@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { initialTab, loadReadMark, loadTab, nearBottom, receiptTip, saveReadMark, saveTab, unreadGroups } from '../src/components/agents/sessionChat.ts'
+import { initialTab, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, receiptTip, saveReadMark, saveTab, unreadGroups } from '../src/components/agents/sessionChat.ts'
 import { collapseMessages } from '../src/components/agents/sessionMessages.ts'
 import type { ProjectMessage } from '../src/lib/agents.ts'
 
@@ -44,6 +44,18 @@ test('the read watermark only moves forward and is keyed by viewer and session',
   const kept = Object.keys(JSON.parse(store.data.get('aeon.session-read.v1')!))
   assert.equal(kept.length, 200)
   assert.equal(kept.includes('me:s1'), false)
+})
+
+test('the server marker wins when it is ahead, and local stands when the server has none', () => {
+  const local = { event: 5, id: 'm5', at: 1 }
+  const server = { event: 8, id: 'm8', at: 2 }
+  assert.deepEqual(preferReadMark(local, server), server)
+  assert.deepEqual(preferReadMark(server, local), server)
+  assert.equal(preferReadMark(local, null), local)
+  assert.equal(preferReadMark(null, null), null)
+  assert.deepEqual(markerFromServer({ last_read_message_id: 'm8', last_read_event_id: 8, read_at: '2026-09-29T06:00:00Z' })?.event, 8)
+  assert.equal(markerFromServer({ last_read_message_id: null, last_read_event_id: null, read_at: null }), null)
+  assert.equal(markerFromServer(null), null)
 })
 
 test('unread counts other people’s posts above the watermark, duplicates by their newest post', () => {

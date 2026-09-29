@@ -12,7 +12,7 @@ const now = Date.parse('2026-09-29T06:00:00Z')
 const longUrl = 'https://ci.example.test/inspr-at/paimos/actions/runs/18446744073709551615/jobs/9223372036854775807/logs?attempt=3&filter=playwright-session-chat-overflow-check'
 const longId = 'sha256:4f9c2a7be1d04c55a3a6c7f1d2e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6'
 
-async function setup(page: Page, options: { theme?: 'light' | 'dark'; count?: number; storage?: Record<string, string> } = {}) {
+async function setup(page: Page, options: { theme?: 'light' | 'dark'; count?: number; storage?: Record<string, string>; readMark?: { event: number; id: string } } = {}) {
   await page.clock.install({ time: now })
   const work = fixtures(); work.preferences.theme = { choice: options.theme ?? 'light' }
   await mockWork(page, work, { admin: true })
@@ -46,7 +46,7 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; count?: nu
     for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v)
     sessionStorage.setItem('seeded', '1')
   }, options.storage)
-  const calls = await mockAgents(page, data)
+  const calls = await mockAgents(page, data, options.readMark ? { readMark: { sessionId: worker.id, ...options.readMark } } : {})
   const receipts: string[] = []
   await page.route('**/api/inbox/messages/*/receipt', route => {
     const id = route.request().url().split('/').at(-2)!
@@ -121,6 +121,44 @@ test('Messages is its own tab with an unread badge; seeing the posts clears it a
   await expect(panel.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
   await expect(messagesTab(page).locator('.count')).toHaveCount(0)
 })
+
+for (const width of [1600, 390]) {
+  test(`the unread badge follows the server read marker at ${width}`, async ({ page }) => {
+    const seen = '3e000000-0000-4000-8000-000000000101'
+    const { worker, calls } = await setup(page, { count: 5, readMark: { event: 201, id: seen } })
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.goto(`/agents/${worker.id}`)
+    const panel = panelOf(page)
+    const overview = panel.getByRole('tab', { name: 'Overview' })
+    const badge = messagesTab(page).locator('.count')
+    // No local watermark: the badge is the server marker (event 201 leaves two later posts).
+    await expect(overview).toHaveAttribute('aria-selected', 'true')
+    await expect(panel.locator('.msg')).toHaveCount(5)
+    await expect(badge).toHaveText('2')
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('aeon.session-read.v1'))).toContain('"event":201')
+    await page.evaluate(() => localStorage.removeItem('aeon.session-read.v1'))
+    await page.reload()
+    await expect(overview).toHaveAttribute('aria-selected', 'true')
+    await expect(panel.locator('.msg')).toHaveCount(5)
+    await expect(badge).toHaveText('2')
+    await shot(page, `server-unread-${width}`)
+    // Reading the thread moves the server marker. The badge is read back on Overview,
+    // where selecting Messages cannot hide it or mark the posts again.
+    await messagesTab(page).click()
+    await expect(panel.locator('.msg').first()).toBeVisible()
+    await scroller(page).evaluate(el => el.scrollTo({ top: el.scrollHeight }))
+    await expect.poll(() => calls.filter(call => call.method === 'PUT' && call.path.endsWith('/read-marker')).at(-1)?.body).toMatchObject({ last_read_event_id: 204 })
+    await page.evaluate(() => {
+      localStorage.removeItem('aeon.session-read.v1')
+      localStorage.setItem('aeon.session-tab', 'overview')
+    })
+    await page.reload()
+    await expect(overview).toHaveAttribute('aria-selected', 'true')
+    await expect(panel.locator('.msg')).toHaveCount(5)
+    await expect(badge).toHaveCount(0)
+    await shot(page, `server-read-${width}`)
+  })
+}
 
 test('?tab=messages deep-links to the thread; an ended session starts read on a new browser', async ({ page }) => {
   const { worker } = await setup(page, { count: 4 })

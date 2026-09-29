@@ -10,7 +10,7 @@ import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import { belongsToSession, collapseMessages } from './sessionMessages'
-import { loadReadMark, nearBottom, saveReadMark, unreadGroups, type InboxReceipt, type ReadMark } from './sessionChat'
+import { loadReadMark, markerFromServer, nearBottom, preferReadMark, saveReadMark, unreadGroups, type InboxReceipt, type ReadMark } from './sessionChat'
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
@@ -41,8 +41,39 @@ const newFrom = ref<string>()
 const newCount = ref(0)
 watch(() => unread.value.length, n => emit('unread', n), { immediate: true })
 function markRead(event: number, id: string) {
-  if (!me.value || !Number.isFinite(event) || (mark.value && mark.value.event >= event)) return
+  if (!me.value || !id || !Number.isFinite(event) || (mark.value && mark.value.event >= event)) return
   mark.value = saveReadMark(me.value, s.value.id, event, id)
+  void pushReadMark(s.value.project_id, s.value.id, mark.value)
+}
+const readPath = (projectId: string, sessionId: string) =>
+  `/projects/${encodeURIComponent(projectId)}/harness-sessions/${encodeURIComponent(sessionId)}/read-marker`
+let pushTicket = 0
+async function pushReadMark(projectId: string, sessionId: string, next: ReadMark) {
+  const ticket = ++pushTicket
+  const viewer = me.value
+  try {
+    const response = await api(readPath(projectId, sessionId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ last_read_message_id: next.id, last_read_event_id: next.event }),
+    })
+    if (!response.ok || ticket !== pushTicket || s.value.id !== sessionId) return
+    const remote = markerFromServer(await response.json())
+    if (!remote || s.value.id !== sessionId || (mark.value && remote.event <= mark.value.event)) return
+    mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
+  } catch { /* Offline: the local watermark stands. */ }
+}
+async function pullReadMark(projectId: string, sessionId: string, viewer: string, generation: number) {
+  try {
+    const response = await api(readPath(projectId, sessionId))
+    if (!response.ok || generation !== readGeneration || s.value.id !== sessionId) return
+    const remote = markerFromServer(await response.json())
+    if (remote && preferReadMark(mark.value, remote) === remote) {
+      mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
+    }
+    const current = mark.value
+    if (current?.id && (!remote || current.event > remote.event)) void pushReadMark(projectId, sessionId, current)
+  } catch { /* Offline: the local watermark stands. */ }
 }
 
 // Shared-inbox attention belongs to the agent principal, not this session: one quiet
@@ -170,13 +201,19 @@ async function refresh() {
   refreshedAt = Date.now()
   await agents.refreshThread(s.value.project_id)
 }
+let readGeneration = 0
 watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
-  mark.value = viewer ? loadReadMark(viewer, id) : null
+  const generation = ++readGeneration
+  const local = viewer ? loadReadMark(viewer, id) : null
+  mark.value = local
   receipts.value = {}; noReceipt.clear()
   entered = false; loaded = false; newFrom.value = undefined; distance.value = 0; stick = true
   draft.value = ''; replyTo.value = null; sendError.value = ''
+  const projectId = s.value.project_id
+  const pulled = viewer ? pullReadMark(projectId, id, viewer, generation) : Promise.resolve()
   await refresh()
-  if (s.value.id !== id) return
+  await pulled
+  if (generation !== readGeneration || s.value.id !== id) return
   loaded = true
   if (props.active) await enter()
   refreshReceipts()

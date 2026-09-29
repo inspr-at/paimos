@@ -2524,6 +2524,46 @@ paths:
                         efforts: {type: array, items: {type: string, enum: [low, medium, high, xhigh, max]}}
         '403': {description: Person with project harness.control required}
         '409': {description: Managed Claude session required}
+  /projects/{projectId}/harness-sessions/{sessionId}/read-marker:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getSessionReadMarker
+      description: The signed-in person's read watermark for this session. Null fields mean nothing has been marked. Requires harness.read. Agents receive 403. Another person's marker is never returned. An invisible session is 404.
+      responses:
+        '200':
+          description: This person's marker, or nulls when unset
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionReadMarker'}
+        '401': {description: Authentication required}
+        '403': {description: Signed-in person with harness.read required}
+        '404': {description: Session is not visible}
+    put:
+      operationId: putSessionReadMarker
+      description: Move this person's watermark forward. last_read_message_id is a message in this session. last_read_event_id is that message's sent_event_id, or the sent_event_id of a later message in the same session. A lower or equal event leaves the stored marker unchanged and returns it. Requires harness.read. Agents receive 403. Does not change message resources.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [last_read_message_id, last_read_event_id]
+              properties:
+                last_read_message_id: {type: string, format: uuid}
+                last_read_event_id: {type: integer, format: int64, minimum: 0}
+      responses:
+        '200':
+          description: The stored marker, which may be ahead of the request
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionReadMarker'}
+        '400': {description: Invalid marker, or the message is not in this session}
+        '401': {description: Authentication required}
+        '403': {description: Signed-in person with harness.read required}
+        '404': {description: Session is not visible}
   /projects/{projectId}/harness-sessions/{sessionId}/managed-context:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -7459,6 +7499,15 @@ components:
         cached_input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
         currency: {type: string, const: USD}
         created_at: {type: string, format: date-time}
+    SessionReadMarker:
+      type: object
+      additionalProperties: false
+      required: [session_id, last_read_message_id, last_read_event_id, read_at]
+      properties:
+        session_id: {type: string, format: uuid}
+        last_read_message_id: {type: [string, 'null'], format: uuid}
+        last_read_event_id: {type: [integer, 'null'], format: int64, minimum: 0}
+        read_at: {type: [string, 'null'], format: date-time}
     HarnessAttentionReason:
       type: object
       description: Content-free grouped evidence; no message body, rationale, request ID or private routing. Shared reasons belong to the principal inbox and never block a session. Detail requires harness.read and the underlying approval/message access.
