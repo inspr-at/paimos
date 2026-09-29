@@ -93,7 +93,7 @@ onMounted(loadKeys)
         <p v-if="working.length" class="lead">Agent identities and keys for your CLIs and scripts.</p>
         <template v-else>
           <p class="lead"><RouterLink to="/agents/register-agent">Connect your machine (the agent daemon, no key to handle)</RouterLink></p>
-          <p class="lead">New agent (a key for a CLI or script)</p>
+          <p v-if="manageKeys" class="lead">New agent (a key for a CLI or script)</p>
         </template>
       </div>
       <button v-if="manageKeys" type="button" class="btn primary" @click="creatingAgent = true"><AppIcon name="plus" :size="14" />New agent</button>
