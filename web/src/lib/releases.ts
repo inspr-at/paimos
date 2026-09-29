@@ -11,7 +11,7 @@ export interface ReleaseEvidence {
   ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; unavailable: string[]
 }
 export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string }
-export interface ReleaseNotes { source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; gaps: string[]; hidden: number }
+export interface ReleaseNotes { source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; gaps: string[]; hidden: number; written_after_release?: boolean }
 export interface Release {
   notes?: ReleaseNotes
   version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved'
@@ -129,6 +129,12 @@ export function localizedNote(item: ReleaseNoteItem, locale?: string | null): Lo
 }
 export const HISTORICAL_TAG_FALLBACK = 'historical-tag-headline'
 export const HISTORICAL_TAG_LABEL = 'Historical tag headline'
+export const WRITTEN_AFTER_LABEL = 'Notes written after release'
+// A backfilled snapshot was captured after publication. The hint stays off
+// when the notes are only the historical headline.
+export function writtenAfterRelease(r: Pick<Release, 'notes'>): boolean {
+  return hasUsableNotes(r) && r.notes.written_after_release === true
+}
 // Tag headlines are only the fallback when member benefits were never captured.
 export function historicalTagFallback(r: Pick<Release, 'notes' | 'headline'>): boolean {
   if (!r.headline.trim()) return false

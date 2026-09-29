@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { benefitDraft, benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
-import { displayHeadline, hasUsableNotes, historicalTagFallback, localizedNote, noteLocale, ticketsOf, matches, type Release } from '../src/lib/releases.ts'
+import { displayHeadline, hasUsableNotes, historicalTagFallback, localizedNote, noteLocale, ticketsOf, matches, writtenAfterRelease, WRITTEN_AFTER_LABEL, type Release } from '../src/lib/releases.ts'
 const fields = { pill_en: 'Clear release notes', pill_de: 'Verständliche Release Notes', benefit_en: 'Tickets explain what you gain.', benefit_de: 'Tickets erklären den Nutzen.' }
 test('benefit completion covers product completion states without guessing custom or cancelled states', () => {
   for (const state of ['done', 'accepted', 'delivered']) assert.equal(completedTicketState(state), true, state)
@@ -48,4 +48,16 @@ test('snapshot notes displace Git headlines and ticket guesses while archives st
   assert.equal(historicalTagFallback(r), true)
   assert.equal(displayHeadline(r), 'Invented headline')
   assert.deepEqual(ticketsOf(r), ['TEST-999'])
+})
+test('a backfilled snapshot says the notes were written after the release, and a historical headline does not', () => {
+  const notes = { source: 'tag:release-notes/synthetic.json', snapshot_sha256: 'a'.repeat(64), captured_at: '2026-09-29T08:00:00Z', release_revision: 2, hidden: 0, gaps: [], items: [{ id: 'one', key: 'AEON-75', ...fields }] }
+  const r = { version: '260115100000.0.0', headline: 'Git headline', tickets: [], changes: [], notes } as unknown as Release
+  assert.equal(WRITTEN_AFTER_LABEL, 'Notes written after release')
+  assert.equal(writtenAfterRelease(r), false)
+  notes.written_after_release = true
+  assert.equal(writtenAfterRelease(r), true)
+  assert.equal(historicalTagFallback(r), false)
+  const historical = { headline: 'Git headline', notes: { source: 'unavailable', fallback: 'historical-tag-headline', snapshot_sha256: '', captured_at: null, release_revision: 0, hidden: 0, items: [], gaps: ['missing'], written_after_release: true } } as unknown as Release
+  assert.equal(writtenAfterRelease(historical), false)
+  assert.equal(historicalTagFallback(historical), true)
 })

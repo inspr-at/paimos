@@ -72,8 +72,55 @@ func TestNotesSnapshotLanguagesHiddenGapsAndDuplicates(t *testing.T) {
 	s.Tickets = []NoteTicket{}
 	raw, _ = json.Marshal(s)
 	notes, err = NotesFromSnapshot(raw, notesVersion, "fixture")
-	if err != nil || len(notes.Items) != 0 || len(notes.Gaps) != 0 {
+	if err != nil || len(notes.Items) != 0 || len(notes.Gaps) != 0 || notes.WrittenAfterRelease {
 		t.Fatal("known empty membership", notes, err)
+	}
+}
+func TestBackfilledSnapshotKeepsTheOriginalReleaseTime(t *testing.T) {
+	s := noteFixture()
+	raw, _ := json.Marshal(s)
+	notes, err := NotesFromSnapshot(raw, notesVersion, "fixture")
+	if err != nil || notes.WrittenAfterRelease {
+		t.Fatalf("publication snapshot: %+v %v", notes, err)
+	}
+	if strings.Contains(string(raw), `"label"`) || strings.Contains(string(raw), `"released_at"`) {
+		t.Fatal("publication encoding grew a backfill field")
+	}
+	encoded, _ := json.Marshal(notes)
+	if strings.Contains(string(encoded), "written_after_release") {
+		t.Fatal("publication notes claim they were written later")
+	}
+	released := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	s.Frozen = true
+	s.Label = BackfillLabel
+	s.ReleasedAt = &released
+	raw, _ = json.Marshal(s)
+	notes, err = NotesFromSnapshot(raw, notesVersion, "fixture")
+	if err != nil || !notes.WrittenAfterRelease || len(notes.Items) != 1 || notes.Items[0].BenefitEN != "Tickets explain what you gain." {
+		t.Fatalf("backfill: %+v %v", notes, err)
+	}
+	s.Label = "historical"
+	raw, _ = json.Marshal(s)
+	if _, err := NotesFromSnapshot(raw, notesVersion, "fixture"); err == nil || !strings.Contains(err.Error(), "not recognised") {
+		t.Fatal("unknown label", err)
+	}
+	s.Label = BackfillLabel
+	s.Frozen = false
+	raw, _ = json.Marshal(s)
+	if _, err := NotesFromSnapshot(raw, notesVersion, "fixture"); err == nil || !strings.Contains(err.Error(), "release time") {
+		t.Fatal("unfrozen backfill", err)
+	}
+	s.Frozen = true
+	s.ReleasedAt = nil
+	raw, _ = json.Marshal(s)
+	if _, err := NotesFromSnapshot(raw, notesVersion, "fixture"); err == nil {
+		t.Fatal("backfill without released_at")
+	}
+	zero := time.Time{}
+	s.ReleasedAt = &zero
+	raw, _ = json.Marshal(s)
+	if _, err := NotesFromSnapshot(raw, notesVersion, "fixture"); err == nil {
+		t.Fatal("backfill with a zero release time")
 	}
 }
 func TestBuildUsesOnlyTaggedSnapshotAndKeepsOfflineGaps(t *testing.T) {
