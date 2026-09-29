@@ -9,6 +9,8 @@
 -- session, or a UUID from the latest worker marker.
 -- A missing actor skips the row. A visibility failure must not roll back
 -- the ticket write or the snapshot capture.
+-- Automatic keys are stable: one completion per ticket, and one publication
+-- per ticket, release and version. A second capture of that identity does nothing.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -209,7 +211,7 @@ BEGIN
             NEW.project_id,
             NEW.id,
             work_session,
-            'auto:ticket_done:' || NEW.id::text || ':' || clock_timestamp()::text,
+            'auto:ticket_done:' || NEW.id::text,
             actor,
             'automatic',
             jsonb_strip_nulls(jsonb_build_object(
@@ -218,7 +220,7 @@ BEGIN
                 'started_at', started,
                 'elapsed_seconds', seconds
             )),
-            decode(md5('ticket_done' || NEW.id::text || prior || NEW.state || clock_timestamp()::text), 'hex')
+            decode(md5('auto:ticket_done:' || NEW.id::text), 'hex')
         )
         ON CONFLICT (tenant_id, idempotency_key) DO NOTHING;
     EXCEPTION
@@ -248,9 +250,11 @@ DECLARE
     release_id uuid;
     version text;
     scheme text;
+    clean_version text;
     ticket jsonb;
     ticket_id uuid;
     work_session uuid;
+    outcome_key text;
 BEGIN
     SELECT (aeon_current_principals())[1] INTO actor;
     IF actor IS NULL OR NOT EXISTS (
@@ -275,6 +279,7 @@ BEGIN
     IF release_id IS NULL OR jsonb_typeof(NEW.snapshot->'tickets') IS DISTINCT FROM 'array' THEN
         RETURN NEW;
     END IF;
+    clean_version := NULLIF(btrim(coalesce(version, '')), '');
     FOR ticket IN
         SELECT value FROM jsonb_array_elements(NEW.snapshot->'tickets')
     LOOP
@@ -291,6 +296,10 @@ BEGIN
             CONTINUE;
         END IF;
         work_session := aeon_outcome_session(NEW.tenant_id, ticket_id);
+        outcome_key := 'auto:released:' || ticket_id::text || ':' || release_id::text || ':' || coalesce(clean_version, '');
+        IF char_length(outcome_key) > 200 THEN
+            CONTINUE;
+        END IF;
         BEGIN
             INSERT INTO outcome_events (
                 tenant_id, kind, project_id, ticket_node_id, session_id, release_node_id,
@@ -302,14 +311,14 @@ BEGIN
                 ticket_id,
                 work_session,
                 release_id,
-                'auto:released:' || ticket_id::text || ':' || release_id::text || ':' || clock_timestamp()::text,
+                outcome_key,
                 actor,
                 'automatic',
                 jsonb_strip_nulls(jsonb_build_object(
-                    'version', NULLIF(btrim(coalesce(version, '')), ''),
+                    'version', clean_version,
                     'version_scheme', NULLIF(btrim(coalesce(scheme, '')), '')
                 )),
-                decode(md5('released' || ticket_id::text || release_id::text || coalesce(version, '') || clock_timestamp()::text), 'hex')
+                decode(md5(outcome_key), 'hex')
             )
             ON CONFLICT (tenant_id, idempotency_key) DO NOTHING;
         EXCEPTION

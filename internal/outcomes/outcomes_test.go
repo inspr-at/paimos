@@ -189,7 +189,7 @@ func testOutcomeCapture(t *testing.T, d *dbtest.DB) {
 	if got := patch(`{"state":"done","fields":` + benefitFields + `}`); got.Code != http.StatusOK {
 		t.Fatalf("second done: %d %s", got.Code, got.Body.String())
 	}
-	if n := countOutcomes(t, d, person, ticket, "ticket_done"); n != 2 {
+	if n := countOutcomes(t, d, person, ticket, "ticket_done"); n != 1 {
 		t.Fatalf("recompletion recorded %d", n)
 	}
 	var leaked int
@@ -240,6 +240,45 @@ func testOutcomeCapture(t *testing.T, d *dbtest.DB) {
 	}
 	if titles := releasedTitles(t, d, person); !titles["September release"] || !titles["October release"] {
 		t.Fatalf("publication titles: %v", titles)
+	}
+
+	again := insertNode(t, d, person, "ticket", "CAP-5", "Ship once", &project)
+	third := insertNode(t, d, person, "release", "CAP-6", "November release", &project)
+	inTenant(t, d, person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number) VALUES($1,$2,$3,3)`, person.TenantID, third, project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source) VALUES($1,$2,$3,$4,0,'manual')`, person.TenantID, again, project, third); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE journey_tickets SET release_node_id=NULL WHERE ticket_node_id=$1`, again); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE journey_tickets SET release_node_id=$1 WHERE ticket_node_id=$2`, third, again)
+		return err
+	})
+	if n := countOutcomes(t, d, person, again, "released"); n != 0 {
+		t.Fatalf("reassignment recorded %d", n)
+	}
+	publishRelease(t, d, person, third, "260929200000.0.0")
+	if n := countOutcomes(t, d, person, again, "released"); n != 1 {
+		t.Fatalf("reassignment publication recorded %d", n)
+	}
+	manifest, err := json.Marshal(map[string]any{
+		"schema": "aeon.release-note-snapshot.v1", "membership_source": "release-manifest-tickets",
+		"label": "backfilled", "backfilled": true, "tenant_id": person.TenantID, "project_node_id": project,
+		"version": "260929120000.0.0", "release_node_id": release, "tickets": []map[string]string{{"id": ticket}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inTenant(t, d, person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO release_manifest_note_snapshots(tenant_id,project_node_id,version,snapshot)
+			VALUES($1,$2,'260929120000.0.0',$3::jsonb)`, person.TenantID, project, string(manifest))
+		return err
+	})
+	if n := countOutcomes(t, d, person, ticket, "released"); n != 2 {
+		t.Fatalf("manifest recapture recorded %d", n)
 	}
 }
 
