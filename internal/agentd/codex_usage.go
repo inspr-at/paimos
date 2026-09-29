@@ -8,6 +8,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
@@ -24,6 +25,9 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 	if method == "account/rateLimits/updated" || method == "rateLimits/updated" {
 		p.emitCapacity(raw, "update")
 		return
+	}
+	if hit := capacity.VendorLimit(Codex, raw, nil, time.Now().UTC()); hit != nil {
+		p.observe(limitEvent(hit))
 	}
 	if method == "thread/settings/updated" {
 		var frame struct {

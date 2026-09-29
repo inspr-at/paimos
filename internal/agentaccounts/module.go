@@ -33,6 +33,10 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 
 // Mount registers account, allowance and routing routes.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("PUT /api/agent-accounts/{accountId}/signals", m.signals)
+	mux.HandleFunc("GET /api/agent-accounts/{accountId}/statusline", m.statusline)
+	mux.HandleFunc("PUT /api/agent-accounts/{accountId}/statusline", m.statusline)
+	mux.HandleFunc("POST /api/agent-accounts/{accountId}/quota-key", m.quotaKey)
 	mux.HandleFunc("GET /api/agent-accounts", m.list)
 	mux.HandleFunc("GET /api/agent-accounts/catalog", m.catalog)
 	mux.HandleFunc("GET /api/agent-accounts/capacity", m.capacityList)

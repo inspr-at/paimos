@@ -133,6 +133,7 @@ func redact(msg, secret string) string {
 
 func (rt *runtime) root() *Command {
 	subs := []*Command{
+		rt.cmdStatusline(),
 		rt.cmdAuth(),
 		rt.cmdWhoami(""),
 		rt.cmdIssue(),

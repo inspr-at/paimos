@@ -144,6 +144,19 @@ func (s *Supervisor) observeCapacity(e *owned, readings []capacity.Reading) {
 		e.mu.Unlock()
 		return
 	}
+	// A final pre-exit snapshot must not lower the limit we just observed.
+	readings = append([]capacity.Reading(nil), readings...)
+	if e.vendorLimit != nil {
+		for i, r := range readings {
+			for _, hit := range e.vendorLimit.Readings {
+				if hit.WindowKind == r.WindowKind && hit.Bucket == r.Bucket && hit.ResetsAt.Equal(r.ResetsAt) {
+					readings[i].UsedPercent = 100
+					no := false
+					readings[i].OrdinaryUsageAllowed = &no
+				}
+			}
+		}
+	}
 	// Replace the pending snapshot for each phase/source, preserving start/end
 	// attribution but not buckets omitted from a subsequent capture.
 	for _, r := range readings {
@@ -228,7 +241,13 @@ func (p *codexProcess) readCapacity(ctx context.Context, phase string) {
 	p.emitCapacityReadings(p.capacityParser.CodexSnapshot(raw, time.Now().UTC()), phase)
 }
 func (p *codexProcess) emitCapacity(raw []byte, phase string) {
-	p.emitCapacityReadings(p.capacityParser.Codex(raw, time.Now().UTC()), phase)
+	at := time.Now().UTC()
+	readings := p.capacityParser.Codex(raw, at)
+	if hit := capacity.VendorLimit(Codex, raw, readings, at); hit != nil {
+		p.observe(limitEvent(hit))
+		return
+	}
+	p.emitCapacityReadings(readings, phase)
 }
 func (p *codexProcess) emitCapacityReadings(readings []capacity.Reading, phase string) {
 	for i := range readings {
@@ -268,12 +287,16 @@ func (a *CodexAdapter) CaptureCapacity(ctx context.Context, key string) []capaci
 	raw, err := p.request(op, "jsonrpc", "account/read", map[string]any{"refreshToken": false})
 	var identity struct {
 		Account *struct {
+			ID    string `json:"id"`
 			Type  string `json:"type"`
 			Email string `json:"email"`
 		} `json:"account"`
 	}
 	if err != nil || json.Unmarshal(raw, &identity) != nil || identity.Account == nil || identity.Account.Type != "chatgpt" || !strings.EqualFold(strings.TrimSpace(identity.Account.Email), strings.TrimSpace(a.Emails[key])) {
 		return nil
+	}
+	if identity.Account.ID != "" {
+		a.quotaIDs.Store(key, identity.Account.ID)
 	}
 	raw, err = p.request(op, "jsonrpc", "account/rateLimits/read", map[string]any{})
 	if err != nil {
@@ -297,6 +320,8 @@ func (s *Supervisor) RunCapacityCaptures(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			s.syncStatuslines(ctx, time.Now())
+			s.publishSignals(ctx)
 			s.captureIdleCapacity(ctx, time.Now())
 		}
 	}

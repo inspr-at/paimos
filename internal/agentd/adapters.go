@@ -97,6 +97,7 @@ func firstNonempty(a, b string) string {
 
 // CodexAdapter speaks the app-server thread and turn protocol.
 type CodexAdapter struct {
+	quotaIDs    sync.Map
 	IdleTimeout time.Duration // Zero uses the ten-minute clean-turn completion window.
 	Path        string
 	Homes       map[string]string
@@ -210,10 +211,11 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	if err != nil {
 		return nil, err
 	}
-	p, err := launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, r.Workspace, withEnv("CODEX_HOME", home), "jsonrpc", observe)
+	p, err := launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, r.Workspace, capacityEnvironment("CODEX_HOME", home, a.Path), "jsonrpc", observe)
 	if err != nil {
 		return nil, err
 	}
+	p.limitVendor = Codex
 	cp := &codexProcess{wireProcess: p, done: make(chan bool, 1), persistent: r.InboxEnabled && r.Run.Purpose != VerificationPurpose, idleTimeout: a.IdleTimeout, profile: r.Profile}
 	p.setOnEvent(cp.notification)
 	fail := p.failStart
@@ -232,6 +234,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	raw, err := p.request(op, "jsonrpc", "account/read", map[string]any{"refreshToken": false})
 	var account struct {
 		Account *struct {
+			ID    string  `json:"id"`
 			Type  string  `json:"type"`
 			Email *string `json:"email"`
 		} `json:"account"`
@@ -239,6 +242,9 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	if err != nil || json.Unmarshal(raw, &account) != nil || account.Account == nil || account.Account.Type != "chatgpt" || account.Account.Email == nil ||
 		!strings.EqualFold(strings.TrimSpace(*account.Account.Email), expectedEmail) {
 		return fail(errors.New("Codex account identity mismatch"))
+	}
+	if account.Account.ID != "" {
+		a.quotaIDs.Store(r.AccountKey, account.Account.ID)
 	}
 	cp.readCapacity(op, "start")
 	var thread struct {
@@ -413,6 +419,7 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 	if err != nil {
 		return nil, err
 	}
+	p.limitVendor = Pi
 	pp := &piProcess{wireProcess: p, provider: provider, model: model, effort: r.Profile.Effort, queue: queue,
 		scope: piHeldQueue{TenantID: r.TenantID, PrincipalID: r.PrincipalID, RunID: r.Run.ID, Generation: r.Generation}}
 	p.setOnEvent(func(raw json.RawMessage) {
@@ -522,6 +529,7 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	if err != nil {
 		return nil, err
 	}
+	p.limitVendor = Cursor
 	cp := &cursorProcess{wireProcess: p, done: make(chan struct{})}
 	var costMicros int64
 	p.setOnEvent(func(raw json.RawMessage) {
@@ -545,6 +553,9 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			return
 		}
 		if len(frame.ID) > 0 && strings.Trim(string(frame.ID), "\"") == cp.promptID {
+			if hit := capacity.VendorLimit(Cursor, raw, nil, time.Now().UTC()); hit != nil {
+				observe(limitEvent(hit))
+			}
 			var result struct {
 				StopReason string `json:"stopReason"`
 			}
@@ -621,6 +632,8 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 var claudeAssets embed.FS
 
 type ClaudeAdapter struct {
+	quotaIDs                      sync.Map
+	usage                         *claudeUsageCapability
 	NodePath, SDKPath, ClaudePath string
 	Homes                         map[string]string
 	Emails                        map[string]string
@@ -784,6 +797,10 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 					at = time.Now().UTC()
 				}
 				readings := capacityParser.Claude(payload.Event, at)
+				if hit := capacity.VendorLimit(Claude, payload.Event, readings, at); hit != nil {
+					observe(limitEvent(hit))
+					return
+				}
 				for i := range readings {
 					readings[i].Phase = "update"
 					if !capacitySeen {

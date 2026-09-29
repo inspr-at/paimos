@@ -83,7 +83,7 @@ func TestCodexCapacityNotification(t *testing.T) {
 	p := &codexProcess{wireProcess: &wireProcess{observe: func(e AdapterEvent) { got = append(got, e.Capacity...) }}}
 	frame := fmt.Sprintf(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":21,"windowDurationMins":300,"resetsAt":%d}},"ordinaryUsageAllowed":false}}`, time.Now().Add(time.Hour).Unix())
 	p.notification(json.RawMessage(frame))
-	if len(got) != 1 || got[0].Phase != "update" || got[0].UsedPercent != 21 || *got[0].OrdinaryUsageAllowed {
+	if len(got) != 1 || got[0].Phase != "update" || got[0].UsedPercent != 100 || *got[0].OrdinaryUsageAllowed {
 		t.Fatal(got)
 	}
 	p.notification(json.RawMessage(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":22}}}}`))

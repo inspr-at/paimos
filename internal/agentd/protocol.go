@@ -18,9 +18,13 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/ownedprocess"
+
+	"github.com/inspr-at/paimos/internal/capacity"
 )
 
 type wireProcess struct {
+	limitVendor string
+
 	identity    ownedprocess.Identity
 	lifetime    *ownedprocess.Lifetime
 	cmd         *exec.Cmd
@@ -328,6 +332,9 @@ func (p *wireProcess) request(ctx context.Context, protocol, method string, para
 		return nil, errors.New("adapter protocol rejected request")
 	}
 	if len(response.Error) > 0 && string(response.Error) != "null" {
+		if hit := capacity.VendorLimit(p.limitVendor, raw, nil, time.Now().UTC()); hit != nil {
+			p.observe(limitEvent(hit))
+		}
 		// Only this explicit rejection proves steer did not inject input.
 		// Never expose raw vendor errors or retry transport/malformed responses.
 		var rejection struct {

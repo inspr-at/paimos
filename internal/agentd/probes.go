@@ -289,6 +289,7 @@ func (a *ClaudeAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus
 		return probeUnavailable
 	}
 	var status struct {
+		AccountID  string `json:"accountId"`
 		LoggedIn   *bool  `json:"loggedIn"`
 		Email      string `json:"email"`
 		AuthMethod string `json:"authMethod"`
@@ -317,6 +318,9 @@ func (a *ClaudeAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus
 	}
 	if code != 0 {
 		return probeUnavailable
+	}
+	if status.AccountID != "" {
+		a.quotaIDs.Store(key, status.AccountID)
 	}
 	return probeOK
 }

@@ -4,6 +4,7 @@ package harness
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -17,6 +18,9 @@ import (
 // requests remain shared inbox attention; neither age nor labels imply ownership.
 // All queries use the caller's tenant transaction and project visibility.
 type StateEvidence struct {
+	VendorLimited    bool               `json:"vendor_limited,omitempty"`
+	LimitWindow      string             `json:"limit_window,omitempty"`
+	LimitResetsAt    *time.Time         `json:"limit_resets_at,omitempty"`
 	RunStatus        *string            `json:"run_status,omitempty"`
 	NeedsAttention   *bool              `json:"needs_attention,omitempty"`
 	HasProblem       *bool              `json:"has_problem,omitempty"`
@@ -100,11 +104,12 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
     ) SELECT s.id::text,s.project_id::text,s.agent_principal_id::text,s.phase,r.status,
       (s.stopped_at IS NULL AND (coalesce(r.status='waiting',false)
         OR EXISTS(SELECT 1 FROM approvals a WHERE a.id=s.id AND a.scope='run'))),
-      (coalesce(r.status IN ('failed','ownership_lost'),false)
+      (coalesce(r.status IN ('failed','ownership_lost') AND coalesce(vl.error_code,'')<>'vendor_limit',false)
         OR coalesce(s.stop_reason<>'heartbeat_lost' AND replace(replace(s.stop_reason,'_',' '),'-',' ') ~* '\m(error|errored|failed|failure|blocked|crash(ed)?|ownership lost|heartbeat lost|timeout|timed out)\M',false)),
       coalesce(q.kind,''),coalesce(q.scope,''),coalesce(q.actor,''),coalesce(q.blocking,false),
-      coalesce(q.location,''),coalesce(q.permission_project,''),coalesce(q.count,0)
+      coalesce(q.location,''),coalesce(q.permission_project,''),coalesce(q.count,0), coalesce(vl.error_code='vendor_limit',false),coalesce(vl.limit_window,''),vl.limit_resets_at
     FROM harness_sessions s LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id
+    LEFT JOIN LATERAL (SELECT error_code,limit_window,limit_resets_at FROM run_telemetry t WHERE t.tenant_id=s.tenant_id AND t.run_id=s.run_id AND t.error_code IS NOT NULL ORDER BY sequence DESC LIMIT 1) vl ON true
     LEFT JOIN grouped q ON q.id=s.id
     WHERE s.id=ANY($1::uuid[])
     ORDER BY s.id,q.scope,q.kind,q.actor,q.permission_project`, ids)
@@ -117,7 +122,7 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
 		var evidence StateEvidence
 		var reason AttentionReason
 		if err := rows.Scan(&id, &project, &principal, &phase, &evidence.RunStatus, &evidence.NeedsAttention, &evidence.HasProblem,
-			&reason.Kind, &reason.Scope, &reason.Actor, &reason.Blocking, &reason.Location, &permissionProject, &reason.Count); err != nil {
+			&reason.Kind, &reason.Scope, &reason.Actor, &reason.Blocking, &reason.Location, &permissionProject, &reason.Count, &evidence.VendorLimited, &evidence.LimitWindow, &evidence.LimitResetsAt); err != nil {
 			return nil, err
 		}
 		if existing, found := out[id]; found {

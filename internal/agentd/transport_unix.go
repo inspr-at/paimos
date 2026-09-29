@@ -82,6 +82,27 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 		return nil, err
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/statusline", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 8192)
+		d := json.NewDecoder(r.Body)
+		d.DisallowUnknownFields()
+		var req StatuslineRequest
+		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
+			http.Error(w, "invalid statusline", 400)
+			return
+		}
+		out, err := s.ReportStatusline(r.Context(), req, time.Now().UTC())
+		if err != nil {
+			http.Error(w, "statusline unavailable", 409)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
+	})
 	if len(attachments) == 1 && attachments[0] != nil {
 		mux.HandleFunc("POST /v1/attach", func(w http.ResponseWriter, r *http.Request) { attachments[0].serve(w, r, token) })
 	}

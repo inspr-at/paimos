@@ -20,6 +20,9 @@ import (
 
 // Account is an opaque local enrollment. AccountKey is not a vendor credential.
 type Account struct {
+	ReadingSupport    string     `json:"reading_support"`
+	QuotaFingerprint  string     `json:"quota_fingerprint"`
+	StatuslineEnabled bool       `json:"statusline_enabled"`
 	ID                string     `json:"id"`
 	AccountKey        string     `json:"account_key"`
 	Harness           string     `json:"harness"`
