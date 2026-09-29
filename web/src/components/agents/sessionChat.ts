@@ -58,6 +58,16 @@ export function preferReadMark(local: ReadMark | null, server: ReadMark | null):
   return local
 }
 
+// One trailing flush sends only the furthest mark. A failed send stays queued
+// until the next flush, unless a later mark has already replaced it.
+export const readMarkFlushDelay = 1500
+export function queueReadMark(pending: ReadMark | null, next: ReadMark): ReadMark {
+  return pending && pending.event >= next.event ? pending : next
+}
+export function keepFailedReadMark(pending: ReadMark | null, failed: ReadMark): ReadMark {
+  return pending && pending.event >= failed.event ? pending : failed
+}
+
 export function loadReadMark(viewer: string, sessionId: string, store: Store | null = storage()): ReadMark | null {
   const mark = readAll(store)[markKey(viewer, sessionId)]
   return mark && Number.isFinite(mark.event) ? mark : null

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { initialTab, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, receiptTip, saveReadMark, saveTab, unreadGroups } from '../src/components/agents/sessionChat.ts'
+import { initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, receiptTip, saveReadMark, saveTab, unreadGroups } from '../src/components/agents/sessionChat.ts'
 import { collapseMessages } from '../src/components/agents/sessionMessages.ts'
 import type { ProjectMessage } from '../src/lib/agents.ts'
 
@@ -56,6 +56,18 @@ test('the server marker wins when it is ahead, and local stands when the server 
   assert.deepEqual(markerFromServer({ last_read_message_id: 'm8', last_read_event_id: 8, read_at: '2026-09-29T06:00:00Z' })?.event, 8)
   assert.equal(markerFromServer({ last_read_message_id: null, last_read_event_id: null, read_at: null }), null)
   assert.equal(markerFromServer(null), null)
+})
+
+test('a flush keeps the highest mark and a failed send stays for the next one', () => {
+  const low = { event: 2, id: 'a', at: 1 }
+  const high = { event: 5, id: 'b', at: 2 }
+  const later = { event: 9, id: 'c', at: 3 }
+  assert.deepEqual(queueReadMark(null, low), low)
+  assert.deepEqual(queueReadMark(low, high), high)
+  assert.deepEqual(queueReadMark(high, low), high)
+  assert.deepEqual(keepFailedReadMark(null, high), high)
+  assert.deepEqual(keepFailedReadMark(later, high), later)
+  assert.deepEqual(keepFailedReadMark(low, high), high)
 })
 
 test('unread counts other people’s posts above the watermark, duplicates by their newest post', () => {

@@ -99,6 +99,8 @@ export interface AgentMockOptions {
   accountsForbidden?: boolean
   failDecision?: boolean
   readMark?: { sessionId: string; event: number; id: string }
+  // The next N marker PUTs fail. The call is still recorded.
+  failReadMarks?: number
 }
 // Routes only the agents surfaces; everything else falls through to earlier routes
 // or the real server.
@@ -149,6 +151,10 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
         const input = body as { last_read_message_id?: string; last_read_event_id?: number }
         if (typeof input?.last_read_message_id !== 'string' || typeof input.last_read_event_id !== 'number') {
           return route.fulfill({ status: 400, json: { error: 'invalid read marker' } })
+        }
+        if ((options.failReadMarks ?? 0) > 0) {
+          options.failReadMarks! -= 1
+          return route.fulfill({ status: 503, json: { error: 'unavailable' } })
         }
         if (!current || input.last_read_event_id > current.last_read_event_id) {
           readMarkers.set(sessionId, { last_read_message_id: input.last_read_message_id, last_read_event_id: input.last_read_event_id, read_at: '2026-09-29T06:10:00.000Z' })
