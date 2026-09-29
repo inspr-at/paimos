@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { estimateDisplay } from '../../lib/estimates'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
@@ -111,7 +112,7 @@ const present = computed(() => {
   return {
     assigned: props.showAssignee,
     workers: listed.some(row => workersOf(row).length > 0),
-    estimate: rows.some(row => !!estimate(row)),
+    estimate: rows.some(row => !!estimate(row) || (row.kind_slug === 'epic' && (row.estimate?.open_children ?? 0) > 0)),
     release: rows.some(row => !!releaseLabel(row.fields) || props.nativeReleases?.get(row.id)?.status === 'member'),
     tags: rows.some(row => tagList(row.fields).length > 0),
     eta: listed.some(row => !!etaFromTicket(row.eta)),
@@ -231,11 +232,11 @@ function autofit(id: ColumnId) {
   emit('widths', { ...(props.prefs?.widths ?? {}), [id]: next })
 }
 watch(() => props.prefs?.widths, () => { if (!resizing) dragWidths.value = {} })
-function estimate(row: ListItem) {
-  const hours = row.fields.estimate_hours, points = row.fields.estimate_lp
-  if (typeof hours === 'number' && hours > 0) return `${hours} h`
-  if (typeof points === 'number' && points > 0) return `${points} pt`
-  return ''
+function estimate(row: ListItem) { return estimateDisplay(row).text }
+// An epic with open children and no hours still has coverage to explain.
+function emptyEstimateTip(row: ListItem) {
+  if (row.kind_slug !== 'epic' || (row.estimate?.open_children ?? 0) < 1 || estimate(row)) return ''
+  return estimateDisplay(row).tip
 }
 const grid = ref<HTMLTableElement>()
 const quick = ref<InstanceType<typeof QuickCreateRow>>()
@@ -713,7 +714,7 @@ defineExpose({
                   <span v-else class="empty" aria-label="No cost unit">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'estimate'" class="c-estimate"><div class="cell"><span v-if="estimate(entry.row)" class="mono">{{ estimate(entry.row) }}</span><span v-else class="empty" aria-label="No estimate">—</span></div></td>
+              <td v-else-if="column.id === 'estimate'" class="c-estimate"><div class="cell"><span v-if="estimate(entry.row)" class="mono" :class="{ 'estimate-draft': estimateDisplay(entry.row).draft }" :data-tip="estimateDisplay(entry.row).tip">{{ estimate(entry.row) }}<span v-if="estimateDisplay(entry.row).draft" class="estimate-mark"> est.</span></span><span v-else class="empty" :aria-label="emptyEstimateTip(entry.row) || 'No estimate'" :data-tip="emptyEstimateTip(entry.row) || undefined">—</span></div></td>
               <td v-else-if="column.id === 'created'" class="c-created"><div class="cell"><time :datetime="entry.row.created_at" :data-tip="absoluteTime(entry.row.created_at)">{{ relativeTime(entry.row.created_at, { now }) }}</time></div></td>
               <td v-else-if="column.id === 'updated'" class="c-updated"><div class="cell"><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }) }}</time></div></td>
               <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" /></div></td>
@@ -898,6 +899,8 @@ td.c-title { position: relative; overflow: hidden; }
 .title-workers { flex: 0 0 auto; min-width: 0; max-width: 132px; }
 .empty { color: var(--ink-3); }
 .c-updated time, .c-created time { color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.c-estimate .mono.estimate-draft { color: var(--ink-3); }
+.estimate-mark { font-size: 10px; }
 .c-estimate .mono { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .epic-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-2); font-size: 12.5px; }
 .epic-name { overflow: hidden; text-overflow: ellipsis; }
@@ -1011,8 +1014,13 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row.cursor, .ticket-row.open { background: var(--row-selected); }
   .tickets colgroup { display: none; }
   .c-key { grid-area: key; } .c-status { grid-area: status; } .c-prio { grid-area: prio; } .c-updated { grid-area: updated; }
-  /* A ticket with an estimate shows it where Updated sits; the estimate is the
-     fresher answer to "when" while an agent works on it. */
+  /* An hour estimate sits at the end of the title line. An empty cell stays off the card. */
+  .c-estimate { grid-area: estimate; justify-self: end; align-self: center; min-width: 0; }
+  .c-estimate .cell { height: auto; }
+  .ticket-row:not(:has(.c-estimate .mono)) .c-estimate { display: none !important; }
+  .ticket-row:has(.c-estimate .mono) { grid-template-areas: "key status prio updated" "title title title estimate"; }
+  .table-card.selecting .ticket-row:has(.c-estimate .mono) { grid-template-areas: "check key status prio updated" "check title title title estimate"; }
+  /* A ready time shows where Updated sits; it is the fresher answer to "when". */
   .ticket-row:not(:has(.eta-cell)) .c-eta, .ticket-row:has(.eta-cell) .c-updated { display: none !important; }
   .c-eta { grid-area: updated; justify-self: end; min-width: 0; }
   .c-title { grid-area: title; }

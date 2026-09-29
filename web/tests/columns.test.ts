@@ -32,6 +32,8 @@ test('a saved choice fixes order and visibility; what cannot fit steps aside', (
   assert.deepEqual(ids(700, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status'])
   assert.equal(visibleColumns(2000, { phone: false, prefs: p }).customised, true)
   assert.deepEqual(ids(390, { phone: true, prefs: p }), ['key', 'title', 'status', 'priority', 'updated'])
+  assert.deepEqual(ids(390, { phone: true, present: { estimate: true } }), ['key', 'title', 'status', 'priority', 'updated', 'estimate'])
+  assert.deepEqual(ids(390, { phone: true, present: { eta: true, estimate: true }, prefs: { visible: ['status'] } }), ['key', 'title', 'status', 'priority', 'updated', 'eta', 'estimate'])
   // A saved choice that hides Assignee stays hidden when a live worker is present.
   assert.deepEqual(ids(1600, { phone: false, present: { workers: true }, prefs: { visible: ['status', 'updated'] } }), ['key', 'title', 'status', 'updated'])
   assert.deepEqual(ids(390, { phone: true, present: { workers: true }, prefs: p }), ['key', 'title', 'status', 'priority', 'updated'])

@@ -15,6 +15,7 @@ export interface MockNode {
   id: string; key: string; kind_slug: string; title: string; body: string; state: string
   fields: Record<string, unknown>; parent_id: string | null; project: string
   created_at: string; updated_at: string
+  estimate?: import('../src/lib/estimates').TicketEstimate
   eta?: Record<string, unknown>
 }
 export interface MockView {
@@ -152,6 +153,7 @@ function item(node: MockNode, data: Fixtures) {
     project: { id: project.id, key: project.key, title: project.title },
     epic: epicAbove(node, data),
     ...(node.eta ? { eta: node.eta } : {}),
+    ...(node.estimate ? { estimate: node.estimate } : {}),
   }
 }
 // The nearest epic above a node, like the server's list projection.
@@ -487,9 +489,9 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       rows = [...rows].sort((a, b) => {
         for (const raw of sort) {
           const desc = raw.startsWith('-'), field = desc ? raw.slice(1) : raw
-          const etaMissing = (n: MockNode) => field === 'eta_ready' ? !n.eta?.eta_ready_at : field === 'progress' ? typeof n.eta?.progress_pct !== 'number' : false
-          if ((field === 'eta_ready' || field === 'progress') && etaMissing(a) !== etaMissing(b)) return etaMissing(a) ? 1 : -1
-          const value = (n: MockNode): string | number => field === 'state' ? (STATE_ORDER.indexOf(normal(n.state)) + 1 || 99)
+          const etaMissing = (n: MockNode) => field === 'estimate' ? (n.kind_slug === 'epic' ? n.estimate?.hours == null : typeof n.fields.estimate_hours !== 'number' || n.fields.estimate_hours <= 0) : field === 'eta_ready' ? !n.eta?.eta_ready_at : field === 'progress' ? typeof n.eta?.progress_pct !== 'number' : false
+          if ((field === 'estimate' || field === 'eta_ready' || field === 'progress') && etaMissing(a) !== etaMissing(b)) return etaMissing(a) ? 1 : -1
+          const value = (n: MockNode): string | number => field === 'estimate' ? (n.kind_slug === 'epic' ? n.estimate?.hours ?? 0 : Number(n.fields.estimate_hours ?? 0)) : field === 'state' ? (STATE_ORDER.indexOf(normal(n.state)) + 1 || 99)
             : field === 'priority' ? PRIORITY_ORDER.indexOf(typeof n.fields.priority === 'string' ? n.fields.priority : 'none')
             : field === 'updated_at' ? Date.parse(n.updated_at) : field === 'created_at' ? Date.parse(n.created_at) : field === 'key' ? Number(n.key.split('-')[1]) : field === 'title' ? n.title
             : field === 'kind' ? n.kind_slug : field === 'assignee' ? (personName(data, n.fields.assignee) || '\uffff')

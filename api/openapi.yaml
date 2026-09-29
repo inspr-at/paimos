@@ -1723,7 +1723,9 @@ paths:
       operationId: createNode
       description: |
         Allocate a tenant-scoped key, or preserve a supplied import key.
+        The created node includes the same read-only estimate view as a later read when it has hours or open children.
         Any create of a portal_product, portal_feature or portal_wish, and any create that places a node under a portal parent, requires a person with settings.manage. Agents are refused.
+        Optional header X-Aeon-Client with value cli changes only the wording of a missing-estimate warning; it grants nothing.
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/NodeCreate'
@@ -10240,10 +10242,10 @@ components:
         warnings:
           type: array
           items: {type: string}
-          description: Non-blocking ticket benefit guidance returned on creation.
+          description: "Non-blocking ticket benefit guidance. An agent creating a ticket or task without estimate_hours is told to set that field. Header X-Aeon-Client set to cli names the --estimate flag instead, and changes only that sentence."
         fields:
           type: object
-          description: Tenant-configured fields. TicketBenefitFields describes the default ticket properties; other kinds retain their own schema.
+          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
         state:
           type: string
         parent_id:
@@ -10258,9 +10260,30 @@ components:
         updated_at:
           type: string
           format: date-time
+        estimate:
+          $ref: '#/components/schemas/TicketEstimate'
         deleted_at:
           type: [string, 'null']
           format: date-time
+    TicketEstimateFields:
+      type: object
+      additionalProperties: true
+      description: Agent work hours until ready for review. New values must be positive and at most 200. Omit or set hours to null to clear with the provenance. Legacy unchanged values remain editable. The server derives source from the authenticated principal (person or agent), and sets by and at; supplied new provenance cannot impersonate another principal. An explicit source must match the caller. To confirm the same hours, resubmit them without by/at. A person or an active agent bound to this ticket confirms the estimate.
+      properties:
+        estimate_hours: {type: [number, 'null'], exclusiveMinimum: 0, maximum: 200}
+        estimate_source: {type: string, enum: [agent, person]}
+        estimate_by: {type: string, format: uuid, readOnly: true}
+        estimate_at: {type: string, format: date-time, readOnly: true}
+        estimate_confirmed: {type: boolean, readOnly: true, description: True for a person or active bound worker; false for an agent draft.}
+    TicketEstimate:
+      type: object
+      required: [hours, estimated_children, open_children]
+      description: Read-only estimate view on node creates, reads and lists, omitted when there are no hours and no open children. Epics sum direct visible open ticket/task children using configured state categories, excluding deleted children. Null hours means no child has an estimate. Other work uses fields.estimate_hours; legacy invalid values are unknown. Counts are zero outside epics.
+      properties:
+        hours: {type: [number, 'null'], exclusiveMinimum: 0}
+        estimated_children: {type: integer, minimum: 0}
+        open_children: {type: integer, minimum: 0}
+        by: {type: object, properties: {id: {type: string, format: uuid}, name: {type: string}}}
     TicketBenefitFields:
       type: object
       additionalProperties: true
@@ -10292,7 +10315,7 @@ components:
           default: ''
         fields:
           type: object
-          description: Tenant-configured fields. TicketBenefitFields describes the default ticket properties; other kinds retain their own schema.
+          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
           default: {}
         state:
           type: string
@@ -10315,7 +10338,7 @@ components:
           type: string
         fields:
           type: object
-          description: Tenant-configured fields. TicketBenefitFields describes the default ticket properties; other kinds retain their own schema.
+          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
         state:
           type: string
     TagPatch:
@@ -10700,7 +10723,7 @@ components:
       in: query
       schema:
         type: string
-        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (by name, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions).'
+        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (by name, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, epic open-child sum, empty last in both directions).'
         default: position
     Direction:
       name: direction
