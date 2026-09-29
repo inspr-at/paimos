@@ -150,6 +150,32 @@ func TestSocketFallbackRealBindAndPrivateDirectory(t *testing.T) {
 	}
 }
 
+func TestSocketLegacyListenerWithinOSLimitBeyondNewPathMargin(t *testing.T) {
+	home := shortSocketHome(t)
+	ref := &ControlReference{DaemonID: "daemon", Generation: strings.Repeat("a", 32)}
+	ref.Socket = "agentd-" + ref.Generation + ".sock"
+	// 103 bytes is valid on Darwin, despite the 100-byte new-path budget.
+	state := home + "/" + strings.Repeat("s", 103-len(home)-1-len("/"+ref.Socket))
+	s, err := OpenStore(state, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	legacy := filepath.Join(state, ref.Socket)
+	l, err := net.Listen("unix", legacy)
+	if err != nil {
+		t.Fatalf("103-byte legacy bind: %v", err)
+	}
+	defer l.Close()
+	if err := os.Chmod(legacy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	path, err := resolveSocketPath("darwin", home, state, ref)
+	if err != nil || path != legacy {
+		t.Fatalf("working legacy listener abandoned: %q %v", path, err)
+	}
+}
+
 func TestSocketFallbackRejectsSymlinkAncestors(t *testing.T) {
 	for _, component := range []string{".aeon", "run"} {
 		t.Run(component, func(t *testing.T) {

@@ -47,7 +47,9 @@ func resolveSocketPath(goos, home, state string, ref *ControlReference) (string,
 	}
 	if ref != nil && ref.Socket == "agentd-"+ref.Generation+".sock" {
 		legacy := filepath.Join(state, ref.Socket)
-		if len(legacy) <= limit {
+		// Existing listeners may use the bytes reserved as margin for new
+		// paths. Preserve them up to the actual sun_path limit (minus NUL).
+		if len(legacy) < limit+4 {
 			if err := CheckSocket(legacy); err == nil {
 				return legacy, nil
 			} else if !errors.Is(err, os.ErrNotExist) {

@@ -33,16 +33,16 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	if s == nil || !filepath.IsAbs(socket) {
 		return nil, errors.New("invalid local socket")
 	}
-	if _, err := os.Lstat(socket); err == nil {
-		return nil, errors.New("local socket already exists")
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
 	dir, err := agentsetup.OpenStore(filepath.Dir(socket), false)
 	if err != nil {
 		return nil, err
 	}
 	defer dir.Close()
+	if _, err := os.Lstat(socket); err == nil {
+		return nil, errors.New("local socket already exists")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
 	token, err := randomID()
 	if err != nil {
 		return nil, err
