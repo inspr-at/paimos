@@ -77,6 +77,8 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := authz.BindPool(r.Context(), m.pool)
+	// Any project grant may open the list. Row-level security only checks node
+	// visibility, so each returned project is authorized on its own below.
 	if err := authz.Require(ctx, "outcome.read", authz.Scope{AnyProject: true}); err != nil {
 		writeErr(w, err)
 		return
@@ -105,11 +107,19 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	}
 	var items []outcome
 	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		check, err := authz.ProjectsTx(r.Context(), tx, p)
+		if err != nil {
+			return err
+		}
 		ticketID := ""
 		if ticket != "" {
 			node, err := resolveTicket(r.Context(), tx, ticket)
 			if err != nil {
 				return err
+			}
+			if !check("outcome.read", node.projectID) {
+				items = []outcome{}
+				return nil
 			}
 			ticketID = node.id
 		}
@@ -126,6 +136,18 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		if rules != "" {
 			args = append(args, rules)
 			where = append(where, "o.rules_version = $"+itoa(len(args)))
+		}
+		if !check("outcome.read", "") {
+			allowed, err := readableOutcomeProjects(r.Context(), tx, where, args, check)
+			if err != nil {
+				return err
+			}
+			if len(allowed) == 0 {
+				items = []outcome{}
+				return nil
+			}
+			args = append(args, allowed)
+			where = append(where, "o.project_id = ANY($"+itoa(len(args))+"::uuid[])")
 		}
 		args = append(args, limit)
 		rows, err := tx.Query(r.Context(), outcomeSelect+`WHERE `+strings.Join(where, " AND ")+
@@ -150,6 +172,27 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"outcomes": items})
+}
+
+// readableOutcomeProjects keeps projects in this filter where the caller holds
+// outcome.read. A workspace grant is decided by the caller before this query.
+func readableOutcomeProjects(ctx context.Context, tx pgx.Tx, where []string, args []any, check authz.ProjectCheck) ([]string, error) {
+	rows, err := tx.Query(ctx, `SELECT DISTINCT o.project_id::text FROM outcome_events o WHERE `+strings.Join(where, " AND "), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	allowed := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		if check("outcome.read", id) {
+			allowed = append(allowed, id)
+		}
+	}
+	return allowed, rows.Err()
 }
 
 func (m *Module) record(w http.ResponseWriter, r *http.Request) {

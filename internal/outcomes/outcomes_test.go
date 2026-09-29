@@ -225,6 +225,57 @@ func testOutcomeCapture(t *testing.T, d *dbtest.DB) {
 	}
 }
 
+func TestOutcomeReadIsPerProject(t *testing.T) {
+	d := dbtest.Open(t)
+	owner := newPerson(t, d, "outcome-project-read")
+	projectA := insertNode(t, d, owner, "project", "OPA-1", "Outcome grant", nil)
+	projectB := insertNode(t, d, owner, "project", "OPB-1", "Nodes only", nil)
+	ticketA := insertNode(t, d, owner, "ticket", "OPA-2", "Readable", &projectA)
+	ticketB := insertNode(t, d, owner, "ticket", "OPB-2", "Hidden outcome", &projectB)
+	person := tenant.Principal{TenantID: owner.TenantID, Kind: tenant.Person, Name: "Restricted"}
+	inTenant(t, d, owner, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Restricted') RETURNING id::text`, owner.TenantID).Scan(&person.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+			SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='guest'`, owner.TenantID, person.ID, projectA); err != nil {
+			return err
+		}
+		var role string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'nodes_only','Nodes only') RETURNING id::text`, owner.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'nodes.read')`, owner.TenantID, role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, owner.TenantID, person.ID, role, projectB); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO outcome_events(
+			tenant_id, kind, project_id, ticket_node_id, rules_version, idempotency_key,
+			actor_principal_id, source, payload, request_digest
+		) VALUES
+			($1,'ci_result',$2,$3,'rv-leak','leak-a',$6,'recorded','{"result":"pass"}'::jsonb, decode(md5('leak-a'),'hex')),
+			($1,'ci_result',$4,$5,'rv-leak','leak-b',$6,'recorded','{"result":"fail"}'::jsonb, decode(md5('leak-b'),'hex'))`,
+			owner.TenantID, projectA, ticketA, projectB, ticketB, owner.ID)
+		return err
+	})
+	mod := New(d.App)
+	listed := callAs(t, mod, person, http.MethodGet, "/api/outcomes?rules_version=rv-leak", "")
+	page := decodePage(t, listed.Body.Bytes())
+	if listed.Code != http.StatusOK || len(page) != 1 || page[0].TicketKey != "OPA-2" {
+		t.Fatalf("shared rules filter: %d %+v %s", listed.Code, page, listed.Body.String())
+	}
+	hidden := callAs(t, mod, person, http.MethodGet, "/api/outcomes?ticket_node_id="+ticketB, "")
+	if hiddenPage := decodePage(t, hidden.Body.Bytes()); hidden.Code == http.StatusOK && len(hiddenPage) > 0 {
+		t.Fatalf("outcome.read in A leaked B (status=%d count=%d)", hidden.Code, len(hiddenPage))
+	}
+	ownerPage := decodePage(t, callAs(t, mod, owner, http.MethodGet, "/api/outcomes?rules_version=rv-leak", "").Body.Bytes())
+	if len(ownerPage) != 2 {
+		t.Fatalf("workspace reader saw %+v", ownerPage)
+	}
+}
+
 func testOutcomeVisibility(t *testing.T, d *dbtest.DB) {
 	t.Helper()
 	person := newPerson(t, d, "outcomes-vis")
