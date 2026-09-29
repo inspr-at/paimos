@@ -625,9 +625,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if profile.Harness != Grok {
 		caps = append(caps, "interrupt")
 	}
-	entry.inboxCapable = !verification && !managedPolicy && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi)
+	entry.inboxCapable = !verification && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi)
 	if entry.inboxCapable {
-		caps = append(caps, "inbox", "steer")
+		caps = append(caps, "inbox")
+		if !managedPolicy {
+			caps = append(caps, "steer")
+		}
 	}
 	registration := HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB, AccountLabel: route.AccountLabel}
 	if profile.Harness != Codex {
@@ -717,7 +720,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	launchedAt := time.Now()
 	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
-		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
+		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
 	if err != nil {
 		_ = entry.tools.Close()
 		// A generic Start error does not prove that a child was never forked.
@@ -772,11 +775,16 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 }
 
 func (s *Supervisor) heartbeat(entry *owned) {
-	ticker := time.NewTicker(s.heartbeatInterval)
-	defer ticker.Stop()
+	// Inbox latency must not depend on the slower telemetry heartbeat setting.
 	entry.mu.Lock()
 	done := entry.monitorDone
+	interval := s.heartbeatInterval
+	if entry.inboxCapable && interval > 2*time.Second {
+		interval = 2 * time.Second
+	}
 	entry.mu.Unlock()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-done:
@@ -817,6 +825,11 @@ func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 	s.observeBudget(entry, ev)
+	if ev.Activity == "busy" || ev.Activity == "idle" {
+		entry.mu.Lock()
+		entry.harness.Activity = ev.Activity
+		entry.mu.Unlock()
+	}
 	if ev.SessionUsage != nil {
 		entry.usage.submit(*ev.SessionUsage)
 	}
@@ -1104,10 +1117,10 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) (result e
 			}
 			req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
 				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: item.ID,
-				Operation: "steer", Text: messageText}
-			if item.SenderPrincipalID == s.principalID {
+				Operation: "inbox", Text: messageText}
+			if item.SenderPrincipalID == s.principalID && !entry.managedPolicy {
 				var in inboxControl
-				if json.Unmarshal([]byte(item.Body), &in) == nil && in.RunID != "" {
+				if json.Unmarshal([]byte(item.Body), &in) == nil && in.RunID != "" && in.Operation != "inbox" {
 					req.RunID, req.Generation, req.Operation, req.Text = in.RunID, in.Generation, in.Operation, in.Text
 				}
 			}
@@ -1123,7 +1136,7 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) (result e
 				entry.replies[item.MessageID] = item.SenderPrincipalID
 				entry.mu.Unlock()
 			}
-			if _, err := s.Control(ctx, req); err != nil {
+			if _, err := s.controlInbox(ctx, req, false, true); err != nil {
 				return err
 			}
 			if err := s.api.CompleteHarnessDelivery(ctx, entry.harness, item); err != nil {
@@ -1167,6 +1180,16 @@ func (s *Supervisor) Control(ctx context.Context, req ControlRequest) (Receipt, 
 // Force authorization originates only in the server's human-confirmed recovery
 // queue. Local transport credentials and inbox messages cannot mint that grant.
 func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecoveryQueue bool) (Receipt, error) {
+	return s.controlInbox(ctx, req, fromRecoveryQueue, false)
+}
+
+// Only the authenticated harness drain may submit an inbox operation. Message
+// text grants no recovery/control authority, including messages from ourselves.
+func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromRecoveryQueue, fromHarness bool) (Receipt, error) {
+	inbox := fromHarness && req.Operation == "inbox"
+	if req.Operation == "inbox" && !inbox {
+		return Receipt{}, ErrUnsupported
+	}
 	if (req.Operation == "force_stop" || isSetting(req.Operation)) && !fromRecoveryQueue {
 		return Receipt{}, ErrUnsupported
 	}
@@ -1174,13 +1197,13 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 		req.RunID == "" || req.CorrelationID == "" || len(req.CorrelationID) > 128 {
 		return Receipt{}, ErrScope
 	}
-	if req.Operation != "steer" && req.Operation != "interrupt" && req.Operation != "resume" && req.Operation != "stop" && req.Operation != "force_stop" && !isSetting(req.Operation) {
+	if req.Operation != "steer" && req.Operation != "interrupt" && req.Operation != "resume" && req.Operation != "stop" && req.Operation != "force_stop" && !isSetting(req.Operation) && !inbox {
 		return Receipt{}, ErrUnsupported
 	}
 	if (isSetting(req.Operation) && !validSettingValue(req.Operation, req.Value)) || (!isSetting(req.Operation) && req.Value != "") {
 		return Receipt{}, ErrUnsupported
 	}
-	if len(req.Text) > 64<<10 || (req.Operation != "steer" && req.Text != "") {
+	if len(req.Text) > 64<<10 || (req.Operation != "steer" && !inbox && req.Text != "") {
 		return Receipt{}, errors.New("invalid control body")
 	}
 	s.mu.Lock()
@@ -1189,14 +1212,14 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 	if entry == nil {
 		return Receipt{}, ErrNotOwned
 	}
-	if entry.record.ExecutionMode == VerificationPurpose && (req.Operation == "steer" || req.Operation == "resume") {
+	if entry.record.ExecutionMode == VerificationPurpose && (req.Operation == "steer" || req.Operation == "resume" || inbox) {
 		return Receipt{}, ErrUnsupported
 	}
 	entry.controlMu.Lock()
 	defer entry.controlMu.Unlock()
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	if (entry.managedPolicy && !fromRecoveryQueue) || (isSetting(req.Operation) && !entry.managedPolicy) {
+	if (entry.managedPolicy && !fromRecoveryQueue && !inbox) || (isSetting(req.Operation) && !entry.managedPolicy) {
 		return Receipt{}, ErrUnsupported
 	}
 
@@ -1223,6 +1246,9 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 		return prior.Receipt, nil
 	}
 	if entry.record.Generation != s.generation || entry.process == nil || entry.record.State != "running" || entry.harnessArchived {
+		return Receipt{}, ErrNotOwned
+	}
+	if inbox && (!entry.inboxCapable || entry.stopRequested || entry.protocolFailed || entry.budgetStopReason() != "") {
 		return Receipt{}, ErrNotOwned
 	}
 	if len(entry.record.Controls) >= 256 {
@@ -1252,6 +1278,14 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 		current, e := recovery.Ownership()
 		if e != nil || current.ProcessID != expected.ProcessID || current.RootPID != expected.RootPID || current.GroupID != expected.GroupID || !current.StartedAt.Equal(expected.StartedAt) {
 			return Receipt{}, ErrNotOwned
+		}
+	}
+	if inbox {
+		// Persist uncertainty before touching the child. A crash or lost vendor
+		// response must never authorize reinjection of the same lease.
+		entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true}
+		if err := s.journal.Put(entry.record); err != nil {
+			return Receipt{}, err
 		}
 	}
 	var err error
@@ -1309,9 +1343,12 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 		entry.mu.Lock()
 	}
 	if err != nil {
-		if entry.managedPolicy && fromRecoveryQueue {
+		if inbox || (entry.managedPolicy && fromRecoveryQueue) {
 			entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true, SettingRejected: errors.Is(err, ErrSettingRejected)}
 			_ = s.journal.Put(entry.record)
+		}
+		if inbox {
+			return Receipt{}, ErrControlUnconfirmed
 		}
 		return Receipt{}, err
 	}

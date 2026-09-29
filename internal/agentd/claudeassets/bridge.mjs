@@ -380,13 +380,14 @@ const handleControlLine = (line) => {
           fail("event_stream_bound", correlationID);
           return;
         }
+        const steerActiveTurn = request.op === "steer" || turnActive;
         const uuid = randomUUID();
         controlUUID = uuid;
         const state = addCorrelation(uuid, correlationID);
         failureReason = "stream_input_failed";
         await streamInputBound(userMessage(request.text, uuid));
         request.text = "";
-        if (request.op === "steer") {
+        if (steerActiveTurn) {
           failureReason = "interrupt_receipt_failed";
           const receipt = await queryHandle.interrupt();
           if (!receipt || !Array.isArray(receipt.still_queued)) {
@@ -394,7 +395,7 @@ const handleControlLine = (line) => {
             throw new Error("receipt");
           }
         }
-        if (request.op === "inbox") {
+        if (!steerActiveTurn) {
           // Consuming our iterator is not external acceptance. Require the
           // live Query's matching input UUID reaction before reporting handoff.
           failureReason = "input_reaction_unconfirmed";

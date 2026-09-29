@@ -190,7 +190,10 @@ func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase s
 	if sequence == 0 {
 		sequence = 1
 	}
-	activity := "busy"
+	activity := s.Activity
+	if activity == "" {
+		activity = "busy"
+	}
 	if phase == "stopping" {
 		activity = "idle"
 	}

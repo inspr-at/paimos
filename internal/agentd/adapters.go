@@ -108,6 +108,10 @@ func (*CodexAdapter) Name() string                                 { return Code
 
 type codexProcess struct {
 	*wireProcess
+	persistent                bool
+	profile                   Profile
+	idlePublished             bool
+	controlMu                 sync.Mutex
 	done                      chan bool
 	once                      sync.Once
 	usage                     *sessionusage.ManagedCodex
@@ -122,21 +126,37 @@ func (p *codexProcess) Wait() error {
 	return p.waitForTurn(p.wireProcess.Stop, 2*time.Second)
 }
 func (p *codexProcess) Control(ctx context.Context, op, text string) error {
+	p.controlMu.Lock()
+	defer p.controlMu.Unlock()
+	p.eventMu.Lock()
+	idle := p.terminalSeen && p.acknowledged && p.terminal != nil && p.terminal.Clean && !p.invalid
+	ended := p.sealed || p.abandoned.Load() || p.invalid || (p.terminalSeen && (!p.persistent || !idle))
+	thread, turn := p.threadID, p.turnID
+	p.eventMu.Unlock()
+	if ended {
+		return ErrNotOwned
+	}
+	if op == "inbox" {
+		if p.persistent && idle {
+			return p.wakeTurn(ctx, text)
+		}
+		op = "steer"
+	}
 	ctx, cancel := operationContext(ctx)
 	defer cancel()
 	if op == "steer" {
 		var result struct {
 			TurnID string `json:"turnId"`
 		}
-		raw, err := p.request(ctx, "jsonrpc", "turn/steer", map[string]any{"threadId": p.threadID, "expectedTurnId": p.turnID, "input": []map[string]string{{"type": "text", "text": text}}})
-		if err != nil || json.Unmarshal(raw, &result) != nil || result.TurnID != p.turnID {
+		raw, err := p.request(ctx, "jsonrpc", "turn/steer", map[string]any{"threadId": thread, "expectedTurnId": turn, "input": []map[string]string{{"type": "text", "text": text}}})
+		if err != nil || json.Unmarshal(raw, &result) != nil || result.TurnID != turn {
 			return errors.New("Codex steer acknowledgement mismatch")
 		}
 		p.observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 		return nil
 	}
 	if op == "interrupt" {
-		_, err := p.request(ctx, "jsonrpc", "turn/interrupt", map[string]string{"threadId": p.threadID, "turnId": p.turnID})
+		_, err := p.request(ctx, "jsonrpc", "turn/interrupt", map[string]string{"threadId": thread, "turnId": turn})
 		return err
 	}
 	return ErrUnsupported
@@ -157,7 +177,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	if err != nil {
 		return nil, err
 	}
-	cp := &codexProcess{wireProcess: p, done: make(chan bool, 1)}
+	cp := &codexProcess{wireProcess: p, done: make(chan bool, 1), persistent: r.InboxEnabled && r.Run.Purpose != VerificationPurpose, profile: r.Profile}
 	p.setOnEvent(cp.notification)
 	fail := p.failStart
 	op, cancel := operationContext(ctx)
@@ -238,6 +258,9 @@ type piProcess struct {
 }
 
 func (p *piProcess) Control(ctx context.Context, op, text string) error {
+	if op == "inbox" {
+		op = "steer"
+	}
 	p.controlMu.Lock()
 	defer p.controlMu.Unlock()
 	ctx, cancel := operationContext(ctx)
@@ -581,7 +604,7 @@ func (p *claudeProcess) Wait() error {
 func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
 	ctx, cancel := operationContext(ctx)
 	defer cancel()
-	if op != "steer" && op != "interrupt" && op != "stop" && op != "model" && op != "effort" {
+	if op != "steer" && op != "inbox" && op != "interrupt" && op != "stop" && op != "model" && op != "effort" {
 		return ErrUnsupported
 	}
 	correlation, err := randomID()
@@ -704,9 +727,9 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 				observe(AdapterEvent{BudgetExhausted: frame.Reason})
 			}
 		case "turn_completed":
-			observe(AdapterEvent{BudgetTurnsDelta: 1})
+			observe(AdapterEvent{BudgetTurnsDelta: 1, Activity: "idle"})
 		case "turn_started":
-			observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
+			observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1, Activity: "busy"})
 		case "usage":
 			if frame.InputTokens < inputTokens || frame.OutputTokens < outputTokens {
 				break

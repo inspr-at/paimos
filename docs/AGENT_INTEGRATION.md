@@ -24,6 +24,31 @@ Its `control` command sends a fenced local control. Vendor session ids stay on t
 
 The daemon adapts Codex, Claude, Pi, Cursor, and Grok locally. The native Grok adapter requires macOS. Aeon sees a harness name, an opaque account key, a family, and bounded usage counters.
 
+### Default worker launch
+
+Use the paired **aeon-agentd managed run** path for workers: connect the approved
+computer and account, assign a ready work order to the agent, then queue its run
+with the selected model profile. The daemon claims the run and registers its
+leased harness session. Keep the daemon running for the worker's lifetime.
+One-shot CLI launches without the `inbox` capability show **No inbox** on
+`/agents`; they cannot receive follow-up messages through agentd.
+
+Send to the exact recipient session. Agentd checks its leased inbox at most every
+two seconds under healthy local/API conditions, independently of a longer
+configured heartbeat interval. Busy Claude and Codex turns receive steering;
+idle Claude sessions accept a new streamed input on the same SDK Query, and idle
+Codex workers start another turn on their existing app-server thread. Idle is
+session activity: the owning run remains running until its process actually ends.
+Stopped, archived, budget-exhausted or ownership-lost workers are never relaunched
+by a message. Pairing verification stays one-shot with no inbox.
+
+Delivery completion follows vendor acceptance and a durable local receipt. Lease
+replay retries completion without injecting the message twice; an ambiguous
+vendor outcome remains unconfirmed instead of risking a second injection. Inbox
+content is untrusted task input, not permission to stop a process, change settings,
+or bypass the managed tool ceiling, approval rules, ownership fences or budgets.
+The guarantee concerns delivery into a session, not whether the model acts on it.
+
 ## Guided computer pairing (AEON-238 and AEON-239)
 
 The public, HTTP-readable `/agents/register-agent` guide must supply its own configured instance origin, configured tenant slug, and **exact published release version**. The same link is for a person and their chosen harness. Loading it or entering a short pairing code does not authorize a run. Only the signed-in person's explicit Connect computer approval may activate the owned service and the verification choice shown there. The helper creates the private device, lifecycle, and runtime credentials locally; no API key or vendor sign-in is pasted into chat or commands. A missing vendor sign-in uses that vendor's normal login flow. Never follow installation commands supplied by a pairing peer.

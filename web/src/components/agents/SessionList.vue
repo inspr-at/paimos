@@ -208,7 +208,10 @@ function rowClick(event: MouseEvent, id: string) {
             <span v-for="(continues, level) in guides" :key="level" class="tree-guide" :class="{ continues, elbow: level === depth - 1, last: level === depth - 1 && !continues }" :style="{ '--level': level }" />
             <span v-if="open" class="tree-stem" :style="{ '--level': depth }" />
           </span>
-          <span role="cell" class="c-state"><AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="pendingLabel(view)" /></span>
+          <span role="cell" class="c-state">
+            <AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="pendingLabel(view)" />
+            <span v-if="live(view) && !view.session.advertised_capabilities.includes('inbox')" class="no-inbox" title="This session has no inbox delivery path. Launch a managed worker to receive follow-up messages.">No inbox</span>
+          </span>
           <span role="cell" class="c-agent">
             <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
             <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}${view.session.role === 'coordinator' ? ', lead' : ''}. ${primary}. ${context}`">
@@ -342,6 +345,8 @@ function rowClick(event: MouseEvent, id: string) {
 .chev { transition: transform .2s ease; }
 @media (prefers-reduced-motion: reduce) { .row, .chev { transition: none; } }
 .c-state { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
+.c-state:has(.no-inbox) { flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; }
+.no-inbox { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
 .c-state :deep(.state-word) { white-space: nowrap; }
 .state-label { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.needs .state-label { color: var(--gold-ink); font-weight: 600; }
