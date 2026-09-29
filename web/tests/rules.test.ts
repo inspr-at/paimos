@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { RequestFailure } from '../src/lib/api.ts'
 import {
-  IMPORT_MAX_BYTES, RulesError, applyEnabled, blankRule, calendarVersion, diffRules, duplicateRule, groupState, heldIdentities,
-  identityFromText, layerInColumn, mergeQuery, parseDraftImport, publishBlock, replyUncertain, resetAvailability, rulePayload, rulesEqual,
+  IMPORT_MAX_BYTES, RulesError, applyEnabled, blankRule, calendarVersion, copyName, diffRules, duplicateRule, groupState, groupsState, hasMovable, heldIdentities,
+  identityFromText, layerInColumn, mergeQuery, parseDraftImport, publishBlock, replyUncertain, resetAvailability, resetRule, rulePayload, rulesEqual, tickTarget,
   runDraftImport, scopeFor, touchRule, validVersion, validateDraft, validateRule, writeBlock, importWrites, draftImportProjects,
   setState, projectedRules, projectedBytes, largestProjected,
   type AgentRule, type Caller, type ImportIO, type RuleScope, type RuleSet,
@@ -41,6 +41,10 @@ test('locked rules and higher locks cannot be switched off', () => {
   assert.equal(off[2].enabled, true)
   assert.equal(groupState(off, held), 'mixed')
   assert.equal(applyEnabled(off, true, held)[1].enabled, true)
+  assert.equal(tickTarget('on'), false)
+  assert.equal(tickTarget('mixed'), true)
+  assert.equal(groupsState([{ rules, held }, { rules: [rule({ identity: 'other', enabled: false })], held: new Set() }]), 'mixed')
+  assert.equal(hasMovable([{ rules: [rule({ strength: 'locked' })], held: new Set() }]), false)
 })
 
 test('a lower layer does not treat a higher locked identity as its own switch', () => {
@@ -131,12 +135,25 @@ test('new identities stay unique and reset needs an original', () => {
   const copy = duplicateRule(rule({ strength: 'locked' }), ['keep-secrets'])
   assert.equal(copy.strength, 'normal')
   assert.notEqual(copy.identity, 'keep-secrets')
-  const reset = resetAvailability(rule({ source: { reference: 'INSPR', identity: 'keep-secrets', edited_here: true } }))
+  assert.equal(copyName('Secrets'), 'Secrets (copy)')
+  assert.ok(new TextEncoder().encode(copyName(`${'n'.repeat(200)}`)).length <= 128)
+  const edited = rule({ text: 'Changed.', source: { reference: 'INSPR', identity: 'keep-secrets', edited_here: true } })
+  const reset = resetAvailability(edited)
   assert.equal(reset.available, false)
   if (!reset.available) assert.equal(reset.show, true)
-  const supplied = rule({ identity: 'keep-secrets', text: 'Original.' })
-  const ready = resetAvailability(rule({ source: { reference: 'INSPR', identity: 'keep-secrets', edited_here: true } }), supplied)
+  const quiet = resetAvailability(rule({ source: { reference: 'INSPR', identity: 'keep-secrets', edited_here: false } }))
+  assert.equal(quiet.available, false)
+  if (!quiet.available) assert.equal(quiet.show, false)
+  assert.equal(resetRule(edited, rule({ identity: 'other' })), null)
+  const supplied = rule({ identity: 'keep-secrets', text: 'Original.', why: 'The template says so.' })
+  const ready = resetAvailability(edited, supplied)
   assert.equal(ready.available, true)
+  const restored = resetRule(edited, supplied)
+  assert.equal(restored?.text, 'Original.')
+  assert.equal(restored?.why, 'The template says so.')
+  assert.equal(restored?.identity, 'keep-secrets')
+  assert.equal(restored?.source.edited_here, false)
+  assert.equal(restored?.source.reference, 'INSPR')
 })
 
 test('merge query names the preview and refuses a loose project id', () => {

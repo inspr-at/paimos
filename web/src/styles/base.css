@@ -136,6 +136,11 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
 }
 .switch input:checked { background: linear-gradient(90deg, #0e6f6c, #1a8683); box-shadow: 0 0 12px rgba(164, 229, 223, .6); }
 .switch input:checked::after { transform: translateX(14px); }
+/* Mixed: the knob sits in the middle, so off / mixed / on are three positions. */
+.switch input:indeterminate { background: color-mix(in oklab, #1a8683 42%, var(--track)); }
+.switch input:indeterminate::after { transform: translateX(7px); }
+.switch input:disabled { cursor: not-allowed; opacity: .45; }
+.switch:has(input:disabled) { cursor: not-allowed; }
 .switch input:focus-visible { box-shadow: var(--focus-ring); }
 
 /* Segmented control */

@@ -9,7 +9,8 @@ import { HARNESS_LABEL, HARNESSES, ROLE_LABEL, ROLES, type AgentRule } from '../
 // One rule as agents read it: the text rendered as Markdown, a lock when it is
 // locked, and only the exceptions as quiet tags. Everything technical (reason,
 // details, source, identity) waits behind the row's own disclosure.
-const props = defineProps<{ rule: AgentRule; heldBy?: string; pending?: boolean }>()
+const props = defineProps<{ rule: AgentRule; heldBy?: string; pending?: boolean; switchable?: boolean; switchDisabled?: boolean }>()
+const emit = defineEmits<{ toggle: [enabled: boolean] }>()
 const open = ref(false)
 const id = useId()
 
@@ -22,6 +23,7 @@ const tags = computed(() => {
   const out: string[] = []
   if (props.pending) out.push('Not live yet')
   if (!props.rule.enabled && props.rule.strength !== 'locked') out.push('Off')
+  if (props.rule.source.edited_here) out.push('Edited here')
   if (roles.value) out.push(`${roles.value} only`)
   if (harnesses.value) out.push(`${harnesses.value} only`)
   if (props.rule.expires_at) out.push(`Until ${date(props.rule.expires_at)}`)
@@ -35,7 +37,10 @@ const lockTip = computed(() => props.heldBy
 <template>
   <li class="rule" :class="{ off: !rule.enabled && rule.strength !== 'locked', held: !!heldBy }">
     <span class="lead">
-      <span v-if="lockTip" class="lock" role="img" :aria-label="heldBy ? `Locked in ${heldBy} rules` : 'Locked'" :data-tip="lockTip"><BizIcon name="lock" :size="13" /></span>
+      <label v-if="switchable" class="switch">
+        <input type="checkbox" :checked="rule.enabled" :disabled="switchDisabled" :aria-label="`${rule.text.trim() || 'Untitled rule'} is on`" @change="emit('toggle', ($event.target as HTMLInputElement).checked)">
+      </label>
+      <span v-else-if="lockTip" class="lock" role="img" :aria-label="heldBy ? `Locked in ${heldBy} rules` : 'Locked'" :data-tip="lockTip"><BizIcon name="lock" :size="13" /></span>
       <span v-else class="dot" aria-hidden="true"></span>
     </span>
     <div class="main">
@@ -59,9 +64,9 @@ const lockTip = computed(() => props.heldBy
 </template>
 
 <style scoped>
-.rule { display: grid; grid-template-columns: 18px minmax(0, 1fr) 28px; gap: 2px 10px; align-items: start; padding: 7px 8px 7px 10px; border-radius: 10px; }
+.rule { display: grid; grid-template-columns: auto minmax(0, 1fr) 28px; gap: 2px 10px; align-items: start; padding: 7px 8px 7px 10px; border-radius: 10px; }
 @media (hover: hover) { .rule:hover { background: var(--row-hover); } }
-.lead { display: grid; place-items: center; height: 23px; }
+.lead { display: grid; place-items: center; min-height: 23px; }
 .lock { display: grid; place-items: center; width: 18px; height: 18px; color: var(--teal-ink); cursor: default; }
 .held .lock { color: var(--ink-3); }
 .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--line-2); }

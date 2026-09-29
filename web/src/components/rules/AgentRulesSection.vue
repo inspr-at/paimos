@@ -4,6 +4,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import BizIcon from '../business/BizIcon.vue'
 import RuleHistory from './RuleHistory.vue'
 import RuleSetCard, { type SetDraft } from './RuleSetCard.vue'
+import RuleTick from './RuleTick.vue'
 import RulesImportDialog from './RulesImportDialog.vue'
 import RulesPreview from './RulesPreview.vue'
 import RulesPublishDialog, { type Budget, type PublishItem } from './RulesPublishDialog.vue'
@@ -13,10 +14,10 @@ import { getMembers } from '../../lib/access'
 import { toast } from '../../lib/toast'
 import { useSession } from '../../stores/session'
 import {
-  ROLE_LABEL, ROLES, RulesError, blankRule, createLayer, createSet, diffRules, getVersion, importBlock, largestProjected,
+  MAX_RULES, ROLE_LABEL, ROLES, RulesError, applyEnabled, blankRule, copyName, createLayer, createSet, diffRules, duplicateRule, getVersion, groupsState, hasMovable, importBlock, largestProjected,
   listLayers, listSets, publishBlock, publishSets, replyUncertain, rulesEqual, rulesMessage, saveDraft, scopeKey, scopeRank,
   setState, validateDraft, writeBlock,
-  type AgentRule, type Caller, type ImportReport, type MergeInput, type RoleName, type RuleLayer, type RuleScope, type RuleSet, type RuleSnapshot, type SetState,
+  type AgentRule, type Caller, type CheckGroup, type CheckState, type ImportReport, type MergeInput, type RoleName, type RuleLayer, type RuleScope, type RuleSet, type RuleSnapshot, type SetState,
 } from '../../lib/rules'
 
 // Agent rules answer three questions at a glance: what applies, what waits to
@@ -206,12 +207,154 @@ function edit(setId: string) {
   if (block) { toast(block, { tone: 'error' }); return }
   editing.value = { setId, name: found.set.remote.name, rules: found.set.remote.rules.map(rule => ({ ...rule, source: { ...rule.source } })), error: '' }
 }
+function rulesOf(setId: string): AgentRule[] {
+  if (editing.value?.setId === setId) return editing.value.rules
+  return find(setId)?.set.remote.rules ?? []
+}
+function groupsOf(setId: string): CheckGroup[] {
+  const found = find(setId)
+  if (!found || writeBlock(caller.value, found.bundle.layer.scope)) return []
+  return [{ rules: rulesOf(setId), held: heldFor(found.bundle.layer.scope) }]
+}
+function tickFor(setId: string): CheckState | null {
+  const groups = groupsOf(setId)
+  if (!hasMovable(groups)) return null
+  return groupsState(groups)
+}
+function tickLocked(setId: string) {
+  return saving.value || (!!editing.value && editing.value.setId !== setId && dirty.value)
+}
+function tickTip(setId: string) {
+  if (editing.value && editing.value.setId !== setId && dirty.value) return 'Save or cancel the set you are editing first.'
+  return 'On or off for this set. Locked rules stay on.'
+}
+function duplicateReason(setId: string) {
+  const found = find(setId)
+  if (!found) return 'That set is no longer here.'
+  return writeBlock(caller.value, found.bundle.layer.scope) ?? (dirty.value ? 'Save or cancel the set you are editing first.' : undefined)
+}
+function sectionGroups(key: SectionKey): CheckGroup[] {
+  return (sections.value.find(section => section.key === key)?.sets ?? []).flatMap(({ bundle, set }) => {
+    if (writeBlock(caller.value, bundle.layer.scope)) return []
+    return [{ rules: rulesOf(set.remote.id), held: heldFor(bundle.layer.scope) }]
+  })
+}
+function sectionTick(key: SectionKey): CheckState | null {
+  const groups = sectionGroups(key)
+  if (!hasMovable(groups)) return null
+  return groupsState(groups)
+}
+const layerTickLocked = computed(() => saving.value || dirty.value)
+function layerTickTip() {
+  if (dirty.value) return 'Save or cancel the set you are editing first.'
+  return 'On or off for this layer. Locked rules stay on.'
+}
+
+async function persistRules(setId: string, rules: AgentRule[]): Promise<'saved' | 'same' | 'failed'> {
+  const found = find(setId)
+  if (!found) return 'failed'
+  if (rulesEqual(rules, found.set.remote.rules)) return 'same'
+  const issue = validateDraft(found.set.remote.name, rules)
+  if (issue) { toast(issue, { tone: 'error' }); return 'failed' }
+  try {
+    found.set.remote = await saveDraft(setId, { expected_revision: found.set.remote.revision, name: found.set.remote.name, rules })
+    return 'saved'
+  } catch (cause) {
+    if (cause instanceof RulesError && cause.code === 'revision_conflict') {
+      toast('This set was saved elsewhere. The page was reloaded.', { tone: 'error' })
+      await load(true)
+    } else toast(rulesMessage(cause), { tone: 'error' })
+    return 'failed'
+  }
+}
+async function onSetTick(setId: string, enabled: boolean) {
+  const found = find(setId)
+  if (!found || tickLocked(setId)) return
+  const held = heldFor(found.bundle.layer.scope)
+  if (editing.value?.setId === setId) {
+    editing.value.rules = applyEnabled(editing.value.rules, enabled, held)
+    return
+  }
+  saving.value = true
+  try {
+    if (await persistRules(setId, applyEnabled(found.set.remote.rules, enabled, held)) === 'saved') toast('Draft saved')
+  } finally { saving.value = false }
+}
+async function onRuleTick(setId: string, identity: string, enabled: boolean) {
+  const found = find(setId)
+  if (!found || tickLocked(setId) || editing.value?.setId === setId) return
+  const held = heldFor(found.bundle.layer.scope)
+  const next = found.set.remote.rules.map(rule => rule.identity === identity ? applyEnabled([rule], enabled, held)[0]! : rule)
+  saving.value = true
+  try {
+    if (await persistRules(setId, next) === 'saved') toast('Draft saved')
+  } finally { saving.value = false }
+}
+async function onSectionTick(key: SectionKey, enabled: boolean) {
+  if (layerTickLocked.value) return
+  const section = sections.value.find(item => item.key === key)
+  if (!section) return
+  saving.value = true
+  let saved = 0
+  let failed = false
+  try {
+    for (const { bundle, set } of section.sets) {
+      if (writeBlock(caller.value, bundle.layer.scope)) continue
+      const next = applyEnabled(set.remote.rules, enabled, heldFor(bundle.layer.scope))
+      const result = await persistRules(set.remote.id, next)
+      if (result === 'failed') { failed = true; break }
+      if (result === 'saved') saved += 1
+    }
+  } finally { saving.value = false }
+  if (!failed && saved === 1) toast('Draft saved')
+  else if (!failed && saved > 1) toast(`Saved ${saved} drafts. Nothing is live until you publish.`)
+}
+async function duplicateSet(setId: string) {
+  if (dirty.value) { toast('Save or cancel the set you are editing before duplicating.', { tone: 'error' }); return }
+  const found = find(setId)
+  if (!found) return
+  const block = writeBlock(caller.value, found.bundle.layer.scope)
+  if (block) { toast(block, { tone: 'error' }); return }
+  const name = copyName(found.set.remote.name)
+  const taken = new Set<string>()
+  const rules = found.set.remote.rules.map(rule => {
+    const copy = duplicateRule(rule, taken)
+    taken.add(copy.identity)
+    return copy
+  })
+  const issue = validateDraft(name, rules)
+  if (issue) { toast(issue, { tone: 'error' }); return }
+  saving.value = true
+  try {
+    const created = await createSet(found.bundle.layer.id, name)
+    const saved = await saveDraft(created.id, { expected_revision: created.revision, name, rules })
+    found.bundle.sets = [...found.bundle.sets, { remote: saved, live: null }]
+    openSets.value = new Set(openSets.value).add(saved.id)
+    toast(`Duplicated as ${saved.name}. Nothing is live until you publish.`)
+  } catch (cause) {
+    toast(rulesMessage(cause), { tone: 'error' })
+    await load(true)
+  } finally { saving.value = false }
+}
+
 function addRule() {
   const draft = editing.value
   if (!draft) return
   const rule: AgentRule = blankRule(draft.rules.map(item => item.identity))
   rule.source.reference = 'Written by hand'
   draft.rules = [...draft.rules, rule]
+}
+function duplicateAt(index: number) {
+  const draft = editing.value
+  if (!draft) return
+  if (draft.rules.length >= MAX_RULES) { draft.error = 'A set holds at most 100 rules.'; return }
+  const source = draft.rules[index]
+  if (!source) return
+  const copy = duplicateRule(source, draft.rules.map(rule => rule.identity))
+  const next = [...draft.rules]
+  next.splice(index + 1, 0, copy)
+  draft.rules = next
+  draft.error = ''
 }
 async function save() {
   const draft = editing.value
@@ -382,6 +525,9 @@ onMounted(() => {
             </h3>
             <p>{{ section.lede }}</p>
           </div>
+          <div v-if="sectionTick(section.key)" class="layer-tick">
+            <RuleTick :state="sectionTick(section.key)!" :label="`Turn ${section.title} rules on or off`" :disabled="layerTickLocked" :tip="layerTickTip()" @toggle="onSectionTick(section.key, $event)" />
+          </div>
         </header>
         <div class="cards">
           <div v-if="section.sets.length" class="group">
@@ -390,8 +536,10 @@ onMounted(() => {
             :open="openSets.has(set.remote.id)" :held="heldFor(bundle.layer.scope)" :pending="pendingOf(set)" :draft="editing?.setId === set.remote.id ? editing : null"
             :edit-reason="writeBlock(caller, bundle.layer.scope)" :publish-reason="publishBlock(caller, bundle.layer.scope)" :lock-reason="lockReason(bundle.layer.scope)"
             :saving="saving" :error="editing?.setId === set.remote.id ? editing.error : ''"
-            @toggle="toggle(set.remote.id)" @edit="edit(set.remote.id)" @cancel="editing = null" @save="save" @add-rule="addRule"
+            :tick="tickFor(set.remote.id)" :tick-disabled="tickLocked(set.remote.id)" :tick-tip="tickTip(set.remote.id)" :duplicate-reason="duplicateReason(set.remote.id)"
+            @toggle="toggle(set.remote.id)" @edit="edit(set.remote.id)" @cancel="editing = null" @save="save" @add-rule="addRule" @duplicate-rule="duplicateAt"
             @draft="value => editing && Object.assign(editing, value)" @publish="openPublish([set.remote.id])" @history="historyId = set.remote.id"
+            @duplicate="duplicateSet(set.remote.id)" @tick="onSetTick(set.remote.id, $event)" @tick-rule="(identity, enabled) => onRuleTick(set.remote.id, identity, enabled)"
           />
           </div>
           <p v-if="!section.sets.length && adding?.section !== section.key && addReason(section)" class="none">None yet.</p>
@@ -448,9 +596,10 @@ onMounted(() => {
 .layer { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .layer-head { display: flex; align-items: flex-start; gap: 12px; }
 .rank { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-top: 1px; border-radius: 50%; background: var(--surface-2); color: var(--ink-3); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.layer-titles { min-width: 0; }
+.layer-titles { flex: 1; min-width: 0; }
 .layer-titles h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 0; font-size: 15px; font-weight: 650; }
 .layer-titles p { margin: 2px 0 0; color: var(--ink-3); font-size: 13px; }
+.layer-tick { flex: none; margin-left: auto; display: flex; }
 .project-pick { position: relative; display: inline-flex; align-items: center; gap: 2px; color: var(--teal-ink); }
 .project-pick select { field-sizing: content; appearance: none; border: 0; background: none; color: inherit; font: inherit; padding: 0 16px 0 2px; margin-right: -14px; border-radius: 6px; cursor: pointer; }
 .project-pick select:focus-visible { outline: none; box-shadow: var(--focus-ring); }

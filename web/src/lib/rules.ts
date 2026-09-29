@@ -300,22 +300,51 @@ export function publishBlock(caller: Caller | null, scope: RuleScope): string | 
   return null
 }
 
-export function canFlip(rule: AgentRule, held: ReadonlySet<string>): boolean {
+export interface IdentitySet { has(identity: string): boolean }
+export interface CheckGroup { rules: readonly AgentRule[]; held: IdentitySet }
+
+export function canFlip(rule: AgentRule, held: IdentitySet): boolean {
   return rule.strength !== 'locked' && !held.has(rule.identity)
 }
 
-export function groupState(rules: AgentRule[], held: ReadonlySet<string>): CheckState {
-  if (!rules.length) return 'off'
-  const movable = rules.filter(rule => canFlip(rule, held))
-  const protectedOn = rules.some(rule => !canFlip(rule, held))
-  if (!movable.length) return 'on'
-  const ons = movable.filter(rule => rule.enabled).length
-  if (ons === movable.length) return 'on'
+/** on when every movable rule is on (or none can move); off when all are off; otherwise mixed. */
+export function groupsState(groups: readonly CheckGroup[]): CheckState {
+  let any = false
+  let movable = 0
+  let ons = 0
+  let protectedOn = false
+  for (const group of groups) {
+    for (const rule of group.rules) {
+      any = true
+      if (!canFlip(rule, group.held)) {
+        if (rule.enabled || rule.strength === 'locked') protectedOn = true
+        continue
+      }
+      movable += 1
+      if (rule.enabled) ons += 1
+    }
+  }
+  if (!any) return 'off'
+  if (!movable) return 'on'
+  if (ons === movable) return 'on'
   if (ons === 0 && !protectedOn) return 'off'
   return 'mixed'
 }
 
-export function applyEnabled(rules: AgentRule[], enabled: boolean, held: ReadonlySet<string>): AgentRule[] {
+export function hasMovable(groups: readonly CheckGroup[]): boolean {
+  return groups.some(group => group.rules.some(rule => canFlip(rule, group.held)))
+}
+
+export function groupState(rules: AgentRule[], held: ReadonlySet<string>): CheckState {
+  return groupsState([{ rules, held }])
+}
+
+/** A tick turns the group on unless it is already fully on. */
+export function tickTarget(state: CheckState): boolean {
+  return state !== 'on'
+}
+
+export function applyEnabled(rules: AgentRule[], enabled: boolean, held: IdentitySet): AgentRule[] {
   return rules.map(rule => {
     if (!canFlip(rule, held) || rule.enabled === enabled) return rule
     const next = normalizeRule({ ...rule, enabled })
@@ -343,6 +372,17 @@ export function blankRule(taken: Iterable<string>): AgentRule {
     roles: [...ROLES], harnesses: [...HARNESSES],
     source: { reference: '', edited_here: false },
   }
+}
+
+/** A set name for a duplicate, still one line and within 128 bytes. */
+export function copyName(name: string): string {
+  const suffix = ' (copy)'
+  const room = 128 - utf8Length(suffix)
+  let base = name.trim() || 'Set'
+  while (base && utf8Length(base) > room) base = base.slice(0, -1)
+  base = base.trimEnd()
+  if (!base || utf8Length(base) > room) base = 'Set'
+  return `${base}${suffix}`
 }
 
 export function duplicateRule(rule: AgentRule, taken: Iterable<string>): AgentRule {
@@ -424,10 +464,28 @@ export function diffRules(before: AgentRule[], after: AgentRule[]): RuleChange[]
 /** Reset only when an upstream original was actually supplied. The contract has no original text. */
 export function resetAvailability(rule: AgentRule, original?: AgentRule | null): { available: true; original: AgentRule } | { available: false; reason: string; show: boolean } {
   if (original && (original.identity === rule.source.identity || original.identity === rule.identity)) return { available: true, original: normalizeRule(original) }
-  if (rule.source.identity) {
-    return { available: false, show: true, reason: 'Reset needs the original wording. This rule records an upstream identity, not the original text.' }
+  if (rule.source.identity && rule.source.edited_here) {
+    return { available: false, show: true, reason: 'Reset needs the original template wording, which this rule does not store.' }
   }
   return { available: false, show: false, reason: '' }
+}
+
+/** Restores the supplied original's wording onto this rule and clears the local edit. */
+export function resetRule(rule: AgentRule, original: AgentRule): AgentRule | null {
+  const ready = resetAvailability(rule, original)
+  if (!ready.available) return null
+  return normalizeRule({
+    ...rule,
+    text: ready.original.text,
+    why: ready.original.why,
+    details: ready.original.details,
+    strength: ready.original.strength,
+    enabled: ready.original.enabled,
+    expires_at: ready.original.expires_at,
+    roles: ready.original.roles,
+    harnesses: ready.original.harnesses,
+    source: { ...rule.source, edited_here: false },
+  })
 }
 
 export function mergeQuery(ctx: RuleContext): { query: string } | { error: string } {

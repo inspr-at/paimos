@@ -2,12 +2,20 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue'
 import BizIcon from '../business/BizIcon.vue'
-import { HARNESS_LABEL, HARNESSES, ROLE_LABEL, ROLES, touchRule, type AgentRule, type HarnessName, type RoleName, type RulePatch } from '../../lib/rules'
+import { HARNESS_LABEL, HARNESSES, ROLE_LABEL, ROLES, resetAvailability, resetRule, touchRule, type AgentRule, type HarnessName, type RoleName, type RulePatch } from '../../lib/rules'
 
 // One rule while its set is being edited: the text and its reason in view, the
 // on/off switch and the lock beside them, everything rarer under "More".
-const props = defineProps<{ rule: AgentRule; heldBy?: string; canLock: boolean; lockReason?: string }>()
-const emit = defineEmits<{ change: [rule: AgentRule]; remove: [] }>()
+const props = defineProps<{ rule: AgentRule; heldBy?: string; canLock: boolean; lockReason?: string; original?: AgentRule | null }>()
+const emit = defineEmits<{ change: [rule: AgentRule]; remove: []; duplicate: [] }>()
+const reset = computed(() => resetAvailability(props.rule, props.original))
+const resetReady = computed(() => reset.value.available && props.rule.source.edited_here)
+const resetNote = computed(() => reset.value.available || !reset.value.show ? '' : reset.value.reason)
+function applyReset() {
+  if (!props.original) return
+  const next = resetRule(props.rule, props.original)
+  if (next) emit('change', next)
+}
 const id = useId()
 const locked = computed(() => props.rule.strength === 'locked')
 const label = computed(() => props.rule.text.trim() || 'New rule')
@@ -52,6 +60,8 @@ function toggleHarness(harness: HarnessName) {
       <div class="texts">
         <textarea class="field text" rows="1" maxlength="512" :value="rule.text" placeholder="What agents must do, in one line" :aria-label="`Rule text`" data-autofocus @input="patch({ text: oneLine(($event.target as HTMLTextAreaElement).value) })"></textarea>
         <textarea class="field why" rows="1" :value="rule.why" maxlength="1024" placeholder="Why, in one sentence" aria-label="Why" @input="patch({ why: oneLine(($event.target as HTMLTextAreaElement).value) })"></textarea>
+        <button v-if="resetReady" type="button" class="reset" @click="applyReset">Reset to template</button>
+        <p v-else-if="resetNote" class="reset-note">{{ resetNote }}</p>
       </div>
       <div class="side">
         <button
@@ -89,6 +99,9 @@ function toggleHarness(harness: HarnessName) {
         <label class="fld">ID
           <input :id="`${id}-identity`" class="field mono" :value="rule.identity" spellcheck="false" maxlength="96" @change="patch({ identity: ($event.target as HTMLInputElement).value.trim() })">
         </label>
+        <div class="fld wide">
+          <button type="button" class="btn sm ghost" @click="emit('duplicate')">Duplicate rule</button>
+        </div>
       </div>
     </details>
   </li>
@@ -103,6 +116,8 @@ function toggleHarness(harness: HarnessName) {
 .side { grid-area: side; }
 .switch { padding-top: 7px; }
 .texts { display: grid; gap: 6px; min-width: 0; }
+.reset { justify-self: start; padding: 0; border: 0; background: none; color: var(--teal-ink); font-size: 12.5px; font-weight: 650; }
+.reset-note { margin: 0; color: var(--ink-3); font-size: 12.5px; line-height: 1.4; }
 textarea.field { height: auto; padding: 7px 11px; resize: vertical; line-height: 1.45; }
 textarea.text { field-sizing: content; min-height: 36px; resize: none; }
 .text { font-size: 14px; }
