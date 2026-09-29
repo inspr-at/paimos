@@ -500,11 +500,21 @@ can do the same with `control --setup-root PATH` (exclusive with `--socket`).
 Existing generation-specific socket references remain readable while their
 listener exists. No pairing data migration is required.
 
+`HOME` is needed only for the fallback, so short and existing legacy socket
+paths still resolve when it is unset. If the service and shell resolve different
+fallbacks, the client reports its resolved home, setup root and socket alongside
+the recorded socket; paths under the client's home are shortened to `~`.
+
 `pair`, `setup` and paired `serve` reject an unrepresentable path before
 creating pairing state or contacting the instance. Choose a shorter setup
 root (`--state-root` for pair/setup, `--setup-root` for serve). A lifetime lock
-protects the stable listener. Crash recovery removes only the socket and token
-inodes recorded for that setup and daemon; unrelated files are left untouched.
+protects the stable listener. Crash recovery checks the socket and token inodes
+recorded for that setup and daemon. If a crash happens between bind and publishing
+the owner record, recovery requires an owned mode-0600 socket with one link, no
+symlink and a connection refused by the kernel. Any accompanying token must also
+be an owned mode-0600 regular file with one link. Both identities are rechecked
+before cleanup; a token without a socket, an unsafe artifact or a live listener
+is left untouched.
 The private token and local control authorization rules remain unchanged.
 
 ### Harness interpreter pins

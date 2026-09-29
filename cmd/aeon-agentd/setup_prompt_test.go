@@ -252,12 +252,14 @@ func TestPairSetupAndServeRefuseImpossibleSocketBeforeSideEffects(t *testing.T) 
 	for _, command := range []string{"pair", "setup", "serve"} {
 		var out bytes.Buffer
 		var err error
+		flag := "--state-root"
 		if command == "serve" {
+			flag = "--setup-root"
 			err = serve([]string{"--setup-root", root})
 		} else {
 			err = setupCommandInput(command, []string{"--state-root", root}, strings.NewReader(""), &out)
 		}
-		if err == nil || !strings.Contains(err.Error(), "The agentd socket path is too long for this system") || !strings.Contains(err.Error(), "Use a shorter --setup-root") {
+		if err == nil || !strings.Contains(err.Error(), "The agentd socket path is too long for this system") || !strings.Contains(err.Error(), "Use a shorter "+flag) {
 			t.Fatalf("%s preflight: %v", command, err)
 		}
 		if out.Len() != 0 {

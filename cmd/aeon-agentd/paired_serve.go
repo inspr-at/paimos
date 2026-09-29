@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -111,6 +112,10 @@ func servePaired(root string, capacityInterval time.Duration) error {
 	state := filepath.Join(root, "daemon")
 	socket, err := agentsetup.ResolveSocketPath(state, nil)
 	if err != nil {
+		var tooLong *agentsetup.SocketPathLengthError
+		if errors.As(err, &tooLong) {
+			return fmt.Errorf("%w Use a shorter --setup-root.", err)
+		}
 		return err
 	}
 	c, err := agentsetup.ReadRuntimeConfig(root)

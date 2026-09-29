@@ -159,6 +159,10 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	}
 	if command == "setup" {
 		if _, err := agentsetup.ResolveSocketPath(filepath.Join(root, "daemon"), nil); err != nil {
+			var tooLong *agentsetup.SocketPathLengthError
+			if errors.As(err, &tooLong) {
+				return fmt.Errorf("%w Use a shorter --state-root.", err)
+			}
 			return err
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -25,13 +26,20 @@ type ControlReference struct {
 // A nil reference selects a new listener; existing references also recognize
 // the generation-specific names used before AEON-376. It creates no state.
 func ResolveSocketPath(state string, ref *ControlReference) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return resolveSocketPath(runtime.GOOS, home, state, ref)
+	return resolveSocketPath(runtime.GOOS, "", state, ref)
 }
 
+// SocketPathLengthError lets each command name its own root flag in the hint.
+type SocketPathLengthError struct {
+	Bytes int
+	Limit int
+}
+
+func (e *SocketPathLengthError) Error() string {
+	return fmt.Sprintf("The agentd socket path is too long for this system (%d > %d bytes, with safety margin).", e.Bytes, e.Limit)
+}
+
+// An empty home is resolved only when the state path needs the fallback.
 func resolveSocketPath(goos, home, state string, ref *ControlReference) (string, error) {
 	if !filepath.IsAbs(state) || filepath.Clean(state) != state || state == "/" {
 		return "", ErrUnsafePath
@@ -59,6 +67,13 @@ func resolveSocketPath(goos, home, state string, ref *ControlReference) (string,
 	}
 	path := filepath.Join(state, "agentd.sock")
 	if len(path) > limit {
+		if home == "" {
+			var err error
+			home, err = os.UserHomeDir()
+			if err != nil {
+				return "", fmt.Errorf("agentd socket fallback requires a user home: %w", err)
+			}
+		}
 		if !filepath.IsAbs(home) || filepath.Clean(home) != home || home == "/" {
 			return "", ErrUnsafePath
 		}
@@ -66,13 +81,26 @@ func resolveSocketPath(goos, home, state string, ref *ControlReference) (string,
 		// their full paths in sun_path. The listener also checks its owner ID.
 		path = filepath.Join(home, ".aeon", "run", Hash([]byte(state))[:16]+".sock")
 		if len(path) > limit {
-			return "", fmt.Errorf("The agentd socket path is too long for this system (%d > %d bytes, with safety margin). Use a shorter --setup-root.", len(path), limit)
+			return "", &SocketPathLengthError{Bytes: len(path), Limit: limit}
 		}
 	}
 	if ref != nil && ref.Socket != "agentd-"+ref.Generation+".sock" && ref.Socket != "agentd.sock" && ref.Socket != path {
+		if home != "" {
+			return "", fmt.Errorf("local daemon reference unavailable (resolved HOME %q; setup root %q; socket %q; recorded socket %q). Check that the service and shell use the same HOME and setup root.", home, socketDisplayPath(home, filepath.Dir(state)), socketDisplayPath(home, path), socketDisplayPath(home, ref.Socket))
+		}
 		return "", errors.New("local daemon reference unavailable")
 	}
 	return path, nil
+}
+
+func socketDisplayPath(home, path string) string {
+	if path == home {
+		return "~"
+	}
+	if strings.HasPrefix(path, home+string(filepath.Separator)) {
+		return "~" + strings.TrimPrefix(path, home)
+	}
+	return path
 }
 
 // PrepareSocketDirectory keeps the short fallback as private as paired state.

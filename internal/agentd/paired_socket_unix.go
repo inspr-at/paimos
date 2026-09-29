@@ -6,10 +6,12 @@ package agentd
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 )
@@ -32,15 +34,15 @@ func privateSocketInode(path string, mode os.FileMode) (socketInode, error) {
 		return socketInode{}, err
 	}
 	st, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || info.Mode().Type() != mode || info.Mode().Perm() != 0600 || int(st.Uid) != os.Getuid() || st.Nlink != 1 {
+	if !ok || info.Mode() != mode|0600 || int(st.Uid) != os.Getuid() || st.Nlink != 1 {
 		return socketInode{}, agentsetup.ErrUnsafePath
 	}
 	return socketInode{Device: uint64(st.Dev), Inode: uint64(st.Ino)}, nil
 }
 
 // ServePairedLocal gives the stable socket an exclusive lifetime lock. After a
-// crash it removes only inodes recorded by this setup and daemon, never an
-// unrecognized file or an active cooperating listener. Local auth is unchanged.
+// crash it removes recorded inodes, or a strictly validated refused socket left
+// before its owner record was written. Local auth is unchanged.
 func ServePairedLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*LocalServer, error) {
 	if s == nil || s.state == nil {
 		return nil, errors.New("invalid paired local socket")
@@ -92,6 +94,8 @@ func ServePairedLocal(s *Supervisor, socket string, attachments ...*AttachManage
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
+	} else if err := recoverUnrecordedSocket(socket); err != nil {
+		return nil, err
 	}
 	local, err := ServeLocal(s, socket, attachments...)
 	if err != nil {
@@ -121,4 +125,51 @@ func ServePairedLocal(s *Supervisor, socket string, attachments ...*AttachManage
 	}
 	keep = true
 	return local, nil
+}
+
+// Called only with the lifetime lock held and no owner record. A token alone
+// is never adopted: only a private, owned socket that refuses a real connect
+// establishes the bind-before-owner crash window. Validate both artifacts and
+// recheck their identities after the connect before removing either one.
+func recoverUnrecordedSocket(socket string) error {
+	want, err := privateSocketInode(socket, os.ModeSocket)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	token, tokenErr := privateSocketInode(socket+".token", 0)
+	if tokenErr != nil && !errors.Is(tokenErr, os.ErrNotExist) {
+		return tokenErr
+	}
+	conn, err := net.DialTimeout("unix", socket, 250*time.Millisecond)
+	if conn != nil {
+		conn.Close()
+	}
+	if !errors.Is(err, syscall.ECONNREFUSED) {
+		return agentsetup.ErrCollision
+	}
+	if _, err := os.Lstat(socket + ".owner.json"); !errors.Is(err, os.ErrNotExist) {
+		return agentsetup.ErrCollision
+	}
+	if got, err := privateSocketInode(socket, os.ModeSocket); err != nil || got != want {
+		return agentsetup.ErrCollision
+	}
+	got, err := privateSocketInode(socket+".token", 0)
+	if tokenErr == nil {
+		if err != nil || got != token {
+			return agentsetup.ErrCollision
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return agentsetup.ErrCollision
+	}
+	// Leave the recoverable socket until last: another crash must not turn
+	// this pair into an unrecorded token with no socket to prove staleness.
+	if tokenErr == nil {
+		if err := os.Remove(socket + ".token"); err != nil {
+			return err
+		}
+	}
+	return os.Remove(socket)
 }

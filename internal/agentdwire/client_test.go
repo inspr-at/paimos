@@ -130,3 +130,48 @@ func TestOpenClientUsesSharedSocketResolver(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenClientReportsFallbackHomeMismatch(t *testing.T) {
+	home, err := os.MkdirTemp("/tmp", "aeon-home-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(home)
+	home, err = filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serviceHome := filepath.Join(home, "service")
+	if err := os.Mkdir(serviceHome, 0700); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(home, strings.Repeat("state", 25), "daemon")
+	store, err := agentsetup.OpenStore(state, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	t.Setenv("HOME", serviceHome)
+	path, err := agentsetup.ResolveSocketPath(state, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := agentsetup.ControlReference{Socket: path, DaemonID: "fixture", Generation: strings.Repeat("a", 32)}
+	raw, _ := json.Marshal(ref)
+	if err := store.Write("control.json", raw, true); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	_, err = OpenClient(state)
+	if err == nil {
+		t.Fatal("mismatched fallback reference accepted")
+	}
+	for _, want := range []string{"local daemon reference unavailable", "resolved HOME \"" + home + "\"", "setup root \"~/" + strings.Repeat("state", 25) + "\"", "socket \"~/.aeon/run/", "recorded socket \"~/service/.aeon/run/", "service and shell use the same HOME and setup root"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("missing diagnostic %q: %v", want, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".aeon")); !os.IsNotExist(err) {
+		t.Fatal("client created fallback state")
+	}
+}
