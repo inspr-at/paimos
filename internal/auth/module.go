@@ -287,6 +287,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "instruction-provenance":
+			if len(parts) == 3 && read {
+				return "harness.read", true
+			}
 		case "release-memberships":
 			if len(parts) == 3 && read {
 				return "releases.read", true
