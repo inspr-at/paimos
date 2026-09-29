@@ -54,7 +54,7 @@ function resetTip(row: BandRow) {
     </p>
     <p v-else-if="!rows.length" class="empty">
       No accounts yet. Sign in to a harness on a connected computer and it appears here.
-      <RouterLink class="btn sm" to="/agents/register-agent"><AppIcon name="monitor" :size="14" />Connect computer</RouterLink>
+      <RouterLink class="btn sm" to="/agents/register-agent"><AppIcon name="monitor" :size="14" />Connect your machine</RouterLink>
     </p>
     <ul v-else class="rows">
       <li v-for="row in rows" :key="row.pool.id" class="row" :data-pool="row.pool.id">

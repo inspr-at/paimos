@@ -92,7 +92,7 @@ onMounted(loadKeys)
       <div class="lead-block">
         <p v-if="working.length" class="lead">Agent identities and keys for your CLIs and scripts.</p>
         <template v-else>
-          <p class="lead"><RouterLink to="/agents/register-agent">Connect a computer (the agent daemon, no key to handle)</RouterLink></p>
+          <p class="lead"><RouterLink to="/agents/register-agent">Connect your machine (the agent daemon, no key to handle)</RouterLink></p>
           <p class="lead">New agent (a key for a CLI or script)</p>
         </template>
       </div>

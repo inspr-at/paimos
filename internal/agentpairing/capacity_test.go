@@ -84,6 +84,15 @@ func TestObservedCapacityPreservesSeparatePairingApproval(t *testing.T) {
 	f.claim(v, e, key, reservationIDs(check), 200)
 	f.telemetry(v, e, key, 200)
 	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/capacity/approve", nil, true, "", 204)
+	// The default schedule rate is zero after 22:00 UTC. This check is about
+	// approval, so the fixture day stays open.
+	open := capacity.DefaultSchedule("UTC")
+	for i := range open.Week {
+		open.Week[i].On = true
+		open.Week[i].Start = 0
+		open.Week[i].End = 24
+	}
+	f.call("PUT", "/api/agent-accounts/capacity/schedule", map[string]any{"scope": "user", "schedule": open}, true, "", 204)
 	route := routeWithUnits(t, f, v, e, key, managed.ID, map[string]int{"requests": 1}, 200)
 	if len(route.Reservations) != 1 || route.Reservations[0].Unit != "percent" {
 		t.Fatal(route)

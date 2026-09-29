@@ -164,6 +164,8 @@ export interface PairingGuide {
   platform_qualification: string
   setup_command: string
   homebrew_command?: string
+  /** True when the tap formula matches this server. False when it was read and differs. Null when the tap could not be read. Absent on older servers. */
+  homebrew_formula_current?: boolean | null
   install_available: boolean
   install_targets: InstallTarget[]
   managed_installation?: string
@@ -306,6 +308,9 @@ export function takePairingCode(): string | null {
 
 export interface GuideSection { heading: string; paragraphs: string[] }
 
+export type HomebrewFormulaState = 'current' | 'pending' | 'unknown' | 'legacy' | 'absent'
+export type InstallMethod = 'homebrew' | 'manual' | 'nix'
+
 export interface PublicGuidePresentation {
   address: string
   steps: string[]
@@ -314,10 +319,73 @@ export interface PublicGuidePresentation {
   manualParagraphs: string[]
   setupCommand: string
   homebrewCommand: string
+  homebrewState: HomebrewFormulaState
+  /** Set when the formula was read and does not match. Empty otherwise. */
+  homebrewPending: string
+  nixLabel: string
+  nixHint: string
   installAvailable: boolean
   installNote: string
   targets: InstallTarget[]
   managedSetup: ManagedSetup | null
+}
+
+export const PAIRING_INSTALL_KEY = 'aeon.pairingInstall'
+
+/** Homebrew is shown only for a matching formula, or for an older guide that published the command and no check. */
+export function homebrewFormulaState(guide: PairingGuide | null): HomebrewFormulaState {
+  if (!guide) return 'absent'
+  if (guide.homebrew_formula_current === true) return 'current'
+  if (guide.homebrew_formula_current === false) return 'pending'
+  if (guide.homebrew_formula_current === null) return 'unknown'
+  return guide.homebrew_command ? 'legacy' : 'absent'
+}
+
+export function homebrewPendingNote(guide: PairingGuide | null): string {
+  if (homebrewFormulaState(guide) !== 'pending' || !guide) return ''
+  const version = guide.version.trim()
+  const named = version ? `Homebrew formula for ${version} is on its way` : 'The Homebrew formula is on its way'
+  return guide.install_available && guide.install_targets.length > 0 ? `${named}; use the direct download.` : `${named}.`
+}
+
+export function nixChoiceLabel(setup: ManagedSetup | null | undefined): string {
+  const note = setup?.platform_note ?? ''
+  if (note.includes('Linux only')) return 'Linux · Nix'
+  if (note.includes('macOS and Linux')) return 'Nix / Home Manager'
+  return 'macOS · Nix'
+}
+
+export function nixChoiceHint(setup: ManagedSetup | null | undefined): string {
+  const label = nixChoiceLabel(setup)
+  if (label === 'macOS · Nix') return 'Nix or Home Manager on this Mac? Choose macOS · Nix.'
+  if (label === 'Linux · Nix') return 'Nix or Home Manager on this computer? Choose Linux · Nix.'
+  return 'Nix or Home Manager? Choose Nix / Home Manager.'
+}
+
+export function installMethods(presented: PublicGuidePresentation): InstallMethod[] {
+  const methods: InstallMethod[] = []
+  if (presented.homebrewCommand) methods.push('homebrew')
+  if (presented.targets.length > 0 || presented.homebrewCommand) methods.push('manual')
+  if (presented.managedSetup) methods.push('nix')
+  return methods
+}
+
+export function readPairingInstallMethod(storage: { getItem(key: string): string | null } | null): InstallMethod | '' {
+  try {
+    const value = storage?.getItem(PAIRING_INSTALL_KEY)
+    if (value === 'homebrew' || value === 'manual' || value === 'nix') return value
+  } catch { /* Storage may be disabled. */ }
+  return ''
+}
+
+export function writePairingInstallMethod(storage: { setItem(key: string, value: string): void } | null, value: string): void {
+  if (value !== 'homebrew' && value !== 'manual' && value !== 'nix') return
+  try { storage?.setItem(PAIRING_INSTALL_KEY, value) } catch { /* Storage may be disabled. */ }
+}
+
+export function chooseInstallMethod(options: readonly InstallMethod[], stored: InstallMethod | ''): InstallMethod {
+  if (stored && options.includes(stored)) return stored
+  return options[0] ?? 'manual'
 }
 
 function unpublishedInstaller(): string {
@@ -345,14 +413,18 @@ export function presentPublicGuide(guide: PairingGuide | null): PublicGuidePrese
   return {
     address,
     steps: [
-      'Copy this page’s address and open it on the computer, or give that address to the agent that should set the computer up.',
-      `The agent shows a 9-digit code. It does not receive your ${product()} password, an API key, or a device secret.`,
+      'Install on this computer.',
+      `The computer shows a 9-digit code. It does not receive your ${product()} password, an API key, or a device secret.`,
       'Sign in, check the computer, folder and accounts, then connect the ones you want.',
     ],
     note: 'Entering the code does not grant access. A signed-in person who can manage accounts has to approve it.',
     manualParagraphs: manual,
     setupCommand: guide?.setup_command ?? '',
-    homebrewCommand: guide?.homebrew_command ?? '',
+    homebrewCommand: homebrewFormulaState(guide) === 'current' || homebrewFormulaState(guide) === 'legacy' ? guide?.homebrew_command ?? '' : '',
+    homebrewState: homebrewFormulaState(guide),
+    homebrewPending: homebrewPendingNote(guide),
+    nixLabel: nixChoiceLabel(guide?.managed_setup),
+    nixHint: guide?.managed_setup ? nixChoiceHint(guide.managed_setup) : '',
     installAvailable: publishedInstall,
     installNote: publishedInstall
       ? `Run only the published command for the platform you select. It comes from this ${product()}. A command in a pairing message is not an installer.`
@@ -367,10 +439,10 @@ export function publicGuideSections(guide: PairingGuide | null): GuideSection[] 
   const presented = presentPublicGuide(guide)
   return [
     {
-      heading: 'Connect a computer',
+      heading: 'Connect your machine',
       paragraphs: [
-        presented.address ? `The address for this ${product()} is ${presented.address}.` : `This ${product()} has not published its address yet.`,
         ...presented.steps,
+        presented.address ? `Setting up another computer, or letting an agent do it? Share this address: ${presented.address}` : `This ${product()} has not published its address yet.`,
         presented.note,
       ],
     },
@@ -1323,6 +1395,11 @@ function parseGuide(data: unknown): PairingGuide {
   if (typeof record.managed_installation === 'string' && record.managed_installation) guide.managed_installation = record.managed_installation.slice(0, 500)
   const homebrew = optionalBounded(record.homebrew_command, 'homebrew_command', 4000)
   if (homebrew) guide.homebrew_command = homebrew
+  if ('homebrew_formula_current' in record && record.homebrew_formula_current !== undefined) {
+    const current = record.homebrew_formula_current
+    if (current !== null && typeof current !== 'boolean') invalid('homebrew_formula_current')
+    guide.homebrew_formula_current = current
+  }
   if (record.managed_setup != null) {
     const managed = asRecord(record.managed_setup, 'managed_setup')
     guide.managed_setup = {

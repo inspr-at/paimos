@@ -52,7 +52,7 @@ func TestNixGuideBelongsToDeploymentOnly(t *testing.T) {
 				}
 			} else {
 				m := payload.Managed
-				if m == nil || m.ModuleURL != tc.guide.ModuleURL || m.ServiceOption != tc.guide.ServiceOption || m.Command != "aeon-agentd pair --url '"+tc.origin+"'" {
+				if m == nil || m.ModuleURL != tc.guide.ModuleURL || m.ServiceOption != tc.guide.ServiceOption || m.Command != `env "$HOME/.nix-profile/bin/aeon-agentd" pair --url '`+tc.origin+`'` {
 					t.Fatal("instance-specific module binding lost")
 				}
 				for _, note := range []string{tc.platform, "PATH", "release pin", "approve as a person"} {
@@ -94,7 +94,8 @@ func TestGuideCommandsHaveNoPlaceholders(t *testing.T) {
 		t.Fatal("guide unavailable")
 	}
 	want := "aeon-agentd pair --url '" + origin + "'"
-	if guide.Pair != want || guide.Brew != "brew install inspr-at/tap/aeon-agentd\n"+want || len(guide.Targets) != 4 {
+	brew := "brew install inspr-at/tap/aeon-agentd\nenv \"$(brew --prefix)/bin/aeon-agentd\" pair --url '" + origin + "'"
+	if guide.Pair != want || guide.Brew != brew || len(guide.Targets) != 4 {
 		t.Fatal("guide commands differ from instance")
 	}
 	for _, target := range guide.Targets {
@@ -109,7 +110,7 @@ func TestGuideCommandsHaveNoPlaceholders(t *testing.T) {
 			t.Fatalf("HTML includes %s", forbidden)
 		}
 	}
-	for _, required := range []string{"brew install inspr-at/tap/aeon-agentd", "aeon-agentd disconnect", "brew uninstall aeon-agentd", "~/.local/bin", "Nix / Home Manager", "tap’s current signed release", "helper/instance version mismatch", "does not drain or restart", "verify Touch ID on the new daemon"} {
+	for _, required := range []string{"brew install inspr-at/tap/aeon-agentd", "$(brew --prefix)/bin/aeon-agentd", "$HOME/.nix-profile/bin/aeon-agentd", "add-harness", "aeon-agentd disconnect", "brew uninstall aeon-agentd", "~/.local/bin", "Nix / Home Manager", "This formula matches this Aeon’s version", "helper/instance version mismatch", "does not drain or restart", "verify Touch ID on the new daemon", "Trouble?", "usage: paimos-agentd setup|status…", "Nix or Home Manager on this Mac? Choose macOS · Nix.", "Setting up another computer, or letting an agent do it? Share this address:"} {
 		if !strings.Contains(html.Body.String(), required) {
 			t.Fatalf("HTML missing %s", required)
 		}
