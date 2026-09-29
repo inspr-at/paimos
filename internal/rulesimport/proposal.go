@@ -545,33 +545,11 @@ func directiveSurface(s string) string {
 	return collapseSpace(stripEmphasis(s))
 }
 
-// stripEmphasis removes markdown emphasis markers and keeps code spans
-// verbatim, aside from the backticks that delimit them. An underscore between
-// identifier characters is part of the identifier, not emphasis.
+// stripEmphasis removes CommonMark emphasis by node and keeps code-span text.
+// The backticks that delimit a span are omitted at any run length, so a star
+// or underscore inside the span stays part of the action.
 func stripEmphasis(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	inCode := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '`' {
-			inCode = !inCode
-			continue
-		}
-		if inCode {
-			b.WriteByte(c)
-			continue
-		}
-		if c == '*' || (c == '_' && !identifierUnderscore(s, i)) {
-			continue
-		}
-		b.WriteByte(c)
-	}
-	return b.String()
-}
-
-func identifierUnderscore(s string, i int) bool {
-	return i > 0 && i+1 < len(s) && isTopicWord(s[i-1]) && isTopicWord(s[i+1])
+	return renderMarkdownInline(s)
 }
 
 func collapseSpace(s string) string {

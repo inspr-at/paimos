@@ -33,7 +33,8 @@
 // PATH=company|project|person|agent overrides the classified layer. --report DIR
 // writes contradictions.md and contradictions.json. Contradictions are
 // same-identity differences and opposing directives (must/always versus
-// never/must-not) on the same action across layers. Heading paths are
+// never/must-not) on the same action across layers. The action is CommonMark
+// text with emphasis removed and code spans kept verbatim. Heading paths are
 // provenance. Compatible tightening and disjoint role or harness selectors are
 // not conflicts. Long packs stay in details and out of the always-on projection.
 //

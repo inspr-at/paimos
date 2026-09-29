@@ -299,6 +299,17 @@ func TestRetitleMatchesHeadingBelowDocumentTitle(t *testing.T) {
 	}
 }
 
+func TestDoubleBacktickCodeSpanIsNotEmphasis(t *testing.T) {
+	if got := renderMarkdownInline("``foo*bar``"); got != "foo*bar" {
+		t.Fatalf("double backtick rendered %q", got)
+	}
+	assertNoDirectiveConflict(t, "Never delete ``foo*bar``.", "Must delete ``foobar``.")
+	same := directivePair(t, "Never delete ``foo*bar``.", "Must delete ``foo*bar``.")
+	if !hasCrossLayer(same, "delete foo*bar") {
+		t.Fatalf("identical double-backtick spans missed: %+v", same.Contradictions)
+	}
+}
+
 func TestEmphasisStrippingKeepsIdentifiers(t *testing.T) {
 	assertNoDirectiveConflict(t, "Never delete foo_bar.", "Must delete foobar.")
 	assertNoDirectiveConflict(t, "Never delete `foo_bar`.", "Must delete `foobar`.")
