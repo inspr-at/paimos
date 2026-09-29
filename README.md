@@ -74,9 +74,11 @@ Repin records local `claude-repin-<id>.json` and `claude-repin-<id>-applied.json
 
 A pending or failed repin, or a broken Claude dependency, holds only fresh Claude work. Other harnesses and claim recovery keep polling. Local status keeps `ready: true` when any enrolled, unfenced account is ready; setup and Add harness can report connected as soon as one harness passes its probe, while another still shows starting or needs sign-in.
 
-`harness_statuses` remains the legacy state map; the additive `harness_details` map carries `{state, reason, fix}` using the same reason/fix vocabulary as per-account `blocked_accounts`. Both use structured `fix: {kind, command}` objects (kinds: `repin`, `add_harness`, `login`, `restart`). Reasons are `repin_pending`, `dependency_invalid`, `pin_missing`, `pin_partial`, `pin_drifted`, `pin_invalid`, `pin_unsafe`, `login_required`, `starting`, `harness_failed`, `cli_unavailable` and `profile_permissions`. `dependency_invalid` covers a runtime dependency check; the `pin_*` codes describe the particular persisted pin failure. `/agents` shows the fixed recovery command on the affected harness row; a pending repin says “Waiting for repin” and retries automatically without a repair command. For an unavailable approved CLI executable, the row directs you to restore the approved executable, then resume with `aeon-agentd setup` (`restart`); `aeon-agentd status` provides local diagnostics; adding the same enrollment or repinning Node/SDK would not repair it. Raw `harness_errors` stay local.
+One status model covers the computer: it is ready while at least one harness can work. A failed start, a hold or a pin block is a detail of that harness or account, never `setup_failed` for the whole computer; a computer that only reports starting harnesses stays provisioning.
 
-Unknown reason or state tokens from newer daemons remain visible as “Needs attention” with the raw code, without a guessed repair command. Unenrolled, revoked, malformed-code and mismatched harness reports are dropped without interrupting fence sync or cleanup; one value-free warning is logged per server instance. Advisory detail extensions and legacy string fixes are accepted, and commands are always rebuilt from known reasons. Malformed JSON shapes still fail validation. Missing reports stay absent, offline reports are labelled as last reported, and a legacy daemon clears prior reports when it omits them. The CLI retains its existing approved physical-executable policy, including Homebrew installations; the stricter ownership and directory checks apply to Node and SDK pins.
+`harness_statuses` remains the legacy state map; the additive `harness_details` map carries `{state, reason, fix}`, and the daemon's per-account `blocked_accounts` carry `{account_id, harness, reason, fix}`. Both use one reason vocabulary and one fix form, `fix: {kind, command}` with kinds `repin`, `add_harness`, `login` and `restart`. Reasons are `repin_pending`, `dependency_invalid`, `pin_missing`, `pin_partial`, `pin_drifted`, `pin_invalid`, `pin_unsafe`, `login_required`, `starting`, `harness_failed`, `cli_unavailable` and `profile_permissions`: the `pin_*` codes come from the static pin check before launch, `dependency_invalid` from the runtime check of the same dependencies. Claude pin and dependency problems are fixed with `aeon-agentd repin --harness claude`, the same problems on other harnesses with `aeon-agentd add-harness --harness NAME`, a failed start, unavailable approved executable or pi profile permissions by restoring it and resuming with `aeon-agentd setup`. `/agents` shows the command on the affected harness row; a pending repin says “Waiting for repin” and retries automatically without a command. `aeon-agentd status` prints the same reason and command per harness and per blocked account. Raw `harness_errors` stay local.
+
+Unknown reason or state tokens from newer daemons remain visible as “Needs attention” with the raw code, without a guessed command; a newer state appears only in `harness_details`, never in the closed legacy map. Unenrolled, revoked, malformed-code and mismatched harness reports are dropped without interrupting fence sync or cleanup; one value-free warning is logged per server instance. Advisory detail extensions and legacy string fixes are accepted, and commands are always rebuilt from known reasons. Malformed JSON shapes still fail validation. Missing reports stay absent, offline reports are labelled as last reported, and a legacy daemon clears prior reports when it omits them. The CLI retains its existing approved physical-executable policy, including Homebrew installations; the stricter ownership and directory checks apply to Node and SDK pins.
 
 Invoking the binary as `paimos` gives the paimos-compatible CLI. `PAIMOS_URL` (with `PAIMOS_API_KEY` or `PAIMOS_API_KEY_FILE`) is the process-only target.
 
@@ -330,13 +332,16 @@ dependencies. The same pin is used for account probes and run launches. A missin
 partial, drifted, invalid, or unsafe pin blocks only that account: the paired
 daemon and its other accounts keep running, and that harness does not launch
 until the pin is fixed. Status names the account, a reason code (`pin_missing`,
-`pin_partial`, `pin_drifted`, `pin_invalid`, `pin_unsafe`), and the fix command
-as the same `{kind, command}` object used by harness details. Claude supports
-`repin` for partial, drifted, invalid or unsafe pins; missing pins and other
-harnesses use `add_harness`. Existing enrollments must be removed through the
-normal approved account flow before re-enrollment. Repin never renews authority.
-Native launchers and saved pi bindings remain supported. Paths and interpreter
-versions stay local.
+`pin_partial`, `pin_drifted`, `pin_invalid`, `pin_unsafe`), and the fix as the
+same `{kind, command}` object used by harness details. Claude launches with the
+shared Node/SDK pins, so every Claude pin problem, a missing pin included, is
+fixed with `aeon-agentd repin --harness claude`. For Codex, Cursor and pi,
+`aeon-agentd add-harness --harness NAME` renews only the blocked pin of the
+already connected account: the signed-in identity and launcher must match, no
+request or approval is created, and a healthy pin is never replaced. If the
+identity or launcher changed, remove the enrollment and add the harness again.
+Repin and pin renewal never renew authority. Native launchers and saved pi
+bindings remain supported. Paths and interpreter versions stay local.
 
 ### Pi guided setup
 

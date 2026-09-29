@@ -3,10 +3,10 @@
 package agentpairing_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -127,8 +127,13 @@ func TestAllFiveGuidedHarnesses(t *testing.T) {
 	if v := f.redeem(p); len(v.Enrollments) != 5 {
 		t.Fatal("fifth harness was not enrolled")
 	}
-	guide := f.call("GET", "/api/agent-pairing/guide", nil, false, "", 200)
-	if !strings.Contains(guide.Body.String(), "grok|pi") {
+	// The guided command is now `pair --url` and offers every signed-in
+	// harness; the guide names pi through its verification capability.
+	var guide struct {
+		Capabilities map[string]json.RawMessage `json:"verification_capabilities"`
+	}
+	decodeResult(t, f.call("GET", "/api/agent-pairing/guide", nil, false, "", 200), &guide)
+	if _, ok := guide.Capabilities["pi"]; !ok {
 		t.Fatal("guide omits pi")
 	}
 	var v agentpairing.View
