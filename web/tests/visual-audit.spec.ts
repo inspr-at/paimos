@@ -593,6 +593,12 @@ const shots: Shot[] = [
     await page.goto('/agents/register-agent')
     await heading(page, 'Connect a computer')
   } },
+  { screen: 'pairing', state: 'fallback-guide', setup: mockAnonymousGuide, act: async page => {
+    await page.goto('/agents/register-agent')
+    await heading(page, 'Connect a computer')
+    await page.getByLabel('Installation method').selectOption('manual')
+    await page.getByText('Disconnect and uninstall', { exact: true }).click()
+  } },
   { screen: 'pairing', state: 'public-guide', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')
     await heading(page, 'Connect a computer')

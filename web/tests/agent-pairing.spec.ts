@@ -19,6 +19,7 @@ test('Homebrew offers two commands and removal after draining', async ({ page, c
   await expect(page.getByText(/Vendor sign-ins and project files stay/)).toBeVisible()
   expect(await page.locator('pre').allTextContents()).not.toEqual(expect.arrayContaining([expect.stringMatching(/<verified|<absolute|Cellar/)]))
   await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByText('Manual and agent setup', { exact: true }).click()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
 

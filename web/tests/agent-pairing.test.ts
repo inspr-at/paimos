@@ -784,7 +784,6 @@ function enrollment(overrides: Record<string, unknown> = {}) {
   }
 }
 
-
 test('Homebrew commands are additive, bounded and published by this instance', async () => {
   const command = "brew install inspr-at/tap/aeon-agentd\naeon-agentd pair --url 'https://other.example'"
   globalThis.fetch = async () => jsonResponse(guidePayload({ homebrew_command: command }))

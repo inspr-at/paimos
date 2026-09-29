@@ -501,7 +501,7 @@ func TestPairingGuideIsAgentReadableAndPublicRoutesExact(t *testing.T) {
 	r.Host = "attacker.invalid"
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	for _, want := range []string{"Connect a computer", "paimos-agentd path&gt;&#34; pair --url ", "/assets/pinned.js", "short code", "Server version:", "Nix / Home Manager", "aeon-agentd pair --url", "services.aeon.enable", "needs a paired-service update", "Cursor ask mode and an isolated config do not enforce a no-tools policy.", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", "Qualified verification with enforced no-tools mode."} {
+	for _, want := range []string{"Connect a computer", "brew install inspr-at/tap/aeon-agentd", "/assets/pinned.js", "short code", "Server version:", "Nix / Home Manager", "aeon-agentd pair --url", "services.aeon.enable", "needs a paired-service update", "Cursor ask mode and an isolated config do not enforce a no-tools policy.", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", "Qualified verification with enforced no-tools mode."} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("guide lacks %s", want)
 		}

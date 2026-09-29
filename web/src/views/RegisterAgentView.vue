@@ -587,8 +587,8 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
       </template>
       <p v-if="guideError" class="problem" role="alert">{{ guideError }} <button type="button" class="btn sm" @click="loadGuide">Try again</button></p>
 
-      <details v-if="presentation?.managedSetup && (!presentation.homebrewCommand || installMethod === 'nix')" :open="installMethod === 'nix'" class="manual nix-guide">
-        <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Nix / Home Manager</summary>
+      <div v-if="presentation?.managedSetup && (!presentation.homebrewCommand || installMethod === 'nix')" class="nix-guide">
+        <h3 v-if="!presentation.homebrewCommand">Nix / Home Manager</h3>
         <div class="manual-body">
           <p v-if="presentation.managedSetup.platform_note" class="copy">{{ presentation.managedSetup.platform_note }}</p>
           <p v-if="presentation.managedSetup.prerequisite_note" class="copy">{{ presentation.managedSetup.prerequisite_note }}</p>
@@ -603,7 +603,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
             <p class="copy">{{ presentation.managedSetup.service_note }}</p>
           </details>
         </div>
-      </details>
+      </div>
 
       <form class="code-form" @submit.prevent="lookup">
         <label for="pairing-code">Pairing code</label>
@@ -644,7 +644,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Disconnect and uninstall</summary>
         <div class="manual-body">
           <pre class="command"><code>aeon-agentd disconnect</code></pre>
-          <p class="copy">Wait for “disconnected”: current work finishes, access is revoked and the service is removed.</p>
+          <p class="copy">{{ installMethod === 'nix' ? 'Wait for “disconnected”: current work finishes and Aeon access is revoked.' : 'Wait for “disconnected”: current work finishes, access is revoked and the service is removed.' }}</p>
           <p class="copy">Vendor sign-ins and project files stay on your computer.</p>
           <template v-if="installMethod === 'homebrew'">
             <pre class="command"><code>brew uninstall aeon-agentd</code></pre>
@@ -798,13 +798,8 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .banner { padding: 10px 12px; border-radius: 12px; background: var(--surface-sunken); color: var(--ink-2); }
 .problem { color: var(--danger); }
 .limit label { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
-/* Public guide: three numbered steps, the address inside the first. */
-.howto { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin: 0; padding: 0; list-style: none; }
-.howto li { display: flex; gap: 12px; min-width: 0; }
-.howto-num { display: grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; border-radius: 50%; background: var(--surface-sunken); color: var(--ink-2); font: 600 12px/1 var(--mono); }
-.howto-body { flex: 1; min-width: 0; padding-top: 2px; }
-.howto-body > p { color: var(--ink); }
-.address { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 6px 6px 12px; border-radius: 10px; background: var(--surface-sunken); }
+/* Public guide commands and optional instance details. */
+.address { min-width: 0; display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 6px 6px 12px; border-radius: 10px; background: var(--surface-sunken); }
 .address code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 13px/1.4 var(--mono); }
 .address .btn, .command + .btn { gap: 6px; flex-shrink: 0; }
 .code-form { display: grid; gap: 8px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
@@ -814,7 +809,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .code-form .note { font-size: 12.5px; color: var(--ink-3); }
 .manual { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 .manual summary { cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
-.manual-body { display: grid; gap: 6px; margin-top: 12px; font-size: 13px; }
+.manual-body { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 6px; margin-top: 12px; font-size: 13px; }
 .install-note { display: flex; gap: 8px; margin-top: 6px; padding: 10px 12px; border-radius: 10px; background: var(--surface-sunken); white-space: normal; }
 .install-note svg { flex-shrink: 0; margin-top: 2px; color: var(--ink-3); }
 .manual-body .k { margin-top: 8px; }
