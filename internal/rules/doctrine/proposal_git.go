@@ -147,7 +147,7 @@ func (g *GitHub) preparePR(ctx context.Context, p *Proposal, files map[string]st
 			return err
 		}
 		body := "## Proposed change\n\n" + explanation + "\n\nReview the rule and TL;DR diff. Merge requires a person in Aeon and the repository gates."
-		if err := g.request(ctx, "POST", base+"/pulls", map[string]any{"title": "Propose doctrine rule change", "head": branch, "base": "main", "body": body}, &pr); err != nil {
+		if err := g.request(ctx, "POST", base+"/pulls", map[string]any{"title": "Propose doctrine rule change", "head": branch, "base": "main", "body": body, "draft": p.Automatic}, &pr); err != nil {
 			return err
 		}
 	}
@@ -156,6 +156,17 @@ func (g *GitHub) preparePR(ctx context.Context, p *Proposal, files map[string]st
 		return gitFail("the PR does not match this proposal")
 	}
 	p.PRURL = fmt.Sprintf("https://github.com/%s/pull/%d", p.Repository, p.PRNumber)
+	p.Draft = pr.Draft
+	if p.Automatic {
+		// Replays may observe a draft that a person already made ready; never
+		// toggle that state, approve, merge or dispatch a release from the job.
+		if err := g.authorizeWrite(ctx); err != nil {
+			return err
+		}
+		if err := g.request(ctx, "POST", fmt.Sprintf("%s/issues/%d/labels", base, p.PRNumber), map[string]any{"labels": []string{"aeon-proposal"}}, nil); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

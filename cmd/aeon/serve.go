@@ -244,6 +244,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		},
 	})
 	go doctrineMod.EnsurePrivateGuards(ctx)
+	go doctrineMod.RunOutcomeAnalysis(ctx)
 	// AEON-288: one daily pass nominates method learnings. It never accepts them.
 	go knowledge.NewTagger(pool).Run(ctx)
 	api := &httpapi.Server{

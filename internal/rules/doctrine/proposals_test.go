@@ -51,6 +51,8 @@ type proposalForge struct {
 	minted          int
 	beforeRequest   func(*http.Request)
 	proposalID      string
+	labels          int
+	bodies          []string
 }
 
 func (f *proposalForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -196,12 +198,14 @@ func (f *proposalForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		send(out)
 	case suffix == "/pulls" && r.Method == "POST":
 		var in struct {
-			Head string `json:"head"`
-			Base string `json:"base"`
-			Body string `json:"body"`
+			Draft bool   `json:"draft"`
+			Head  string `json:"head"`
+			Base  string `json:"base"`
+			Body  string `json:"body"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&in)
-		pr := pull{Number: len(f.pulls) + 1, State: "open", MergeableState: "blocked"}
+		pr := pull{Number: len(f.pulls) + 1, State: "open", MergeableState: "blocked", Draft: in.Draft}
+		f.bodies = append(f.bodies, in.Body)
 		pr.Head.Ref = in.Head
 		pr.Head.SHA = nextCommit
 		pr.Head.Repo.FullName = repo
@@ -214,6 +218,16 @@ func (f *proposalForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		send(pr)
+	case strings.HasPrefix(suffix, "/issues/") && strings.HasSuffix(suffix, "/labels"):
+		var in struct {
+			Labels []string `json:"labels"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		if len(in.Labels) != 1 || in.Labels[0] != "aeon-proposal" {
+			f.t.Error("unexpected outcome label")
+		}
+		f.labels++
+		send([]any{})
 	case strings.HasSuffix(suffix, "/reviews"):
 		send(f.reviews)
 	case strings.HasSuffix(suffix, "/merge") && r.Method == "PUT":
