@@ -74,10 +74,8 @@ test('the version pill opens the history over the page, and Esc brings the page 
   await expect(options(page)).toHaveCount(history.releases.length)
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   await expect(options(page).first()).toContainText('Current')
-  // Row counts follow the lines in the detail. Without a visible ticket, a feature or fix commit counts as other.
-  await expect(options(page).first().getByRole('img', { name: '3 other changes', exact: true })).toHaveAttribute('data-tip', '3 other changes')
-  await expect(options(page).first().getByRole('img', { name: '1 feature', exact: true })).toHaveCount(0)
-  await expect(options(page).nth(1).getByRole('img', { name: '4 other changes', exact: true })).toBeVisible()
+  // Row counts follow the groups the detail lists (AEON-305 restored the per-change list).
+  await expect(options(page).first().getByRole('img', { name: '1 feature', exact: true })).toHaveAttribute('data-tip', '1 feature')
   await expect(sheet(page).getByRole('heading', { level: 2, name: history.current })).toBeVisible()
   await expect(sheet(page)).toContainText('PAIMOS 7 · Release history')
   await expect(sheet(page).getByText(/^Live on this server since /)).toBeVisible()
@@ -94,10 +92,11 @@ test('deep links open one release, and the address follows the selection', async
   await page.goto(`/releases/${target.version}`)
   await expect(sheet(page)).toBeVisible()
   await expect(options(page).nth(3)).toHaveAttribute('aria-selected', 'true')
-  // Headlines read without the keys their chips show, in sentence case.
-  await expect(sheet(page).locator('.detail .headline')).toHaveText('Retry a busy BEGIN in release acceptance')
+  // AEON-305: the tag message is evidence, not a title; the key stays as a chip.
+  await expect(sheet(page).locator('.detail .headline')).toHaveCount(0)
+  await expect(sheet(page).getByText('Historical tag headline')).toHaveCount(0)
   await expect(sheet(page).locator('.detail .tickets')).toContainText('PAI-1057')
-  await expect(options(page).nth(3).locator('.headline')).toHaveText('Retry a busy BEGIN in release acceptance')
+  await expect(options(page).nth(3).locator('.headline')).toHaveCount(0)
   await page.keyboard.press('k')
   await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
   // Opened from a link, closing leads to Projects.
@@ -154,22 +153,19 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(sheet(page)).toHaveCount(0)
 })
 
-test('filters follow visible feature and fix lines, and still keep releases with tickets', async ({ page }) => {
+test('filters keep releases with features, fixes or tickets', async ({ page }) => {
   await setup(page)
   await page.goto('/releases')
   await expect(options(page)).toHaveCount(7)
   const toggles = sheet(page).getByRole('group', { name: 'Show only releases with' })
-  // These commits name tickets but carry no visible benefit line, so the rows show other, not features or fixes.
   await toggles.getByRole('button', { name: 'Features' }).click()
-  await expect(sheet(page).getByText('0 of 7')).toBeVisible()
-  await expect(sheet(page).getByRole('heading', { name: 'No release matches' })).toBeVisible()
+  await expect(options(page)).toHaveCount(5)
   await toggles.getByRole('button', { name: 'Features' }).click()
   await toggles.getByRole('button', { name: 'Fixes' }).click()
   await expect(toggles.getByRole('button', { name: 'Fixes' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(sheet(page).getByText('0 of 7')).toBeVisible()
-  await toggles.getByRole('button', { name: 'Fixes' }).click()
+  await expect(options(page)).toHaveCount(4)
   await toggles.getByRole('button', { name: 'Tickets' }).click()
-  await expect(options(page)).toHaveCount(5)
+  await expect(options(page)).toHaveCount(4)
   await sheet(page).getByRole('searchbox', { name: 'Search releases' }).fill('nothing like this')
   await expect(sheet(page).getByRole('heading', { name: 'No release matches' })).toBeVisible()
   await sheet(page).getByRole('button', { name: 'Clear search and filters' }).click()

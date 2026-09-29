@@ -19,7 +19,7 @@ import { mockAnonymousGuide, mockPairing } from './agent-pairing-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { RULE_PERSON, RULE_PROJECT, mockRules } from './rules-fixtures'
 import { journeyWorld, mockJourney, PROJECT, retryJourneyWorld, type JourneyWorld } from './journey-fixtures'
-import { mockReleases, releaseHistory } from './releases-fixtures'
+import { mockReleases, presentedHistory, releaseHistory } from './releases-fixtures'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
 import { mockIndicator } from './agent-indicator-fixtures'
 import type { UsageDashboard, UsageGroup } from '../src/lib/usageFormat.ts'
@@ -523,6 +523,7 @@ const ticketRow = (page: Page, key: string) => grid(page).locator('tr.ticket-row
 const ticketPanel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
 
 // ---------------------------------------------------------------- the shots
+const PRESENTED_NOW = Date.parse('2026-09-29T12:00:00Z')
 const shots: Shot[] = [
   // 1. Agents overview
   { screen: 'agents', state: 'overview', setup: page => agentsSetup(page, 'busy'), act: page => openAgents(page) },
@@ -712,6 +713,14 @@ const shots: Shot[] = [
     await page.goto(`/releases/${releaseHistory().current}`)
     await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
   } },
+  // AEON-305: a presented release, one with benefits only, one with internal changes only.
+  ...([['history-presented', 0], ['history-benefits-only', 1], ['history-internal', 3]] as const).map(([state, index]) => ({ screen: 'releases', state, setup: async (page: Page) => {
+    await mockWork(page, fixtures())
+    await mockReleases(page, presentedHistory(PRESENTED_NOW))
+  }, act: async (page: Page) => {
+    await page.goto(`/releases/${presentedHistory(PRESENTED_NOW).releases[index].version}`)
+    await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
+  } })),
   // 10. Project view, header glimpse, ticket workspace
   { screen: 'project', state: 'tickets-glimpse-workers', motion: true, setup: async page => {
     await page.clock.setSystemTime(AT)

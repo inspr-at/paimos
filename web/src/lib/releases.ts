@@ -14,8 +14,12 @@ export interface ReleaseEvidence {
 }
 export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string }
 export interface ReleaseNotes { source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; gaps: string[]; hidden: number; written_after_release?: boolean }
+// How a release introduces itself (AEON-305): the theme is the kicker, the
+// headline one sentence, the intro two or three. German may be empty.
+export interface ReleasePresentation { theme_en: string; theme_de: string; headline_en: string; headline_de: string; intro_en: string; intro_de: string; revision: number; updated_at: string }
 export interface Release {
   notes?: ReleaseNotes
+  presentation?: ReleasePresentation
   version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved'
   reserved_at: string | null; tagged_at: string | null; published_at: string | null; headline: string
   tickets: string[]; changes: ReleaseChange[]; changes_omitted: number; evidence: ReleaseEvidence
@@ -131,6 +135,32 @@ export function presentChanges(changes: ReleaseChange[], locale?: string | null)
   }
   return { features: [...buckets.features.values()], fixes: [...buckets.fixes.values()], other }
 }
+// The changes of one group, in order, each ticket's changes together under that
+// ticket's pill (AEON-305). Changes with no visible ticket note form a block
+// with an empty key, placed where the first of them appeared.
+export interface TicketBlock { key: string; pill: string; pillLang: 'en' | 'de'; changes: ReleaseChange[] }
+export function ticketBlocks(changes: ReleaseChange[], locale?: string | null): TicketBlock[] {
+  const blocks: TicketBlock[] = []
+  const byKey = new Map<string, TicketBlock>()
+  let loose: TicketBlock | undefined
+  for (const change of changes) {
+    const note = visibleNotes(change, locale).find(n => change.tickets.includes(n.key)) ?? visibleNotes(change, locale)[0]
+    if (!note) {
+      if (!loose) { loose = { key: '', pill: '', pillLang: 'en', changes: [] }; blocks.push(loose) }
+      loose.changes.push(change)
+      continue
+    }
+    let block = byKey.get(note.key)
+    if (!block) {
+      const text = localizedNote(note, locale)
+      block = { key: note.key, pill: text.pill || text.benefit, pillLang: text.pill ? text.pillLang : text.benefitLang, changes: [] }
+      byKey.set(note.key, block)
+      blocks.push(block)
+    }
+    block.changes.push(change)
+  }
+  return blocks
+}
 // ---------- Display ----------
 // Headlines and subjects as people read them, next to their ticket chips: the keys
 // the chips already show are left out and the text starts with a capital. Display
@@ -174,8 +204,86 @@ export function localizedNote(item: Pick<ReleaseNoteItem, 'pill_en' | 'pill_de' 
   const benefitLang = de && benefitDe ? 'de' : 'en'
   return { pill: pillLang === 'de' ? pillDe : pillEn, benefit: benefitLang === 'de' ? benefitDe : benefitEn, pillLang, benefitLang }
 }
+export interface LocalizedPresentation { theme: string; headline: string; intro: string; themeLang: 'en' | 'de'; headlineLang: 'en' | 'de'; introLang: 'en' | 'de' }
+// A release's theme, headline and intro in the viewer's language; an empty
+// German field falls back to English. Null when the release has none.
+export function localizedPresentation(r: Pick<Release, 'presentation'>, locale?: string | null): LocalizedPresentation | null {
+  const p = r.presentation
+  if (!p || !p.headline_en?.trim()) return null
+  const de = noteLocale(locale) === 'de'
+  const pick = (en: string, deText: string) => de && deText?.trim() ? { text: deText.trim(), lang: 'de' as const } : { text: (en ?? '').trim(), lang: 'en' as const }
+  const theme = pick(p.theme_en, p.theme_de), headline = pick(p.headline_en, p.headline_de), intro = pick(p.intro_en, p.intro_de)
+  return { theme: theme.text, headline: headline.text, intro: intro.text, themeLang: theme.lang, headlineLang: headline.lang, introLang: intro.lang }
+}
+// One benefit row: the pill is the label, the benefit the detail, the key stays quiet.
+export interface BenefitRow { key: string; label: string; detail: string; labelLang: 'en' | 'de'; detailLang: 'en' | 'de' }
+export interface ReleaseStory { benefits: BenefitRow[]; fixes: BenefitRow[]; commits: ReleaseChange[] }
+function benefitRow(key: string, text: LocalizedNote): BenefitRow | null {
+  const pill = text.pill.trim(), benefit = text.benefit.trim()
+  if (!pill && !benefit) return null
+  const label = pill || benefit
+  const detail = pill && benefit.toLowerCase() !== pill.toLowerCase() ? benefit : ''
+  return { key, label, detail, labelLang: pill ? text.pillLang : text.benefitLang, detailLang: text.benefitLang }
+}
+// What a release did, as the detail tells it: benefit rows, then fixes, then
+// every commit. A captured snapshot decides membership and text; its fix tickets
+// (by the served change groups) move to Fixes. Without one, linked tickets
+// decide. A ticket is listed once; as a benefit when it is both.
+export function releaseStory(r: Pick<Release, 'notes' | 'changes'>, locale?: string | null): ReleaseStory {
+  const lines = presentChanges(r.changes, locale)
+  const commits = r.changes.filter(c => c.type !== 'release')
+  const featureKeys = new Set(lines.features.map(line => line.key))
+  const fixKeys = new Set(lines.fixes.map(line => line.key).filter(key => !featureKeys.has(key)))
+  const benefits: BenefitRow[] = [], fixes: BenefitRow[] = []
+  if (hasUsableNotes(r)) {
+    for (const item of r.notes.items) {
+      const row = benefitRow(item.key, localizedNote(item, locale))
+      if (row) (fixKeys.has(item.key) ? fixes : benefits).push(row)
+    }
+    return { benefits, fixes, commits }
+  }
+  for (const line of lines.features) {
+    const row = benefitRow(line.key, { pill: line.pill, benefit: line.benefit, pillLang: line.pillLang, benefitLang: line.benefitLang })
+    if (row) benefits.push(row)
+  }
+  for (const line of lines.fixes) {
+    if (featureKeys.has(line.key)) continue
+    const row = benefitRow(line.key, { pill: line.pill, benefit: line.benefit, pillLang: line.pillLang, benefitLang: line.benefitLang })
+    if (row) fixes.push(row)
+  }
+  return { benefits, fixes, commits }
+}
+// A short name for a release in toasts and lists: its theme, else its benefit
+// pills, else its tidied Git headline.
+export function releaseTitle(r: Pick<Release, 'headline' | 'tickets' | 'changes' | 'notes' | 'presentation'>, locale?: string | null) {
+  const presented = localizedPresentation(r, locale)
+  if (presented) return presented.theme || presented.headline
+  return displayHeadline(r, locale)
+}
+// The rail's second line: the theme, else the benefit pills. Git tag headlines
+// are evidence, not names, so they are not shown there.
+export function railLine(r: Release, locale?: string | null): { text: string; themed: boolean } {
+  const presented = localizedPresentation(r, locale)
+  if (presented) return { text: presented.theme || presented.headline, themed: true }
+  const story = releaseStory(r, locale)
+  return { text: [...story.benefits, ...story.fixes].map(row => row.label).join(' · '), themed: false }
+}
+// Text split around each case-insensitive hit of the search query, for <mark>.
+export function markParts(text: string, query?: string | null): { text: string; hit: boolean }[] {
+  const q = query?.trim()
+  if (!q) return [{ text, hit: false }]
+  const out: { text: string; hit: boolean }[] = []
+  const lower = text.toLowerCase(), needle = q.toLowerCase()
+  let at = 0
+  for (let i = lower.indexOf(needle); i !== -1; i = lower.indexOf(needle, at)) {
+    if (i > at) out.push({ text: text.slice(at, i), hit: false })
+    out.push({ text: text.slice(i, i + needle.length), hit: true })
+    at = i + needle.length
+  }
+  if (at < text.length) out.push({ text: text.slice(at), hit: false })
+  return out
+}
 export const HISTORICAL_TAG_FALLBACK = 'historical-tag-headline'
-export const HISTORICAL_TAG_LABEL = 'Historical tag headline'
 export const WRITTEN_AFTER_LABEL = 'Notes written after release'
 // A backfilled snapshot was captured after publication. The hint stays off
 // when the notes are only the historical headline.
@@ -270,15 +378,17 @@ export function naturalKey(a: string, b: string) { return a.localeCompare(b, 'en
 // ---------- Search and filters ----------
 export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; tickets: boolean }
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
-// The same lines the row counts. A feature or fix commit with no visible
-// ticket is Other, so it must not pass the Features or Fixes filter.
-export function matches(r: Release, f: ReleaseFilter, locale?: string | null) {
-  const presented = presentChanges(r.changes, locale)
-  if (f.features && !presented.features.length) return false
-  if (f.fixes && !presented.fixes.length) return false
+// The same groups the list and the row counts show (AEON-305 restored the
+// per-change list): the server's group, else the commit type.
+export function matches(r: Release, f: ReleaseFilter, _locale?: string | null) {
+  const groups = groupChanges(r.changes)
+  if (f.features && !groups.features.length) return false
+  if (f.fixes && !groups.fixes.length) return false
   if (f.tickets && !ticketsOf(r).length) return false
   const q = f.q.trim().toLowerCase()
   if (!q) return true
+  const p = r.presentation
+  if (p && [p.theme_en, p.theme_de, p.headline_en, p.headline_de, p.intro_en, p.intro_de].some(text => (text ?? '').toLowerCase().includes(q))) return true
   return !!r.notes?.items.some(item => [item.pill_en, item.pill_de, item.benefit_en, item.benefit_de, item.key].some(text => text.toLowerCase().includes(q))) || r.version.includes(q) || r.headline.toLowerCase().includes(q) || r.tickets.some(t => t.toLowerCase().includes(q))
     || r.changes.some(c => c.subject.toLowerCase().includes(q) || c.tickets.some(t => t.toLowerCase().includes(q)) || (c.linked_tickets ?? []).some(t => [t.pill_en, t.pill_de, t.benefit_en, t.benefit_de, t.key].some(text => text.toLowerCase().includes(q))))
 }

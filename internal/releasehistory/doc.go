@@ -77,8 +77,13 @@
 //
 //	GET /api/releases            the whole history plus the running version
 //	GET /api/releases/{version}  one release (with or without the leading v)
+//	PUT /api/releases/{version}/presentation     set theme, headline, intro
+//	DELETE /api/releases/{version}/presentation  remove them
 //
-// Both require an authenticated principal. The manifest is embedded in the
+// The reads require an authenticated principal. The presentation writes
+// (AEON-305) require releases.deploy on the served product project and record
+// one event per change; aeon release-notes present is the offline equivalent.
+// Reads attach the stored presentation as the additive presentation member. The manifest is embedded in the
 // binary (data/history.json when generated, else data/empty.json). WithBackfills
 // adds immutable database snapshots for the caller's tenant and visible product
 // project. Tagged snapshots win, followed by native journey snapshots, then

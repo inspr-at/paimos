@@ -120,26 +120,25 @@ test('search and filters look at headlines, changes and ticket keys', () => {
   const noted = rel('260924000009.0.0', '', { changes: [{ ...change('n', 'other', 'P0.x: internal', ['AEON-1']), group: 'features', linked_tickets: [{ key: 'AEON-1', pill_en: 'Hosts in minutes', pill_de: 'Hosts in Minuten', benefit_en: 'You approve the price once.', benefit_de: 'Du bestätigst den Preis einmal.' }] }] })
   assert.ok(matches(noted, { ...f, q: 'approve the price' }))
   assert.ok(matches(noted, { ...f, q: 'minuten' }))
-  assert.ok(!matches(r, { ...f, fixes: true })) // no visible fix line; the row counts it as other
+  assert.ok(matches(r, { ...f, fixes: true })) // AEON-305: filters follow the listed changes again
   assert.ok(!matches(r, { ...f, features: true }))
   assert.ok(matches(r, { ...f, tickets: true }))
   assert.ok(!matches({ ...r, tickets: [], changes: [] }, { ...f, tickets: true }))
   assert.deepEqual(ticketsOf(r), ['AEON-77', 'AEON-78'])
 })
 
-test('feature and fix filters follow the visible ticket lines, in the viewer locale', () => {
+test('feature and fix filters follow the listed change groups (AEON-305)', () => {
   const f = { q: '', features: false, fixes: false, tickets: false }
   const bare = rel('260924000010.0.0', '', { changes: [{ ...change('a', 'feat', 'feat: no visible ticket', ['AEON-9']), group: 'features' as const }] })
-  assert.equal(presentChanges(bare.changes).features.length, 0)
-  assert.equal(matches(bare, { ...f, features: true }), false)
+  assert.equal(matches(bare, { ...f, features: true }), true)
   const note = { key: 'AEON-1', pill_en: 'Hosts in minutes', pill_de: 'Hosts in Minuten', benefit_en: 'You approve the price once.', benefit_de: 'Du bestätigst den Preis einmal.' }
   const lined = rel('260924000009.0.0', '', { changes: [{ ...change('n', 'other', 'P0.x: internal', ['AEON-1']), group: 'features' as const, linked_tickets: [note] }] })
   assert.equal(matches(lined, { ...f, features: true }), true)
   assert.equal(matches(lined, { ...f, fixes: true }), false)
-  const deOnly = rel('260924000011.0.0', '', { changes: [{ ...change('d', 'fix', 'fix: price', ['AEON-2']), group: 'fixes' as const, linked_tickets: [{ key: 'AEON-2', pill_en: ' ', pill_de: 'Preis', benefit_en: '', benefit_de: 'Du siehst den Preis.' }] }] })
-  assert.equal(matches(deOnly, { ...f, fixes: true }), false)
-  assert.equal(matches(deOnly, { ...f, fixes: true }, 'de-AT'), true)
-  assert.equal(presentChanges(deOnly.changes, 'de-AT').fixes.length, 1)
+  // The server group wins over the commit type.
+  const regrouped = rel('260924000011.0.0', '', { changes: [{ ...change('d', 'feat', 'feat: price', ['AEON-2']), group: 'fixes' as const }] })
+  assert.equal(matches(regrouped, { ...f, fixes: true }), true)
+  assert.equal(matches(regrouped, { ...f, features: true }), false)
 })
 
 test('new since the last visit: newer published releases, nothing on a first visit', () => {

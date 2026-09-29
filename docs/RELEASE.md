@@ -117,11 +117,11 @@ the public notes; they contribute only to the hidden count, even when benefit
 fields are incomplete or the member was unavailable at capture.
 Technical Git headlines, legacy top-level `tickets` references and changes remain
 evidence; membership claims come only from the snapshot. The release detail shows
-English/German notes; Git evidence is expandable when a snapshot is available.
-Old v1 manifests without the optional `notes` member and regenerated records with
-`notes.source = "unavailable"` keep their historical headline, ticket references,
-ticket filter and visible changes. Regenerated records also show the missing
-benefit-data gap; their Git text is not presented as benefit notes or membership.
+English/German notes as benefit rows in its header (see the release presentation
+below) above the change list; the tag message appears only under Evidence. Old v1 manifests without the optional
+`notes` member and regenerated records with `notes.source = "unavailable"` keep
+their ticket references, ticket filter and commits, but their tag message is not
+shown as a title; their Git text is not presented as benefit notes or membership.
 Available snapshots remain authoritative even when empty or incomplete. This
 additive reader boundary does not modify any existing published artifact or
 legacy tag.
@@ -188,7 +188,67 @@ version-keyed backfills for the visible AEON project. Otherwise they retain the
 historical tag headline. The database overlay is computed per request and never
 changes the shared embedded manifest. A malformed database snapshot is logged
 without its payload and falls back for that release alone; other releases remain
-available. Releases with no public notes or gaps keep their tag headline in the
-list and show a quiet **Internal changes only** in the detail. Backfilled notes
+available. Releases with no public notes or gaps show a quiet **Internal changes
+only** in the detail (or **No notes for this release** without any commit); their
+tag message is evidence only. Backfilled notes
 show **Notes written after release**. No original tag, artifact, published
 timestamp, or existing snapshot is rewritten. The coordinator owns production dry-run review and apply.
+
+## Release presentation (AEON-305)
+
+Every release introduces itself with a short **theme** (the kicker, 1–80
+characters, one line), one **headline** sentence (up to 200 characters, one line)
+and a short **intro** (two or three sentences, up to 600 characters), each in
+English and German. The release detail shows them as a compact header, together
+with the release's benefits (pill, then the benefit sentence, with a check icon),
+above the change list: Features, Fixes and Other changes with every change, where
+each ticket's features and fixes sit under its pill. The release list shows
+version, date and theme. A release without a presentation shows its benefits
+alone in the header, or no header at all. The Git tag message is evidence, never
+a title.
+
+Presentations live in `release_presentations` (migration `0943`), keyed by
+tenant, product project and calendar version, protected by tenant RLS and project
+visibility, separate from tags, manifests and note snapshots. The version need not
+be in the running build yet, so the presentation can be written before the new
+build is live. English theme and headline are required; German fields may be
+empty and readers then show English. Writing identical text changes nothing.
+Every change records one `release.presentation_set` event (before and after);
+removing one records `release.presentation_cleared`.
+
+**The release agent must write the presentation for every new release**, in both
+languages, as part of the release, right after the notes snapshot is final and
+before announcing the release. It is written against the production database from
+the deployed container, like the backfill, and is a dry run until `--apply`:
+
+```sh
+/paimos release-notes present --tenant inspr --project AEON --actor-principal-id PERSON_UUID \
+  --release VERSION \
+  --theme "Releases with a name" --theme-de "Releases mit Namen" \
+  --headline "Every release says what it is about." --headline-de "Jedes Release sagt, worum es geht." \
+  --intro "Two or three sentences." --intro-de "Zwei oder drei Sätze." \
+  --apply
+```
+
+or with the six fields as a JSON file (`-` reads stdin; use `docker exec -i`),
+which avoids shell quoting:
+
+```sh
+/paimos release-notes present --tenant inspr --project AEON --actor-principal-id PERSON_UUID \
+  --release VERSION --file - --apply < presentation.json
+# {"theme_en":"…","theme_de":"…","headline_en":"…","headline_de":"…","intro_en":"…","intro_de":"…"}
+```
+
+`--clear` removes a presentation. Outside the container the binary is `aeon`
+with the same arguments. The actor is an active **person** with `releases.deploy`
+on the project (workspace admins and owners); offline there is no agent key, so
+the release agent names its operator, as for the backfill. The command prints a
+JSON report with `applied`, `tenant_id` and `change` (`version`, `changed`,
+`before`, `after`). People can also use `PUT` and `DELETE
+/api/releases/{version}/presentation` (same authority; optional
+`expected_revision` answers 409 when stale).
+
+Write for the reader, not the repository: the theme names what the release is
+about in a few words, the headline says what changes for them in one sentence, the
+intro adds context in two or three. No ticket keys, package names or commit
+jargon; those stay in the rows and the commits.

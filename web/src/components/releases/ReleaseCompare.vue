@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { compare, displayHeadline, presentChanges, releasedAt, span, type Release } from '../../lib/releases'
+import { compare, releasedAt, releaseTitle, span, type Release } from '../../lib/releases'
 import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
@@ -16,12 +16,6 @@ const profile = useProfile()
 const locale = computed(() => profile.profile?.locale ?? null)
 const result = computed(() => props.to && props.to !== props.from ? compare(props.releases, props.from, props.to) : null)
 const count = computed(() => result.value ? result.value.groups.features.length + result.value.groups.fixes.length + result.value.groups.other.length : 0)
-const chipTickets = computed(() => {
-  if (!result.value) return []
-  const lines = presentChanges(result.value.changes, locale.value)
-  const lined = new Set([...lines.features, ...lines.fixes].map(line => line.key))
-  return result.value.tickets.filter(key => !lined.has(key))
-})
 const between = computed(() => {
   if (!result.value) return ''
   const find = (v: string) => props.releases.find(r => r.version === v)
@@ -50,14 +44,14 @@ const between = computed(() => {
         <span><b>{{ result.tickets.length }}</b> {{ result.tickets.length === 1 ? 'ticket' : 'tickets' }}</span>
         <span v-if="between">over <b>{{ between }}</b></span>
       </p>
-      <TicketChips v-if="chipTickets.length" :tickets="chipTickets" />
+      <TicketChips v-if="result.tickets.length" :tickets="result.tickets" />
       <section class="included" aria-labelledby="compare-included">
         <h3 id="compare-included" class="included-h">Releases in this range</h3>
         <ul>
-          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span class="inc-headline">{{ r.notes || r.headline ? displayHeadline(r, locale) : 'No headline recorded' }}</span></li>
+          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span class="inc-headline">{{ releaseTitle(r, locale) || 'No headline recorded' }}</span></li>
         </ul>
       </section>
-      <ReleaseChanges v-if="count" :changes="result.changes" :repository="repository" :query="query" class="changes" />
+      <ReleaseChanges v-if="count" :groups="result.groups" :repository="repository" :query="query" class="changes" />
       <p v-else class="none">No changes are recorded between these releases.</p>
     </template>
     <p v-else class="hint">

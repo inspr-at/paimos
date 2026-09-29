@@ -19,7 +19,7 @@ import { useSession } from './stores/session'
 import { useReleases } from './stores/releases'
 import { brand } from './lib/brand'
 import { toast } from './lib/toast'
-import { displayHeadline, getRelease } from './lib/releases'
+import { getRelease, releaseTitle } from './lib/releases'
 import { useProfile } from './stores/profile'
 import { headerFolded } from './lib/chrome'
 import { usePoller } from './lib/usePolledData'
@@ -116,7 +116,8 @@ watch(() => releases.available, async version => {
   // The new server knows what the release was about; say it in its reading form.
   const release = await getRelease(version)
   if (version !== releases.available) return
-  const about = release?.headline ? `: ${displayHeadline(release, profile.profile?.locale)}` : ''
+  const title = release ? releaseTitle(release, profile.profile?.locale) : ''
+  const about = title ? `: ${title}` : ''
   toast(`${brand.value.wordmark} was updated to ${version}${about}`, {
     sticky: true, key: 'update',
     actions: [{ label: 'What’s new', run: () => openReleases(version) }, { label: 'Reload', run: () => window.location.reload() }],
