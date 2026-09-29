@@ -26,21 +26,24 @@ function readComputers(value: unknown): LocalAuthComputer[] {
     return [{ computer_id: typeof row.computer_id === 'string' ? row.computer_id : name, name, capability }]
   })
 }
-function blockedLine(computer: LocalAuthComputer): string | null {
+function limitation(computer: LocalAuthComputer): string | null {
   const name = computer.name || 'Paired computer'
   switch (computer.capability) {
     case 'available': return null
-    case 'unsupported': return `${name} cannot confirm on the Mac, so watches there stay off.`
-    case 'unsigned': return `${name} needs a signed daemon, so watches there stay off.`
-    case 'no_gui': return `${name} has no graphical session, so watches there stay off.`
-    case 'policy': return `${name} cannot use Touch ID or the Mac password, so watches there stay off.`
-    default: return `${name} has not reported Touch ID support, so watches there stay off.`
+    case 'unsupported': return `${name} cannot confirm on the Mac`
+    case 'unsigned': return `${name} needs a signed daemon`
+    case 'no_gui': return `${name} has no graphical session`
+    case 'policy': return `${name} cannot use Touch ID or the Mac password`
+    default: return `${name} has not reported Touch ID support`
   }
 }
 const canPickLocal = computed(() => computers.value.some(computer => computer.capability === 'available'))
+// Watches stay off only while Mac confirmation is the selected or saved mode.
+const macConfirmation = computed(() => choice.value === 'local_auth' || saved.value === 'local_auth')
 const blocked = computed(() => computers.value.flatMap(computer => {
-  const line = blockedLine(computer)
-  return line ? [line] : []
+  const line = limitation(computer)
+  if (!line) return []
+  return [macConfirmation.value ? `${line}, so watches there stay off.` : `${line}.`]
 }))
 
 async function request(save = false) {
