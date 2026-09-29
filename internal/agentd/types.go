@@ -22,13 +22,18 @@ const (
 )
 
 var (
-	ErrScope                = errors.New("run control scope mismatch")
-	ErrGeneration           = errors.New("run generation mismatch")
-	ErrReplay               = errors.New("control correlation replay conflict")
-	ErrNotOwned             = errors.New("run is not owned by this daemon generation")
-	ErrUnsupported          = errors.New("adapter operation unsupported")
-	ErrHarnessArchived      = errors.New("harness generation archived; detach without signaling")
-	ErrControlUnconfirmed   = errors.New("control outcome unconfirmed; reporting failure does not authorize termination")
+	ErrScope              = errors.New("run control scope mismatch")
+	ErrGeneration         = errors.New("run generation mismatch")
+	ErrReplay             = errors.New("control correlation replay conflict")
+	ErrNotOwned           = errors.New("run is not owned by this daemon generation")
+	ErrUnsupported        = errors.New("adapter operation unsupported")
+	ErrHarnessArchived    = errors.New("harness generation archived; detach without signaling")
+	ErrControlUnconfirmed = errors.New("control outcome unconfirmed; reporting failure does not authorize termination")
+	// ErrControlTerminal means this completion cannot be recorded. The server
+	// already finished the control, or it refused an applied setting because the
+	// database deadline passed. The daemon drops that control from the queue head.
+	// Other conflicts stay retryable.
+	ErrControlTerminal      = errors.New("control completion is terminal")
 	ErrForceExitUnconfirmed = errors.New("owned group signalled; root exit unconfirmed")
 )
 

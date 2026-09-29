@@ -128,7 +128,8 @@ paths:
         - $ref: '#/components/parameters/workerLease'
       responses:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
-        '200': {description: Claimed typed owned controls}
+        '409': {description: Managed worker required}
+        '200': {description: 'Claimed controls. expires_in_ms is the remaining database-clock authorization, rounded down and at most 45000. Expired controls are settled first and omitted.'}
   /api/projects/{projectId}/harness-sessions/{sessionId}/drain:
     post:
       operationId: drainHarnessInbox
