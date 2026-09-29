@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { CALENDAR_VERSION, releaseName, releaseStateLabel, type ReleaseRef } from '../../lib/journey'
+import { CALENDAR_DISPLAY_SCHEME } from '../../lib/version-copy'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import StatusIcon from '../work/StatusIcon.vue'
@@ -27,7 +28,7 @@ const shown = computed(() => all.value || !props.limit ? newest.value : newest.v
         <button type="button" class="what pick" :aria-current="release.id === selectedId ? 'true' : undefined" @click="emit('select', release)">
           <span class="line"><b>{{ releaseName(release) }}</b><span v-if="release.id === currentId" class="j-chip teal">Current</span></span>
           <small class="line">
-            <ReleaseVersion v-if="release.version && CALENDAR_VERSION.test(release.version)" class="ver" :version="release.version" scheme="inspr-calendar-v2" :interactive="false" />
+            <ReleaseVersion v-if="release.version && CALENDAR_VERSION.test(release.version)" class="ver" :version="release.version" :scheme="CALENDAR_DISPLAY_SCHEME" :interactive="false" />
             <span v-else-if="release.version" class="mono ver-text">{{ release.version }}</span>
             <span class="mono key">{{ release.key }}</span>
             <span>· {{ releaseStateLabel(release.state) }}</span>

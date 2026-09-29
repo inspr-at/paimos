@@ -4,6 +4,7 @@ import { onBeforeUnmount, ref, watchEffect } from 'vue'
 import { renderVersion, disposeVersion } from '../vendor/calendar-version-display/version.js'
 import display from '../vendor/calendar-version-display/display.json'
 import { useVersion } from '../stores/version'
+import { VERSION_COPY_TEXT } from '../lib/version-copy'
 
 const version = useVersion()
 const host = ref<HTMLElement>()
@@ -15,10 +16,7 @@ watchEffect(() => {
     disposeVersion(host.value)
     host.value.textContent = 'dev'
   } else {
-    renderVersion(host.value, value, scheme, { config: display, mode: 'pretty', brand: '#D69B31' })
-    if (host.value.getAttribute('role') === 'button') {
-      host.value.setAttribute('aria-label', `Copy version ${value}`)
-    }
+    renderVersion(host.value, value, scheme, { config: display, mode: 'pretty', brand: '#D69B31', text: VERSION_COPY_TEXT })
   }
 }, { flush: 'post' })
 onBeforeUnmount(() => { if (host.value) disposeVersion(host.value) })

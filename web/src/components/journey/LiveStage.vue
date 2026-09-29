@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ACTION_LONG, CALENDAR_VERSION, isImported, releaseStateLabel } from '../../lib/journey'
+import { CALENDAR_DISPLAY_SCHEME } from '../../lib/version-copy'
 import { useJourneyContext } from '../../lib/journeyContext'
 import { plural } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
@@ -35,7 +36,7 @@ const bare = computed(() => !ctx.release.value && !releases.value.length && ctx.
       <section class="j-card" aria-labelledby="live-tickets">
         <header class="j-card-head">
           <p id="live-tickets" class="eyebrow">{{ ctx.release.value ? `In ${ctx.releaseLabel.value.toLowerCase()} · ${plural(included, 'ticket')}` : 'In the release' }}</p>
-          <ReleaseVersion v-if="ctx.release.value?.version && CALENDAR_VERSION.test(ctx.release.value.version)" class="ver" :version="ctx.release.value.version" scheme="inspr-calendar-v2" />
+          <ReleaseVersion v-if="ctx.release.value?.version && CALENDAR_VERSION.test(ctx.release.value.version)" class="ver" :version="ctx.release.value.version" :scheme="CALENDAR_DISPLAY_SCHEME" />
           <button type="button" class="btn sm" :disabled="!included" aria-keyshortcuts="w" @click="ctx.walk()"><AppIcon name="expand" :size="13" />Full screen</button>
         </header>
         <div v-if="!ctx.release.value" class="j-empty"><strong>No release yet</strong><span>A release goes live once it is deployed and, where needed, its access is granted.</span></div>

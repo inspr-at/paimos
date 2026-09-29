@@ -3,10 +3,11 @@
 import { onBeforeUnmount, ref, watchEffect } from 'vue'
 import { disposeVersion, parts, renderVersion } from '../vendor/calendar-version-display/version.js'
 import display from '../vendor/calendar-version-display/display.json'
+import { CALENDAR_DISPLAY_SCHEME } from '../lib/version-copy'
 
 // A calendar version in the shared INSPR renderer's Pretty display, for reading
 // (the copy interaction lives in VersionDisplay). Other versions read as text.
-const props = withDefaults(defineProps<{ value: string; scheme?: string }>(), { scheme: 'inspr-calendar-v2' })
+const props = withDefaults(defineProps<{ value: string; scheme?: string }>(), { scheme: CALENDAR_DISPLAY_SCHEME })
 const host = ref<HTMLElement>()
 watchEffect(() => {
   const element = host.value
