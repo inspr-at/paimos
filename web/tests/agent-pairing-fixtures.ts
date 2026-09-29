@@ -127,3 +127,6 @@ export async function mockAnonymousGuide(page: Page) {
     return route.fulfill({ status: 404, json: { error: 'unmocked' } })
   })
 }
+
+// Builders for other fixtures (capacity, agents desk).
+export { base as pairingView, enrollment as pairingEnrollment }

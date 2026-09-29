@@ -4,6 +4,7 @@
 // message targets and project messages. Ids for projects, tickets and the person
 // come from the caller, so captures can sit on real projects and tickets.
 import type { Page, Route } from '@playwright/test'
+import { defaultSchedule, type CapacityWorld } from './capacity-fixtures'
 
 export interface AgentWorld {
   me: string
@@ -93,7 +94,7 @@ export function agentData(world: AgentWorld) {
 }
 export type AgentData = ReturnType<typeof agentData>
 
-export interface AgentMockOptions { sessionsMissing?: boolean; messagesMissing?: boolean; accountsForbidden?: boolean; failDecision?: boolean }
+export interface AgentMockOptions { sessionsMissing?: boolean; messagesMissing?: boolean; accountsForbidden?: boolean; failDecision?: boolean; capacity?: CapacityWorld; capacityForbidden?: boolean }
 // Routes only the agents surfaces; everything else falls through to earlier routes
 // or the real server.
 export async function mockAgents(page: Page, data: AgentData, options: AgentMockOptions = {}) {
@@ -107,7 +108,8 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     const messagesPath = /^\/api\/projects\/([^/]+)\/(messages|message-targets)$/.exec(path)
     const resolutionPath = /^\/api\/projects\/([^/]+)\/messages\/([^/]+)\/resolution$/.exec(path)
     const known = provenancePath || sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
-    if (!known) return route.fallback()
+    const pairing = !!options.capacity && path === '/api/agent-pairing/computers'
+    if (!known && !pairing) return route.fallback()
     calls.push({ path, method, body, query: url.searchParams })
     const q = url.searchParams
     if (path === '/api/harness-sessions') {
@@ -179,6 +181,14 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       if (options.failDecision) return route.fulfill({ status: 409, json: { error: 'The request expired while you were deciding' } })
       if (decision[2] === 'decision') Object.assign(found, { decision: (body as { decision: string }).decision, decided_by_principal_id: 'me' })
       return route.fulfill({ json: found })
+    }
+    if (path.startsWith('/api/agent-accounts/capacity') || pairing) {
+      if (options.capacityForbidden || options.accountsForbidden) return route.fulfill({ status: 403, json: { error: 'account.read permission required' } })
+      const answer = options.capacity?.handle(path, method, body)
+      if (answer) return answer.status === 204 ? route.fulfill({ status: 204, body: '' }) : route.fulfill({ status: answer.status ?? 200, json: answer.json })
+      // Without a capacity world: accounts without readings and the default schedule.
+      if (path === '/api/agent-accounts/capacity' || path === '/api/agent-accounts/capacity/preview') return route.fulfill({ json: data.accounts.map(a => ({ account_id: a.id, schedule: defaultSchedule(), windows: [] })) })
+      if (path === '/api/agent-accounts/capacity/schedule') return method === 'PUT' ? route.fulfill({ status: 204, body: '' }) : route.fulfill({ json: [] })
     }
     if (path === '/api/agent-accounts') return options.accountsForbidden ? route.fulfill({ status: 403, json: { error: 'admin session required' } }) : route.fulfill({ json: data.accounts })
     const account = /^\/api\/agent-accounts\/([^/]+)$/.exec(path)
