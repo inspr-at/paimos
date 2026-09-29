@@ -446,13 +446,12 @@
   },
   "harness-session": {
     "version": "harness-session/1.1",
-    "sha256": "081f8a80ddbb35a65f20882fead611454be3f18b9468921526838634f26091ec",
+    "sha256": "09dff956da220327daed37c54e552f8d42749b04e4c219531db789584b9840cc",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
           "account_label": {
             "maxLength": 128,
-            "never a credential. Trimmed plain text; control characters stripped.": null,
             "type": [
               "string",
               "null"
@@ -485,7 +484,6 @@
               ],
               "type": "object"
             },
-            "newest first; present on session detail.": null,
             "type": "array"
           },
           "activity_note": {
@@ -801,7 +799,6 @@
             "type": "string"
           },
           "metadata_history": {
-            "and reasoning effort changes": null,
             "items": {
               "properties": {
                 "at": {
@@ -837,8 +834,6 @@
               ],
               "type": "object"
             },
-            "model": null,
-            "newest first; present on session detail.": null,
             "type": "array"
           },
           "model": {
@@ -1027,7 +1022,6 @@
         "properties": {
           "account_label": {
             "maxLength": 128,
-            "never a credential. Trimmed plain text; control characters stripped.": null,
             "type": [
               "string",
               "null"
@@ -1060,7 +1054,6 @@
               ],
               "type": "object"
             },
-            "newest first; present on session detail.": null,
             "type": "array"
           },
           "activity_note": {
@@ -1376,7 +1369,6 @@
             "type": "string"
           },
           "metadata_history": {
-            "and reasoning effort changes": null,
             "items": {
               "properties": {
                 "at": {
@@ -1412,8 +1404,6 @@
               ],
               "type": "object"
             },
-            "model": null,
-            "newest first; present on session detail.": null,
             "type": "array"
           },
           "model": {

@@ -6984,9 +6984,9 @@ components:
         branch: {$ref: '#/components/schemas/HarnessBranch'}
         commits: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/HarnessCommit'}}
         activity_note: {type: [string, 'null'], maxLength: 120, description: Current step reported by the worker.}
-        activity_history: {type: array, description: Up to 20 changed notes, newest first; present on session detail., items: {$ref: '#/components/schemas/HarnessActivityNote'}}
+        activity_history: {type: array, description: 'Up to 20 changed notes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessActivityNote'}}
         controls: {type: array, description: Session requests on detail reads; outstanding requests plus the latest 20 completions and the last applied request of each kind. Expiry is terminal rejected with request_expired reason., items: {$ref: '#/components/schemas/HarnessSessionRequest'}}
-        metadata_history: {type: array, description: Up to 20 display label, model, and reasoning effort changes, newest first; present on session detail., items: {$ref: '#/components/schemas/HarnessMetadataChange'}}
+        metadata_history: {type: array, description: 'Up to 20 display label, model, and reasoning effort changes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessMetadataChange'}}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
         host: {type: string}
         management_mode: {type: string, enum: [managed, unmanaged]}
@@ -7133,7 +7133,7 @@ components:
         truncated: {type: boolean}
     HarnessModel: {type: [string, 'null'], maxLength: 128, description: Optional trimmed plain text; control characters stripped.}
     HarnessEffort: {type: [string, 'null'], maxLength: 40, description: Optional trimmed plain text; control characters stripped.}
-    HarnessAccountLabel: {type: [string, 'null'], maxLength: 128, description: Subscription or account display name, never a credential. Trimmed plain text; control characters stripped.}
+    HarnessAccountLabel: {type: [string, 'null'], maxLength: 128, description: 'Subscription or account display name, never a credential. Trimmed plain text; control characters stripped.'}
     HarnessVersion: {type: [string, 'null'], maxLength: 80, description: Optional trimmed plain text; control characters stripped.}
     HarnessBrief: {type: [string, 'null'], maxLength: 240, description: Short prompt file name or ticket key; trimmed plain text.}
     HarnessWorktree: {type: [string, 'null'], maxLength: 512, description: Worktree path; trimmed plain text.}
