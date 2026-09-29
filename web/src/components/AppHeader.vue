@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { brand, pageName } from '../lib/brand'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import mark from '../assets/brand/aeon-mark.svg'
 import { useSession } from '../stores/session'
@@ -11,12 +11,10 @@ import { useBusiness } from '../stores/business'
 import { useCustomers } from '../stores/customers'
 import { useQuotes } from '../stores/quotes'
 import { useProfile } from '../stores/profile'
-import Avatar from './Avatar.vue'
-import { dark, setTheme, themeChoice, toggleTheme, type ThemeChoice } from '../lib/theme'
+import { dark, toggleTheme } from '../lib/theme'
 import { can } from '../lib/authz'
 import { command, consume, run } from '../lib/commands'
 import { fatal } from '../lib/fatal'
-import { accountEmail, accountName } from '../lib/api'
 import { usePoller } from '../lib/usePolledData'
 import { placeOf, sequence, visiblePlaces, type PlaceId } from '../lib/places'
 import { SETTINGS_SECTIONS, sectionOf } from '../lib/settings'
@@ -24,7 +22,8 @@ import AppIcon from './AppIcon.vue'
 import KeyCap from './KeyCap.vue'
 import BizIcon from './business/BizIcon.vue'
 import CommandPalette from './CommandPalette.vue'
-import VersionDisplay from './VersionDisplay.vue'
+import AccountMenu from './header/AccountMenu.vue'
+import AppMenu from './header/AppMenu.vue'
 
 const session = useSession()
 const projects = useProjects()
@@ -35,17 +34,8 @@ const quotes = useQuotes()
 const profile = useProfile()
 const route = useRoute()
 const router = useRouter()
-const open = ref(false)
-const busy = ref(false)
-const error = ref('')
-const account = ref<HTMLElement>()
-const trigger = ref<HTMLButtonElement>()
-const panel = ref<HTMLElement>()
 const palette = ref<InstanceType<typeof CommandPalette>>()
-const themes: { value: ThemeChoice; label: string; icon: 'sun' | 'moon' | 'monitor' }[] = [{ value: 'light', label: 'Light', icon: 'sun' }, { value: 'dark', label: 'Dark', icon: 'moon' }, { value: 'system', label: 'System', icon: 'monitor' }]
 const writable = computed(() => can('nodes.write', project.value?.id))
-const name = computed(() => session.identity ? accountName(session.identity) : '')
-const email = computed(() => session.identity ? accountEmail(session.identity) : '')
 
 // The legacy workspace view keeps its own search; everywhere else search is global.
 const globalSearch = computed(() => !!session.identity)
@@ -82,52 +72,7 @@ const profilesPage = computed(() => route.path.startsWith('/settings/business/pr
 const settingsSection = computed(() => route.path.startsWith('/settings') ? SETTINGS_SECTIONS.find(section => section.id === (profilesPage.value ? 'business' : sectionOf(route.params.section))) ?? null : null)
 const placeLabel = (id: PlaceId) => id === 'agents' && agents.needsCount ? `Agents, ${agents.needsCount} ${agents.needsCount === 1 ? 'needs' : 'need'} you` : undefined
 
-async function toggleMenu() {
-  open.value = !open.value
-  if (open.value) { await nextTick(); focusTheme() }
-}
-function focusTheme() { panel.value?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus() }
-// Up and down walk the menu's rows (the theme group is one stop); left and right choose a theme.
-function menuKeys(event: KeyboardEvent) {
-  // Keys pressed inside the menu belong to it, not to the page underneath (Escape and ⌘K still pass).
-  if (event.key !== 'Escape' && !event.metaKey && !event.ctrlKey) event.stopPropagation()
-  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
-  const items = [...(panel.value?.querySelectorAll<HTMLElement>('button:not(:disabled):not([role="radio"][aria-checked="false"]), [role="button"]') ?? [])]
-  const index = items.indexOf(document.activeElement as HTMLElement)
-  event.preventDefault()
-  items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
-}
-function themeKeys(event: KeyboardEvent) {
-  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-  event.preventDefault()
-  const index = themes.findIndex(theme => theme.value === themeChoice.value)
-  setTheme(themes[(index + (event.key === 'ArrowRight' ? 1 : -1) + themes.length) % themes.length].value)
-  void nextTick(focusTheme)
-}
-function showShortcuts() { closeMenu(); run({ name: 'shortcuts' }) }
-function showReleases() { closeMenu(); run({ name: 'releases' }) }
-async function showSettings() { closeMenu(); await router.push('/settings') }
 watch(command, value => { if (value?.command.name === 'palette') { consume(); palette.value?.open() } })
-function closeMenu(restoreFocus = false) {
-  open.value = false
-  if (restoreFocus) trigger.value?.focus()
-}
-function outside(event: PointerEvent) {
-  if (event.target instanceof Node && !account.value?.contains(event.target)) closeMenu()
-}
-function focusOut(event: FocusEvent) {
-  if (event.relatedTarget instanceof Node && !account.value?.contains(event.relatedTarget)) closeMenu()
-}
-async function signOut() {
-  busy.value = true
-  error.value = ''
-  try {
-    await session.signOut()
-    closeMenu()
-    await router.replace('/signin')
-  } catch { error.value = 'Sign out didn’t complete. Please try again.' }
-  finally { busy.value = false }
-}
 function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
@@ -159,10 +104,10 @@ watch(() => session.identity?.principal.id, id => {
   void business.loadPlugins(true)
 }, { immediate: true })
 onMounted(() => {
-  document.addEventListener('pointerdown', outside); window.addEventListener('keydown', shortcut); window.addEventListener('keydown', placeKeys, true)
+  window.addEventListener('keydown', shortcut); window.addEventListener('keydown', placeKeys, true)
   needsPoll.start()
 })
-onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); needsPoll.stop() })
+onBeforeUnmount(() => { window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); needsPoll.stop() })
 </script>
 
 <template>
@@ -233,36 +178,12 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
       <span class="pill-text">Search</span>
       <span class="pill-keys"><KeyCap k="mod" /><KeyCap k="K" /></span>
     </button>
+    <!-- Quick light or dark; the avatar menu has the full choice, System included. -->
     <button class="icon-btn header-btn theme-btn" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme()">
       <AppIcon :name="dark ? 'sun' : 'moon'" />
     </button>
-    <div v-if="session.identity" ref="account" class="account" @keydown.esc.stop.prevent="closeMenu(true)" @focusout="focusOut">
-      <button ref="trigger" class="avatar-btn header-btn" type="button" :aria-expanded="open" aria-controls="account-panel" :aria-label="`Account for ${name}`" @click="toggleMenu">
-        <Avatar :id="session.identity?.principal.id" :name="name" :size="34" />
-      </button>
-      <div v-if="open" id="account-panel" ref="panel" class="account-panel pop" role="dialog" aria-label="Account" @keydown="menuKeys">
-        <div class="who">
-          <Avatar :id="session.identity.principal.id" :name="name" :size="40" class="who-avatar" />
-          <div class="who-text">
-            <p class="account-name">{{ name }}</p>
-            <p v-if="email" class="account-email">{{ email }}</p>
-            <p class="account-tenant" title="Workspace"><AppIcon name="folder" :size="12" /><span class="sr-only">Workspace: </span>{{ session.identity.tenant.name }}</p>
-          </div>
-        </div>
-        <div class="menu-block">
-          <p class="eyebrow">Theme</p>
-          <div class="seg theme-seg" role="radiogroup" aria-label="Theme" @keydown="themeKeys">
-            <button v-for="option in themes" :key="option.value" type="button" role="radio" :aria-checked="themeChoice === option.value" :tabindex="themeChoice === option.value ? 0 : -1" @click="setTheme(option.value)"><AppIcon :name="option.icon" :size="13" />{{ option.label }}</button>
-          </div>
-        </div>
-        <button class="menu-row" type="button" @click="showSettings"><AppIcon name="gear" />Settings</button>
-        <button class="menu-row" type="button" @click="showReleases"><AppIcon name="history" />Release history</button>
-        <button class="menu-row" type="button" aria-keyshortcuts="?" @click="showShortcuts"><AppIcon name="keyboard" />Keyboard shortcuts<kbd class="keycap row-key" aria-hidden="true">?</kbd></button>
-        <button class="menu-row" type="button" :disabled="busy" @click="signOut"><AppIcon name="logout" />{{ busy ? 'Signing out…' : 'Sign out' }}</button>
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <div class="menu-version"><span class="eyebrow">{{ brand.wordmark }}</span><VersionDisplay /></div>
-      </div>
-    </div>
+    <AppMenu />
+    <AccountMenu />
     <CommandPalette v-if="globalSearch" ref="palette" :can-write="writable" />
   </header>
 </template>
@@ -316,7 +237,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .sep { color: var(--ink-3); font-weight: 300; font-size: 16px; }
 .mono-crumb { font: 500 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
 .spacer { flex: 1 1 0; min-width: 0; }
-.search-pill, .header-btn, .account { flex-shrink: 0; }
+.search-pill, .header-btn { flex-shrink: 0; }
 .needs-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--gold-2); color: #3a2804; font: 700 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface-raised); }
 .search-pill {
   display: inline-flex; align-items: center; gap: 9px; width: 240px; height: 34px; padding: 0 6px 0 12px; border: 1px solid var(--glass-edge); border-radius: 999px;
@@ -327,34 +248,6 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .search-pill:focus-visible { box-shadow: var(--focus-ring); }
 .pill-text { flex: 1; text-align: left; }
 .pill-keys { display: inline-flex; gap: 3px; }
-.account { position: relative; }
-.avatar-btn { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; background: transparent; }
-.avatar-btn :deep(.avatar) { box-shadow: 0 0 0 1px var(--glass-rim), 0 2px 6px rgba(32, 60, 61, .12); transition: box-shadow .15s ease; }
-.avatar-btn:hover :deep(.avatar), .avatar-btn[aria-expanded="true"] :deep(.avatar) { box-shadow: 0 0 0 1.5px var(--teal), 0 2px 8px rgba(32, 60, 61, .18); }
-.avatar-btn:active { filter: brightness(.96); }
-.avatar-btn:focus-visible { box-shadow: var(--focus-ring); }
-.account-panel { position: absolute; right: 0; top: 44px; width: min(300px, calc(100vw - 24px)); padding: 8px; }
-.who { display: flex; align-items: center; gap: 12px; padding: 10px 10px 12px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
-.who-avatar { flex-shrink: 0; }
-.who-text { min-width: 0; }
-.account-name { color: var(--ink); font-weight: 650; font-size: 14px; overflow-wrap: anywhere; }
-.account-email { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
-.account-tenant { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; padding: 2px 8px 2px 6px; border-radius: 999px; background: var(--code-bg); font-size: 11.5px; color: var(--ink-2); }
-.menu-block { display: grid; gap: 6px; padding: 8px 10px 10px; }
-.menu-block .eyebrow { margin: 0; }
-.theme-seg { display: grid; grid-template-columns: repeat(3, 1fr); }
-.theme-seg button { height: 30px; gap: 5px; padding: 0 6px; }
-.menu-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
-@media (max-width: 600px) { .menu-row { height: 44px; } }
-.menu-row svg { color: var(--ink-2); }
-@media (hover: hover) { .menu-row:hover:not(:disabled) { background: var(--row-hover); } }
-.menu-row:active:not(:disabled) { background: var(--row-selected); }
-.menu-row:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
-.row-key { margin-left: auto; }
-.error { margin: 8px 10px 4px; }
-.menu-version { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px; padding: 0 10px; border-top: 1px solid var(--line); }
-.menu-version .eyebrow { letter-spacing: .2em; }
-.menu-version .eyebrow { margin: 0; }
 /* Narrower desktops: the wordmark steps back on inner pages, then the place labels. */
 @media (max-width: 1180px) { .lockup.compact .wordmark { display: none; } }
 @media (max-width: 980px) {
@@ -390,7 +283,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
   .crumb-short { display: inline; }
   .search-pill { width: 44px; height: 44px; padding: 0; justify-content: center; }
   .pill-text, .pill-keys { display: none; }
-  .header-btn, .avatar-btn { width: 44px; height: 44px; }
+  .app-header :deep(.header-btn) { width: 44px; height: 44px; }
   /* The theme lives in the account menu on phones. */
   .theme-btn { display: none; }
 }

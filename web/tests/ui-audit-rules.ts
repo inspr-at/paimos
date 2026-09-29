@@ -133,7 +133,7 @@ export function domAudit(): Raw[] {
     const cx = (ar.left + ar.right) / 2, cy = (ar.top + ar.bottom) / 2
     // An open menu or popover covers the page below it; a tap there closes it, so it
     // does not take reach away from the controls it covers.
-    const overlayOf = (el: Element | null) => el?.closest('.floating.pop, #account-panel, [role="menu"]') ?? null
+    const overlayOf = (el: Element | null) => el?.closest('.floating.pop, .hm-panel, [role="menu"]') ?? null
     const reach = (x: number, y: number) => {
       if (receivesPointer(a, x, y)) return true
       if (x < 0 || x >= innerWidth || y < 0 || y >= innerHeight) return false
@@ -167,7 +167,7 @@ export function domAudit(): Raw[] {
       // A scrim and a fixed app edge intentionally cover scrolling content.
       if (a.matches('.sheet-scrim') || b.matches('.sheet-scrim') || a.closest('.app-footer, .app-header') !== b.closest('.app-footer, .app-header') && (a.closest('.app-footer') || b.closest('.app-footer'))) continue
       // Open menus cover the page below; their background controls are not peers.
-      const overlay = (el: Element) => el.closest('.floating.pop, #account-panel')
+      const overlay = (el: Element) => el.closest('.floating.pop, .hm-panel')
       if (overlay(a) !== overlay(b) && (overlay(a) || overlay(b))) continue
       const overlap = Math.max(0, Math.min(ar.right, br.right) - Math.max(ar.left, br.left)) * Math.max(0, Math.min(ar.bottom, br.bottom) - Math.max(ar.top, br.top))
       if (overlap > 16) add('interactive-overlap', 'serious', selector(a), `overlaps ${selector(b)} by ${Math.round(overlap)}px²`)

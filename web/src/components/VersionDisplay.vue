@@ -5,6 +5,8 @@ import { renderVersion, disposeVersion } from '../vendor/calendar-version-displa
 import display from '../vendor/calendar-version-display/display.json'
 import { useVersion } from '../stores/version'
 
+// menuitem: inside a menu the copy control is one of its items (roving focus, AEON-312).
+const props = defineProps<{ menuitem?: boolean }>()
 const version = useVersion()
 const host = ref<HTMLElement>()
 void version.load()
@@ -18,6 +20,7 @@ watchEffect(() => {
     renderVersion(host.value, value, scheme, { config: display, mode: 'pretty', brand: '#D69B31' })
     if (host.value.getAttribute('role') === 'button') {
       host.value.setAttribute('aria-label', `Copy version ${value}`)
+      if (props.menuitem) { host.value.setAttribute('role', 'menuitem'); host.value.setAttribute('tabindex', '-1') }
     }
   }
 }, { flush: 'post' })

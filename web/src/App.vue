@@ -94,7 +94,7 @@ function goHome() { openedHere = false; void router.push('/') }
 // A ticket open beside the history can go to its full page, which leaves the history.
 function leaveReleasesFor(path: string) { openedHere = false; void router.push(path) }
 watch(releasesOpen, open => { if (!open) openedHere = false })
-watch(command, value => { if (value?.command.name === 'releases') { consume(); openReleases() } })
+watch(command, value => { if (value?.command.name === 'releases') { const { version } = value.command; consume(); openReleases(version) } })
 
 // Signed in: remember what was seen, count what is new, and notice a newer version on the server.
 watch(() => session.identity?.principal.id, id => {

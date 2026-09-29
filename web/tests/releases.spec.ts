@@ -279,7 +279,7 @@ test('the palette and the account menu open the history too', async ({ page }) =
   await page.keyboard.press('Escape')
   await expect(sheet(page)).toHaveCount(0)
   await page.getByRole('button', { name: /^Account for / }).click()
-  await page.getByRole('button', { name: 'Release history', exact: true }).click()
+  await page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Release history', exact: true }).click()
   await expect(sheet(page)).toBeVisible()
 })
 
