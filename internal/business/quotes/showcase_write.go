@@ -534,6 +534,9 @@ func issueQuoteDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 	if err = validateDocument(&doc, true); err != nil {
 		return out, "", err
 	}
+	// Frozen as the editor reads it: a draft stored with null lists (before
+	// AEON-274) is issued with empty ones; the digest covers this value.
+	doc = normalizedDraft(doc)
 	settings, err := readSettings(ctx, tx)
 	if err != nil {
 		return out, "", err

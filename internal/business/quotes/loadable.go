@@ -141,10 +141,12 @@ func marshalProfile(d profileDefinition) ([]byte, error) {
 	return raw, nil
 }
 
-// marshalDraft encodes a draft document with empty lists instead of nil and a
-// normalized profile snapshot. Drafts carry no digest; a version frozen from
-// one hashes the draft as stored.
-func marshalDraft(doc quoteDocument) ([]byte, error) {
+// normalizedDraft returns the document with empty lists instead of nil and a
+// normalized profile snapshot. Only drafts, and a draft as it is being frozen
+// (before its digest is computed), are normalized; a frozen version is never
+// rewritten. A draft copied from an old snapshot with null lists therefore
+// stays issuable. The caller's sections are not modified.
+func normalizedDraft(doc quoteDocument) quoteDocument {
 	doc.Profile = normalizedSnapshot(doc.Profile)
 	if doc.Positions == nil {
 		doc.Positions = []documentPosition{}
@@ -157,7 +159,20 @@ func marshalDraft(doc quoteDocument) ([]byte, error) {
 		sections[i] = section
 	}
 	doc.Sections = sections
-	return marshalDocument(doc)
+	return doc
+}
+
+// marshalDraft encodes a draft document, normalized. Drafts carry no digest.
+func marshalDraft(doc quoteDocument) ([]byte, error) {
+	return marshalDocument(normalizedDraft(doc))
+}
+
+// sameProfile compares two snapshots as the editor reads them, so a stored
+// null list and an empty one are the same profile.
+func sameProfile(a, b *documentProfileSnapshot) bool {
+	left, _ := json.Marshal(normalizedSnapshot(a))
+	right, _ := json.Marshal(normalizedSnapshot(b))
+	return bytes.Equal(left, right)
 }
 
 // marshalDocument encodes a quote document for a draft or version and refuses
