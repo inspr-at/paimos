@@ -33,6 +33,12 @@ export interface HarnessSession {
 export interface HarnessSessionDetail extends HarnessSession { metadata_history?: MetadataChange[] }
 export interface NodeSummary { id: string; key: string; title: string }
 export interface Paged<T> { items: T[]; next_cursor: string | null }
+export interface SessionChangeRequest {
+  id: string; session_id: string; expected_generation: string; kind: 'rename_request' | 'model_request'
+  state: 'pending' | 'claimed' | 'completed'; sequence: number; expires_at: string
+  outcome: 'applied' | 'rejected' | null; reason: string | null
+  request_payload: { display_label?: string; model?: string; reasoning_effort?: string; account_id?: string; model_profile_id?: string }
+}
 export interface SessionControl {
   id: string; session_id: string; kind: 'interrupt' | 'stop'; state: 'pending' | 'claimed' | 'completed'; sequence: number
   outcome: 'applied' | 'rejected' | null; reason: string | null; created_at: string; claimed_at: string | null; completed_at: string | null

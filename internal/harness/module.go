@@ -92,6 +92,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/drain", "harness.worker", true, 200, m.drain},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery", "harness.worker", true, 200, m.completeDelivery},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/requests", "harness.control", false, 201, m.requestSessionChange},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/interrupt", "harness.control", false, 201, m.interrupt},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/stop", "harness.control", false, 201, m.stop},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}", "harness.read", false, 200, m.control},
@@ -112,6 +113,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
+	Controls             *[]Control             `json:"controls,omitempty"`
 	ProcessOwnership     *ownedprocess.Identity `json:"process_ownership,omitempty"`
 	ProcessObservedAt    *time.Time             `json:"process_observed_at,omitempty"`
 	ArchivedAt           *time.Time             `json:"archived_at"`
@@ -663,7 +665,7 @@ func (m *Module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	return out, nil
 }
 func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), false)
+	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), true)
 	if err != nil {
 		return nil, err
 	}
@@ -712,6 +714,11 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err = stampSessions(r.Context(), tx, []*Session{&s}); err != nil {
 		return nil, err
 	}
+	controls, err := readSessionRequests(r.Context(), tx, p, s)
+	if err != nil {
+		return nil, err
+	}
+	s.Controls = &controls
 	return s, nil
 }
 func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {

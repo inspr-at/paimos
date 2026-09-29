@@ -11,6 +11,7 @@ import AppIcon from '../AppIcon.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
 import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
+import SessionRequests from './SessionRequests.vue'
 import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
 import ProvenanceDetail from './ProvenanceDetail.vue'
@@ -258,7 +259,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <SessionMessages :messages="messages" :session-id="view.session.id" :principal-id="view.session.agent_principal_id" :address="address" :now="now" :can-reply="canWrite && !composeBlock" @reply="replyTo = $event" />
     </div>
 
-    <footer v-if="view && !loading && address" class="composer">
+    <footer v-if="view && !loading && (address || view.session.management_mode === 'unmanaged')" class="composer">
+      <SessionRequests v-if="view.session.management_mode === 'unmanaged'" :key="view.session.id" :session="view.session" :now="now" />
       <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
       <form v-else class="compose" @submit.prevent="send">
         <p v-if="replyTo" class="replying"><span>Replying to “{{ replyTo.body.slice(0, 80) }}{{ replyTo.body.length > 80 ? '…' : '' }}”</span><button type="button" class="icon-btn sm flat" aria-label="Cancel the reply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
