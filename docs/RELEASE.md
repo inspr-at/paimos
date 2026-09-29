@@ -122,18 +122,31 @@ TENANT_UUID -project AEON_PROJECT_UUID`. A run with no exports imports only
 authoritative snapshots already in local tags and reports missing versions.
 Alternatively, save an authorized PPM `GET /api/releases` response, record that
 workspace's `tenant_id` and `project_node_id` on the saved file, and pass
-`-history HISTORY.json -tenant TENANT_UUID -project AEON_PROJECT_UUID`. The two
-identifiers must match the flags; a file for another workspace is rejected.
-This consumes only `database-snapshot` or immutable tag-snapshot notes, never
-`changes.linked_tickets`. It records each ticket's group, including a group the
-server derived from the live classification when the snapshot itself had none.
-Never substitute live ticket fields, release PR bodies or pills.tsv files for
-missing snapshots. Existing tags and artifacts stay unchanged; the new binary
-carries the backfill. Migration `0997` captures future groups alongside the five
-note fields. Older snapshots have no group. Serving those takes only the group
-from the ticket's current classification (a bug is a fix, the same rule as
-AEON-289). The captured pill and benefit stay frozen. The history export above
-records that group, so other workspaces see Fixes from the embedded notes.
+`-history HISTORY.json -tenant TENANT_UUID -project AEON_PROJECT_UUID`. Prefer
+`-history` over `-snapshots` for backfill. A snapshot file from before group
+storage has no group, and packnotes cannot derive one offline; those embedded
+items then take a group from the viewing tenant's own tickets, which usually
+means Features. `-history` records the group the serving workspace already
+derived. The two identifiers must match the flags; a file for another workspace
+is rejected. This consumes only `database-snapshot` or immutable tag-snapshot
+notes, never `changes.linked_tickets`. It records each ticket's group, including
+a group the server derived from the live classification when the snapshot itself
+had none. Never substitute live ticket fields, release PR bodies or pills.tsv
+files for missing snapshots. Existing tags and artifacts stay unchanged; the new
+binary carries the backfill. Migration `0997` captures future groups alongside
+the five note fields. Older snapshots have no group. Serving those classifies
+every commit ticket from the current classification, not only the tickets the
+capture tells: a hidden bug, a ticket with no pill or benefit, and a commit
+ticket that was not a release member. A bug is a fix and a visible benefit is a
+feature, the same rule as AEON-289. Only those two facts are read. The captured
+pill and benefit stay frozen, and live pill or benefit text never enters
+`linked_tickets`. The history export above records that group, so other
+workspaces see Fixes from the embedded notes.
+
+A release with no capture uses that same classification for `changes[].group`.
+It loses live-text Highlights by design: the no-live-text rule keeps pill and
+benefit text out of the response, so Highlights has nothing to show until a
+capture exists. Compare still follows the classified group.
 
 `internal/releasehistory/generate` also reads legacy `release-notes/VERSION.json`
 files **from their matching annotated Git tags**, including under `-offline`.
@@ -243,11 +256,13 @@ English and German. The release detail shows them as a compact header above the
 blocks every release shows: Features and Fixes with one block per ticket (the
 pill as heading, the key, the benefit sentence and its commits folded), then
 Other changes. A captured or backfilled snapshot decides which tickets are told
-and their text; without one, the tickets linked from the commits do. A ticket is
-a fix when it is a bug (the served change group), else when its commits are only
-`fix:`; otherwise a feature. The release list shows version, date and theme, or
-the pills. A release without a presentation has no header. The Git tag message
-is evidence, never a title; "Notes written after release" is one muted line.
+and their text. Without a capture, Aeon does not fill Highlights from live
+ticket text: that is the no-live-text rule. Compare still uses the served change
+group. A ticket is a fix when it is a bug (the served change group), else when
+its commits are only `fix:`; otherwise a feature. The release list shows version,
+date and theme, or the pills. A release without a presentation has no header.
+The Git tag message is evidence, never a title; "Notes written after release"
+is one muted line.
 
 Presentations live in `release_presentations` (migration `0945`), keyed by
 tenant, product project and calendar version, protected by tenant RLS and project

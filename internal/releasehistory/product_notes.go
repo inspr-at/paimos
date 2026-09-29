@@ -189,13 +189,16 @@ func withProductNotes(h History, bundle ProductNotes) History {
 }
 
 // withFrozenGroups makes the selected snapshot the only ticket text source.
-// A missing capture leaves commit-derived groups. A capture without a group
-// takes only the group from live: a bug is fixes, a visible benefit is features.
+// A capture that already records a group keeps it. A capture without a group,
+// and a release with no capture, take only the group from live for every
+// commit ticket that has no frozen group: a bug is fixes, a visible benefit
+// is features. Live pill and benefit text is not attached.
 func withFrozenGroups(h History, live map[string]TicketMeta) History {
 	out := h
 	out.Releases = make([]Release, len(h.Releases))
 	for i, rel := range h.Releases {
 		meta := map[string]TicketMeta{}
+		classifyCommits := !captureHasGroup(rel)
 		if HasSnapshot(rel) && rel.Notes != nil {
 			rel.Notes = applyClassification(rel.Notes, live)
 		}
@@ -213,6 +216,9 @@ func withFrozenGroups(h History, live map[string]TicketMeta) History {
 					meta[item.Key] = TicketMeta{Bug: item.Group == GroupFixes, PublicBenefit: item.Group == GroupFeatures, Note: &note}
 				}
 			}
+		}
+		if classifyCommits {
+			meta = mergeCommitClassification(rel, meta, live)
 		}
 		// Clear annotations from earlier readers before deriving from the capture.
 		rel.Changes = append([]Change{}, rel.Changes...)
@@ -306,25 +312,89 @@ func cloneNotes(n *Notes) *Notes {
 	return &c
 }
 
-func unclassifiedTicketKeys(h History) []string {
-	var keys []string
-	for _, rel := range h.Releases {
-		if !HasSnapshot(rel) || rel.Notes == nil {
-			continue
-		}
-		if rel.Notes.PublicItems != nil {
-			for _, item := range rel.Notes.PublicItems {
-				if item.Group == "" {
-					keys = append(keys, item.Key)
-				}
+// captureHasGroup reports a capture that already stored at least one group.
+// A missing capture, and a capture whose items have no group, are false.
+func captureHasGroup(rel Release) bool {
+	if !HasSnapshot(rel) || rel.Notes == nil {
+		return false
+	}
+	if rel.Notes.PublicItems != nil {
+		for _, item := range rel.Notes.PublicItems {
+			if item.Group != "" {
+				return true
 			}
-			continue
 		}
-		for _, item := range rel.Notes.Items {
+		return false
+	}
+	for _, item := range rel.Notes.Items {
+		if item.Group != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func unclassifiedCapturedKeys(rel Release) []string {
+	if !HasSnapshot(rel) || rel.Notes == nil {
+		return nil
+	}
+	var keys []string
+	if rel.Notes.PublicItems != nil {
+		for _, item := range rel.Notes.PublicItems {
 			if item.Group == "" {
 				keys = append(keys, item.Key)
 			}
 		}
+		return keys
+	}
+	for _, item := range rel.Notes.Items {
+		if item.Group == "" {
+			keys = append(keys, item.Key)
+		}
+	}
+	return keys
+}
+
+// classificationLookupKeys is the live classification query. A capture that
+// already has a group is asked only for its still-unclassified told tickets.
+// A capture with no group, and a release with no capture, are asked for every
+// commit ticket, plus any told ticket the commits do not name.
+func classificationLookupKeys(h History) []string {
+	var keys []string
+	for _, rel := range h.Releases {
+		if captureHasGroup(rel) {
+			keys = append(keys, unclassifiedCapturedKeys(rel)...)
+			continue
+		}
+		for _, change := range rel.Changes {
+			keys = append(keys, change.Tickets...)
+		}
+		keys = append(keys, unclassifiedCapturedKeys(rel)...)
 	}
 	return uniqueTicketKeys(keys)
+}
+
+// mergeCommitClassification fills groups for commit tickets the capture did
+// not already classify. Bug and PublicBenefit are kept; Note is cleared so
+// live pill and benefit text cannot reach linked_tickets.
+func mergeCommitClassification(rel Release, meta map[string]TicketMeta, live map[string]TicketMeta) map[string]TicketMeta {
+	if len(live) == 0 {
+		return meta
+	}
+	if meta == nil {
+		meta = map[string]TicketMeta{}
+	}
+	for _, change := range rel.Changes {
+		for _, key := range change.Tickets {
+			if _, ok := meta[key]; ok {
+				continue
+			}
+			m, ok := live[key]
+			if !ok {
+				continue
+			}
+			meta[key] = TicketMeta{Bug: m.Bug, PublicBenefit: m.PublicBenefit}
+		}
+	}
+	return meta
 }

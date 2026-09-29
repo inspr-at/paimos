@@ -147,9 +147,9 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 }
 
 // annotated derives Aeon's groups from the selected frozen capture. A capture
-// without a group takes only that group from the live classification. Other
-// products retain their legacy ticket source; lookup errors leave their
-// embedded history unchanged.
+// without a group, and a release with no capture, take only the group from the
+// live classification of every commit ticket. Other products retain their
+// legacy ticket source; lookup errors leave their embedded history unchanged.
 func (m *Module) annotated(ctx context.Context, h History) History {
 	if aeonHistory(h) {
 		return m.annotateAeon(ctx, h)
@@ -171,9 +171,10 @@ func (m *Module) annotated(ctx context.Context, h History) History {
 }
 
 // annotateAeon keeps captured pill and benefit text. When the capture stored
-// no group, the caller's live classification supplies features or fixes only.
+// no group, or the release has no capture, the caller's live classification
+// supplies features or fixes for every commit ticket. Live note text is dropped.
 func (m *Module) annotateAeon(ctx context.Context, h History) History {
-	keys := unclassifiedTicketKeys(h)
+	keys := classificationLookupKeys(h)
 	var live map[string]TicketMeta
 	if len(keys) > 0 && m != nil && m.tickets != nil {
 		if p, ok := tenant.PrincipalFrom(ctx); ok && p.TenantID != "" {

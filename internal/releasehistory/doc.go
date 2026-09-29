@@ -60,15 +60,17 @@
 //	                   version bump omits group. Older manifests without it stay
 //	                   valid; clients then derive the group from type. Aeon takes
 //	                   pill and benefit text only from the selected frozen capture.
-//	                   When that capture has no group, the group alone comes from
-//	                   the live classification (the same bug rule); live text is
-//	                   not read. A features or fixes change also
-//	                   carries linked_tickets: key plus pill and benefit in
-//	                   English and German, and the ticket's own group (fixes
-//	                   for a bug, else features). Hidden tickets, and tickets with no
-//	                   pill or benefit, are omitted. Later ticket edits cannot
-//	                   change the captured text. A group recorded on the capture
-//	                   stays as captured.
+//	                   When that capture has no group, or the release has no
+//	                   capture, every commit ticket takes its group from the live
+//	                   classification (a bug is fixes, a visible benefit is
+//	                   features). Only those two facts are read. Live pill and
+//	                   benefit text is not copied, so a release with no capture
+//	                   has no Highlights text: that is the no-live-text rule.
+//	                   A capture that already records a group keeps it. A features
+//	                   or fixes change carries linked_tickets only for frozen
+//	                   note text. Hidden tickets, and tickets with no pill or
+//	                   benefit, are omitted from that text. Later ticket edits
+//	                   cannot change the captured text.
 //	changes_omitted    how many more changes there were beyond the listed ones
 //	evidence           source_commit and its URL, the OCI image reference and
 //	                   digest, the CI and Release runs (URL, conclusion), the
@@ -96,8 +98,10 @@
 // project. Native journey snapshots win, followed by explicit manifest backfills,
 // then embedded tag/public notes; empty and hidden-only captures also win.
 // Note text is never taken from live ticket fields, and reads never contact
-// the network. When a capture has no group, Aeon reads the live classification
-// only (bug tag, type or kind) and ignores the live pill and benefit.
+// the network. When a capture has no group, or the release has none, Aeon
+// reads the live classification of every commit ticket (bug tag, type or kind,
+// or a visible benefit) and ignores the live pill and benefit. A release
+// without a capture therefore loses live-text Highlights by design.
 // Portable notes use the additive notes.public_items without tenant-local UUIDs;
 // notes.items retains its original API contract. Other products can still opt
 // into the legacy TicketSource annotation for both group and text.

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -321,6 +322,138 @@ func TestGrouplessCaptureUsesLiveClassification(t *testing.T) {
 		if item.Key == "AEON-7" && item.Group != "" {
 			t.Fatal("lookup failure invented a group")
 		}
+	}
+}
+
+func TestGrouplessAndUncapturedCommitsMatchBaseGroups(t *testing.T) {
+	at := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+	s := noteFixture()
+	s.Tickets = []NoteTicket{
+		{ID: "44444444-4444-4444-8444-444444444411", Key: "AEON-11", Position: 1, UpdatedAt: &at, Fields: json.RawMessage(`{"tags":["bug"],"pill_en":"Frozen bug","benefit_en":"Captured bug."}`)},
+		{ID: "55555555-5555-4555-8555-555555555512", Key: "AEON-12", Position: 2, UpdatedAt: &at, Fields: json.RawMessage(`{"hide_from_release_notes":true,"tags":["bug"],"pill_en":"HIDDEN BUG TEXT","benefit_en":"HIDDEN BENEFIT"}`)},
+		{ID: "66666666-6666-4666-8666-666666666613", Key: "AEON-13", Position: 3, UpdatedAt: &at, Fields: json.RawMessage(`{"tags":["bug"]}`)},
+	}
+	raw, _ := json.Marshal(s)
+	notes, err := NotesFromSnapshot(raw, notesVersion, "database-snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes.Items) != 1 || notes.Items[0].Key != "AEON-11" || notes.Items[0].Group != "" || notes.Hidden != 1 {
+		t.Fatalf("capture %+v", notes)
+	}
+	frozen := noteFixture()
+	frozen.Version = "260926120000.0.0"
+	frozen.Tickets = []NoteTicket{{ID: "77777777-7777-4777-8777-777777777720", Key: "AEON-20", Position: 1, UpdatedAt: &at, Group: GroupFixes, Fields: json.RawMessage(`{"pill_en":"Frozen kept","benefit_en":"Stays a fix."}`)}}
+	raw, _ = json.Marshal(frozen)
+	kept, err := NotesFromSnapshot(raw, frozen.Version, "database-snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := History{Schema: Schema, Product: "PAIMOS AEON", Repository: "inspr-at/paimos", Releases: []Release{
+		{Version: notesVersion, Notes: notes, Changes: []Change{
+			{Commit: "a", Subject: "AEON-11: told bug", Type: "other", Tickets: []string{"AEON-11"}},
+			{Commit: "b", Subject: "AEON-12: hidden bug", Type: "other", Tickets: []string{"AEON-12"}},
+			{Commit: "c", Subject: "AEON-13: textless bug", Type: "other", Tickets: []string{"AEON-13"}},
+			{Commit: "d", Subject: "AEON-14: not a member", Type: "other", Tickets: []string{"AEON-14"}},
+		}},
+		{Version: "260927120000.0.0", Notes: MissingNotes(), Changes: []Change{
+			{Commit: "e", Subject: "AEON-15: bug without a capture", Type: "other", Tickets: []string{"AEON-15"}},
+			{Commit: "f", Subject: "AEON-16: benefit without a capture", Type: "other", Tickets: []string{"AEON-16"}},
+		}},
+		{Version: frozen.Version, Notes: kept, Changes: []Change{
+			{Commit: "g", Subject: "AEON-20: frozen group", Type: "other", Tickets: []string{"AEON-20"}},
+			{Commit: "h", Subject: "AEON-99: outside a grouped capture", Type: "other", Tickets: []string{"AEON-99"}},
+		}},
+	}}
+	liveNote := func(pill string) *TicketNote {
+		return &TicketNote{PillEN: pill, BenefitEN: "LIVE BENEFIT"}
+	}
+	live := map[string]TicketMeta{
+		"AEON-11": {Bug: true, Note: liveNote("LIVE TOLD")},
+		"AEON-12": {Bug: true, Note: liveNote("LIVE HIDDEN")},
+		"AEON-13": {Bug: true, Note: liveNote("LIVE TEXTLESS")},
+		"AEON-14": {PublicBenefit: true, Note: liveNote("LIVE NONMEMBER")},
+		"AEON-15": {Bug: true, Note: liveNote("LIVE NOCAPTURE")},
+		"AEON-16": {PublicBenefit: true, Note: liveNote("LIVE BENEFIT ONLY")},
+		"AEON-20": {PublicBenefit: true, Note: liveNote("LIVE KEPT")},
+		"AEON-99": {Bug: true, Note: liveNote("LIVE OUTSIDE")},
+	}
+	// The base classified the same live facts with GroupChange, including note text.
+	base := withGroups(h, live)
+	mod := NewWith(h, notesVersion)
+	var keys []string
+	mod.UseTickets(func(_ context.Context, tenantID string, got []string) (map[string]TicketMeta, error) {
+		if tenantID != "11111111-1111-4111-8111-111111111111" {
+			t.Errorf("tenant %s", tenantID)
+		}
+		keys = append([]string{}, got...)
+		return live, nil
+	})
+	ctx := tenant.WithPrincipal(t.Context(), tenant.Principal{ID: "22222222-2222-4222-8222-222222222222", TenantID: "11111111-1111-4111-8111-111111111111", Kind: tenant.Person})
+	got := mod.annotated(ctx, h)
+	seen := map[string]bool{}
+	for _, key := range keys {
+		seen[key] = true
+	}
+	for _, key := range []string{"AEON-11", "AEON-12", "AEON-13", "AEON-14", "AEON-15", "AEON-16"} {
+		if !seen[key] {
+			t.Fatalf("lookup missed %s in %v", key, keys)
+		}
+	}
+	if seen["AEON-99"] || seen["AEON-20"] {
+		t.Fatalf("lookup reached a capture that already has a group: %v", keys)
+	}
+	body, _ := json.Marshal(got)
+	for _, leaked := range []string{"LIVE", "HIDDEN"} {
+		if strings.Contains(string(body), leaked) {
+			t.Fatalf("live text %q entered the response", leaked)
+		}
+	}
+	byCommit := func(rel Release) map[string]Change {
+		out := map[string]Change{}
+		for _, change := range rel.Changes {
+			out[change.Commit] = change
+		}
+		return out
+	}
+	// The base is live classification of every commit ticket. A capture that
+	// already stored a group is not that case: its frozen group stays put.
+	for i, rel := range got.Releases[:2] {
+		want := byCommit(base.Releases[i])
+		for _, change := range rel.Changes {
+			if change.Group != want[change.Commit].Group {
+				t.Fatalf("commit %s group %q, base %q", change.Commit, change.Group, want[change.Commit].Group)
+			}
+		}
+	}
+	groupless := byCommit(got.Releases[0])
+	if groupless["a"].Group != GroupFixes || len(groupless["a"].Linked) != 1 || groupless["a"].Linked[0].PillEN != "Frozen bug" {
+		t.Fatalf("told bug %+v", groupless["a"])
+	}
+	if groupless["b"].Group != GroupFixes || groupless["b"].Linked != nil || groupless["c"].Group != GroupFixes || groupless["c"].Linked != nil {
+		t.Fatalf("hidden/textless %+v %+v", groupless["b"], groupless["c"])
+	}
+	if groupless["d"].Group != GroupFeatures || groupless["d"].Linked != nil {
+		t.Fatalf("non-member %+v", groupless["d"])
+	}
+	plain := byCommit(got.Releases[1])
+	if plain["e"].Group != GroupFixes || plain["e"].Linked != nil || plain["f"].Group != GroupFeatures || plain["f"].Linked != nil {
+		t.Fatalf("no capture %+v %+v", plain["e"], plain["f"])
+	}
+	grouped := byCommit(got.Releases[2])
+	if grouped["g"].Group != GroupFixes || len(grouped["g"].Linked) != 1 || grouped["g"].Linked[0].PillEN != "Frozen kept" || grouped["h"].Group != GroupOther || grouped["h"].Linked != nil {
+		t.Fatalf("frozen capture %+v %+v", grouped["g"], grouped["h"])
+	}
+	if h.Releases[0].Notes.Items[0].Group != "" {
+		t.Fatal("mutated the stored capture")
+	}
+	failed := NewWith(h, notesVersion)
+	failed.UseTickets(func(context.Context, string, []string) (map[string]TicketMeta, error) {
+		return nil, errors.New("lookup failed")
+	})
+	down := failed.annotated(ctx, h)
+	if byCommit(down.Releases[0])["b"].Group == GroupFixes || down.Releases[0].Notes.Items[0].Group != "" {
+		t.Fatal("lookup failure invented a group")
 	}
 }
 
