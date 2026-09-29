@@ -11,6 +11,7 @@ import FloatingPanel from '../work/FloatingPanel.vue'
 import ConnectHint from './ConnectHint.vue'
 import { isStale, useSessionRemoval } from './sessionRemoval'
 import AgentStateLabel from './AgentStateLabel.vue'
+import ListeningLabel from './ListeningLabel.vue'
 import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
 import AgentGlyph from './AgentGlyph.vue'
@@ -208,7 +209,7 @@ function rowClick(event: MouseEvent, id: string) {
             <span v-for="(continues, level) in guides" :key="level" class="tree-guide" :class="{ continues, elbow: level === depth - 1, last: level === depth - 1 && !continues }" :style="{ '--level': level }" />
             <span v-if="open" class="tree-stem" :style="{ '--level': depth }" />
           </span>
-          <span role="cell" class="c-state"><AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="pendingLabel(view)" /></span>
+          <span role="cell" class="c-state"><AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="pendingLabel(view)" /><ListeningLabel class="state-listen" :session="view.session" :now="now" compact /></span>
           <span role="cell" class="c-agent">
             <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
             <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}${view.session.role === 'coordinator' ? ', lead' : ''}. ${primary}. ${context}`">
@@ -248,6 +249,7 @@ function rowClick(event: MouseEvent, id: string) {
           <span role="cell" class="right c-beat">
             <time v-if="view.session.heartbeat_at" :datetime="view.session.heartbeat_at">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time>
             <span v-else class="faint">never</span>
+            <ListeningLabel class="beat-listen" :session="view.session" :now="now" compact />
           </span>
           <span role="cell" class="right c-elapsed mono-cell">{{ elapsed(view.session, now) }}</span>
           <span role="cell" class="c-actions">
@@ -370,6 +372,10 @@ function rowClick(event: MouseEvent, id: string) {
 .ticket-chip:hover { filter: brightness(1.04); text-decoration: underline; }
 .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
 .row .c-beat { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+/* Listening sits under the state word on wide rows and under the heartbeat on phones. */
+.row .c-state:has(.state-listen) { display: grid; justify-items: start; gap: 3px; }
+.state-listen { padding-left: 1px; }
+.row .beat-listen { display: none; }
 .row .c-elapsed { font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .faint { color: var(--ink-3); }
 .mono-cell { font-family: var(--mono); font-variant-ligatures: none; }
@@ -432,6 +438,9 @@ function rowClick(event: MouseEvent, id: string) {
   .row > .c-ticket { padding-block: 0; }
   .c-exec { grid-area: exec; min-width: 0; }
   .c-beat { display: block; grid-area: beat; }
+  .row .c-beat:has(.beat-listen) { display: grid; justify-items: end; gap: 2px; }
+  .row .beat-listen { display: inline-flex; }
+  .row .state-listen { display: none; }
   .c-elapsed { display: none; }
   .row > .c-actions { grid-area: actions; grid-row: 1 / span 3; align-self: center; justify-content: center; padding: 0; }
   .act { display: none; }

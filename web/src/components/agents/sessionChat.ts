@@ -3,11 +3,11 @@
 // watermark per session, and delivery receipt wording. The watermark is the highest
 // sent_event_id this person has had in view; it lives in this browser only until
 // the server offers a per-person read marker.
+import type { MessageStatus } from '../../lib/agents.ts'
 import type { MessageGroup } from './sessionMessages.ts'
 
 export type SessionTab = 'overview' | 'messages'
 export interface ReadMark { event: number; id: string; at: number }
-export interface InboxReceipt { message_id: string; state: 'queued' | 'handed_off' | 'failed'; handed_off_at: string | null; failure_reason: string }
 
 const TAB_KEY = 'aeon.session-tab'
 const READ_KEY = 'aeon.session-read.v1'
@@ -60,11 +60,29 @@ export function unreadGroups(items: MessageGroup[], me: string, mark: ReadMark |
   return items.filter(m => m.sender_principal_id !== me && m.last_event > floor)
 }
 
-export function receiptTip(receipt: InboxReceipt, format: (iso: string) => string): string {
-  if (receipt.state === 'handed_off') return receipt.handed_off_at ? `Picked up by the session · ${format(receipt.handed_off_at)}` : 'Picked up by the session'
-  if (receipt.state === 'failed') return `Not delivered${receipt.failure_reason ? ` · ${receipt.failure_reason.replaceAll('_', ' ')}` : ''}`
-  return 'Sent · waiting for the session to pick it up'
+// Delivery progress of the viewer's own posts (AEON-280): Sent, Delivered (the
+// session pulled it), Read (the session confirmed it) or Not delivered, loudly.
+const REASON: Record<string, string> = {
+  deadline: 'not confirmed in time', attempts: 'every attempt failed', session_ended: 'the session ended', no_listener: 'the session was not listening',
 }
+export const reasonText = (reason?: string) => reason ? REASON[reason] ?? reason.replaceAll('_', ' ') : ''
+export function statusLabel(status: MessageStatus): string {
+  switch (status.status) {
+    case 'read': return 'Read'
+    case 'delivered': return 'Delivered'
+    case 'not_delivered': return status.reason ? `Not delivered · ${reasonText(status.reason)}` : 'Not delivered'
+    default: return 'Sent'
+  }
+}
+export function statusTip(status: MessageStatus, format: (iso: string) => string): string {
+  switch (status.status) {
+    case 'read': return status.read_at ? `Read by the session · ${format(status.read_at)}` : 'Read by the session'
+    case 'delivered': return status.delivered_at ? `Delivered to the session · ${format(status.delivered_at)}` : 'Delivered to the session'
+    case 'not_delivered': return 'It will not arrive later. Send it again once the session is listening.'
+    default: return 'Sent · waiting for the session to pick it up'
+  }
+}
+export const statusDone = (status?: MessageStatus) => status?.status === 'read' || status?.status === 'not_delivered'
 
 // Within this distance of the end the thread counts as read to the bottom.
 export const nearBottom = (el: { scrollHeight: number; scrollTop: number; clientHeight: number }, slack = 32) =>

@@ -26,6 +26,8 @@ export interface HarnessSession {
   phase: 'starting' | 'working' | 'yielded' | 'stopping' | 'stopped'; activity: 'unknown' | 'busy' | 'idle' | 'throttled'
   run_status?: string | null; needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]; activity_sequence: number; revision: number; heartbeat_at: string | null; stopped_at: string | null; stop_reason: string | null; created_at: string
   eta_ready_at?: string | null; eta_live_at?: string | null; progress_pct?: number | null; eta_reported_at?: string | null; eta_stale?: boolean
+  // AEON-280: the last inbox pull of this generation; absent until it pulls once.
+  inbox_seen_at?: string | null; inbox_seen_via?: 'hook' | 'drain' | 'long_poll' | 'stream' | 'ack' | null
   // The tenant-wide list adds node summaries (B7) and the agent principal's name (U13).
   project?: NodeSummary; ticket?: NodeSummary | null; agent?: { id: string; name: string } | null
 }
@@ -140,6 +142,9 @@ export const listMessages = (projectId: string, params: { newest_first?: boolean
 export const resolveMessage = (projectId: string, messageId: string, decision: HeldResolution['decision'], note: string) =>
   request<HeldResolution>(`/projects/${enc(projectId)}/messages/${enc(messageId)}/resolution`, 'POST', { decision, note })
 export const sendMessage = (projectId: string, body: MessageSend) => request<ProjectMessage>(`/projects/${enc(projectId)}/messages`, 'POST', body)
+// AEON-280: the sender's delivery progress per message (sender-only; others omitted).
+export interface MessageStatus { message_id: string; status: 'sent' | 'delivered' | 'read' | 'not_delivered'; reason?: string; delivered_at: string | null; read_at: string | null; deliver_by: string | null }
+export const messageStatuses = (ids: string[]) => request<{ items: MessageStatus[] }>(`/inbox/message-status?ids=${ids.map(enc).join(',')}`)
 
 export const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed. Please retry.'
 
@@ -155,11 +160,15 @@ export function paceFraction(model: AllowanceWrite['pace_model'], elapsed: numbe
 // periodic refresh; registration/stop and reconnect wake the consumer immediately.
 const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'control_requested', 'control_claimed', 'control_completed']
 const OTHER_EVENTS = ['approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved']
-export function subscribeAgents(changed: () => void, connection: (live: boolean) => void = () => {}): () => void {
+// Delivery progress of sent messages (AEON-280). These only refresh message
+// status, never the whole workspace.
+export const DELIVERY_EVENTS = ['inbox.message_fetched', 'inbox.receipt_handed_off', 'inbox.receipt_failed', 'inbox.delivery_failed']
+export function subscribeAgents(changed: () => void, connection: (live: boolean) => void = () => {}, delivery: () => void = () => {}): () => void {
   if (typeof EventSource === 'undefined') return () => {}
   const stream = new EventSource('/api/events/stream')
-  stream.onopen = () => { connection(true); changed() }
+  stream.onopen = () => { connection(true); changed(); delivery() }
   stream.onerror = () => connection(false)
   for (const name of [...HARNESS_EVENTS.map(kind => `harness.${kind}`), ...OTHER_EVENTS]) stream.addEventListener(name, changed)
+  for (const name of DELIVERY_EVENTS) stream.addEventListener(name, () => delivery())
   return () => stream.close()
 }

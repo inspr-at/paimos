@@ -47,14 +47,18 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; count?: nu
     sessionStorage.setItem('seeded', '1')
   }, options.storage)
   const calls = await mockAgents(page, data)
+  // AEON-280: one batched, sender-only status read replaces the per-message receipt.
   const receipts: string[] = []
-  await page.route('**/api/inbox/messages/*/receipt', route => {
-    const id = route.request().url().split('/').at(-2)!
-    receipts.push(id)
-    const index = messages.findIndex(m => m.id === id)
-    if (index < 0) return route.fulfill({ status: 404, json: { error: 'not found' } })
-    const handed = index < count - 3
-    return route.fulfill({ json: { message_id: id, state: handed ? 'handed_off' : 'queued', handed_off_at: handed ? new Date(now - 60_000).toISOString() : null, failure_reason: '' } })
+  await page.route('**/api/inbox/message-status?*', route => {
+    const ids = new URL(route.request().url()).searchParams.get('ids')!.split(',')
+    receipts.push(...ids)
+    const items = ids.flatMap(id => {
+      const index = messages.findIndex(m => m.id === id)
+      if (index < 0) return []
+      const read = index < count - 3
+      return [{ message_id: id, status: read ? 'read' : 'sent', delivered_at: read ? new Date(now - 90_000).toISOString() : null, read_at: read ? new Date(now - 60_000).toISOString() : null, deliver_by: new Date(now + 240_000).toISOString() }]
+    })
+    return route.fulfill({ json: { items } })
   })
   return { data, worker, calls, messages, receipts }
 }
@@ -185,13 +189,14 @@ test('the thread stays pinned at the bottom, counts posts that arrive while scro
   await shot(page, 'focused-390')
 })
 
-test('own posts show quiet delivery ticks from the sender receipt', async ({ page }) => {
+test('own posts show quiet delivery ticks from the sender status', async ({ page }) => {
   const { worker, receipts, messages } = await setup(page, { count: 9, storage: { 'aeon.session-tab': 'messages' } })
   await page.goto(`/agents/${worker.id}`)
   const mine = panelOf(page).locator('.msg.mine')
   await expect(mine).toHaveCount(3)
-  await expect(mine.first().locator('.tick.handed_off')).toHaveAttribute('data-tip', /^Picked up by the session · /)
-  await expect(mine.last().locator('.tick.queued')).toHaveAttribute('data-tip', 'Sent · waiting for the session to pick it up')
+  await expect(mine.first().locator('.delivery.read')).toHaveAttribute('data-tip', /^Read by the session · /)
+  await expect(mine.first().locator('.delivery.read')).toContainText('Read')
+  await expect(mine.last().locator('.delivery.sent')).toHaveAttribute('data-tip', 'Sent · waiting for the session to pick it up')
   // Only the viewer's own posts are asked for, never the agent's.
   const own = new Set(messages.filter(m => m.sender_principal_id === me.id).map(m => m.id))
   expect(receipts.length).toBeGreaterThan(0)

@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { APIError, api } from '../../lib/api'
-import type { ProjectMessage } from '../../lib/agents'
+import { APIError } from '../../lib/api'
+import { messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
 import { attentionReasonText } from '../../lib/agentSignals'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
@@ -10,7 +10,7 @@ import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import { belongsToSession, collapseMessages } from './sessionMessages'
-import { loadReadMark, nearBottom, saveReadMark, unreadGroups, type InboxReceipt, type ReadMark } from './sessionChat'
+import { loadReadMark, nearBottom, saveReadMark, statusDone, unreadGroups, type ReadMark } from './sessionChat'
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
@@ -144,25 +144,29 @@ onMounted(() => {
 })
 onBeforeUnmount(() => { seen?.disconnect(); resize?.disconnect(); document.removeEventListener('visibilitychange', visibility) })
 
-// ---------- Receipts for the viewer's own posts (sender only; 404 means none) ----------
-const receipts = ref<Record<string, InboxReceipt>>({})
-const noReceipt = new Set<string>()
-let receiptFlight: Promise<void> | undefined
+// ---------- Delivery status of the viewer's own posts (sender only, AEON-280) ----------
+// One batched read; delivery events re-read it live, finished posts are not asked again.
+const statuses = ref<Record<string, MessageStatus>>({})
+let statusFlight: Promise<void> | undefined
+let statusAgain = false
 function refreshReceipts() {
-  if (receiptFlight || !props.active || !me.value) return
-  const todo = current.value.filter(m => m.sender_principal_id === me.value).slice(-8)
-    .filter(m => !noReceipt.has(m.id) && !['handed_off', 'failed'].includes(receipts.value[m.id]?.state ?? ''))
+  if (!props.active || !me.value) return
+  if (statusFlight) { statusAgain = true; return }
+  const todo = current.value.filter(m => m.sender_principal_id === me.value).slice(-30)
+    .filter(m => !statusDone(statuses.value[m.id])).map(m => m.id)
   if (!todo.length) return
   const session = s.value.id
-  receiptFlight = Promise.all(todo.map(async m => {
-    try {
-      const response = await api(`/inbox/messages/${encodeURIComponent(m.id)}/receipt`)
-      if (!response.ok) { if (response.status < 500) noReceipt.add(m.id); return }
-      const receipt = await response.json() as InboxReceipt
-      if (s.value.id === session) receipts.value = { ...receipts.value, [m.id]: receipt }
-    } catch { /* The tick simply stays away. */ }
-  })).then(() => undefined).finally(() => { receiptFlight = undefined })
+  statusFlight = messageStatuses(todo).then(page => {
+    if (s.value.id !== session) return
+    const next = { ...statuses.value }
+    for (const item of page.items) next[item.message_id] = item
+    statuses.value = next
+  }).catch(() => { /* The status simply stays as it was. */ }).finally(() => {
+    statusFlight = undefined
+    if (statusAgain) { statusAgain = false; refreshReceipts() }
+  })
 }
+watch(() => agents.deliveryPulse, () => refreshReceipts())
 
 // ---------- Load and live refresh ----------
 let refreshedAt = 0
@@ -172,7 +176,7 @@ async function refresh() {
 }
 watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
   mark.value = viewer ? loadReadMark(viewer, id) : null
-  receipts.value = {}; noReceipt.clear()
+  statuses.value = {}
   entered = false; loaded = false; newFrom.value = undefined; distance.value = 0; stick = true
   draft.value = ''; replyTo.value = null; sendError.value = ''
   await refresh()
@@ -222,7 +226,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
           <p v-for="note in inboxNotes" :key="note.code"><AppIcon name="inbox" :size="13" />{{ note.text }}</p>
         </section>
         <SessionMessages :messages="messages" :session-id="s.id" :principal-id="s.agent_principal_id" :address="address" :now="now"
-          :can-reply="canWrite && !composeBlock && !managed" :new-from="newFrom" :new-count="newCount" :receipts="receipts" @reply="reply" />
+          :can-reply="canWrite && !composeBlock && !managed" :new-from="newFrom" :new-count="newCount" :statuses="statuses" @reply="reply" />
       </div>
       <Transition name="jump">
         <button v-if="jump" type="button" class="jump" :class="{ labelled: below > 0 }"
