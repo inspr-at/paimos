@@ -8,8 +8,10 @@ import (
 	"encoding/hex"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 )
@@ -25,6 +27,12 @@ import (
 // A label needs a value with a credential's shape after it: quoted, or one
 // token with enough length and character mix, or a known key prefix. File
 // names and paths are never credentials.
+//
+// Provider key formats come from the gitleaks default rule set, vendored in
+// gitleaks/ and turned into gitleaks_rules.go; they apply in addition to the
+// label and value heuristics here.
+
+//go:generate go run ./gitleaks/generate.go -tag v8.30.1
 
 // SensitiveRange is one suspected credential in a learning field, in Unicode
 // code points. Only positions are returned, never the text.
@@ -40,20 +48,25 @@ type span struct{ start, end int }
 type spanPattern struct {
 	re    *regexp.Regexp
 	group int
+	needs []string // runs only when the lower-case text holds one of these
 }
 
 // Shapes that are credentials wherever they appear.
 var fixedPatterns = []spanPattern{
 	// Provider keys and tokens by prefix.
-	{regexp.MustCompile(`(?:^|[^A-Za-z0-9])((?:sk-(?:proj-|ant-|live-|test-)?[A-Za-z0-9_-]{16,}|sk_(?:live|test)_[A-Za-z0-9]{16,}|rk_(?:live|test)_[A-Za-z0-9]{16,}|xai-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{16,}|xox[abeoprs]-[A-Za-z0-9-]{10,}|ya29\.[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z_-]{30,}|aeon_[A-Za-z0-9_]{16,}|npm_[A-Za-z0-9]{30,}|hf_[A-Za-z0-9]{30,}))`), 1},
+	{regexp.MustCompile(`(?:^|[^A-Za-z0-9])((?:sk-(?:proj-|ant-|live-|test-)?[A-Za-z0-9_-]{16,}|sk_(?:live|test)_[A-Za-z0-9]{16,}|rk_(?:live|test)_[A-Za-z0-9]{16,}|xai-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{16,}|xox[abeoprs]-[A-Za-z0-9-]{10,}|ya29\.[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z_-]{30,}|aeon_[A-Za-z0-9_]{16,}|npm_[A-Za-z0-9]{30,}|hf_[A-Za-z0-9]{30,}))`), 1,
+		[]string{"sk-", "sk_", "rk_", "xai-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "glpat-", "xox", "ya29.", "aiza", "aeon_", "npm_", "hf_"}},
 	// AWS access key ids.
-	{regexp.MustCompile(`(?:^|[^A-Za-z0-9])((?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16})(?:[^A-Za-z0-9]|$)`), 1},
+	{regexp.MustCompile(`(?:^|[^A-Za-z0-9])((?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16})(?:[^A-Za-z0-9]|$)`), 1, []string{"akia", "asia", "abia", "acca"}},
 	// JSON web tokens.
-	{regexp.MustCompile(`eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`), 0},
+	{regexp.MustCompile(`eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`), 0, []string{"eyj"}},
 	// PEM blocks: private keys, certificates, anything armoured.
-	{regexp.MustCompile(`-----BEGIN [A-Z0-9 ]+-----(?s:.*?)(?:-----END [A-Z0-9 ]+-----|$)`), 0},
+	{regexp.MustCompile(`-----BEGIN [A-Z0-9 ]+-----(?s:.*?)(?:-----END [A-Z0-9 ]+-----|$)`), 0, []string{"-----begin "}},
 	// Credentials in a URL.
-	{regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://([^\s/:@]+:[^\s/@]+)@`), 1},
+	{regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://([^\s/:@]+:[^\s/@]+)@`), 1, []string{"://"}},
+	// Authorization values.
+	{bearerValue, 1, []string{"bearer"}},
+	{basicValue, 1, []string{"basic"}},
 }
 
 var (
@@ -62,8 +75,7 @@ var (
 	// A credential label, optionally in Markdown or quotes, and its
 	// separator: password=, **Password:**, `password`:, "api_key": .
 	credentialLabel = regexp.MustCompile("(?i)(?:^|[^A-Za-z0-9])[*_`\"']{0,3}(passw(?:or)?d|pwd|passphrase|client[_-]?secret|secret[_-]?key|secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key)[*_`\"']{0,3}[ \\t]*([:=])[*_`]{0,3}[ \\t]*")
-	// opaqueRun is a long run of token characters, the shape of a random key.
-	opaqueRun  = regexp.MustCompile(`[A-Za-z0-9+/_=-]{32,}`)
+
 	ticketKey  = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9]+$`)
 	versionish = regexp.MustCompile(`^[vV]?[0-9]+([.:/-][0-9]+)+$`)
 	envName    = regexp.MustCompile(`^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$`)
@@ -98,20 +110,24 @@ func sensitiveSpans(text string) []span {
 			spans = append(spans, span{start, end})
 		}
 	}
+	lower := strings.ToLower(text)
 	for _, p := range fixedPatterns {
+		if !slices.ContainsFunc(p.needs, func(n string) bool { return strings.Contains(lower, n) }) {
+			continue
+		}
 		for _, m := range p.re.FindAllStringSubmatchIndex(text, -1) {
-			add(m[2*p.group], m[2*p.group+1])
-		}
-	}
-	for _, m := range bearerValue.FindAllStringSubmatchIndex(text, -1) {
-		value := text[m[2]:m[3]]
-		if charClasses(value) >= 2 && !wordLike(value) && !identifierLike(value) {
-			add(m[2], m[3])
-		}
-	}
-	for _, m := range basicValue.FindAllStringSubmatchIndex(text, -1) {
-		if basicCredential(text[m[2]:m[3]]) {
-			add(m[2], m[3])
+			start, end := m[2*p.group], m[2*p.group+1]
+			switch value := text[start:end]; p.re {
+			case bearerValue:
+				if charClasses(value) < 2 || wordLike(value) || identifierLike(value) {
+					continue
+				}
+			case basicValue:
+				if !basicCredential(value) {
+					continue
+				}
+			}
+			add(start, end)
 		}
 	}
 	for _, m := range credentialLabel.FindAllStringSubmatchIndex(text, -1) {
@@ -120,13 +136,229 @@ func sensitiveSpans(text string) []span {
 			add(start, end)
 		}
 	}
-	for _, m := range opaqueRun.FindAllStringIndex(text, -1) {
-		run := text[m[0]:m[1]]
-		if highEntropy(run) && !identifierLike(run) {
-			add(m[0], m[1])
+	for _, m := range opaqueRuns(text) {
+		if run := text[m.start:m.end]; highEntropy(run) && !identifierLike(run) {
+			add(m.start, m.end)
 		}
 	}
+	leakSpans(text, lower, func(_ string, start, end int) { add(start, end) })
 	return mergeSpans(spans)
+}
+
+// opaqueRuns lists the runs of 32 or more token characters, the shape of a
+// random key.
+func opaqueRuns(text string) []span {
+	var runs []span
+	start := -1
+	for i := 0; i <= len(text); i++ {
+		if i < len(text) && tokenChar(text[i]) {
+			if start < 0 {
+				start = i
+			}
+			continue
+		}
+		if start >= 0 && i-start >= 32 {
+			runs = append(runs, span{start, i})
+		}
+		start = -1
+	}
+	return runs
+}
+
+func tokenChar(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("+/_=-", c) >= 0
+}
+
+// leakRuleSpec is one gitleaks rule as generated into gitleaks_rules.go.
+type leakRuleSpec struct {
+	id          string
+	regex       string
+	keywords    []string // lower case; the rule runs only when one occurs
+	entropy     float64  // the secret must exceed this Shannon entropy
+	secretGroup int      // 0: the first non-empty group, else the match
+	allow       []leakAllowSpec
+}
+
+// leakAllowSpec exempts a finding whose target matches one of regexes or
+// whose secret contains one of the stop words.
+type leakAllowSpec struct {
+	target    string // "" for the secret, "match" or "line"
+	regexes   []string
+	stopwords []string
+}
+
+type leakAllow struct {
+	target    string
+	re        *regexp.Regexp
+	stopwords []string
+}
+
+type leakRule struct {
+	spec     leakRuleSpec
+	re       *regexp.Regexp
+	allow    []leakAllow
+	keywords []int // into leakSet.keywords
+}
+
+type leakSet struct {
+	rules    []leakRule
+	global   leakAllow
+	keywords []string
+	// byPair indexes keywords by their first two bytes, for one pass over
+	// the text.
+	byPair map[[2]byte][]int
+}
+
+// leakRules compiles the generated rules once, on first use. The generator
+// kept only patterns that compile, and a test compiles them all.
+var leakRules = sync.OnceValue(func() *leakSet {
+	set := &leakSet{rules: make([]leakRule, len(gitleaksRules)), global: compileAllow(gitleaksGlobalAllow), byPair: map[[2]byte][]int{}}
+	index := map[string]int{}
+	for i, spec := range gitleaksRules {
+		r := leakRule{spec: spec, re: regexp.MustCompile(spec.regex)}
+		for _, a := range spec.allow {
+			r.allow = append(r.allow, compileAllow(a))
+		}
+		for _, k := range spec.keywords {
+			id, ok := index[k]
+			if !ok {
+				id = len(set.keywords)
+				index[k] = id
+				set.keywords = append(set.keywords, k)
+				pair := [2]byte{k[0]}
+				if len(k) > 1 {
+					pair[1] = k[1]
+				}
+				set.byPair[pair] = append(set.byPair[pair], id)
+			}
+			r.keywords = append(r.keywords, id)
+		}
+		set.rules[i] = r
+	}
+	return set
+})
+
+// present reports which keywords occur in the lower-case text.
+func (set *leakSet) present(lower string) []bool {
+	found := make([]bool, len(set.keywords))
+	for i := 0; i < len(lower); i++ {
+		pair := [2]byte{lower[i]}
+		if i+1 < len(lower) {
+			pair[1] = lower[i+1]
+		}
+		for _, id := range set.byPair[pair] {
+			if !found[id] && strings.HasPrefix(lower[i:], set.keywords[id]) {
+				found[id] = true
+			}
+		}
+	}
+	return found
+}
+
+func compileAllow(a leakAllowSpec) leakAllow {
+	out := leakAllow{target: a.target, stopwords: a.stopwords}
+	if len(a.regexes) > 0 {
+		out.re = regexp.MustCompile("(?:" + strings.Join(a.regexes, ")|(?:") + ")")
+	}
+	return out
+}
+
+// leakSpans applies the gitleaks rules as gitleaks does: a keyword
+// prefilter, the pattern, the secret group, the entropy floor, then the
+// global and rule allowlists. Paths stay exempt, as everywhere here.
+func leakSpans(text, lower string, add func(rule string, start, end int)) {
+	set := leakRules()
+	present := set.present(lower)
+	for _, r := range set.rules {
+		if len(r.keywords) > 0 && !slices.ContainsFunc(r.keywords, func(id int) bool { return present[id] }) {
+			continue
+		}
+		for _, m := range r.re.FindAllStringSubmatchIndex(text, -1) {
+			start, end := leakSecret(text, m, r.spec.secretGroup)
+			if start < 0 || end <= start {
+				continue
+			}
+			secret := text[start:end]
+			if r.spec.entropy != 0 && shannonEntropy(secret) <= r.spec.entropy || pathLike(secret) {
+				continue
+			}
+			allowed := set.global.allows(text, m, secret)
+			for _, a := range r.allow {
+				allowed = allowed || a.allows(text, m, secret)
+			}
+			if !allowed {
+				add(r.spec.id, start, end)
+			}
+		}
+	}
+}
+
+// leakSecret picks the secret of a match: the rule's secret group, else the
+// first non-empty group, else the match without surrounding line breaks.
+func leakSecret(text string, m []int, group int) (int, int) {
+	if group > 0 {
+		return m[2*group], m[2*group+1]
+	}
+	for g := 1; 2*g+1 < len(m); g++ {
+		if m[2*g] >= 0 && m[2*g+1] > m[2*g] {
+			return m[2*g], m[2*g+1]
+		}
+	}
+	start, end := m[0], m[1]
+	for start < end && text[start] == '\n' {
+		start++
+	}
+	for end > start && text[end-1] == '\n' {
+		end--
+	}
+	return start, end
+}
+
+func (a leakAllow) allows(text string, m []int, secret string) bool {
+	if a.re != nil {
+		target := secret
+		switch a.target {
+		case "match":
+			target = text[m[0]:m[1]]
+		case "line":
+			start := strings.LastIndexByte(text[:m[0]], '\n') + 1
+			end := strings.IndexByte(text[m[1]:], '\n')
+			if end < 0 {
+				end = len(text)
+			} else {
+				end += m[1]
+			}
+			target = text[start:end]
+		}
+		if a.re.MatchString(target) {
+			return true
+		}
+	}
+	if len(a.stopwords) > 0 {
+		lower := strings.ToLower(secret)
+		for _, w := range a.stopwords {
+			if strings.Contains(lower, w) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// shannonEntropy is the entropy of value per byte, counted over code points
+// as gitleaks computes it.
+func shannonEntropy(value string) float64 {
+	counts := map[rune]int{}
+	for _, r := range value {
+		counts[r]++
+	}
+	n := float64(len(value))
+	entropy := 0.0
+	for _, c := range counts {
+		p := float64(c) / n
+		entropy -= p * math.Log2(p)
+	}
+	return entropy
 }
 
 func mergeSpans(spans []span) []span {
@@ -179,11 +411,11 @@ func labelledValue(text string, i int, label string, sep byte) (int, int, bool) 
 			value := text[i+1 : i+1+end]
 			n := utf8.RuneCountInString(strings.TrimSpace(value))
 			switch {
-			case placeholder(value) || n < minLen:
+			case placeholder(value) || n < minLen || pathLike(strings.TrimSpace(value)):
 				return 0, 0, false
 			case password:
 				return i + 1, i + 1 + end, true
-			case strings.ContainsAny(value, " \t") || wordLike(value) || pathLike(value):
+			case strings.ContainsAny(value, " \t") || wordLike(value):
 				return 0, 0, false
 			}
 			return i + 1, i + 1 + end, true
