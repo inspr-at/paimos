@@ -148,7 +148,7 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "release-notes" {
 		if len(os.Args) < 3 || os.Args[2] != "backfill" {
-			fmt.Fprintln(os.Stderr, "release-notes:", errors.New("usage: aeon release-notes backfill --tenant SLUG [--actor-principal-id UUID] [--apply]"))
+			fmt.Fprintln(os.Stderr, "release-notes:", errors.New("usage: aeon release-notes backfill --tenant SLUG --project KEY --actor-principal-id UUID [--release VERSION | --all-missing] [--apply]"))
 			os.Exit(1)
 		}
 		if err := releaseNotesBackfill(context.Background(), os.Args[3:], os.Stdout); err != nil {

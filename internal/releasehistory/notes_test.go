@@ -167,3 +167,34 @@ func TestBuildUsesOnlyTaggedSnapshotAndKeepsOfflineGaps(t *testing.T) {
 		t.Fatal(archived, err)
 	}
 }
+
+func TestManifestSnapshotRequiresExplicitBackfillProvenance(t *testing.T) {
+	s := noteFixture()
+	s.MembershipSource = ManifestMembershipSource
+	s.ReleaseID = ""
+	s.Label = BackfillLabel
+	s.Backfilled = true
+	s.Frozen = true
+	s.ActorID = "88888888-8888-4888-8888-888888888888"
+	at := s.CapturedAt.Add(-time.Hour)
+	s.ReleasedAt = &at
+	raw, _ := json.Marshal(s)
+	notes, err := NotesFromSnapshot(raw, notesVersion, "database-snapshot")
+	if err != nil || !notes.WrittenAfterRelease || len(notes.Items) != 1 {
+		t.Fatalf("manifest %+v %v", notes, err)
+	}
+	for _, mutate := range []func(*NoteSnapshot){
+		func(s *NoteSnapshot) { s.ActorID = "" },
+		func(s *NoteSnapshot) { s.Backfilled = false },
+		func(s *NoteSnapshot) { s.Label = "" },
+		func(s *NoteSnapshot) { s.ReleaseID = s.ProjectID },
+		func(s *NoteSnapshot) { s.Version = ""; s.VersionScheme = "" },
+	} {
+		bad := s
+		mutate(&bad)
+		raw, _ := json.Marshal(bad)
+		if _, err := NotesFromSnapshot(raw, notesVersion, "database-snapshot"); err == nil {
+			t.Fatal("incomplete manifest provenance accepted")
+		}
+	}
+}

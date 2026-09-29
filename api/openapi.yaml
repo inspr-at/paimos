@@ -817,6 +817,7 @@ paths:
     get:
       operationId: listReleases
       summary: The release history embedded in this build (inspr.release-history.v1)
+      description: Tagged snapshots win. Missing tagged notes may use an immutable version-keyed backfill for the caller tenant and visible AEON project; otherwise the historical headline remains. Backfilled notes are explicitly marked written_after_release.
       responses:
         '200':
           description: History, newest first
@@ -824,10 +825,12 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ReleaseHistory'}
         '401': {description: Authentication required}
+        '500': {description: Stored release notes could not be read}
   /releases/{version}:
     get:
       operationId: getRelease
       summary: One release of the embedded history
+      description: Uses the same tenant/project-scoped backfill and tagged snapshot precedence as the list endpoint.
       parameters:
         - {name: version, in: path, required: true, schema: {type: string}, description: The calendar version, with or without the leading v}
       responses:
@@ -838,6 +841,7 @@ paths:
               schema: {$ref: '#/components/schemas/Release'}
         '400': {description: Not an inspr-calendar-v2 version}
         '401': {description: Authentication required}
+        '500': {description: Stored release notes could not be read}
         '404': {description: No such release in this build's history}
   /auth/login:
     get:
@@ -5596,12 +5600,14 @@ components:
         schema: {type: string, const: aeon.release-note-snapshot.v1}
         tenant_id: {type: string, format: uuid}
         project_node_id: {type: string, format: uuid}
-        release_node_id: {type: string, format: uuid}
+        release_node_id: {type: string, description: Journey release UUID; empty for a version-keyed manifest backfill}
         version: {type: string, description: Empty until a version is assigned; tagged file path then declares the build binding and notes preserve that gap}
         version_scheme: {type: string}
         release_revision: {type: integer, minimum: 1}
         captured_at: {type: string, format: date-time}
-        membership_source: {type: string, const: journey_tickets.release_node_id}
+        membership_source: {type: string, enum: [journey_tickets.release_node_id, release-manifest-tickets]}
+        backfilled: {type: boolean, description: True for an explicit post-publication capture}
+        actor_principal_id: {type: string, format: uuid, description: Person who authorized the backfill}
         field_source: {type: string, const: nodes.fields}
         frozen: {type: boolean, description: True when publication stored this snapshot and later ticket edits no longer change it. False on a live preview. Absent on snapshots exported before this field existed.}
         label: {type: string, enum: [backfilled], description: "Set only when an operator inserted this snapshot after publication because none was stored at release time. Absent on a live preview and on a snapshot frozen at publication."}
@@ -5621,7 +5627,7 @@ components:
     ReleaseNotes:
       type: object
       required: [source, snapshot_sha256, captured_at, release_revision, items, gaps, hidden]
-      description: Additive v1 extension. Captured member benefits are authoritative, including an empty or hidden-only membership. When no snapshot was captured, fallback is historical-tag-headline and the git tag headline is only a labelled historical fallback for that release. Old manifests without notes keep the same labelled headline display. New builds always record notes, including gaps. Snapshot digest binds the exact tagged file bytes. Git headlines never replace captured benefits. written_after_release is true only when the captured snapshot was labelled backfilled.
+      description: Additive v1 extension. Captured member benefits are authoritative, including an empty or hidden-only membership. When no snapshot was captured, fallback is historical-tag-headline and the git tag headline is only a labelled historical fallback for that release. Old manifests without notes keep the same labelled headline display. New builds always record notes, including gaps. Snapshot digest binds the exact tagged file bytes or the stored database snapshot JSON. Git headlines never replace captured benefits. written_after_release is true only when the captured snapshot was labelled backfilled.
       properties:
         source: {type: string}
         fallback: {type: string, enum: [historical-tag-headline], description: Set only when member benefits were not captured and the git tag headline is the labelled historical fallback}

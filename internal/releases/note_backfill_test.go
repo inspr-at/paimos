@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +23,8 @@ import (
 
 func TestBackfillNoteSnapshotsPlansAppliesAndLeavesExistingRows(t *testing.T) {
 	f := ticketSetup(t)
-	if _, err := BackfillNoteSnapshots(t.Context(), nil, f.person.TenantID, "", false); err == nil {
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	if _, err := BackfillNoteSnapshots(t.Context(), nil, f.person.TenantID, f.person.ID, false, NoteBackfillOptions{Project: f.project}); err == nil {
 		t.Fatal("nil pool")
 	}
 	visible := f.existing("ticket", f.project, "Frozen member", "open")
@@ -81,7 +83,7 @@ func TestBackfillNoteSnapshotsPlansAppliesAndLeavesExistingRows(t *testing.T) {
 		t.Fatalf("before backfill snapshots=%d events=%d operators=%d", snapshots, events, operators)
 	}
 
-	dry, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, "", false)
+	dry, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, f.person.ID, false, NoteBackfillOptions{Project: f.project})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,14 +105,18 @@ func TestBackfillNoteSnapshotsPlansAppliesAndLeavesExistingRows(t *testing.T) {
 		t.Fatalf("dry-run wrote snapshots=%d events=%d operators=%d", snapshots, events, operators)
 	}
 
-	applied, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, "", true)
+	scoped, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, f.person.ID, false, NoteBackfillOptions{Project: f.project, Release: gapVersion})
+	if err != nil || len(scoped.Planned) != 1 || scoped.Planned[0].ReleaseID != gap || scoped.Unchanged != 0 {
+		t.Fatalf("native selector: %+v %v", scoped, err)
+	}
+	applied, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, f.person.ID, true, NoteBackfillOptions{Project: f.project})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !applied.Applied || applied.Inserted != 2 || applied.Unchanged != 1 || len(applied.Planned) != 2 || applied.Planned[0].ReleaseID != gap || applied.Planned[1].ReleaseID != superseded {
 		t.Fatalf("apply: %+v", applied)
 	}
-	if snapshots, events, operators := backfillCounts(t, f); snapshots != 3 || events != 2 || operators != 1 {
+	if snapshots, events, operators := backfillCounts(t, f); snapshots != 3 || events != 2 || operators != 0 {
 		t.Fatalf("after apply snapshots=%d events=%d operators=%d", snapshots, events, operators)
 	}
 	if snapshotBody(t, f, f.release) != original {
@@ -133,6 +139,14 @@ func TestBackfillNoteSnapshotsPlansAppliesAndLeavesExistingRows(t *testing.T) {
 	if err != nil || !gapNotes.WrittenAfterRelease || len(gapNotes.Items) != 1 || gapNotes.Items[0].BenefitEN != backfillBenefit {
 		t.Fatalf("gap notes: %+v %v", gapNotes, err)
 	}
+	// The same native backfill reaches the product release history too.
+	historyMux := http.NewServeMux()
+	releasehistory.NewWith(releasehistory.History{Releases: []releasehistory.Release{{Version: gapVersion, Notes: releasehistory.MissingNotes()}}}, gapVersion).WithBackfills(f.db.App, f.project).Mount(historyMux)
+	historyResponse := httptest.NewRecorder()
+	historyMux.ServeHTTP(historyResponse, httptest.NewRequest("GET", "/api/releases/"+gapVersion, nil).WithContext(tenant.WithPrincipal(t.Context(), f.person)))
+	if historyResponse.Code != 200 || !strings.Contains(historyResponse.Body.String(), backfillBenefit) || !strings.Contains(historyResponse.Body.String(), `"written_after_release":true`) {
+		t.Fatalf("native history: %d %s", historyResponse.Code, historyResponse.Body.String())
+	}
 	var eventBody, actor string
 	f.tx(func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `SELECT coalesce(string_agg(after::text, ''), '') FROM events WHERE type=$1`, noteBackfillEvent).Scan(&eventBody); err != nil {
@@ -140,7 +154,7 @@ func TestBackfillNoteSnapshotsPlansAppliesAndLeavesExistingRows(t *testing.T) {
 		}
 		return tx.QueryRow(t.Context(), `SELECT coalesce(string_agg(DISTINCT p.name, ','), '') FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.type=$1`, noteBackfillEvent).Scan(&actor)
 	})
-	if strings.Contains(eventBody, backfillBenefit) || strings.Contains(eventBody, "Backfilled pill") || !strings.Contains(eventBody, gap) || !strings.Contains(eventBody, superseded) || actor != "Access operator" {
+	if strings.Contains(eventBody, backfillBenefit) || strings.Contains(eventBody, "Backfilled pill") || !strings.Contains(eventBody, gap) || !strings.Contains(eventBody, superseded) || actor != "Person" {
 		t.Fatalf("events actor=%s body=%s", actor, eventBody)
 	}
 
@@ -168,18 +182,18 @@ func TestBackfillNoteSnapshotsPlansAppliesAndLeavesExistingRows(t *testing.T) {
 		t.Fatalf("api snapshot: %s", got.Body.String())
 	}
 
-	againDry, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, "", false)
+	againDry, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, f.person.ID, false, NoteBackfillOptions{Project: f.project})
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, "", true)
+	again, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, f.person.ID, true, NoteBackfillOptions{Project: f.project})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if againDry.Applied || len(againDry.Planned) != 0 || againDry.Unchanged != 3 || again.Inserted != 0 || len(again.Planned) != 0 || again.Unchanged != 3 {
 		t.Fatalf("re-run dry=%+v apply=%+v", againDry, again)
 	}
-	if snapshots, events, operators := backfillCounts(t, f); snapshots != 3 || events != 2 || operators != 1 || snapshotBody(t, f, f.release) != original || snapshotBody(t, f, gap) != gapBody {
+	if snapshots, events, operators := backfillCounts(t, f); snapshots != 3 || events != 2 || operators != 0 || snapshotBody(t, f, f.release) != original || snapshotBody(t, f, gap) != gapBody {
 		t.Fatalf("re-run wrote snapshots=%d events=%d operators=%d", snapshots, events, operators)
 	}
 	err = f.txErr(func(tx pgx.Tx) error {
@@ -196,8 +210,8 @@ func TestBackfillNoteSnapshotsPlansAppliesAndLeavesExistingRows(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "immutable") {
 		t.Fatalf("delete: %v", err)
 	}
-	other, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.other.TenantID, "", true)
-	if err != nil || other.Inserted != 0 || len(other.Planned) != 0 || other.Unchanged != 0 {
+	other, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.other.TenantID, f.person.ID, true, NoteBackfillOptions{Project: f.project})
+	if err == nil || other.Inserted != 0 || len(other.Planned) != 0 || other.Unchanged != 0 {
 		t.Fatalf("other tenant: %+v %v", other, err)
 	}
 	var otherOps int
@@ -210,6 +224,7 @@ func TestBackfillNoteSnapshotsPlansAppliesAndLeavesExistingRows(t *testing.T) {
 
 func TestBackfillNoteSnapshotsStayInsideTheProject(t *testing.T) {
 	f := ticketSetup(t)
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
 	memberA := f.existing("ticket", f.project, "Visible member", "open")
 	membershipOK(t, f.addExisting([]string{memberA}, 1, false))
 	const visibleBenefit = "Project A visible benefit."
@@ -260,9 +275,13 @@ func TestBackfillNoteSnapshotsStayInsideTheProject(t *testing.T) {
 	if snapshots, _, _ := backfillCounts(t, f); snapshots != 0 {
 		t.Fatalf("trigger off still stored %d", snapshots)
 	}
-	applied, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, "", true)
-	if err != nil || applied.Inserted != 2 {
-		t.Fatalf("apply: %+v %v", applied, err)
+	applied, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, f.person.ID, true, NoteBackfillOptions{Project: f.project})
+	if err != nil || applied.Inserted != 1 {
+		t.Fatalf("apply project A: %+v %v", applied, err)
+	}
+	appliedB, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, f.person.ID, true, NoteBackfillOptions{Project: projectB})
+	if err != nil || appliedB.Inserted != 1 {
+		t.Fatalf("apply project B: %+v %v", appliedB, err)
 	}
 	f.tx(func(tx pgx.Tx) error {
 		tag, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, f.person.TenantID, principal, f.project)

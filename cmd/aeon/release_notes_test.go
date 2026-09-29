@@ -8,17 +8,19 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
 
 func TestReleaseNotesBackfillUsage(t *testing.T) {
-	const usage = "usage: aeon release-notes backfill --tenant SLUG [--actor-principal-id UUID] [--apply]"
-	for _, args := range [][]string{nil, {"--apply"}, {"--tenant", "synthetic", "extra"}, {"--tenant", ""}} {
+	const usage = "usage: aeon release-notes backfill --tenant SLUG --project KEY --actor-principal-id UUID [--release VERSION | --all-missing] [--apply]"
+	for _, args := range [][]string{nil, {"--apply"}, {"--tenant", "synthetic", "extra"}, {"--tenant", ""}, {"--tenant", "x", "--project", "AEON"}, {"--tenant", "x", "--actor-principal-id", "00000000-0000-0000-0000-000000000001"}, {"--tenant", "x", "--project", "AEON", "--actor-principal-id", "00000000-0000-0000-0000-000000000001", "--release", "260115100000.0.0", "--all-missing"}} {
 		err := releaseNotesBackfill(context.Background(), args, &bytes.Buffer{})
 		if err == nil || err.Error() != usage {
 			t.Fatalf("args %q: %v", args, err)
@@ -38,8 +40,20 @@ func TestReleaseNotesBackfillEmptyTenantDoesNotWrite(t *testing.T) {
 	t.Setenv("AEON_DATABASE_PASSWORD_FILE", "")
 	t.Setenv("AEON_MESSAGING_KEY_FILE", "")
 	t.Setenv("AEON_LINK_KEY_FILE", "")
+	var actorID, projectID string
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Backfill admin') RETURNING id::text`, tenantID).Scan(&actorID); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,'PRJ-1','Notes project','{"project_key":"NOTES"}'::jsonb FROM node_kinds WHERE slug='project' RETURNING id::text`, tenantID).Scan(&projectID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, database, tenantID, actorID, "admin")
+	args := []string{"--tenant", "notes-backfill", "--project", "NOTES", "--actor-principal-id", actorID}
+
 	var out bytes.Buffer
-	if err := releaseNotesBackfill(ctx, []string{"--tenant", "notes-backfill"}, &out); err != nil {
+	if err := releaseNotesBackfillWithHistory(ctx, args, &out, func() (releasehistory.History, error) { return releasehistory.History{}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	var dry map[string]any
@@ -50,7 +64,7 @@ func TestReleaseNotesBackfillEmptyTenantDoesNotWrite(t *testing.T) {
 		t.Fatalf("empty slices: %s", out.String())
 	}
 	out.Reset()
-	if err := releaseNotesBackfill(ctx, []string{"--tenant", "notes-backfill", "--apply"}, &out); err != nil {
+	if err := releaseNotesBackfillWithHistory(ctx, append(args, "--apply"), &out, func() (releasehistory.History, error) { return releasehistory.History{}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	var applied map[string]any
@@ -65,5 +79,61 @@ func TestReleaseNotesBackfillEmptyTenantDoesNotWrite(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "postgres://") {
 		t.Fatal("report contains a database url")
+	}
+}
+
+func TestReleaseNotesBackfillManifestCLISelectors(t *testing.T) {
+	database := dbtest.Open(t)
+	ctx := t.Context()
+	tenantID, err := tenantbootstrap.Create(ctx, database.App, "cli-backfill", "CLI backfill")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actor, project, ticket string
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Admin') RETURNING id::text`, tenantID).Scan(&actor); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,'PRJ-1','Project','{"project_key":"CLI"}'::jsonb FROM node_kinds WHERE slug='project' RETURNING nodes.id::text`, tenantID).Scan(&project); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,fields) SELECT $1,id,'CLI-1','Ticket',$2,'{"pill_en":"Clear changes","pill_de":"Klare Änderungen","benefit_en":"You see benefits.","benefit_de":"Sie sehen Vorteile."}'::jsonb FROM node_kinds WHERE slug='ticket' RETURNING nodes.id::text`, tenantID, project).Scan(&ticket)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, database, tenantID, actor, "admin")
+	t.Setenv("AEON_ENV", "dev")
+	t.Setenv("AEON_DATABASE_URL", database.AppURL)
+	t.Setenv("AEON_DATABASE_PASSWORD_FILE", "")
+	t.Setenv("AEON_MESSAGING_KEY_FILE", "")
+	t.Setenv("AEON_LINK_KEY_FILE", "")
+	when := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	load := func() (releasehistory.History, error) {
+		return releasehistory.History{Releases: []releasehistory.Release{
+			{Version: "260115100000.0.0", State: releasehistory.StatePublished, TaggedAt: &when, Tickets: []string{"CLI-1"}},
+			{Version: "260115110000.0.0", State: releasehistory.StatePublished, TaggedAt: &when, Tickets: []string{"CLI-1"}},
+		}}, nil
+	}
+	args := []string{"--tenant", "cli-backfill", "--project", "CLI", "--actor-principal-id", actor, "--release", "260115100000.0.0"}
+	var out bytes.Buffer
+	if err := releaseNotesBackfillWithHistory(ctx, args, &out, load); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"notes_count":1`) || !strings.Contains(out.String(), `"inserted":0`) || strings.Contains(out.String(), "260115110000.0.0") {
+		t.Fatal(out.String())
+	}
+	out.Reset()
+	if err := releaseNotesBackfillWithHistory(ctx, append(args, "--apply"), &out, load); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"inserted":1`) {
+		t.Fatal(out.String())
+	}
+	out.Reset()
+	if err := releaseNotesBackfillWithHistory(ctx, args, &out, load); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"unchanged":1`) || !strings.Contains(out.String(), `"planned":[]`) {
+		t.Fatal(out.String())
 	}
 }

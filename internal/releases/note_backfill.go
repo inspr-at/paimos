@@ -1,48 +1,56 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-
 package releases
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
-	"github.com/inspr-at/paimos/internal/operatoractor"
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/ticketbenefits"
 )
 
 const noteBackfillEvent = "release.notes_backfilled"
 
-// NoteBackfillItem is one published release whose snapshot would be inserted,
-// or was inserted when the report's Applied is true.
-type NoteBackfillItem struct {
-	ProjectID  string    `json:"project_node_id"`
-	ReleaseID  string    `json:"release_node_id"`
-	Version    string    `json:"version"`
-	ReleasedAt time.Time `json:"released_at"`
-	Revision   int64     `json:"release_revision"`
-	Tickets    int       `json:"ticket_count"`
+// NoteBackfillOptions scopes both native journey and embedded tag releases.
+// History is the same offline manifest used by /api/releases.
+type NoteBackfillOptions struct {
+	Project    string
+	Release    string
+	AllMissing bool
+	History    releasehistory.History
 }
 
-// NoteBackfillSkip is a published release whose current membership could not
-// be captured, so nothing was inserted.
+type NoteBackfillItem struct {
+	ProjectID        string    `json:"project_node_id"`
+	ReleaseID        string    `json:"release_node_id"`
+	Version          string    `json:"version"`
+	ReleasedAt       time.Time `json:"released_at"`
+	Revision         int64     `json:"release_revision"`
+	Tickets          int       `json:"ticket_count"`
+	Notes            int       `json:"notes_count"`
+	Hidden           int       `json:"hidden_count"`
+	MembershipSource string    `json:"membership_source"`
+}
+
 type NoteBackfillSkip struct {
 	ProjectID string `json:"project_node_id"`
 	ReleaseID string `json:"release_node_id"`
+	Version   string `json:"version"`
 	Reason    string `json:"reason"`
 }
 
-// NoteBackfillReport is the operator plan. Inserted is zero unless Applied.
-// Planned lists the releases a dry-run would insert, or the releases this
-// apply inserted. An existing snapshot is counted in Unchanged and never rewritten.
 type NoteBackfillReport struct {
 	Applied   bool               `json:"applied"`
 	TenantID  string             `json:"tenant_id"`
@@ -52,268 +60,281 @@ type NoteBackfillReport struct {
 	Skipped   []NoteBackfillSkip `json:"skipped"`
 }
 
-const backfillSkipReason = "Release note snapshot could not be captured."
-
-// Readers never call aeon_release_note_snapshot for a published release that
-// has no stored row (AEON-256). This statement is the audited exception: one
-// insert, labelled backfilled, with the release's original released_at and
-// captured_at set by the snapshot function to statement time. The immutability
-// trigger still rejects any later update or delete.
-const backfillApplySQL = `
-WITH unchanged AS (
-    SELECT count(*)::int AS n
-    FROM journey_releases r
-    JOIN nodes rn ON rn.tenant_id = r.tenant_id AND rn.id = r.release_node_id AND rn.deleted_at IS NULL
-    JOIN nodes pn ON pn.tenant_id = r.tenant_id AND pn.id = r.project_node_id AND pn.deleted_at IS NULL
-    WHERE r.tenant_id = $1::uuid
-      AND r.state IN ('released', 'superseded')
-      AND EXISTS (
-          SELECT 1 FROM journey_release_note_snapshots s
-          WHERE s.tenant_id = r.tenant_id AND s.release_node_id = r.release_node_id)
-),
-locked AS MATERIALIZED (
-    SELECT r.tenant_id, r.release_node_id, r.project_node_id, r.released_at, r.revision,
-           coalesce(r.version, '') AS version,
-           aeon_release_note_snapshot(r.project_node_id, r.release_node_id) AS snap
-    FROM journey_releases r
-    JOIN nodes rn ON rn.tenant_id = r.tenant_id AND rn.id = r.release_node_id AND rn.deleted_at IS NULL
-    JOIN nodes pn ON pn.tenant_id = r.tenant_id AND pn.id = r.project_node_id AND pn.deleted_at IS NULL
-    WHERE r.tenant_id = $1::uuid
-      AND r.state IN ('released', 'superseded')
-      AND NOT EXISTS (
-          SELECT 1 FROM journey_release_note_snapshots s
-          WHERE s.tenant_id = r.tenant_id AND s.release_node_id = r.release_node_id)
-    ORDER BY r.released_at, r.release_node_id
-    FOR UPDATE OF r
-),
-ready AS (
-    SELECT tenant_id, release_node_id, project_node_id, released_at, revision, version,
-           CASE WHEN snap IS NOT NULL THEN jsonb_set(jsonb_set(jsonb_set(
-               snap, '{frozen}', 'true'::jsonb),
-               '{label}', to_jsonb($2::text)),
-               '{released_at}', to_jsonb(released_at)) END AS labelled
-    FROM locked
-),
-inserted AS (
-    INSERT INTO journey_release_note_snapshots (tenant_id, release_node_id, project_node_id, snapshot)
-    SELECT tenant_id, release_node_id, project_node_id, labelled
-    FROM ready
-    WHERE labelled IS NOT NULL
-    ON CONFLICT (tenant_id, release_node_id) DO NOTHING
-    RETURNING release_node_id
-)
-SELECT u.n,
-       ready.project_node_id::text,
-       ready.release_node_id::text,
-       ready.version,
-       ready.released_at,
-       ready.revision,
-       coalesce(jsonb_array_length(ready.labelled -> 'tickets'), 0),
-       CASE WHEN ready.labelled IS NULL THEN NULL ELSE (ready.labelled ->> 'captured_at')::timestamptz END,
-       CASE
-           WHEN inserted.release_node_id IS NOT NULL THEN 'inserted'
-           WHEN ready.release_node_id IS NULL THEN NULL
-           WHEN ready.labelled IS NULL THEN 'skipped'
-           ELSE 'unchanged'
-       END
-FROM unchanged u
-LEFT JOIN ready ON true
-LEFT JOIN inserted ON inserted.release_node_id = ready.release_node_id
-ORDER BY ready.released_at, ready.release_node_id`
-
-const backfillPlanSQL = `
-WITH unchanged AS (
-    SELECT count(*)::int AS n
-    FROM journey_releases r
-    JOIN nodes rn ON rn.tenant_id = r.tenant_id AND rn.id = r.release_node_id AND rn.deleted_at IS NULL
-    JOIN nodes pn ON pn.tenant_id = r.tenant_id AND pn.id = r.project_node_id AND pn.deleted_at IS NULL
-    WHERE r.tenant_id = $1::uuid
-      AND r.state IN ('released', 'superseded')
-      AND EXISTS (
-          SELECT 1 FROM journey_release_note_snapshots s
-          WHERE s.tenant_id = r.tenant_id AND s.release_node_id = r.release_node_id)
-),
-missing AS (
-    SELECT r.project_node_id, r.release_node_id, coalesce(r.version, '') AS version,
-           r.released_at, r.revision,
-           aeon_release_note_snapshot(r.project_node_id, r.release_node_id) AS snap
-    FROM journey_releases r
-    JOIN nodes rn ON rn.tenant_id = r.tenant_id AND rn.id = r.release_node_id AND rn.deleted_at IS NULL
-    JOIN nodes pn ON pn.tenant_id = r.tenant_id AND pn.id = r.project_node_id AND pn.deleted_at IS NULL
-    WHERE r.tenant_id = $1::uuid
-      AND r.state IN ('released', 'superseded')
-      AND NOT EXISTS (
-          SELECT 1 FROM journey_release_note_snapshots s
-          WHERE s.tenant_id = r.tenant_id AND s.release_node_id = r.release_node_id)
-)
-SELECT u.n,
-       missing.project_node_id::text,
-       missing.release_node_id::text,
-       missing.version,
-       missing.released_at,
-       missing.revision,
-       coalesce(jsonb_array_length(missing.snap -> 'tickets'), 0),
-       NULL::timestamptz,
-       CASE
-           WHEN missing.release_node_id IS NULL THEN NULL
-           WHEN missing.snap IS NULL THEN 'skipped'
-           ELSE 'planned'
-       END
-FROM unchanged u
-LEFT JOIN missing ON true
-ORDER BY missing.released_at, missing.release_node_id`
-
-type backfillRow struct {
-	item       NoteBackfillItem
-	capturedAt time.Time
-	outcome    string
-}
-
-// BackfillNoteSnapshots plans, or inserts, one snapshot for each published
-// release in the tenant that does not have one. It sees every project: a
-// partial plan would look complete. Dry-run writes nothing. Apply inserts
-// and appends one release.notes_backfilled event per inserted release.
-// actorID empty attributes those events to the tenant's access operator.
-func BackfillNoteSnapshots(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID string, apply bool) (NoteBackfillReport, error) {
+// BackfillNoteSnapshots is an offline maintenance operation. A named, active
+// person with workspace administration authority is required even for planning.
+// All reads and writes use that principal's live project visibility. Applying
+// both sources and their audit events is atomic; existing rows are never changed.
+func BackfillNoteSnapshots(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID string, apply bool, opts NoteBackfillOptions) (NoteBackfillReport, error) {
 	report := NoteBackfillReport{Applied: apply, TenantID: tenantID, Planned: []NoteBackfillItem{}, Skipped: []NoteBackfillSkip{}}
 	if pool == nil || !uuid.MatchString(tenantID) {
 		return report, errors.New("tenant id is required")
 	}
-	if actorID != "" && !uuid.MatchString(actorID) {
-		return report, errors.New("actor principal id must be a UUID")
+	if !uuid.MatchString(actorID) {
+		return report, errors.New("actor principal id must name a person with tenant-admin authority")
 	}
-	ctx = db.AllProjects(ctx, "release note backfill")
-	var inserted []backfillRow
+	opts.Project = strings.TrimSpace(opts.Project)
+	opts.Release = strings.TrimPrefix(opts.Release, "v")
+	if opts.Project == "" || (opts.Release != "" && opts.AllMissing) {
+		return report, errors.New("project is required; --release and --all-missing cannot be combined")
+	}
+	if p, ok := tenant.PrincipalFrom(ctx); ok && (p.ID != actorID || p.TenantID != tenantID || p.Kind != tenant.Person) {
+		return report, errors.New("actor must be the calling person")
+	}
+	actor := tenant.Principal{ID: actorID, TenantID: tenantID, Kind: tenant.Person}
+	ctx = tenant.WithPrincipal(ctx, actor)
 	err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+		if !apply {
+			if _, err := tx.Exec(ctx, `SET LOCAL transaction_read_only = on`); err != nil {
+				return err
+			}
+		}
+		if err := backfillAuthorize(ctx, tx, actor); err != nil {
+			return err
+		}
 		if apply {
 			if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '5s'`); err != nil {
 				return err
 			}
-		} else if _, err := tx.Exec(ctx, `SET LOCAL transaction_read_only = on`); err != nil {
-			return err
 		}
-		query := backfillPlanSQL
-		args := []any{tenantID}
+		projectID, err := releasehistory.ResolveProject(ctx, tx, opts.Project)
+		if err != nil {
+			return fmt.Errorf("project %q: %w", opts.Project, err)
+		}
+		found := opts.Release == ""
+		// Serialize operators for this project. Snapshot capture and all writes remain
+		// inside the transaction; the unique key is a second idempotency guard.
 		if apply {
-			query = backfillApplySQL
-			args = append(args, releasehistory.BackfillLabel)
+			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":release-notes:"+projectID); err != nil {
+				return err
+			}
 		}
-		rows, err := tx.Query(ctx, query, args...)
+		save := func(snap releasehistory.NoteSnapshot) error {
+			snap.Label = releasehistory.BackfillLabel
+			snap.Backfilled = true
+			snap.ActorID = actorID
+			snap.Frozen = true
+			raw, err := json.Marshal(snap)
+			if err != nil {
+				return err
+			}
+			// Native journey captures can have legacy or unassigned versions.
+			// Do not apply the calendar-only tag import validator to those rows.
+			notesCount, hiddenCount := snapshotNoteCounts(snap.Tickets)
+			if snap.MembershipSource == releasehistory.ManifestMembershipSource {
+				if _, err := releasehistory.NotesFromSnapshot(raw, snap.Version, "backfill"); err != nil {
+					return err
+				}
+			}
+			item := NoteBackfillItem{ProjectID: projectID, ReleaseID: snap.ReleaseID, Version: snap.Version, ReleasedAt: *snap.ReleasedAt, Revision: snap.Revision, Tickets: len(snap.Tickets), Notes: notesCount, Hidden: hiddenCount, MembershipSource: snap.MembershipSource}
+			if apply {
+				var tag pgconn.CommandTag
+				if snap.MembershipSource == releasehistory.ManifestMembershipSource {
+					tag, err = tx.Exec(ctx, `INSERT INTO release_manifest_note_snapshots(tenant_id,project_node_id,version,snapshot) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, tenantID, projectID, snap.Version, raw)
+				} else {
+					tag, err = tx.Exec(ctx, `INSERT INTO journey_release_note_snapshots(tenant_id,project_node_id,release_node_id,snapshot) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, tenantID, projectID, snap.ReleaseID, raw)
+				}
+				if err != nil {
+					return err
+				}
+				if tag.RowsAffected() == 0 {
+					report.Unchanged++
+					return nil
+				}
+				nodeID := snap.ReleaseID
+				if nodeID == "" {
+					nodeID = projectID
+				}
+				if _, err := events.Append(ctx, tx, actor, events.Change{NodeID: &nodeID, Type: noteBackfillEvent, After: map[string]any{
+					"label": snap.Label, "backfilled": true, "actor_principal_id": actorID, "project_node_id": projectID, "release_node_id": snap.ReleaseID,
+					"version": snap.Version, "released_at": snap.ReleasedAt, "captured_at": snap.CapturedAt, "release_revision": snap.Revision,
+					"ticket_count": item.Tickets, "notes_count": item.Notes, "hidden_count": item.Hidden, "membership_source": snap.MembershipSource,
+				}}); err != nil {
+					return err
+				}
+				report.Inserted++
+			}
+			report.Planned = append(report.Planned, item)
+			return nil
+		}
+
+		// Keep the original native journey path. Only the requested project/version
+		// is considered; a publication snapshot always wins over later ticket fields.
+		query := `SELECT r.release_node_id::text, coalesce(r.version,''), r.released_at,
+       EXISTS(SELECT 1 FROM journey_release_note_snapshots s WHERE s.tenant_id=r.tenant_id AND s.release_node_id=r.release_node_id)
+   FROM journey_releases r
+   JOIN nodes rn ON rn.tenant_id=r.tenant_id AND rn.id=r.release_node_id AND rn.deleted_at IS NULL
+   WHERE r.project_node_id=$1 AND r.state IN ('released','superseded') AND ($2='' OR r.version=$2)
+   ORDER BY r.released_at,r.release_node_id`
+		if apply {
+			query += ` FOR UPDATE OF r`
+		}
+		rows, err := tx.Query(ctx, query, projectID, opts.Release)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
-		var seenCount bool
+		type native struct {
+			id, version string
+			released    *time.Time
+			exists      bool
+		}
+		nativeRows := []native{}
+		nativeVersions := map[string]bool{}
 		for rows.Next() {
-			var n int
-			var projectID, releaseID, version, outcome *string
-			var releasedAt, capturedAt *time.Time
-			var revision *int64
-			var tickets *int
-			if err := rows.Scan(&n, &projectID, &releaseID, &version, &releasedAt, &revision, &tickets, &capturedAt, &outcome); err != nil {
+			var n native
+			if err := rows.Scan(&n.id, &n.version, &n.released, &n.exists); err != nil {
+				rows.Close()
 				return err
 			}
-			if !seenCount {
-				report.Unchanged = n
-				seenCount = true
-			}
-			if releaseID == nil || projectID == nil || outcome == nil {
-				continue
-			}
-			item := NoteBackfillItem{ProjectID: *projectID, ReleaseID: *releaseID}
-			if version != nil {
-				item.Version = *version
-			}
-			if releasedAt != nil {
-				item.ReleasedAt = *releasedAt
-			}
-			if revision != nil {
-				item.Revision = *revision
-			}
-			if tickets != nil {
-				item.Tickets = *tickets
-			}
-			switch *outcome {
-			case "planned", "inserted":
-				report.Planned = append(report.Planned, item)
-				if *outcome == "inserted" {
-					row := backfillRow{item: item}
-					if capturedAt != nil {
-						row.capturedAt = *capturedAt
-					}
-					inserted = append(inserted, row)
-				}
-			case "skipped":
-				report.Skipped = append(report.Skipped, NoteBackfillSkip{ProjectID: *projectID, ReleaseID: *releaseID, Reason: backfillSkipReason})
-			case "unchanged":
-				report.Unchanged++
-			default:
-				return fmt.Errorf("unexpected backfill outcome %q", *outcome)
-			}
+			nativeRows = append(nativeRows, n)
 		}
+		rows.Close()
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		if !apply || len(inserted) == 0 {
-			return nil
-		}
-		actor, err := backfillActor(ctx, tx, tenantID, actorID)
-		if err != nil {
-			return err
-		}
-		for _, row := range inserted {
-			releaseID := row.item.ReleaseID
-			if _, err := events.Append(ctx, tx, actor, events.Change{
-				NodeID: &releaseID,
-				Type:   noteBackfillEvent,
-				After: map[string]any{
-					"label":            releasehistory.BackfillLabel,
-					"project_node_id":  row.item.ProjectID,
-					"release_node_id":  row.item.ReleaseID,
-					"released_at":      row.item.ReleasedAt,
-					"captured_at":      row.capturedAt,
-					"release_revision": row.item.Revision,
-					"ticket_count":     row.item.Tickets,
-				},
-			}); err != nil {
+		for _, n := range nativeRows {
+			found = true
+			nativeVersions[n.version] = true
+			if n.exists {
+				report.Unchanged++
+				continue
+			}
+			if n.released == nil {
+				report.Skipped = append(report.Skipped, NoteBackfillSkip{ProjectID: projectID, ReleaseID: n.id, Version: n.version, Reason: "Original release time is unavailable."})
+				continue
+			}
+			var raw []byte
+			if err := tx.QueryRow(ctx, `SELECT aeon_release_note_snapshot($1,$2)`, projectID, n.id).Scan(&raw); err != nil {
 				return err
 			}
+			var snap releasehistory.NoteSnapshot
+			if err := json.Unmarshal(raw, &snap); err != nil {
+				return err
+			}
+			snap.ReleasedAt = n.released
+			if err := save(snap); err != nil {
+				return err
+			}
+		}
+
+		for _, rel := range opts.History.Releases {
+			if rel.State != releasehistory.StatePublished || (opts.Release != "" && rel.Version != opts.Release) {
+				continue
+			}
+			found = true
+			// A native row for this version is authoritative (including its frozen
+			// membership); the reader can consume it without creating a second capture.
+			if nativeVersions[rel.Version] {
+				continue
+			}
+			if releasehistory.HasSnapshot(rel) {
+				report.Unchanged++
+				continue
+			}
+			var exists bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM release_manifest_note_snapshots WHERE project_node_id=$1 AND version=$2)`, projectID, rel.Version).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				report.Unchanged++
+				continue
+			}
+			released := rel.PublishedAt
+			if released == nil {
+				released = rel.TaggedAt
+			}
+			if released == nil || released.IsZero() {
+				report.Skipped = append(report.Skipped, NoteBackfillSkip{ProjectID: projectID, Version: rel.Version, Reason: "Original release time is unavailable."})
+				continue
+			}
+			snap, err := manifestSnapshot(ctx, tx, actor, projectID, rel, *released)
+			if err != nil {
+				return err
+			}
+			if err := save(snap); err != nil {
+				return err
+			}
+		}
+		if !found {
+			return fmt.Errorf("release %q not found in project journey or embedded history", opts.Release)
 		}
 		return nil
 	})
 	if err != nil {
+		// A rolled-back apply must never report successful writes.
+		report.Planned = []NoteBackfillItem{}
+		report.Inserted = 0
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
 			return report, errors.New("release note backfill timed out waiting for a lock")
 		}
-		return report, err
 	}
-	if apply {
-		report.Inserted = len(report.Planned)
-	}
-	return report, nil
+	return report, err
 }
 
-func backfillActor(ctx context.Context, tx pgx.Tx, tenantID, actorID string) (tenant.Principal, error) {
-	if actorID == "" {
-		id, err := operatoractor.Ensure(ctx, tx, tenantID)
-		if err != nil {
-			return tenant.Principal{}, err
-		}
-		return tenant.Principal{ID: id, TenantID: tenantID, Kind: tenant.Agent}, nil
-	}
+func backfillAuthorize(ctx context.Context, tx pgx.Tx, actor tenant.Principal) error {
 	var kind, status string
-	if err := tx.QueryRow(ctx, `SELECT kind, status FROM principals WHERE id=$1::uuid`, actorID).Scan(&kind, &status); err != nil {
-		return tenant.Principal{}, fmt.Errorf("actor: %w", err)
+	if err := tx.QueryRow(ctx, `SELECT kind,status FROM principals WHERE tenant_id=$1 AND id=$2`, actor.TenantID, actor.ID).Scan(&kind, &status); err != nil {
+		return errors.New("actor must be an active person with tenant-admin authority")
 	}
-	if status != "active" {
-		return tenant.Principal{}, errors.New("actor is inactive")
+	if kind != "person" || status != "active" {
+		return errors.New("actor must be an active person with tenant-admin authority")
 	}
-	actor := tenant.Principal{ID: actorID, TenantID: tenantID, Kind: tenant.Person}
-	if kind == string(tenant.Agent) {
-		actor.Kind = tenant.Agent
-	} else if kind != string(tenant.Person) {
-		return tenant.Principal{}, errors.New("actor must be a person or agent")
+	if err := authz.RequireTx(ctx, tx, actor, "roles.manage", authz.Scope{}); err != nil {
+		return errors.New("actor requires tenant-admin authority")
 	}
-	return actor, nil
+	return nil
+}
+
+func manifestSnapshot(ctx context.Context, tx pgx.Tx, actor tenant.Principal, projectID string, rel releasehistory.Release, released time.Time) (releasehistory.NoteSnapshot, error) {
+	snap := releasehistory.NoteSnapshot{Schema: releasehistory.SnapshotSchema, TenantID: actor.TenantID, ProjectID: projectID, Version: rel.Version, VersionScheme: "inspr-calendar-v2", Revision: 1, ReleasedAt: &released, MembershipSource: releasehistory.ManifestMembershipSource, FieldSource: releasehistory.FieldSource, Tickets: []releasehistory.NoteTicket{}}
+	keys := append([]string{}, rel.Tickets...)
+	for _, c := range rel.Changes {
+		keys = append(keys, c.Tickets...)
+	}
+	// Capture the complete field set in one MVCC statement. Only current tickets
+	// in this tenant/project can resolve the manifest's approximate membership.
+	rows, err := tx.Query(ctx, `SELECT n.id::text,n.key,n.updated_at,
+  (SELECT coalesce(jsonb_object_agg(f.key,f.value),'{}'::jsonb) FROM jsonb_each(n.fields) f WHERE f.key IN ('pill_en','pill_de','benefit_en','benefit_de','hide_from_release_notes')),
+  statement_timestamp()
+  FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+  WHERE n.project_id=$1 AND n.key=ANY($2::text[]) AND n.deleted_at IS NULL AND k.slug='ticket'
+  ORDER BY n.key,n.id`, projectID, keys)
+	if err != nil {
+		return snap, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ticket releasehistory.NoteTicket
+		if err := rows.Scan(&ticket.ID, &ticket.Key, &ticket.UpdatedAt, &ticket.Fields, &snap.CapturedAt); err != nil {
+			return snap, err
+		}
+		ticket.Position = len(snap.Tickets)
+		snap.Tickets = append(snap.Tickets, ticket)
+	}
+	if err := rows.Err(); err != nil {
+		return snap, err
+	}
+	if snap.CapturedAt.IsZero() {
+		err = tx.QueryRow(ctx, `SELECT statement_timestamp()`).Scan(&snap.CapturedAt)
+	}
+	return snap, err
+}
+
+// Both capture queries return unique ticket identities. Count their usable
+// notes with the same field validator as the release history renderer.
+func snapshotNoteCounts(tickets []releasehistory.NoteTicket) (notes, hidden int) {
+	for _, ticket := range tickets {
+		var flags struct {
+			Hidden bool `json:"hide_from_release_notes"`
+		}
+		_ = json.Unmarshal(ticket.Fields, &flags)
+		if flags.Hidden {
+			hidden++
+			continue
+		}
+		if ticket.Unavailable == "" && len(ticketbenefits.Issues(ticket.Fields)) == 0 {
+			notes++
+		}
+	}
+	return
 }

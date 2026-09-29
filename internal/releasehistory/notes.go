@@ -18,6 +18,7 @@ import (
 
 const SnapshotSchema = "aeon.release-note-snapshot.v1"
 const MembershipSource = "journey_tickets.release_node_id"
+const ManifestMembershipSource = "release-manifest-tickets"
 const FieldSource = "nodes.fields"
 
 // HistoricalFallback labels a git tag headline used only because member
@@ -30,6 +31,8 @@ const HistoricalFallback = "historical-tag-headline"
 const BackfillLabel = "backfilled"
 
 type NoteSnapshot struct {
+	Backfilled       bool         `json:"backfilled,omitempty"`
+	ActorID          string       `json:"actor_principal_id,omitempty"`
 	Schema           string       `json:"schema"`
 	TenantID         string       `json:"tenant_id"`
 	ProjectID        string       `json:"project_node_id"`
@@ -95,8 +98,11 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 	if d.Decode(new(any)) != io.EOF {
 		return nil, fmt.Errorf("ticket snapshot must contain one JSON object")
 	}
-	if s.Schema != SnapshotSchema || (s.Version != "" && s.Version != version) || !ValidVersion(version) || (s.Version != "" && s.VersionScheme != "inspr-calendar-v2") || (s.Version == "" && s.VersionScheme != "") || s.Revision < 1 || s.CapturedAt.IsZero() || s.Tickets == nil || s.MembershipSource != MembershipSource || s.FieldSource != FieldSource || !noteUUID.MatchString(s.TenantID) || !noteUUID.MatchString(s.ProjectID) || !noteUUID.MatchString(s.ReleaseID) {
+	if s.Schema != SnapshotSchema || (s.Version != "" && s.Version != version) || !ValidVersion(version) || (s.Version != "" && s.VersionScheme != "inspr-calendar-v2") || (s.Version == "" && s.VersionScheme != "") || s.Revision < 1 || s.CapturedAt.IsZero() || s.Tickets == nil || (s.MembershipSource != MembershipSource && s.MembershipSource != ManifestMembershipSource) || s.FieldSource != FieldSource || !noteUUID.MatchString(s.TenantID) || !noteUUID.MatchString(s.ProjectID) || (s.MembershipSource == MembershipSource && !noteUUID.MatchString(s.ReleaseID)) {
 		return nil, fmt.Errorf("ticket snapshot identity, version or provenance is incomplete")
+	}
+	if s.MembershipSource == ManifestMembershipSource && (s.ReleaseID != "" || s.Version == "" || !s.Backfilled || s.Label != BackfillLabel || !noteUUID.MatchString(s.ActorID)) {
+		return nil, fmt.Errorf("manifest backfill identity or actor is incomplete")
 	}
 	if s.Label != "" && s.Label != BackfillLabel {
 		return nil, fmt.Errorf("ticket snapshot label is not recognised")

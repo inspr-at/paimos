@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/version"
@@ -45,9 +47,11 @@ func Embedded() (History, error) {
 
 // Module serves a History over HTTP.
 type Module struct {
-	history History
-	current string
-	started time.Time
+	pool       *pgxpool.Pool
+	projectKey string
+	history    History
+	current    string
+	started    time.Time
 }
 
 // New serves the embedded history; current is the running version.
@@ -95,7 +99,12 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	httpapi.WriteJSON(w, http.StatusOK, Response{History: m.history, Current: m.current, LiveSince: m.started})
+	h, err := m.historyFor(r.Context())
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "release notes unavailable")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, Response{History: h, Current: m.current, LiveSince: m.started})
 }
 
 func (m *Module) one(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +116,12 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusBadRequest, "not an inspr-calendar-v2 version")
 		return
 	}
-	for _, rel := range m.history.Releases {
+	h, err := m.historyFor(r.Context())
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "release notes unavailable")
+		return
+	}
+	for _, rel := range h.Releases {
 		if rel.Version == v {
 			w.Header().Set("Cache-Control", "no-store")
 			httpapi.WriteJSON(w, http.StatusOK, rel)

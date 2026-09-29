@@ -65,6 +65,9 @@
 //	GET /api/releases/{version}  one release (with or without the leading v)
 //
 // Both require an authenticated principal. The manifest is embedded in the
-// binary (data/history.json when generated, else data/empty.json), so the
-// endpoints never touch the database or the network.
+// binary (data/history.json when generated, else data/empty.json). WithBackfills
+// adds immutable database snapshots for the caller's tenant and visible product
+// project. Tagged snapshots win, followed by native journey snapshots, then
+// explicit manifest backfills; missing rows retain the historical fallback.
+// Reads never capture live ticket fields and never contact the network.
 package releasehistory
