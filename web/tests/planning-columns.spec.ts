@@ -6,7 +6,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork, type Fixtures } from './work-fixtures'
 import type { TicketPlanning } from '../src/lib/planning'
 
-const shots = '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-329b'
+const shots = process.env.PLANNING_SHOTS ?? '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-329b'
 const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const keys = (page: Page) => page.locator('tr.ticket-row:not(.ghost) .key').allTextContents()
 const astra = { label: 'Codex astra · xhigh', profile: 'codex-astra-xhigh', harness: 'codex', model: 'gpt-6-astra', effort: 'xhigh', revision: '3f9a1c2b' }
@@ -131,10 +131,12 @@ test('cost stays with people who may see usage; tokens and model do not need it'
   expect(names).not.toContain('Paid')
 })
 
-test('keyboard focus exposes calibration, subscription and partial-data descriptions', async ({ page }) => {
+for (const theme of ['light', 'dark'] as const) test(`keyboard focus exposes calibration, subscription and partial-data descriptions in ${theme}`, async ({ page }) => {
   const data = world()
   chooseAll(data)
   const built = data.nodes.find(n => n.key === 'PHAROS-11')!.planning!
+  data.preferences.theme = { choice: theme }
+  await page.addInitScript(value => { document.documentElement.dataset.theme = value }, theme)
   built.tokens.unreported = 1
   built.cost!.list_unpriced = true
   const subscription = data.nodes.find(n => n.key === 'PHAROS-12')!.planning!
@@ -158,6 +160,10 @@ test('keyboard focus exposes calibration, subscription and partial-data descript
     await expect(trigger).toBeFocused()
     await expect(page.locator('.tooltip')).toBeVisible()
     await expect(page.locator('.tooltip')).toHaveText(description)
+    if (column === '.c-paid .plan-figure') {
+      mkdirSync(shots, { recursive: true })
+      await page.screenshot({ path: join(shots, `planning-keyboard__1600__${theme}.png`) })
+    }
     await page.keyboard.press('Escape')
     await expect(page.locator('.tooltip')).toHaveCount(0)
     await expect(trigger).toHaveAccessibleDescription(description)
