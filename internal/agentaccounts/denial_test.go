@@ -66,7 +66,9 @@ func TestDenialAdmissionInterleavings(t *testing.T) {
 		{"named only", []step{{"named", 0, 60, 60, ""}, {"check", 59, 0, 60, ""}, {"check", 60, 0, 0, "recover:"}}},
 		{"unnamed only", []step{{"unnamed", 0, 0, 60, ""}, {"check", 59, 0, 60, ""}, {"check", 60, 0, 0, "recover:"}}},
 		{"named then unnamed", []step{{"named", 0, 180, 180, ""}, {"unnamed", 30, 0, 180, ""}, {"check", 90, 0, 180, ""}, {"check", 180, 0, 0, "recover:"}}},
+		{"named then longer unnamed", []step{{"named", 0, 30, 30, ""}, {"unnamed", 20, 0, 80, ""}, {"check", 30, 0, 80, ""}, {"check", 80, 0, 0, "recover:"}}},
 		{"unnamed then named", []step{{"unnamed", 0, 0, 60, ""}, {"named", 30, 50, 60, ""}, {"check", 50, 0, 60, ""}, {"check", 60, 0, 0, "recover:"}}},
+		{"unnamed then longer named", []step{{"unnamed", 0, 0, 60, ""}, {"named", 30, 180, 180, ""}, {"check", 60, 0, 180, ""}, {"check", 180, 0, 0, "recover:"}}},
 		{"expired named then unnamed", []step{{"named", 0, 60, 60, ""}, {"check", 60, 0, 0, "recover:"}, {"unnamed", 181, 0, 241, ""}, {"check", 185, 0, 241, ""}, {"check", 241, 0, 0, "recover:"}}},
 		// Gate reproduction: reset 21:00, recovery 23:00 fails at 23:01,
 		// restart at 23:05. The required wait ends at 00:01, not 21:00.
@@ -315,7 +317,7 @@ func (f *denialFixture) recover(start, finish time.Time, outcome string) {
  VALUES($1,$2,$3,$4,'percent',1,'unrestricted','refresh',$3,$5) RETURNING id::text`, f.person.TenantID, f.account.ID, start, w.EndsAt, w.capacityBucket).Scan(&windowID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(f.t.Context(), `INSERT INTO account_reservations(tenant_id,run_id,window_id,reserved_units,state) VALUES($1,$2,$3,1,'released')`, f.person.TenantID, run, windowID); err != nil {
+		if _, err := tx.Exec(f.t.Context(), `INSERT INTO account_reservations(tenant_id,run_id,window_id,reserved_units,state,settled_at) VALUES($1,$2,$3,1,'released',$4)`, f.person.TenantID, run, windowID, finish); err != nil {
 			return err
 		}
 		if outcome == "vendor_limit" {
