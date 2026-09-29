@@ -3,6 +3,7 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
@@ -132,7 +134,7 @@ func TestUnpinnedAccountDoesNotBlockSibling(t *testing.T) {
 	s.harnessFailed["old"] = true
 	s.mu.Unlock()
 	before := s.Lifecycle("")
-	if before.Ready || before.HarnessFailed || len(before.HarnessFailedAccountIDs) != 1 || before.HarnessFailedAccountIDs[0] != "old" {
+	if before.Ready || before.HarnessFailed || len(before.HarnessFailedAccountIDs) != 1 || before.HarnessFailedAccountIDs[0] != "old" || len(before.BlockedAccounts) != 1 || before.BlockedAccounts[0].Reason != "pin_missing" || before.BlockedAccounts[0].Fix != "add-harness" || before.BlockedAccounts[0].Harness != Codex {
 		t.Fatalf("sibling marked failed before probe: %+v", before)
 	}
 	if err := s.PollOnce(t.Context()); err != nil {
@@ -159,7 +161,7 @@ func TestUnpinnedAccountDoesNotBlockSibling(t *testing.T) {
 		t.Fatalf("sibling starved: blocked=%v routes=%v claims=%d", sawBlocked, api.routeAccounts, api.claims)
 	}
 	status := s.Lifecycle("")
-	if !status.Ready || status.HarnessFailed || len(status.HarnessFailedAccountIDs) != 1 || status.HarnessFailedAccountIDs[0] != "old" {
+	if !status.Ready || status.HarnessFailed || len(status.HarnessFailedAccountIDs) != 1 || status.HarnessFailedAccountIDs[0] != "old" || len(status.BlockedAccounts) != 1 || status.BlockedAccounts[0].AccountID != "old" || status.BlockedAccounts[0].Reason != "pin_missing" || status.BlockedAccounts[0].Fix != "add-harness" {
 		t.Fatalf("status after a blocked sibling: %+v", status)
 	}
 	run := api.run
@@ -194,6 +196,47 @@ func TestBlockedEnrollmentStartsWithoutAdapters(t *testing.T) {
 	}
 	if s.accountAvailable("old") {
 		t.Fatal("sole unpinned enrollment is launchable")
+	}
+	if len(status.BlockedAccounts) != 1 || status.BlockedAccounts[0].Reason != "pin_missing" || status.BlockedAccounts[0].Fix != "add-harness" {
+		t.Fatalf("sole block omitted the fix: %+v", status.BlockedAccounts)
+	}
+}
+
+func TestDriftedPinRefreshKeepsSiblingPolling(t *testing.T) {
+	s, api, process := testSupervisor(t)
+	rec := &recordingAdapter{fakeAdapter: fakeAdapter{proc: process}}
+	logged := &probeLog{fakeAPI: api}
+	s.mu.Lock()
+	s.api = logged
+	s.adapters[Codex] = rec
+	s.mu.Unlock()
+	refreshed := []EnrolledAccount{
+		{ID: "account", Key: "local", Harness: Codex},
+		{ID: "drifted", Key: "drifted-local", Harness: Codex, DependencyBlocked: true, PinReason: agentsetup.PinDrifted, PinFix: agentsetup.FixRepin},
+	}
+	if err := s.RefreshAccounts(refreshed, []Adapter{rec}); err != nil {
+		t.Fatal(err)
+	}
+	if s.accountAvailable("drifted") || !s.PinHealthMatches(refreshed) {
+		t.Fatal("drifted account stayed launchable")
+	}
+	if err := s.PollOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	rec.mu.Lock()
+	keys, starts, started := append([]string(nil), rec.keys...), rec.starts, append([]string(nil), rec.started...)
+	rec.mu.Unlock()
+	if len(keys) != 1 || keys[0] != "local" || starts != 1 || len(started) != 1 || started[0] != "local" {
+		t.Fatalf("drifted account was probed or launched: keys=%v starts=%d started=%v", keys, starts, started)
+	}
+	status := s.Lifecycle("")
+	raw, err := json.Marshal(status)
+	if err != nil || !status.Ready || status.HarnessFailed || len(status.BlockedAccounts) != 1 || status.BlockedAccounts[0].AccountID != "drifted" || status.BlockedAccounts[0].Harness != Codex || status.BlockedAccounts[0].Reason != agentsetup.PinDrifted || status.BlockedAccounts[0].Fix != agentsetup.FixRepin || !strings.Contains(string(raw), `"blocked_accounts"`) {
+		t.Fatalf("status lost the drifted pin: %+v %s", status.BlockedAccounts, raw)
+	}
+	repaired := []EnrolledAccount{{ID: "drifted", Key: "drifted-local", Harness: Codex}}
+	if err := s.RefreshAccounts(repaired, []Adapter{rec}); err != nil || !s.accountAvailable("drifted") || s.PinHealthMatches(refreshed) {
+		t.Fatal("repaired pin stayed blocked", err)
 	}
 }
 

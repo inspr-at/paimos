@@ -37,7 +37,11 @@ func (l localPairing) client() (agentdwire.Client, error) {
 	return agentdwire.OpenClient(filepath.Join(l.root, "daemon"))
 }
 func localStatus(s agentd.LifecycleStatus) agentsetup.LocalStatus {
-	return agentsetup.LocalStatus{ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults}
+	var blocked []agentsetup.BlockedAccount
+	if len(s.BlockedAccounts) > 0 {
+		blocked = append([]agentsetup.BlockedAccount(nil), s.BlockedAccounts...)
+	}
+	return agentsetup.LocalStatus{ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults, BlockedAccounts: blocked}
 }
 func (l localPairing) Status(ctx context.Context, account string) (agentsetup.LocalStatus, error) {
 	if l.supervisor != nil {
@@ -293,5 +297,13 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 		}
 	}
 	_, err := fmt.Fprintf(out, "%s: %s\n", p.Stage, p.Action)
-	return err
+	if err != nil {
+		return err
+	}
+	for _, blocked := range p.BlockedAccounts {
+		if _, err = fmt.Fprintf(out, "blocked account %s harness %s reason %s fix %s\n", blocked.AccountID, blocked.Harness, blocked.Reason, blocked.Fix); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -314,10 +314,12 @@ Codex, Cursor, Claude and pi. `--node-path` selects an installed Node outside th
 workspace, including for shell wrappers. Setup checks the launcher using the
 service PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) with the pinned Node directory first;
 interactive shell paths and Node injection variables cannot mask missing runtime
-dependencies. The same pin is used for account probes and run launches. Unsafe or changed pins
-block startup rather than reporting a signed-out account. An older npm Codex,
-Cursor or pi enrollment with no pin blocks only that account; the paired daemon
-and its other accounts keep running, and fresh guided setup restores the pin.
+dependencies. The same pin is used for account probes and run launches. A missing,
+partial, drifted, invalid, or unsafe pin blocks only that account: the paired
+daemon and its other accounts keep running, and that harness does not launch
+until the pin is fixed. Status names the account, a reason code (`pin_missing`,
+`pin_partial`, `pin_drifted`, `pin_invalid`, `pin_unsafe`), and the fix command
+(`add-harness` for a missing pin, `repin` otherwise).
 Native launchers and saved pi bindings remain supported. Paths and interpreter
 versions stay local.
 
@@ -329,8 +331,8 @@ its `/login` and `/model` commands first. Setup pins the executable and reads it
 version. For npm's `#!/usr/bin/env node` entrypoint it also resolves Node (or
 uses `--node-path`), pins its physical path and version privately, and prepends
 its directory to the probe and runtime PATH. Node must be installed outside the
-workspace. A changed interpreter pin blocks startup. A missing pin on an older
-enrollment blocks only that account. Setup then checks
+workspace. A missing or changed interpreter pin blocks only that account.
+Setup then checks
 the selected provider/model against pi's public RPC
 `get_available_models` response. `--account-context anthropic` selects a specific
 configured provider instead. The local profile is `~/.pi/agent`; Aeon never

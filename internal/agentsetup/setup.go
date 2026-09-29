@@ -110,18 +110,19 @@ type snapshot struct {
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
-	AccountingState   string       `json:"accounting_state,omitempty"`
-	Schema            string       `json:"schema"`
-	Stage             string       `json:"stage"`
-	RequestID         string       `json:"request_id,omitempty"`
-	ComputerID        string       `json:"computer_id,omitempty"`
-	UserCode          string       `json:"user_code,omitempty"`
-	VerificationURI   string       `json:"verification_uri,omitempty"`
-	Accounts          []Enrollment `json:"accounts,omitempty"`
-	LocalProcesses    string       `json:"local_processes"`
-	ServerRevocation  string       `json:"server_revocation,omitempty"`
-	Action            string       `json:"action,omitempty"`
-	RetryAfterSeconds int          `json:"retry_after_seconds,omitempty"`
+	AccountingState   string           `json:"accounting_state,omitempty"`
+	Schema            string           `json:"schema"`
+	Stage             string           `json:"stage"`
+	RequestID         string           `json:"request_id,omitempty"`
+	ComputerID        string           `json:"computer_id,omitempty"`
+	UserCode          string           `json:"user_code,omitempty"`
+	VerificationURI   string           `json:"verification_uri,omitempty"`
+	Accounts          []Enrollment     `json:"accounts,omitempty"`
+	LocalProcesses    string           `json:"local_processes"`
+	ServerRevocation  string           `json:"server_revocation,omitempty"`
+	Action            string           `json:"action,omitempty"`
+	RetryAfterSeconds int              `json:"retry_after_seconds,omitempty"`
+	BlockedAccounts   []BlockedAccount `json:"blocked_accounts,omitempty"`
 }
 type LocalStatus struct {
 	ProfilePermissions                     bool
@@ -132,6 +133,7 @@ type LocalStatus struct {
 	DaemonID, State                        string
 	Active, Unconfirmed, SettlementPending []string
 	VerificationResults                    map[string]string
+	BlockedAccounts                        []BlockedAccount
 }
 
 // SavedOptions exposes only noncredential choices to resume the local command.
@@ -660,6 +662,9 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		return p, nil
 	}
 	local, err := e.Local.Status(ctx, "")
+	if err == nil && local.DaemonID == s.View.DaemonID && len(local.BlockedAccounts) > 0 {
+		p.BlockedAccounts = append([]BlockedAccount(nil), local.BlockedAccounts...)
+	}
 	if err != nil || local.DaemonID != s.View.DaemonID || !local.Ready {
 		p.Stage = "provisioning"
 		p.Action = "Daemon connectivity is unconfirmed; resume setup after the approved service starts."
@@ -705,8 +710,10 @@ func UnpinnedEnrollment(a RuntimeAccount) bool {
 	return err == nil && needed
 }
 
-// LaunchableRuntime removes unpinned enrollments so one old account cannot veto
-// startup. ValidateRuntimeDependencies on the original config stays fail-closed.
+// LaunchableRuntime removes unpinned enrollments so a whole-config check can
+// still see the other accounts. The paired daemon does not use it to ignore
+// partial, drifted, invalid, or unsafe pins; AccountPinBlocks isolates every
+// pin problem to that account.
 func LaunchableRuntime(c RuntimeConfig) RuntimeConfig {
 	kept := make([]RuntimeAccount, 0, len(c.Accounts))
 	for _, a := range c.Accounts {
@@ -716,44 +723,6 @@ func LaunchableRuntime(c RuntimeConfig) RuntimeConfig {
 	}
 	c.Accounts = kept
 	return c
-}
-
-// ValidateRuntimeDependencies gates execution, never access to recovery metadata
-// or the credential needed to revoke this computer. Removed harnesses do not
-// block the remaining accounts merely because their old dependency pins remain.
-// An unpinned older enrollment fails this check; LaunchableRuntime separates it
-// so the paired daemon can block that account alone.
-func ValidateRuntimeDependencies(c RuntimeConfig) error {
-	claude := false
-	for _, a := range c.Accounts {
-		claude = claude || a.Harness == "claude"
-		if a.Harness != "grok" && (a.Harness != "claude" || a.Node != (harnesslaunch.Node{})) {
-			if a.Harness == "claude" && a.Node.Path != c.NodePath {
-				return harnesslaunch.ErrStart
-			}
-			node := a.Node
-			if a.Harness == "pi" {
-				node = a.PiNode
-			}
-			if err := validateNode(a.Path, c.Workspace, node); err != nil {
-				return err
-			}
-			if node.Path != "" {
-				raw, err := (OSExecutor{}).Run(context.Background(), Command{Path: node.Path, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, node.Path)})
-				match := safeVersion.FindSubmatch(raw)
-				if err != nil || len(match) != 2 || string(match[1]) != node.Version {
-					return piprobe.ErrStart
-				}
-			}
-		}
-	}
-	if claude {
-		valid, err := (Discovery{}).ResolveClaudeDependencies(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace)
-		if err != nil || valid.NodePath != c.NodePath || valid.SDKPath != c.ClaudeSDKPath {
-			return errors.New("pinned Claude runtime dependencies are unavailable or unsafe")
-		}
-	}
-	return nil
 }
 func ReadRuntime(root string) (RuntimeConfig, secret, error) {
 	c, err := ReadRuntimeConfig(root)

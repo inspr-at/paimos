@@ -217,3 +217,76 @@ func TestSetupUsesServicePathForShellWrappers(t *testing.T) {
 		})
 	}
 }
+
+func TestAccountPinBlockReasons(t *testing.T) {
+	root := physicalTemp(t)
+	nodePath := filepath.Join(root, "node")
+	if err := os.WriteFile(nodePath, []byte("#!/bin/sh\necho v22.19.0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(root, "launcher")
+	if err := os.WriteFile(launcher, []byte("#!/usr/bin/env node\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	shell := filepath.Join(root, "shell")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	node := harnesslaunch.Node{Path: nodePath, Version: "22.19.0"}
+	healthy := RuntimeAccount{Harness: "cursor", AccountID: "healthy", Path: launcher, Node: node}
+	cases := []struct {
+		name, reason, fix string
+		bad               RuntimeAccount
+		workspace         string
+	}{
+		{"drifted", PinDrifted, FixRepin, RuntimeAccount{Harness: "codex", AccountID: "bad", Path: launcher, Node: harnesslaunch.Node{Path: nodePath, Version: "22.20.0"}}, ""},
+		{"invalid", PinInvalid, FixRepin, RuntimeAccount{Harness: "codex", AccountID: "bad", Path: launcher, Node: harnesslaunch.Node{Path: nodePath, Version: "not-a-version"}}, ""},
+		{"partial", PinPartial, FixRepin, RuntimeAccount{Harness: "codex", AccountID: "bad", Path: launcher, Node: harnesslaunch.Node{Path: nodePath}}, ""},
+		{"missing", PinMissing, FixAddHarness, RuntimeAccount{Harness: "codex", AccountID: "bad", Path: launcher}, ""},
+		{"unsafe", PinUnsafe, FixRepin, RuntimeAccount{Harness: "codex", AccountID: "bad", Path: launcher, Node: node}, root},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := RuntimeConfig{Workspace: tc.workspace, Accounts: []RuntimeAccount{healthy, tc.bad}}
+			if tc.name == "unsafe" {
+				cfg.Accounts[0].Node = harnesslaunch.Node{}
+				cfg.Accounts[0].Path = shell
+			}
+			blocks := AccountPinBlocks(cfg)
+			if len(blocks) != 1 || blocks[0].AccountID != "bad" || blocks[0].Harness != "codex" || blocks[0].Reason != tc.reason || blocks[0].Fix != tc.fix {
+				t.Fatalf("pin classification: %+v", blocks)
+			}
+			if err := ValidateRuntimeDependencies(cfg); !errors.Is(err, harnesslaunch.ErrStart) {
+				t.Fatal("whole-config check stopped failing closed", err)
+			}
+			kept := LaunchableRuntime(cfg)
+			if tc.reason == PinMissing {
+				if err := ValidateRuntimeDependencies(kept); err != nil {
+					t.Fatal("missing pin still vetoed the sibling", err)
+				}
+			}
+		})
+	}
+	native := RuntimeConfig{Accounts: []RuntimeAccount{{Harness: "codex", AccountID: "nix", Path: shell}, {Harness: "grok", AccountID: "grok", Path: shell}}}
+	if blocks := AccountPinBlocks(native); len(blocks) != 0 {
+		t.Fatalf("native and grok accounts were pin-blocked: %+v", blocks)
+	}
+	claude := RuntimeConfig{Accounts: []RuntimeAccount{{Harness: "claude", AccountID: "claude", Path: shell}, {Harness: "codex", AccountID: "codex", Path: shell}}}
+	blocks := AccountPinBlocks(claude)
+	if len(blocks) != 1 || blocks[0].AccountID != "claude" || blocks[0].Reason != PinMissing || blocks[0].Fix != FixAddHarness {
+		t.Fatalf("claude dependency blocked the wrong account: %+v", blocks)
+	}
+	if ValidateRuntimeDependencies(claude) == nil {
+		t.Fatal("missing claude pins became launchable")
+	}
+}
+
+func TestStatusKeepsBlockedAccountReasonAndFix(t *testing.T) {
+	e, a, l, o, _ := engineFixture(t)
+	approveFixture(t, e, a, o)
+	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", Ready: true, BlockedAccounts: []BlockedAccount{{AccountID: "old", Harness: "codex", Reason: PinDrifted, Fix: FixRepin}}}
+	p, err := e.Status(t.Context())
+	if err != nil || p.Stage != "connected" || len(p.BlockedAccounts) != 1 || p.BlockedAccounts[0].AccountID != "old" || p.BlockedAccounts[0].Harness != "codex" || p.BlockedAccounts[0].Reason != PinDrifted || p.BlockedAccounts[0].Fix != FixRepin {
+		t.Fatalf("connected status hid the blocked account: stage=%s blocks=%+v err=%v", p.Stage, p.BlockedAccounts, err)
+	}
+}

@@ -44,12 +44,13 @@ func TestPairedPiAdapterBinding(t *testing.T) {
 	}
 	c.Accounts[0].Identity = "anthropic"
 	c.Accounts[0].PiNode.Version = "22.20.0"
-	if _, _, err := pairedAdapters(c); err == nil {
-		t.Fatal("changed Node version accepted")
+	accounts, adapters, err = pairedAdapters(c)
+	if err != nil || len(accounts) != 1 || !accounts[0].DependencyBlocked || accounts[0].PinReason != agentsetup.PinDrifted || accounts[0].PinFix != agentsetup.FixRepin || len(adapters) != 0 {
+		t.Fatal("drifted pi pin stopped the daemon or stayed launchable", err)
 	}
 	c.Accounts[0].PiNode = piprobe.Node{}
 	accounts, adapters, err = pairedAdapters(c)
-	if err != nil || len(accounts) != 1 || !accounts[0].DependencyBlocked || len(adapters) != 0 {
+	if err != nil || len(accounts) != 1 || !accounts[0].DependencyBlocked || accounts[0].PinReason != agentsetup.PinMissing || accounts[0].PinFix != agentsetup.FixAddHarness || len(adapters) != 0 {
 		t.Fatal("env-node entrypoint without a pin stopped the daemon or stayed launchable", err)
 	}
 	status := localStatus(agentd.LifecycleStatus{HarnessFailed: true})

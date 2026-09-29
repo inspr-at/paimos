@@ -326,6 +326,9 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 	if e.Local != nil {
 		local, err := e.Local.Status(ctx, "")
 		if err == nil && local.DaemonID == v.DaemonID {
+			if len(local.BlockedAccounts) > 0 {
+				p.BlockedAccounts = append([]BlockedAccount(nil), local.BlockedAccounts...)
+			}
 			observed := observedProgress(v, local)
 			if local.ProfilePermissions {
 				p.Stage = "blocked"

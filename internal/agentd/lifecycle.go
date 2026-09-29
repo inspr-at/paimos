@@ -25,21 +25,22 @@ type DrainRequest struct {
 // LifecycleStatus does not conflate telemetry acceptance with observed exit.
 // Only a drained status permits removing a pairing-owned service or credential.
 type LifecycleStatus struct {
-	ProfilePermissions      bool              `json:"profile_permissions,omitempty"`
-	HarnessFailed           bool              `json:"harness_failed,omitempty"`
-	LoginRequired           bool              `json:"login_required"`
-	VerificationUnavailable []string          `json:"verification_unavailable_account_ids"`
-	HarnessFailedAccountIDs []string          `json:"harness_failed_account_ids,omitempty"`
-	Ready                   bool              `json:"ready"`
-	DaemonID                string            `json:"daemon_id"`
-	Generation              string            `json:"generation"`
-	State                   string            `json:"state"`
-	ActiveRunIDs            []string          `json:"active_run_ids"`
-	UnconfirmedRunIDs       []string          `json:"unconfirmed_run_ids"`
-	SettlementPendingRunIDs []string          `json:"settlement_pending_run_ids"`
-	FencedAccountIDs        []string          `json:"fenced_account_ids"`
-	AllFenced               bool              `json:"all_fenced"`
-	VerificationResults     map[string]string `json:"verification_results"`
+	ProfilePermissions      bool                        `json:"profile_permissions,omitempty"`
+	HarnessFailed           bool                        `json:"harness_failed,omitempty"`
+	LoginRequired           bool                        `json:"login_required"`
+	VerificationUnavailable []string                    `json:"verification_unavailable_account_ids"`
+	HarnessFailedAccountIDs []string                    `json:"harness_failed_account_ids,omitempty"`
+	Ready                   bool                        `json:"ready"`
+	DaemonID                string                      `json:"daemon_id"`
+	Generation              string                      `json:"generation"`
+	State                   string                      `json:"state"`
+	ActiveRunIDs            []string                    `json:"active_run_ids"`
+	UnconfirmedRunIDs       []string                    `json:"unconfirmed_run_ids"`
+	SettlementPendingRunIDs []string                    `json:"settlement_pending_run_ids"`
+	FencedAccountIDs        []string                    `json:"fenced_account_ids"`
+	AllFenced               bool                        `json:"all_fenced"`
+	VerificationResults     map[string]string           `json:"verification_results"`
+	BlockedAccounts         []agentsetup.BlockedAccount `json:"blocked_accounts,omitempty"`
 }
 
 func fenceName(account string) string {
@@ -137,13 +138,16 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	launchable, readyAccounts := 0, 0
 	for _, a := range s.accounts {
 		fenced, e := s.readFence(a.ID)
+		if a.DependencyBlocked {
+			v.HarnessFailedAccountIDs = append(v.HarnessFailedAccountIDs, a.ID)
+			v.BlockedAccounts = append(v.BlockedAccounts, blockedReport(a))
+		}
 		if fenced || e != nil {
 			v.FencedAccountIDs = append(v.FencedAccountIDs, a.ID)
 			continue
 		}
-		// An old unpinned enrollment must not mark every sibling unready.
+		// A pin failure must not mark every sibling unready.
 		if a.DependencyBlocked {
-			v.HarnessFailedAccountIDs = append(v.HarnessFailedAccountIDs, a.ID)
 			continue
 		}
 		launchable++
@@ -217,7 +221,27 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	sort.Strings(v.SettlementPendingRunIDs)
 	sort.Strings(v.FencedAccountIDs)
 	sort.Strings(v.HarnessFailedAccountIDs)
+	sort.Slice(v.BlockedAccounts, func(i, j int) bool {
+		if v.BlockedAccounts[i].AccountID == v.BlockedAccounts[j].AccountID {
+			return v.BlockedAccounts[i].Harness < v.BlockedAccounts[j].Harness
+		}
+		return v.BlockedAccounts[i].AccountID < v.BlockedAccounts[j].AccountID
+	})
 	return v
+}
+
+func blockedReport(a EnrolledAccount) agentsetup.BlockedAccount {
+	reason, fix := a.PinReason, a.PinFix
+	if reason == "" {
+		reason = agentsetup.PinMissing
+	}
+	if fix == "" {
+		fix = agentsetup.FixRepin
+		if reason == agentsetup.PinMissing {
+			fix = agentsetup.FixAddHarness
+		}
+	}
+	return agentsetup.BlockedAccount{AccountID: a.ID, Harness: a.Harness, Reason: reason, Fix: fix}
 }
 
 func (s *Supervisor) freezeOnError(account string) {
@@ -344,10 +368,20 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 		}
 		if !found {
 			merged = append(merged, a)
-		} else if a.DependencyBlocked {
+		} else {
 			for i := range merged {
-				if merged[i].ID == a.ID {
-					merged[i].DependencyBlocked = true
+				if merged[i].ID != a.ID {
+					continue
+				}
+				wasBlocked := merged[i].DependencyBlocked
+				merged[i].DependencyBlocked = a.DependencyBlocked
+				merged[i].PinReason = a.PinReason
+				merged[i].PinFix = a.PinFix
+				if wasBlocked && !a.DependencyBlocked {
+					delete(s.blockedAccounts, a.ID)
+					if s.harnessFailed != nil {
+						delete(s.harnessFailed, a.ID)
+					}
 				}
 			}
 		}
@@ -362,4 +396,22 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 	s.accounts = merged
 	s.adapters = configured
 	return nil
+}
+
+// PinHealthMatches reports whether enrolled accounts already carry the same
+// per-account pin block as the latest runtime classification.
+func (s *Supervisor) PinHealthMatches(accounts []EnrolledAccount) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	byID := make(map[string]EnrolledAccount, len(s.accounts))
+	for _, account := range s.accounts {
+		byID[account.ID] = account
+	}
+	for _, account := range accounts {
+		old, ok := byID[account.ID]
+		if !ok || old.DependencyBlocked != account.DependencyBlocked || old.PinReason != account.PinReason || old.PinFix != account.PinFix {
+			return false
+		}
+	}
+	return true
 }
