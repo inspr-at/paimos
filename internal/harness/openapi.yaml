@@ -209,6 +209,15 @@ paths:
       responses:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Closed immutable generation}
+  /api/projects/{projectId}/instruction-provenance:
+    get:
+      operationId: queryHarnessInstructionProvenance
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200': {description: Instruction source identities for one visible project, newest first}
+        '400': {description: Unknown or invalid query}
+        '404': {description: Project is not visible}
   /api/projects/{projectId}/harness-sessions/{sessionId}/provenance:
     get:
       operationId: getHarnessInstructionProvenance
@@ -247,8 +256,11 @@ paths:
     post:
       operationId: recordHarnessRulesReceipt
       description: >-
-        Explicit worker report of receiving particular merged bytes; never publishes rules, changes
-        instruction provenance, or proves model load, obedience or execution, and grants no authority.
+        Explicit worker report of receiving particular merged bytes; never publishes rules or proves
+        model load, obedience or execution, and grants no authority. A newly appended receipt also
+        appends session instruction provenance for that merged version and body hash, plus published
+        set versions when the current merge still matches. Replay does not append another provenance
+        revision. The receipt row itself stays free of rule text.
         Requires harness.worker and the exact active owning generation lease. Server verifies tenant,
         project, agent, canonical key creator, registered harness and any task's current session/project
         binding. Role, bytes, version and source remain worker-reported; publication is not verified.
@@ -389,7 +401,7 @@ components:
       type: object
       required: [kind, logical_name, hash_kind]
       properties:
-        kind: {type: string, enum: [agents, claude, skill, prompt_template]}
+        kind: {type: string, enum: [agents, claude, skill, prompt_template, rules_merged, rules_set]}
         logical_name: {type: string, maxLength: 80}
         hash_kind: {type: string, enum: [content, absent]}
         content_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$', description: Present only for hash_kind content. Null when absent. Never a hash of the version identifier.}

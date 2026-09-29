@@ -16,6 +16,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/inspr-at/paimos/internal/harness"
 )
 
 const (
@@ -261,6 +263,7 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 	}
 	interval := time.Duration(o.Interval) * time.Second
 	for {
+		rt.noteHeartbeatSources(ctx, o, &session)
 		if ctx.Err() != nil || !dep.alive(o.OwnerPID) {
 			return rt.finishHeartbeat(o, &session)
 		}
@@ -285,6 +288,54 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 			return rt.finishHeartbeat(o, &session)
 		}
 	}
+}
+
+// noteHeartbeatSources records hashes of AGENTS.md and CLAUDE.md in the
+// registered worktree. Missing files record nothing. Refused files are skipped.
+// The request body is logical names, digests and sizes, never paths or contents.
+func (rt *runtime) noteHeartbeatSources(ctx context.Context, o heartbeatOptions, session *heartbeatSession) {
+	if session == nil || session.disk.SourcesRecorded || strings.TrimSpace(o.Worktree) == "" {
+		return
+	}
+	if !validUUID(session.disk.ProjectID) || !validUUID(session.id) {
+		return
+	}
+	items, settled := heartbeatInstructionItems(o.Worktree)
+	if len(items) > 0 {
+		pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		err := rt.harnessDoCtx(pctx, http.MethodPost, harnessPath(session.disk.ProjectID, session.id)+"/provenance", session.lease, map[string]any{"items": items}, new(map[string]any))
+		cancel()
+		if err != nil {
+			fmt.Fprintf(rt.stderr, "heartbeat: instruction provenance was not recorded\n")
+			return
+		}
+	} else if !settled {
+		return
+	}
+	session.disk.SourcesRecorded = true
+	if err := saveHeartbeatSession(session); err != nil {
+		fmt.Fprintf(rt.stderr, "heartbeat: instruction provenance was not recorded\n")
+	}
+}
+
+func heartbeatInstructionItems(dir string) ([]harness.ProvenanceItem, bool) {
+	settled := true
+	var items []harness.ProvenanceItem
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+		path := filepath.Join(dir, name)
+		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			settled = false
+			continue
+		}
+		got, err := harness.CollectInstructionFiles([]string{path})
+		if err != nil {
+			continue
+		}
+		items = append(items, got...)
+	}
+	return items, settled
 }
 
 func waitHeartbeat(ctx context.Context, pid int, alive func(int) bool, interval time.Duration) error {

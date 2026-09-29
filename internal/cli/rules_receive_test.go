@@ -156,7 +156,10 @@ func TestRulesReceiveOnlineAndExplicitReplay(t *testing.T) {
 	if code != 0 || out["complete"] != true || out["receipt_recorded"] != true || out["source"] != "online" || out["stale"] != false || f.posts != 1 {
 		t.Fatalf("%d %v %s", code, out, stderr)
 	}
-	for _, field := range []string{"provenance_recorded", "publication_verified", "load_verified", "execution_verified", "authority_granted"} {
+	if out["provenance_recorded"] != true {
+		t.Fatal("receipt did not record instruction provenance", out["provenance_recorded"])
+	}
+	for _, field := range []string{"publication_verified", "load_verified", "execution_verified", "authority_granted"} {
 		if out[field] != false {
 			t.Fatal(field, out)
 		}

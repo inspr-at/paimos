@@ -2790,8 +2790,11 @@ paths:
     post:
       operationId: recordHarnessRulesReceipt
       description: >-
-        Explicit worker report of receiving particular merged bytes; never publishes rules, changes
-        instruction provenance, or proves model load, obedience or execution, and grants no authority.
+        Explicit worker report of receiving particular merged bytes; never publishes rules or proves
+        model load, obedience or execution, and grants no authority. A newly appended receipt also
+        appends session instruction provenance for that merged version and body hash, plus published
+        set versions when the current merge still matches. Replay does not append another provenance
+        revision. The receipt row itself stays free of rule text.
         Requires harness.worker and the exact active owning generation lease. Server verifies tenant,
         project, agent, canonical key creator, registered harness and any task's current session/project
         binding. Role, bytes, version and source remain worker-reported; publication is not verified.
@@ -2814,19 +2817,34 @@ paths:
         '403': {description: Worker proof or context binding rejected}
         '409': {description: Expected receipt revision conflict or divergent request reuse}
         '410': {description: Authenticated archived generation; receipt history remains readable}
+  /projects/{projectId}/instruction-provenance:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: queryHarnessInstructionProvenance
+      description: Requires harness.read and project visibility. Returns instruction-source identities (logical name, hash, version) for sessions in the project, newest first, at most 200. Filter by version, content_sha256, kind or logical_name. A session with no sources contributes nothing. No rule text, file contents or paths.
+      parameters:
+        - {name: version, in: query, schema: {type: string, maxLength: 80}}
+        - {name: content_sha256, in: query, schema: {type: string, pattern: '^[0-9a-f]{64}$'}}
+        - {name: kind, in: query, schema: {type: string, enum: [agents, claude, skill, prompt_template, rules_merged, rules_set]}}
+        - {name: logical_name, in: query, schema: {type: string, maxLength: 80}}
+      responses:
+        '200': {description: Matching instruction sources, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessInstructionSourcePage'}}}}
+        '400': {description: Unknown or invalid query}
+        '404': {description: Project is not visible}
   /projects/{projectId}/harness-sessions/{sessionId}/provenance:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: getHarnessInstructionProvenance
-      description: Newest instruction-provenance revisions for a visible session. Each item is an allowlisted logical name, a hash_kind, and an optional version. content_sha256 is present only when hash_kind is content. A prompt template recorded without an explicit template digest uses hash_kind absent and a null digest; the version identifier is not hashed. Contents, secrets and local paths are not stored.
+      description: Newest instruction-provenance revisions for a visible session. Each item is an allowlisted logical name, a hash_kind, and an optional version. content_sha256 is present only when hash_kind is content. A prompt template recorded without an explicit template digest uses hash_kind absent and a null digest; the version identifier is not hashed. rules_merged and rules_set are appended when a rules receipt is recorded. Contents, rule text, secrets and local paths are not stored. Query across sessions with GET /projects/{projectId}/instruction-provenance.
       responses:
         '200': {description: Provenance revisions, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessProvenancePage'}}}}
         '404': {description: Session is not visible}
     post:
       operationId: recordHarnessInstructionProvenance
-      description: The attributed worker appends one provenance revision, or replays the latest revision when the canonical set digest matches. Separate from registration and heartbeat. Requires harness.worker and X-Aeon-Worker-Lease.
+      description: The attributed worker appends one provenance revision for allowlisted instruction files or a prompt template, or replays the latest revision when the canonical set digest matches. Requires harness.worker and X-Aeon-Worker-Lease. rules_merged and rules_set are rejected here; a rules receipt records them. Heartbeat registration may post AGENTS.md and CLAUDE.md hashes when those files are present in the worktree.
       parameters:
         - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private per-generation proof; never returned or logged}
       requestBody:
@@ -7582,8 +7600,8 @@ components:
       type: object
       required: [kind, logical_name, hash_kind]
       properties:
-        kind: {type: string, enum: [agents, claude, skill, prompt_template]}
-        logical_name: {type: string, maxLength: 80, description: AGENTS.md, CLAUDE.md, one skill slug plus /SKILL.md, or prompt-template. Not a filesystem path.}
+        kind: {type: string, enum: [agents, claude, skill, prompt_template, rules_merged, rules_set]}
+        logical_name: {type: string, maxLength: 80, description: AGENTS.md, CLAUDE.md, one skill slug plus /SKILL.md, prompt-template, merged-rules, or a published rule-set UUID. Not a filesystem path.}
         hash_kind: {type: string, enum: [content, absent], description: content means content_sha256 is a digest of the instruction or template bytes. absent is only valid for a prompt template recorded with a version and no template digest.}
         content_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$', description: Required when hash_kind is content. Null when hash_kind is absent. Never a hash of the version identifier.}
         version: {type: [string, 'null'], maxLength: 80, description: Required for prompt_template. A version identifier, not prompt text.}
@@ -7612,6 +7630,26 @@ components:
       properties:
         session_id: {type: string, format: uuid}
         revisions: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/HarnessProvenanceRevision'}}
+        truncated: {type: boolean}
+    HarnessInstructionSource:
+      type: object
+      required: [session_id, revision, kind, logical_name, hash_kind, recorded_at]
+      properties:
+        session_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        kind: {type: string, enum: [agents, claude, skill, prompt_template, rules_merged, rules_set]}
+        logical_name: {type: string, maxLength: 80, description: Allowlisted logical name or a published rule-set UUID. Not a filesystem path.}
+        hash_kind: {type: string, enum: [content, absent]}
+        content_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$'}
+        version: {type: [string, 'null'], maxLength: 80}
+        byte_size: {type: [integer, 'null'], minimum: 0, maximum: 1048576}
+        recorded_at: {type: string, format: date-time}
+    HarnessInstructionSourcePage:
+      type: object
+      required: [project_id, items, truncated]
+      properties:
+        project_id: {type: string, format: uuid}
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessInstructionSource'}}
         truncated: {type: boolean}
     HarnessModel: {type: [string, 'null'], maxLength: 128, description: Optional trimmed plain text; control characters stripped.}
     HarnessEffort: {type: [string, 'null'], maxLength: 40, description: Optional trimmed plain text; control characters stripped.}

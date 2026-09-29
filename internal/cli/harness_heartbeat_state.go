@@ -19,28 +19,29 @@ type heartbeatHold struct {
 }
 
 type heartbeatDisk struct {
-	Schema         string                  `json:"schema"`
-	SessionID      string                  `json:"session_id"`
-	ProjectID      string                  `json:"project_id,omitempty"`
-	Sequence       int64                   `json:"sequence"`
-	LabelSent      bool                    `json:"label_sent"`
-	SentLabel      string                  `json:"sent_label,omitempty"`
-	SentCommits    []string                `json:"sent_commits,omitempty"`
-	StartRev       string                  `json:"start_rev,omitempty"`
-	Usage          []heartbeatUsageDisk    `json:"usage,omitempty"`
-	PendingUsage   []heartbeatPendingUsage `json:"pending_usage,omitempty"`
-	UsageOffset    int64                   `json:"usage_offset,omitempty"`
-	UsageRecent    []string                `json:"usage_recent,omitempty"`
-	UsageDiscard   bool                    `json:"usage_discard,omitempty"`
-	OwnerPID       int                     `json:"owner_pid,omitempty"`
-	OwnerStart     string                  `json:"owner_start,omitempty"`
-	BoundWorktree  string                  `json:"bound_worktree,omitempty"`
-	BoundBranch    string                  `json:"bound_branch,omitempty"`
-	StartedUnix    int64                   `json:"started_unix,omitempty"`
-	CommitCursor   string                  `json:"commit_cursor,omitempty"`
-	Terminal       bool                    `json:"terminal,omitempty"`
-	TerminalReason string                  `json:"terminal_reason,omitempty"`
-	Closed         bool                    `json:"closed,omitempty"`
+	Schema          string                  `json:"schema"`
+	SessionID       string                  `json:"session_id"`
+	ProjectID       string                  `json:"project_id,omitempty"`
+	Sequence        int64                   `json:"sequence"`
+	LabelSent       bool                    `json:"label_sent"`
+	SentLabel       string                  `json:"sent_label,omitempty"`
+	SentCommits     []string                `json:"sent_commits,omitempty"`
+	StartRev        string                  `json:"start_rev,omitempty"`
+	Usage           []heartbeatUsageDisk    `json:"usage,omitempty"`
+	PendingUsage    []heartbeatPendingUsage `json:"pending_usage,omitempty"`
+	UsageOffset     int64                   `json:"usage_offset,omitempty"`
+	UsageRecent     []string                `json:"usage_recent,omitempty"`
+	UsageDiscard    bool                    `json:"usage_discard,omitempty"`
+	OwnerPID        int                     `json:"owner_pid,omitempty"`
+	OwnerStart      string                  `json:"owner_start,omitempty"`
+	BoundWorktree   string                  `json:"bound_worktree,omitempty"`
+	BoundBranch     string                  `json:"bound_branch,omitempty"`
+	StartedUnix     int64                   `json:"started_unix,omitempty"`
+	CommitCursor    string                  `json:"commit_cursor,omitempty"`
+	Terminal        bool                    `json:"terminal,omitempty"`
+	TerminalReason  string                  `json:"terminal_reason,omitempty"`
+	Closed          bool                    `json:"closed,omitempty"`
+	SourcesRecorded bool                    `json:"sources_recorded,omitempty"`
 }
 
 type heartbeatUsageDisk struct {
