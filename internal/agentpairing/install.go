@@ -104,7 +104,11 @@ printf 'Verified binary: %%s/paimos-agentd\n' "$aeon_pairing_dir"
 }
 
 func setupCommand(origin string) string {
-	return `"<verified absolute paimos-agentd path>" pair --url ` + shellQuote(origin)
+	return "aeon-agentd pair --url " + shellQuote(origin)
+}
+
+func homebrewCommand(origin string) string {
+	return "brew install inspr-at/tap/aeon-agentd\n" + setupCommand(origin)
 }
 
 type ManagedSetup struct {

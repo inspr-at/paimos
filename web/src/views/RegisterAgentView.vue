@@ -44,11 +44,13 @@ const online = ref(typeof navigator === 'undefined' ? true : navigator.onLine)
 const addTarget = ref<PairingView | null>(null)
 const grantedKeys = ref<string[] | null>(null)
 const platformKey = ref('')
+const installMethod = ref('homebrew')
 const copied = ref('')
 const busy = ref('')
 const message = ref('')
 const nextStep = ref('')
 const presentation = computed(() => guideLoaded.value ? presentPublicGuide(guide.value) : null)
+const fallbackCommand = computed(() => 'export PATH="$HOME/.local/bin:$PATH"\n' + (presentation.value?.setupCommand ?? ''))
 const selectedTarget = computed(() => {
   const targets = presentation.value?.targets ?? []
   return targets.find(item => `${item.platform}/${item.arch}` === platformKey.value) ?? targets[0] ?? null
@@ -553,22 +555,39 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         <p class="muted">Loading the guide for this {{ brand.short_name }}…</p>
       </template>
       <template v-else>
-        <ol class="howto">
-          <li v-for="(stepText, index) in presentation.steps" :key="stepText">
-            <span class="howto-num" aria-hidden="true">{{ index + 1 }}</span>
-            <div class="howto-body">
-              <p>{{ stepText }}</p>
-              <div v-if="index === 0" class="address">
-                <code :title="presentation.address">{{ presentation.address || `This ${brand.short_name} has not published its address yet.` }}</code>
-                <button v-if="presentation.address" type="button" class="btn sm" @click="copyText(presentation.address, 'Address')"><AppIcon :name="copied === 'Address' ? 'check' : 'copy'" :size="13" />{{ copied === 'Address' ? 'Copied' : 'Copy' }}</button>
-              </div>
-            </div>
-          </li>
-        </ol>
+        <label v-if="presentation.homebrewCommand" class="install-choice">Install on this computer
+          <select v-model="installMethod" class="field" aria-label="Installation method">
+            <option value="homebrew">macOS · Homebrew</option>
+            <option value="manual">macOS or Linux · without Homebrew</option>
+            <option v-if="presentation.managedSetup" value="nix">Nix / Home Manager</option>
+          </select>
+        </label>
+        <div v-if="presentation.homebrewCommand && installMethod === 'homebrew'" class="install-guide">
+          <p class="copy">Run these from your project folder.</p>
+          <pre class="command"><code>{{ presentation.homebrewCommand }}</code></pre>
+          <button type="button" class="btn sm" @click="copyText(presentation.homebrewCommand, 'Homebrew commands')"><AppIcon :name="copied === 'Homebrew commands' ? 'check' : 'copy'" :size="13" />{{ copied === 'Homebrew commands' ? 'Copied' : 'Copy commands' }}</button>
+          <p class="copy">Confirm the folder and accounts, then approve the code below to start the service.</p>
+        </div>
+        <div v-if="presentation.homebrewCommand && installMethod === 'manual'" class="install-guide">
+          <p v-if="!selectedTarget" class="copy">{{ presentation.installNote }}</p>
+          <template v-else>
+            <label>Platform
+              <select v-model="platformKey" class="field" aria-label="Install platform">
+                <option v-for="target in presentation.targets" :key="`${target.platform}/${target.arch}`" :value="`${target.platform}/${target.arch}`">{{ platformCaption(target.platform, target.arch) }}</option>
+              </select>
+            </label>
+            <p class="copy">Copy the checksum installer into your terminal, then pair from your project folder.</p>
+            <button type="button" class="btn sm" @click="copyText(selectedTarget.command, 'Install command')"><AppIcon :name="copied === 'Install command' ? 'check' : 'copy'" :size="13" />{{ copied === 'Install command' ? 'Copied' : 'Copy checksum installer' }}</button>
+            <details class="service-details"><summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Read installer</summary><pre class="command installer-source"><code>{{ selectedTarget.command }}</code></pre></details>
+          </template>
+          <pre class="command"><code>{{ fallbackCommand }}</code></pre>
+          <button type="button" class="btn sm" @click="copyText(fallbackCommand, 'Fallback pair')"><AppIcon :name="copied === 'Fallback pair' ? 'check' : 'copy'" :size="13" />{{ copied === 'Fallback pair' ? 'Copied' : 'Copy pairing command' }}</button>
+          <p class="copy">Approve the code below; only then is the user service installed.</p>
+        </div>
       </template>
       <p v-if="guideError" class="problem" role="alert">{{ guideError }} <button type="button" class="btn sm" @click="loadGuide">Try again</button></p>
 
-      <details v-if="presentation?.managedSetup" class="manual nix-guide">
+      <details v-if="presentation?.managedSetup && (!presentation.homebrewCommand || installMethod === 'nix')" :open="installMethod === 'nix'" class="manual nix-guide">
         <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Nix / Home Manager</summary>
         <div class="manual-body">
           <p v-if="presentation.managedSetup.platform_note" class="copy">{{ presentation.managedSetup.platform_note }}</p>
@@ -598,23 +617,41 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
       <details v-if="presentation" class="manual">
         <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Manual and agent setup</summary>
         <div class="manual-body">
+        <div class="address">
+          <code :title="presentation.address">{{ presentation.address }}</code>
+          <button type="button" class="btn sm" @click="copyText(presentation.address, 'Address')"><AppIcon :name="copied === 'Address' ? 'check' : 'copy'" :size="13" />{{ copied === 'Address' ? 'Copied' : 'Copy' }}</button>
+        </div>
         <p v-for="paragraph in presentation.manualParagraphs" :key="paragraph" class="copy">{{ paragraph }}</p>
         <p class="copy install-note"><AppIcon name="shield" :size="14" />{{ presentation.installNote }}</p>
-        <label v-if="presentation.targets.length > 1">Platform
+        <label v-if="!presentation.homebrewCommand && presentation.targets.length > 1">Platform
           <select v-model="platformKey" class="field" aria-label="Install platform">
             <option v-for="target in presentation.targets" :key="`${target.platform}/${target.arch}`" :value="`${target.platform}/${target.arch}`">{{ platformCaption(target.platform, target.arch) }}</option>
           </select>
         </label>
-        <template v-if="selectedTarget">
+        <template v-if="!presentation.homebrewCommand && selectedTarget">
           <p class="k">{{ platformCaption(selectedTarget.platform, selectedTarget.arch) }}</p>
           <pre class="command"><code>{{ selectedTarget.command }}</code></pre>
           <button type="button" class="btn sm" @click="copyText(selectedTarget.command, 'Install command')">{{ copied === 'Install command' ? 'Copied' : 'Copy install command' }}</button>
         </template>
-        <template v-if="presentation.setupCommand">
+        <template v-if="!presentation.homebrewCommand && presentation.setupCommand">
           <p class="k">Setup command</p>
           <pre class="command"><code>{{ presentation.setupCommand }}</code></pre>
           <button type="button" class="btn sm" @click="copyText(presentation.setupCommand, 'Setup command')">{{ copied === 'Setup command' ? 'Copied' : 'Copy setup command' }}</button>
         </template>
+        </div>
+      </details>
+      <details v-if="presentation" class="manual">
+        <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Disconnect and uninstall</summary>
+        <div class="manual-body">
+          <pre class="command"><code>aeon-agentd disconnect</code></pre>
+          <p class="copy">Wait for “disconnected”: current work finishes, access is revoked and the service is removed.</p>
+          <p class="copy">Vendor sign-ins and project files stay on your computer.</p>
+          <template v-if="installMethod === 'homebrew'">
+            <pre class="command"><code>brew uninstall aeon-agentd</code></pre>
+          </template>
+          <p v-else-if="installMethod === 'nix'" class="copy">Disable the service and remove the package in your Nix / Home Manager configuration, then apply it through its review path.</p>
+          <p v-else class="copy">Remove the aeon-agentd link in ~/.local/bin and downloaded versions in ~/.local/lib/aeon.</p>
+          <p class="copy">Keep private pairing state until cleanup and accounting recovery are complete.</p>
         </div>
       </details>
     </section>
@@ -733,6 +770,11 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 </template>
 
 <style scoped>
+.install-choice { display: grid; gap: 8px; font-weight: 500; }
+.install-guide { display: grid; justify-items: start; gap: 10px; margin-top: 16px; }
+.install-guide > label, .install-guide > details, .install-guide .command { width: 100%; min-width: 0; box-sizing: border-box; }
+.install-guide > p { margin: 0; }
+.installer-source { max-height: 280px; overflow: auto; }
 .connect { width: min(760px, 100%); margin: 0 auto; padding: 28px var(--gutter) 48px; }
 .intro h1 { margin-top: 6px; }
 .lede, .sub, .next, .note, .copy { color: var(--ink-2); }

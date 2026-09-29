@@ -586,8 +586,12 @@ const shots: Shot[] = [
   { screen: 'pairing', state: 'nix-guide', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')
     await heading(page, 'Connect a computer')
-    await page.getByText('Nix / Home Manager', { exact: true }).click()
+    await page.getByLabel('Installation method').selectOption('nix')
     await page.getByText('Declarative service', { exact: true }).click()
+  } },
+  { screen: 'pairing', state: 'homebrew-guide', setup: mockAnonymousGuide, act: async page => {
+    await page.goto('/agents/register-agent')
+    await heading(page, 'Connect a computer')
   } },
   { screen: 'pairing', state: 'public-guide', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')

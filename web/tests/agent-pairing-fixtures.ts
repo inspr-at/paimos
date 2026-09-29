@@ -9,7 +9,7 @@ const ACCOUNT_2 = '55555555-5555-4555-8555-555555555555'
 const MODEL = '66666666-6666-4666-8666-666666666666'
 const DIGEST = 'ab'.repeat(32)
 
-export const SETUP_COMMAND = `"<verified absolute paimos-agentd path>" pair --url 'https://aeon.example'`
+export const SETUP_COMMAND = `aeon-agentd pair --url 'https://aeon.example'`
 export const NIX_PAIR_COMMAND = "aeon-agentd pair --url 'https://aeon.example'"
 
 export function pairingGuide() {
@@ -21,6 +21,7 @@ export function pairingGuide() {
     version: '260927181849.0.0',
     platform_qualification: 'candidate; consult the exact release service qualification evidence',
     setup_command: SETUP_COMMAND,
+    homebrew_command: `brew install inspr-at/tap/aeon-agentd\n${SETUP_COMMAND}`,
     install_available: false,
     install_targets: [],
     managed_installation: 'Use the owning Nix or Home Manager configuration.',

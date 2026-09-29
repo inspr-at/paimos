@@ -201,10 +201,10 @@ type fixtureExecutor struct {
 
 func (x *fixtureExecutor) Run(_ context.Context, c Command) ([]byte, error) {
 	x.calls = append(x.calls, c)
-	if len(c.Args) > 0 && c.Args[0] == "bootstrap" {
+	if len(c.Args) > 0 && (c.Args[0] == "bootstrap" || c.Args[0] == "--user" && len(c.Args) > 1 && c.Args[1] == "enable") {
 		x.active = true
 	}
-	if len(c.Args) > 0 && c.Args[0] == "bootout" {
+	if len(c.Args) > 0 && (c.Args[0] == "bootout" || c.Args[0] == "--user" && len(c.Args) > 1 && c.Args[1] == "disable") {
 		x.active = false
 	}
 	if c.Path == "/bin/ps" {
@@ -213,6 +213,9 @@ func (x *fixtureExecutor) Run(_ context.Context, c Command) ([]byte, error) {
 	if len(c.Args) > 0 && (c.Args[0] == "print" || c.Args[0] == "--user" && len(c.Args) > 1 && c.Args[1] == "is-active") {
 		if x.active {
 			return []byte("active"), nil
+		}
+		if c.Args[0] == "--user" {
+			return nil, &CommandError{ExitCode: 3}
 		}
 		return nil, &CommandError{ExitCode: 113}
 	}
@@ -295,7 +298,7 @@ func TestSetupApprovalAndRetryDoNotDuplicateServiceOrCredential(t *testing.T) {
 	}
 	starts := 0
 	for _, c := range x.calls {
-		if len(c.Args) > 0 && c.Args[0] == "bootstrap" {
+		if len(c.Args) > 0 && (c.Args[0] == "bootstrap" || c.Args[0] == "--user" && len(c.Args) > 1 && c.Args[1] == "enable") {
 			starts++
 		}
 		for _, arg := range c.Args {

@@ -159,7 +159,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	if err != nil {
 		return err
 	}
-	executable, err = filepath.EvalSymlinks(executable)
+	executable, err = agentsetup.ServiceExecutable(executable, home)
 	if err != nil {
 		return err
 	}
@@ -316,7 +316,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	if err != nil {
 		return err
 	}
-	for !once && (command == "setup" || command == "add-harness") && (p.Stage == "awaiting_approval" || p.Stage == "requesting" || p.Stage == "provisioning" || p.Stage == "verification_pending") {
+	for !once && setupNeedsPoll(command, p) {
 		wait := 5 * time.Second
 		if p.RetryAfterSeconds > 5 {
 			wait = time.Duration(p.RetryAfterSeconds) * time.Second
@@ -325,10 +325,14 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return errors.New("setup paused; rerun the same command to resume")
+			return errors.New(command + " paused; rerun the same command to resume")
 		case <-timer.C:
 		}
-		p, err = engine.Step(ctx)
+		if command == "disconnect" {
+			p, err = engine.Status(ctx)
+		} else {
+			p, err = engine.Step(ctx)
+		}
 		store.Unlock()
 		if e := printSetupProgress(out, jsonOutput, p); e != nil {
 			return e
@@ -344,6 +348,13 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		}
 	}
 	return nil
+}
+
+func setupNeedsPoll(command string, p agentsetup.Progress) bool {
+	if command == "disconnect" {
+		return p.Stage == "draining"
+	}
+	return (command == "setup" || command == "add-harness") && (p.Stage == "awaiting_approval" || p.Stage == "requesting" || p.Stage == "provisioning" || p.Stage == "verification_pending")
 }
 
 func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) error {

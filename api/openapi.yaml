@@ -5881,6 +5881,7 @@ components:
         platforms: {type: array, items: {type: string}}
         platform_qualification: {type: string, description: Candidate builds require exact-release service qualification evidence}
         setup_command: {type: string, description: Instance-bound pair command; defaults are confirmed locally before requesting person approval}
+        homebrew_command: {type: string, description: macOS Homebrew installation followed by the instance-bound pair command}
         managed_installation: {type: string}
         managed_setup:
           type: object
