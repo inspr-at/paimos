@@ -2670,6 +2670,22 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/lookup:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: lookupHarnessSession
+      description: Active-generation check for an ambient sender. One row, no lock, and no activity, history, or controls.
+      responses:
+        '200':
+          description: Session identity and end times
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessSessionLookup'}
+        '400': {description: Invalid id}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {description: Session is not in this project}
   /projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -8177,6 +8193,16 @@ components:
         count: {type: integer, minimum: 1}
         blocking: {type: boolean}
         location: {type: string, enum: [approvals, messages, session]}
+    HarnessSessionLookup:
+      type: object
+      description: Enough to decide whether an ambient tell may name this generation. Null end times mean it is still active.
+      required: [id, project_id, agent_principal_id, stopped_at, archived_at]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        agent_principal_id: {type: string, format: uuid}
+        stopped_at: {type: [string, 'null'], format: date-time}
+        archived_at: {type: [string, 'null'], format: date-time}
     HarnessSession:
       type: object
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
