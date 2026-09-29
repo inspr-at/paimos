@@ -8,15 +8,16 @@ import display from '../../vendor/calendar-version-display/display.json'
 import { VERSION_COPY_TEXT } from '../../lib/version-copy'
 import { attachVersionReveal, revealControl } from '../../lib/version-reveal'
 // Not interactive (inside a row that navigates): the row's hover or keyboard
-// focus reveals the seconds and a click still reaches the row.
-const props = defineProps<{ version: string; scheme: string; interactive?: boolean }>()
+// focus reveals the seconds and a click still reaches the row. The explicit
+// default matters: Vue casts an omitted Boolean prop to false.
+const props = withDefaults(defineProps<{ version: string; scheme: string; interactive?: boolean }>(), { interactive: true })
 const host = ref<HTMLElement>(), error = ref(false)
 let reveal: (() => void) | undefined
 watchEffect(() => {
   reveal?.(); reveal = undefined
   if (!host.value) return
   error.value = false
-  const interactive = props.interactive ?? true
+  const interactive = props.interactive
   try {
     renderVersion(host.value, props.version, props.scheme, { config: display, mode: 'pretty', brand: '#D69B31', interactive, text: VERSION_COPY_TEXT })
     if (!interactive) reveal = attachVersionReveal(host.value, revealControl(host.value) ?? host.value)

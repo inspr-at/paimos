@@ -122,6 +122,25 @@ test('journey release list: hover and focus reveal; a click still opens the rele
   await expect(row).toHaveAttribute('aria-current', 'true')
 })
 
+test('journey Live heading: the standalone copy pill reveals on keyboard focus and copies', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  await mockJourney(page, journeyWorld('build', { derived: true }))
+  await page.goto('/p/PHAROS?view=journey&stage=live&release=PHAROS-30')
+  const head = page.locator('section[aria-labelledby="live-tickets"] .j-card-head')
+  // Omitted `interactive` means the renderer's own pill, never a bare image.
+  const copy = head.getByRole('button', { name: /^260901120000\.0\.0 · .* — Copy version$/ })
+  await expect(copy).toBeVisible()
+  await expectRest(head)
+  await copy.focus()
+  await expect(copy).toBeFocused()
+  await expectRevealed(head)
+  await page.keyboard.press('Enter')
+  await expect(copy).toHaveAttribute('data-copy-state', 'copied')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('260901120000.0.0')
+})
+
 test('reduced motion reveals at once, without a transition', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await setup(page)
