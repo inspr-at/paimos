@@ -98,7 +98,8 @@ export function tiles(d: Pick<UsageDashboard, 'totals' | 'work' | 'ratings'>): T
   ].filter(Boolean) as string[]
   const waste: Tile = {
     key: 'waste', value: formatCount(x.total), label: x.total === 1 ? 'run with nothing to show' : 'runs with nothing to show',
-    detail: parts.length ? parts.join(' · ') : 'none stuck, failed or empty',
+    // The separator stays with the item before it, so no line starts with a dot.
+    detail: parts.length ? parts.join('\u00a0· ') : 'none stuck, failed or empty',
     note: '',
     tip: 'Worker sessions on a ticket that is not done that left no commit, lost contact, failed, or are stuck now; three or more tries count once.',
   }
