@@ -243,7 +243,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
           <div class="big">
             <div v-if="model === 'blocks'" class="paint" role="group" aria-label="Agent pace per hour">
               <button
-                v-for="(k, h) in draft.blocks" :key="h" type="button" class="hr" :data-h="h" :tabindex="h === focusHour ? 0 : -1" :aria-label="hourName(h)" :style="{ background: tint(k) }"
+                v-for="(k, h) in draft.blocks" :key="h" type="button" class="hr" :data-h="h" :tabindex="h === focusHour ? 0 : -1" :aria-label="hourName(h)" :style="{ background: k > 0 ? tint(k) : 'var(--track)' }"
                 @pointerdown="paintDown($event, h)" @keydown="paintKey($event, h)"
               />
             </div>
@@ -333,13 +333,13 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 </template>
 
 <style scoped>
-.ed { position: absolute; z-index: 30; display: flex; flex-direction: column; width: 620px; max-width: calc(100vw - 24px); border-radius: 16px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); color: var(--ink); text-align: left; }
+.ed { position: absolute; z-index: 30; display: flex; flex-direction: column; width: 620px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 96px); border-radius: 16px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); color: var(--ink); text-align: left; }
 .ed.night { width: 580px; }
 .grab { width: 36px; height: 5px; margin: 8px auto 0; border-radius: 3px; background: var(--line-2); }
 .ed-head { display: flex; align-items: center; gap: 10px; padding: 14px 12px 2px 20px; }
 .ed-head h3 { margin: 0 auto 0 0; font: 600 16px/1.3 var(--font); color: var(--ink); }
 .ed-head h3:focus, .ed-head h3:focus-visible { outline: none; box-shadow: none; }
-.ed-body { display: grid; gap: 16px; padding: 2px 20px 18px; min-height: 0; }
+.ed-body { display: grid; gap: 16px; padding: 2px 20px 18px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .ed p { margin: 0; }
 .ed-help { color: var(--ink-3); font-size: 12.5px; line-height: 1.45; }
 .ed-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
@@ -352,7 +352,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 .off-help { margin-top: 6px; }
 .chk { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; color: var(--ink-2); font-size: 12.5px; font-weight: 550; cursor: pointer; }
 .chk input { width: 16px; height: 16px; margin: 0; accent-color: #0e6f6c; }
-.sel { appearance: none; -webkit-appearance: none; height: 30px; padding: 0 24px 0 9px; border: 0; border-radius: 8px; background: var(--field-bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%237a8c8d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4.5 6.3 3.5 3.5 3.5-3.5'/%3E%3C/svg%3E") no-repeat right 7px center / 11px; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink); font: 500 12.5px var(--mono); font-variant-numeric: tabular-nums; cursor: pointer; }
+.sel { -webkit-appearance: none; appearance: none; height: 30px; padding: 0 24px 0 9px; border: 0; border-radius: 8px; background: var(--field-bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%237a8c8d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4.5 6.3 3.5 3.5 3.5-3.5'/%3E%3C/svg%3E") no-repeat right 7px center / 11px; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink); font: 500 12.5px var(--mono); font-variant-numeric: tabular-nums; cursor: pointer; }
 .sel:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .dash { color: var(--ink-3); }
 .same-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
@@ -407,9 +407,8 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 .drow .gap { width: 8px; }
 .drow input[type="range"] { width: 150px; accent-color: #0e6f6c; }
 .drow output { min-width: 38px; color: var(--teal-ink); font: 600 12.5px var(--mono); font-variant-numeric: tabular-nums; }
-.paint { display: flex; height: 40px; border-radius: 10px; overflow: hidden; background: var(--track); touch-action: none; user-select: none; }
-.paint .hr { flex: 1; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: inset -1px 0 0 var(--surface-raised); cursor: crosshair; }
-.paint .hr:last-child { box-shadow: none; }
+.paint { display: flex; gap: 1px; height: 40px; border-radius: 10px; overflow: hidden; background: var(--surface-raised); touch-action: none; user-select: none; }
+.paint .hr { flex: 1; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; cursor: crosshair; }
 .paint .hr:focus-visible { position: relative; z-index: 1; outline: none; box-shadow: inset 0 0 0 2px var(--ink); }
 .brush { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .from-hours { margin-left: auto; }

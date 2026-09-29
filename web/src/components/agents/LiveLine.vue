@@ -48,7 +48,6 @@ const what = (view: SessionView) => (view.status.reasons?.[0]?.detail || view.st
         <button type="button" class="btn open" @click="emit('jump', trouble[0].status.state)">Show</button>
       </span>
     </template>
-    <span v-else class="live-total quiet">No agents live</span>
   </div>
 </template>
 
@@ -56,7 +55,6 @@ const what = (view: SessionView) => (view.status.reasons?.[0]?.detail || view.st
 .live-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 2px; margin-top: 10px; min-height: 32px; min-width: 0; }
 .line-skeleton { display: inline-block; width: 260px; height: 14px; }
 .live-total { margin-right: 8px; color: var(--ink); font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.live-total.quiet { color: var(--ink-3); font-weight: 550; }
 .state-count { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font-size: 13px; font-weight: 550; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .state-count b { color: var(--ink); font-weight: 650; }
 @media (hover: hover) { .state-count:hover { background: var(--row-hover); color: var(--ink); } }

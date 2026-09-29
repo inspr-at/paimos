@@ -92,6 +92,9 @@ test('the long window is the bar and the 5-hour window the small line', () => {
 test('account states: sign-in, offline, paused, no reading, live', () => {
   assert.equal(accountState(acct('a', 'x', 'codex', { loginRequired: true }), true), 'signin')
   assert.equal(accountState(acct('a', 'x', 'codex', { state: 'unavailable', last_probe_ok: false }), true), 'signin')
+  // The probe is the vendor's login status, so a failed probe asks for a sign-in on any state.
+  assert.equal(accountState(acct('a', 'x', 'codex', { last_probe_ok: false }), true), 'signin')
+  assert.equal(accountState(acct('a', 'x', 'codex', { last_probe_ok: null }), true), 'live')
   assert.equal(accountState(acct('a', 'x', 'codex', { connectivity: 'offline' }), true), 'offline')
   assert.equal(accountState(acct('a', 'x', 'codex', { state: 'draining' }), true), 'paused')
   assert.equal(accountState(acct('a', 'x', 'codex'), false), 'unread')
@@ -112,7 +115,7 @@ test('two Codex accounts: soonest reset first, one plan sentence, gauges from se
   assert.deepEqual(todayCell(spare, plan), { kind: 'share', value: '~6%', tip: 'Plan for today ~6%: 2% used, 4% to go' })
   assert.equal(sourceLine(spare, now), 'Codex reported · 9 min ago')
   const studio = codex.rows[2]
-  assert.equal(sourceLine(studio, now), 'Read on studio · 3 h ago · studio offline')
+  assert.equal(sourceLine(studio, now), 'Read on studio · 3 h ago · offline')
   assert.deepEqual(todayCell(studio, accountPlan(studio, now)), { kind: 'quiet', text: 'waits for studio' })
   assert.equal(gauge(studio, accountPlan(studio, now)).tick, null)
 })

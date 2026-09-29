@@ -29,7 +29,7 @@ async function refresh() {
 
 <template>
   <SettingsCard title="Accounts" icon="gauge" anchor="agent-accounts">
-    <template #lead>The vendor accounts agents run on. Sign in on the computer itself; Aeon never sees the password.</template>
+    <template #lead>The vendor accounts agents run on. Sign in on the computer itself; the password never leaves it.</template>
     <AccountsCard
       :accounts="agents.accounts" :state="agents.accountsUpdatedAt !== null ? 'ready' : agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'"
       :set="setAccount" @allowance-created="refresh()"

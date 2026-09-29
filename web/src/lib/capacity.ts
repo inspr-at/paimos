@@ -231,7 +231,8 @@ export function pickWindows(windows: CapacityWindow[]): { primary: CapacityWindo
   return { primary, five }
 }
 export function accountState(a: AccountInput, hasReading: boolean): AccountState {
-  if (a.loginRequired || (a.state === 'unavailable' && a.last_probe_ok === false)) return 'signin'
+  // agentd's probe is the vendor's own login status check, so a failed probe means sign in again.
+  if (a.loginRequired || a.last_probe_ok === false) return 'signin'
   if (a.connectivity === 'offline' || a.state === 'unavailable') return 'offline'
   if (a.state === 'draining') return 'paused'
   return hasReading ? 'live' : 'unread'
@@ -332,7 +333,7 @@ export function sourceLine(row: AccountRow, now: number): string {
   const r = w.reading
   const base = r.source === 'harness' ? `${HARNESS_NAME[row.harness] ?? row.harness} reported · ${ago(r.read_at, now)}`
     : r.source === 'agentd' ? `Read on ${row.host} · ${ago(r.read_at, now)}` : 'Estimated'
-  if (row.state === 'offline') return `${base} · ${row.host} offline`
+  if (row.state === 'offline') return `${base} · offline`
   if (w.freshness === 'stale' || w.freshness === 'expired') return `${base} · stale`
   return base
 }

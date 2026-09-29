@@ -35,10 +35,10 @@ test('row overflow removes a live session; Removed preserves history and survive
   const errors = watchErrors(page)
   const { selected, bodies } = await setup(page)
   await page.goto('/agents')
-  const summary = page.locator('.summary')
+  const summary = page.getByRole('group', { name: 'Live sessions' })
   await expect(summary).toContainText('live')
   const before = await summary.innerText()
-  // No loud Remove on rows or Live now chips.
+  // No loud Remove on rows or in the live line.
   await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0)
   await removeFromRow(page, selected.id)
   await expect(confirm(page)).toContainText('The process is not stopped; late heartbeats are ignored.')
@@ -114,13 +114,13 @@ test('panel Remove sits with the controls, closes the panel after confirmation, 
   await expect(panel).toHaveCount(0)
 })
 
-test('phones show the overflow button on every row; Live now chips carry no removal', async ({ page }) => {
+test('phones show the overflow button on every row; the live line carries no removal', async ({ page }) => {
   const { selected } = await setup(page)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/agents')
   const more = row(page, selected.id).getByRole('button', { name: 'Actions for ghost-worker' })
   await expect(more).toHaveCSS('opacity', '1')
-  await expect(page.locator('.live-now').getByRole('button', { name: /Remove/ })).toHaveCount(0)
+  await expect(page.getByRole('group', { name: 'Live sessions' }).getByRole('button', { name: /Remove/ })).toHaveCount(0)
   await more.click()
   await page.getByRole('menuitem', { name: /Remove from Agents/ }).click()
   await confirm(page).getByRole('button', { name: 'Remove', exact: true }).click()

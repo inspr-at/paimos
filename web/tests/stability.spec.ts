@@ -117,7 +117,9 @@ test('the approval queue never says nothing waits before it knows', async ({ pag
   const held = new Promise<void>(resolve => { release = resolve })
   await page.route('**/api/approvals?**', async route => { await held; await route.fallback() })
   await page.goto('/agents')
-  await expect(page.getByRole('status', { name: 'Loading requests' })).toBeVisible()
+  // Needs you shows only once it knows something waits (AEON-299): no early card, no all-clear.
+  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Needs you' })).toHaveCount(0)
   await expect(page.getByText('Nothing waits on you')).toHaveCount(0)
   release()
   await expect(page.getByRole('list', { name: 'Requests waiting for you' })).toBeVisible()

@@ -21,7 +21,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     const queue = page.getByRole('region', { name: 'Needs you' })
     // Production removes Needs you when nothing is pending and there is no decided
     // history. The sentence "Nothing waits on you" exists only inside that region.
-    await expect(page.locator('p.summary')).toHaveText('5 live')
+    await expect(page.locator('.live-line .live-total')).toHaveText('5 live')
     await expect(queue).toHaveCount(0)
     await expect(page.getByText('Nothing waits on you')).toHaveCount(0)
     await expect(page.getByRole('list', { name: 'Requests waiting for you' })).toHaveCount(0)

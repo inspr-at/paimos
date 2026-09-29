@@ -39,7 +39,7 @@ const DOT_TIP: Record<AccountRow['state'], (row: AccountRow) => string> = {
   live: () => 'Live: signed in, computer online, fresh reading',
   offline: row => `${row.host} is offline`,
   signin: () => 'Sign-in expired',
-  paused: () => 'Paused in Settings → Accounts',
+  paused: () => 'Paused in Settings, under Accounts',
   unread: () => 'Signed in; no reading yet',
 }
 function gaugeLabel(row: AccountRow) {
@@ -91,7 +91,12 @@ async function openEditor(kind: 'week' | 'night', event: Event) {
   editor.value = { kind, gear }
   editorStyle.value = { visibility: 'hidden' }
   await nextTick()
-  if (!sheet.value) { position(); await nextTick(); editorRef.value?.focusTitle() }
+  if (!sheet.value) {
+    position()
+    await nextTick()
+    editorRef.value?.root?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    editorRef.value?.focusTitle()
+  }
 }
 function position() {
   const el = editorRef.value?.root
@@ -119,12 +124,15 @@ async function openMenu(pool: PoolView, event: Event) {
   const button = event.currentTarget as HTMLElement
   if (menu.value?.pool.id === pool.id) { closeMenu(true); return }
   if (editor.value && !editorRef.value?.dirty()) closeEditor(false)
-  menu.value = { pool, style: {} }
+  menu.value = { pool, style: { visibility: 'hidden' } }
   await nextTick()
   if (!card.value || !menuEl.value) return
   const box = card.value.getBoundingClientRect(), r = button.getBoundingClientRect(), w = menuEl.value.offsetWidth
   menu.value.style = { top: `${r.bottom - box.top + 4}px`, left: `${Math.max(8, Math.min(r.right - box.left - w, box.width - w - 8))}px` }
-  menuEl.value.querySelector<HTMLElement>('button')?.focus()
+  // Focus only once the menu sits under its button, or the page scrolls to where it was.
+  await nextTick()
+  menuEl.value?.querySelector<HTMLElement>('button')?.focus({ preventScroll: true })
+  menuEl.value?.scrollIntoView({ block: 'nearest' })
 }
 function closeMenu(focus = false) {
   const id = menu.value?.pool.id
@@ -197,7 +205,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
           <button class="gear" type="button" aria-haspopup="dialog" :aria-expanded="editor?.kind === 'night'" aria-label="Customize night and shifts" :data-tip="mayManage ? 'Customize night and shifts' : manageTip" :disabled="!mayManage" @click="openEditor('night', $event)"><AppIcon name="gear" :size="15" /></button>
         </div>
       </div>
-      <RouterLink class="manage" to="/settings/accounts" data-tip="Settings → Accounts: sign-ins, names, which accounts agents may use"><AppIcon name="sliders" :size="15" /><span>Manage<span class="long"> accounts</span></span></RouterLink>
+      <RouterLink class="manage" to="/settings/accounts" data-tip="Accounts in Settings: sign-ins, names, which accounts agents may use"><AppIcon name="sliders" :size="15" /><span>Manage<span class="long"> accounts</span></span></RouterLink>
     </div>
 
     <p v-if="capacity.loaded && !pools.length" class="empty">No accounts yet. Sign in to a harness on a connected computer and it appears here.</p>
@@ -208,9 +216,9 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
         <div class="pool-head">
           <span class="vendor"><HarnessMark :harness="pool.id" :size="16" /></span>
           <span class="pool-name">{{ pool.name }}</span>
-          <span v-if="pool.plan" class="pool-plan">{{ pool.plan }}</span>
+          <span v-if="pool.plan" class="pool-plan" :title="pool.plan">{{ pool.plan }}</span>
           <span v-if="pool.override" class="override" :class="{ hold: pool.override === 'hold' }">
-            {{ pool.override === 'hold' ? 'On hold' : 'Sprint until reset' }}
+            {{ pool.override === 'hold' ? 'On hold' : 'Sprint' }}
             <button v-if="mayManage" type="button" aria-label="Back to the plan" data-tip="Back to the plan" @click="setOverride(pool, '')"><AppIcon name="close" :size="12" /></button>
           </span>
           <button
@@ -340,9 +348,9 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .pool-head { display: flex; align-items: center; gap: 10px; min-height: 32px; }
 .vendor { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(32, 60, 61, .06); color: var(--ink); }
 .pool-name { color: var(--ink); font-size: 15px; font-weight: 650; }
-.pool-plan { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
+.pool-plan { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
 .pool-head .more { flex: none; width: 32px; height: 32px; margin-left: auto; }
-.override { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 2px 0 9px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.override { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 2px 0 9px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .override.hold { background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); }
 .override button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; }
 .override button:hover { background: var(--row-hover); }

@@ -226,7 +226,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
         <span class="mark key"><AppIcon name="key" :size="16" /></span>
         <div class="body">
           <p class="line1"><strong class="what">{{ vendor(row) }} needs a new sign-in on {{ row.host }}</strong></p>
-          <p class="line2 signin-help"><template v-if="LOGIN_COMMAND[row.harness]">Run <code>{{ LOGIN_COMMAND[row.harness] }}</code> there · </template>agents skip {{ row.name === vendor(row) ? vendor(row) : `${vendor(row)} ${row.name}` }} until then</p>
+          <p class="line2 signin-help"><template v-if="LOGIN_COMMAND[row.harness]">Run <code>{{ LOGIN_COMMAND[row.harness] }}</code> there · </template>agents skip this account until then</p>
         </div>
         <div v-if="LOGIN_COMMAND[row.harness]" class="row-actions">
           <button type="button" class="btn sm" @click.stop="copyLogin(row)"><AppIcon name="copy" :size="13" />Copy command</button>

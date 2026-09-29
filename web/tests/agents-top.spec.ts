@@ -64,7 +64,7 @@ test('nothing waits: no Needs you, a compact live line, and accounts with one pl
   await expect(pool(page, 'codex').locator('.plan')).toHaveText('Today: ~6% of Spare, then ~15% of Main — soonest reset first, so each lands at 0% as it resets.')
   await expect(pool(page, 'codex').locator('.acct .nm')).toHaveText(['Spare', 'Main', 'Studio'])
   const studio = page.locator(`[data-account="${ACCOUNTS.studio}"]`)
-  await expect(studio.locator('.source')).toHaveText('Read on studio · 3 h ago · studio offline')
+  await expect(studio.locator('.source')).toHaveText('Read on studio · 3 h ago · offline')
   await expect(studio.locator('.today')).toHaveText('waits for studio')
   await expect(page.locator(`[data-account="${ACCOUNTS.claude}"] .win5`)).toHaveText('5-hour window 60% left · resets 16:40')
   await expect(pool(page, 'claude').locator('.plan')).toContainText('Today: use up to ~10% of Claude (4% so far) — on track to finish at 0% by Fri 22:00, before it resets Sun 11:00.')
@@ -86,7 +86,7 @@ test('Needs you appears only when something waits, with the sign-in and its comm
   const needs = page.getByRole('region', { name: 'Needs you' })
   await expect(needs).toBeVisible()
   const signin = needs.getByRole('listitem', { name: 'Cursor needs a new sign-in on mbp2607' })
-  await expect(signin).toContainText('Run cursor-agent login there · agents skip Cursor markus until then')
+  await expect(signin).toContainText('Run cursor-agent login there · agents skip this account until then')
   await signin.getByRole('button', { name: 'Copy command' }).click()
   await expect(page.getByText('Copied: cursor-agent login — run it on mbp2607.')).toBeVisible()
   await expect(pool(page, 'cursor').locator('.plan')).toHaveText('Paused until you sign in again on mbp2607. 57% left, resets Wed 14 Oct.')
@@ -186,7 +186,7 @@ test('Sprint and Hold from the pool menu, and back to the plan', async ({ page }
   const menu = page.getByRole('menu', { name: 'Codex: sprint or hold' })
   await expect(menu.getByRole('menuitem', { name: /Sprint until reset/ })).toContainText('Agents may use everything left until tomorrow 18:02.')
   await menu.getByRole('menuitem', { name: /Sprint until reset/ }).click()
-  await expect(pool(page, 'codex').locator('.override')).toContainText('Sprint until reset')
+  await expect(pool(page, 'codex').locator('.override')).toContainText('Sprint')
   await expect(pool(page, 'codex').locator('.plan')).toHaveText('Sprint: agents may use everything left on Spare (9%) and Main (42%) until tomorrow 18:02.')
   await expect(page.locator(`[data-account="${ACCOUNTS.spare}"] .today`)).toHaveText('all 9%')
   expect(capacity.puts.at(-1)).toMatchObject({ scope: 'pool', pool: 'codex', schedule: { override: 'sprint' } })
@@ -249,6 +249,11 @@ test.describe('phone', () => {
     await page.locator('.scrim').click({ position: { x: 20, y: 20 } })
     await expect(page.getByRole('dialog')).toHaveCount(0)
     expect(await noScroll(page)).toBe(true)
+    // The pool menu opens under its button, in view, with focus on the first choice.
+    await pool(page, 'claude').getByRole('button', { name: 'Claude: sprint or hold' }).click()
+    const menu = page.getByRole('menu')
+    await expect(menu).toBeInViewport()
+    await expect(menu.getByRole('menuitem').first()).toBeFocused()
   })
 })
 
@@ -299,7 +304,10 @@ const SHOT_STATES: Shot[] = [
   } },
 ]
 async function shoot(browser: Browser, shot: Shot, width: number, theme: 'light' | 'dark') {
-  const context = await browser.newContext({ viewport: { width, height: width < 800 ? 844 : 1000 }, colorScheme: theme, reducedMotion: 'reduce', timezoneId: TZ })
+  // The app scrolls inside its own frame, so page states use a tall viewport; overlays keep a real one.
+  const overlay = /editor|shifts|blocks|menu/.test(shot.name)
+  const height = width < 800 ? (overlay ? 844 : 2600) : (overlay ? 1100 : 1300)
+  const context = await browser.newContext({ viewport: { width, height }, colorScheme: theme, reducedMotion: 'reduce', timezoneId: TZ })
   const page = await context.newPage()
   try {
     await setup(page, shot.options)
@@ -307,7 +315,7 @@ async function shoot(browser: Browser, shot: Shot, width: number, theme: 'light'
     await shot.act?.(page)
     await page.waitForTimeout(350)
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)
-    await page.screenshot({ path: `${SHOTS}/${width}-${theme}-${shot.name}${overflow ? '-OVERFLOW' : ''}.png`, fullPage: true })
+    await page.screenshot({ path: `${SHOTS}/${width}-${theme}-${shot.name}${overflow ? '-OVERFLOW' : ''}.png` })
   } finally { await context.close() }
 }
 test.describe('screenshots', () => {
