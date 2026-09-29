@@ -9,6 +9,7 @@ import type { Availability } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import AllowanceWindowForm from './AllowanceWindowForm.vue'
+import ClaudeStatuslineToggle from '../settings/ClaudeStatuslineToggle.vue'
 import { ABSENT_ALLOWANCE, allowanceFailure, beginSave, findSavedAllowance, holdUncertain, releaseHeld, settleSave, UNCERTAIN_ALLOWANCE, type HeldAllowance } from './allowanceWindow'
 
 // Per account: the window that binds first, how much of it is left and whether use
@@ -172,6 +173,7 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
           </p>
         </template>
         <p v-else class="facts muted">No active allowance window</p>
+        <ClaudeStatuslineToggle v-if="mayManage && account.harness === 'claude'" :account="account" @changed="emit('allowance-created')" />
         <AllowanceWindowForm
           v-if="mayManage && editingId === account.id"
           :account="account" :now="now" :busy="flight !== null" :server-message="serverMessage" :uncertain="uncertain"

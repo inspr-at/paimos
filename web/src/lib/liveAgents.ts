@@ -10,6 +10,7 @@ import type { Harness, NodeSummary } from './agents.ts'
 import { DEFAULT_AGENT_STATE, STATE_LABEL, STATE_PRIORITY, deriveAgentState, waitingLabel, type AttentionReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
 export type LiveBotState = AgentState
 export interface LiveAgent {
+  vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
   project_id: string
   // Present only when the caller may open the session / know the agent (AEON-171).
   session_id?: string; principal_id?: string; name?: string

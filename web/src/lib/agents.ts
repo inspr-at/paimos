@@ -16,6 +16,7 @@ export interface MetadataChange {
 }
 export interface ProcessOwnership { daemon_id: string; generation: string; process_id: string; root_pid: number; group_id: number; started_at: string }
 export interface HarnessSession {
+  vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
   handed_over_to_id?: string; adopted_from_id?: string | null; can_reparent?: boolean
   watch?: import("./attachWatch").AttachStatus
   id: string; project_id: string; agent_principal_id: string
@@ -59,6 +60,7 @@ export interface AllowanceWindow extends AllowanceWrite {
   provisional?: boolean
 }
 export interface AgentAccount {
+  reading_support?: 'every_5_min' | 'first_run' | 'statusline' | 'none'; quota_fingerprint?: string; statusline_enabled?: boolean
   id: string; account_key: string; harness: string; daemon_id: string; label: string
   registered_by_principal_id: string; state: 'available' | 'draining' | 'unavailable'
   max_parallel_runs?: number; last_probe_at?: string | null; last_probe_ok?: boolean | null; created_at: string
@@ -194,3 +196,5 @@ export function subscribeAgents(changed: () => void, connection: (live: boolean)
   for (const name of DELIVERY_EVENTS) stream.addEventListener(name, () => delivery())
   return () => stream.close()
 }
+
+export const setClaudeStatusline = (id: string, enabled: boolean) => request<{ enabled: boolean }>(`/agent-accounts/${enc(id)}/statusline`, 'PUT', { enabled })

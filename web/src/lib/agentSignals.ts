@@ -63,6 +63,7 @@ export interface StateEvidence {
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null
   needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]
   eta_stale?: boolean
+  vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
 }
 // Stop reasons are free text. Match error words, not arbitrary nonempty reasons:
 // "user requested", "completed", "stopped", "cancelled" are normal stops.
@@ -88,10 +89,15 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
   const result = (state: AgentState, reasons: StateReason[] = [], label = STATE_LABEL[state]) => ({ state, label, reasons })
   const problems: StateReason[] = []
   if (problemReason(evidence.stop_reason)) problems.push({ code: 'stop', detail: `Reported stop reason: ${evidence.stop_reason}`, next: 'Check the session activity and its bound ticket before starting a replacement.' })
-  if (['failed', 'ownership_lost', 'blocked'].includes(evidence.run_status ?? '')) problems.push({ code: 'run', detail: `The bound run reported ${evidence.run_status!.replace(/_/g, ' ')}.`, next: 'Check the current run and its history for the failure context.' })
+  if (!evidence.vendor_limited && ['failed', 'ownership_lost', 'blocked'].includes(evidence.run_status ?? '')) problems.push({ code: 'run', detail: `The bound run reported ${evidence.run_status!.replace(/_/g, ' ')}.`, next: 'Check the current run and its history for the failure context.' })
   if (evidence.has_problem ?? (problems.length > 0)) {
     if (!problems.length) problems.push({ code: 'reported', detail: 'The service reported a problem without a visible reason.', next: 'Refresh this session and check its run history or ask the session owner for the missing reason.' })
     return result('problem', problems)
+  }
+  if (evidence.vendor_limited && (!evidence.limit_resets_at || Date.parse(evidence.limit_resets_at) > now)) {
+    const window = ({ '5h': '5-hour limit', weekly: 'Weekly limit', monthly: 'Monthly limit' } as Record<string, string>)[evidence.limit_window ?? ''] ?? 'Vendor limit'
+    const until = evidence.limit_resets_at ? ` until ${new Date(evidence.limit_resets_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}` : ''
+    return result('throttled', [{ code: 'vendor-limit', detail: `${window}${until}.`, next: 'Check account capacity before starting another run.' }], `Throttled · ${window.toLowerCase()}${until}`)
   }
   if (evidence.phase === 'stopped' || evidence.stopped_at) return result('stopped', [], evidence.stop_reason === LOST_CONTACT ? 'Lost contact' : STATE_LABEL.stopped)
   const heartbeat = heartbeatEvidence(evidence, now)
