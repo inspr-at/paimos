@@ -126,8 +126,18 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark']) test(`ma
   await page.emulateMedia({ colorScheme: theme as 'light' | 'dark' })
   await setup(page)
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+  if (process.env.MANAGED_CONTROL_SHOTS) {
+    await mkdir(process.env.MANAGED_CONTROL_SHOTS, { recursive: true })
+    await page.screenshot({ path: `${process.env.MANAGED_CONTROL_SHOTS}/resting-${width}-${theme}.png`, fullPage: true })
+    if (width === 390) {
+      await controls(page).getByRole('button', { name: 'More session actions' }).click()
+      await page.screenshot({ path: `${process.env.MANAGED_CONTROL_SHOTS}/menu-${width}-${theme}.png`, fullPage: true })
+      await page.keyboard.press('Escape')
+    }
+  }
   await controls(page).getByRole('button', { name: 'Steer', exact: true }).click()
-  await controls(page).getByLabel('What should change?').fill('Keep the change focused. Check the tenant isolation fixtures before committing.')
+  const steer = width === 390 ? page.getByRole('dialog', { name: 'Steer' }) : controls(page)
+  await steer.getByLabel('What should change?').fill('Keep the change focused. Check the tenant isolation fixtures before committing.')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   if (process.env.MANAGED_CONTROL_SHOTS) {
     await mkdir(process.env.MANAGED_CONTROL_SHOTS, { recursive: true })
@@ -171,8 +181,14 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark']) test(`ma
   await page.setViewportSize({ width, height: 1000 })
   await setup(page)
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
-  await controls(page).getByRole('button', { name: 'Edit effort' }).click()
-  await expect(controls(page).getByLabel('Effort', { exact: true })).toBeEnabled()
+  if (width === 390) {
+    await controls(page).getByRole('button', { name: 'More session actions' }).click()
+    await page.getByRole('menuitem', { name: 'Edit effort' }).click()
+    await expect(page.getByRole('dialog', { name: 'Effort' }).getByLabel('Effort', { exact: true })).toBeEnabled()
+  } else {
+    await controls(page).getByRole('button', { name: 'Edit effort' }).click()
+    await expect(controls(page).getByLabel('Effort', { exact: true })).toBeEnabled()
+  }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   if (process.env.MANAGED_CONTROL_SHOTS) {
     await mkdir(process.env.MANAGED_CONTROL_SHOTS, { recursive: true })
