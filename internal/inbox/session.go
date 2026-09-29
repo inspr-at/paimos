@@ -36,6 +36,18 @@ func sessionQuery(r *http.Request) (*string, error) {
 // Lock the exact generation through commit so stop/archive cannot race a send.
 // A supplied session is never inferred from a principal's newest registration.
 func messageSession(ctx context.Context, tx pgx.Tx, id *string, principal, project string) (string, error) {
+	return lockSession(ctx, tx, id, principal, project, "FOR SHARE OF s")
+}
+
+// listeningSession is messageSession for a path that records the generation as
+// listening (pull, stream, ack). It takes the row lock it will write with up
+// front, never upgrading a shared lock, and always before any message row: the
+// inbox lock order is session, message, delivery, receipt (AEON-280).
+func listeningSession(ctx context.Context, tx pgx.Tx, id *string, principal, project string) (string, error) {
+	return lockSession(ctx, tx, id, principal, project, "FOR NO KEY UPDATE OF s")
+}
+
+func lockSession(ctx context.Context, tx pgx.Tx, id *string, principal, project, lock string) (string, error) {
 	if id == nil {
 		return "", nil
 	}
@@ -43,7 +55,7 @@ func messageSession(ctx context.Context, tx pgx.Tx, id *string, principal, proje
 	var active bool
 	err := tx.QueryRow(ctx, `SELECT coalesce(s.display_label,p.name),s.stopped_at IS NULL AND s.archived_at IS NULL
  FROM harness_sessions s JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=s.agent_principal_id
- WHERE s.id=$1::uuid AND s.agent_principal_id=$2::uuid AND ($3='' OR s.project_id::text=$3) FOR SHARE OF s`, *id, principal, project).Scan(&label, &active)
+ WHERE s.id=$1::uuid AND s.agent_principal_id=$2::uuid AND ($3='' OR s.project_id::text=$3) `+lock, *id, principal, project).Scan(&label, &active)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", errNotFound
 	}

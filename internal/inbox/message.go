@@ -325,22 +325,30 @@ func (m *module) handleAck(w http.ResponseWriter, r *http.Request) {
 func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Message, error) {
 	var out Message
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		current, err := scanMessage(tx.QueryRow(ctx, `SELECT `+messageCols+`
-			FROM inbox_messages WHERE id = $1::uuid FOR UPDATE`, id))
+		// Lock order (AEON-280): the bound session first, then the message.
+		// recipient and session are immutable, so an unlocked read picks the lock.
+		var recipient, sender string
+		var session *string
+		err := tx.QueryRow(ctx, `SELECT recipient_principal_id::text,sender_principal_id::text,recipient_session_id::text FROM inbox_messages WHERE id=$1::uuid`, id).Scan(&recipient, &sender, &session)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
 		if err != nil {
 			return err
 		}
-		if current.RecipientPrincipalID != p.ID {
-			if current.SenderPrincipalID == p.ID {
+		if recipient != p.ID {
+			if sender == p.ID {
 				return errForbidden
 			}
 			return errNotFound
 		}
 		// Keep the generation live through commit, including idempotent retries.
-		if _, err := messageSession(ctx, tx, current.RecipientSessionID, p.ID, ""); err != nil {
+		if _, err := listeningSession(ctx, tx, session, p.ID, ""); err != nil {
+			return err
+		}
+		current, err := scanMessage(tx.QueryRow(ctx, `SELECT `+messageCols+`
+			FROM inbox_messages WHERE id = $1::uuid FOR UPDATE`, id))
+		if err != nil {
 			return err
 		}
 		if current.AckedAt != nil {

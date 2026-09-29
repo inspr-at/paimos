@@ -450,7 +450,7 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 			return err
 		}
 		if sessionID != nil && !inspect {
-			if _, err := messageSession(r.Context(), tx, sessionID, p.ID, project); err != nil {
+			if _, err := listeningSession(r.Context(), tx, sessionID, p.ID, project); err != nil {
 				return err
 			}
 		}

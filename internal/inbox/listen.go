@@ -158,7 +158,7 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
 	var items []Message
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		items = nil
-		if _, err := messageSession(ctx, tx, sessionID, p.ID, ""); err != nil {
+		if _, err := listeningSession(ctx, tx, sessionID, p.ID, ""); err != nil {
 			return err
 		}
 		rows, err := tx.Query(ctx, `SELECT `+messageCols+`

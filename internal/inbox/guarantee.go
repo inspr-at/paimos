@@ -122,9 +122,10 @@ func MarkSessionSeen(ctx context.Context, tx pgx.Tx, sessionID, via string) erro
 }
 
 // Locking protocol (AEON-280), the same on every path that reads, hands over,
-// acknowledges, completes or fails a message: the inbox_messages row first,
-// then its delivery (inbox_message_deliveries or harness_deliveries), then the
-// receipt. A failure sets expires_at under that row lock, so a reader that
+// acknowledges, completes or fails a message: the bound harness_sessions row
+// first (close takes FOR UPDATE, listening paths FOR NO KEY UPDATE, failure FOR
+// KEY SHARE), then the inbox_messages row, then its delivery
+// (inbox_message_deliveries or harness_deliveries), then the receipt. A failure sets expires_at under that row lock, so a reader that
 // locks and re-checks the row can never hand over a failed message.
 
 // handOver is the read side of that protocol. It locks the candidate rows in id
@@ -245,6 +246,11 @@ const liveLeaseSQL = `SELECT EXISTS(SELECT 1 FROM inbox_message_deliveries d JOI
  OR EXISTS(SELECT 1 FROM harness_deliveries h WHERE h.message_id=$1::uuid AND h.completed_at IS NULL AND h.released_at IS NULL AND h.leased_at>clock_timestamp()-interval '2 minutes')`
 
 func failMessage(ctx context.Context, tx pgx.Tx, messageID, reason string, respectLease bool) (bool, error) {
+	// Lock order (AEON-280): the bound session before the message. KEY SHARE
+	// waits only for a close (FOR UPDATE) and never blocks a pull or an ack.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM harness_sessions WHERE id=(SELECT recipient_session_id FROM inbox_messages WHERE id=$1::uuid) FOR KEY SHARE`, messageID); err != nil {
+		return false, err
+	}
 	var f failingMessage
 	var acked *time.Time
 	// Only the coordinator of the recipient's own project counts as its parent.
