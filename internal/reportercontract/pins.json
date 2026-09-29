@@ -1035,6 +1035,20 @@
             "format": "uuid",
             "type": "string"
           },
+          "inbox_seen_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "inbox_seen_via": {
+            "enum": [
+              "hook",
+              "drain",
+              "long_poll",
+              "stream",
+              "ack"
+            ],
+            "type": "string"
+          },
           "management_mode": {
             "enum": [
               "managed",
@@ -1631,6 +1645,20 @@
           },
           "id": {
             "format": "uuid",
+            "type": "string"
+          },
+          "inbox_seen_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "inbox_seen_via": {
+            "enum": [
+              "hook",
+              "drain",
+              "long_poll",
+              "stream",
+              "ack"
+            ],
             "type": "string"
           },
           "management_mode": {

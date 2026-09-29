@@ -36,6 +36,18 @@ func sessionQuery(r *http.Request) (*string, error) {
 // Lock the exact generation through commit so stop/archive cannot race a send.
 // A supplied session is never inferred from a principal's newest registration.
 func messageSession(ctx context.Context, tx pgx.Tx, id *string, principal, project string) (string, error) {
+	return lockSession(ctx, tx, id, principal, project, "FOR SHARE OF s")
+}
+
+// listeningSession is messageSession for a path that records the generation as
+// listening (pull, stream, ack). It takes the row lock it will write with up
+// front, never upgrading a shared lock, and always before any message row: the
+// inbox lock order is session, message, delivery, receipt (AEON-280).
+func listeningSession(ctx context.Context, tx pgx.Tx, id *string, principal, project string) (string, error) {
+	return lockSession(ctx, tx, id, principal, project, "FOR NO KEY UPDATE OF s")
+}
+
+func lockSession(ctx context.Context, tx pgx.Tx, id *string, principal, project, lock string) (string, error) {
 	if id == nil {
 		return "", nil
 	}
@@ -43,7 +55,7 @@ func messageSession(ctx context.Context, tx pgx.Tx, id *string, principal, proje
 	var active bool
 	err := tx.QueryRow(ctx, `SELECT coalesce(s.display_label,p.name),s.stopped_at IS NULL AND s.archived_at IS NULL
  FROM harness_sessions s JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=s.agent_principal_id
- WHERE s.id=$1::uuid AND s.agent_principal_id=$2::uuid AND ($3='' OR s.project_id::text=$3) FOR SHARE OF s`, *id, principal, project).Scan(&label, &active)
+ WHERE s.id=$1::uuid AND s.agent_principal_id=$2::uuid AND ($3='' OR s.project_id::text=$3) `+lock, *id, principal, project).Scan(&label, &active)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", errNotFound
 	}
@@ -60,21 +72,19 @@ func sameSession(a, b *string) bool {
 	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }
 
-// ConfirmSessionMessage records a session inbox handoff, never a shared adapter
-// handoff. The caller must first authenticate and acknowledge the exact message
-// in this transaction. Unbound messages retain their existing receipt behavior.
+// ConfirmSessionMessage records the receiver confirmation for a message the
+// caller acknowledged in this transaction (a direct ack or a harness drain
+// completion). Session-bound and unbound messages alike move their receipt to
+// handed_off (AEON-280); a receipt that already failed stays failed.
 func ConfirmSessionMessage(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID string) error {
-	var targeted bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_messages WHERE id=$1::uuid AND recipient_principal_id=$2::uuid AND recipient_session_id IS NOT NULL AND acked_at IS NOT NULL)`, messageID, p.ID).Scan(&targeted); err != nil {
+	var acked bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_messages WHERE id=$1::uuid AND recipient_principal_id=$2::uuid AND acked_at IS NOT NULL)`, messageID, p.ID).Scan(&acked); err != nil {
 		return err
 	}
-	if !targeted {
+	if !acked {
 		return nil
 	}
-	if _, err := tx.Exec(ctx, `UPDATE inbox_message_deliveries d SET state='delivered',effective_level='simple' FROM inbox_compat_messages c WHERE c.tenant_id=d.tenant_id AND c.id=d.message_id AND c.inbox_message_id=$1::uuid AND c.recipient_session_id IS NOT NULL`, messageID); err != nil {
-		return err
-	}
-	return advanceReceipt(ctx, tx, p, messageID, "handed_off", "simple", "", receiptTarget{})
+	return confirmReceived(ctx, tx, p, messageID)
 }
 
 // FailSessionMessage settles authenticated, acknowledged input with an uncertain

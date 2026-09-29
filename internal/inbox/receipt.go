@@ -107,7 +107,9 @@ func recordAcceptanceReceipt(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 			return err
 		}
 	}
-	if state == "blocked" || state == "dead" {
+	// A blocked message (no target) stays readable by a listening recipient, so
+	// it is queued like any other and fails at its deadline (AEON-280).
+	if state == "dead" {
 		if reason == "" {
 			reason = "unavailable"
 		}
@@ -134,9 +136,10 @@ func insertReceipt(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO inbox_receipts (
 			tenant_id, message_id, state, target_id, target_version, adapter, address,
-			effective_level, handed_off_at, failure_reason)
+			effective_level, handed_off_at, failure_reason, deliver_by)
 		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, $8,
-			CASE WHEN $3 = 'handed_off' THEN clock_timestamp() ELSE NULL END, $9)`,
+			CASE WHEN $3 = 'handed_off' THEN clock_timestamp() ELSE NULL END, $9,
+			CASE WHEN $3 = 'queued' THEN `+receiptDeadlineSQL+` END)`,
 		p.TenantID, messageID, state, targetID, version, target.Adapter, target.Address, level, reason); err != nil {
 		return err
 	}

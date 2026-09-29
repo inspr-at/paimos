@@ -1,0 +1,143 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package inbox
+
+import (
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenant"
+)
+
+// MessageStatus is the sender's delivery progress for one message (AEON-280):
+// sent (accepted), delivered (handed to the recipient by a pull, drain, stream
+// or adapter claim), read (the recipient confirmed it) or not_delivered. It is
+// content-free and, like the receipt, readable only by the sender.
+type MessageStatus struct {
+	MessageID   string     `json:"message_id"`
+	Status      string     `json:"status"`
+	Reason      string     `json:"reason,omitempty"`
+	DeliveredAt *time.Time `json:"delivered_at"`
+	ReadAt      *time.Time `json:"read_at"`
+	DeliverBy   *time.Time `json:"deliver_by"`
+}
+
+const maxStatusIDs = 100
+
+func (m *module) handleMessageStatus(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	raw := strings.TrimSpace(r.URL.Query().Get("ids"))
+	if raw == "" {
+		failure(w, badRequest("ids is required"))
+		return
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > maxStatusIDs {
+		failure(w, badRequest("at most 100 ids"))
+		return
+	}
+	ids := make([]string, 0, len(parts))
+	for _, part := range parts {
+		id, valid := parseUUID(strings.TrimSpace(part))
+		if !valid {
+			failure(w, badRequest("invalid ids"))
+			return
+		}
+		ids = append(ids, id)
+	}
+	items := []MessageStatus{}
+	err := db.InTenant(tenant.WithPrincipal(r.Context(), p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		items = items[:0]
+		rows, err := tx.Query(r.Context(), `SELECT m.id::text,r.state,r.failure_reason,m.fetched_at,r.handed_off_at,r.deliver_by
+ FROM inbox_messages m JOIN inbox_receipts r ON r.tenant_id=m.tenant_id AND r.message_id=m.id
+ WHERE m.id=ANY($1::uuid[]) AND m.sender_principal_id=$2::uuid ORDER BY m.sent_event_id`, ids, p.ID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var s MessageStatus
+			var state string
+			if err := rows.Scan(&s.MessageID, &state, &s.Reason, &s.DeliveredAt, &s.ReadAt, &s.DeliverBy); err != nil {
+				return err
+			}
+			switch {
+			case state == "handed_off":
+				s.Status = "read"
+			case state == "failed":
+				s.Status = "not_delivered"
+			case s.DeliveredAt != nil:
+				s.Status = "delivered"
+			default:
+				s.Status = "sent"
+			}
+			if state != "failed" {
+				s.Reason = ""
+			}
+			items = append(items, s)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		failure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Items []MessageStatus `json:"items"`
+	}{items})
+}
+
+func (m *module) handleGetDeliverySettings(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	var out DeliverySettings
+	err := db.InTenant(tenant.WithPrincipal(r.Context(), p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = loadDeliverySettings(r.Context(), tx)
+		return err
+	})
+	if err != nil {
+		failure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// New deadlines apply to messages sent from now on; a queued message keeps the
+// deadline it was accepted with.
+func (m *module) handlePutDeliverySettings(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	var in DeliverySettings
+	if !decodeJSON(w, r, 1024, &in) {
+		return
+	}
+	if in.SessionDeadlineSeconds < 60 || in.SessionDeadlineSeconds > 86400 ||
+		in.UnboundDeadlineSeconds < 60 || in.UnboundDeadlineSeconds > 604800 ||
+		in.MaxAttempts < 1 || in.MaxAttempts > 50 {
+		failure(w, badRequest("session deadline 60–86400 s, unbound deadline 60–604800 s, attempts 1–50"))
+		return
+	}
+	err := db.InTenant(tenant.WithPrincipal(r.Context(), p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(r.Context(), `INSERT INTO inbox_delivery_settings(tenant_id,session_deadline_seconds,unbound_deadline_seconds,max_attempts) VALUES($1::uuid,$2,$3,$4)
+ ON CONFLICT (tenant_id) DO UPDATE SET session_deadline_seconds=EXCLUDED.session_deadline_seconds,unbound_deadline_seconds=EXCLUDED.unbound_deadline_seconds,max_attempts=EXCLUDED.max_attempts,updated_at=clock_timestamp()`,
+			p.TenantID, in.SessionDeadlineSeconds, in.UnboundDeadlineSeconds, in.MaxAttempts)
+		return err
+	})
+	if err != nil {
+		failure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, in)
+}

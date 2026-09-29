@@ -11,6 +11,7 @@ import FloatingPanel from '../work/FloatingPanel.vue'
 import ConnectHint from './ConnectHint.vue'
 import { isStale, useSessionRemoval } from './sessionRemoval'
 import AgentStateLabel from './AgentStateLabel.vue'
+import ListeningLabel from './ListeningLabel.vue'
 import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
 import AgentGlyph from './AgentGlyph.vue'
@@ -210,7 +211,9 @@ function rowClick(event: MouseEvent, id: string) {
           </span>
           <span role="cell" class="c-state">
             <AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="pendingLabel(view)" />
+            <!-- No inbox (AEON-282) is the more specific cue; otherwise the listening cue (AEON-280). -->
             <span v-if="live(view) && view.session.management_mode === 'managed' && view.session.run_id && !view.session.advertised_capabilities.includes('inbox')" class="no-inbox" title="This session has no inbox delivery path. Launch a managed worker to receive follow-up messages.">No inbox</span>
+            <ListeningLabel v-else class="state-listen" :session="view.session" :now="now" compact />
           </span>
           <span role="cell" class="c-agent">
             <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
@@ -251,6 +254,7 @@ function rowClick(event: MouseEvent, id: string) {
           <span role="cell" class="right c-beat">
             <time v-if="view.session.heartbeat_at" :datetime="view.session.heartbeat_at">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time>
             <span v-else class="faint">never</span>
+            <ListeningLabel class="beat-listen" :session="view.session" :now="now" compact />
           </span>
           <span role="cell" class="right c-elapsed mono-cell">{{ elapsed(view.session, now) }}</span>
           <span role="cell" class="c-actions">
@@ -375,6 +379,10 @@ function rowClick(event: MouseEvent, id: string) {
 .ticket-chip:hover { filter: brightness(1.04); text-decoration: underline; }
 .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
 .row .c-beat { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+/* Listening sits under the state word on wide rows and under the heartbeat on phones. */
+.row .c-state:has(.state-listen) { display: grid; justify-items: start; gap: 3px; }
+.state-listen { padding-left: 1px; }
+.row .beat-listen { display: none; }
 .row .c-elapsed { font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .faint { color: var(--ink-3); }
 .mono-cell { font-family: var(--mono); font-variant-ligatures: none; }
@@ -437,6 +445,9 @@ function rowClick(event: MouseEvent, id: string) {
   .row > .c-ticket { padding-block: 0; }
   .c-exec { grid-area: exec; min-width: 0; }
   .c-beat { display: block; grid-area: beat; }
+  .row .c-beat:has(.beat-listen) { display: grid; justify-items: end; gap: 2px; }
+  .row .beat-listen { display: inline-flex; }
+  .row .state-listen { display: none; }
   .c-elapsed { display: none; }
   .row > .c-actions { grid-area: actions; grid-row: 1 / span 3; align-self: center; justify-content: center; padding: 0; }
   .act { display: none; }

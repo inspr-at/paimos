@@ -214,7 +214,7 @@ func TestHeartbeatControlsPullsExactSession(t *testing.T) {
 	})
 	var out bytes.Buffer
 	rt := &runtime{configPath: config, stdout: &out, stderr: io.Discard}
-	rt.printHeartbeatControls(context.Background(), hookProjectID, hookSessionID)
+	rt.printHeartbeatControls(context.Background(), hookSessionID, "claude", nil)
 	if !pulled.Load() || !strings.Contains(out.String(), "message "+hookMessageID) {
 		t.Fatal("heartbeat lost session message hint")
 	}

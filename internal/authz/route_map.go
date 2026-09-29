@@ -143,6 +143,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/harness-sessions/orchestrator":            "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}":             "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker": "harness.read",
+	"GET /api/inbox/message-status":                                          "inbox.receipt",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}": "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/recovery":             "harness.read",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/remove":              "harness.read",
@@ -379,6 +380,8 @@ var RoutePermissions = map[string]string{
 	"PUT /api/settings/eta-interval":                                                            "settings.manage",
 	"PUT /api/nodes/{nodeId}/live-eta":                                                          "harness.worker",
 	"PUT /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker":                    "harness.read",
+	"GET /api/settings/inbox-delivery":                                                          "settings.read",
+	"PUT /api/settings/inbox-delivery":                                                          "settings.manage",
 }
 
 func PermissionForPattern(pattern string) (string, bool) {

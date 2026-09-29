@@ -20,6 +20,7 @@ import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
 import ProvenanceDetail from './ProvenanceDetail.vue'
 import SessionStateEvidence from './SessionStateEvidence.vue'
+import ListeningLabel from './ListeningLabel.vue'
 import SessionRecovery from './SessionRecovery.vue'
 import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import ManagedSessionControls from './ManagedSessionControls.vue'
@@ -209,6 +210,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <template v-else-if="view.session.heartbeat_at"> · heartbeat <time :datetime="view.session.heartbeat_at" :data-tip="absoluteTime(view.session.heartbeat_at)">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time></template>
           <template v-else> · no heartbeat yet</template>
         </p>
+        <p v-if="view.session.phase !== 'stopped' && !view.session.stopped_at && !view.session.archived_at" class="now-meta now-listen"><ListeningLabel :session="view.session" :now="now" /></p>
         <p v-if="view.ticket && !view.session.stopped_at && etaFromSession(view.session)" class="now-meta now-eta"><EtaCell align="start" labelled :eta="etaFromSession(view.session)" :now="now" /></p>
         <SessionStateEvidence :view="view" :now="now" />
         <ol v-if="timeline.length" class="activity-timeline" aria-label="Recent activity">
@@ -319,6 +321,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .now-block { display: grid; gap: 6px; padding: 0 0 18px; border-bottom: 1px solid var(--line); }
 .now-step { font-size: 19px; line-height: 1.3; color: var(--ink); overflow-wrap: anywhere; }
 .now-meta { font-size: 12px; color: var(--ink-2); }
+.now-listen { display: flex; min-width: 0; }
 .activity-timeline { display: grid; gap: 0; margin: 10px 0 0; padding: 0; list-style: none; }
 .activity-timeline li { display: grid; grid-template-columns: 65px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink); }
 .activity-timeline time { color: var(--ink-3); font-size: 11px; white-space: nowrap; }

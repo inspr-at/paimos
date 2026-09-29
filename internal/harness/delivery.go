@@ -36,9 +36,13 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if s.Management != "managed" || !has(s, "inbox") {
 		return nil, workorders.Fail(409, "managed inbox capability required")
 	}
+	// Every drain is this generation listening, with or without work (AEON-280).
+	if err := inbox.MarkSessionSeen(ctx, tx, s.ID, inbox.SeenDrain); err != nil {
+		return nil, err
+	}
 	// Existing uncompleted lease must be replayed before taking later work.
 	var d Delivery
-	err = tx.QueryRow(ctx, `SELECT d.id::text,m.id::text,d.cursor,m.sender_principal_id::text,m.body,d.leased_at FROM harness_deliveries d JOIN inbox_messages m ON m.tenant_id=d.tenant_id AND m.id=d.message_id WHERE d.session_id=$1 AND d.completed_at IS NULL AND d.released_at IS NULL ORDER BY d.cursor LIMIT 1`, s.ID).Scan(&d.ID, &d.MessageID, &d.Cursor, &d.SenderPrincipalID, &d.Body, &d.LeasedAt)
+	err = tx.QueryRow(ctx, `SELECT d.id::text,m.id::text,d.cursor,m.sender_principal_id::text,m.body,d.leased_at FROM harness_deliveries d JOIN inbox_messages m ON m.tenant_id=d.tenant_id AND m.id=d.message_id WHERE d.session_id=$1 AND d.completed_at IS NULL AND d.released_at IS NULL AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) ORDER BY d.cursor LIMIT 1 FOR UPDATE OF m`, s.ID).Scan(&d.ID, &d.MessageID, &d.Cursor, &d.SenderPrincipalID, &d.Body, &d.LeasedAt)
 	if err == nil {
 		return []Delivery{d}, nil
 	}
@@ -64,6 +68,9 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	d.Cursor = cursor
 	d.SenderPrincipalID = sender
 	d.Body = body
+	if err := inbox.MarkFetched(ctx, tx, p, inbox.SeenDrain, messageID); err != nil {
+		return nil, err
+	}
 	return []Delivery{d}, record(ctx, tx, p, s, "delivery_leased", nil, map[string]any{"delivery_id": d.ID, "message_id": d.MessageID, "cursor": d.Cursor})
 }
 func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -109,6 +116,10 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 	var messageID string
 	var cursor int64
 	var completed, released *time.Time
+	// Message row first, then the drain lease (AEON-280 lock order).
+	if _, err = tx.Exec(ctx, `SELECT 1 FROM inbox_messages WHERE id=(SELECT message_id FROM harness_deliveries WHERE session_id=$1 AND id=$2) FOR UPDATE`, s.ID, in.DeliveryID); err != nil {
+		return nil, err
+	}
 	err = tx.QueryRow(ctx, `SELECT message_id::text,cursor,completed_at,released_at FROM harness_deliveries WHERE session_id=$1 AND id=$2 FOR UPDATE`, s.ID, in.DeliveryID).Scan(&messageID, &cursor, &completed, &released)
 	if err != nil {
 		return nil, err
@@ -121,6 +132,12 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 	}
 	if completed != nil {
 		return map[string]any{"delivery_id": in.DeliveryID, "cursor": cursor, "completed_at": completed}, nil
+	}
+	if failed, err := inbox.MessageNotDelivered(ctx, tx, messageID); err != nil || failed {
+		if err == nil {
+			err = workorders.Fail(409, "message was not delivered")
+		}
+		return nil, err
 	}
 	var acked *time.Time
 	err = tx.QueryRow(ctx, `UPDATE inbox_messages SET acked_at=clock_timestamp(),acked_by_principal_id=$2 WHERE id=$1 AND recipient_principal_id=$2 AND acked_at IS NULL RETURNING acked_at`, messageID, s.AgentPrincipalID).Scan(&acked)
@@ -141,6 +158,9 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 	event := "delivery_acknowledged"
 	if in.Outcome == "failed" {
 		event = "delivery_failed"
+	} else if err = inbox.MarkSessionSeen(ctx, tx, s.ID, inbox.SeenAck); err != nil {
+		// Only a completed hand-off proves a live delivery path (AEON-280).
+		return nil, err
 	}
 	if err = record(ctx, tx, p, s, event, nil, map[string]any{"message_id": messageID, "cursor": cursor, "outcome": in.Outcome, "failure_reason": in.FailureReason}); err != nil {
 		return nil, err

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, receiptTip, saveReadMark, saveTab, unreadGroups } from '../src/components/agents/sessionChat.ts'
+import { initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, saveReadMark, saveTab, statusDone, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
 import { collapseMessages } from '../src/components/agents/sessionMessages.ts'
 import type { ProjectMessage } from '../src/lib/agents.ts'
 
@@ -80,11 +80,22 @@ test('unread counts other people’s posts above the watermark, duplicates by th
   assert.deepEqual(unreadGroups(groups, 'me', null, true), [])
 })
 
-test('receipt wording is short and specific', () => {
+test('delivery wording is short and specific (AEON-280)', () => {
   const at = (iso: string) => iso.slice(11, 16)
-  assert.equal(receiptTip({ message_id: 'm', state: 'queued', handed_off_at: null, failure_reason: '' }, at), 'Sent · waiting for the session to pick it up')
-  assert.equal(receiptTip({ message_id: 'm', state: 'handed_off', handed_off_at: '2026-09-29T06:10:00Z', failure_reason: '' }, at), 'Picked up by the session · 06:10')
-  assert.equal(receiptTip({ message_id: 'm', state: 'failed', handed_off_at: null, failure_reason: 'target_missing' }, at), 'Not delivered · target missing')
+  const base = { message_id: 'm', delivered_at: null, read_at: null, deliver_by: '2026-09-29T06:15:00Z' }
+  const sent = { ...base, status: 'sent' as const }
+  const delivered = { ...base, status: 'delivered' as const, delivered_at: '2026-09-29T06:09:00Z' }
+  const read = { ...base, status: 'read' as const, delivered_at: '2026-09-29T06:09:00Z', read_at: '2026-09-29T06:10:00Z' }
+  assert.deepEqual([sent, delivered, read].map(statusLabel), ['Sent', 'Delivered', 'Read'])
+  assert.equal(statusTip(sent, at), 'Sent · waiting for the session to pick it up')
+  assert.equal(statusTip(delivered, at), 'Delivered to the session · 06:09')
+  assert.equal(statusTip(read, at), 'Read by the session · 06:10')
+  for (const [reason, text] of [['session_ended', 'the session ended'], ['no_listener', 'the session was not listening'], ['deadline', 'not confirmed in time'], ['attempts', 'every attempt failed'], ['http_error', 'http error']]) {
+    assert.equal(statusLabel({ ...base, status: 'not_delivered', reason }), `Not delivered · ${text}`)
+  }
+  assert.equal(statusDone(sent), false)
+  assert.equal(statusDone(read), true)
+  assert.equal(statusDone({ ...base, status: 'not_delivered', reason: 'deadline' }), true)
 })
 
 test('near the bottom allows a small slack', () => {
