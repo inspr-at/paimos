@@ -4,7 +4,7 @@
 // watermark is the highest sent_event_id this person has had in view. The server
 // marker follows the person across devices; this browser's copy is the offline
 // fallback.
-import type { MessageStatus } from '../../lib/agents.ts'
+import type { HarnessSession, MessageStatus } from '../../lib/agents.ts'
 import type { MessageGroup } from './sessionMessages.ts'
 
 export type SessionTab = 'overview' | 'messages'
@@ -118,6 +118,15 @@ export function statusTip(status: MessageStatus, format: (iso: string) => string
   }
 }
 export const statusDone = (status?: MessageStatus) => status?.status === 'read' || status?.status === 'not_delivered'
+
+// A live session with neither a stored vendor reference nor a hook read so far
+// cannot take the message until its inbox hook runs (AEON-369).
+export const hookDeliveryNotice = "Delivered when the session's inbox hook runs."
+export function awaitsInboxHook(session: Pick<HarnessSession, 'phase' | 'stopped_at' | 'archived_at' | 'has_vendor_session_ref' | 'inbox_seen_via'>): boolean {
+  if (session.phase === 'stopped' || session.stopped_at || session.archived_at) return false
+  if (session.has_vendor_session_ref || session.inbox_seen_via === 'hook') return false
+  return true
+}
 
 // Within this distance of the end the thread counts as read to the bottom.
 export const nearBottom = (el: { scrollHeight: number; scrollTop: number; clientHeight: number }, slack = 32) =>

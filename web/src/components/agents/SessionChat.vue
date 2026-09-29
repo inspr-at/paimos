@@ -10,7 +10,7 @@ import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
 import { collapseMessages } from './sessionMessages'
-import { keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, saveReadMark, statusDone, unreadGroups, type ReadMark } from './sessionChat'
+import { awaitsInboxHook, hookDeliveryNotice, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, saveReadMark, statusDone, unreadGroups, type ReadMark } from './sessionChat'
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
@@ -23,6 +23,8 @@ const person = computed(() => identity.identity?.principal.kind === 'person')
 const s = computed(() => props.view.session)
 const messages = computed(() => agents.thread(s.value))
 const address = computed(() => agents.addressOf(s.value.agent_principal_id))
+// A registered address is sent when one exists. Otherwise the recipient is the session's principal.
+const recipient = computed(() => address.value || s.value.agent_principal_id)
 const current = computed(() => collapseMessages(messages.value))
 const ended = computed(() => s.value.phase === 'stopped' || !!s.value.stopped_at || !!s.value.archived_at)
 // Managed sessions (AEON-260) take input only through the Session controls above:
@@ -36,6 +38,7 @@ const level = ref<'simple' | 'steer'>('simple')
 const replyTo = ref<ProjectMessage | null>(null)
 const sending = ref(false)
 const sendError = ref('')
+const hookNotice = ref(false)
 
 // ---------- Read state ----------
 const mark = ref<ReadMark | null>(null)
@@ -449,7 +452,7 @@ watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
   touchY = undefined
   markerHold = viewer && person.value && !local ? generation : 0
   seen?.disconnect()
-  draft.value = ''; replyTo.value = null; sendError.value = ''
+  draft.value = ''; replyTo.value = null; sendError.value = ''; hookNotice.value = false
   const projectId = s.value.project_id
   boundProject = projectId
   boundSession = id
@@ -470,16 +473,19 @@ const composeBlock = computed(() => {
   if (ended.value || sendError.value === 'This session has ended.') return 'This session has ended.'
   if (agents.messagingState === 'error') return 'Messages could not be loaded right now. Close and reopen the session to try again.'
   if (agents.messagingState === 'forbidden') return 'Messages are open to workspace admins.'
-  if (!address.value) return `${props.view.name} has no message address yet. It gets one when it registers a message target.`
+  // Only a message with no session still needs a registered target.
+  if (!s.value.id && !address.value) return `${props.view.name} has no message address yet. It gets one when it registers a message target.`
   return ''
 })
+const showHookNotice = computed(() => hookNotice.value && awaitsInboxHook(s.value) && !current.value.some(m => m.sender_principal_id === me.value && (statuses.value[m.id]?.status === 'delivered' || statuses.value[m.id]?.status === 'read')))
 async function send() {
   if (!draft.value.trim() || sending.value || composeBlock.value) return
   sending.value = true; sendError.value = ''
   try {
-    await agents.send(s.value, address.value, draft.value.trim(), level.value, replyTo.value?.id)
+    await agents.send(s.value, recipient.value, draft.value.trim(), level.value, replyTo.value?.id)
     refreshedAt = Date.now()
     draft.value = ''; replyTo.value = null
+    hookNotice.value = awaitsInboxHook(s.value)
     await nextTick(); toBottom(true); refreshReceipts()
   } catch (e) { sendError.value = e instanceof APIError && e.status === 409 && e.body.code === 'session_ended' ? 'This session has ended.' : e instanceof Error ? e.message : 'The message was not sent. Please try again.' }
   finally { sending.value = false }
@@ -516,10 +522,11 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
     </div>
 
     <p v-if="managed && !ended" class="managed-hint"><AppIcon name="send" :size="13" />Steer this managed session with the controls above.</p>
-    <footer v-else-if="address || composeBlock || unmanaged" class="composer">
+    <footer v-else class="composer">
       <SessionRequests v-if="unmanaged" :key="s.id" :session="s" :now="now" />
       <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
       <form v-else class="compose" @submit.prevent="send">
+        <p v-if="showHookNotice" class="compose-block" role="status">{{ hookDeliveryNotice }}</p>
         <p v-if="replyTo" class="replying"><span>Replying to “{{ replyTo.body.slice(0, 80) }}{{ replyTo.body.length > 80 ? '…' : '' }}”</span><button type="button" class="icon-btn sm flat" aria-label="Cancel the reply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
         <label class="sr-only" :for="`compose-${s.id}`">Message to {{ view.name }}</label>
         <textarea :id="`compose-${s.id}`" ref="textarea" v-model="draft" class="field" rows="2" :placeholder="`Message ${view.name}…`" :disabled="!canWrite || sending" @keydown="composerKeys" @focus="toBottom(true)" />

@@ -66,6 +66,42 @@ test('send targets the selected generation and a concurrent stop disables the co
   await expect(panel.getByRole('button', { name: 'Send', exact: true })).toHaveCount(0)
 })
 
+for (const width of [1600, 390]) {
+  test(`a live session with no target can be messaged, and only that session receives it (${width})`, async ({ page }) => {
+    await page.clock.install({ time: now })
+    const work = fixtures(); work.preferences.theme = { choice: 'light' }
+    await mockWork(page, work, { admin: true })
+    const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {} })
+    const first = data.sessions[0]!
+    Object.assign(first, { display_label: 'aithema-4c', role: 'worker', run_id: null, ticket_node_id: null, phase: 'working', activity: 'idle', heartbeat_at: new Date(now).toISOString(), stopped_at: null, stop_reason: null, management_mode: 'managed', advertised_capabilities: ['inbox', 'status'] })
+    const second = { ...first, id: '5e000000-0000-4000-8000-000000000099', display_label: 'aithema-other', created_at: new Date(now - 60_000).toISOString() }
+    data.sessions.splice(0, data.sessions.length, first, second)
+    data.targets.splice(0); data.messages.splice(0); data.approvals.splice(0); data.runs.splice(0)
+    await mockAgents(page, data)
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.goto(`/agents/${first.id}?tab=messages`)
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    const composer = panel.getByRole('textbox', { name: 'Message to aithema-4c' })
+    await expect(composer).toBeEnabled()
+    await expect(panel.getByText('has no message address')).toHaveCount(0)
+    await expect(panel.getByText("delivered when the session's inbox hook runs")).toHaveCount(0)
+    const [request] = await Promise.all([
+      page.waitForRequest(r => r.method() === 'POST' && r.url().includes('/messages')),
+      composer.fill('Only this generation').then(() => panel.getByRole('button', { name: 'Send', exact: true }).click()),
+    ])
+    expect(request.postDataJSON()).toMatchObject({ to: first.agent_principal_id, recipient_session_id: first.id, body: 'Only this generation' })
+    await expect(panel.getByRole('list', { name: 'Messages', exact: true })).toContainText('Only this generation')
+    await expect(panel.getByRole('status').filter({ hasText: "delivered when the session's inbox hook runs" })).toHaveText("Delivered when the session's inbox hook runs.")
+    expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.goto(`/agents/${second.id}?tab=messages`)
+    const other = page.getByRole('complementary', { name: 'Session details' })
+    await expect(other.getByRole('textbox', { name: 'Message to aithema-other' })).toBeEnabled()
+    await expect(other.getByText('Only this generation')).toHaveCount(0)
+    await expect(other.getByText("delivered when the session's inbox hook runs")).toHaveCount(0)
+  })
+}
+
 test('a stopped session has no active Send action', async ({ page }) => {
   const { worker } = await setup(page)
   Object.assign(worker, { phase: 'stopped', stopped_at: new Date(now).toISOString(), stop_reason: 'done' })

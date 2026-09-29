@@ -689,8 +689,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/1.3",
-    "sha256": "c5fb34f021d524bcb2bca218fba67e924856e723529fa1cb8261588f6621b828",
+    "version": "harness-session/1.4",
+    "sha256": "19b016b636722c8e88b1526327f537753fd8e6e3c4b162dc23262f642aa7db70",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1019,6 +1019,9 @@
             ]
           },
           "has_problem": {
+            "type": "boolean"
+          },
+          "has_vendor_session_ref": {
             "type": "boolean"
           },
           "heartbeat_at": {
@@ -1631,6 +1634,9 @@
             ]
           },
           "has_problem": {
+            "type": "boolean"
+          },
+          "has_vendor_session_ref": {
             "type": "boolean"
           },
           "heartbeat_at": {

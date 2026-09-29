@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, saveReadMark, saveTab, statusDone, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
+import { awaitsInboxHook, hookDeliveryNotice, initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, saveReadMark, saveTab, statusDone, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
+import type { HarnessSession } from '../src/lib/agents.ts'
 import { collapseMessages } from '../src/components/agents/sessionMessages.ts'
 import type { ProjectMessage } from '../src/lib/agents.ts'
 
@@ -96,6 +97,18 @@ test('delivery wording is short and specific (AEON-280)', () => {
   assert.equal(statusDone(sent), false)
   assert.equal(statusDone(read), true)
   assert.equal(statusDone({ ...base, status: 'not_delivered', reason: 'deadline' }), true)
+})
+
+test('a live session without a hook binding waits for the inbox hook (AEON-369)', () => {
+  const live = { id: 's', project_id: 'p', agent_principal_id: 'a', run_id: null, ticket_node_id: null, work_order_id: null, parent_harness_session_id: null, harness: 'claude', host: 'h', management_mode: 'unmanaged', role: 'worker', work_shape: 'unknown', advertised_capabilities: [], phase: 'working', activity: 'idle', activity_sequence: 1, revision: 1, heartbeat_at: null, stopped_at: null, stop_reason: null, created_at: '2026-09-29T00:00:00Z' } satisfies HarnessSession
+  assert.equal(awaitsInboxHook(live), true)
+  assert.equal(awaitsInboxHook({ ...live, has_vendor_session_ref: true }), false)
+  assert.equal(awaitsInboxHook({ ...live, inbox_seen_via: 'hook' }), false)
+  assert.equal(awaitsInboxHook({ ...live, inbox_seen_via: 'drain' }), true)
+  assert.equal(awaitsInboxHook({ ...live, phase: 'stopped', stopped_at: '2026-09-29T00:00:00Z' }), false)
+  assert.equal(awaitsInboxHook({ ...live, archived_at: '2026-09-29T00:00:00Z' }), false)
+  assert.equal(hookDeliveryNotice, "Delivered when the session's inbox hook runs.")
+  assert.equal(hookDeliveryNotice.toLowerCase().includes("delivered when the session's inbox hook runs"), true)
 })
 
 test('near the bottom allows a small slack', () => {
