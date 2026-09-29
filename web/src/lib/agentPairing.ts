@@ -107,7 +107,8 @@ export interface PairingEnrollment {
 
 export type HarnessReason = string
 export interface HarnessFix { kind: 'repin' | 'add_harness' | 'login' | 'restart'; command: string }
-export interface HarnessDetail { state: HarnessStatus; reason?: HarnessReason; fix?: HarnessFix }
+export interface AccountAttention { account_id: string; reason: string }
+export interface HarnessDetail { state: HarnessStatus; reason?: HarnessReason; fix?: HarnessFix; attention_accounts?: AccountAttention[] }
 
 /** Public pairing projection. Secret-bearing keys are not part of this type. */
 export interface PairingView {
@@ -921,7 +922,9 @@ export interface ComputerStatusCopy {
   next: string
 }
 
-type HarnessView = Pick<PairingView, 'computer_state' | 'connectivity' | 'harness_statuses' | 'harness_details'>
+type HarnessView = Pick<PairingView, 'computer_state' | 'connectivity' | 'harness_statuses' | 'harness_details'> & {
+  enrollments?: PairingView['enrollments']
+}
 
 function harnessDetail(view: HarnessView, harness: string): HarnessDetail | undefined {
   const detail = view.harness_details?.[harness]
@@ -955,9 +958,26 @@ export function harnessRecovery(harness: string, reason: string): HarnessFix | u
   return harnessFix(harness, reason)
 }
 
+function attentionItems(detail: HarnessDetail | undefined): AccountAttention[] {
+  return detail?.state === 'ready' ? detail.attention_accounts ?? [] : []
+}
+
+function attentionFix(harness: string, items: AccountAttention[]): string {
+  const commands: string[] = []
+  for (const item of items) {
+    const command = harnessFix(harness, item.reason)?.command ?? ''
+    if (command && !commands.includes(command)) commands.push(command)
+  }
+  return commands.join(' · ')
+}
+
 export function describeHarnessFix(view: HarnessView, harness: string): string {
+  if (view.computer_state !== 'connected') return ''
   const detail = harnessDetail(view, harness)
-  return view.computer_state === 'connected' && detail && ['blocked', 'login_required', 'checking'].includes(detail.state) ? harnessFix(harness, detail.reason)?.command ?? '' : ''
+  if (!detail) return ''
+  const attention = attentionItems(detail)
+  if (attention.length) return attentionFix(harness, attention)
+  return ['blocked', 'login_required', 'checking'].includes(detail.state) ? harnessFix(harness, detail.reason)?.command ?? '' : ''
 }
 
 const HARNESS_HINTS: Record<string, string> = {
@@ -967,11 +987,42 @@ const HARNESS_HINTS: Record<string, string> = {
   profile_permissions: 'Make the pi profile private, then retry.',
 }
 
+function enrolledHarnessCount(view: HarnessView, harness: string): number {
+  return (view.enrollments ?? []).filter(item => item.harness === harness && item.state !== 'revoked').length
+}
+
 /** One short sentence that the command alone does not say; empty otherwise. */
 export function describeHarnessHint(view: HarnessView, harness: string): string {
   const detail = harnessDetail(view, harness)
-  if (view.computer_state !== 'connected' || !detail?.reason || detail.state !== 'blocked') return ''
+  if (view.computer_state !== 'connected' || !detail) return ''
+  const attention = attentionItems(detail)
+  const enrolled = enrolledHarnessCount(view, harness)
+  if (attention.length > 0 && enrolled >= 2 && attention.length < enrolled) {
+    const verb = attention.length === 1 ? 'needs' : 'need'
+    return `${attention.length} of ${enrolled} accounts ${verb} attention`
+  }
+  if (!detail.reason || detail.state !== 'blocked') return ''
   return HARNESS_HINTS[detail.reason] ?? ''
+}
+
+function reasonLabel(status: string, reason?: string): string {
+  const labels: Record<string, string> = { ready: 'Ready', blocked: 'Needs attention', login_required: 'Sign in required', checking: 'Checking', draining: 'Draining' }
+  const reasons: Record<string, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair' }
+  // A code from a newer daemon is shown raw rather than dropped or guessed.
+  if (!HARNESS_STATES.includes(status as typeof HARNESS_STATES[number])) return `Needs attention · ${reason ?? status}`
+  if (reason) return reasons[reason] ?? `Needs attention · ${reason}`
+  return labels[status] ?? ''
+}
+
+function attentionStatusLabel(items: AccountAttention[]): string {
+  const reason = items[0]?.reason
+  if (reason && items.every(item => item.reason === reason)) return reasonLabel('blocked', reason)
+  return 'Needs attention'
+}
+
+function freshLabel(view: HarnessView, label: string): string {
+  if (!label) return ''
+  return view.connectivity === 'online' ? label : `Last reported: ${label.toLowerCase()}`
 }
 
 export function describeHarnessStatus(view: HarnessView, harness: string): string {
@@ -979,11 +1030,20 @@ export function describeHarnessStatus(view: HarnessView, harness: string): strin
   const detail = harnessDetail(view, harness)
   const status = view.harness_statuses?.[harness] ?? detail?.state
   if (!status) return ''
-  const labels: Record<HarnessStatus, string> = { ready: 'Ready', blocked: 'Needs attention', login_required: 'Sign in required', checking: 'Checking', draining: 'Draining' }
-  const reasons: Record<HarnessReason, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair' }
-  // A code from a newer daemon is shown raw rather than dropped or guessed.
-  const label = !HARNESS_STATES.includes(status as typeof HARNESS_STATES[number]) ? `Needs attention · ${detail?.reason ?? status}` : detail?.reason ? reasons[detail.reason] ?? `Needs attention · ${detail.reason}` : labels[status]!
-  return view.connectivity === 'online' ? label : `Last reported: ${label.toLowerCase()}`
+  const attention = attentionItems(detail)
+  const label = attention.length ? attentionStatusLabel(attention) : reasonLabel(status, detail?.reason)
+  return freshLabel(view, label)
+}
+
+/** Per-enrollment label. A partial block names the account that needs a fix and leaves its sibling Ready. */
+export function describeEnrollmentStatus(view: HarnessView, enrollment: { account_id: string; harness: string }): string {
+  if (view.computer_state !== 'connected') return ''
+  const detail = harnessDetail(view, enrollment.harness)
+  const attention = attentionItems(detail)
+  const hit = attention.find(item => item.account_id === enrollment.account_id)
+  if (hit) return freshLabel(view, reasonLabel('blocked', hit.reason))
+  if (attention.length) return freshLabel(view, 'Ready')
+  return describeHarnessStatus(view, enrollment.harness)
 }
 
 export function describeComputerStatus(view: Pick<PairingView, 'computer_state' | 'local_cleanup' | 'local_processes' | 'enrollments' | 'setup_state' | 'connectivity' | 'accounting_state'>, hints: { httpStatus?: number; heartbeatMissing?: boolean } = {}): ComputerStatusCopy {
@@ -1429,6 +1489,25 @@ function parseInstallTarget(value: unknown): InstallTarget {
   }
 }
 
+function parseAttention(raw: unknown, enrolled: Set<string>): AccountAttention[] | undefined {
+  if (!Array.isArray(raw) || enrolled.size < 2) return
+  const seen = new Set<string>()
+  const items: AccountAttention[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const item = entry as Record<string, unknown>
+    const id = typeof item.account_id === 'string' && UUID.test(item.account_id) ? item.account_id : ''
+    const reason = harnessCode(item.reason)
+    if (!id || !reason || !enrolled.has(id) || seen.has(id)) continue
+    seen.add(id)
+    items.push({ account_id: id, reason })
+  }
+  items.sort((a, b) => a.account_id < b.account_id ? -1 : a.account_id > b.account_id ? 1 : 0)
+  const capped = items.slice(0, 5)
+  if (capped.length === 0 || capped.length >= enrolled.size) return
+  return capped
+}
+
 function parseView(data: unknown): PairingView {
   const record = asRecord(data, 'pairing')
   const view: PairingView = {
@@ -1478,9 +1557,15 @@ function parseView(data: unknown): PairingView {
       const state = harnessCode(item.state)
       if (!state || view.harness_statuses?.[harness] && view.harness_statuses[harness] !== state) continue
       const reason = harnessCode(item.reason)
-      if (item.reason && !reason || ['ready', 'draining'].includes(state) && reason) continue
-      const fix = ['blocked', 'login_required', 'checking'].includes(state) ? harnessFix(harness, reason) : undefined
-      view.harness_details[harness] = { state, ...(reason ? { reason } : {}), ...(fix ? { fix } : {}) }
+      if (item.reason && !reason) continue
+      const enrolled = new Set(view.enrollments.filter(entry => entry.harness === harness && entry.state !== 'revoked').map(entry => entry.account_id))
+      const attention = state === 'ready' ? parseAttention(item.attention_accounts, enrolled) : undefined
+      // A ready or draining detail keeps no top-level reason. Valid attention
+      // still survives a mistaken reason so the partial block stays visible.
+      if (['ready', 'draining'].includes(state) && reason && !attention) continue
+      const storedReason = ['ready', 'draining'].includes(state) ? undefined : reason
+      const fix = ['blocked', 'login_required', 'checking'].includes(state) ? harnessFix(harness, storedReason) : undefined
+      view.harness_details[harness] = { state, ...(storedReason ? { reason: storedReason } : {}), ...(fix ? { fix } : {}), ...(attention ? { attention_accounts: attention } : {}) }
     }
   }
   if (typeof record.setup_error === 'string' && record.setup_error) view.setup_error = record.setup_error.slice(0, 500)

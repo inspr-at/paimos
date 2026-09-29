@@ -443,8 +443,14 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 	for _, c := range candidates {
 		addingClaude = addingClaude || c.Harness == "claude"
 	}
-	if err := e.checkSavedClaudeDependencies(s, e.ClaudeDependencies, addingClaude); err != nil {
-		return Progress{Stage: "blocked", Action: err.Error()}, err
+	// Renewing one existing account depends only on that account's pin,
+	// launcher and interpreter. Another harness's saved Claude dependencies
+	// must not block the repair. New enrollments, and Claude's own path,
+	// still validate the shared pins.
+	if !renewsExistingPin(s, candidates) {
+		if err := e.checkSavedClaudeDependencies(s, e.ClaudeDependencies, addingClaude); err != nil {
+			return Progress{Stage: "blocked", Action: err.Error()}, err
+		}
 	}
 	if s.Request.ExistingComputerID != "" && (s.Phase == "awaiting_approval" || s.Phase == "requesting" || s.Phase == "provisioning") {
 		return e.Step(ctx)
@@ -514,6 +520,25 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 		return Progress{}, err
 	}
 	return e.Step(ctx)
+}
+
+// renewsExistingPin is the single-account repair of a connected non-Claude
+// enrollment. It matches the signed-in candidate to that enrollment by
+// harness and label, and it does not cover a new enrollment.
+func renewsExistingPin(s *snapshot, candidates []Candidate) bool {
+	if s == nil || len(candidates) != 1 {
+		return false
+	}
+	c := candidates[0]
+	if c.Harness == "claude" || c.Harness == "grok" || c.Login != "signed_in" {
+		return false
+	}
+	for _, a := range s.View.Enrollments {
+		if a.State == "connected" && !s.Removed[a.AccountID] && a.Harness == c.Harness && a.Label == c.Label {
+			return true
+		}
+	}
+	return false
 }
 
 // renewPin is the add_harness repair for a connected account whose own

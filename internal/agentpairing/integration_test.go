@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -1222,7 +1223,7 @@ func TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup(t *testing
 	decodeResult(t, f.call("GET", "/api/agent-pairing/computers", nil, true, "", 200), &listed)
 	report = agentpairing.View{}
 	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &report)
-	if len(listed.Computers) != 1 || listed.Computers[0].HarnessDetails["claude"] != report.HarnessDetails["claude"] {
+	if len(listed.Computers) != 1 || !reflect.DeepEqual(listed.Computers[0].HarnessDetails["claude"], report.HarnessDetails["claude"]) {
 		t.Fatal("list/detail lost harness repair details")
 	}
 	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "blocked", Reason: "repin_pending", Fix: agentsetup.HarnessFix{Kind: "restart", Command: "must not be retained"}}
@@ -1299,5 +1300,68 @@ func TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup(t *testing
 	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
 	if len(report.HarnessDetails) != 0 || len(report.HarnessStatuses) != 0 {
 		t.Fatal("legacy report retained stale details")
+	}
+}
+
+func TestPartialAttentionStaysOnReadyHarness(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	q := &proposal{id: uuid(t, f.db), device: nonce(), runtime: p.runtime, lifecycle: p.lifecycle}
+	q.request = map[string]any{}
+	for k, x := range p.request {
+		q.request[k] = x
+	}
+	q.request["request_id"] = q.id
+	q.request["device_hash"] = hash(q.device)
+	q.request["existing_computer_id"] = *v.ComputerID
+	q.request["existing_lifecycle_secret"] = p.lifecycle
+	q.request["accounts"] = []map[string]string{{"account_key": "claude-add", "harness": "claude", "label": "Second chosen account", "model_profile_id": f.profiles["claude"]}}
+	f.submit(q)
+	f.approve(q, "one_per_harness")
+	added := f.redeem(q)
+	var ids []string
+	for _, enrollment := range added.Enrollments {
+		if enrollment.Harness == "claude" && enrollment.State != "revoked" {
+			ids = append(ids, enrollment.AccountID)
+		}
+	}
+	if len(ids) != 2 {
+		t.Fatalf("expected two claude enrollments, got %+v", added.Enrollments)
+	}
+	slices.Sort(ids)
+	blocked, healthy := ids[0], ids[1]
+	progress := agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "ready"}, HarnessDetails: map[string]agentsetup.HarnessDetail{
+		"claude": {State: "ready", Fix: agentsetup.HarnessFix{Kind: "restart", Command: "untrusted"}, Attention: []agentsetup.AccountAttention{
+			{AccountID: blocked, Reason: "pin_drifted"},
+			{AccountID: "not-an-id", Reason: "pin_drifted"},
+			{AccountID: healthy, Reason: ""},
+		}},
+	}}
+	proof := map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": progress}
+	var report agentpairing.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	got := report.HarnessDetails["claude"]
+	if report.SetupState != "connected" || report.HarnessStatuses["claude"] != "ready" || got.State != "ready" || got.Reason != "" || got.Fix.Command != "" || len(got.Attention) != 1 || got.Attention[0].AccountID != blocked || got.Attention[0].Reason != "pin_drifted" {
+		t.Fatalf("partial attention lost or leaked a command: %+v %s", got, report.SetupState)
+	}
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "ready", Attention: []agentsetup.AccountAttention{
+		{AccountID: blocked, Reason: "pin_drifted"},
+		{AccountID: healthy, Reason: "login_required"},
+	}}
+	proof["progress"] = progress
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if report.HarnessDetails["claude"].State != "ready" || len(report.HarnessDetails["claude"].Attention) != 0 {
+		t.Fatalf("full-harness attention stayed: %+v", report.HarnessDetails["claude"])
+	}
+	progress.HarnessStatuses["claude"] = "blocked"
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "blocked", Reason: "pin_drifted", Attention: []agentsetup.AccountAttention{{AccountID: blocked, Reason: "login_required"}}, Fix: agentsetup.HarnessFix{Kind: "restart", Command: "untrusted"}}
+	proof["progress"] = progress
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if report.HarnessDetails["claude"].Reason != "pin_drifted" || len(report.HarnessDetails["claude"].Attention) != 0 || report.HarnessDetails["claude"].Fix.Command != "aeon-agentd repin --harness claude" {
+		t.Fatalf("non-ready attention was stored: %+v", report.HarnessDetails["claude"])
 	}
 }

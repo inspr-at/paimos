@@ -141,6 +141,7 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	v.HarnessDetails = map[string]agentsetup.HarnessDetail{}
 	v.AllFenced, _ = s.readFence("")
 	launchable := 0
+	perHarness := map[string][]harnessAccountState{}
 	for _, a := range s.accounts {
 		status, reason := "checking", "starting"
 		fenced, e := s.readFence(a.ID)
@@ -194,18 +195,9 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 				v.VerificationUnavailable = append(v.VerificationUnavailable, a.ID)
 			}
 		}
-		// A harness is usable if any of its accounts is ready. Otherwise keep
-		// the most actionable state; a fenced account cannot hide a live one.
-		priority := map[string]int{"draining": 1, "checking": 2, "login_required": 3, "blocked": 4, "ready": 5}
-		if priority[status] > priority[v.HarnessStatuses[a.Harness]] {
-			v.HarnessStatuses[a.Harness] = status
-			if detail, ok := agentsetup.HarnessReport(a.Harness, status, reason); ok {
-				v.HarnessDetails[a.Harness] = detail
-			} else {
-				delete(v.HarnessDetails, a.Harness)
-			}
-		}
+		perHarness[a.Harness] = append(perHarness[a.Harness], harnessAccountState{id: a.ID, status: status, reason: reason})
 	}
+	assignHarnessReports(&v, perHarness)
 	// One ready harness keeps the computer ready. Blocks stay per account and
 	// per harness; HarnessFailed only summarizes a computer that cannot work.
 	if v.Ready {
@@ -265,6 +257,71 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 		return v.BlockedAccounts[i].AccountID < v.BlockedAccounts[j].AccountID
 	})
 	return v
+}
+
+// harnessAccountState is one account's contribution to its harness report.
+// The type stays at package scope because a function cannot declare a named type.
+type harnessAccountState struct {
+	id, status, reason string
+}
+
+// assignHarnessReports keeps a harness ready when any account can work, and
+// records the blocked or unsigned siblings in attention_accounts. A healthy
+// account must not erase those blocks. When nobody is ready, the most
+// actionable state wins; equal ranks keep the first account. Checking,
+// starting and draining are not attention. A fenced account cannot hide a live one.
+func assignHarnessReports(v *LifecycleStatus, perHarness map[string][]harnessAccountState) {
+	priority := map[string]int{"draining": 1, "checking": 2, "login_required": 3, "blocked": 4, "ready": 5}
+	for harness, accounts := range perHarness {
+		ids := make([]string, 0, len(accounts))
+		ready := false
+		var pending []agentsetup.AccountAttention
+		for _, account := range accounts {
+			ids = append(ids, account.id)
+			if account.status == "ready" {
+				ready = true
+			}
+		}
+		if ready {
+			for _, account := range accounts {
+				if account.status != "blocked" && account.status != "login_required" {
+					continue
+				}
+				reason := account.reason
+				if reason == "" {
+					reason = account.status
+				}
+				pending = append(pending, agentsetup.AccountAttention{AccountID: account.id, Reason: reason})
+			}
+			if attention := agentsetup.PartialAttention(harness, ids, "ready", pending); len(attention) > 0 {
+				if detail, ok := agentsetup.HarnessReport(harness, "ready", ""); ok {
+					detail.Attention = attention
+					v.HarnessStatuses[harness] = "ready"
+					v.HarnessDetails[harness] = detail
+					continue
+				}
+			}
+		}
+		bestStatus, bestReason := "", ""
+		bestPriority := 0
+		for _, account := range accounts {
+			rank := priority[account.status]
+			if rank > bestPriority {
+				bestPriority = rank
+				bestStatus = account.status
+				bestReason = account.reason
+			}
+		}
+		if bestStatus == "" {
+			continue
+		}
+		v.HarnessStatuses[harness] = bestStatus
+		if detail, ok := agentsetup.HarnessReport(harness, bestStatus, bestReason); ok {
+			v.HarnessDetails[harness] = detail
+		} else {
+			delete(v.HarnessDetails, harness)
+		}
+	}
 }
 
 func blockedReport(a EnrolledAccount) agentsetup.BlockedAccount {

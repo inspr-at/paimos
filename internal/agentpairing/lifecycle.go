@@ -325,17 +325,19 @@ func (m *Module) harnessReports(ctx context.Context, tx pgx.Tx, computer string,
 	statuses := map[string]string{}
 	details := map[string]agentsetup.HarnessDetail{}
 	enrolled := map[string]bool{}
-	rows, err := tx.Query(ctx, `SELECT DISTINCT a.harness FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$1 AND e.state<>'revoked'`, computer)
+	enrolledAccounts := map[string][]string{}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT a.harness, e.account_id::text FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$1 AND e.state<>'revoked'`, computer)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var harness string
-		if err := rows.Scan(&harness); err != nil {
+		var harness, accountID string
+		if err := rows.Scan(&harness, &accountID); err != nil {
 			return nil, nil, err
 		}
 		enrolled[harness] = true
+		enrolledAccounts[harness] = append(enrolledAccounts[harness], accountID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
@@ -363,7 +365,12 @@ func (m *Module) harnessReports(ctx context.Context, tx pgx.Tx, computer string,
 			statuses[harness] = detail.State
 		}
 		// Never persist client-supplied commands, paths or diagnostics: the
-		// fix is derived from the harness and reason code.
+		// fix is derived from the harness and reason code. Attention on a
+		// non-ready report is ignored. A ready report keeps only enrolled
+		// accounts that are a proper subset and still need a fix.
+		if detail.State == "ready" {
+			detail.Attention = agentsetup.PartialAttention(harness, enrolledAccounts[harness], detail.State, report.Attention)
+		}
 		details[harness] = detail
 	}
 	if dropped {

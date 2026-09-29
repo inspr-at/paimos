@@ -3,7 +3,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import {
-  PairingError, activeRunIds, applyComputerListRefresh, describeComputerStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, disconnectComputer, disconnectConfirm,
+  PairingError, activeRunIds, applyComputerListRefresh, describeComputerStatus, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, disconnectComputer, disconnectConfirm,
   disconnectEnrollment, getPairingComputer, lastActiveLabel, listPairingComputers, pairingReadGeneration, pairingScopeKey,
   platformCaption, type DisconnectMode, type PairingPermissions, type PairingView,
 } from '../../lib/agentPairing'
@@ -261,7 +261,7 @@ function assign(error: unknown, fallback: string) {
             <li v-for="enrollment in computer.enrollments" :key="enrollment.account_id">
               <HarnessMark :harness="enrollment.harness" :size="14" />
               <span class="enrollment-name">{{ harnessLabel(enrollment.harness) }} · {{ enrollment.label }}</span>
-              <span class="enrollment-meta">{{ enrollment.state === 'connected' ? describeHarnessStatus(computer, enrollment.harness) || enrollment.state : enrollment.state }}<template v-if="enrollment.verification_state && enrollment.verification_state !== 'not_selected'"> · verification {{ enrollment.verification_state === 'unavailable' ? 'unavailable' : enrollment.verification_state.replace(/_/g, ' ') }}</template><template v-if="enrollment.local_processes"> · {{ enrollment.local_processes }} local processes</template><template v-if="enrollment.accounting_state === 'unconfirmed'"> · accounting unconfirmed</template></span>
+              <span class="enrollment-meta">{{ enrollment.state === 'connected' ? describeEnrollmentStatus(computer, enrollment) || enrollment.state : enrollment.state }}<template v-if="enrollment.verification_state && enrollment.verification_state !== 'not_selected'"> · verification {{ enrollment.verification_state === 'unavailable' ? 'unavailable' : enrollment.verification_state.replace(/_/g, ' ') }}</template><template v-if="enrollment.local_processes"> · {{ enrollment.local_processes }} local processes</template><template v-if="enrollment.accounting_state === 'unconfirmed'"> · accounting unconfirmed</template></span>
               <span v-if="enrollment.verification_error && enrollment.verification_error !== 'verification_unavailable'" class="enrollment-meta">{{ enrollment.verification_error }}</span>
               <button v-if="canChange(computer) && enrollment.state !== 'revoked'" type="button" class="btn sm ghost remove" @click="openDialog(computer, 'enrollment', enrollment.account_id)">Remove<span class="sr-only"> {{ enrollment.label }} from {{ brand.short_name }}</span></button>
             </li>

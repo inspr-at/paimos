@@ -6,7 +6,7 @@ import { sessionEnded } from '../src/lib/api.ts'
 import {
   DEFAULT_REVIEW_CHOICE, LOOKUP_DEBOUNCE_MS, MIN_POLL_INTERVAL_MS, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
   agentRouteKind, canonicalUserCode, clearPairingClientState, createOngoingLimits, denyPairing,
-  describeComputerStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, describeProgress, harnessRecovery, disconnectComputer, disconnectConfirm, disconnectEnrollment,
+  describeComputerStatus, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, describeProgress, harnessRecovery, disconnectComputer, disconnectConfirm, disconnectEnrollment,
   formatVerification, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
   ongoingLimitError, pairingPermissions, planApproval, planLookup, planOngoingLimits, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
@@ -876,4 +876,61 @@ test('web fixes and labels follow the shared daemon/server vocabulary', async ()
     globalThis.fetch = async () => jsonResponse({ computers: [held] })
     assert.equal(describeHarnessHint((await listPairingComputers())[0]!, 'claude'), hint)
   }
+})
+
+test('a ready harness keeps a blocked sibling account visible', async () => {
+  const blocked = '88888888-8888-4888-8888-888888888888'
+  const enrollments = [
+    enrollment({ account_id: ACCOUNT_2, account_key: 'codex-healthy', harness: 'codex', label: 'Healthy' }),
+    enrollment({ account_id: blocked, account_key: 'codex-blocked', harness: 'codex', label: 'Blocked' }),
+  ]
+  const report = view({
+    state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', reason: 'dependency_invalid', fix: { kind: 'restart', command: 'untrusted' }, attention_accounts: [
+      { account_id: blocked, reason: 'pin_drifted' },
+      { account_id: 'not-a-uuid', reason: 'pin_drifted' },
+      { account_id: ACCOUNT_2, reason: '' },
+    ] } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [report] })
+  const parsed = (await listPairingComputers())[0]!
+  assert.deepEqual(parsed.harness_details?.codex?.attention_accounts, [{ account_id: blocked, reason: 'pin_drifted' }])
+  assert.equal(parsed.harness_details?.codex?.reason, undefined)
+  assert.equal(JSON.stringify(parsed).includes('untrusted'), false)
+  assert.equal(describeComputerStatus(parsed).stateLabel, 'Connected')
+  assert.equal(describeHarnessStatus(parsed, 'codex'), 'Pin changed')
+  assert.equal(describeHarnessHint(parsed, 'codex'), '1 of 2 accounts needs attention')
+  assert.equal(describeHarnessFix(parsed, 'codex'), 'aeon-agentd add-harness --harness codex')
+  assert.equal(describeEnrollmentStatus(parsed, { account_id: ACCOUNT_2, harness: 'codex' }), 'Ready')
+  assert.equal(describeEnrollmentStatus(parsed, { account_id: blocked, harness: 'codex' }), 'Pin changed')
+  assert.equal(describeHarnessStatus({ ...parsed, connectivity: 'offline' }, 'codex'), 'Last reported: pin changed')
+  assert.equal(describeEnrollmentStatus({ ...parsed, connectivity: 'offline' }, { account_id: ACCOUNT_2, harness: 'codex' }), 'Last reported: ready')
+  const mixed = view({
+    state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', attention_accounts: [
+      { account_id: blocked, reason: 'pin_drifted' },
+      { account_id: ACCOUNT_2, reason: 'login_required' },
+    ] } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [mixed] })
+  const both = (await listPairingComputers())[0]!
+  assert.equal(both.harness_details?.codex?.state, 'ready')
+  assert.equal(both.harness_details?.codex?.attention_accounts, undefined)
+  assert.equal(describeHarnessStatus(both, 'codex'), 'Ready')
+  assert.equal(describeHarnessHint(both, 'codex'), '')
+  const unknown = view({
+    state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', attention_accounts: [{ account_id: blocked, reason: 'future_reason' }] } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [unknown] })
+  const future = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessStatus(future, 'codex'), 'Needs attention · future_reason')
+  assert.equal(describeHarnessFix(future, 'codex'), '')
+  assert.equal(describeHarnessHint(future, 'codex'), '1 of 2 accounts needs attention')
 })

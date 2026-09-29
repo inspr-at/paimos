@@ -347,3 +347,70 @@ func TestAddHarnessRenewsOnlyABlockedPin(t *testing.T) {
 		t.Fatal("renewed pin renewed again", err)
 	}
 }
+
+func TestAddHarnessRenewsCodexWhileClaudeDependenciesAreUnavailable(t *testing.T) {
+	e, api, _, o, _ := engineFixture(t)
+	defer e.Store.Close()
+	d, _, node := npmFixture(t, "codex")
+	codex, err := d.Detect(t.Context(), "codex", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, claudeNode, sdk := claudeFixture(t)
+	shellDir := physicalTemp(t)
+	shell := filepath.Join(shellDir, "claude")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	claude := Candidate{Harness: "claude", Label: "claude@example.test", Identity: "claude@example.test", Path: shell, Home: shellDir, Login: "signed_in", Version: "1.0.0"}
+	o.Candidates = []Candidate{claude, codex}
+	o.NodePath, o.ClaudeSDKPath = claudeNode, sdk
+	approveFixture(t, e, api, o)
+	before, err := e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(before.ClaudeSDKPath); err != nil {
+		t.Fatal(err)
+	}
+	config, err := ReadRuntimeConfig(e.Store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexIndex := -1
+	for i, account := range config.Accounts {
+		if account.Harness == "codex" {
+			codexIndex = i
+		}
+	}
+	if codexIndex < 0 {
+		t.Fatal("codex enrollment missing")
+	}
+	config.Accounts[codexIndex].Node.Version = "22.20.0"
+	raw, _ := json.Marshal(config)
+	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
+		t.Fatal(err)
+	}
+	creates := api.createCount
+	p, err := e.AddHarness(t.Context(), []Candidate{codex})
+	if err != nil || !strings.Contains(p.Action, "Interpreter pin renewed") || api.createCount != creates {
+		t.Fatal("codex renewal waited on claude", err, p.Action)
+	}
+	config, err = ReadRuntimeConfig(e.Store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := AccountPinBlocks(config)
+	if len(blocks) != 1 || blocks[0].Harness != "claude" || blocks[0].Fix.Command != "aeon-agentd repin --harness claude" {
+		t.Fatalf("claude block changed: %+v", blocks)
+	}
+	for _, account := range config.Accounts {
+		if account.Harness == "codex" && account.Node != node {
+			t.Fatalf("codex pin not renewed: %+v want %+v", account.Node, node)
+		}
+	}
+	after, err := e.load()
+	if err != nil || after.NodePath != before.NodePath || after.ClaudeSDKPath != before.ClaudeSDKPath {
+		t.Fatal("renewal repinned claude", err)
+	}
+}

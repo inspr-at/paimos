@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -253,5 +254,27 @@ func TestLifecycleReadinessIsPerHarness(t *testing.T) {
 	}
 	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "draining" || !status.AllFenced {
 		t.Fatalf("fenced account is ready: %+v", status)
+	}
+}
+
+func TestReadyAccountDoesNotHideBlockedSibling(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	s.mu.Lock()
+	s.accounts = append(s.accounts, EnrolledAccount{ID: "blocked", Key: "blocked-local", Harness: Codex, DependencyBlocked: true, PinReason: agentsetup.PinDrifted})
+	s.blockedAccounts["blocked"] = true
+	s.probedAccounts["account"] = true
+	s.mu.Unlock()
+	status := s.Lifecycle("")
+	detail := status.HarnessDetails[Codex]
+	if !status.Ready || status.HarnessFailed || status.HarnessStatuses[Codex] != "ready" || detail.State != "ready" || detail.Reason != "" || detail.Fix.Command != "" || len(detail.Attention) != 1 || detail.Attention[0].AccountID != "blocked" || detail.Attention[0].Reason != agentsetup.PinDrifted {
+		t.Fatalf("ready sibling erased the block: %+v ready=%v", detail, status.Ready)
+	}
+	if len(status.BlockedAccounts) != 1 || status.BlockedAccounts[0].AccountID != "blocked" || status.BlockedAccounts[0].Reason != agentsetup.PinDrifted {
+		t.Fatalf("local blocked account lost: %+v", status.BlockedAccounts)
+	}
+	for _, item := range detail.Attention {
+		if item.AccountID == "account" {
+			t.Fatal("healthy account listed as needing attention")
+		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"sort"
 )
 
 // HarnessIssue retains the diagnostic locally while exposing only its code.
@@ -49,6 +50,11 @@ func HarnessFailureReason(err error) string {
 // is the runtime failure of the same dependencies. For Claude the pins are the
 // shared Node/SDK pins. Newer daemons may send other bounded code tokens: they
 // stay visible as needing attention with the raw code and no guessed fix.
+//
+// A ready harness may also list attention_accounts: a proper subset of its
+// enrolled accounts that still need a fix while a sibling can work. Reasons
+// use this same vocabulary. Commands are derived again from the reason and
+// are never stored on the attention entry.
 const (
 	PinMissing    = "pin_missing"
 	PinPartial    = "pin_partial"
@@ -72,21 +78,32 @@ type HarnessFix struct {
 	Command string `json:"command"`
 }
 
+// AccountAttention names one enrolled account that still needs a fix while
+// its harness stays ready because another account of that harness can work.
+type AccountAttention struct {
+	AccountID string `json:"account_id"`
+	Reason    string `json:"reason"`
+}
+
 // HarnessDetail uses the same reason tokens and structured fix as BlockedAccount.
 // Unknown bounded tokens survive version skew; local diagnostics never leave the host.
+// Attention is set only for a ready harness and only for a proper subset.
 type HarnessDetail struct {
-	State  string     `json:"state"`
-	Reason string     `json:"reason,omitempty"`
-	Fix    HarnessFix `json:"fix,omitzero"`
+	State     string             `json:"state"`
+	Reason    string             `json:"reason,omitempty"`
+	Fix       HarnessFix         `json:"fix,omitzero"`
+	Attention []AccountAttention `json:"attention_accounts,omitempty"`
 }
 
 // Ignore advisory extensions and legacy string fixes without weakening the
 // strict decoder for lifecycle identities, fences or cleanup acknowledgements.
+// A malformed attention list is ignored; it does not drop the rest of the detail.
 func (d *HarnessDetail) UnmarshalJSON(raw []byte) error {
 	var wire struct {
-		State  string          `json:"state"`
-		Reason string          `json:"reason"`
-		Fix    json.RawMessage `json:"fix"`
+		State     string          `json:"state"`
+		Reason    string          `json:"reason"`
+		Fix       json.RawMessage `json:"fix"`
+		Attention json.RawMessage `json:"attention_accounts"`
 	}
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		return err
@@ -95,7 +112,30 @@ func (d *HarnessDetail) UnmarshalJSON(raw []byte) error {
 	if len(wire.Fix) > 0 && wire.Fix[0] == '{' {
 		_ = json.Unmarshal(wire.Fix, &d.Fix)
 	}
+	d.Attention = decodeAttention(wire.Attention)
 	return nil
+}
+
+func decodeAttention(raw json.RawMessage) []AccountAttention {
+	if len(raw) == 0 || raw[0] != '[' {
+		return nil
+	}
+	var items []json.RawMessage
+	if json.Unmarshal(raw, &items) != nil {
+		return nil
+	}
+	var kept []AccountAttention
+	for _, item := range items {
+		var parsed AccountAttention
+		if json.Unmarshal(item, &parsed) != nil {
+			continue
+		}
+		kept = append(kept, parsed)
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 var harnessCode = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
@@ -172,4 +212,43 @@ func HarnessReport(harness, state, reason string) (HarnessDetail, bool) {
 		d.Fix = RecoveryFix(harness, reason)
 	}
 	return d, true
+}
+
+// PartialAttention keeps a ready harness's blocked accounts only when they
+// are a proper subset of the enrolled accounts. Empty reasons, unknown
+// account ids, malformed codes and a list that covers every enrollment are
+// dropped. The result is sorted by account id and capped at five.
+func PartialAttention(harness string, enrolledIDs []string, state string, items []AccountAttention) []AccountAttention {
+	if state != "ready" || len(items) == 0 {
+		return nil
+	}
+	enrolled := map[string]bool{}
+	for _, id := range enrolledIDs {
+		if id != "" {
+			enrolled[id] = true
+		}
+	}
+	if len(enrolled) < 2 {
+		return nil
+	}
+	seen := map[string]bool{}
+	kept := make([]AccountAttention, 0, len(items))
+	for _, item := range items {
+		if item.Reason == "" || !enrolled[item.AccountID] || seen[item.AccountID] {
+			continue
+		}
+		if _, ok := HarnessReport(harness, "blocked", item.Reason); !ok {
+			continue
+		}
+		seen[item.AccountID] = true
+		kept = append(kept, AccountAttention{AccountID: item.AccountID, Reason: item.Reason})
+	}
+	sort.Slice(kept, func(i, j int) bool { return kept[i].AccountID < kept[j].AccountID })
+	if len(kept) > 5 {
+		kept = kept[:5]
+	}
+	if len(kept) == 0 || len(kept) >= len(enrolled) {
+		return nil
+	}
+	return kept
 }

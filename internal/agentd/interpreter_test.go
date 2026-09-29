@@ -165,6 +165,9 @@ func TestUnpinnedAccountDoesNotBlockSibling(t *testing.T) {
 	if !status.Ready || status.HarnessFailed || len(status.HarnessFailedAccountIDs) != 1 || status.HarnessFailedAccountIDs[0] != "old" || len(status.BlockedAccounts) != 1 || status.BlockedAccounts[0].AccountID != "old" || status.BlockedAccounts[0].Reason != "pin_missing" || status.BlockedAccounts[0].Fix.Kind != "add_harness" {
 		t.Fatalf("status after a blocked sibling: %+v", status)
 	}
+	if status.HarnessStatuses[Codex] != "ready" || len(status.HarnessDetails[Codex].Attention) != 1 || status.HarnessDetails[Codex].Attention[0].AccountID != "old" || status.HarnessDetails[Codex].Attention[0].Reason != "pin_missing" || status.HarnessDetails[Codex].Reason != "" {
+		t.Fatalf("ready sibling erased the unpinned account: %+v", status.HarnessDetails[Codex])
+	}
 	run := api.run
 	run.ID = "blocked-run"
 	run.AccountID = "old"
@@ -234,6 +237,9 @@ func TestDriftedPinRefreshKeepsSiblingPolling(t *testing.T) {
 	raw, err := json.Marshal(status)
 	if err != nil || !status.Ready || status.HarnessFailed || len(status.BlockedAccounts) != 1 || status.BlockedAccounts[0].AccountID != "drifted" || status.BlockedAccounts[0].Harness != Codex || status.BlockedAccounts[0].Reason != agentsetup.PinDrifted || status.BlockedAccounts[0].Fix.Kind != agentsetup.FixAddHarness || !strings.Contains(string(raw), `"blocked_accounts"`) {
 		t.Fatalf("status lost the drifted pin: %+v %s", status.BlockedAccounts, raw)
+	}
+	if status.HarnessStatuses[Codex] != "ready" || status.HarnessDetails[Codex].Reason != "" || len(status.HarnessDetails[Codex].Attention) != 1 || status.HarnessDetails[Codex].Attention[0].AccountID != "drifted" || status.HarnessDetails[Codex].Attention[0].Reason != agentsetup.PinDrifted {
+		t.Fatalf("ready sibling erased the drifted pin: %+v", status.HarnessDetails[Codex])
 	}
 	repaired := []EnrolledAccount{{ID: "drifted", Key: "drifted-local", Harness: Codex}}
 	if err := s.RefreshAccounts(repaired, []Adapter{rec}); err != nil || !s.accountAvailable("drifted") || s.PinHealthMatches(refreshed) {

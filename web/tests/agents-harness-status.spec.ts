@@ -102,6 +102,42 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
   }
 })
 
+for (const [width, theme] of [[1600, 'light'], [390, 'dark']] as const) {
+  test(`partial block names the account that needs attention at ${width} ${theme}`, async ({ page }) => {
+    const errors = watchErrors(page)
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    await mockWork(page, fixtures())
+    const blocked = '88888888-8888-4888-8888-888888888888'
+    const healthy = '55555555-5555-4555-8555-555555555555'
+    await mockPairing(page, {}, {
+      harness_statuses: { codex: 'ready' },
+      harness_details: { codex: { state: 'ready', attention_accounts: [{ account_id: blocked, reason: 'pin_drifted' }], fix: 'untrusted' } },
+      enrollments: [healthy, blocked].map((id, index) => ({
+        account_id: id, account_key: `codex-${index}`, harness: 'codex', label: index ? 'Blocked work' : 'Healthy work',
+        model_profile_id: '66666666-6666-4666-8666-666666666666', state: 'connected', local_cleanup: 'pending',
+        verification_run_id: null, active_run_ids: [], verification_state: 'not_selected', verification_error: '',
+        local_processes: 'unconfirmed', accounting_state: 'settled',
+      })),
+    })
+    await page.goto('/agents')
+    const computers = page.getByRole('region', { name: 'Connected computers' })
+    const row = computers.locator('.harness-report').filter({ hasText: 'Codex' })
+    await expect(computers.locator('.status')).toHaveText('Connected')
+    await expect(row).toContainText('1 of 2 accounts needs attention')
+    await expect(row.locator('code')).toHaveText('aeon-agentd add-harness --harness codex')
+    await expect(row).not.toContainText('untrusted')
+    await page.getByRole('button', { name: 'Show details for studio' }).click()
+    await expect(computers.locator('.enrollment-meta', { hasText: 'Pin changed' })).toHaveCount(1)
+    await expect(computers.locator('.enrollment-meta', { hasText: 'Ready' })).toHaveCount(1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    if (width === 390) {
+      expect(await computers.locator('.harness-report-text').evaluateAll(items => items.every(item => item.scrollWidth <= item.clientWidth))).toBe(true)
+    }
+    expect(errors).toEqual([])
+  })
+}
+
 // AEON-347/348: per-account pin blocks and per-harness holds share one reason
 // vocabulary and fix; one ready harness keeps the computer connected.
 for (const [width, theme] of [[1600, 'light'], [390, 'dark']] as const) test(`every shared reason shows its fix beside a ready harness at ${width} ${theme}`, async ({ page }) => {
