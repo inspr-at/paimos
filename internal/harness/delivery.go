@@ -116,7 +116,8 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 	var messageID string
 	var cursor int64
 	var completed, released *time.Time
-	// Message row first, then the drain lease (AEON-280 lock order).
+	// Lock order (AEON-280): worker() locked the session; then the message row,
+	// then the drain lease; FailMessage and receipts follow.
 	if _, err = tx.Exec(ctx, `SELECT 1 FROM inbox_messages WHERE id=(SELECT message_id FROM harness_deliveries WHERE session_id=$1 AND id=$2) FOR UPDATE`, s.ID, in.DeliveryID); err != nil {
 		return nil, err
 	}
@@ -139,17 +140,31 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 		}
 		return nil, err
 	}
-	var acked *time.Time
-	err = tx.QueryRow(ctx, `UPDATE inbox_messages SET acked_at=clock_timestamp(),acked_by_principal_id=$2 WHERE id=$1 AND recipient_principal_id=$2 AND acked_at IS NULL RETURNING acked_at`, messageID, s.AgentPrincipalID).Scan(&acked)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, workorders.Fail(409, "message already acknowledged elsewhere")
-	}
-	if err != nil {
-		return nil, err
-	}
 	if in.Outcome == "failed" {
+		// AEON-279: a managed failure goes through the one terminal failure path
+		// (inbox.FailMessage via FailSessionMessage), which needs the message
+		// unacknowledged. The lease is completed first: FailMessage releases open
+		// drain leases, and a lease is completed or released, never both.
+		var acked bool
+		if err = tx.QueryRow(ctx, `SELECT acked_at IS NOT NULL FROM inbox_messages WHERE id=$1 AND recipient_principal_id=$2`, messageID, s.AgentPrincipalID).Scan(&acked); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+		if acked || errors.Is(err, pgx.ErrNoRows) {
+			return nil, workorders.Fail(409, "message already acknowledged elsewhere")
+		}
+		if err = tx.QueryRow(ctx, `UPDATE harness_deliveries SET completed_at=clock_timestamp() WHERE id=$1 RETURNING completed_at`, in.DeliveryID).Scan(&completed); err != nil {
+			return nil, err
+		}
 		err = inbox.FailSessionMessage(ctx, tx, p, messageID, in.FailureReason)
 	} else {
+		var acked *time.Time
+		err = tx.QueryRow(ctx, `UPDATE inbox_messages SET acked_at=clock_timestamp(),acked_by_principal_id=$2 WHERE id=$1 AND recipient_principal_id=$2 AND acked_at IS NULL RETURNING acked_at`, messageID, s.AgentPrincipalID).Scan(&acked)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, workorders.Fail(409, "message already acknowledged elsewhere")
+		}
+		if err != nil {
+			return nil, err
+		}
 		err = inbox.ConfirmSessionMessage(ctx, tx, p, messageID)
 	}
 	if err != nil {
@@ -165,9 +180,11 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 	if err = record(ctx, tx, p, s, event, nil, map[string]any{"message_id": messageID, "cursor": cursor, "outcome": in.Outcome, "failure_reason": in.FailureReason}); err != nil {
 		return nil, err
 	}
-	err = tx.QueryRow(ctx, `UPDATE harness_deliveries SET completed_at=clock_timestamp() WHERE id=$1 RETURNING completed_at`, in.DeliveryID).Scan(&completed)
-	if err != nil {
-		return nil, err
+	if completed == nil {
+		err = tx.QueryRow(ctx, `UPDATE harness_deliveries SET completed_at=clock_timestamp() WHERE id=$1 RETURNING completed_at`, in.DeliveryID).Scan(&completed)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err = record(ctx, tx, p, s, "delivery_completed", nil, map[string]any{"delivery_id": in.DeliveryID, "cursor": cursor}); err != nil {
 		return nil, err

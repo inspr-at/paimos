@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -294,72 +295,60 @@ func assertSessionClosureEvents(t *testing.T, w *world, messageIDs []string, exp
 	}
 }
 
-func TestSessionSettlementLeavesUnboundMessagesUntouched(t *testing.T) {
+// AEON-279 integration: a managed hand-off settles through the one terminal
+// failure path of AEON-280. Failure (without a prior ack) fails the delivery and
+// receipt with a mapped reason, hides the message and notifies the sender
+// exactly once, also on replay; confirmation hands off bound and unbound alike.
+func TestManagedSettlementUsesTheOneFailurePath(t *testing.T) {
 	w, m, project, srv := messagingWorld(t)
-	session := messageTestSession(t, w, project, w.agent, "Worker")
+	session := messageTestSession(t, w, project, w.agent, "Managed worker")
 	for _, targeted := range []bool{false, true} {
-		for _, failed := range []bool{false, true} {
-			in := compatInput("codex:worker", fmt.Sprintf("settle-%t-%t", targeted, failed))
+		for _, reason := range []string{"", "outcome_unconfirmed", "child_unavailable"} {
+			failed := reason != ""
+			in := compatInput("codex:worker", fmt.Sprintf("settle-%t-%s", targeted, reason))
 			if targeted {
 				in.RecipientSessionID = &session
 			}
 			message := mustCompatSend(t, m, w.sender, project, in)
-			status, body := do(t, srv, w.sender.ID, "GET", "/api/inbox/messages/"+message.ID+"/receipt", "", nil)
-			if status != 200 {
-				t.Fatalf("receipt: %d %s", status, body)
-			}
-			before := mustJSON[Receipt](t, body)
-			err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
-				var priorState, afterState string
-				if err := tx.QueryRow(t.Context(), `SELECT state FROM inbox_message_deliveries WHERE message_id=$1`, message.ID).Scan(&priorState); err != nil {
-					return err
-				}
-				if _, err := tx.Exec(t.Context(), `UPDATE inbox_messages SET acked_at=clock_timestamp(),acked_by_principal_id=$2 WHERE id=$1`, message.ID, w.agent.ID); err != nil {
-					return err
-				}
-				var err error
-				if failed {
-					err = FailSessionMessage(t.Context(), tx, w.agent, message.ID, "outcome_unconfirmed")
-				} else {
-					err = ConfirmSessionMessage(t.Context(), tx, w.agent, message.ID)
-				}
-				if err != nil {
-					return err
-				}
-				if err := tx.QueryRow(t.Context(), `SELECT state FROM inbox_message_deliveries WHERE message_id=$1`, message.ID).Scan(&afterState); err != nil {
-					return err
-				}
-				want := priorState
-				if targeted {
+			settle := func() error {
+				return db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
 					if failed {
-						want = "dead"
-					} else {
-						want = "delivered"
+						return FailSessionMessage(t.Context(), tx, w.agent, message.ID, reason)
 					}
-				}
-				if afterState != want {
-					return fmt.Errorf("targeted=%t failed=%t delivery state=%s want=%s", targeted, failed, afterState, want)
-				}
-				return nil
-			})
-			if err != nil {
+					if _, err := tx.Exec(t.Context(), `UPDATE inbox_messages SET acked_at=clock_timestamp(),acked_by_principal_id=$2 WHERE id=$1`, message.ID, w.agent.ID); err != nil {
+						return err
+					}
+					return ConfirmSessionMessage(t.Context(), tx, w.agent, message.ID)
+				})
+			}
+			if err := settle(); err != nil {
 				t.Fatal(err)
 			}
-			status, body = do(t, srv, w.sender.ID, "GET", "/api/inbox/messages/"+message.ID+"/receipt", "", nil)
-			if status != 200 {
-				t.Fatalf("receipt: %d %s", status, body)
-			}
-			after := mustJSON[Receipt](t, body)
-			want := before.State
-			if targeted {
-				if failed {
-					want = "failed"
-				} else {
-					want = "handed_off"
+			if failed {
+				// A replayed failure changes nothing and notifies nobody again.
+				if err := settle(); err != nil {
+					t.Fatal(err)
 				}
 			}
-			if after.State != want || (!targeted && after.FailureReason != before.FailureReason) {
-				t.Fatalf("targeted=%t failed=%t receipt=%+v", targeted, failed, after)
+			mapped := map[string]string{"outcome_unconfirmed": ReasonTransportError, "child_unavailable": ReasonUnavailable}[reason]
+			var delivery, deliveryReason string
+			guaranteeRow(t, w, `SELECT state,reason FROM inbox_message_deliveries WHERE message_id=$1::uuid`, []any{message.ID}, &delivery, &deliveryReason)
+			state, receiptReason := receiptState(t, w, message.ID)
+			notices := noticesFor(t, w, message.ID)
+			var acked bool
+			guaranteeRow(t, w, `SELECT acked_at IS NOT NULL FROM inbox_messages WHERE id=$1::uuid`, []any{message.ID}, &acked)
+			if failed {
+				sender, ok := notices[""]
+				if delivery != "dead" || deliveryReason != mapped || state != "failed" || receiptReason != mapped || acked ||
+					len(notices) != 1 || !ok || sender.recipient != w.sender.ID || !strings.Contains(sender.body, "Not delivered") {
+					t.Fatalf("targeted=%t reason=%s: delivery=%s/%s receipt=%s/%s acked=%t notices=%+v", targeted, reason, delivery, deliveryReason, state, receiptReason, acked, notices)
+				}
+				status, body := do(t, srv, w.agent.ID, "GET", "/api/inbox/messages?wait_ms=0", "", nil)
+				if status != 200 || strings.Contains(string(body), message.ID) {
+					t.Fatalf("failed message still readable: %d %s", status, body)
+				}
+			} else if delivery != "delivered" || state != "handed_off" || len(notices) != 0 || !acked {
+				t.Fatalf("targeted=%t confirm: delivery=%s receipt=%s notices=%d acked=%t", targeted, delivery, state, len(notices), acked)
 			}
 		}
 	}

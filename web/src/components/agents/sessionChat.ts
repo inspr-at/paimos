@@ -98,6 +98,7 @@ export function unreadGroups(items: MessageGroup[], me: string, mark: ReadMark |
 // session pulled it), Read (the session confirmed it) or Not delivered, loudly.
 const REASON: Record<string, string> = {
   deadline: 'not confirmed in time', attempts: 'every attempt failed', session_ended: 'the session ended', no_listener: 'the session was not listening',
+  unavailable: 'the session could not take it', transport_error: 'the hand-off was not confirmed',
 }
 export const reasonText = (reason?: string) => reason ? REASON[reason] ?? reason.replaceAll('_', ' ') : ''
 export function statusLabel(status: MessageStatus): string {

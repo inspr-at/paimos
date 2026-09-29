@@ -32,6 +32,9 @@ const (
 	ReasonAttempts     = "attempts"
 	ReasonSessionEnded = "session_ended"
 	ReasonNoListener   = "no_listener"
+	// Managed hand-off failures (AEON-282), mapped by managedFailureReason.
+	ReasonUnavailable    = "unavailable"
+	ReasonTransportError = "transport_error"
 )
 
 // Seen channels recorded on a harness session when it pulls its inbox.
@@ -404,6 +407,10 @@ func failureText(reason string) string {
 		return "the session ended before it picked the message up"
 	case ReasonNoListener:
 		return "nothing was listening for it"
+	case ReasonUnavailable:
+		return "the managed session could not take it"
+	case ReasonTransportError:
+		return "the hand-off to the session was not confirmed"
 	case "":
 		return "delivery failed"
 	}
