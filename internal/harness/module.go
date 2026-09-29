@@ -86,6 +86,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/harness-sessions", "harness.read", false, 200, m.list},
 		{"GET /api/projects/{projectId}/harness-sessions/orchestrator", "harness.read", false, 200, m.orchestrator},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}", "harness.read", false, 200, m.status},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/lookup", "harness.read", false, 200, m.lookup},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker", "harness.read", false, 200, m.getReadMarker},
 		{"PUT /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker", "harness.read", false, 200, m.putReadMarker},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/reparent", "harness.write", false, 200, m.reparent},
@@ -862,6 +863,27 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	s.Controls = controls
 	return reporterSession(s), nil
 }
+
+// lookup answers the ambient tell check for the caller's own generation.
+// Another principal's row is the same not-found as a missing id: one query,
+// with no second read that could differ in timing or body. It does not lock
+// the row or load activity, history, or controls.
+func (m *Module) lookup(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	projectID, id := r.PathValue("projectId"), r.PathValue("sessionId")
+	if !workorders.UUID(projectID) {
+		return nil, workorders.Fail(400, "invalid project id")
+	}
+	if !workorders.UUID(id) {
+		return nil, workorders.Fail(400, "invalid session id")
+	}
+	var out sessionLookup
+	err := tx.QueryRow(r.Context(), `SELECT id::text, project_id::text, agent_principal_id::text, stopped_at, archived_at FROM harness_sessions WHERE project_id=$1 AND id=$2 AND agent_principal_id=$3`, projectID, id, p.ID).Scan(&out.ID, &out.ProjectID, &out.AgentPrincipalID, &out.StoppedAt, &out.ArchivedAt)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	id := r.PathValue("projectId")
 	if err := project(r.Context(), tx, id); err != nil {
