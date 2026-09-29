@@ -10,6 +10,10 @@ import (
 	"strings"
 )
 
+// RequiredCode marks a ticket entering done, accepted or delivered without the
+// four benefit texts. Clients that only read "error" are unchanged.
+const RequiredCode = "benefit_required"
+
 // Issues names every missing/invalid field in a stable order. Hidden tickets
 // have exactly the same requirements. Drafts may be saved with these warnings.
 func Issues(raw json.RawMessage) []string {

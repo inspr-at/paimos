@@ -168,14 +168,14 @@ test('a status changed elsewhere is not overwritten', async ({ page }) => {
   const calls = await mockWork(page, fixtures(), { conflictOn: 'n-2' })
   await page.goto('/p/PHAROS')
   await row(page, 'PHAROS-12').getByRole('button', { name: /Change status of PHAROS-12/ }).click()
-  await page.getByRole('menuitemradio', { name: 'Done' }).click()
+  await page.getByRole('menuitemradio', { name: 'QA' }).click()
   await expect(page.getByText('PHAROS-12 was changed elsewhere')).toBeVisible()
   await expect(row(page, 'PHAROS-12').locator('.status-btn')).toHaveText('Backlog')
   await expect(row(page, 'PHAROS-12')).toContainText('(edited elsewhere)')
   const patches = calls.filter(call => call.method === 'PATCH')
   expect(patches).toHaveLength(1)
   expect(patches[0].headers['if-unmodified-since']).toBeTruthy()
-  await expect(page.getByText('PHAROS-12 is now Done')).toHaveCount(0)
+  await expect(page.getByText('PHAROS-12 is now QA')).toHaveCount(0)
 })
 
 test('a rejected status change rolls back and explains why', async ({ page }) => {

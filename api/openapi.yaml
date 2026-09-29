@@ -1605,7 +1605,14 @@ paths:
         '409':
           $ref: '#/components/responses/Error'
         '422':
-          $ref: '#/components/responses/Error'
+          description: |
+            Unprocessable node. A ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/ApiError'}
+                  - {$ref: '#/components/schemas/NodeError'}
   /tags/{tagId}:
     parameters:
       - {name: tagId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -1698,6 +1705,9 @@ paths:
                         id: {type: string, format: uuid}
                         key: {type: string}
                         reason: {type: string}
+                        code:
+                          type: string
+                          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. Omitted for other skips.
         '400':
           $ref: '#/components/responses/Error'
         '403':
@@ -1798,7 +1808,14 @@ paths:
         '412':
           $ref: '#/components/responses/Error'
         '422':
-          $ref: '#/components/responses/Error'
+          description: |
+            Unprocessable node. A ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/ApiError'}
+                  - {$ref: '#/components/schemas/NodeError'}
     delete:
       operationId: deleteNode
       description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
@@ -8730,6 +8747,15 @@ components:
       properties:
         error:
           type: string
+    NodeError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. Omitted for other errors.
     Principal:
       type: object
       required: [id, tenant_id, kind, name, roles]

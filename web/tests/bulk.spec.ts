@@ -28,10 +28,10 @@ test('checkbox and Shift-click select a range; one status change for all of them
   // Shift-click selects; it never opens the ticket.
   await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
   await bulkBar(page).getByRole('button', { name: 'Status' }).click()
-  await page.getByRole('menu', { name: 'Status of 3 tickets' }).getByRole('menuitemradio', { name: 'Done' }).click()
-  await expect(page.getByText('3 tickets are now Done')).toBeVisible()
-  expect(bulkCalls(calls)[0].body).toEqual({ ids: ['n-1', 'n-2', 'n-3'], state: 'done' })
-  // Done work leaves the list (closed tickets are hidden), and the selection with it.
+  await page.getByRole('menu', { name: 'Status of 3 tickets' }).getByRole('menuitemradio', { name: 'Cancelled' }).click()
+  await expect(page.getByText('3 tickets are now Cancelled')).toBeVisible()
+  expect(bulkCalls(calls)[0].body).toEqual({ ids: ['n-1', 'n-2', 'n-3'], state: 'cancelled' })
+  // Cancelled work leaves the list (closed tickets are hidden), and the selection with it.
   await expect(rows(page)).toHaveCount(2)
   await expect(bulkBar(page)).toHaveCount(0)
   await page.getByRole('button', { name: 'Undo' }).click()

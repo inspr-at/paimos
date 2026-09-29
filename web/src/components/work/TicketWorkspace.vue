@@ -30,7 +30,8 @@ import TicketAgentWork from './TicketAgentWork.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 import TicketBenefits from './TicketBenefits.vue'
-import { benefitDraft, benefitTextKeys, completedTicketState } from '../../lib/ticketBenefits'
+import { needsBenefitPrompt } from '../../lib/doneGate'
+import { benefitDraft, benefitTextKeys, completedTicketState, firstBenefitGap } from '../../lib/ticketBenefits'
 import { can } from '../../lib/authz'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
 import { openedMembershipMessage, type NativeReleaseView } from '../../lib/releaseMembership'
@@ -103,6 +104,8 @@ const contextColumn = computed(() => props.mode === 'full' ? wideScreen.value : 
 // ---------- Edit mode: title, text and properties together, one Save ----------
 const editing = ref(false)
 const saving = ref(false)
+const benefitNotice = ref('')
+const benefitInvalidKey = ref('')
 const titleField = ref<HTMLTextAreaElement>()
 const draft = reactive({ ...benefitDraft({}), title: '', body: '', acceptance: '', notes: '', state: '', priority: '', assignee: '' })
 let base = { ...draft }
@@ -118,9 +121,35 @@ const editStatusOptions = computed(() => {
   const options = statusOptions([props.item?.state ?? ''])
   return options.some(o => o.value === draft.state) || !draft.state ? options : [{ value: draft.state, meta: statusMeta(draft.state) }, ...options]
 })
+const benefitNames: Record<string, string> = {
+  pill_en: 'Pill · English', pill_de: 'Pill · Deutsch', benefit_en: 'Benefit · English', benefit_de: 'Benefit · Deutsch',
+}
+function focusBenefit(key: string) {
+  const name = benefitNames[key]
+  const scope = root.value?.querySelector('.edit-benefits')
+  if (!scope || !name) return
+  const label = [...scope.querySelectorAll('label')].find(item => item.textContent?.trim() === name)
+  const id = label?.getAttribute('for')
+  if (!id) return
+  scope.querySelector<HTMLElement>(`#${CSS.escape(id)}`)?.focus()
+}
+function refreshBenefitNotice() {
+  const target = props.item
+  if (!benefitNotice.value || !target) return
+  if (!needsBenefitPrompt({ kind_slug: target.kind_slug, state: base.state, fields: draft }, draft.state)) {
+    benefitNotice.value = ''
+    benefitInvalidKey.value = ''
+    return
+  }
+  const gap = firstBenefitGap(draft)
+  benefitNotice.value = gap?.line ?? ''
+  benefitInvalidKey.value = gap?.key ?? ''
+}
 async function startEdit(focus: 'title' | 'body' | 'benefit' = 'title') {
   if (!editable.value || !props.item || editing.value) return
   base = snapshot(); Object.assign(draft, base)
+  benefitNotice.value = ''
+  benefitInvalidKey.value = ''
   editing.value = true
   await nextTick()
   // The caret goes to the end of the title: typing adds to it rather than replacing it.
@@ -131,6 +160,7 @@ async function startEdit(focus: 'title' | 'body' | 'benefit' = 'title') {
 function changeBenefit(key: string, value: string | boolean) {
   if (key === 'hide_from_release_notes' && typeof value === 'boolean') draft.hide_from_release_notes = value
   else if (typeof value === 'string' && benefitTextKeys.includes(key as typeof benefitTextKeys[number])) draft[key as typeof benefitTextKeys[number]] = value
+  refreshBenefitNotice()
 }
 function growTitle() { const el = titleField.value; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px` } }
 async function saveEdit() {
@@ -154,6 +184,17 @@ async function saveEdit() {
     if (draft.hide_from_release_notes !== base.hide_from_release_notes) { fieldsChanged = true; fields.hide_from_release_notes = draft.hide_from_release_notes }
   }
   if (fieldsChanged) patch.fields = fields
+  // The benefit editor is already on this form. Point at the first incomplete field.
+  if (needsBenefitPrompt({ kind_slug: target.kind_slug, state: base.state, fields }, draft.state)) {
+    const gap = firstBenefitGap(fields)
+    benefitNotice.value = gap?.line ?? 'A 2–4 word pill and a benefit, in both languages, are required.'
+    benefitInvalidKey.value = gap?.key ?? 'pill_en'
+    await nextTick()
+    focusBenefit(benefitInvalidKey.value)
+    return
+  }
+  benefitNotice.value = ''
+  benefitInvalidKey.value = ''
   saving.value = true
   const result = await ticket.patch(patch)
   saving.value = false
@@ -193,6 +234,7 @@ function chooseEdit(kind: 'status' | 'priority' | 'assignee', value: string) {
   else if (kind === 'priority') draft.priority = value
   else draft.assignee = value
   closeEditMenu(true)
+  refreshBenefitNotice()
 }
 const draftAssignee = computed(() => assigneeOptions.value.find(option => option.value === draft.assignee && option.value))
 function editKeys(event: KeyboardEvent) {
@@ -200,7 +242,7 @@ function editKeys(event: KeyboardEvent) {
   else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); void cancelEdit() }
 }
 watch(() => props.item?.id, () => { editing.value = false })
-watch(editing, value => { if (!value) editMenu.value = null })
+watch(editing, value => { if (!value) { editMenu.value = null; benefitNotice.value = ''; benefitInvalidKey.value = '' } })
 
 // ---------- Attachments: drop anywhere on the ticket, paste a screenshot ----------
 const dropping = ref(false)
@@ -452,7 +494,7 @@ defineExpose({
         <section class="edit-section" aria-labelledby="edit-notes"><h3 id="edit-notes" class="eyebrow">Notes</h3>
           <MarkdownEditor v-model="draft.notes" label="Notes" bare :split="mode === 'full'" :min-rows="3" :attachment-id="attachmentId" @save="saveEdit" @cancel="cancelEdit" />
         </section>
-        <TicketBenefits v-if="item.kind_slug === 'ticket'" class="edit-benefits" :fields="draft" editing :disabled="saving" :done="completedTicketState(item.state)" @change="changeBenefit" />
+        <TicketBenefits v-if="item.kind_slug === 'ticket'" class="edit-benefits" :fields="draft" editing :disabled="saving" :done="completedTicketState(item.state)" :notice="benefitNotice" :invalid-key="benefitInvalidKey" @change="changeBenefit" />
         <p class="edit-hint"><KeyCap k="mod" /><KeyCap k="enter" /> save · <kbd class="keycap">esc</kbd> cancel · paste or drop images to attach them</p>
       </form>
 
