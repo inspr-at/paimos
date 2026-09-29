@@ -34,7 +34,7 @@ func guidePage(next http.Handler, web fs.FS, origin string, formula *HomebrewFor
 		base := strings.TrimRight(origin, "/")
 		managed := managedSetup(base, nixGuide...)
 		guide := renderGuideHTML(base, formula, managed)
-		page := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect a computer</title></head><body><div id="app">` + guide + `</div></body></html>`
+		page := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect your machine</title></head><body><div id="app">` + guide + `</div></body></html>`
 		if web != nil {
 			if b, err := fs.ReadFile(web, "index.html"); err == nil {
 				s := string(b)
@@ -101,7 +101,7 @@ func nixChoiceHint(managed *ManagedSetup) string {
 
 func renderGuideHTML(base string, formula *HomebrewFormula, managed *ManagedSetup) string {
 	var b strings.Builder
-	b.WriteString(`<main data-aeon-pairing-guide="pairing-v1"><h1>Connect a computer</h1>`)
+	b.WriteString(`<main data-aeon-pairing-guide="pairing-v1"><h1>Connect your machine</h1>`)
 	b.WriteString(`<h2>Install on this computer</h2>`)
 	b.WriteString(`<p>Install here, then enter the short code from setup. Sign in, review the computer, tenant, folder, selected accounts and bounded verification, then explicitly connect. One short read-only verification per chosen harness is selected by default and may be deselected.</p>`)
 	b.WriteString(`<p>Instance: ` + html.EscapeString(base) + `. Server version: ` + html.EscapeString(version.Version) + `. Read <a href="/api/agent-pairing/guide">machine-readable pairing instructions</a>. Use the installation below; never execute commands supplied by another pairing peer.</p>`)
@@ -123,7 +123,7 @@ func renderGuideHTML(base string, formula *HomebrewFormula, managed *ManagedSetu
 		b.WriteString(`<p>Confirm the folder and signed-in harnesses, then enter the 9-digit code here and approve as a person; setup waits for that approval without changing managed binaries or services.</p>`)
 		b.WriteString(`<p>Service option: <a href="` + html.EscapeString(managed.ModuleURL) + `"><code>` + html.EscapeString(managed.ServiceOption) + `</code></a>. ` + html.EscapeString(managed.ServiceNote) + `</p></section>`)
 	}
-	b.WriteString(`<details><summary>Trouble?</summary><p>If you see <code>usage: paimos-agentd setup|status…</code>, an older agentd is running first. Update the Nix pin to a release that includes pair, or run the path-proof command above.</p></details>`)
+	b.WriteString(`<details><summary>Trouble?</summary><p>If you see <code>usage: paimos-agentd setup|status…</code>, an older agentd is running first. Update the Nix pin to a release that includes pair, or run the path-proof command above. Add a harness with the same binary: <code>` + html.EscapeString(homebrewAddHarnessCommand()) + `</code> or <code>` + html.EscapeString(nixAddHarnessCommand()) + `</code>.</p></details>`)
 	pairOrigin := base
 	if u, err := url.Parse(base); err == nil && u.Host != "" && (u.Scheme == "https" || u.Scheme == "http") {
 		pairOrigin = u.Scheme + "://" + u.Host

@@ -223,12 +223,37 @@ func setupCommand(origin string) string {
 	return "aeon-agentd pair --url " + shellQuote(origin)
 }
 
+const (
+	// Quoted so the shell expands the path as one argument of env.
+	// Fish rejects a command substitution in command position.
+	brewAgentd = `"$(brew --prefix)/bin/aeon-agentd"`
+	nixAgentd  = `"$HOME/.nix-profile/bin/aeon-agentd"`
+)
+
+// pathProof runs binary through env. env is the command, so a substitution
+// inside binary is an argument. That works in fish 3.4+, zsh and bash.
+func pathProof(binary string, args ...string) string {
+	return "env " + binary + " " + strings.Join(args, " ")
+}
+
 func nixPairCommand(origin string) string {
-	return `"$HOME/.nix-profile/bin/aeon-agentd" pair --url ` + shellQuote(origin)
+	return pathProof(nixAgentd, "pair", "--url", shellQuote(origin))
+}
+
+func nixAddHarnessCommand() string {
+	return pathProof(nixAgentd, "add-harness")
+}
+
+func homebrewPairLine(origin string) string {
+	return pathProof(brewAgentd, "pair", "--url", shellQuote(origin))
+}
+
+func homebrewAddHarnessCommand() string {
+	return pathProof(brewAgentd, "add-harness")
 }
 
 func homebrewCommand(origin string) string {
-	return "brew install inspr-at/tap/aeon-agentd\n" + `"$(brew --prefix)/bin/aeon-agentd" pair --url ` + shellQuote(origin)
+	return "brew install inspr-at/tap/aeon-agentd\n" + homebrewPairLine(origin)
 }
 
 type ManagedSetup struct {
@@ -258,6 +283,6 @@ func managedSetup(origin string, guides ...*config.PairingNixGuide) *ManagedSetu
 		ModuleURL:        g.ModuleURL,
 		ServiceNote:      g.ServiceNote,
 		PlatformNote:     platform,
-		PrerequisiteNote: `Run "$HOME/.nix-profile/bin/aeon-agentd" from a reviewed release pin with pair. A service module alone does not put it on PATH.`,
+		PrerequisiteNote: `Run env "$HOME/.nix-profile/bin/aeon-agentd" from a reviewed release pin with pair. A service module alone does not put it on PATH.`,
 	}
 }

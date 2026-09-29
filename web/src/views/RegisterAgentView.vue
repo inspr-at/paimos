@@ -545,7 +545,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
   <article class="connect" data-aeon-pairing-guide="pairing-v1">
     <header class="intro">
       <p class="eyebrow">Agents</p>
-      <h1>Connect a computer</h1>
+      <h1>Connect your machine</h1>
       <p class="lede">{{ adding ? 'Add a harness on a computer that is already paired. It keeps the same daemon.' : 'Pair a computer with agentd; no API key needed.' }}</p>
       <p class="key-path">For a CLI or script, <RouterLink to="/settings/access/agents?new=1">create an agent and key</RouterLink>.</p>
     </header>
@@ -622,7 +622,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         </div>
         <details v-if="methods.length" class="service-details trouble">
           <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Trouble?</summary>
-          <p class="copy">If you see <code>usage: paimos-agentd setup|status…</code>, an older agentd is running first. Update the Nix pin to a release that includes pair, or run the path-proof command above.</p>
+          <p class="copy">If you see <code>usage: paimos-agentd setup|status…</code>, an older agentd is running first. Update the Nix pin to a release that includes pair, or run the path-proof command above. Add a harness with the same binary: <code>env "$(brew --prefix)/bin/aeon-agentd" add-harness</code> or <code>env "$HOME/.nix-profile/bin/aeon-agentd" add-harness</code>.</p>
         </details>
         <div v-if="presentation.address" class="agent-address">
           <p class="copy">Setting up another computer, or letting an agent do it? Share this address.</p>
@@ -764,7 +764,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
       </div>
 
       <div v-if="pendingReview" class="actions">
-        <button class="btn primary go" type="button" :disabled="!!busy || !permissions.canApprove || !selected.length || !!targetProblem || verificationBlocked.length > 0" @click="connect">{{ busy === 'approve' ? (addRequest ? 'Adding…' : 'Connecting…') : addRequest ? 'Add harness' : 'Connect computer' }}</button>
+        <button class="btn primary go" type="button" :disabled="!!busy || !permissions.canApprove || !selected.length || !!targetProblem || verificationBlocked.length > 0" @click="connect">{{ busy === 'approve' ? (addRequest ? 'Adding…' : 'Connecting…') : addRequest ? 'Add harness' : 'Connect your machine' }}</button>
         <button class="btn" type="button" :disabled="!!busy || !permissions.canDeny" @click="deny">Deny</button>
         <p class="keep"><AppIcon name="shield" :size="14" />Vendor sign-ins and project files stay on the computer.</p>
       </div>

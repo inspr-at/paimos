@@ -22,7 +22,7 @@ for (const width of [390, 1600]) for (const colorScheme of ['light', 'dark'] as 
     await mockAccess(page, world)
     await page.goto('/settings/access/agents')
     await expect(page.locator('.agents-tab')).toBeVisible()
-    await expect(page.getByRole('link', { name: 'Connect a computer (the agent daemon, no key to handle)' })).toHaveAttribute('href', '/agents/register-agent')
+    await expect(page.getByRole('link', { name: 'Connect your machine (the agent daemon, no key to handle)' })).toHaveAttribute('href', '/agents/register-agent')
     await expect(page.locator('.agents-tab')).toContainText('New agent (a key for a CLI or script)')
     await shot(page, `${width}-${colorScheme}-empty`)
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])

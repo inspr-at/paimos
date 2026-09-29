@@ -10,9 +10,9 @@ const MODEL = '66666666-6666-4666-8666-666666666666'
 const DIGEST = 'ab'.repeat(32)
 
 export const SETUP_COMMAND = `aeon-agentd pair --url 'https://aeon.example'`
-export const BREW_PAIR = `"$(brew --prefix)/bin/aeon-agentd" pair --url 'https://aeon.example'`
+export const BREW_PAIR = `env "$(brew --prefix)/bin/aeon-agentd" pair --url 'https://aeon.example'`
 export const HOMEBREW_COMMAND = `brew install inspr-at/tap/aeon-agentd\n${BREW_PAIR}`
-export const NIX_PAIR_COMMAND = `"$HOME/.nix-profile/bin/aeon-agentd" pair --url 'https://aeon.example'`
+export const NIX_PAIR_COMMAND = `env "$HOME/.nix-profile/bin/aeon-agentd" pair --url 'https://aeon.example'`
 
 export function pairingGuide() {
   return {
@@ -35,7 +35,7 @@ export function pairingGuide() {
       module_url: 'https://example.test/instance/module.nix',
       service_note: 'The current Home Manager module needs a paired-service update before this computer can connect.',
       platform_note: 'Service module: macOS only.',
-      prerequisite_note: 'Run "$HOME/.nix-profile/bin/aeon-agentd" from a reviewed release pin with pair. A service module alone does not put it on PATH.',
+      prerequisite_note: 'Run env "$HOME/.nix-profile/bin/aeon-agentd" from a reviewed release pin with pair. A service module alone does not put it on PATH.',
     },
   }
 }

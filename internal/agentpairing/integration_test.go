@@ -501,7 +501,7 @@ func TestPairingGuideIsAgentReadableAndPublicRoutesExact(t *testing.T) {
 	r.Host = "attacker.invalid"
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	for _, want := range []string{"Connect a computer", "brew install inspr-at/tap/aeon-agentd", "/assets/pinned.js", "short code", "Server version:", "Nix / Home Manager", "aeon-agentd pair --url", "services.aeon.enable", "needs a paired-service update", "Cursor ask mode and an isolated config do not enforce a no-tools policy.", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", "Qualified verification with enforced no-tools mode."} {
+	for _, want := range []string{"Connect your machine", "brew install inspr-at/tap/aeon-agentd", "/assets/pinned.js", "short code", "Server version:", "Nix / Home Manager", "aeon-agentd pair --url", "services.aeon.enable", "needs a paired-service update", "Cursor ask mode and an isolated config do not enforce a no-tools policy.", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", "Qualified verification with enforced no-tools mode."} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("guide lacks %s", want)
 		}
@@ -774,7 +774,7 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 	if guide.HelperVersion != version.Version || !guide.Capabilities["claude"].Supported || guide.Capabilities["codex"].Supported || guide.Capabilities["cursor"].Supported || guide.Capabilities["grok"].Supported || guide.Instance != origin || guide.Tenant != "reviewed-tenant" || len(guide.Targets) != 4 || !strings.Contains(guide.Command, " pair --url '") || !strings.Contains(guide.Qualification, "candidate") {
 		t.Fatalf("guide release contract mismatch: %s", w.Body.String())
 	}
-	if guide.Managed.Command != `"$HOME/.nix-profile/bin/aeon-agentd" pair --url '`+origin+`'` || guide.Managed.ServiceOption != "services.aeon.enable" || guide.Managed.ModuleURL != nixGuideFixture().ModuleURL || strings.Contains(guide.Managed.Command, "attacker.invalid") {
+	if guide.Managed.Command != `env "$HOME/.nix-profile/bin/aeon-agentd" pair --url '`+origin+`'` || guide.Managed.ServiceOption != "services.aeon.enable" || guide.Managed.ModuleURL != nixGuideFixture().ModuleURL || strings.Contains(guide.Managed.Command, "attacker.invalid") {
 		t.Fatal("Nix guide is not bound to the server origin and owning module")
 	}
 	for _, target := range guide.Targets {

@@ -166,7 +166,7 @@ function edited() { sendKey = ''; sent.value = '' }
       <template v-if="connect || keys">
         <div role="group" aria-labelledby="app-menu-agents">
           <p id="app-menu-agents" class="eyebrow hm-label">Agents</p>
-          <button v-if="connect" class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/agents/register-agent')"><AppIcon name="monitor" /><span class="hm-text">Connect a computer</span></button>
+          <button v-if="connect" class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/agents/register-agent')"><AppIcon name="monitor" /><span class="hm-text">Connect your machine</span></button>
           <button v-if="keys" class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/settings/access/agents')"><AppIcon name="key" /><span class="hm-text">Agent keys</span></button>
           <button class="hm-item" type="button" role="menuitem" tabindex="-1" aria-haspopup="dialog" data-hooks-item @click="openHooks">
             <AppIcon name="terminal" /><span class="hm-text">Inbox hooks</span><span class="hm-end" aria-hidden="true"><AppIcon name="chevron-right" :size="14" /></span>

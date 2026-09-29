@@ -146,7 +146,7 @@ func TestServeShutdownAndBootstrap(t *testing.T) {
 	}
 	guideBody, _ := io.ReadAll(guide.Body)
 	guide.Body.Close()
-	if guide.StatusCode != http.StatusOK || !bytes.Contains(guideBody, []byte("Connect a computer")) || !bytes.Contains(guideBody, []byte("pair --url")) || !bytes.Contains(guideBody, []byte("short code")) {
+	if guide.StatusCode != http.StatusOK || !bytes.Contains(guideBody, []byte("Connect your machine")) || !bytes.Contains(guideBody, []byte("pair --url")) || !bytes.Contains(guideBody, []byte("short code")) {
 		t.Fatalf("pairing guide is not readable without JavaScript: %d", guide.StatusCode)
 	}
 	metadata, err := http.Get(base + "/api/agent-pairing/guide")

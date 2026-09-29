@@ -439,7 +439,7 @@ export function publicGuideSections(guide: PairingGuide | null): GuideSection[] 
   const presented = presentPublicGuide(guide)
   return [
     {
-      heading: 'Connect a computer',
+      heading: 'Connect your machine',
       paragraphs: [
         ...presented.steps,
         presented.address ? `Setting up another computer, or letting an agent do it? Share this address: ${presented.address}` : `This ${product()} has not published its address yet.`,

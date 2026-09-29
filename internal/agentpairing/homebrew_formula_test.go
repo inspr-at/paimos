@@ -189,7 +189,7 @@ func TestHomebrewFormulaGatesGuide(t *testing.T) {
 				t.Fatalf("current %#v", payload.Current)
 			}
 			if tc.brew {
-				if !strings.Contains(payload.Brew, `"$(brew --prefix)/bin/aeon-agentd" pair --url 'https://pairing.test'`) {
+				if !strings.Contains(payload.Brew, `env "$(brew --prefix)/bin/aeon-agentd" pair --url 'https://pairing.test'`) {
 					t.Fatalf("brew command %q", payload.Brew)
 				}
 			} else if payload.Brew != "" || strings.Contains(w.Body.String(), "brew install") {

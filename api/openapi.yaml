@@ -6920,7 +6920,7 @@ components:
         platforms: {type: array, items: {type: string}}
         platform_qualification: {type: string, description: Candidate builds require exact-release service qualification evidence}
         setup_command: {type: string, description: Instance-bound pair command; defaults are confirmed locally before requesting person approval}
-        homebrew_command: {type: string, description: "Present when homebrew_formula_current is true, or when that field is absent on an older server. brew install, then the pair command as \"$(brew --prefix)/bin/aeon-agentd\" so an older binary on PATH cannot shadow it."}
+        homebrew_command: {type: string, description: "Present when homebrew_formula_current is true, or when that field is absent on an older server. brew install, then env \"$(brew --prefix)/bin/aeon-agentd\" pair --url …. env is the command so the substitution stays out of command position in fish, zsh, and bash, and an older binary on PATH cannot shadow it."}
         homebrew_formula_current:
           type: [boolean, 'null']
           description: "True when the formula on inspr-at/homebrew-tap main was read and its version equals this server. False when that formula was read and the versions differ. Null when the tap could not be read. Clients show Homebrew only when this is true, and otherwise the direct download. The browser does not call GitHub. Absent on servers that do not perform the check."
@@ -6930,7 +6930,7 @@ components:
           description: Optional deployment-admin-configured Nix/Home Manager guide; omitted when the instance has no reviewed module configuration. Commands remain bound to the server origin and never install or change a managed service.
           required: [command, service_option, module_url, service_note]
           properties:
-            command: {type: string, description: "Instance-bound pair command naming $HOME/.nix-profile/bin/aeon-agentd"}
+            command: {type: string, description: "Instance-bound pair command: env \"$HOME/.nix-profile/bin/aeon-agentd\" pair --url …. env keeps the path out of command position in fish, zsh, and bash."}
             service_option: {type: string}
             module_url: {type: string, format: uri}
             service_note: {type: string}

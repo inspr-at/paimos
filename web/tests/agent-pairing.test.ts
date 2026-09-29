@@ -798,7 +798,7 @@ function enrollment(overrides: Record<string, unknown> = {}) {
 }
 
 test('Homebrew commands are additive, bounded and published by this instance', async () => {
-  const command = "brew install inspr-at/tap/aeon-agentd\n\"$(brew --prefix)/bin/aeon-agentd\" pair --url 'https://other.example'"
+  const command = "brew install inspr-at/tap/aeon-agentd\nenv \"$(brew --prefix)/bin/aeon-agentd\" pair --url 'https://other.example'"
   globalThis.fetch = async () => jsonResponse(guidePayload({ homebrew_command: command }))
   assert.equal(presentPublicGuide(await getPairingGuide()).homebrewCommand, command)
   assert.equal(presentPublicGuide(await getPairingGuide()).homebrewState, 'legacy')
@@ -812,7 +812,7 @@ test('Homebrew commands are additive, bounded and published by this instance', a
 })
 
 test('Homebrew is shown only when the formula matches, and the last install choice is reused', () => {
-  const command = `brew install inspr-at/tap/aeon-agentd\n"$(brew --prefix)/bin/aeon-agentd" pair --url 'https://aeon.example'`
+  const command = `brew install inspr-at/tap/aeon-agentd\nenv "$(brew --prefix)/bin/aeon-agentd" pair --url 'https://aeon.example'`
   const target = {
     platform: 'darwin' as const, arch: 'arm64' as const, service: 'launchd-user' as const, qualification: 'candidate',
     artifact_url: 'https://example.com/darwin', checksums_url: 'https://example.com/SHA256SUMS', command: 'install-darwin-only',
@@ -841,7 +841,7 @@ test('Homebrew is shown only when the formula matches, and the last install choi
   assert.deepEqual(installMethods(unknown), ['manual'])
 
   const managed = {
-    command: '"$HOME/.nix-profile/bin/aeon-agentd" pair --url \'https://aeon.example\'',
+    command: 'env "$HOME/.nix-profile/bin/aeon-agentd" pair --url \'https://aeon.example\'',
     service_option: 'services.aeon.enable', module_url: 'https://example.test/module.nix', service_note: 'Needs a paired-service update.',
     platform_note: 'Service module: macOS only.',
   }
