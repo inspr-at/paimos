@@ -422,3 +422,88 @@ func TestMalformedBackfillFallsBackOnlyForItsRelease(t *testing.T) {
 		}
 	}
 }
+
+// A git-tag release has no journey node. The real writer leaves release_node_id
+// empty; publication still records one released outcome per included ticket.
+func TestManifestBackfillRecordsReleasedOutcomeWithoutJourneyNode(t *testing.T) {
+	f := ticketSetup(t)
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	shipped := f.existing("ticket", f.project, "Shipped", "done")
+	open := f.existing("ticket", f.project, "Still open", "open")
+	var shippedKey, openKey string
+	f.tx(func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT key FROM nodes WHERE id=$1`, shipped).Scan(&shippedKey); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT key FROM nodes WHERE id=$1`, open).Scan(&openKey)
+	})
+	when := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	const version = "260115100000.0.0"
+	const later = "260115110000.0.0"
+	history := func(versions ...string) releasehistory.History {
+		releases := make([]releasehistory.Release, 0, len(versions))
+		for _, v := range versions {
+			releases = append(releases, releasehistory.Release{
+				Version: v, State: releasehistory.StatePublished, TaggedAt: &when,
+				Tickets: []string{shippedKey, openKey},
+			})
+		}
+		return releasehistory.History{Releases: releases}
+	}
+	applied, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, f.person.ID, true, NoteBackfillOptions{Project: f.project, History: history(version)})
+	if err != nil || applied.Inserted != 1 || len(applied.Planned) != 1 || applied.Planned[0].Tickets != 1 || applied.Planned[0].ReleaseID != "" {
+		t.Fatalf("apply %+v %v", applied, err)
+	}
+	type releasedOutcome struct {
+		release, project, tenant, version, scheme, key, source, actor string
+	}
+	load := func(ticket string) []releasedOutcome {
+		t.Helper()
+		var rows []releasedOutcome
+		f.tx(func(tx pgx.Tx) error {
+			scanned, err := tx.Query(t.Context(), `SELECT coalesce(release_node_id::text,''), project_id::text, tenant_id::text,
+				coalesce(payload->>'version',''), coalesce(payload->>'version_scheme',''), idempotency_key, source, actor_principal_id::text
+				FROM outcome_events WHERE ticket_node_id=$1 AND kind='released' ORDER BY idempotency_key`, ticket)
+			if err != nil {
+				return err
+			}
+			defer scanned.Close()
+			for scanned.Next() {
+				var row releasedOutcome
+				if err := scanned.Scan(&row.release, &row.project, &row.tenant, &row.version, &row.scheme, &row.key, &row.source, &row.actor); err != nil {
+					return err
+				}
+				rows = append(rows, row)
+			}
+			return scanned.Err()
+		})
+		return rows
+	}
+	var snapRelease string
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT coalesce(snapshot->>'release_node_id','') FROM release_manifest_note_snapshots WHERE project_node_id=$1 AND version=$2`, f.project, version).Scan(&snapRelease)
+	})
+	if snapRelease != "" {
+		t.Fatalf("writer stored release node %q", snapRelease)
+	}
+	got := load(shipped)
+	wantKey := "auto:released:" + shipped + ":" + f.project + ":" + version
+	if len(got) != 1 || got[0].release != "" || got[0].project != f.project || got[0].tenant != f.person.TenantID || got[0].version != version || got[0].scheme != "inspr-calendar-v2" || got[0].key != wantKey || got[0].source != "automatic" || got[0].actor != f.person.ID {
+		t.Fatalf("released outcome %+v", got)
+	}
+	if openRows := load(open); len(openRows) != 0 {
+		t.Fatalf("open ticket recorded %+v", openRows)
+	}
+	again, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, f.person.ID, true, NoteBackfillOptions{Project: f.project, History: history(version)})
+	if err != nil || again.Inserted != 0 || again.Unchanged != 1 || len(load(shipped)) != 1 {
+		t.Fatalf("replay %+v %v outcomes=%d", again, err, len(load(shipped)))
+	}
+	second, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, f.person.ID, true, NoteBackfillOptions{Project: f.project, Release: later, History: history(version, later)})
+	if err != nil || second.Inserted != 1 {
+		t.Fatalf("second version %+v %v", second, err)
+	}
+	got = load(shipped)
+	if len(got) != 2 || got[0].key != wantKey || got[1].key != "auto:released:"+shipped+":"+f.project+":"+later || got[1].release != "" || got[1].version != later {
+		t.Fatalf("two versions %+v", got)
+	}
+}

@@ -55,6 +55,7 @@ import (
 	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
+	"github.com/inspr-at/paimos/internal/outcomes"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
@@ -274,6 +275,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			rules.New(pool),
 			doctrineMod,
 			ticketwork.New(pool),
+			outcomes.New(pool),
 			deliveryvote.New(pool),
 			usagedashboard.New(pool),
 			workorders.New(pool),

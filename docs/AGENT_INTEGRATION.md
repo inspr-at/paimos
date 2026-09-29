@@ -229,7 +229,6 @@ The proposal in `proposals/ticket-benefit-writing.json` is compatible with AR1's
 rule draft shape and is not a published company rule. See `RELEASE.md` for the
 exact membership source, snapshot capture and offline release-history behavior.
 
-
 ## Read-only attached watches (AEON-258)
 
 The paired daemon uses only `POST /api/agent-pairing/attach` for registration,
@@ -386,3 +385,16 @@ environment assignments and private-key blocks. Lines containing Unicode
 nonspacing marks are dropped. Control/format characters are
 rejected. The browser displays text only and clears it on disconnect, permission
 change, hidden tab or navigation; it never reconnects automatically.
+
+## Outcome events (AEON-286)
+
+Review verdicts, fix rounds, CI results and reverts are outcome events. Record one with `aeon outcome record`. The agent key needs `outcome.write`. Repeat the same `--idempotency-key` and body after a lost response; a different body for that key conflicts. Keys starting with `auto:` are reserved.
+
+```
+aeon outcome record --ticket AEON-286 --kind review_verdict \
+  --idempotency-key review-aeon-286-r1 --verdict ok \
+  --reviewer-model codex --route backend --author-family grok --round 1 --blocking-count 0 \
+  --session "$SESSION" --rules-version "$RULES"
+```
+
+`--kind` is `review_verdict`, `fix_round`, `ci_result` or `revert`. A review verdict is `--verdict ok` or `--verdict changes`, and may name `--author-family` and `--blocking-count`. A fix round needs `--round`. A CI result needs `--result pass` or `--result fail`, `--repo` and `--pr`, and may name the check with `--name`. A revert needs `--summary`. `--session` is the harness session UUID when the work had one. `--rules-version` may be omitted; it stays empty until a rules version is recorded. Marking a ticket done, accepted or delivered, and publishing a release, are recorded automatically. Completion records the time from the first worker marker, or from the first move to in progress, and the harness session when one is known. A published release records the same session. Do not post those two kinds.

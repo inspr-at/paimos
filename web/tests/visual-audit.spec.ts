@@ -751,6 +751,22 @@ const shots: Shot[] = [
     await projectAgents(page)
     await ticketAgentWork(page)
   }, act: async page => { await page.goto('/p/PHAROS/PHAROS-11'); await expect(ticketPanel(page)).toBeVisible(); await page.waitForTimeout(400) } },
+  { screen: 'ticket', state: 'workspace-outcomes', setup: async page => {
+    page.setDefaultTimeout(30_000)
+    await page.clock.setSystemTime(AT)
+    await mockWork(page, ticketDataWithAgents())
+    await projectAgents(page)
+    await ticketAgentWork(page)
+    await page.route('**/api/outcomes*', route => route.fulfill({ json: { outcomes: [
+      { id: 'o-1', kind: 'review_verdict', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos', session_id: null, rules_version: null, release_node_id: null, release_key: null, release_title: null, source: 'recorded', payload: { verdict: 'pass', reviewer_model: 'codex', route: 'backend', round: 2, findings: 1, summary: 'One naming mismatch in the release note, otherwise the benefit text is ready to ship with the candidate.' }, actor_principal_id: 'a-1', recorded_at: new Date(AT - 2 * 60 * 60_000).toISOString(), idempotency_key: 'review-1' },
+      { id: 'o-2', kind: 'fix_round', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos', session_id: null, rules_version: null, release_node_id: null, release_key: null, release_title: null, source: 'recorded', payload: { round: 2, summary: 'Renamed the release note field.' }, actor_principal_id: 'a-1', recorded_at: new Date(AT - 3 * 60 * 60_000).toISOString(), idempotency_key: 'fix-2' },
+      { id: 'o-3', kind: 'ci_result', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos', session_id: null, rules_version: null, release_node_id: null, release_key: null, release_title: null, source: 'recorded', payload: { result: 'fail', name: 'web' }, actor_principal_id: 'a-1', recorded_at: new Date(AT - 4 * 60 * 60_000).toISOString(), idempotency_key: 'ci-1' },
+      { id: 'o-4', kind: 'released', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos', session_id: null, rules_version: null, release_node_id: 'rel-1', release_key: 'PHAROS-90', release_title: 'September release', source: 'automatic', payload: { version: '260929120000.0.0' }, actor_principal_id: 'a-1', recorded_at: new Date(AT - 5 * 60 * 60_000).toISOString(), idempotency_key: 'rel-1' },
+    ] } }))
+  }, act: async page => {
+    await page.goto('/p/PHAROS/PHAROS-11')
+    await expect(ticketPanel(page).getByRole('region', { name: 'Outcomes' })).toBeVisible()
+  } },
   { screen: 'ticket', state: 'benefits-missing', setup: async page => {
     await page.clock.setSystemTime(AT)
     await mockWork(page, ticketDataWithAgents())

@@ -27,6 +27,7 @@ import StatusMenu from './StatusMenu.vue'
 import RelationList from './RelationList.vue'
 import RelationPicker from './RelationPicker.vue'
 import TicketAgentWork from './TicketAgentWork.vue'
+import TicketOutcomes from './TicketOutcomes.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 import TicketBenefits from './TicketBenefits.vue'
@@ -532,6 +533,7 @@ defineExpose({
           </div>
 
           <TicketAgentWork v-if="item.kind_slug === 'ticket' || item.kind_slug === 'epic' || item.kind_slug === 'task'" class="ws-block" :node-id="item.id" :kind="item.kind_slug" />
+          <TicketOutcomes v-if="item.kind_slug === 'ticket'" class="ws-block" :node-id="item.id" />
           <ChildList
             v-if="hasChildren" class="ws-block" :children="ticket.children.value" :loading="ticket.childrenLoading.value" :editable="editable"
             :child-label="item.kind_slug === 'epic' ? 'ticket' : 'task'" :progress="ticket.childProgress()" :add="title => ticket.addChild(title, project.routeKey)"

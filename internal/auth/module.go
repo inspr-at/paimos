@@ -467,6 +467,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return "account.manage", true
 	case "stage-handoffs":
 		return "stage.<op>", true
+	case "outcomes":
+		if len(parts) == 1 && (read || r.Method == http.MethodPost) {
+			return scope("outcome")
+		}
 	case "me":
 		// Any key may read its own identity; the rest of /api/me is for people.
 		if len(parts) == 1 && read {
