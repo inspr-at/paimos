@@ -10,6 +10,7 @@ import {
 import { agentName, harnessLabel, heldRequests, mergeSessionEvidence, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
 import { advanceActivity, type ActivityEvidence } from '../lib/liveAgents'
 import { toast } from '../lib/toast'
+import { managedControlSession } from '../lib/managedControl'
 import { usePolledData } from '../lib/usePolledData'
 import { useProjects } from './projects'
 import { useAgentAppearance } from '../lib/agentAppearance'
@@ -310,7 +311,7 @@ export const useAgents = defineStore('agents', () => {
   async function control(view: SessionView, kind: SessionControl['kind']) {
     const { session } = view
     // managed_control_v1 sessions refuse the legacy route; use the ownership-aware one.
-    const issued = session.advertised_capabilities.includes('managed_control_v1') ? await requestManagedControl(session, kind) : await requestControl(session.project_id, session.id, kind)
+    const issued = managedControlSession(session) ? await requestManagedControl(session, kind) : await requestControl(session.project_id, session.id, kind)
     controls.value = { ...controls.value, [session.id]: issued }
     void follow(session, issued, view.name)
     return issued

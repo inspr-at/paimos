@@ -56,17 +56,25 @@ test('a managed session offers Interrupt, Stop and settings only when they work'
   assert.equal(sessionMenu(view({ archived_at: ago(0), phase: 'stopped', stopped_at: ago(0) }, 'stopped'), access).remove, false)
 })
 
-test('managed_control_v1 offers Interrupt and Stop only with fresh process ownership', () => {
+test('managed_control_v1 offers controls only when the server would accept them', () => {
   const ownership = { daemon_id: 'd', generation: 'g', process_id: 'p', root_pid: 9, group_id: 9, started_at: ago(60_000) }
   const caps = ['interrupt', 'stop', 'managed_control_v1', 'rename']
-  const fresh = view({ harness: 'claude', management_mode: 'managed', advertised_capabilities: caps, process_ownership: ownership, process_observed_at: ago(10_000) })
+  const fresh = view({ harness: 'claude', management_mode: 'managed', run_id: 'r1', run_status: 'running', advertised_capabilities: caps, process_ownership: ownership, process_observed_at: ago(10_000) })
   assert.deepEqual(sessionMenu(fresh, access).control, ['interrupt', 'stop', 'settings'])
-  const stale = view({ harness: 'claude', management_mode: 'managed', advertised_capabilities: caps, process_ownership: ownership, process_observed_at: ago(60_000) })
-  assert.deepEqual(sessionMenu(stale, access).control, ['settings'])
-  const unowned = view({ harness: 'claude', management_mode: 'managed', advertised_capabilities: caps })
-  assert.deepEqual(sessionMenu(unowned, access).control, ['settings'])
-  const other = view({ harness: 'codex', management_mode: 'managed', advertised_capabilities: caps, process_ownership: ownership, process_observed_at: ago(10_000) })
-  assert.deepEqual(sessionMenu(other, access).control, ['settings'])
+  // Settings go through the same route, so they share every prerequisite.
+  const stale = view({ ...fresh.session, process_observed_at: ago(60_000) })
+  assert.deepEqual(sessionMenu(stale, access).control, [])
+  const failed = view({ ...fresh.session, run_status: 'failed' })
+  assert.deepEqual(sessionMenu(failed, access).control, [])
+  const noStop = view({ ...fresh.session, advertised_capabilities: ['interrupt', 'managed_control_v1', 'rename'] })
+  assert.deepEqual(sessionMenu(noStop, access).control, [])
+  const noInterrupt = view({ ...fresh.session, advertised_capabilities: ['stop', 'managed_control_v1'] })
+  assert.deepEqual(sessionMenu(noInterrupt, access).control, ['stop'])
+  const other = view({ ...fresh.session, harness: 'codex' })
+  assert.deepEqual(sessionMenu(other, access).control, [])
+  // The run read fills in a status the session read does not carry.
+  const fromRun = { ...view({ ...fresh.session, run_status: undefined }), run: { status: 'running' } as SessionView['run'] }
+  assert.deepEqual(sessionMenu(fromRun, access).control, ['interrupt', 'stop', 'settings'])
 })
 
 test('No heartbeat, Lost contact and stopped rows remove in one click; live rows ask', () => {

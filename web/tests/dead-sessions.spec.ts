@@ -156,6 +156,35 @@ test('a managed session menu offers Interrupt, Stop, settings and Remove', async
   await expect(page).toHaveURL(new RegExp(`/agents/${lead.id}$`))
 })
 
+// The row menu and the panel share one eligibility rule with the server (AEON-291).
+for (const [state, change, rowItems, panelHint] of [
+  ['without the stop capability', { advertised_capabilities: ['inbox', 'status', 'steer', 'interrupt', 'managed_control_v1', 'rename', 'model', 'effort'] }, [], 'This session does not take controls from here.'],
+  ['with a failed run', { run_status: 'failed' }, [], 'Its run is not running.'],
+  ['with only the stop capability', { advertised_capabilities: ['inbox', 'status', 'stop', 'managed_control_v1'] }, ['Stop session…'], ''],
+] as const) {
+  test(`a managed_control_v1 session ${state} offers only controls the server accepts`, async ({ page }) => {
+    const { lead, managed, legacy } = await setup(page)
+    Object.assign(lead, change)
+    await page.goto('/agents')
+    await row(page, lead.id).hover()
+    await row(page, lead.id).getByRole('button', { name: 'Actions for claude-lead' }).click()
+    const menu = page.getByRole('menu', { name: 'Actions for claude-lead' })
+    await expect(menu.getByRole('menuitem', { name: /^(Interrupt|Stop session…)/ })).toHaveText([...rowItems])
+    await page.keyboard.press('Escape')
+    await expect(row(page, lead.id).getByRole('button', { name: 'Interrupt claude-lead' })).toHaveCount(0)
+    await page.goto(`/agents/${lead.id}`)
+    const controls = page.getByRole('region', { name: 'Session controls' })
+    if (panelHint) {
+      await expect(controls).toContainText(panelHint)
+      for (const name of ['Steer', 'Interrupt', 'Stop']) await expect(controls.getByRole('button', { name, exact: true })).toBeDisabled()
+    } else {
+      await expect(controls.getByRole('button', { name: 'Stop', exact: true })).toBeEnabled()
+      await expect(controls.getByRole('button', { name: 'Interrupt', exact: true })).toBeDisabled()
+    }
+    expect([managed, legacy]).toEqual([[], []])
+  })
+}
+
 test('a managed_control_v1 session without fresh ownership offers no Interrupt or Stop', async ({ page }) => {
   const { lead } = await setup(page)
   await page.route(/\/api\/harness-sessions\?/, async route => route.fallback())

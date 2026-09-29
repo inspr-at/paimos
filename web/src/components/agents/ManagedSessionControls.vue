@@ -5,6 +5,7 @@ import { api, APIError } from '../../lib/api'
 import { can } from '../../lib/authz'
 import type { HarnessSession } from '../../lib/agents'
 import { useVisualViewport } from '../../lib/visualViewport'
+import { managedControlSession, managedControlUnavailable } from '../../lib/managedControl'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
@@ -15,7 +16,8 @@ type Setting = 'rename' | 'model' | 'effort'
 type Kind = 'steer' | 'interrupt' | 'stop' | Setting
 interface SettingModel { model: string; efforts: string[] }
 interface Control { id: string; session_id: string; kind: Kind; state: 'pending' | 'claimed' | 'completed'; outcome: 'applied' | 'rejected' | null; reason: string | null; expires_at: string }
-const props = defineProps<{ session: ManagedSession; now: number }>()
+// runStatus: the bound run's status when the session read does not carry it.
+const props = defineProps<{ session: ManagedSession; now: number; runStatus?: string | null }>()
 const auth = useSession(), uid = useId()
 const draft = ref(''), error = ref(''), busy = ref(false), composing = ref(false), confirmStop = ref(false)
 // The session panel is a full-height sheet below 720px. Keep one action row
@@ -37,13 +39,10 @@ const validValue = computed(() => !!editing.value && !!settingValue.value.trim()
 const uncertain = ref(false)
 let epoch = 0, timer: ReturnType<typeof setTimeout> | undefined
 let request: { request_id: string; kind: Kind; text?: string; value?: string; expected_ownership: Ownership } | null = null
-const available = computed(() => props.session.management_mode === 'managed' && props.session.advertised_capabilities.includes('managed_control_v1'))
+const available = computed(() => managedControlSession(props.session))
 const allowed = computed(() => auth.identity?.principal.kind === 'person' && can('harness.control', props.session.project_id))
-const fresh = computed(() => {
-  const observed = Date.parse(props.session.process_observed_at || '')
-  return !!props.session.process_ownership && Number.isFinite(observed) && props.now - observed >= 0 && props.now - observed <= 45000
-})
-const unavailable = computed(() => !allowed.value ? 'You need permission to control this session.' : props.session.phase === 'stopped' ? 'This session has stopped.' : !fresh.value ? 'Waiting for the owning daemon to confirm this process.' : '')
+// The same eligibility the row menu uses and the server enforces (AEON-291).
+const unavailable = computed(() => managedControlUnavailable(props.session, { now: props.now, allowed: allowed.value, runStatus: props.session.run_status !== undefined ? props.session.run_status : props.runStatus }))
 const waiting = computed(() => busy.value || uncertain.value || (!!result.value && result.value.state !== 'completed'))
 const canSteer = computed(() => !!draft.value.trim() && new TextEncoder().encode(draft.value).length <= 8192)
 const feedback = computed(() => {

@@ -168,7 +168,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <RemoveSessionDialog :session="view.session" :label="view.name" :quick="quick" />
       </div>
       <p v-if="view && !loading && outside" class="outside-note">Runs outside {{ brand.short_name }} — stop it in its terminal</p>
-      <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now">
+      <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now" :run-status="view.run?.status">
         <template v-if="compactControls" #more>
           <button v-if="showRecover" type="button" role="menuitem" class="menu-item" @click="recovery?.open()"><AppIcon name="wrench" :size="16" /><span class="mi-text"><span>Recover</span></span></button>
           <button v-if="showRemove" type="button" role="menuitem" class="menu-item" :aria-label="`Remove ${view.name}`" @click="removal?.remove()"><AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quick ? 'Remove' : 'Remove…' }}</span></span></button>
