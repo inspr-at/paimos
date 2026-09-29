@@ -393,24 +393,12 @@ func (rt *runtime) noteHeartbeatSources(ctx context.Context, o heartbeatOptions,
 	}
 }
 
+// heartbeatInstructionItems hashes the worktree's AGENTS.md and CLAUDE.md
+// through the hardened instruction reader. The presence check lives in the
+// harness package too, so no heartbeat source file stats a file outside the
+// harness fence (TestHarnessReadersUseTheFence).
 func heartbeatInstructionItems(dir string) ([]harness.ProvenanceItem, bool) {
-	settled := true
-	var items []harness.ProvenanceItem
-	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
-		path := filepath.Join(dir, name)
-		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-			continue
-		} else if err != nil {
-			settled = false
-			continue
-		}
-		got, err := harness.CollectInstructionFiles([]string{path})
-		if err != nil {
-			continue
-		}
-		items = append(items, got...)
-	}
-	return items, settled
+	return harness.CollectPresentInstructionFiles(dir, "AGENTS.md", "CLAUDE.md")
 }
 
 func waitHeartbeat(ctx context.Context, pid int, alive func(int) bool, interval time.Duration) error {
