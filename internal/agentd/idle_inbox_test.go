@@ -473,7 +473,7 @@ func TestSettledInboxDoesNotExhaustControlSlots(t *testing.T) {
 	expected.DaemonID, expected.Generation = s.daemonID, s.generation
 	expires := time.Now().Add(time.Minute)
 	for _, operation := range []string{"interrupt", "stop"} {
-		_, err := s.control(t.Context(), ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: e.record.RunID, Generation: s.generation, CorrelationID: operation, Operation: operation, ExpectedOwnership: &expected, ExpiresAt: &expires}, true)
+		_, err := s.control(t.Context(), ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: e.record.RunID, Generation: s.generation, CorrelationID: operation, Operation: operation, ExpectedOwnership: &expected, ExpiresAt: &expires, deadline: expires}, true)
 		if err != nil {
 			t.Fatalf("%s starved: %v", operation, err)
 		}

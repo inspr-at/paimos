@@ -68,7 +68,7 @@ func TestManagedControlFencesAndNoReinjection(t *testing.T) {
 	identity.DaemonID = s.daemonID
 	identity.Generation = s.generation
 	expiry := time.Now().Add(time.Minute)
-	req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: a.run.ID, Generation: s.generation, CorrelationID: "managed-1", Operation: "steer", Text: "private steer", ExpectedOwnership: &identity, ExpiresAt: &expiry}
+	req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: a.run.ID, Generation: s.generation, CorrelationID: "managed-1", Operation: "steer", Text: "private steer", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}
 	if _, err := s.Control(t.Context(), req); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("local bypass: %v", err)
 	}
@@ -81,10 +81,12 @@ func TestManagedControlFencesAndNoReinjection(t *testing.T) {
 	req.ExpectedOwnership = &identity
 	expired := time.Now().Add(-time.Second)
 	req.ExpiresAt = &expired
+	req.deadline = expired
 	if _, err := s.control(t.Context(), req, true); !errors.Is(err, ErrControlExpired) {
 		t.Fatalf("expired: %v", err)
 	}
 	req.ExpiresAt = &expiry
+	req.deadline = expiry
 	// Synchronous usage callbacks used to deadlock under entry.mu.
 	p.observe = func(ev AdapterEvent) { s.observe(e, ev) }
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
@@ -175,10 +177,13 @@ func TestManagedControlCompletionRetryDoesNotRepeatAdapter(t *testing.T) {
 	identity.Generation = s.generation
 	expiry := time.Now().Add(time.Minute)
 	a.harnessCompletionFailures = 1
-	a.harnessControls = []HarnessControl{{ID: "queue-control", Kind: "steer", Text: "queue fixture", ExpectedOwnership: &identity, ExpiresAt: &expiry}}
+	a.harnessControls = []HarnessControl{{ID: "queue-control", Kind: "steer", Text: "queue fixture", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}}
 	if err := s.serviceHarness(t.Context(), e); !errors.Is(err, ErrControlUnconfirmed) {
 		t.Fatalf("missing completion uncertainty: %v", err)
 	}
+	// Reporting an already-applied receipt after expiry must not renew the
+	// authorization or repeat the child operation.
+	e.pending[0].deadline = time.Now().Add(-time.Second)
 	if err := s.serviceHarness(t.Context(), e); err != nil {
 		t.Fatal(err)
 	}

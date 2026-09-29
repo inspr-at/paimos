@@ -89,9 +89,9 @@ func (l *Lifetime) Signal(force bool) error {
 	return l.signal(context.Background(), force, nil)
 }
 
-// SignalBefore carries the immutable server authorization to the final signal
-// lock. A queued request cannot outlive its deadline while waiting for this
-// mutex, even if its caller already checked the same deadline earlier.
+// SignalBefore carries a local monotonic deadline, derived from the server's
+// remaining authorization budget, to the final signal lock. Never pass a remote
+// wall-clock timestamp here. Waiting for this mutex cannot extend the deadline.
 func (l *Lifetime) SignalBefore(ctx context.Context, force bool, expiresAt time.Time) error {
 	return l.signal(ctx, force, &expiresAt)
 }

@@ -673,7 +673,7 @@ func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
 	} else {
 		frame["text"] = text
 	}
-	if err := p.send(frame); err != nil {
+	if err := p.sendContext(ctx, frame); err != nil {
 		return err
 	}
 	select {

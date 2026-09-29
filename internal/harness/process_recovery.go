@@ -21,8 +21,8 @@ import (
 
 const ownershipWindow = 45 * time.Second
 
-// Ownership freshness (AEON-271) and session ETA staleness (AEON-277) share the
-// database clock. Millisecond skew between Postgres and an API host can
+// Ownership freshness (AEON-271), session ETA staleness (AEON-277) and control
+// authorization (AEON-337) share the database clock. Skew with an API host can
 // otherwise make a just-accepted report look future-dated, or a fresh estimate
 // look stale. Read after acquiring locks; a transaction-start timestamp can
 // predate a row this transaction waited for.
@@ -48,7 +48,9 @@ func (m *Module) reportOwnership(ctx context.Context, tx pgx.Tx, s Session, iden
 	if err != nil {
 		return err
 	}
-	if s.Management != "managed" || s.RunID == nil || daemon == "" || daemon != identity.DaemonID || !validIdentity(identity.Generation) || !validIdentity(identity.ProcessID) || identity.RootPID < 2 || identity.GroupID != identity.RootPID || identity.StartedAt.IsZero() || identity.StartedAt.After(now.Add(time.Minute)) {
+	// StartedAt is an opaque part of the daemon's process identity, on that
+	// host's clock. Only the DB-stamped observation establishes freshness.
+	if s.Management != "managed" || s.RunID == nil || daemon == "" || daemon != identity.DaemonID || !validIdentity(identity.Generation) || !validIdentity(identity.ProcessID) || identity.RootPID < 2 || identity.GroupID != identity.RootPID || identity.StartedAt.IsZero() {
 		return workorders.Fail(400, "verified managed process identity required")
 	}
 	if s.ProcessOwnership != nil && *s.ProcessOwnership != identity {

@@ -9299,6 +9299,11 @@ components:
         reason: {type: [string, 'null'], description: Content-free outcome. authorization_expired means expired before claim; outcome_unconfirmed means no safe retry. queued_next_turn acknowledges queued input rather than model obedience.}
         expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
         expires_at: {type: string, format: date-time}
+        expires_in_ms:
+          type: integer
+          minimum: 0
+          maximum: 45000
+          description: Yield-only remaining authorization lifetime from the database clock, rounded down. Workers anchor this to the monotonic start of the yield request (deducting the full round trip), retain that deadline across queueing and retries, and fail closed if absent or zero. expires_at remains an audit timestamp, never a worker wall-clock deadline.
         created_at: {type: string, format: date-time}
         claimed_at: {type: [string, 'null'], format: date-time}
         completed_at: {type: [string, 'null'], format: date-time}
@@ -9339,6 +9344,11 @@ components:
         reason: {type: [string, 'null'], description: Applied requires owned_group_signalled_root_exited; queued alone never proves exit.}
         expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
         expires_at: {type: string, format: date-time}
+        expires_in_ms:
+          type: integer
+          minimum: 0
+          maximum: 45000
+          description: Yield-only database-derived remaining authorization lifetime. Workers deduct the full round trip and use the resulting local monotonic deadline through the final process signal lock. Missing or zero lifetime cannot authorize a signal.
         created_at: {type: string, format: date-time}
         claimed_at: {type: [string, 'null'], format: date-time}
         completed_at: {type: [string, 'null'], format: date-time}

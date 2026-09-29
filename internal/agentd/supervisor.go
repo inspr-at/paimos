@@ -1125,7 +1125,7 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 				reason = "owned_group_signalled_root_exited"
 			}
 			_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
-				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt}, true)
+				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
 			if entry.managedPolicy && control.Kind != "force_stop" {
 				switch {
 				case errors.Is(err, ErrControlExpired):
@@ -1385,7 +1385,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		if req.ExpectedOwnership == nil || req.ExpiresAt == nil {
 			return Receipt{}, ErrUnsupported
 		}
-		if !req.ExpiresAt.After(time.Now()) {
+		if req.deadline.IsZero() || time.Until(req.deadline) <= 0 {
 			return Receipt{}, ErrControlExpired
 		}
 		recovery, ok := entry.process.(RecoveryProcess)
@@ -1401,6 +1401,19 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 			return Receipt{}, ErrNotOwned
 		}
 	}
+	if fromRecoveryQueue && (entry.managedPolicy || req.Operation == "force_stop" || req.ExpectedOwnership != nil) {
+		// Recheck after ownership lookup and lock contention, then propagate the
+		// same monotonic deadline through adapter waits. Never restart the TTL.
+		if req.deadline.IsZero() || time.Until(req.deadline) <= 0 {
+			if req.Operation == "force_stop" {
+				return Receipt{}, ErrUnsupported
+			}
+			return Receipt{}, ErrControlExpired
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, req.deadline)
+		defer cancel()
+	}
 	if inbox {
 		// Persist uncertainty before touching the child. A crash or lost vendor
 		// response must never authorize reinjection of the same lease.
@@ -1413,7 +1426,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	if req.Operation == "force_stop" {
 		recovery, ok := entry.process.(RecoveryProcess)
 		expected := req.ExpectedOwnership
-		if !ok || expected == nil || req.ExpiresAt == nil || !req.ExpiresAt.After(time.Now()) {
+		if !ok || expected == nil || req.ExpiresAt == nil || req.deadline.IsZero() || time.Until(req.deadline) <= 0 {
 			return Receipt{}, ErrUnsupported
 		}
 		if expected.DaemonID != s.daemonID || expected.Generation != s.generation {
@@ -1426,7 +1439,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		entry.stopRequested = true
 		entry.forceRequested = true
 		entry.mu.Unlock()
-		err = recovery.ForceStop(ctx, *expected, *req.ExpiresAt)
+		err = recovery.ForceStop(ctx, *expected, req.deadline)
 		entry.mu.Lock()
 		if err != nil && !errors.Is(err, ErrForceExitUnconfirmed) {
 			entry.forceRequested = false
@@ -1453,9 +1466,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	} else if isSetting(req.Operation) {
 		proc := entry.process
 		entry.mu.Unlock()
-		settingCtx, cancel := context.WithDeadline(ctx, *req.ExpiresAt)
-		err = proc.Control(settingCtx, req.Operation, req.Value)
-		cancel()
+		err = proc.Control(ctx, req.Operation, req.Value)
 		entry.mu.Lock()
 	} else {
 		proc := entry.process
