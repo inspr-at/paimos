@@ -104,7 +104,10 @@ func TestHarnessUsageSourcesReportMonotonicTotals(t *testing.T) {
 		t.Fatal(err)
 	}
 	posted = usagePosts(calls)[before:]
-	if len(posted) != 1 || posted[0]["model"] != "gpt-5" || numField(posted[0], "input_tokens") != 150 || numField(posted[0], "output_tokens") != 35 || numField(posted[0], "cached_input_tokens") != 80 || numField(posted[0], "reasoning_tokens") != 4 {
+	// The fixture revises cumulative reasoning 5 -> 4. Attributed reasoning
+	// never moves backwards, the same answer whether or not a beat boundary
+	// falls between the two records.
+	if len(posted) != 1 || posted[0]["model"] != "gpt-5" || numField(posted[0], "input_tokens") != 150 || numField(posted[0], "output_tokens") != 35 || numField(posted[0], "cached_input_tokens") != 80 || numField(posted[0], "reasoning_tokens") != 5 {
 		t.Fatalf("codex cumulative: %#v", posted)
 	}
 	if err = rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {

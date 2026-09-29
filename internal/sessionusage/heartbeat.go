@@ -85,17 +85,47 @@ func ParseHeartbeatLine(source, fallback string, line []byte) (HeartbeatLine, bo
 }
 
 func parseCodexHeartbeat(fields map[string]json.RawMessage, fallback string) (HeartbeatLine, bool, error) {
-	rec, outcome, err := classifyCodex(fields)
-	if err != nil || outcome != outcomeUse || rec.cumulative == nil || !rec.cumulative.inputKnown {
+	line, ok := codexTotals(fields)
+	if !ok {
 		return HeartbeatLine{}, false, nil
 	}
-	model := rec.model
+	model := line.Model
 	if model == "" {
 		model = fallback
 	}
-	model, err = canonicalModel(model)
+	model, err := canonicalModel(model)
 	if err != nil {
 		return HeartbeatLine{}, false, nil
+	}
+	line.Model = model
+	return line, true, nil
+}
+
+// CodexTotals reads one Codex cumulative token record without requiring a
+// model. The totals are session-wide; Model is the record's own model or "".
+// Callers attribute the increase over their session baseline to the model in
+// context, so a model switch never re-counts earlier tokens.
+func CodexTotals(line []byte) (HeartbeatLine, bool) {
+	if len(line) == 0 || len(line) > 1<<20 {
+		return HeartbeatLine{}, false
+	}
+	fields, err := decodeLine(line)
+	if err != nil {
+		return HeartbeatLine{}, false
+	}
+	return codexTotals(fields)
+}
+
+func codexTotals(fields map[string]json.RawMessage) (HeartbeatLine, bool) {
+	rec, outcome, err := classifyCodex(fields)
+	if err != nil || outcome != outcomeUse || rec.cumulative == nil || !rec.cumulative.inputKnown {
+		return HeartbeatLine{}, false
+	}
+	model := ""
+	if rec.model != "" {
+		if canonical, err := canonicalModel(rec.model); err == nil {
+			model = canonical
+		}
 	}
 	snap := rec.cumulative
 	cached := snap.cached
@@ -103,9 +133,9 @@ func parseCodexHeartbeat(fields map[string]json.RawMessage, fallback string) (He
 		cached = 0
 	}
 	if cached > snap.input {
-		return HeartbeatLine{}, false, nil
+		return HeartbeatLine{}, false
 	}
-	return HeartbeatLine{Model: model, Input: snap.input, Output: snap.output, Cached: cached, Reasoning: snap.reasoning, ReasoningKnown: snap.reasoningKnown, Absolute: true}, true, nil
+	return HeartbeatLine{Model: model, Input: snap.input, Output: snap.output, Cached: cached, Reasoning: snap.reasoning, ReasoningKnown: snap.reasoningKnown, Absolute: true}, true
 }
 
 func parseCursorHeartbeat(fields map[string]json.RawMessage, fallback string) (HeartbeatLine, bool, error) {
