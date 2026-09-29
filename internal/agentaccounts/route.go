@@ -329,7 +329,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[]
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], provider, model, model_status, model_data_note, openrouter_credits
 		FROM agent_accounts
 		WHERE harness = $1 AND daemon_id = $2 AND registered_by_principal_id = $3::uuid
 		  AND id::text = ANY($4::text[]) AND state = 'available'
