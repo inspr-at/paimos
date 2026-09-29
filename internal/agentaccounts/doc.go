@@ -44,6 +44,47 @@
 // Route responses include account_label, which agentd forwards with model and
 // reasoning_effort to the existing harness session metadata contract.
 //
+// Capacity readings (AEON-297): POST /api/agent-accounts/{id}/readings requires
+// an account.probe key and the registering agent. Reports are append-only,
+// tenant-isolated and idempotent; optional run IDs must use that account.
+// Derived percent windows have allowance 100 and conservatively round used
+// percent upward for the integer reservation ledger. Fresh means <=10 minutes;
+// aging <=window/6, stale beyond, expired at reset. Only fresh measured readings
+// route. Explicit vendor denial fails closed until explicit vendor recovery.
+// Readings never approve pairing: POST {id}/capacity/approve requires a person
+// with account.manage and records the existing separate ongoing-use approval.
+// Active manual windows override derived windows. Percent reservations hold an
+// initial 1% per job; tokens/dollars never masquerade as vendor quota.
+// Settlement releases that hold without adding usage already in observations.
+//
+// GET /api/agent-accounts/capacity (person account.read) returns exact percentages,
+// original observation time, source, freshness, and schedule pacing separately
+// from the legacy account contract. GET {id}/readings returns 200 recent samples.
+// GET/PUT /api/agent-accounts/capacity/schedule stores the current person's user,
+// pool (harness) or account override; account wins, then pool, then user. Null
+// removes an override. Default: UTC, Monday-Friday, 08-22, nights disabled,
+// off_days expire. Per-day half-hour bands, an optional crossing night, three
+// shifts and 24 hourly blocks match the approved schedule editor. Shifts and
+// blocks replace work bands; reduced rates are adjustable from 0.1 to 0.9.
+// Pacing uses weighted hours and the schedule day boundary; it is advice, not
+// a reserve profile or routing budget. A missing usage baseline projects from
+// now and is explicitly marked unknown rather than inventing daily usage.
+//
+// Lead workers can use harness heartbeat or run-heartbeat with --capacity-account
+// UUID --capacity-source codex|claude --capacity-file PHYSICAL_JSONL_PATH. The
+// one-shot heartbeat also accepts --capacity-phase start|update|end; the loop
+// captures start/end automatically. The account must belong to the reporting
+// principal. Codex accepts app-server
+// rate-limit events/responses or timestamped rollout token_count.rate_limits.
+// Claude accepts rate_limit_event stream frames; prefix them with a timestamp
+// field for durable capture. An undated frame is usable only at the file tail,
+// with the file modification time, so later output cannot freshen old quota.
+// No credential files, vendor identity or raw stream content are uploaded.
+// agentd captures Codex at start/end and updates, with quota-neutral app-server
+// fallback before routing. Claude preserves its first/last available stream
+// observation, including the original read time on the end snapshot; it does
+// not invent a pre-run baseline when the vendor supplies none.
+//
 // Pace for elapsed window fraction f in [0,1] is f (steady),
 // 1-(1-f)^2 (frontload) or 1 (unrestricted). The cumulative allowed fraction
 // is min(1, pace+burst_ratio), and the estimate must also fit the hard

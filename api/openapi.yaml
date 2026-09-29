@@ -3387,6 +3387,67 @@ paths:
       responses:
         '201': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/capacity:
+    get:
+      operationId: listAccountCapacity
+      summary: Current observed capacity and schedule pacing per account
+      description: Person account.read permission. Separate from the legacy account contract. Manual active windows override routing; readings remain visible here.
+      responses:
+        '200': {description: Capacity, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountCapacity'}}}}}
+        '403': {description: Person account.read permission required}
+  /agent-accounts/{accountId}/capacity/approve:
+    post:
+      operationId: approveOngoingObservedCapacity
+      summary: Approve ongoing managed work using observed account capacity
+      description: Person account.manage permission required. Records the existing separate pairing approval without creating a manual allowance window. Fresh readings, probe, grant and reservation checks still apply. Ingesting a reading never grants this approval.
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Ongoing use approved}
+        '403': {description: Person account.manage permission required}
+        '404': {description: Account not found}
+  /agent-accounts/{accountId}/readings:
+    parameters:
+      - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: ingestCapacityReadings
+      summary: Report allowlisted quota observations for an owned account
+      description: Requires agent key scope account.probe and the account registering principal. Does not grant ongoing pairing approval. Duplicate observations are idempotent; older reports cannot replace newer current windows.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [readings]
+              properties:
+                readings: {type: array, minItems: 1, maxItems: 32, items: {$ref: '#/components/schemas/CapacityReading'}}
+      responses:
+        '204': {description: Observations recorded}
+        '400': {description: Invalid reading}
+        '403': {description: Scope or ownership mismatch}
+    get:
+      operationId: listCapacityReadings
+      summary: Most recent 200 observations for an account
+      description: Person account.read permission required.
+      responses:
+        '200': {description: Readings, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CapacityReading'}}}}}
+  /agent-accounts/capacity/schedule:
+    get:
+      operationId: listCapacitySchedules
+      summary: Current person's default, pool and account schedule overrides
+      responses:
+        '200': {description: Schedules, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CapacityScheduleOverride'}}}}}
+    put:
+      operationId: putCapacitySchedule
+      summary: Set current person's default, pool or account schedule
+      description: Person account.manage permission required. Account override wins over pool (harness), then user default, then built-in default. Times are local to the explicit IANA timezone; week is Monday first. Shifts and hourly blocks replace work hours while nights is enabled. Null schedule removes an override.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CapacityScheduleOverride'}}}}
+      responses:
+        '204': {description: Schedule saved}
+        '400': {description: Invalid schedule}
+        '403': {description: Person account.manage permission required}
   /agent-accounts/catalog:
     get:
       operationId: getAgentAccountCatalog
@@ -8133,6 +8194,115 @@ components:
         command_template: {type: string}
         owner_required: {type: boolean}
         source: {type: string, enum: [aeon]}
+    CapacityReading:
+      type: object
+      additionalProperties: false
+      required: [window_kind, window_minutes, used_percent, resets_at, source, read_at]
+      properties:
+        window_kind: {type: string, enum: [5h, weekly, monthly, other]}
+        bucket: {type: string, maxLength: 64, description: 'Vendor bucket, e.g. codex or seven_day_opus; empty means general quota'}
+        window_minutes: {type: integer, minimum: 1, maximum: 527040}
+        used_percent: {type: number, minimum: 0, maximum: 100}
+        resets_at: {type: string, format: date-time}
+        plan: {type: string, maxLength: 128}
+        source: {type: string, enum: [harness, agentd, estimate]}
+        read_at: {type: string, format: date-time}
+        ordinary_usage_allowed: {type: boolean, description: Vendor authority; false forbids dispatch even when percent remains}
+        run_id: {type: string, format: uuid}
+        phase: {type: string, enum: [start, update, end]}
+    CapacitySchedule:
+      type: object
+      additionalProperties: false
+      required: [timezone, week, off_days, nights, model, night, shifts, blocks]
+      properties:
+        timezone: {type: string, default: UTC}
+        week:
+          type: array
+          minItems: 7
+          maxItems: 7
+          description: Monday first; at least one day on. Local hours use a half-hour grid.
+          items:
+            type: object
+            additionalProperties: false
+            required: [on, start, end]
+            properties:
+              on: {type: boolean}
+              start: {type: number, minimum: 0, maximum: 23.5, multipleOf: 0.5}
+              end: {type: number, minimum: 0.5, maximum: 24, multipleOf: 0.5}
+        off_days: {type: string, enum: [rest, expire, normal], default: expire}
+        nights: {type: boolean, default: false}
+        model: {type: string, enum: [daynight, shifts, blocks], default: daynight}
+        night:
+          type: object
+          additionalProperties: false
+          required: [start, end, k]
+          properties:
+            start: {type: number, minimum: 0, maximum: 23.5, multipleOf: 0.5}
+            end: {type: number, minimum: 0, maximum: 23.5, multipleOf: 0.5}
+            k: {type: number, minimum: 0.1, maximum: 1}
+        shifts:
+          type: object
+          additionalProperties: false
+          required: [early, late, night, k]
+          properties:
+            early: {type: number, minimum: 0, maximum: 23.5, multipleOf: 0.5}
+            late: {type: number, minimum: 0, maximum: 23.5, multipleOf: 0.5}
+            night: {type: number, minimum: 0, maximum: 23.5, multipleOf: 0.5}
+            k: {type: array, minItems: 3, maxItems: 3, items: {$ref: '#/components/schemas/CapacityRate'}}
+        blocks: {type: array, minItems: 24, maxItems: 24, items: {$ref: '#/components/schemas/CapacityRate'}}
+    CapacityRate:
+      description: Off (0), full (1), or adjustable reduced pace (0.1 to 0.9).
+      anyOf:
+        - {type: number, enum: [0, 1]}
+        - {type: number, minimum: 0.1, maximum: 0.9}
+    CapacityScheduleOverride:
+      type: object
+      additionalProperties: false
+      required: [scope, schedule]
+      properties:
+        scope: {type: string, enum: [user, pool, account]}
+        pool: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        account_id: {type: string, format: uuid}
+        schedule:
+          anyOf:
+            - {$ref: '#/components/schemas/CapacitySchedule'}
+            - {type: 'null'}
+    CapacityPacing:
+      type: object
+      required: [usable_hours, percent_per_hour, suggested_today_percent]
+      properties:
+        usable_hours: {type: number}
+        percent_per_hour: {type: number}
+        suggested_today_percent: {type: number, description: Remaining share of the current schedule day}
+        budget_percent: {type: number}
+        used_today_percent: {type: number, description: Observed usage since the schedule boundary when usage_today_known is true; otherwise projection starts now}
+        tonight_percent: {type: number}
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        finish: {type: string, format: date-time}
+        allow_off: {type: boolean}
+        unused: {type: boolean}
+        ahead: {type: boolean}
+    AccountCapacity:
+      type: object
+      required: [account_id, schedule, windows]
+      properties:
+        account_id: {type: string, format: uuid}
+        ongoing_use_approved: {type: boolean, description: True for unpaired accounts or a separately approved connected pairing; readings never change this approval}
+        schedule: {$ref: '#/components/schemas/CapacitySchedule'}
+        windows:
+          type: array
+          items:
+            type: object
+            required: [reading, starts_at, allowance, remaining_percent, freshness, pacing]
+            properties:
+              reading: {$ref: '#/components/schemas/CapacityReading'}
+              starts_at: {type: string, format: date-time}
+              allowance: {type: number, const: 100}
+              remaining_percent: {type: number}
+              freshness: {type: string, enum: [fresh, aging, stale, expired]}
+              usage_today_known: {type: boolean, description: False when no exact schedule-boundary observation exists; never infers daily usage from tokens}
+              pacing: {$ref: '#/components/schemas/CapacityPacing'}
     AgentAccountWrite:
       type: object
       required: [account_key, harness, daemon_id, label]
@@ -8255,7 +8425,15 @@ components:
         burst_ratio: {type: number, minimum: 0, maximum: 1, default: 0.1}
     AllowanceWindow:
       allOf:
-        - {$ref: '#/components/schemas/AllowanceWindowWrite'}
+        - type: object
+          required: [starts_at, ends_at, unit, allowance, pace_model]
+          properties:
+            starts_at: {type: string, format: date-time}
+            ends_at: {type: string, format: date-time}
+            unit: {type: string, enum: [requests, tokens, cost_micros, percent]}
+            allowance: {type: integer, format: int64, minimum: 1}
+            pace_model: {type: string, enum: [steady, frontload, unrestricted]}
+            burst_ratio: {type: number, minimum: 0, maximum: 1}
         - type: object
           required: [id, account_id, used, reserved, provisional]
           properties:
@@ -8298,7 +8476,7 @@ components:
             properties:
               reservation_id: {type: string, format: uuid}
               window_id: {type: string, format: uuid}
-              unit: {type: string, enum: [requests, tokens, cost_micros]}
+              unit: {type: string, enum: [requests, tokens, cost_micros, percent]}
     Error:
       type: object
       required: [error]

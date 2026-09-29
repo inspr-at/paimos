@@ -19,6 +19,7 @@ type heartbeatHold struct {
 }
 
 type heartbeatDisk struct {
+	CapacityStarted       bool                    `json:"capacity_started,omitempty"`
 	AppliedModelSequence  int64                   `json:"applied_model_sequence,omitempty"`
 	AppliedRenameSequence int64                   `json:"applied_rename_sequence,omitempty"`
 	RequestedLabel        string                  `json:"requested_label,omitempty"`

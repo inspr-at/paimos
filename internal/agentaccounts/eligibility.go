@@ -58,9 +58,37 @@ func allowanceHeadroom(windows []Window, now time.Time) bool {
 
 func activeWindows(windows []Window, now time.Time) []Window {
 	out := []Window{}
-	for _, window := range windows {
-		if !now.Before(window.StartsAt) && now.Before(window.EndsAt) {
-			out = append(out, window)
+	manual := false
+	latest := map[string]Window{}
+	for _, w := range windows {
+		if w.capacityReadAt == nil {
+			if !w.pairingVerification && !now.Before(w.StartsAt) && now.Before(w.EndsAt) {
+				manual = true
+			}
+			continue
+		}
+		key := w.capacityKind + "/" + w.capacityBucket
+		old, exists := latest[key]
+		if !exists || w.capacityReadAt.After(*old.capacityReadAt) {
+			latest[key] = w
+		}
+	}
+	// Each current vendor window constrains the account. Dropping just a stale
+	// or denied weekly window would incorrectly route against its fresh 5h peer.
+	usable := !manual && len(latest) > 0
+	for _, w := range latest {
+		if !w.capacityAllowed || now.Sub(*w.capacityReadAt) > 10*time.Minute || now.Before(w.StartsAt) || !now.Before(w.EndsAt) {
+			usable = false
+		}
+	}
+	for _, w := range windows {
+		if w.capacityReadAt == nil && !now.Before(w.StartsAt) && now.Before(w.EndsAt) {
+			out = append(out, w)
+		}
+	}
+	if usable {
+		for _, w := range latest {
+			out = append(out, w)
 		}
 	}
 	return out

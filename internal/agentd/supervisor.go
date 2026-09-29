@@ -21,6 +21,7 @@ import (
 	"unicode"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
@@ -91,6 +92,7 @@ type owned struct {
 	metadataSeq     uint64
 	metadataPending []harnessMetadata
 	usage           *sessionUsageReporter
+	capacityPending map[string]capacity.Reading
 	inboxCapable    bool
 	pending         []HarnessControl
 	process         Process
@@ -368,6 +370,17 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		probe := adapters[account.Harness].(AccountProber)
 		available := probe.Probe(ctx, account.Key)
 		err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
+		if err == nil && available {
+			if capture, ok := probe.(interface {
+				CaptureCapacity(context.Context, string) []capacity.Reading
+			}); ok {
+				if api, ok := s.api.(capacityAPI); ok {
+					if readings := capture.CaptureCapacity(ctx, account.Key); len(readings) > 0 {
+						_ = api.ReportCapacity(ctx, account.ID, readings)
+					}
+				}
+			}
+		}
 		s.mu.Lock()
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
@@ -783,6 +796,7 @@ func (s *Supervisor) heartbeat(entry *owned) {
 			return
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			s.flushCapacity(ctx, entry)
 			err := s.update(ctx, entry, Telemetry{Kind: "heartbeat"})
 			if err == nil {
 				err = s.serviceHarness(ctx, entry)
@@ -817,6 +831,9 @@ func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 	s.observeBudget(entry, ev)
+	if len(ev.Capacity) > 0 {
+		s.observeCapacity(entry, ev.Capacity)
+	}
 	if ev.SessionUsage != nil {
 		entry.usage.submit(*ev.SessionUsage)
 	}
@@ -982,6 +999,10 @@ func (s *Supervisor) monitor(entry *owned) {
 
 func (s *Supervisor) finishSessionUsage(entry *owned) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s.flushCapacity(ctx, entry)
+	cancel()
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := entry.usage.finish(ctx); err != nil && !errors.Is(err, ErrHarnessArchived) {
 		// No server errors, vendor fields, lease or account context in diagnostics.

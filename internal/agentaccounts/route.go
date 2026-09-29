@@ -144,7 +144,7 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		return windows[i].ID < windows[j].ID
 	})
 	for _, window := range windows {
-		estimate := estimates[window.Unit]
+		estimate := windowEstimate(window, estimates)
 		tag, err := tx.Exec(ctx, `
 			UPDATE account_allowance_windows
 			SET reserved = reserved + $2
@@ -182,6 +182,13 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if run.ProfileID == nil || a.State != "available" || !probeFresh(a, now) ||
 		(a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID)) {
 		return fail(http.StatusConflict, "reserved account is not eligible")
+	}
+	var invalidCapacity bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$1 AND r.state='active' AND w.capacity_read_at IS NOT NULL AND (NOT w.capacity_allowed OR w.capacity_read_at<$2::timestamptz-interval '10 minutes' OR w.ends_at<=$2 OR w.used+w.reserved>w.allowance))`, run.ID, now).Scan(&invalidCapacity); err != nil {
+		return err
+	}
+	if invalidCapacity {
+		return fail(http.StatusConflict, "reserved capacity is not eligible")
 	}
 	var enabled bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE id=$1::uuid AND harness=$2 AND enabled)`, *run.ProfileID, a.Harness).Scan(&enabled); err != nil {
@@ -348,7 +355,8 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		ok := true
 		ratio := 0.0
 		for _, window := range active {
-			estimate, exists := estimates[window.Unit]
+			estimate := windowEstimate(window, estimates)
+			exists := estimate > 0
 			if !exists {
 				ok = false
 				break
@@ -383,7 +391,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (map[string][]Window, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_id::text, starts_at, ends_at, unit, allowance, used, reserved,
-		       pace_model, burst_ratio::float8, pairing_verification
+		       pace_model, burst_ratio::float8, pairing_verification, capacity_read_at, capacity_allowed, COALESCE(capacity_kind,''), capacity_bucket
 		FROM account_allowance_windows
 		WHERE account_id::text = ANY($1::text[])
 		ORDER BY id
@@ -395,7 +403,7 @@ func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (ma
 	out := map[string][]Window{}
 	for rows.Next() {
 		var w Window
-		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.pairingVerification); err != nil {
+		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.pairingVerification, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket); err != nil {
 			return nil, err
 		}
 		out[w.AccountID] = append(out[w.AccountID], w)
@@ -416,4 +424,13 @@ func windowForRun(w Window, run runRow) bool {
 	default:
 		return false
 	}
+}
+
+// A one-percent initial hold keeps reservations atomic until learned per-run
+// percentages are available. It never invents token or dollar units.
+func windowEstimate(w Window, estimates map[string]int64) int64 {
+	if w.capacityReadAt != nil {
+		return 1
+	}
+	return estimates[w.Unit]
 }

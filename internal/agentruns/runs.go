@@ -324,6 +324,7 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	// Validate the exact reservation set, including on retry; never let a caller
 	// replace or omit a window from the account module's atomic reservation.
 	rows, err := tx.Query(ctx, `SELECT r.id::text,r.state,w.account_id::text,w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp()
+  AND (w.capacity_read_at IS NULL OR (w.capacity_allowed AND w.capacity_read_at>=clock_timestamp()-interval '10 minutes' AND w.used+w.reserved<=w.allowance))
 	 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
 	 WHERE r.run_id=$1 ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID)
 	if err != nil {

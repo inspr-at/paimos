@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
@@ -107,6 +108,7 @@ func (a *CodexAdapter) SetExpectedEmails(emails map[string]string) { a.Emails = 
 func (*CodexAdapter) Name() string                                 { return Codex }
 
 type codexProcess struct {
+	capacityParser capacity.Parser
 	*wireProcess
 	done                      chan bool
 	once                      sync.Once
@@ -119,7 +121,7 @@ type codexProcess struct {
 }
 
 func (p *codexProcess) Wait() error {
-	return p.waitForTurn(p.wireProcess.Stop, 2*time.Second)
+	return p.waitForTurn(func(ctx context.Context) error { p.readCapacity(ctx, "end"); return p.wireProcess.Stop(ctx) }, 3*time.Second)
 }
 func (p *codexProcess) Control(ctx context.Context, op, text string) error {
 	ctx, cancel := operationContext(ctx)
@@ -183,6 +185,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		!strings.EqualFold(strings.TrimSpace(*account.Account.Email), expectedEmail) {
 		return fail(errors.New("Codex account identity mismatch"))
 	}
+	cp.readCapacity(op, "start")
 	var thread struct {
 		Thread struct {
 			ID string `json:"id"`
@@ -675,6 +678,8 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	}
 	cp := &claudeProcess{wireProcess: p, assetDir: dir, ready: make(chan error, 1), controls: map[string]chan bool{}}
 	var inputTokens, outputTokens, costMicros int64
+	capacitySeen := false
+	capacityParser := capacity.Parser{}
 	p.setOnEvent(func(raw json.RawMessage) {
 		var frame struct {
 			Kind            string          `json:"kind"`
@@ -691,6 +696,32 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			return
 		}
 		switch frame.Kind {
+		case "capacity":
+			var payload struct {
+				Event  json.RawMessage `json:"event"`
+				Phase  string          `json:"phase"`
+				ReadAt time.Time       `json:"read_at"`
+			}
+			if json.Unmarshal(raw, &payload) == nil {
+				at := payload.ReadAt
+				if at.IsZero() {
+					at = time.Now().UTC()
+				}
+				readings := capacityParser.Claude(payload.Event, at)
+				for i := range readings {
+					readings[i].Phase = "update"
+					if !capacitySeen {
+						readings[i].Phase = "start"
+					}
+					if payload.Phase == "end" {
+						readings[i].Phase = "end"
+					}
+				}
+				if len(readings) > 0 {
+					capacitySeen = true
+					observe(AdapterEvent{Capacity: readings})
+				}
+			}
 		case "session_started":
 			observe(AdapterEvent{Kind: "status", EffectiveModel: frame.EffectiveModel, ModelEvidence: frame.ModelEvidence, HarnessModel: frame.EffectiveModel})
 			select {

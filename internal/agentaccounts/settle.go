@@ -253,6 +253,10 @@ func actualUnits(unit string, sums usageSums) (int64, error) {
 		return sums.tokens, nil
 	case "cost_micros":
 		return sums.cost, nil
+	case "percent":
+		// Authoritative readings already contain usage. Telemetry cannot convert
+		// tokens to vendor quota; settle only releases the held percentage.
+		return 0, nil
 	default:
 		return 0, fail(http.StatusConflict, "unknown allowance")
 	}
@@ -263,7 +267,7 @@ func settleActive(ctx context.Context, tx pgx.Tx, window Window, row reservation
 		UPDATE account_allowance_windows
 		SET used = used + $2, reserved = reserved - $3
 		WHERE id = $1::uuid AND reserved >= $3
-		  AND used + $2 + reserved - $3 <= allowance`, window.ID, actual, row.Reserved)
+		  AND (unit = 'percent' OR used + $2 + reserved - $3 <= allowance)`, window.ID, actual, row.Reserved)
 	if err != nil {
 		return err
 	}

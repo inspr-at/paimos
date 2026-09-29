@@ -104,7 +104,7 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		           SELECT 1 FROM account_reservations r
 		           WHERE r.tenant_id = w.tenant_id AND r.window_id = w.id
 		             AND r.state = 'settled' AND r.actual_units = 0
-		       ) AS provisional
+		       ) AS provisional, w.capacity_read_at, w.capacity_allowed, COALESCE(w.capacity_kind,''), w.capacity_bucket
 		FROM account_allowance_windows w
 		WHERE NOT w.pairing_verification
 		ORDER BY w.account_id, w.starts_at, w.id`)
@@ -115,9 +115,12 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 	byAccount := map[string][]Window{}
 	for rows.Next() {
 		var w Window
-		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional); err != nil {
+		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket); err != nil {
 			return nil, err
 		}
+		if w.capacityReadAt != nil {
+			w.Provisional = false
+		} // Vendor percentage is measured; token settlement is irrelevant.
 		byAccount[w.AccountID] = append(byAccount[w.AccountID], w)
 	}
 	if err := rows.Err(); err != nil {

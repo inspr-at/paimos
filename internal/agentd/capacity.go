@@ -1,0 +1,156 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package agentd
+
+import (
+	"context"
+	"encoding/json"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/capacity"
+)
+
+type capacityAPI interface {
+	ReportCapacity(context.Context, string, []capacity.Reading) error
+}
+
+func (r *Remote) ReportCapacity(ctx context.Context, id string, readings []capacity.Reading) error {
+	for len(readings) > 0 {
+		n := min(32, len(readings))
+		if err := r.Client.Do(ctx, "POST", "/api/agent-accounts/"+url.PathEscape(id)+"/readings", struct {
+			Readings []capacity.Reading `json:"readings"`
+		}{readings[:n]}, nil); err != nil {
+			return err
+		}
+		readings = readings[n:]
+	}
+	return nil
+}
+
+// The existing supervisor heartbeat flushes this bounded normalized outbox;
+// a vendor stream reader never waits on HTTP. No raw frames enter the journal.
+func (s *Supervisor) observeCapacity(e *owned, readings []capacity.Reading) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.record.Generation != s.generation || e.harnessArchived {
+		return
+	}
+	if e.capacityPending == nil {
+		e.capacityPending = map[string]capacity.Reading{}
+	}
+	for _, r := range readings {
+		r.RunID = e.record.RunID
+		key := r.WindowKind + "/" + r.Bucket + "/" + r.Phase
+		if len(e.capacityPending) < 192 || e.capacityPending[key].WindowKind != "" {
+			e.capacityPending[key] = r
+		}
+	}
+}
+func (s *Supervisor) flushCapacity(ctx context.Context, e *owned) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	api, ok := s.api.(capacityAPI)
+	if !ok {
+		return
+	}
+	e.mu.Lock()
+	if e.record.Generation != s.generation || e.harnessArchived {
+		e.mu.Unlock()
+		return
+	}
+	id := e.record.AccountID
+	items := []capacity.Reading{}
+	keys := []string{}
+	for k, v := range e.capacityPending {
+		keys = append(keys, k)
+		items = append(items, v)
+	}
+	e.mu.Unlock()
+	if len(items) == 0 {
+		return
+	}
+	if api.ReportCapacity(ctx, id, items) != nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for i, k := range keys {
+		if e.capacityPending[k].ReadAt.Equal(items[i].ReadAt) {
+			delete(e.capacityPending, k)
+		}
+	}
+}
+func (p *codexProcess) readCapacity(ctx context.Context, phase string) {
+	// Optional vendor extension: quota failure must not break run accounting.
+	op, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	raw, err := p.request(op, "jsonrpc", "account/rateLimits/read", map[string]any{})
+	if err != nil {
+		return
+	}
+	// Optional quota capture must not extend the process-stop deadline if
+	// an unrelated observer currently owns the event lock.
+	if !p.eventMu.TryLock() {
+		return
+	}
+	defer p.eventMu.Unlock()
+	p.emitCapacity(raw, phase)
+}
+func (p *codexProcess) emitCapacity(raw []byte, phase string) {
+	readings := p.capacityParser.Codex(raw, time.Now().UTC())
+	for i := range readings {
+		readings[i].Phase = phase
+	}
+	if len(readings) > 0 {
+		p.observe(AdapterEvent{Capacity: readings})
+	}
+}
+
+// CaptureCapacity is a quota-neutral fallback for accounts without a first
+// run. The vendor owns authentication; identity is checked on the same process
+// before reading quota. No credential files or auth response are published.
+func (a *CodexAdapter) CaptureCapacity(ctx context.Context, key string) []capacity.Reading {
+	home, err := localHome(a.Homes, key)
+	if err != nil || strings.TrimSpace(a.Emails[key]) == "" {
+		return nil
+	}
+	p, err := launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, home, withEnv("CODEX_HOME", home), "jsonrpc", func(AdapterEvent) {})
+	if err != nil {
+		return nil
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = p.Stop(cleanup)
+		_ = p.finishReader()
+	}()
+	op, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if _, err := p.request(op, "jsonrpc", "initialize", map[string]any{"clientInfo": map[string]string{"name": "aeon-capacity", "version": "1"}}); err != nil {
+		return nil
+	}
+	if p.send(map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}}) != nil {
+		return nil
+	}
+	raw, err := p.request(op, "jsonrpc", "account/read", map[string]any{"refreshToken": false})
+	var identity struct {
+		Account *struct {
+			Type  string `json:"type"`
+			Email string `json:"email"`
+		} `json:"account"`
+	}
+	if err != nil || json.Unmarshal(raw, &identity) != nil || identity.Account == nil || identity.Account.Type != "chatgpt" || !strings.EqualFold(strings.TrimSpace(identity.Account.Email), strings.TrimSpace(a.Emails[key])) {
+		return nil
+	}
+	raw, err = p.request(op, "jsonrpc", "account/rateLimits/read", map[string]any{})
+	if err != nil {
+		return nil
+	}
+	parser := capacity.Parser{}
+	readings := parser.Codex(raw, time.Now().UTC())
+	for i := range readings {
+		readings[i].Source = "agentd"
+	}
+	return readings
+}

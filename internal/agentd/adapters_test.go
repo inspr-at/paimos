@@ -70,6 +70,10 @@ func TestFakeVendorProcess(t *testing.T) {
 		}
 		result := any(map[string]any{})
 		switch frame.Method {
+		case "account/rateLimits/read":
+			if vendor == "codex_capacity" {
+				result = map[string]any{"rateLimits": map[string]any{"primary": map[string]any{"usedPercent": 31, "windowDurationMins": 10080, "resetsAt": time.Now().Add(24 * time.Hour).Unix()}}, "ordinaryUsageAllowed": true}
+			}
 		case "account/read":
 			result = map[string]any{"account": map[string]string{"type": "chatgpt", "email": "agent@example.test"}}
 		case "thread/start":
@@ -113,6 +117,9 @@ func TestFakeVendorProcess(t *testing.T) {
 			}
 		}
 		_ = write.Encode(map[string]any{"jsonrpc": "2.0", "id": frame.ID, "result": result})
+		if vendor == "codex_capacity" && frame.Method == "turn/start" {
+			_ = write.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-1", "turn": map[string]string{"id": "turn-1", "status": "completed"}}})
+		}
 	}
 }
 

@@ -53,7 +53,7 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 			if r.Method == "GET" && len(parts) == 2 {
 				return nil
 			}
-			if r.Method == "POST" && (len(parts) == 3 && parts[2] == "route" || len(parts) == 4 && parts[3] == "probe") {
+			if r.Method == "POST" && (len(parts) == 3 && parts[2] == "route" || len(parts) == 4 && (parts[3] == "probe" || parts[3] == "readings")) {
 				return nil
 			}
 		case "runs":
