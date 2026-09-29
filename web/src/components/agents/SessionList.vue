@@ -516,7 +516,10 @@ function rowClick(event: MouseEvent, id: string) {
   .c-ticket { grid-column: 3; grid-row: 3; justify-self: start; min-width: 0; overflow: hidden; margin-top: 4px; min-height: 22px; }
   .row > .c-ticket { padding-block: 0; }
   .c-beat { display: none; }
-  /* AEON-280 x AEON-304: no beat cell on phones, so the listening cue stays under the state label. */
+  /* AEON-280 x AEON-304: no beat cell on phones, so the listening cue joins the state line as
+     its icon; the words stay in its accessible name and tooltip. */
+  .row .c-state:has(.state-listen) { display: flex; align-items: center; gap: 6px; }
+  .row .state-listen :deep(.listening-text) { display: none; }
   .c-elapsed { display: none; }
   .row > .c-actions { grid-area: actions; grid-row: 1 / span 3; align-self: center; flex-direction: column; justify-content: center; gap: 0; padding: 0; }
   .act { display: none; }
