@@ -48,7 +48,7 @@ func TestCreateAgentAndFirstKey(t *testing.T) {
 			return err
 		}
 		var role string
-		if err := tx.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1::uuid,'key-manager','Key manager') RETURNING id::text`, owner.TenantID).Scan(&role); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1::uuid,'key_manager','Key manager') RETURNING id::text`, owner.TenantID).Scan(&role); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT tenant_id,$1::uuid,permission FROM role_permissions WHERE role_id=$2::uuid`, role, viewer); err != nil {
