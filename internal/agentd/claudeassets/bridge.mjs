@@ -198,6 +198,7 @@ let verificationSucceeded = false;
 let sessionStarted = false;
 let sessionID = "";
 let effectiveModel = "";
+let effectiveEffort = start.effort || "";
 let modelEvidenceStatus = "";
 let initialTurnStarted = false;
 let completedTurns = 0;
@@ -410,6 +411,30 @@ const handleControlLine = (line) => {
         emit({ kind: "control_applied", correlation_id: correlationID, vendor_message_id: uuid });
         if (state.reacted) deleteCorrelation(uuid);
         controlUUID = "";
+      } else if (request.op === "model" || request.op === "effort") {
+        failureReason = "setting_rejected";
+        if (!sessionStarted || typeof queryHandle.supportedModels !== "function") throw new Error("unavailable");
+        const value = request.value;
+        if (!validDispatchValue(value)) throw new Error("invalid setting");
+        const models = await queryHandle.supportedModels();
+        const model = models.find(m => m.value === (request.op === "model" ? value : effectiveModel));
+        const effort = request.op === "effort" ? value : effectiveEffort;
+        if (!model || !["low", "medium", "high", "xhigh", "max"].includes(effort) ||
+            model.supportsEffort === false ||
+            (Array.isArray(model.supportedEffortLevels) && !model.supportedEffortLevels.includes(effort))) throw new Error("unsupported setting");
+        if (request.op === "model") {
+          if (typeof queryHandle.setModel !== "function") throw new Error("unsupported setter");
+          await queryHandle.setModel(value);
+          effectiveModel = value;
+          emit({ kind: "settings_changed", effective_model: value });
+        } else {
+          if (typeof queryHandle.applyFlagSettings !== "function") throw new Error("unsupported setter");
+          // Exact allowlist: no caller-provided settings object reaches the SDK.
+          await queryHandle.applyFlagSettings({ effortLevel: value });
+          effectiveEffort = value;
+          emit({ kind: "settings_changed", effective_effort: value });
+        }
+        emit({ kind: "control_applied", correlation_id: correlationID });
       } else if (request.op === "interrupt") {
         if (!interruptReceipt) {
           fail("app_server_protocol", correlationID);

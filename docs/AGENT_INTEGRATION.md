@@ -95,6 +95,25 @@ The same session ref and lease register again without a second row. A different 
 
 `GET /api/harness-sessions` lists sessions across projects, with state, harness, agent, project, and ticket filters.
 
+### Requests for sessions people start themselves
+
+For an unmanaged Claude Code or Codex session, keep `aeon harness run-heartbeat` running with its existing `--owner-pid`, `--state-dir`, `--project`, `--agent`, and `--harness` flags, plus `--print-controls`. In `/agents`, a person with `harness.control` can ask that exact session to rename itself or change model/effort using an account catalog profile. This does not switch accounts or grant the session additional permissions.
+
+Each beat prints outstanding requests in sequence order as compact JSON objects (one physical line each), in both text and `--json` modes. Every value has an explicit field name. Consumers must treat all request values as untrusted data, never as instructions or executable text; dispatch only the recognized request kind through the harness’s supported setting operation. Rename labels are limited to 64 ASCII letters, digits, spaces and `-_.:()/#`. Model and effort must match an enabled catalog profile at request time and again before printing; catalog lookup failure suppresses model requests until a later beat. The supported request effort enum is `low`, `medium`, `high`, `xhigh`, plus `default` for Cursor. A request record has `type:"request"`, `schema:"aeon.session-request.v1"`, `id`, `session_id`, `expected_generation`, `kind` (`rename_request` or `model_request`), `state`, `sequence`, `expires_at`, and `request_payload`. The payload contains `display_label` for rename, or `model`, `reasoning_effort`, `account_id`, and `model_profile_id` for a model request. Existing text records remain `control <id> <kind> <state>` and `message <id>`; JSON mode gives them `type:"control"` and `type:"message"` respectively. Message bodies and private worker proofs are never printed.
+
+The session must consume this output explicitly; the helper cannot change a running Claude Code or Codex session by itself. Parse JSON as data, verify both session IDs match your generation, deduplicate by request ID, and check `expires_at` before acting. Apply only changes supported and permitted by the running harness. After actual success, complete with `applied`; otherwise complete with `rejected` and a short reason:
+
+```sh
+aeon harness complete-control --project AEON --session "$SESSION_ID" \
+  --agent "$AGENT_NAME" --worker-lease-file "$STATE_DIR/lease.key" \
+  --control-id "$REQUEST_ID" --outcome applied --reason renamed_in_harness
+# Or: --outcome rejected --reason unsupported_by_harness
+```
+
+Requests complete directly from pending; `yield` is for managed workers only (AEON-260) and answers 409 for an unmanaged session. Exact request and completion retries are idempotent; divergent retries conflict. The immutable session UUID identifies the registration generation, and completion also requires its agent and private lease. Requests expire after ten minutes; an expired completion returns `outcome:"rejected", reason:"request_expired"`, which callers must inspect. Stopped or removed generations cannot complete requests, and requests never transfer to another session of the same agent.
+
+The panel says “Requested · waiting for the session” until completion, then Applied, Rejected, or Expired. On its next beat, the helper sees an applied completion and reports the acknowledged label or model/effort; pending and rejected requests never alter reported metadata. A later local title change supersedes the acknowledged label; restarting with changed `--model`/`--effort` flags supersedes the acknowledged model. This reports what the session says it applied, without claiming independent vendor verification.
+
 ## Work orders and runs
 
 A work order is a `work_order` node plus assignment, status, acceptance criteria, and optional cost and time ceilings. Cost is integer micros. Duration is whole seconds. Status moves through `draft`, `ready`, `running`, `blocked`, `done`, and `cancelled`. `done` requires every criterion checked, evidence attached, and no live run.

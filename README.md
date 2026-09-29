@@ -361,6 +361,19 @@ requires the SDK receipt; stop requires native Query.close and observed exit.
 The managed panel replaces its legacy inbox composer with these exact-session
 controls, leaving older sessions on their existing interface.
 
+The same panel offers **Session settings** for qualified managed runs (AEON-224).
+Name, model and effort use typed, person-only, ownership-fenced controls with
+idempotent request IDs and pending/applied/rejected receipts. Model and effort
+choices come from the run's exact enrolled account catalog; unsupported pairs
+and unqualified harnesses are refused. The Claude bridge checks its live
+`supportedModels()` catalog, calls `setModel()` or
+`applyFlagSettings({ effortLevel })`, and reports metadata only after the SDK
+acknowledges. Effort applies on the next turn. The daemon publishes the applied
+settings by heartbeat before completing the control. Rename updates Aeon's
+public `display_label` and metadata history after the daemon verifies ownership;
+it does not enable vendor transcript persistence or rename files. A missing SDK
+setter rejects the request. Codex remains unqualified. Tests use fake SDKs only.
+
 Qualified runs default to 100,000 reported input/output tokens (including cache
 usage) and 16 completed input turns, configured by agentd Config.MaxTokens and
 Config.MaxTurns. The SDK also receives maxTurns for its agent loop. Counters

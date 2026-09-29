@@ -40,9 +40,10 @@ type Config struct {
 }
 
 type replay struct {
-	Rejected bool    `json:"rejected,omitempty"`
-	Digest   string  `json:"digest"`
-	Receipt  Receipt `json:"receipt"`
+	SettingRejected bool    `json:"setting_rejected,omitempty"`
+	Rejected        bool    `json:"rejected,omitempty"`
+	Digest          string  `json:"digest"`
+	Receipt         Receipt `json:"receipt"`
 }
 
 // Record contains only local process provenance and bounded control digests.
@@ -619,7 +620,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	caps := []string{"status", "stop"}
 	if managedPolicy {
-		caps = append(caps, managedControlCapability, "steer")
+		caps = append(caps, managedControlCapability, "steer", "rename", "model", "effort")
 	}
 	if profile.Harness != Grok {
 		caps = append(caps, "interrupt")
@@ -1029,7 +1030,7 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) (result e
 			reason = "owned_group_signalled_root_exited"
 		}
 		_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
-			RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind, Text: control.Text, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt}, true)
+			RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt}, true)
 		if entry.managedPolicy && control.Kind != "force_stop" {
 			switch {
 			case errors.Is(err, ErrControlExpired):
@@ -1038,8 +1039,14 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) (result e
 				outcome, reason, err = "rejected", "child_unavailable", nil
 			case errors.Is(err, ErrBudgetExhausted):
 				outcome, reason, err = "rejected", "budget_exhausted", nil
+			case errors.Is(err, ErrSettingRejected):
+				outcome, reason, err = "rejected", "setting_rejected", nil
 			case err != nil:
 				outcome, reason, err = "rejected", "outcome_unconfirmed", nil
+			case control.Kind == "effort":
+				reason = "setting_applied_next_turn"
+			case control.Kind == "model" || control.Kind == "rename":
+				reason = "setting_applied"
 			case control.Kind == "steer":
 				reason = "queued_next_turn"
 			case control.Kind == "interrupt":
@@ -1062,6 +1069,13 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) (result e
 				return ErrControlUnconfirmed
 			}
 			return err
+		}
+		// Publish the acknowledged model/effort before releasing the pending
+		// setting: subsequent account validation must see this applied pair.
+		if isSetting(control.Kind) && outcome == "applied" {
+			if err := s.heartbeatHarnessPhase(ctx, entry, "working"); err != nil {
+				return ErrControlUnconfirmed
+			}
 		}
 		if err := s.api.CompleteHarnessControl(ctx, entry.harness, control.ID, outcome, reason); err != nil {
 			if !errors.Is(err, ErrHarnessArchived) && (entry.managedPolicy || control.Kind == "force_stop" || control.Kind == "stop") {
@@ -1153,14 +1167,17 @@ func (s *Supervisor) Control(ctx context.Context, req ControlRequest) (Receipt, 
 // Force authorization originates only in the server's human-confirmed recovery
 // queue. Local transport credentials and inbox messages cannot mint that grant.
 func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecoveryQueue bool) (Receipt, error) {
-	if req.Operation == "force_stop" && !fromRecoveryQueue {
+	if (req.Operation == "force_stop" || isSetting(req.Operation)) && !fromRecoveryQueue {
 		return Receipt{}, ErrUnsupported
 	}
 	if req.TenantID != s.tenantID || req.PrincipalID != s.principalID || req.Generation != s.generation ||
 		req.RunID == "" || req.CorrelationID == "" || len(req.CorrelationID) > 128 {
 		return Receipt{}, ErrScope
 	}
-	if req.Operation != "steer" && req.Operation != "interrupt" && req.Operation != "resume" && req.Operation != "stop" && req.Operation != "force_stop" {
+	if req.Operation != "steer" && req.Operation != "interrupt" && req.Operation != "resume" && req.Operation != "stop" && req.Operation != "force_stop" && !isSetting(req.Operation) {
+		return Receipt{}, ErrUnsupported
+	}
+	if (isSetting(req.Operation) && !validSettingValue(req.Operation, req.Value)) || (!isSetting(req.Operation) && req.Value != "") {
 		return Receipt{}, ErrUnsupported
 	}
 	if len(req.Text) > 64<<10 || (req.Operation != "steer" && req.Text != "") {
@@ -1179,7 +1196,7 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 	defer entry.controlMu.Unlock()
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	if entry.managedPolicy && !fromRecoveryQueue {
+	if (entry.managedPolicy && !fromRecoveryQueue) || (isSetting(req.Operation) && !entry.managedPolicy) {
 		return Receipt{}, ErrUnsupported
 	}
 
@@ -1187,13 +1204,20 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 		Ownership *ownedprocess.Identity
 		ExpiresAt *time.Time
 	}{req.ExpectedOwnership, req.ExpiresAt})
-	digest := sha256.Sum256([]byte(req.Operation + "\x00" + req.Text + "\x00" + string(payload)))
+	body := req.Text
+	if isSetting(req.Operation) {
+		body = req.Value
+	}
+	digest := sha256.Sum256([]byte(req.Operation + "\x00" + body + "\x00" + string(payload)))
 	key := hex.EncodeToString(digest[:])
 	if prior, ok := entry.record.Controls[req.CorrelationID]; ok {
 		if prior.Digest != key {
 			return Receipt{}, ErrReplay
 		}
 		if prior.Rejected {
+			if prior.SettingRejected {
+				return Receipt{}, ErrSettingRejected
+			}
 			return Receipt{}, ErrControlUnconfirmed
 		}
 		return prior.Receipt, nil
@@ -1268,6 +1292,16 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 		if err != nil && !errors.Is(err, ErrGracefulTimeout) {
 			entry.stopRequested = false
 		}
+	} else if req.Operation == "rename" {
+		// Aeon's public label is server metadata, not a persisted vendor
+		// transcript title. The exact owned process has been verified above.
+	} else if isSetting(req.Operation) {
+		proc := entry.process
+		entry.mu.Unlock()
+		settingCtx, cancel := context.WithDeadline(ctx, *req.ExpiresAt)
+		err = proc.Control(settingCtx, req.Operation, req.Value)
+		cancel()
+		entry.mu.Lock()
 	} else {
 		proc := entry.process
 		entry.mu.Unlock()
@@ -1276,7 +1310,7 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 	}
 	if err != nil {
 		if entry.managedPolicy && fromRecoveryQueue {
-			entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true}
+			entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true, SettingRejected: errors.Is(err, ErrSettingRejected)}
 			_ = s.journal.Put(entry.record)
 		}
 		return Receipt{}, err

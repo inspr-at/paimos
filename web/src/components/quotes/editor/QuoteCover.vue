@@ -4,16 +4,18 @@ import QuoteText from './QuoteText.vue'
 import DatePicker from '../DatePicker.vue'
 import type { QuoteEditor } from '../../../lib/quotes/editor'
 import type { QuoteDocumentData } from '../../../lib/quotes/types'
-import { profileAssetUrl, profileDate, profileLabel } from '../../../lib/quotes/profile'
+import { computed } from 'vue'
+import { normalizeProfile, profileAssetUrl, profileDate, profileLabel } from '../../../lib/quotes/profile'
 const props = defineProps<{ document: QuoteDocumentData; editor: QuoteEditor; offerNo?: string; editable?: boolean }>()
-const classic = () => props.document.profile?.definition.layout_variant === 'classic-v1'
+const profile = computed(() => normalizeProfile(props.document.profile))
+const classic = () => profile.value?.definition.layout_variant === 'classic-v1'
 const set = (part: 'sender' | 'recipient' | 'legal', key: string, text: string) => props.editor.editField(part, { key, text })
 const date = (value: string) => profileDate(props.document.profile, value)
 const label = (key: string, fallback: string) => profileLabel(props.document.profile, key, fallback)
 </script>
 <template>
   <section class="quote-cover" aria-label="Quote cover">
-    <p class="quote-overline">{{ label('quote', 'Angebot') }} <span>{{ offerNo }}</span><img v-if="classic() && document.profile?.definition.cover.brand_asset_id" class="quote-brand-dots" :src="profileAssetUrl(document.profile.definition.cover.brand_asset_id)" alt="" /></p>
+    <p class="quote-overline">{{ label('quote', 'Angebot') }} <span>{{ offerNo }}</span><img v-if="classic() && profile?.definition.cover.brand_asset_id" class="quote-brand-dots" :src="profileAssetUrl(profile.definition.cover.brand_asset_id)" alt="" /></p>
     <QuoteText tag="h1" class="quote-title" :model-value="document.title" label="Angebotstitel" :editable="editable" @update:model-value="editor.editField('title', $event)" />
     <QuoteText tag="p" class="quote-subtitle" :model-value="document.subtitle" label="Untertitel" :editable="editable" @update:model-value="editor.editField('subtitle', $event)" />
     <div class="quote-cover-grid">

@@ -2488,14 +2488,42 @@ paths:
               required: [request_id, kind, expected_ownership]
               properties:
                 request_id: {type: string, format: uuid}
-                kind: {type: string, enum: [steer, interrupt, stop]}
+                kind: {type: string, enum: [steer, interrupt, stop, rename, model, effort]}
                 text: {type: string, maxLength: 8192, description: Required only for steer; UTF-8 byte limit 8192.}
+                value: {type: string, minLength: 1, maxLength: 128, description: Required only for rename/model/effort. Name is public session metadata; model and effort must match the enrolled account catalog.}
                 expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
       responses:
         '201': {description: Pending or identical replay; reason authorization_expired means expired., content: {application/json: {schema: {$ref: '#/components/schemas/HarnessManagedControl'}}}}
+        '400': {description: Invalid typed value or model/effort outside the enrolled account catalog}
         '403': {description: Person with project harness.control required}
         '409': {description: Unmanaged, unsupported, stale ownership, changed retry or session unavailable}
         '429': {description: Session control quota reached}
+  /projects/{projectId}/harness-sessions/{sessionId}/managed-settings:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getManagedHarnessSettings
+      description: Person with harness.control reads only model and effort choices from this run's enrolled account catalog. Missing enrollment returns no choices.
+      responses:
+        '200':
+          description: Account-scoped model choices, filtered to supported Claude efforts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [models]
+                properties:
+                  models:
+                    type: array
+                    items:
+                      type: object
+                      required: [model, efforts]
+                      properties:
+                        model: {type: string}
+                        efforts: {type: array, items: {type: string, enum: [low, medium, high, xhigh, max]}}
+        '403': {description: Person with project harness.control required}
+        '409': {description: Managed Claude session required}
   /projects/{projectId}/harness-sessions/{sessionId}/managed-context:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2513,6 +2541,59 @@ paths:
         '200': {description: ADR-004 merged rules envelope}
         '403': {description: Invalid worker lease or owner}
         '409': {description: Managed run required}
+  /projects/{projectId}/harness-sessions/{sessionId}/requests:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: requestHarnessSessionChange
+      security: *auth
+      description: Person with harness.control permission requests a change to an unmanaged session. The immutable session UUID is its generation; expected_generation must equal it. Requests expire after ten minutes. Exact request_id replay returns the original control; divergent reuse conflicts. Rename labels permit only ASCII letters, digits, spaces and -_.:()/# (at most 64 characters). Model requests require a granted enabled catalog profile and a supported harness effort. No metadata changes until the session acknowledges application and reports it on a heartbeat.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, expected_generation, kind]
+              properties:
+                request_id: {type: string, format: uuid}
+                expected_generation: {type: string, format: uuid}
+                kind: {type: string, enum: [rename_request, model_request]}
+                display_label: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9 _.:()/#-]+$'}
+                account_id: {type: string, format: uuid}
+                model_profile_id: {type: string, format: uuid}
+      responses:
+        '201': {description: Requested; waiting for the session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSessionRequest'}}}}
+        '400': {description: Invalid rename or catalog selection}
+        '403': {description: Person with harness.control permission required}
+        '409': {description: Closed or managed generation, stale generation, or divergent replay}
+  /projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: controlId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    post:
+      operationId: completeHarnessControl
+      security: *auth
+      description: Exact session agent and private generation lease required. Session requests may complete directly from pending or claimed; owned process controls still require claimed. Exact completion replay is idempotent. An expired request returns its terminal rejected outcome with request_expired reason and cannot be applied.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [outcome, reason]
+              properties:
+                outcome: {type: string, enum: [applied, rejected]}
+                reason: {type: string, minLength: 1, maxLength: 128}
+      responses:
+        '200': {description: Control outcome; inspect outcome and reason, content: {application/json: {schema: {type: object}}}}
+        '403': {description: Wrong session agent or generation lease}
+        '409': {description: Divergent completion or unclaimed process control}
   /projects/{projectId}/harness-sessions/{sessionId}/recovery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -4792,7 +4873,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.0']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.0']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.1']}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
@@ -7278,7 +7359,7 @@ components:
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
         work_shape: {type: string, enum: [unknown, ship, scout]}
-        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop, managed_control_v1]}}
+        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop, managed_control_v1, rename, model, effort]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
     HarnessProcessOwnership:
@@ -7298,7 +7379,8 @@ components:
       properties:
         id: {type: string, format: uuid}
         session_id: {type: string, format: uuid}
-        kind: {type: string, enum: [steer, interrupt, stop]}
+        kind: {type: string, enum: [steer, interrupt, stop, rename, model, effort]}
+        value: {type: string, description: Public setting value; absent for steering and process controls}
         state: {type: string, enum: [pending, claimed, completed]}
         sequence: {type: integer, format: int64}
         outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
@@ -7308,6 +7390,30 @@ components:
         created_at: {type: string, format: date-time}
         claimed_at: {type: [string, 'null'], format: date-time}
         completed_at: {type: [string, 'null'], format: date-time}
+    HarnessSessionRequest:
+      type: object
+      required: [id, session_id, expected_generation, kind, state, sequence, request_payload, expires_at, outcome, reason]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        expected_generation: {type: string, format: uuid}
+        kind: {type: string, enum: [rename_request, model_request]}
+        state: {type: string, enum: [pending, claimed, completed]}
+        sequence: {type: integer, format: int64}
+        outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
+        reason: {type: [string, 'null'], description: 'request_expired means expired, not applied.'}
+        expires_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        claimed_at: {type: [string, 'null'], format: date-time}
+        completed_at: {type: [string, 'null'], format: date-time}
+        request_payload:
+          type: object
+          properties:
+            display_label: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9 _.:()/#-]+$'}
+            model: {type: string, maxLength: 128}
+            reasoning_effort: {type: string, enum: [default, low, medium, high, xhigh]}
+            account_id: {type: string, format: uuid}
+            model_profile_id: {type: string, format: uuid}
     HarnessRecoveryControl:
       type: object
       required: [id, session_id, kind, state, sequence, outcome, reason, created_at, expected_ownership, expires_at]
@@ -7467,8 +7573,9 @@ components:
         branch: {$ref: '#/components/schemas/HarnessBranch'}
         commits: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/HarnessCommit'}}
         activity_note: {type: [string, 'null'], maxLength: 120, description: Current step reported by the worker.}
-        activity_history: {type: array, description: Up to 20 changed notes, newest first; present on session detail., items: {$ref: '#/components/schemas/HarnessActivityNote'}}
-        metadata_history: {type: array, description: Up to 20 display label, model, and reasoning effort changes, newest first; present on session detail., items: {$ref: '#/components/schemas/HarnessMetadataChange'}}
+        activity_history: {type: array, description: 'Up to 20 changed notes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessActivityNote'}}
+        controls: {type: array, description: Session requests on detail reads; outstanding requests plus the latest 20 completions and the last applied request of each kind. Expiry is terminal rejected with request_expired reason., items: {$ref: '#/components/schemas/HarnessSessionRequest'}}
+        metadata_history: {type: array, description: 'Up to 20 display label, model, and reasoning effort changes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessMetadataChange'}}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
         host: {type: string}
         management_mode: {type: string, enum: [managed, unmanaged]}
@@ -7615,7 +7722,7 @@ components:
         truncated: {type: boolean}
     HarnessModel: {type: [string, 'null'], maxLength: 128, description: Optional trimmed plain text; control characters stripped.}
     HarnessEffort: {type: [string, 'null'], maxLength: 40, description: Optional trimmed plain text; control characters stripped.}
-    HarnessAccountLabel: {type: [string, 'null'], maxLength: 128, description: Subscription or account display name, never a credential. Trimmed plain text; control characters stripped.}
+    HarnessAccountLabel: {type: [string, 'null'], maxLength: 128, description: 'Subscription or account display name, never a credential. Trimmed plain text; control characters stripped.'}
     HarnessVersion: {type: [string, 'null'], maxLength: 80, description: Optional trimmed plain text; control characters stripped.}
     HarnessBrief: {type: [string, 'null'], maxLength: 240, description: Short prompt file name or ticket key; trimmed plain text.}
     HarnessWorktree: {type: [string, 'null'], maxLength: 512, description: Worktree path; trimmed plain text.}

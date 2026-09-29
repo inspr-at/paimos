@@ -5,6 +5,7 @@ import { PAGE_MM } from '../../../lib/quotes/layout'
 import { MARK_DEFAULT_MM, MARK_RANGES, mmText } from '../../../lib/quotes/inspector'
 import MmField from './MmField.vue'
 import { settingsLink } from '../../../lib/settings'
+import { normalizeProfile } from '../../../lib/quotes/profile'
 import type { QuoteEditor } from '../../../lib/quotes/editor'
 import type { DocumentSettings, QuoteDocumentData } from '../../../lib/quotes/types'
 import DatePicker from '../DatePicker.vue'
@@ -25,7 +26,7 @@ const markMoved = computed(() => !!props.document.layout.logo_width_mm || !!prop
 // The page as this quote prints it: its document profile's geometry and language,
 // or the built-in standard page when it has none.
 const page = computed(() => {
-  const p = props.document.profile?.definition.page
+  const p = normalizeProfile(props.document.profile)?.definition.page
   const mm = (value: string | undefined, fallback: number) => { const n = Number(value); return value && Number.isFinite(n) ? n : fallback }
   return {
     width: mm(p?.width_mm, PAGE_MM.width), height: mm(p?.height_mm, PAGE_MM.height),
@@ -42,7 +43,7 @@ const margins = computed(() => {
   const { top, right, bottom, left } = page.value
   return top === bottom && left === right ? `${top} mm top and bottom, ${left} mm left and right` : `${top} mm top, ${right} mm right, ${bottom} mm bottom, ${left} mm left`
 })
-const language = computed(() => props.document.profile?.definition.locale === 'en' ? 'English' : 'German (Austria)')
+const language = computed(() => normalizeProfile(props.document.profile)?.definition.locale === 'en' ? 'English' : 'German (Austria)')
 const dateProblem = computed(() => props.document.valid_until && props.document.offer_date && props.document.valid_until < props.document.offer_date ? 'Valid until is before the quote date.' : '')
 function days(from: string, to: string) {
   if (!from || !to) return ''

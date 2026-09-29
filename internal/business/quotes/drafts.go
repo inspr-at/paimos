@@ -3,7 +3,6 @@
 package quotes
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -188,9 +187,8 @@ func (m *Module) draftPatch(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		oldProfile, _ := json.Marshal(oldDocument.Profile)
-		newProfile, _ := json.Marshal(doc.Profile)
-		if !bytes.Equal(oldProfile, newProfile) {
+		// Null and empty lists are the same profile (AEON-274).
+		if !sameProfile(oldDocument.Profile, doc.Profile) {
 			return conflict("select the quote profile through its endpoint")
 		}
 		minimumWriter := max(current.MinimumWriterVersion, documentMinimumWriterVersion(doc))
@@ -222,7 +220,7 @@ func (m *Module) draftPatch(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		raw, err := json.Marshal(doc)
+		raw, err := marshalDraft(doc)
 		if err != nil {
 			return err
 		}

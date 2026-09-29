@@ -12,10 +12,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/inspr-at/paimos/internal/sessionrequest"
 )
 
 const (
@@ -128,7 +131,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.CodexIndex, "codex-index", 0, "Codex session_index.jsonl (default ~/.codex/session_index.jsonl)")
 			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default ~/.claude/projects)")
 			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage and its title")
-			fs.bool(&o.PrintControls, "print-controls", 0, "print one line per pending control or inbox message")
+			fs.bool(&o.PrintControls, "print-controls", 0, "print request JSON records and pending control/message lines; --json emits NDJSON")
 		},
 		run: func([]string) error {
 			if err := o.prepare(); err != nil {
@@ -694,6 +697,11 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if err != nil {
 		return err
 	}
+	var controls []heartbeatControl
+	if o.PrintControls {
+		controls = rt.readHeartbeatControls(ctx, projectID, session.id)
+		applyHeartbeatRequests(o, dep, session, controls, ctx)
+	}
 	session.disk.ProjectID = projectID
 	session.disk.Sequence++
 	body := map[string]any{
@@ -708,8 +716,26 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if label, ok := resolveHeartbeatLabel(ctx, o, dep, false); ok && (!session.disk.LabelSent || label != session.disk.SentLabel) {
 		body["display_label"] = label
 	}
+	if session.disk.RequestedLabel != "" {
+		label, ok := resolveHeartbeatLabel(ctx, o, dep, false)
+		if ok && label != session.disk.RequestedLabelSource && label != session.disk.RequestedLabel {
+			session.disk.RequestedLabel = ""
+		} else if !session.disk.LabelSent || session.disk.SentLabel != session.disk.RequestedLabel {
+			body["display_label"] = session.disk.RequestedLabel
+		} else {
+			delete(body, "display_label")
+		}
+	}
 	putText(body, "model", heartbeatText(o.Model, 128), true)
 	putText(body, "reasoning_effort", heartbeatText(o.Effort, 40), true)
+	if session.disk.RequestedModel != "" && o.Model == session.disk.ModelFlagAtRequest && o.Effort == session.disk.EffortFlagAtRequest {
+		body["model"] = session.disk.RequestedModel
+		body["reasoning_effort"] = session.disk.RequestedEffort
+	} else {
+		session.disk.RequestedModel = ""
+		session.disk.RequestedEffort = ""
+	}
+
 	putText(body, "account_label", heartbeatText(o.AccountLabel, 128), true)
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
@@ -778,7 +804,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		}
 	}
 	if o.PrintControls {
-		rt.printHeartbeatControls(ctx, projectID, session.id)
+		rt.printHeartbeatControls(ctx, session.id, o.Harness, controls)
 	}
 	return nil
 }
@@ -802,25 +828,131 @@ func (rt *runtime) stopHeartbeat(ctx context.Context, project string, session he
 	return err
 }
 
-func (rt *runtime) printHeartbeatControls(ctx context.Context, projectID, sessionID string) {
+type heartbeatControl struct {
+	ID                 string     `json:"id"`
+	SessionID          string     `json:"session_id"`
+	ExpectedGeneration string     `json:"expected_generation,omitempty"`
+	Kind               string     `json:"kind"`
+	State              string     `json:"state"`
+	Sequence           int64      `json:"sequence"`
+	Outcome            string     `json:"outcome,omitempty"`
+	ExpiresAt          *time.Time `json:"expires_at,omitempty"`
+	Payload            struct {
+		DisplayLabel    string `json:"display_label,omitempty"`
+		Model           string `json:"model,omitempty"`
+		ReasoningEffort string `json:"reasoning_effort,omitempty"`
+		AccountID       string `json:"account_id,omitempty"`
+		ModelProfileID  string `json:"model_profile_id,omitempty"`
+	} `json:"request_payload"`
+}
+
+func (rt *runtime) readHeartbeatControls(ctx context.Context, projectID, sessionID string) []heartbeatControl {
 	var status struct {
-		Controls []struct {
-			ID    string `json:"id"`
-			Kind  string `json:"kind"`
-			State string `json:"state"`
-		} `json:"controls"`
+		Controls []heartbeatControl `json:"controls"`
 	}
-	if err := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, sessionID), "", nil, &status); err == nil {
-		for _, c := range status.Controls {
-			if c.State == "" || c.State == "completed" || !validUUID(c.ID) {
+	if err := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, sessionID), "", nil, &status); err != nil {
+		return nil
+	}
+	return status.Controls
+}
+
+func heartbeatSessionRequest(c heartbeatControl, sessionID string) bool {
+	return (c.Kind == "rename_request" || c.Kind == "model_request") && validUUID(c.ID) &&
+		strings.EqualFold(c.SessionID, sessionID) && strings.EqualFold(c.ExpectedGeneration, sessionID) && c.Sequence > 0 && c.ExpiresAt != nil
+}
+
+// Completion is a report by the owning harness, never an instruction to mutate
+// the local harness. Pending requests only get printed; nothing executes them.
+func applyHeartbeatRequests(o heartbeatOptions, dep heartbeatDeps, session *heartbeatSession, controls []heartbeatControl, ctx context.Context) {
+	sort.Slice(controls, func(i, j int) bool { return controls[i].Sequence < controls[j].Sequence })
+	for _, c := range controls {
+		if !heartbeatSessionRequest(c, session.id) || c.State != "completed" || c.Outcome != "applied" {
+			continue
+		}
+		if c.Kind == "rename_request" {
+			if c.Sequence <= session.disk.AppliedRenameSequence {
 				continue
 			}
-			kind := heartbeatText(c.Kind, 40)
-			state := heartbeatText(c.State, 40)
+			session.disk.AppliedRenameSequence = c.Sequence
+			label := c.Payload.DisplayLabel
+			if !sessionrequest.ValidLabel(label) {
+				continue
+			}
+			session.disk.RequestedLabel = label
+			session.disk.RequestedLabelSource, _ = resolveHeartbeatLabel(ctx, o, dep, false)
+		} else {
+			if c.Sequence <= session.disk.AppliedModelSequence {
+				continue
+			}
+			session.disk.AppliedModelSequence = c.Sequence
+			model, effort := c.Payload.Model, c.Payload.ReasoningEffort
+			if !sessionrequest.ValidModel(o.Harness, model, effort) {
+				continue
+			}
+			session.disk.RequestedModel, session.disk.RequestedEffort = model, effort
+			session.disk.ModelFlagAtRequest, session.disk.EffortFlagAtRequest = o.Model, o.Effort
+		}
+	}
+}
+
+func (rt *runtime) printHeartbeatControls(ctx context.Context, sessionID, harness string, controls []heartbeatControl) {
+	var profiles []struct {
+		ID      string `json:"id"`
+		Harness string `json:"harness"`
+		Model   string `json:"model"`
+		Effort  string `json:"effort"`
+		Enabled bool   `json:"enabled"`
+	}
+	catalogRead := false
+	for _, c := range controls {
+		if c.State != "pending" && c.State != "claimed" || !validUUID(c.ID) {
+			continue
+		}
+		if c.Kind == "rename_request" || c.Kind == "model_request" {
+			if !heartbeatSessionRequest(c, sessionID) || !c.ExpiresAt.After(time.Now()) {
+				continue
+			}
+			if c.Kind == "rename_request" {
+				if !sessionrequest.ValidLabel(c.Payload.DisplayLabel) || c.Payload.Model != "" || c.Payload.ReasoningEffort != "" || c.Payload.AccountID != "" || c.Payload.ModelProfileID != "" {
+					continue
+				}
+			} else {
+				if c.Payload.DisplayLabel != "" || !validUUID(c.Payload.AccountID) || !validUUID(c.Payload.ModelProfileID) || !sessionrequest.ValidModel(harness, c.Payload.Model, c.Payload.ReasoningEffort) {
+					continue
+				}
+				if !catalogRead {
+					catalogRead = true
+					if err := rt.doCtx(ctx, http.MethodGet, "/api/models", nil, &profiles); err != nil {
+						profiles = nil // Fail closed; a later beat retries the catalog.
+					}
+				}
+				matched := false
+				for _, p := range profiles {
+					if strings.EqualFold(p.ID, c.Payload.ModelProfileID) && p.Enabled && p.Harness == harness && p.Model == c.Payload.Model && p.Effort == c.Payload.ReasoningEffort {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					continue
+				}
+			}
+			record := struct {
+				Type   string `json:"type"`
+				Schema string `json:"schema"`
+				heartbeatControl
+			}{"request", "aeon.session-request.v1", c}
+			_ = json.NewEncoder(rt.stdout).Encode(record)
+		} else {
+			kind, state := heartbeatText(c.Kind, 40), heartbeatText(c.State, 40)
 			if kind == "" || state == "" {
 				continue
 			}
-			fmt.Fprintf(rt.stdout, "control %s %s %s\n", strings.ToLower(c.ID), kind, state)
+			if rt.jsonOut {
+				_ = json.NewEncoder(rt.stdout).Encode(map[string]string{"type": "control", "id": strings.ToLower(c.ID), "kind": kind, "state": state})
+			} else {
+				fmt.Fprintf(rt.stdout, "control %s %s %s\n", strings.ToLower(c.ID), kind, state)
+			}
 		}
 	}
 	var page struct {
@@ -843,7 +975,11 @@ func (rt *runtime) printHeartbeatControls(ctx context.Context, projectID, sessio
 		if !validUUID(item.ID) {
 			continue
 		}
-		fmt.Fprintf(rt.stdout, "message %s\n", strings.ToLower(item.ID))
+		if rt.jsonOut {
+			_ = json.NewEncoder(rt.stdout).Encode(map[string]string{"type": "message", "id": strings.ToLower(item.ID)})
+		} else {
+			fmt.Fprintf(rt.stdout, "message %s\n", strings.ToLower(item.ID))
+		}
 	}
 }
 

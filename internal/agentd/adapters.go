@@ -579,7 +579,9 @@ func (p *claudeProcess) Wait() error {
 	return err
 }
 func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
-	if op != "steer" && op != "interrupt" && op != "stop" {
+	ctx, cancel := operationContext(ctx)
+	defer cancel()
+	if op != "steer" && op != "interrupt" && op != "stop" && op != "model" && op != "effort" {
 		return ErrUnsupported
 	}
 	correlation, err := randomID()
@@ -591,13 +593,22 @@ func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
 	p.controls[correlation] = ch
 	p.controlMu.Unlock()
 	defer func() { p.controlMu.Lock(); delete(p.controls, correlation); p.controlMu.Unlock() }()
-	if err := p.send(map[string]any{"op": op, "text": text, "correlation_id": correlation}); err != nil {
+	frame := map[string]any{"op": op, "correlation_id": correlation}
+	if isSetting(op) {
+		frame["value"] = text
+	} else {
+		frame["text"] = text
+	}
+	if err := p.send(frame); err != nil {
 		return err
 	}
 	select {
 	case ok := <-ch:
 		if ok {
 			return nil
+		}
+		if isSetting(op) {
+			return ErrSettingRejected
 		}
 		return errors.New("Claude bridge rejected control")
 	case <-ctx.Done():
@@ -666,25 +677,28 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	var inputTokens, outputTokens, costMicros int64
 	p.setOnEvent(func(raw json.RawMessage) {
 		var frame struct {
-			Kind           string          `json:"kind"`
-			Reason         string          `json:"reason"`
-			CorrelationID  string          `json:"correlation_id"`
-			EffectiveModel string          `json:"effective_model"`
-			ModelEvidence  string          `json:"model_evidence_status"`
-			InputTokens    int64           `json:"input_tokens_total"`
-			OutputTokens   int64           `json:"output_tokens_total"`
-			CostUSD        json.RawMessage `json:"cost_usd_total"`
+			Kind            string          `json:"kind"`
+			Reason          string          `json:"reason"`
+			CorrelationID   string          `json:"correlation_id"`
+			EffectiveModel  string          `json:"effective_model"`
+			EffectiveEffort string          `json:"effective_effort"`
+			ModelEvidence   string          `json:"model_evidence_status"`
+			InputTokens     int64           `json:"input_tokens_total"`
+			OutputTokens    int64           `json:"output_tokens_total"`
+			CostUSD         json.RawMessage `json:"cost_usd_total"`
 		}
 		if json.Unmarshal(raw, &frame) != nil {
 			return
 		}
 		switch frame.Kind {
 		case "session_started":
-			observe(AdapterEvent{Kind: "status", EffectiveModel: frame.EffectiveModel, ModelEvidence: frame.ModelEvidence})
+			observe(AdapterEvent{Kind: "status", EffectiveModel: frame.EffectiveModel, ModelEvidence: frame.ModelEvidence, HarnessModel: frame.EffectiveModel})
 			select {
 			case cp.ready <- nil:
 			default:
 			}
+		case "settings_changed":
+			observe(AdapterEvent{HarnessModel: frame.EffectiveModel, HarnessEffort: frame.EffectiveEffort})
 		case "budget_exhausted":
 			if frame.Reason == "token_budget_exhausted" || frame.Reason == "turn_budget_exhausted" {
 				observe(AdapterEvent{BudgetExhausted: frame.Reason})

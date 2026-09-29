@@ -294,7 +294,7 @@ func createCustomerQuote(ctx context.Context, tx pgx.Tx, p tenant.Principal, tit
 		if err != nil {
 			return out, err
 		}
-		raw, err := json.Marshal(doc)
+		raw, err := marshalDraft(doc)
 		if err != nil {
 			return out, err
 		}
@@ -449,7 +449,7 @@ func WriteShowcaseDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, id s
 	}
 	minimumWriter := max(current.MinimumWriterVersion, doc.MinimumWriterVersion)
 	doc.MinimumWriterVersion = minimumWriter
-	raw, err := json.Marshal(doc)
+	raw, err := marshalDocument(doc)
 	if err != nil {
 		return err
 	}
@@ -534,6 +534,9 @@ func issueQuoteDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 	if err = validateDocument(&doc, true); err != nil {
 		return out, "", err
 	}
+	// Frozen as the editor reads it: a draft stored with null lists (before
+	// AEON-274) is issued with empty ones; the digest covers this value.
+	doc = normalizedDraft(doc)
 	settings, err := readSettings(ctx, tx)
 	if err != nil {
 		return out, "", err
@@ -611,7 +614,7 @@ func issueQuoteDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 	if err != nil {
 		return out, "", err
 	}
-	raw, err := json.Marshal(doc)
+	raw, err := marshalDocument(doc)
 	if err != nil {
 		return out, "", err
 	}
@@ -702,7 +705,7 @@ func branchQuoteDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, id str
 	if _, err = tx.Exec(ctx, `UPDATE business_quotes SET state='draft',revision=revision+1 WHERE quote_node_id=$1::uuid`, id); err != nil {
 		return out, err
 	}
-	raw, err := json.Marshal(doc)
+	raw, err := marshalDraft(doc)
 	if err != nil {
 		return out, err
 	}

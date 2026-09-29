@@ -38,6 +38,27 @@ export function previewSnapshot(definition: QuoteProfileDefinition, key = 'draft
   return { id: `preview-${key.replace(/[^a-z0-9]/gi, '')}-${hash.toString(36)}`, revision: 1, definition }
 }
 
+// A snapshot as the editor may read it (AEON-274). Profiles stored before the
+// server normalised them can carry null where a list or map belongs (fonts:
+// null crashed the quote page); read those as empty. A well-formed snapshot is
+// returned as is, so identity and reactivity stay unchanged; a malformed one is
+// copied, never mutated, so a save still sends the document as it was loaded.
+const LISTS = ['fonts'] as const
+const MAPS = ['colors', 'typography', 'cover', 'sections', 'labels', 'page', 'positions_table', 'totals', 'payment_terms', 'acceptance', 'footer'] as const
+const isMap = (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value)
+export function normalizeProfile<T extends QuoteProfileSnapshot | null | undefined>(profile: T): T {
+  const d = profile?.definition as Record<string, unknown> | null | undefined
+  if (!profile) return profile
+  const columns = isMap(d?.positions_table) ? (d!.positions_table as Record<string, unknown>).columns : undefined
+  if (isMap(d) && LISTS.every(key => Array.isArray(d![key])) && MAPS.every(key => isMap(d![key])) && Array.isArray(columns)) return profile
+  const next: Record<string, unknown> = { ...(isMap(d) ? d : {}) }
+  for (const key of LISTS) if (!Array.isArray(next[key])) next[key] = []
+  for (const key of MAPS) if (!isMap(next[key])) next[key] = {}
+  const table = next.positions_table as Record<string, unknown>
+  if (!Array.isArray(table.columns)) next.positions_table = { ...table, columns: [] }
+  return { ...profile, definition: next as unknown as QuoteProfileDefinition }
+}
+
 export function defaultProfile(): QuoteProfileDefinition {
   return {
     schema: 'inspr.document-profile.v1', layout_variant: 'classic-v1', locale: 'de-AT', fonts: [],
@@ -60,14 +81,16 @@ export function defaultProfile(): QuoteProfileDefinition {
 
 // A date as the document prints it: de-AT "21.09.2026", English in the European
 // order "21/09/2026" (a quote from Graz is not written for the US).
-export function profileDate(profile: QuoteProfileSnapshot | null | undefined, iso: string): string {
+export function profileDate(snapshot: QuoteProfileSnapshot | null | undefined, iso: string): string {
   if (!iso) return ''
+  const profile = normalizeProfile(snapshot)
   const locale = profile?.definition.locale === 'en' ? 'en-GB' : 'de-AT'
   return new Intl.DateTimeFormat(locale, { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`))
 }
-export const profileLabel = (profile: QuoteProfileSnapshot | null | undefined, key: string, fallback: string) => profile?.definition.labels[key] || fallback
-export const pageNumber = (profile: QuoteProfileSnapshot | null | undefined, page: number, total: number) => (profile?.definition.footer.page_number_format || '{page} / {total}').replaceAll('{page}', String(page)).replaceAll('{total}', String(total))
-export function profileMoney(cents: number, currency: string, profile: QuoteProfileSnapshot | null | undefined): string {
+export const profileLabel = (profile: QuoteProfileSnapshot | null | undefined, key: string, fallback: string) => normalizeProfile(profile)?.definition.labels[key] || fallback
+export const pageNumber = (profile: QuoteProfileSnapshot | null | undefined, page: number, total: number) => (normalizeProfile(profile)?.definition.footer.page_number_format || '{page} / {total}').replaceAll('{page}', String(page)).replaceAll('{total}', String(total))
+export function profileMoney(cents: number, currency: string, snapshot: QuoteProfileSnapshot | null | undefined): string {
+  const profile = normalizeProfile(snapshot)
   const [whole, fraction] = decimalCents(cents).split('.')
   const mark = profile?.definition.locale === 'en' ? ',' : '.'
   const decimal = profile?.definition.locale === 'en' ? '.' : ','
@@ -75,7 +98,8 @@ export function profileMoney(cents: number, currency: string, profile: QuoteProf
   return profile?.definition.layout_variant === 'classic-v1' && profile.definition.locale !== 'en' && currency === 'EUR' ? `€ ${amount}` : `${amount} ${currency}`
 }
 
-export function profileStyle(profile: QuoteProfileSnapshot | null | undefined): Record<string, string> {
+export function profileStyle(snapshot: QuoteProfileSnapshot | null | undefined): Record<string, string> {
+  const profile = normalizeProfile(snapshot)
   if (!profile) return {}
   const d = profile.definition
   const style: Record<string, string> = {
@@ -98,7 +122,8 @@ export function profileStyle(profile: QuoteProfileSnapshot | null | undefined): 
 }
 
 const fontLoads = new Map<string, Promise<void>>()
-export function loadProfileFonts(profile: QuoteProfileSnapshot | null | undefined): Promise<void> {
+export function loadProfileFonts(snapshot: QuoteProfileSnapshot | null | undefined): Promise<void> {
+  const profile = normalizeProfile(snapshot)
   if (!profile?.definition.fonts.length) return Promise.resolve()
   const key = `${profile.id}:${profile.revision}`
   let pending = fontLoads.get(key)

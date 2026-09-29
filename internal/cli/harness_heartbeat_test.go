@@ -50,6 +50,8 @@ func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *http
 			_, _ = w.Write([]byte(`{"items":[{"id":"project-kind","slug":"project"}]}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{project}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/models":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": transcriptEntryID, "harness": "codex", "model": "fixture-model", "effort": "high", "enabled": true}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
 			_, _ = w.Write([]byte(`{"principal":{"id":"44444444-4444-4444-8444-444444444444","name":"worker"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/"+transcriptProjectID+"/harness-sessions":
@@ -546,6 +548,8 @@ func hbServer(t *testing.T, calls *[]hbCall, handle func(r *http.Request, body m
 			_, _ = w.Write([]byte(`{"items":[{"id":"project-kind","slug":"project"}]}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{project}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/models":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": transcriptEntryID, "harness": "codex", "model": "fixture-model", "effort": "high", "enabled": true}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
 			_, _ = w.Write([]byte(`{"principal":{"id":"44444444-4444-4444-8444-444444444444","name":"worker"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/"+transcriptProjectID+"/harness-sessions":

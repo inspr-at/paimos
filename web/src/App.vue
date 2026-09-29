@@ -194,7 +194,8 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
 
 <style scoped>
 /* One column the width of the window: a long breadcrumb shrinks, it never widens the page. */
-.app-shell { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--header-h) minmax(0, 1fr) var(--footer-h); }
+/* viewport-fit=cover (AEON-273): keep the shell out of the notch and home indicator. */
+.app-shell { box-sizing: border-box; height: 100%; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--header-h) minmax(0, 1fr) var(--footer-h); }
 .app-shell.bare { --footer-h: 0px; grid-template-rows: minmax(0, 1fr); }
 .app-shell.header-folded { grid-template-rows: minmax(0, 1fr) var(--footer-h); }
 @media (max-width: 600px) {

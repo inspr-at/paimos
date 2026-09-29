@@ -296,7 +296,9 @@ func (m *Module) duplicate(w http.ResponseWriter, r *http.Request) {
 		if err := validateDocument(&doc, false); err != nil {
 			return err
 		}
-		raw, err = json.Marshal(doc)
+		// A copy of an old issued snapshot may hold null lists; the new draft
+		// gets empty ones so it stays issuable (AEON-274).
+		raw, err = marshalDraft(doc)
 		if err != nil {
 			return err
 		}
