@@ -1004,6 +1004,7 @@ watch(selectable, on => { if (!on) clearSelection() })
 const selectedRows = computed(() => list.rows.value.filter(row => selected.value.has(row.id)))
 // Selected tickets someone deleted meanwhile: the bulk bar says so, and changes leave them out.
 const selectedDeleted = computed(() => liveList.deletedAmong(selected.value))
+const liveSelection = () => { const gone = new Set(selectedDeleted.value); return [...selected.value].filter(id => !gone.has(id)) }
 // Where the list is, so the bulk bar centres over it (a docked panel takes the right).
 const listFrame = ref<{ left: number; width: number } | null>(null)
 let frameObserver: ResizeObserver | undefined
@@ -1029,7 +1030,7 @@ const releaseIds = ref<string[]>([])
 function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
   const at = anchor ?? document.querySelector<HTMLElement>(`.bulk-bar [aria-keyshortcuts="${{ status: 's', assignee: 'a', priority: 'p', labels: 'l', move: 'm', release: 'g' }[kind]}"]`)
   if (!at) return
-  if (kind === 'release') { openRelease(at, [...selected.value]); return }
+  if (kind === 'release') { openRelease(at, liveSelection()); return }
   if (kind === 'labels') void list.requestFacet('tag')
   if (kind === 'move') void list.loadEpics()
   bulkMenu.value = { kind, anchor: at }
@@ -1545,7 +1546,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <BulkBar
         v-if="selectable && selected.size" :count="selected.size" :deleted="selectedDeleted.length" :loaded="sequence.length" :total="total" :busy="bulkBusy" :can-write="writable" :can-release="can('releases.write', project.id)" :frame="listFrame"
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
-        @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, [...selected])" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
+        @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, liveSelection())" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
       />
       <p v-if="!journeyActive && !knowledgeActive && !graphActive" class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·

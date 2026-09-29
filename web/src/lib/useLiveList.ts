@@ -178,8 +178,15 @@ export function useLiveList(options: LiveListOptions) {
     }
     schedule()
   }
+  // One refetch at a time: an older answer never classifies after a newer one.
+  let flushing: Promise<void> | null = null
   function schedule() {
-    if (batchTimer === undefined) batchTimer = setTimeout(() => { batchTimer = undefined; void flush() }, BATCH_MS)
+    if (batchTimer !== undefined) return
+    batchTimer = setTimeout(() => {
+      batchTimer = undefined
+      if (flushing) return
+      flushing = flush().finally(() => { flushing = null; if (queue.size) schedule() })
+    }, BATCH_MS)
   }
 
   // ---------- Refetch and classify ----------
@@ -347,7 +354,8 @@ export function useLiveList(options: LiveListOptions) {
     const project = projectId.value
     if (!project) return
     const run = generation
-    // The first page again: rows that arrived meanwhile show as new.
+    // The first page again, in one request: rows that arrived meanwhile show
+    // as new; loaded rows that changed or are missing from it are looked at.
     const loaded = rows.value.slice(0, RESYNC_ROWS)
     let page: ListPage
     try { page = await fetchList(apiParams(project, filters.value, { limit: Math.max(PAGE / 4, Math.min(PAGE, loaded.length)) })) }
@@ -356,9 +364,13 @@ export function useLiveList(options: LiveListOptions) {
     const synthetic = (id: string, item?: ListItem): NodeChange => ({
       eventId: 0, type: 'resync', actorId: '', id, projectId: item?.project?.id ?? project, change: 'updated', fields: [], revision: item?.updated_at ?? null,
     })
+    const fresh = new Map(page.items.map(item => [item.id, item]))
     const known = new Set(rows.value.map(row => row.id))
     for (const item of page.items) if (!known.has(item.id)) receive(synthetic(item.id, item))
-    for (const row of loaded) receive(synthetic(row.id))
+    for (const row of loaded) {
+      const item = fresh.get(row.id)
+      if (!item || compareRevision(item.updated_at, row.updated_at) > 0) receive(synthetic(row.id, item))
+    }
   }
 
   // ---------- Lifecycle ----------

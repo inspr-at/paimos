@@ -106,6 +106,25 @@ describe('useLiveList: field changes', () => {
     expect(h.live.message.value).toBe('3 tickets changed elsewhere.')
   })
 
+  it('refetches one batch at a time, so an older answer never lands after a newer one', async () => {
+    const h = setup([item('n1')])
+    let release!: () => void
+    const slow = new Promise<void>(resolve => { release = resolve })
+    const plain = h.srv.fetchList.getMockImplementation()!
+    h.srv.fetchList.mockImplementationOnce(async query => { await slow; return plain(query) })
+    let node = edit(h, 'n1', { title: 'First' })
+    h.send({ id: 'n1', fields: ['title'], revision: node.updated_at })
+    await vi.advanceTimersByTimeAsync(150)
+    node = edit(h, 'n1', { title: 'Second' })
+    h.send({ id: 'n1', fields: ['title'], revision: node.updated_at })
+    await vi.advanceTimersByTimeAsync(150)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(1)
+    release()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(2)
+    expect(h.rows.value![0].title).toBe('Second')
+  })
+
   it('leaves the person’s own changes to the code that made them', async () => {
     const h = setup([item('n1')])
     h.send({ id: 'n1', actorId: ME, fields: ['title'] })
@@ -265,6 +284,8 @@ describe('useLiveList: loads and gaps', () => {
     await h.settle()
     expect(h.live.pill.value).toBe('1 update · Show')
     expect(h.rows.value!.map(r => r.id)).toEqual(['n1', 'n2'])
+    // One request for the page; only the new row is looked at more closely.
+    expect(h.srv.calls.map(q => q.ids ?? null)).toEqual([null, ['n7']])
   })
 
   it('places a row by the order fields and the group, never by its update time', () => {
