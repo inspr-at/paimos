@@ -336,7 +336,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 @media (max-width: 720px) {
   /* The sheet follows the visual viewport, so the keyboard never covers the composer. */
   .session-panel { z-index: 40; inset: var(--vv-top, 0px) 0 auto 0; width: auto; height: var(--vv-h, 100dvh); border-radius: 0; border: 0; background: var(--canvas); }
-  .panel-head { padding: 6px 8px 10px 16px; }
+  .panel-head { padding: calc(6px + env(safe-area-inset-top)) 8px 10px 16px; }
   .head-actions { flex-wrap: wrap; }
   .head-actions .spacer { flex-basis: 100%; height: 0; }
   /* Up to four quiet controls share one row on phones. */
