@@ -47,6 +47,7 @@ func TestStatuslineRateLimitAndAccountFence(t *testing.T) {
 	api := &capacityTestAPI{API: base}
 	s.api = api
 	s.accounts = []EnrolledAccount{{ID: "claude", Key: "a", Harness: Claude}, {ID: "codex", Key: "b", Harness: Codex}}
+	s.statuslineEnabled = map[string]bool{"claude": true}
 	now := time.Now().UTC()
 	r := capacity.Reading{WindowKind: "5h", Bucket: "five_hour", WindowMinutes: 300, UsedPercent: 42, ResetsAt: now.Add(time.Hour), ReadAt: now, Source: "harness", Phase: "update"}
 	req := StatuslineRequest{AccountID: "claude", Readings: []capacity.Reading{r}}
@@ -65,7 +66,7 @@ func TestStatuslineRateLimitAndAccountFence(t *testing.T) {
 		t.Fatal("more than one report per minute")
 	}
 	// A new in-memory supervisor using the same private state is still limited.
-	restarted := &Supervisor{api: api, state: s.state, tenantID: s.tenantID, principalID: s.principalID, daemonID: s.daemonID, accounts: s.accounts}
+	restarted := &Supervisor{api: api, state: s.state, tenantID: s.tenantID, principalID: s.principalID, daemonID: s.daemonID, accounts: s.accounts, statuslineEnabled: map[string]bool{"claude": true}}
 	if out, err := restarted.ReportStatusline(t.Context(), req, now.Add(59*time.Second)); err != nil || out.Reported {
 		t.Fatal("restart/59s bypassed rate limit")
 	}
@@ -83,6 +84,21 @@ func TestStatuslineRateLimitAndAccountFence(t *testing.T) {
 	req.Readings[0].Plan = "private-value"
 	if _, err := s.ReportStatusline(t.Context(), req, now.Add(time.Minute)); err == nil {
 		t.Fatal("extra data accepted")
+	}
+}
+
+func TestStatuslineReportRequiresConsent(t *testing.T) {
+	s, base, _ := testSupervisor(t)
+	s.api = &capacityTestAPI{API: base}
+	s.accounts = []EnrolledAccount{{ID: "claude", Key: "a", Harness: Claude}}
+	now := time.Now().UTC()
+	req := StatuslineRequest{AccountID: "claude", Readings: []capacity.Reading{{WindowKind: "5h", Bucket: "five_hour", WindowMinutes: 300, UsedPercent: 42, ResetsAt: now.Add(time.Hour), ReadAt: now, Source: "harness", Phase: "update"}}}
+	if _, err := s.ReportStatusline(t.Context(), req, now); err == nil {
+		t.Fatal("missing consent reported")
+	}
+	s.statuslineEnabled = map[string]bool{"claude": false}
+	if _, err := s.ReportStatusline(t.Context(), req, now); err == nil {
+		t.Fatal("consent off reported")
 	}
 }
 
@@ -173,6 +189,77 @@ func TestClaudeIdleCapabilityExactBinary(t *testing.T) {
 	}
 }
 
+func TestClaudeStatuslineFollowsBinaryPath(t *testing.T) {
+	home := privateCapacityHome(t)
+	account := "11111111-1111-4111-8111-111111111111"
+	old := aeonStatuslineCommand("/nix/store/old-aeon/bin/aeon", home, account)
+	next := aeonStatuslineCommand("/nix/store/new-aeon/bin/aeon", home, account)
+	if err := applyClaudeStatusline(home, old, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyClaudeStatusline(home, next, true); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "settings.json"))
+	if err != nil || !strings.Contains(string(raw), "/nix/store/new-aeon/bin/aeon") || strings.Contains(string(raw), "/nix/store/old-aeon/bin/aeon") {
+		t.Fatal(string(raw))
+	}
+	if err := applyClaudeStatusline(home, next, false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(mustRead(t, filepath.Join(home, "settings.json")), "statusLine") {
+		t.Fatal("path change left Aeon's status line")
+	}
+	foreign := []byte(`{"statusLine":{"type":"command","command":"other-tool"}}`)
+	if err := os.WriteFile(filepath.Join(home, "settings.json"), foreign, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if applyClaudeStatusline(home, next, false) == nil {
+		t.Fatal("removed a status line Aeon did not install")
+	}
+}
+
+func mustRead(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func TestExactCapacityBinaryHashCache(t *testing.T) {
+	home := privateCapacityHome(t)
+	path := filepath.Join(home, "fixture-claude")
+	raw := []byte("#!/bin/sh\nexit 88\n")
+	if err := os.WriteFile(path, raw, 0700); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256Hex(raw)
+	before := capacityHashCount()
+	if !exactCapacityBinary(path, digest) || !exactCapacityBinary(path, digest) {
+		t.Fatal("fixture hash rejected")
+	}
+	if capacityHashCount()-before != 1 {
+		t.Fatalf("hashed %d times", capacityHashCount()-before)
+	}
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho bigger\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if exactCapacityBinary(path, digest) {
+		t.Fatal("stale hash accepted")
+	}
+	if capacityHashCount()-before != 2 {
+		t.Fatalf("size change hashed %d times", capacityHashCount()-before)
+	}
+}
+
+func capacityHashCount() int {
+	capacityBinaryCache.Lock()
+	defer capacityBinaryCache.Unlock()
+	return capacityBinaryCache.hashes
+}
+
 func TestCodexVendorLimitSettlesRunAndCapacity(t *testing.T) {
 	s, base, _ := testSupervisor(t)
 	api := &capacityTestAPI{API: base}
@@ -188,13 +275,13 @@ func TestCodexVendorLimitSettlesRunAndCapacity(t *testing.T) {
 	base.mu.Lock()
 	last := base.reports[len(base.reports)-1]
 	base.mu.Unlock()
-	if last.Kind != "finished" || last.ErrorCode != "vendor_limit" || last.Status != "failed" || last.LimitResetsAt == nil || !last.LimitResetsAt.Equal(reset) {
+	if last.Kind != "finished" || last.ErrorCode != "vendor_limit" || last.Status != "failed" || last.LimitResetsAt != nil {
 		t.Fatal("vendor limit did not settle run")
 	}
 	api.mu.Lock()
 	defer api.mu.Unlock()
-	if len(api.got) == 0 || api.got[0].UsedPercent != 100 || api.got[0].RunID != base.run.ID || api.got[0].Source != "harness" {
-		t.Fatal("100% harness reading missing")
+	if len(api.got) == 0 || api.got[0].UsedPercent != 41 || api.got[0].RunID != base.run.ID || api.got[0].Source != "harness" {
+		t.Fatal("unnamed stop rewrote the vendor percentage")
 	}
 }
 
@@ -234,7 +321,7 @@ func TestCodexVendorLimitNotificationBinding(t *testing.T) {
 		}
 	}}, acknowledged: true}
 	for _, thread := range []string{"foreign", "owned"} {
-		p.notification(json.RawMessage(fmt.Sprintf(`{"method":"error","params":{"threadId":%q,"turnId":"turn","error":{"codexErrorInfo":{"rateLimitReachedType":"usage"}}}}`, thread)))
+		p.notification(json.RawMessage(fmt.Sprintf(`{"method":"error","params":{"threadId":%q,"turnId":"turn","error":{"codexErrorInfo":"usageLimitExceeded"}}}`, thread)))
 		if thread == "foreign" && hits != 0 {
 			t.Fatal("foreign thread stopped run")
 		}
@@ -248,7 +335,7 @@ func TestCodexVendorLimitWaitsForTurnAcknowledgement(t *testing.T) {
 	for _, turn := range []string{"expected", "foreign"} {
 		t.Run(turn, func(t *testing.T) {
 			f := newCodexLifecycleFixture(t)
-			f.emit(t, fmt.Sprintf(`{"method":"error","params":{"threadId":"synthetic-thread","turnId":%q,"error":{"codexErrorInfo":{"rateLimitReachedType":"usage"}}}}`, turn))
+			f.emit(t, fmt.Sprintf(`{"method":"error","params":{"threadId":"synthetic-thread","turnId":%q,"error":{"codexErrorInfo":"usageLimitExceeded"}}}`, turn))
 			if f.proc.vendorLimited.Load() {
 				t.Fatal("limit preceded turn acknowledgement")
 			}

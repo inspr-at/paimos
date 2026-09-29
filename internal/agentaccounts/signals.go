@@ -2,6 +2,7 @@
 package agentaccounts
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"math"
@@ -160,6 +161,15 @@ func (m *Module) statusline(w http.ResponseWriter, r *http.Request) {
 		if a.Harness != "claude" {
 			return fail(400, "Claude account required")
 		}
+		if r.Method == http.MethodPut {
+			audience, err := statuslineAudience(r.Context(), tx, p, a.ID)
+			if err != nil {
+				return err
+			}
+			if audience == "" {
+				return fail(403, "status line opt-in is limited to the paired computer's owner or a workspace admin")
+			}
+		}
 		enabled = a.StatuslineEnabled
 		if r.Method == http.MethodGet {
 			plan, err = statuslinePlanFor(r, tx, a)
@@ -184,6 +194,64 @@ func (m *Module) statusline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, 200, statuslineConsent{Enabled: &enabled, Plan: plan})
+}
+
+func statuslineAudience(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string) (string, error) {
+	if p.Kind != tenant.Person {
+		return "", nil
+	}
+	var own bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id WHERE e.account_id=$1::uuid AND q.approved_by=$2::uuid AND e.state<>'revoked')`, accountID, p.ID).Scan(&own); err != nil {
+		return "", err
+	}
+	if own {
+		return "own", nil
+	}
+	admin, err := workspaceStatuslineAdmin(ctx, tx, p.ID)
+	if err != nil || !admin {
+		return "", err
+	}
+	return "workspace", nil
+}
+
+func workspaceStatuslineAdmin(ctx context.Context, tx pgx.Tx, principalID string) (bool, error) {
+	var admin bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id WHERE b.principal_id=$1::uuid AND b.scope_type='workspace' AND r.builtin AND r.key IN ('owner','admin'))`, principalID).Scan(&admin)
+	return admin, err
+}
+
+func annotateStatuslineOptIn(ctx context.Context, tx pgx.Tx, p tenant.Principal, items []Account) error {
+	admin, err := workspaceStatuslineAdmin(ctx, tx, p.ID)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `SELECT e.account_id::text FROM agent_pairing_enrollments e JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id WHERE q.approved_by=$1::uuid AND e.state<>'revoked'`, p.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	own := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		own[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range items {
+		if items[i].Harness != "claude" {
+			continue
+		}
+		if own[items[i].ID] {
+			items[i].StatuslineOptIn = "own"
+		} else if admin {
+			items[i].StatuslineOptIn = "workspace"
+		}
+	}
+	return nil
 }
 
 func statuslinePlanFor(r *http.Request, tx pgx.Tx, a Account) (string, error) {

@@ -91,7 +91,7 @@ func TestFakeVendorProcess(t *testing.T) {
 			}
 		case "turn/start":
 			if vendor == "codex_limit_error" {
-				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "id": frame.ID, "error": map[string]any{"code": -32000, "data": map[string]string{"rateLimitReachedType": "usage"}}})
+				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "id": frame.ID, "error": map[string]any{"code": -32000, "data": map[string]string{"codexErrorInfo": "usageLimitExceeded"}}})
 				continue
 			}
 			if vendor == "codex_metadata" {

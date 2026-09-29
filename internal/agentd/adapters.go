@@ -853,6 +853,28 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 				}
 				readings := capacityParser.Claude(payload.Event, at)
 				if hit := capacity.VendorLimit(Claude, payload.Event, readings, at); hit != nil {
+					phase := "update"
+					if !capacitySeen {
+						phase = "start"
+					}
+					if payload.Phase == "end" {
+						phase = "end"
+					}
+					if len(hit.Readings) == 0 {
+						for i := range readings {
+							readings[i].Phase = phase
+						}
+						if len(readings) > 0 {
+							capacitySeen = true
+							observe(AdapterEvent{Capacity: readings})
+						}
+					} else {
+						hit.Readings = overlayNamedReadings(readings, hit.Readings)
+						for i := range hit.Readings {
+							hit.Readings[i].Phase = phase
+						}
+						capacitySeen = len(hit.Readings) > 0
+					}
 					observe(limitEvent(hit))
 					return
 				}

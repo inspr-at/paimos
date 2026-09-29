@@ -55,7 +55,7 @@ func (s *Supervisor) ReportStatusline(ctx context.Context, req StatuslineRequest
 		}
 	}
 	s.mu.Unlock()
-	if !found || !s.dispatchAllowed(req.AccountID) {
+	if !found || !s.dispatchAllowed(req.AccountID) || !s.statuslineEnabled[req.AccountID] {
 		return StatuslineResponse{}, ErrScope
 	}
 	if len(req.Readings) > 2 {
@@ -147,18 +147,21 @@ func applyClaudeStatusline(home, command string, enabled bool) error {
 			Type    string `json:"type"`
 			Command string `json:"command"`
 		}
-		if json.Unmarshal(old, &v) != nil || v.Type != "command" || v.Command != command {
+		if json.Unmarshal(old, &v) != nil || v.Type != "command" || !claudeStatuslineOwned(v.Command, command) {
 			return errors.New("Claude status line already configured")
 		}
 		if enabled {
-			return nil
+			if v.Command == command {
+				return nil
+			}
+			settings["statusLine"] = wanted
+		} else {
+			delete(settings, "statusLine")
 		}
-		delete(settings, "statusLine")
-	} else {
-		if !enabled {
-			return nil
-		}
+	} else if enabled {
 		settings["statusLine"] = wanted
+	} else {
+		return nil
 	}
 	next, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -191,10 +194,15 @@ func (s *Supervisor) syncStatuslines(ctx context.Context, now time.Time) {
 		if err != nil {
 			continue
 		}
+		// Consent gates the relay even when the settings write cannot run yet.
 		s.statuslineMu.Lock()
 		if s.statuslinePlans == nil {
 			s.statuslinePlans = map[string]statuslinePlan{}
 		}
+		if s.statuslineEnabled == nil {
+			s.statuslineEnabled = map[string]bool{}
+		}
+		s.statuslineEnabled[a.ID] = consent.Enabled
 		if validPlanLine(consent.Plan) {
 			s.statuslinePlans[a.ID] = statuslinePlan{consent.Plan, now}
 		}
@@ -214,17 +222,53 @@ func (s *Supervisor) syncStatuslines(ctx context.Context, now time.Time) {
 		if _, err = pinnedExecutable(path); err != nil {
 			continue
 		}
-		quote := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "'\\''") + "'" }
-		command := fmt.Sprintf("%s statusline --state-dir %s --account-id %s", quote(path), quote(s.state.Path()), quote(a.ID))
-		if applyClaudeStatusline(home, command, consent.Enabled) == nil {
-			s.statuslineMu.Lock()
-			if s.statuslineEnabled == nil {
-				s.statuslineEnabled = map[string]bool{}
-			}
-			s.statuslineEnabled[a.ID] = consent.Enabled
-			s.statuslineMu.Unlock()
-		}
+		_ = applyClaudeStatusline(home, aeonStatuslineCommand(path, s.state.Path(), a.ID), consent.Enabled)
 	}
+}
+
+// Aeon's entry is the statusline subcommand for this state dir and account.
+// The binary path is not part of that signature: a nix store path change must
+// still update or remove the entry Aeon installed.
+func aeonStatuslineCommand(binary, stateDir, accountID string) string {
+	quote := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "'\\''") + "'" }
+	return fmt.Sprintf("%s statusline --state-dir %s --account-id %s", quote(binary), quote(stateDir), quote(accountID))
+}
+
+func claudeStatuslineOwned(existing, wanted string) bool {
+	if existing == wanted {
+		return true
+	}
+	signature := func(command string) string {
+		const marker = " statusline --state-dir "
+		i := strings.Index(command, marker)
+		if i < 2 || !singleQuotedWord(command[:i]) {
+			return ""
+		}
+		return command[i:]
+	}
+	owned := signature(existing)
+	return owned != "" && owned == signature(wanted)
+}
+
+func singleQuotedWord(s string) bool {
+	if len(s) < 2 || s[0] != '\'' || s[len(s)-1] != '\'' {
+		return false
+	}
+	body := s[1 : len(s)-1]
+	for i := 0; i < len(body); {
+		if body[i] == '\'' {
+			if !strings.HasPrefix(body[i:], `'\''`) {
+				return false
+			}
+			i += 4
+			continue
+		}
+		if body[i] == ' ' || body[i] == '\t' || body[i] == '\n' {
+			return false
+		}
+		i++
+	}
+	return true
 }
 
 func validPlanLine(v string) bool {

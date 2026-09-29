@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
@@ -24,6 +25,18 @@ type claudeUsageCapability struct {
 	decode  func(json.RawMessage, time.Time) []capacity.Reading
 }
 
+type capacityBinaryStamp struct {
+	path  string
+	size  int64
+	mtime int64
+}
+
+var capacityBinaryCache struct {
+	sync.Mutex
+	digest map[capacityBinaryStamp]string
+	hashes int
+}
+
 func exactCapacityBinary(path, digest string) bool {
 	if len(digest) != 64 {
 		return false
@@ -36,9 +49,31 @@ func exactCapacityBinary(path, digest string) bool {
 		return false
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	stamp := capacityBinaryStamp{path, info.Size(), info.ModTime().UnixNano()}
+	capacityBinaryCache.Lock()
+	cached, ok := capacityBinaryCache.digest[stamp]
+	capacityBinaryCache.Unlock()
+	if ok {
+		return cached == digest
+	}
 	h := sha256.New()
 	n, err := io.Copy(h, io.LimitReader(f, (512<<20)+1))
-	return err == nil && n <= 512<<20 && hex.EncodeToString(h.Sum(nil)) == digest
+	if err != nil || n > 512<<20 {
+		return false
+	}
+	sum := hex.EncodeToString(h.Sum(nil))
+	capacityBinaryCache.Lock()
+	if capacityBinaryCache.digest == nil {
+		capacityBinaryCache.digest = map[capacityBinaryStamp]string{}
+	}
+	capacityBinaryCache.digest[stamp] = sum
+	capacityBinaryCache.hashes++
+	capacityBinaryCache.Unlock()
+	return sum == digest
 }
 func (a *ClaudeAdapter) CanCaptureCapacity(key string) bool {
 	c := a.usage

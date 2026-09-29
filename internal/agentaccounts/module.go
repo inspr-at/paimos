@@ -76,6 +76,9 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		items, err = listAccounts(r.Context(), tx)
+		if err == nil && p.Kind == tenant.Person {
+			err = annotateStatuslineOptIn(r.Context(), tx, p, items)
+		}
 		if p.Kind == tenant.Agent {
 			own := []Account{}
 			for _, a := range items {

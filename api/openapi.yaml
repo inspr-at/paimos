@@ -4371,7 +4371,7 @@ paths:
         '200': {description: Consent, content: {application/json: {schema: {$ref: '#/components/schemas/StatuslineConsent'}}}}
     put:
       operationId: setAccountStatusline
-      description: A person with account.manage explicitly opts in or out. The enrolled daemon applies the change locally, preserving other Claude settings.
+      description: A person may opt in only for a Claude account enrolled on a computer they approved, or a workspace owner or admin may opt in for any Claude account. account.manage alone is not enough. The enrolled daemon applies the change locally and preserves a status line it did not install.
       security: *auth
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StatuslineConsent'}}}}
       responses:
@@ -10266,6 +10266,7 @@ components:
             reading_support: {type: string, enum: [every_5_min, first_run, statusline, none]}
             quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
             statusline_enabled: {type: boolean}
+            statusline_opt_in: {type: string, enum: [own, workspace], description: Present when this person may change the status line. own means they approved the paired computer. workspace means they are a workspace owner or admin and did not. Omitted when they cannot opt in.}
             id: {type: string, format: uuid}
             registered_by_principal_id: {type: string, format: uuid}
             state: {type: string, enum: [available, draining, unavailable]}

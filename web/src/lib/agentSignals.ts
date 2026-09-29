@@ -85,6 +85,16 @@ export function heartbeatEvidence(evidence: StateEvidence, now: number) {
 
 // Registration is not a heartbeat, and loss of reporting is not proof that the
 // worker failed. Keep its severity visible with a distinct word and explanation.
+const RESET_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+function limitUntil(reset: string, now: number) {
+  const at = new Date(reset)
+  if (Number.isNaN(at.getTime())) return ''
+  const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+  const today = new Date(now)
+  if (at.getFullYear() === today.getFullYear() && at.getMonth() === today.getMonth() && at.getDate() === today.getDate()) return ` until ${time}`
+  return ` until ${at.getDate()} ${RESET_MONTHS[at.getMonth()]} ${time}`
+}
+
 export function assessAgentState(evidence: StateEvidence, now: number, preferences = DEFAULT_AGENT_STATE, needs = false): StateAssessment {
   const result = (state: AgentState, reasons: StateReason[] = [], label = STATE_LABEL[state]) => ({ state, label, reasons })
   const problems: StateReason[] = []
@@ -96,7 +106,7 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
   }
   if (evidence.vendor_limited && (!evidence.limit_resets_at || Date.parse(evidence.limit_resets_at) > now)) {
     const window = ({ '5h': '5-hour limit', weekly: 'Weekly limit', monthly: 'Monthly limit' } as Record<string, string>)[evidence.limit_window ?? ''] ?? 'Vendor limit'
-    const until = evidence.limit_resets_at ? ` until ${new Date(evidence.limit_resets_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}` : ''
+    const until = evidence.limit_resets_at ? limitUntil(evidence.limit_resets_at, now) : ''
     return result('throttled', [{ code: 'vendor-limit', detail: `${window}${until}.`, next: 'Check account capacity before starting another run.' }], `Throttled · ${window.toLowerCase()}${until}`)
   }
   if (evidence.phase === 'stopped' || evidence.stopped_at) return result('stopped', [], evidence.stop_reason === LOST_CONTACT ? 'Lost contact' : STATE_LABEL.stopped)

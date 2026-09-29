@@ -241,7 +241,7 @@ func (p *codexProcess) readCapacity(ctx context.Context, phase string) {
 	at := time.Now().UTC()
 	readings := p.capacityParser.CodexSnapshot(raw, at)
 	if hit := capacity.VendorLimit(Codex, raw, readings, at); hit != nil {
-		p.emitVendorLimit(hit)
+		p.emitLimitCapacity(readings, phase, hit)
 		return
 	}
 	p.emitCapacityReadings(readings, phase)
@@ -250,10 +250,42 @@ func (p *codexProcess) emitCapacity(raw []byte, phase string) {
 	at := time.Now().UTC()
 	readings := p.capacityParser.Codex(raw, at)
 	if hit := capacity.VendorLimit(Codex, raw, readings, at); hit != nil {
-		p.emitVendorLimit(hit)
+		p.emitLimitCapacity(readings, phase, hit)
 		return
 	}
 	p.emitCapacityReadings(readings, phase)
+}
+func (p *codexProcess) emitLimitCapacity(readings []capacity.Reading, phase string, hit *capacity.LimitHit) {
+	// An unnamed stop must not replace the percentages the vendor actually sent.
+	p.lastCapacity = append([]capacity.Reading(nil), readings...)
+	if len(hit.Readings) == 0 {
+		p.emitCapacityReadings(readings, phase)
+	} else {
+		hit.Readings = overlayNamedReadings(readings, hit.Readings)
+		for i := range hit.Readings {
+			hit.Readings[i].Phase = phase
+		}
+	}
+	p.emitVendorLimit(hit)
+}
+func overlayNamedReadings(base, named []capacity.Reading) []capacity.Reading {
+	out := append([]capacity.Reading(nil), base...)
+	for _, n := range named {
+		replaced := false
+		for i, r := range out {
+			if r.WindowKind == n.WindowKind && r.Bucket == n.Bucket {
+				out[i] = n
+				replaced = true
+			}
+		}
+		if !replaced {
+			out = append(out, n)
+		}
+	}
+	if len(out) == 0 {
+		return append([]capacity.Reading(nil), named...)
+	}
+	return out
 }
 func (p *codexProcess) emitCapacityReadings(readings []capacity.Reading, phase string) {
 	p.lastCapacity = append([]capacity.Reading(nil), readings...)

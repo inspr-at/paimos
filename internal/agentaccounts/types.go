@@ -20,9 +20,13 @@ import (
 
 // Account is an opaque local enrollment. AccountKey is not a vendor credential.
 type Account struct {
-	ReadingSupport    string     `json:"reading_support"`
-	QuotaFingerprint  string     `json:"quota_fingerprint"`
-	StatuslineEnabled bool       `json:"statusline_enabled"`
+	ReadingSupport    string `json:"reading_support"`
+	QuotaFingerprint  string `json:"quota_fingerprint"`
+	StatuslineEnabled bool   `json:"statusline_enabled"`
+	// StatuslineOptIn is own for the person who approved the paired computer,
+	// workspace for a workspace owner or admin who did not, and empty when
+	// this caller cannot opt the account in. It is not a stored column.
+	StatuslineOptIn   string     `json:"statusline_opt_in,omitempty"`
 	ID                string     `json:"id"`
 	AccountKey        string     `json:"account_key"`
 	Harness           string     `json:"harness"`

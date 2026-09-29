@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { brand } from '../../lib/brand'
-import { setClaudeStatusline } from '../../lib/agents'
+import { claudeStatuslineCopy, setClaudeStatusline } from '../../lib/agents'
 import type { AgentAccount } from '../../lib/agents'
 const props = defineProps<{ account: AgentAccount }>()
 const emit = defineEmits<{ changed: [] }>()
@@ -25,7 +25,7 @@ async function toggle() {
 <template>
   <div class="statusline-setting">
     <button type="button" role="switch" :aria-checked="enabled" :disabled="busy" class="statusline-switch" @click="toggle">
-      <span>Show {{ brand.short_name }} in your Claude status line</span>
+      <span>{{ claudeStatuslineCopy(account.statusline_opt_in, brand.short_name) }}</span>
       <span class="switch-track" :class="{ on: enabled }" aria-hidden="true"><span /></span>
     </button>
     <p v-if="error" role="alert">{{ error }}</p>

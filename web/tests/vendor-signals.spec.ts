@@ -25,6 +25,7 @@ async function setup(page: Page, theme: 'light' | 'dark') {
   })
   const changes: boolean[] = []
   const account = data.accounts.find(a => a.harness === 'claude')!
+  Object.assign(account, { statusline_opt_in: 'own' })
   await page.route('**/api/agent-accounts/*/statusline', async route => {
     expect(route.request().method()).toBe('PUT')
     const { enabled } = route.request().postDataJSON()
