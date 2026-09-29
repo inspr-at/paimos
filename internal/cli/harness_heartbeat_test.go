@@ -86,7 +86,7 @@ func heartbeatRuntime(t *testing.T, srv *httptest.Server) (*runtime, *bytes.Buff
 
 func claudeUsagePath(t *testing.T, dir, name string) string {
 	t.Helper()
-	path := filepath.Join(dir, "projects", name)
+	path := filepath.Join(dir, "projects", "-work-slug", name)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}

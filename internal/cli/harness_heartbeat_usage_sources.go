@@ -141,36 +141,15 @@ func usageID(id string) bool {
 	return true
 }
 
-// allowedUsagePath is the only gate that may name a file opened for usage.
-// Each harness accepts one vendor log shape. Credential, cookie and keychain
-// names are rejected in every path component, including directories.
+// allowedUsagePath reports whether path is this source's vendor usage log.
+// It is the resolveHarnessPath allowlist, judged on the absolute path.
 func allowedUsagePath(source, path string) bool {
-	cleaned := filepath.Clean(path)
-	if cleaned == "." || unsafeHeartbeatPath(cleaned) {
+	kind, ok := harnessKindForSource(source)
+	if !ok {
 		return false
 	}
-	parts := usagePathParts(cleaned)
-	if len(parts) == 0 {
-		return false
-	}
-	for _, part := range parts {
-		if part == ".." || credentialUsageName(part) {
-			return false
-		}
-	}
-	base := parts[len(parts)-1]
-	switch source {
-	case "claude":
-		return strings.HasSuffix(base, ".jsonl") && usagePathHasDir(parts, "projects")
-	case "codex":
-		return strings.HasPrefix(base, "rollout-") && strings.HasSuffix(base, ".jsonl") && usagePathHasDir(parts, "sessions")
-	case "grok":
-		return base == "usage.json" && usagePathHasDir(parts, "sessions")
-	case "cursor":
-		return base == "cursor.jsonl"
-	default:
-		return false
-	}
+	_, ok = resolveHarnessPath(kind, path)
+	return ok
 }
 
 func usagePathParts(path string) []string {
@@ -184,21 +163,12 @@ func usagePathParts(path string) []string {
 	return parts
 }
 
-func usagePathHasDir(parts []string, name string) bool {
-	for _, part := range parts[:len(parts)-1] {
-		if part == name {
-			return true
-		}
-	}
-	return false
-}
-
 func credentialUsageName(name string) bool {
 	base := strings.ToLower(name)
 	switch base {
 	case "auth.json", "cli-config.json", "cookies", "cookies.db", "cookies.binarycookies",
 		"keychain", "keychains", "login.keychain", "login.keychain-db",
-		"credentials", "credentials.json", "secrets", ".ssh":
+		"credentials", "credentials.json", "secrets", ".ssh", ".gnupg", ".aws", ".netrc", ".docker", ".password-store":
 		return true
 	}
 	if strings.HasPrefix(base, ".credentials") || strings.HasPrefix(base, ".env") || strings.HasPrefix(base, "id_") {
@@ -211,11 +181,12 @@ func credentialUsageName(name string) bool {
 }
 
 func regularUsageFile(source, path string) bool {
-	if !allowedUsagePath(source, path) {
+	kind, ok := harnessKindForSource(source)
+	if !ok {
 		return false
 	}
-	info, err := os.Lstat(path)
-	return err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0
+	_, err := statHarnessFile(kind, path)
+	return err == nil
 }
 
 func findCodexRollout(home, thread string) string {
@@ -321,17 +292,17 @@ func pathInsideRoot(root, target string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func noteHarnessLine(source string, line []byte, fallback string, sums map[string]usageSum, poisoned, seen map[string]bool, ring *[]string, codexModel *string) error {
+func noteHarnessLine(source string, line []byte, fallback string, sums map[string]usageSum, poisoned, seen map[string]bool, ring *[]string, codex *heartbeatCodexCursor) error {
 	if source == "codex" {
+		if codex == nil {
+			codex = &heartbeatCodexCursor{}
+		}
 		if model, ok := sessionusage.CodexContextModel(line); ok {
-			if codexModel != nil {
-				*codexModel = model
-			}
+			codex.Model = model
 			return nil
 		}
-		if codexModel != nil && *codexModel != "" {
-			fallback = *codexModel
-		}
+		noteCodexTotals(line, fallback, sums, poisoned, codex)
+		return nil
 	}
 	parsed, ok, err := sessionusage.ParseHeartbeatLine(source, fallback, line)
 	if err != nil {
@@ -355,6 +326,55 @@ func noteHarnessLine(source string, line []byte, fallback string, sums map[strin
 		sums[parsed.Model] = usageSum{input: parsed.Input, output: parsed.Output, cached: parsed.Cached, reasoning: parsed.Reasoning, reasoningKnown: parsed.ReasoningKnown, absolute: true}
 		return nil
 	}
+	addUsageDelta(sums, poisoned, parsed)
+	return nil
+}
+
+// noteCodexTotals turns one session-wide cumulative Codex record into a delta
+// for the model in context. The baseline always moves to the new totals, so
+// tokens that cannot be attributed to a model are dropped, never re-counted
+// under the next model. A record below the baseline is stale and ignored.
+func noteCodexTotals(line []byte, fallback string, sums map[string]usageSum, poisoned map[string]bool, codex *heartbeatCodexCursor) {
+	snap, ok := sessionusage.CodexTotals(line)
+	if !ok {
+		return
+	}
+	if snap.Input < codex.Input || snap.Output < codex.Output || snap.Cached < codex.Cached {
+		return
+	}
+	delta := sessionusage.HeartbeatLine{
+		Input: snap.Input - codex.Input, Output: snap.Output - codex.Output, Cached: snap.Cached - codex.Cached,
+		ReasoningKnown: snap.ReasoningKnown,
+	}
+	// Codex can revise reasoning down while input grows; the attributed
+	// reasoning baseline never moves backwards.
+	if snap.ReasoningKnown && snap.Reasoning > codex.Reasoning {
+		delta.Reasoning = snap.Reasoning - codex.Reasoning
+		codex.Reasoning = snap.Reasoning
+	}
+	codex.Input, codex.Output, codex.Cached = snap.Input, snap.Output, snap.Cached
+	if delta.Cached > delta.Input {
+		delta.Cached = delta.Input
+	}
+	model := snap.Model
+	if model == "" {
+		model = codex.Model
+	}
+	if model == "" {
+		model = fallback
+	}
+	if model == "" || !heartbeatModelRE.MatchString(model) || poisoned[model] {
+		return
+	}
+	if delta.Input == 0 && delta.Output == 0 && delta.Cached == 0 && (!delta.ReasoningKnown || delta.Reasoning == 0) {
+		return
+	}
+	delta.Model = model
+	addUsageDelta(sums, poisoned, delta)
+}
+
+func addUsageDelta(sums map[string]usageSum, poisoned map[string]bool, parsed sessionusage.HeartbeatLine) {
+	cur := sums[parsed.Model]
 	nextIn, ok1 := addTokens(cur.input, parsed.Input)
 	nextOut, ok2 := addTokens(cur.output, parsed.Output)
 	nextCached, ok3 := addTokens(cur.cached, parsed.Cached)
@@ -362,10 +382,9 @@ func noteHarnessLine(source string, line []byte, fallback string, sums map[strin
 	if !ok1 || !ok2 || !ok3 || !ok4 {
 		poisoned[parsed.Model] = true
 		delete(sums, parsed.Model)
-		return nil
+		return
 	}
 	sums[parsed.Model] = usageSum{input: nextIn, output: nextOut, cached: nextCached, reasoning: nextReasoning, reasoningKnown: reasoningKnown}
-	return nil
 }
 
 func addUsageReasoning(cur usageSum, parsed sessionusage.HeartbeatLine) (int64, bool, bool) {
@@ -445,7 +464,7 @@ func readGrokUsage(path, fallback string) ([]sessionusage.HeartbeatLine, error) 
 	if !allowedUsagePath("grok", path) {
 		return nil, usagef("usage file is not a session log")
 	}
-	f, err := openNoFollow(path)
+	f, err := openHarnessFile(harnessGrokUsage, path)
 	if err != nil {
 		return nil, err
 	}
@@ -485,7 +504,7 @@ func usageCaughtUp(o heartbeatOptions, session *heartbeatSession) bool {
 	if target.Snapshot {
 		return snapshotCaughtUp(target.Path, heartbeatText(o.Model, 128), session)
 	}
-	return heartbeatTranscriptCaughtUp(target.Path, session.disk.UsageOffset)
+	return heartbeatTranscriptCaughtUp(target.Source, target.Path, session.disk.UsageOffset)
 }
 
 func usageOutstanding(o heartbeatOptions, session *heartbeatSession) bool {
@@ -496,5 +515,5 @@ func usageOutstanding(o heartbeatOptions, session *heartbeatSession) bool {
 	if target.Snapshot {
 		return !snapshotCaughtUp(target.Path, heartbeatText(o.Model, 128), session)
 	}
-	return heartbeatTranscriptOutstanding(target.Path, session.disk.UsageOffset, session.disk.UsageDiscard)
+	return heartbeatTranscriptOutstanding(target.Source, target.Path, session.disk.UsageOffset, session.disk.UsageDiscard)
 }

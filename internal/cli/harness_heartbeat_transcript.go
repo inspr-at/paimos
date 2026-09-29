@@ -44,7 +44,11 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 	if source == "" {
 		source = "claude"
 	}
-	sums, next, recent, discarding, err := scanUsageWindowSource(ctx, target.Path, heartbeatText(o.Model, 128), session.disk.UsageOffset, heartbeatUsageWindow, session.disk.UsageRecent, session.disk.UsageDiscard, source)
+	codexStart := session.disk.UsageCodex
+	if source == "codex" && codexStart == nil && session.disk.UsageOffset > 0 {
+		codexStart = legacyCodexCursor(session.disk.Usage)
+	}
+	sums, next, recent, discarding, codex, err := scanUsageWindowState(ctx, target.Path, heartbeatText(o.Model, 128), session.disk.UsageOffset, heartbeatUsageWindow, session.disk.UsageRecent, session.disk.UsageDiscard, source, codexStart)
 	if err != nil {
 		return err
 	}
@@ -100,7 +104,7 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 			Model: model, Sequence: seq, Input: input, Output: output, Cached: cached,
 			Reasoning: reasoningPointer(reasoning, reasoningKnown),
 			ReportID:  usageReportID(session.id, model, seq, input, output, cached, reasoningPointer(reasoning, reasoningKnown)),
-			Offset:    next, Recent: recent, Discard: discarding,
+			Offset:    next, Recent: recent, Discard: discarding, Codex: codex,
 			BillingMode: mode, SubscriptionLabel: label,
 		})
 	}
@@ -108,6 +112,7 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 		session.disk.UsageOffset = next
 		session.disk.UsageRecent = trimRecent(recent)
 		session.disk.UsageDiscard = discarding
+		session.disk.UsageCodex = codex
 		return nil
 	}
 	session.disk.PendingUsage = append(session.disk.PendingUsage, created...)
@@ -116,6 +121,22 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 		return err
 	}
 	return rt.replayPendingUsage(ctx, projectID, session)
+}
+
+// legacyCodexCursor rebuilds the Codex baseline for state written before the
+// cursor existed. Each stored figure was a session-wide cumulative total, so
+// the largest one is what has already been reported.
+func legacyCodexCursor(items []heartbeatUsageDisk) *heartbeatCodexCursor {
+	cur := &heartbeatCodexCursor{}
+	for _, item := range items {
+		cur.Input = max(cur.Input, item.Input)
+		cur.Output = max(cur.Output, item.Output)
+		cur.Cached = max(cur.Cached, item.Cached)
+		if item.Reasoning != nil {
+			cur.Reasoning = max(cur.Reasoning, *item.Reasoning)
+		}
+	}
+	return cur
 }
 
 type usageAck struct {
@@ -241,6 +262,9 @@ func commitUsage(session *heartbeatSession, pending heartbeatPendingUsage, ack u
 	if len(session.disk.PendingUsage) > 0 {
 		session.disk.PendingUsage = session.disk.PendingUsage[1:]
 	}
+	if pending.Codex != nil && pending.Offset >= session.disk.UsageOffset {
+		session.disk.UsageCodex = pending.Codex
+	}
 	if pending.Offset > session.disk.UsageOffset || (pending.Offset == session.disk.UsageOffset && pending.Discard != session.disk.UsageDiscard) {
 		session.disk.UsageOffset = pending.Offset
 		session.disk.UsageDiscard = pending.Discard
@@ -255,10 +279,10 @@ func codexSessionLabel(path, sessionID string) (string, bool) {
 }
 
 func readCodexSessionLabel(ctx context.Context, path, sessionID string) (string, bool) {
-	if ctx.Err() != nil || path == "" || !validUUID(sessionID) || unsafeHeartbeatPath(path) {
+	if ctx.Err() != nil || path == "" || !validUUID(sessionID) {
 		return "", false
 	}
-	f, err := openNoFollow(path)
+	f, err := openHarnessFile(harnessCodexIndex, path)
 	if err != nil {
 		return "", false
 	}
@@ -306,10 +330,10 @@ func readClaudeSessionLabel(ctx context.Context, o heartbeatOptions, sessionID s
 }
 
 func claudeTitleFile(ctx context.Context, path string) (string, bool) {
-	if ctx.Err() != nil || path == "" || unsafeHeartbeatPath(path) {
+	if ctx.Err() != nil || path == "" {
 		return "", false
 	}
-	f, err := openNoFollow(path)
+	f, err := openHarnessFile(harnessClaudeTranscript, path)
 	if err != nil {
 		return "", false
 	}
@@ -421,8 +445,7 @@ func findClaudeTranscript(root, sessionID string) string {
 			continue
 		}
 		candidate := filepath.Join(root, entry.Name(), name)
-		st, err := os.Lstat(candidate)
-		if err != nil || !st.Mode().IsRegular() || st.Mode()&os.ModeSymlink != 0 {
+		if _, err := statHarnessFile(harnessClaudeTranscript, candidate); err != nil {
 			continue
 		}
 		return candidate
@@ -451,17 +474,41 @@ func scanUsageWindow(ctx context.Context, path, fallback string, offset, maxByte
 	return scanUsageWindowSource(ctx, path, fallback, offset, maxBytes, recent, discarding, "claude")
 }
 
+// scanUsageWindowSource scans one window with a fresh Codex cursor. It is the
+// single-window form; the heartbeat uses scanUsageWindowState so the Codex
+// model and baseline carry over between beats.
 func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool, source string) (map[string]usageSum, int64, []string, bool, error) {
+	sums, next, ring, disc, _, err := scanUsageWindowState(ctx, path, fallback, offset, maxBytes, recent, discarding, source, nil)
+	return sums, next, ring, disc, err
+}
+
+// scanUsageWindowState scans one window and returns the Codex cursor that
+// belongs to the returned offset. On error the input cursor is returned.
+func scanUsageWindowState(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool, source string, codex *heartbeatCodexCursor) (map[string]usageSum, int64, []string, bool, *heartbeatCodexCursor, error) {
+	cur := &heartbeatCodexCursor{}
+	if codex != nil {
+		copied := *codex
+		cur = &copied
+	}
+	sums, next, ring, disc, err := scanUsageLines(ctx, path, fallback, offset, maxBytes, recent, discarding, source, cur)
+	if err != nil || source != "codex" {
+		return sums, next, ring, disc, codex, err
+	}
+	return sums, next, ring, disc, cur, nil
+}
+
+func scanUsageLines(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool, source string, codex *heartbeatCodexCursor) (map[string]usageSum, int64, []string, bool, error) {
 	if ctx.Err() != nil {
 		return nil, offset, recent, discarding, ctx.Err()
 	}
 	if path == "" || maxBytes <= 0 {
 		return nil, offset, recent, discarding, nil
 	}
-	if unsafeHeartbeatPath(path) || !allowedUsagePath(source, path) {
+	kind, ok := harnessKindForSource(source)
+	if !ok || !allowedUsagePath(source, path) {
 		return nil, offset, recent, discarding, usagef("usage file is not a session log")
 	}
-	f, err := openNoFollow(path)
+	f, err := openHarnessFile(kind, path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, offset, recent, discarding, nil
@@ -492,7 +539,6 @@ func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, m
 	poisoned := map[string]bool{}
 	seen := map[string]bool{}
 	ring := append([]string{}, recent...)
-	var codexModel string
 	for _, id := range ring {
 		seen[id] = true
 	}
@@ -561,7 +607,7 @@ func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, m
 			if source == "" || source == "claude" {
 				lineErr = noteUsageLine(line, fallback, sums, poisoned, seen, &ring)
 			} else {
-				lineErr = noteHarnessLine(source, line, fallback, sums, poisoned, seen, &ring, &codexModel)
+				lineErr = noteHarnessLine(source, line, fallback, sums, poisoned, seen, &ring, codex)
 			}
 			if lineErr != nil {
 				return nil, offset, recent, discarding, lineErr

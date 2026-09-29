@@ -458,12 +458,13 @@ func heartbeatUsageDue(o heartbeatOptions) bool {
 	return err != nil || target.Path != ""
 }
 
-func heartbeatTranscriptCaughtUp(path string, offset int64) bool {
-	if path == "" || unsafeHeartbeatPath(path) {
+func heartbeatTranscriptCaughtUp(source, path string, offset int64) bool {
+	kind, ok := harnessKindForSource(source)
+	if path == "" || !ok {
 		return true
 	}
-	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+	info, err := statHarnessFile(kind, path)
+	if err != nil {
 		return true
 	}
 	return offset >= info.Size()
@@ -472,16 +473,17 @@ func heartbeatTranscriptCaughtUp(path string, offset int64) bool {
 // heartbeatTranscriptOutstanding reports bytes a later scan can still turn
 // into usage: a partial record past the cursor, or an interrupted discard
 // still waiting for its newline.
-func heartbeatTranscriptOutstanding(path string, offset int64, discarding bool) bool {
-	if !heartbeatTranscriptCaughtUp(path, offset) {
+func heartbeatTranscriptOutstanding(source, path string, offset int64, discarding bool) bool {
+	if !heartbeatTranscriptCaughtUp(source, path, offset) {
 		return true
 	}
-	if !discarding || path == "" || unsafeHeartbeatPath(path) {
+	kind, ok := harnessKindForSource(source)
+	if !discarding || path == "" || !ok {
 		return false
 	}
-	info, err := os.Lstat(path)
+	info, err := statHarnessFile(kind, path)
 	// A cursor past EOF means the transcript shrank.
-	return err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 && offset <= info.Size()
+	return err == nil && offset <= info.Size()
 }
 
 // finishStop closes the generation on a budget that the usage flush does not share.
@@ -1146,7 +1148,7 @@ func agentStatusNote(worktree string) string {
 		return ""
 	}
 	path := filepath.Join(worktree, ".agent-status.json")
-	f, err := openNoFollow(path)
+	f, err := openHarnessFile(harnessAgentStatus, path)
 	if err != nil {
 		return ""
 	}
