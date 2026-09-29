@@ -26,10 +26,10 @@ import { quickRemoval, sessionMenu, type SessionMenu } from './sessionActions'
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
 const props = defineProps<{
-  history?: SessionView[]; historyState?: 'idle' | 'loading' | 'ready' | 'error'; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
+  history?: SessionView[]; historyState?: 'idle' | 'loading' | 'ready' | 'error'; historyMore?: boolean; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
   loaded: boolean; controls: Record<string, SessionControl>; canControl: boolean; canStart: boolean
 }>()
-const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: [] }>()
+const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: [] }>()
 const showStopped = ref(false)
 // History is a separate, opt-in list of every ended or removed session. The
 // main list keeps only sessions that ended in the last 24 hours (AEON-291).
@@ -289,6 +289,9 @@ function rowClick(event: MouseEvent, id: string) {
         </div>
       </template>
     </div>
+    <div v-if="showRemoved && loaded && state === 'ready' && (historyMore || (historyState === 'loading' && removedCount))" class="older">
+      <button type="button" class="btn sm ghost quiet-btn" :disabled="historyState === 'loading'" @click="emit('older')">{{ historyState === 'loading' ? 'Loading…' : 'Show older' }}</button>
+    </div>
     <FloatingPanel v-if="menu && menuItems" :anchor="menu.anchor" align="end" :width="248" :label="`Actions for ${menu.view.name}`" @close="menu = null">
       <div role="menu" :aria-label="`Actions for ${menu.view.name}`">
         <template v-if="menuItems.control.length">
@@ -427,6 +430,8 @@ function rowClick(event: MouseEvent, id: string) {
 .menu-item[aria-disabled="true"] { color: var(--ink-3); cursor: not-allowed; }
 .mi-text { display: grid; gap: 2px; min-width: 0; }
 .mi-text small { font-size: 11.5px; color: var(--ink-3); line-height: 1.35; }
+.older { display: flex; justify-content: center; padding: 0 0 12px; }
+@media (max-width: 720px) { .older .btn { min-height: 44px; } }
 .state { display: grid; justify-items: center; gap: 8px; padding: 48px 24px 56px; text-align: center; color: var(--ink-2); border-top: 1px solid var(--line); }
 .state > svg { color: var(--teal); margin-bottom: 4px; }
 .state h3 { color: var(--ink); font-size: 16px; }

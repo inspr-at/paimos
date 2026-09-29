@@ -12,7 +12,7 @@ const minutes = (n: number) => new Date(Date.now() - n * 60_000).toISOString()
 const shots = process.env.DEAD_SESSIONS_SCREENSHOT_DIR
 const row = (page: Page, id: string) => page.locator(`[data-row="s:${id}"]`)
 
-async function setup(page: Page) {
+async function setup(page: Page, options: { undoable?: boolean } = {}) {
   await mockWork(page, fixtures(), { admin: true })
   const data = agentData(world)
   await mockAgents(page, data)
@@ -40,6 +40,11 @@ async function setup(page: Page) {
     touch()
     const cutoff = Date.now() - 24 * 3_600_000
     const ended = (s: Record<string, unknown>) => Math.max(Date.parse(String(s.stopped_at ?? '')) || 0, Date.parse(String(s.archived_at ?? '')) || 0)
+    // History pages: the day-old session sits on the second page.
+    if (q.get('view') === 'all') {
+      if (q.get('cursor') === 'older') return route.fulfill({ json: { items: [old], next_cursor: null } })
+      return route.fulfill({ json: { items: data.sessions.filter(s => s !== old), next_cursor: 'older' } })
+    }
     const items = data.sessions.filter(s => q.get('view') !== 'current' || !(ended(s) && ended(s) < cutoff))
     return route.fulfill({ json: { items, next_cursor: null } })
   })
@@ -53,7 +58,7 @@ async function setup(page: Page) {
     Object.assign(s, { archived_at: new Date().toISOString(), recovery_process_state: 'unknown', phase: 'stopped', stopped_at: s.stopped_at ?? new Date().toISOString(), stop_reason: s.stop_reason ?? 'removed_process_unknown', revision: Number(s.revision) + 1 })
     const eventId = ++event
     restore.set(eventId, () => Object.assign(s, { ...before, archived_at: null, recovery_process_state: null, revision: Number(s.revision) + 1 }))
-    await route.fulfill({ json: { session: s, message: 'Record removed; process not stopped by removal.', processes_signalled: false, process_state: 'unknown', event_id: eventId } })
+    await route.fulfill({ json: { session: s, message: 'Record removed; process not stopped by removal.', processes_signalled: false, process_state: 'unknown', event_id: eventId, undoable: options.undoable ?? true } })
   })
   await page.route('**/api/events/*/undo', async route => {
     const id = Number(/events\/(\d+)\/undo/.exec(route.request().url())![1])
@@ -92,6 +97,16 @@ test('Lost contact is an ended row with a bin; one click removes, Undo brings it
   await expect(row(page, lost.id)).toContainText('Lost contact')
   expect(undone).toHaveLength(1)
   expect(errors).toEqual([])
+})
+
+test('Undo is offered only when the server says this person may undo', async ({ page }) => {
+  const { lost, undone } = await setup(page, { undoable: false })
+  await page.goto('/agents')
+  await page.getByRole('button', { name: /^Stopped/ }).click()
+  await row(page, lost.id).getByRole('button', { name: 'Remove cursor-275' }).click()
+  await expect(page.getByText('Removed cursor-275', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveCount(0)
+  expect(undone).toEqual([])
 })
 
 test('No heartbeat rows carry a bin; live rows keep the confirm', async ({ page }) => {
@@ -161,9 +176,14 @@ test('sessions that ended over a day ago leave the list and stay in History', as
   expect(views.every(v => v === 'current')).toBe(true)
   await page.getByRole('button', { name: 'Show history: every ended or removed session' }).click()
   await expect(page.getByRole('heading', { name: 'History' })).toBeVisible()
-  await expect(row(page, old.id)).toBeVisible()
+  await expect(row(page, lost.id)).toBeVisible()
   expect(views).toContain('all')
-  // A link straight to it finds it in History too.
+  // History reads one page at a time; Show older continues until the cursor ends.
+  await expect(row(page, old.id)).toHaveCount(0)
+  await page.getByRole('button', { name: 'Show older' }).click()
+  await expect(row(page, old.id)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Show older' })).toHaveCount(0)
+  // A link straight to it finds it in History too, following the pages.
   await page.goto(`/agents/${old.id}`)
   await expect(page.getByRole('complementary', { name: 'Session details' })).toContainText('old-run')
 })
@@ -214,6 +234,11 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.keyboard.press('Escape')
     await row(page, lost.id).getByRole('button', { name: 'Remove cursor-275' }).click()
     await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeVisible()
+    if (width === 390) for (const name of ['Undo', 'Dismiss']) {
+      const box = (await page.locator('.toast').getByRole('button', { name, exact: true }).boundingBox())!
+      expect(box.height).toBeGreaterThanOrEqual(44)
+      expect(box.width).toBeGreaterThanOrEqual(name === 'Dismiss' ? 44 : 40)
+    }
     if (shots) await page.screenshot({ path: `${shots}/undo-${width}-${theme}.png` })
     await page.getByRole('button', { name: 'Show history: every ended or removed session' }).click()
     await expect(page.getByRole('heading', { name: 'History' })).toBeVisible()

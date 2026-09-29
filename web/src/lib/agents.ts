@@ -18,7 +18,7 @@ export interface HarnessSession {
   watch?: import("./attachWatch").AttachStatus
   id: string; project_id: string; agent_principal_id: string
   archived_at?: string | null; recovery_process_state?: 'unknown' | null
-  process_ownership?: ProcessOwnership | null; process_observed_at?: string | null
+  process_ownership?: ProcessOwnership; process_observed_at?: string
   display_label?: string | null
   model?: string | null; reasoning_effort?: string | null; account_label?: string | null; harness_version?: string | null
   brief?: string | null; worktree?: string | null; branch?: string | null; commits?: { sha: string; subject: string }[]
@@ -122,7 +122,7 @@ export const listAllSessions = (params: { ticket?: string; agent?: string; proje
 export const getLiveAgents = () => request<LivePage>('/harness-sessions/live?include_inactive=true')
 export const listRuns = (params: { session?: string; agent?: string; work_order?: string; cursor?: string; limit?: number } = {}) =>
   request<Paged<AgentRun>>(`/runs${query({ limit: 50, ...params })}`)
-export interface RemoveSessionResult { session: HarnessSession; message: string; processes_signalled: false; process_state: 'unknown'; event_id?: number }
+export interface RemoveSessionResult { session: HarnessSession; message: string; processes_signalled: false; process_state: 'unknown'; event_id?: number; undoable?: boolean }
 export const removeSession = (session: HarnessSession, reason: string) => request<RemoveSessionResult>(`${sessionPath(session.project_id, session.id)}/remove`, 'POST', { reason })
 // Undo of a removal restores the record exactly as it was (POST /events/{id}/undo).
 export const undoRemoval = (eventId: number) => request<{ after: HarnessSession }>(`/events/${enc(String(eventId))}/undo`, 'POST').then(event => event.after)

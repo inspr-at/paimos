@@ -41,7 +41,8 @@ export function useSessionRemoval() {
       const result = await removeSession(session, 'Removed from Agents by a person')
       agents.recordRemoval(result.session)
       await leaveIfSelected(session.id)
-      const event = result.event_id
+      // Undo only where the server says this person may undo the event (events.undo).
+      const event = result.undoable === true ? result.event_id : undefined
       toast(`Removed ${label}`, event ? { timeout: 8000, action: { label: 'Undo', run: () => void undo(event, label) } } : {})
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Removal failed. Please retry.', { tone: 'error' })

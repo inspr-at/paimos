@@ -219,27 +219,37 @@ export const useAgents = defineStore('agents', () => {
   // hours. Every ended or removed generation is read on demand, newest first.
   const historySessions = ref<HarnessSession[]>([])
   const historyState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  // The next page's cursor: History reads one page at a time and "Show older"
+  // continues until the server has no more.
+  const historyCursor = ref<string | null>(null)
   let historyFlight: Promise<void> | undefined
   function loadHistory(force = false) {
     if (historyFlight) return historyFlight
     if (historyState.value === 'ready' && !force) return Promise.resolve()
+    return readHistory(undefined)
+  }
+  function loadOlderHistory() {
+    if (historyFlight) return historyFlight
+    if (!historyCursor.value) return Promise.resolve()
+    return readHistory(historyCursor.value)
+  }
+  function readHistory(cursor: string | undefined) {
     historyState.value = 'loading'
     historyFlight = (async () => {
       try {
-        const out: HarnessSession[] = []
-        let cursor: string | undefined
-        for (let page = 0; page < 10; page++) {
-          const result = await listAllSessions({ cursor, view: 'all' })
-          out.push(...result.items.filter(item => item.stopped_at || item.archived_at))
-          cursor = result.next_cursor ?? undefined
-          if (!cursor) break
-        }
-        historySessions.value = out
+        const result = await listAllSessions({ cursor, view: 'all' })
+        const page = result.items.filter(item => item.stopped_at || item.archived_at)
+        if (cursor) {
+          const seen = new Set(historySessions.value.map(item => item.id))
+          historySessions.value = [...historySessions.value, ...page.filter(item => !seen.has(item.id))]
+        } else historySessions.value = page
+        historyCursor.value = result.next_cursor ?? null
         historyState.value = 'ready'
       } catch { historyState.value = 'error' } finally { historyFlight = undefined }
     })()
     return historyFlight
   }
+  const historyMore = computed(() => !!historyCursor.value)
   const historyViews = computed(() => {
     const byId = new Map(historySessions.value.map(item => [item.id, item]))
     for (const item of sessions.value) if (item.stopped_at || item.archived_at || byId.has(item.id)) byId.set(item.id, item)
@@ -334,7 +344,7 @@ export const useAgents = defineStore('agents', () => {
 
   return {
     now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, eventPulseFor,
-    loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, loadHistory, recordRemoval, grouped,
+    loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordRemoval, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshSessions, refreshThread, refreshAgentRuns, tick,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount,
     invalidatePolls: () => { sessionsRead.invalidate(); approvalsRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate() },
