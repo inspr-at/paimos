@@ -215,7 +215,7 @@ export interface BulkChange {
   ids: string[]; state?: string; priority?: string | null; assignee?: string | null
   tags_add?: (string | { name: string; color?: string })[]; tags_remove?: string[]; parent_id?: string
 }
-export interface BulkResult { event_id: number | null; items: WorkNode[]; unchanged: string[]; skipped: { id: string; key?: string; reason: string }[] }
+export interface BulkResult { event_id: number | null; items: WorkNode[]; unchanged: string[]; skipped: { id: string; key?: string; reason: string; code?: string }[] }
 export const bulkChange = (body: BulkChange) => json<BulkResult>('/nodes/bulk', 'POST', body)
 export const undoEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 export const getProjects = (includeArchived = false) => json<{ items: ProjectSummary[] }>(`/projects${includeArchived ? '?include_archived=true' : ''}`)

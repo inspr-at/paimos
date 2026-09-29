@@ -3,7 +3,9 @@
 import { setPageTitle } from '../lib/brand'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
-import { APIError, createNode, listNodes, type ListItem, type SavedView } from '../lib/api'
+import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
+import { askDoneGate } from '../lib/doneGateAsk'
+import { benefitGateError, benefitSkip, completionFields, needsBenefitPrompt } from '../lib/doneGate'
 import { can } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
@@ -635,8 +637,14 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
   try {
     const kind = (await kinds()).find(candidate => candidate.slug === draft.kind)
     if (!kind) throw new Error('this workspace has no such type')
+    let fields: Record<string, unknown> = draft.priority ? { priority: draft.priority } : {}
+    if (needsBenefitPrompt({ kind_slug: draft.kind, state: 'new', fields }, draft.state)) {
+      const text = await askDoneGate({ key: 'New ticket', title: draft.title, state: draft.state, fields })
+      if (!text) return false
+      fields = completionFields(fields, text)
+    }
     const node = await createNode({
-      kind_id: kind.id, title: draft.title, state: draft.state, fields: draft.priority ? { priority: draft.priority } : {},
+      kind_id: kind.id, title: draft.title, state: draft.state, fields,
       parent_id: draft.epic?.id ?? current.id, key_prefix: keyPrefix(current.routeKey),
     })
     const parent = draft.epic ? { ...draft.epic, kind_slug: 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
@@ -648,6 +656,10 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
     void projects.load(true)
     return true
   } catch (e) {
+    if (benefitGateError(e)) {
+      toast('The ticket was not created. Add a 2–4 word pill and a benefit in both languages.', { tone: 'error' })
+      return false
+    }
     toast(`The ticket was not created: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
     return false
   }
@@ -951,31 +963,49 @@ const bulkLabels = computed<LabelChoice[]>(() => {
   for (const choice of byName.values()) choice.on = selectedRows.value.filter(row => rowTags(row).some(tag => tag.name.toLowerCase() === choice.name.toLowerCase())).length
   return [...byName.values()].sort((a, b) => b.on - a.on || a.name.localeCompare(b.name))
 })
-async function runBulk(change: Omit<import('../lib/api').BulkChange, 'ids'>, done: (count: number) => string) {
-  const ids = [...selected.value]
+async function runBulk(change: Omit<BulkChange, 'ids'>, done: (count: number) => string, ids = [...selected.value]) {
   if (!ids.length || bulkBusy.value) return
   bulkMenu.value = null
   bulkBusy.value = true
   try {
     const result = await list.applyBulk({ ids, ...change })
+    const reported = result.skipped.filter(item => !benefitSkip(item))
+    const held = result.skipped.filter(item => benefitSkip(item))
     const changed = result.items.length
-    const skipped = result.skipped.length
+    const skipped = reported.length
     const eventId = result.event_id
     if (changed) {
       toast(`${done(changed)}${skipped ? ` · ${plural(skipped, 'ticket')} skipped` : ''}`, {
         timeout: 8000, action: eventId ? { label: 'Undo', run: () => void undoBulk(eventId) } : undefined,
       })
-    } else if (!skipped) toast(`Nothing to change: ${plural(result.unchanged.length, 'ticket is', 'tickets are')} already so`)
+    } else if (!skipped && !held.length) toast(`Nothing to change: ${plural(result.unchanged.length, 'ticket is', 'tickets are')} already so`)
     if (skipped) {
-      const first = result.skipped[0]
+      const first = reported[0]
       toast(`${first.key ?? 'A ticket'} was skipped: ${first.reason}${skipped > 1 ? ` (and ${skipped - 1} more)` : ''}`, { tone: 'error' })
     }
     if (changed) { void list.load(); void projects.load(true); for (const node of result.items) outline.refreshStatsFor(node.id) }
+    if (change.state && held.length) await offerBenefitSkips(held, change.state)
   } catch (e) {
     toast(`Nothing was changed: ${problem(e)}`, { tone: 'error' })
   } finally {
     bulkBusy.value = false
     table.value?.focusGrid()
+  }
+}
+async function offerBenefitSkips(held: BulkResult['skipped'], state: string) {
+  for (let index = 0; index < held.length; index++) {
+    const row = list.rows.value.find(item => item.id === held[index].id)
+    if (!row) continue
+    if (!needsBenefitPrompt(row, state)) {
+      if (await list.setStatus(row, state)) { void projects.load(true); outline.refreshStatsFor(row.id) }
+      continue
+    }
+    const text = await askDoneGate({ key: row.key, title: row.title, state, fields: row.fields ?? {} }, { index: index + 1, total: held.length })
+    if (!text) continue
+    if (await list.setStatus(row, state, { fields: completionFields(row.fields, text) })) {
+      void projects.load(true)
+      outline.refreshStatsFor(row.id)
+    }
   }
 }
 async function undoBulk(eventId: number) {
@@ -988,7 +1018,27 @@ async function undoBulk(eventId: number) {
   }
 }
 const count = (n: number) => plural(n, 'ticket')
-function bulkStatus(state: string) { void runBulk({ state }, n => `${count(n)} ${n === 1 ? 'is' : 'are'} now ${statusMeta(state).label}`) }
+async function bulkStatus(state: string) {
+  if (bulkBusy.value) return
+  bulkMenu.value = null
+  const gated = selectedRows.value.filter(row => needsBenefitPrompt(row, state))
+  const gatedIds = new Set(gated.map(row => row.id))
+  const ready = [...selected.value].filter(id => !gatedIds.has(id))
+  if (ready.length) await runBulk({ state }, n => `${count(n)} ${n === 1 ? 'is' : 'are'} now ${statusMeta(state).label}`, ready)
+  for (let index = 0; index < gated.length; index++) {
+    const row = list.rows.value.find(item => item.id === gated[index].id) ?? gated[index]
+    if (!needsBenefitPrompt(row, state)) {
+      if (await list.setStatus(row, state)) { void projects.load(true); outline.refreshStatsFor(row.id) }
+      continue
+    }
+    const text = await askDoneGate({ key: row.key, title: row.title, state, fields: row.fields ?? {} }, { index: index + 1, total: gated.length })
+    if (!text) continue
+    if (await list.setStatus(row, state, { fields: completionFields(row.fields, text) })) {
+      void projects.load(true)
+      outline.refreshStatsFor(row.id)
+    }
+  }
+}
 function bulkArchive() { void runBulk({ state: 'archived' }, n => `Archived ${count(n)}`) }
 function bulkAssign(value: string) {
   const name = bulkPeople.value.find(person => person.value === value)?.label ?? 'someone'

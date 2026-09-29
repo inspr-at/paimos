@@ -240,7 +240,7 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		if issues := ticketbenefits.Transition(kind.Slug, "", state, fields); len(issues) > 0 {
-			return unprocessable("before done: " + strings.Join(issues, "; "))
+			return unprocessableCoded("before done: "+strings.Join(issues, "; "), ticketbenefits.RequiredCode)
 		}
 		if parentID != nil {
 			if err := ensureParentAllows(ctx, tx, *parentID, kind.Slug); err != nil {
@@ -387,7 +387,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				return err
 			}
 			if issues := ticketbenefits.Transition(kind.Slug, current.State, nextState, nextFields); len(issues) > 0 {
-				return unprocessable("before done: " + strings.Join(issues, "; "))
+				return unprocessableCoded("before done: "+strings.Join(issues, "; "), ticketbenefits.RequiredCode)
 			}
 		}
 		idPh := add(id)

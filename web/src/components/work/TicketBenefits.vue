@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, useId } from 'vue'
-import { benefitIssues } from '../../lib/ticketBenefits'
+import { benefitIssues, pillWords } from '../../lib/ticketBenefits'
 import AppIcon from '../AppIcon.vue'
 
 // The plain-language user benefit (AEON-256): a 2–4 word pill and one or two
@@ -24,8 +24,7 @@ const guidance = computed(() => {
     : 'Before Done: a 2–4 word pill and a plain benefit, in both languages.'
 })
 const raw = (key: string) => typeof props.fields[key] === 'string' ? props.fields[key] as string : ''
-const words = (value: string) => value.trim() ? value.trim().split(/\s+/u).length : 0
-const countLabel = (value: string) => { const n = words(value); return n ? `${n} ${n === 1 ? 'word' : 'words'} of 2–4` : '2–4 words' }
+const countLabel = (value: string) => { const n = pillWords(value); return n ? `${n} ${n === 1 ? 'word' : 'words'} of 2–4` : '2–4 words' }
 </script>
 
 <template>
@@ -41,7 +40,7 @@ const countLabel = (value: string) => { const n = words(value); return n ? `${n}
         <div v-for="language in languages" :key="language.key" :lang="language.key" class="language-edit">
           <div class="label-row">
             <label :for="`${uid}-pill-${language.key}`">Pill · {{ language.label }}</label>
-            <span class="count" :class="{ off: words(text(`pill_${language.key}`)) > 4 || words(text(`pill_${language.key}`)) === 1 }" aria-hidden="true">{{ countLabel(text(`pill_${language.key}`)) }}</span>
+            <span class="count" :class="{ off: pillWords(text(`pill_${language.key}`)) > 4 || pillWords(text(`pill_${language.key}`)) === 1 }" aria-hidden="true">{{ countLabel(text(`pill_${language.key}`)) }}</span>
           </div>
           <input :id="`${uid}-pill-${language.key}`" class="field" :value="raw(`pill_${language.key}`)" :placeholder="language.pill" :disabled="disabled" @input="emit('change', `pill_${language.key}`, ($event.target as HTMLInputElement).value)" />
           <label :for="`${uid}-benefit-${language.key}`">Benefit · {{ language.label }}</label>

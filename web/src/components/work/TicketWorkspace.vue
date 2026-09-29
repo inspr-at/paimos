@@ -30,6 +30,7 @@ import TicketAgentWork from './TicketAgentWork.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 import TicketBenefits from './TicketBenefits.vue'
+import { needsBenefitPrompt } from '../../lib/doneGate'
 import { benefitDraft, benefitTextKeys, completedTicketState } from '../../lib/ticketBenefits'
 import { can } from '../../lib/authz'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
@@ -154,6 +155,11 @@ async function saveEdit() {
     if (draft.hide_from_release_notes !== base.hide_from_release_notes) { fieldsChanged = true; fields.hide_from_release_notes = draft.hide_from_release_notes }
   }
   if (fieldsChanged) patch.fields = fields
+  // The benefit editor is already on this form. Focus it instead of a second dialog.
+  if (needsBenefitPrompt({ kind_slug: target.kind_slug, state: base.state, fields }, draft.state)) {
+    root.value?.querySelector<HTMLInputElement>('.edit-benefits input')?.focus()
+    return
+  }
   saving.value = true
   const result = await ticket.patch(patch)
   saving.value = false

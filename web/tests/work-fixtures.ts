@@ -3,6 +3,7 @@
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page } from '@playwright/test'
+import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
@@ -194,6 +195,13 @@ function costUnit(node: MockNode): string {
 const release = (node: MockNode) => labelOf(node.fields.release)
 const personName = (data: Fixtures, id: unknown) => typeof id === 'string' ? data.people.find(p => p.id === id)?.name ?? '' : ''
 
+function completionRefusal(node: MockNode, nextState: string, fields: Record<string, unknown>): { error: string; code: string } | null {
+  if (node.kind_slug !== 'ticket' || completedTicketState(node.state) || !completedTicketState(nextState)) return null
+  const issues = benefitIssues(fields)
+  if (!issues.length) return null
+  return { error: `before done: ${issues.join('; ')}`, code: 'benefit_required' }
+}
+
 export async function mockWork(page: Page, data: Fixtures, options: MockOptions = {}) {
   const calls: Call[] = []
   const started = Date.now()
@@ -294,7 +302,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     if (path === '/api/nodes/bulk' && method === 'POST') {
       if (options.readOnly) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       const input = body as { ids: string[]; state?: string; priority?: string | null; assignee?: string | null; tags_add?: (string | { name: string; color?: string })[]; tags_remove?: string[]; parent_id?: string }
-      const before: MockNode[] = [], after: MockNode[] = [], skipped: { id: string; key?: string; reason: string }[] = [], unchanged: string[] = []
+      const before: MockNode[] = [], after: MockNode[] = [], skipped: { id: string; key?: string; reason: string; code?: string }[] = [], unchanged: string[] = []
       for (const id of input.ids) {
         const node = data.nodes.find(n => n.id === id)
         if (!node) { skipped.push({ id, reason: 'not found' }); continue }
@@ -312,7 +320,10 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
           }
           fields.tags = kept
         }
-        const next = { ...node, fields, state: input.state ?? node.state, parent_id: input.parent_id ?? node.parent_id }
+        const nextState = input.state ?? node.state
+        const refusal = completionRefusal(node, nextState, fields)
+        if (refusal) { skipped.push({ id, key: node.key, reason: refusal.error, code: refusal.code }); continue }
+        const next = { ...node, fields, state: nextState, parent_id: input.parent_id ?? node.parent_id }
         if (JSON.stringify(next) === JSON.stringify(node)) { unchanged.push(id); continue }
         Object.assign(node, next, { updated_at: new Date(now + 120_000 + calls.length).toISOString() })
         before.push(old); after.push(JSON.parse(JSON.stringify(node)))
@@ -527,6 +538,11 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         if (options.conflictOn === id && !node.title.endsWith('(edited elsewhere)')) { node.updated_at = new Date(now + 30_000).toISOString(); node.title = `${node.title} (edited elsewhere)` }
         const expected = request.headers()['if-unmodified-since']
         if (expected && expected !== node.updated_at) return route.fulfill({ status: 412, json: { error: 'node has changed' } })
+        const patch = body as { state?: string; fields?: Record<string, unknown> }
+        const nextState = typeof patch.state === 'string' ? patch.state : node.state
+        const nextFields = patch.fields && typeof patch.fields === 'object' && !Array.isArray(patch.fields) ? patch.fields : node.fields
+        const refusal = completionRefusal(node, nextState, nextFields)
+        if (refusal) return route.fulfill({ status: 422, json: refusal })
         Object.assign(node, body as object, { updated_at: new Date(now + 60_000 + calls.length).toISOString() })
       }
       const { kind_slug: kind, project: _project, ...rest } = node

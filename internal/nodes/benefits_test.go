@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/ticketbenefits"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -35,12 +36,12 @@ func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 			}
 			for _, fields := range []string{`{}`, `{"hide_from_release_notes":true}`, `{"pill_en":"Too short"}`} {
 				code, raw := call(t, &p, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q,"fields":%s}`, state, fields))
-				if code != 422 || !strings.Contains(string(raw), "benefit_de") {
+				if code != 422 || !strings.Contains(string(raw), `"error":"before done:`) || !strings.Contains(string(raw), "benefit_de") || !strings.Contains(string(raw), `"code":"benefit_required"`) {
 					t.Fatalf("gate: %d %s", code, raw)
 				}
 			}
 			code, raw := call(t, &p, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q}`, state))
-			if code != 422 {
+			if code != 422 || !strings.Contains(string(raw), `"code":"benefit_required"`) || !strings.Contains(string(raw), "benefit_de") {
 				t.Fatalf("state-only patch: %d %s", code, raw)
 			}
 			code, raw = call(t, &p, "GET", "/api/nodes/"+n.ID, "")
@@ -48,7 +49,7 @@ func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 				t.Fatal("rejected completion changed draft", unchanged)
 			}
 			code, raw = call(t, &p, "POST", "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"title":"Bypass","state":%q}`, k.ID, state))
-			if code != 422 {
+			if code != 422 || !strings.Contains(string(raw), `"code":"benefit_required"`) || !strings.Contains(string(raw), "benefit_de") {
 				t.Fatalf("create completed: %d %s", code, raw)
 			}
 			created := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Complete at creation","state":%q,"fields":%s}`, k.ID, state, benefitFields))
@@ -72,7 +73,7 @@ func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 			code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"state":"open"}`)
 			decode[nodeJSON](t, code, raw, 200)
 			code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q}`, state))
-			if code != 422 {
+			if code != 422 || !strings.Contains(string(raw), `"code":"benefit_required"`) {
 				t.Fatalf("reopened: %d %s", code, raw)
 			}
 			other := addPrincipal(t, "other-benefits")
@@ -95,7 +96,7 @@ func TestTicketBenefitsBulkAndUndo(t *testing.T) {
 			ready := mustNode(t, p, `{"kind_id":"`+k.ID+`","parent_id":"`+b.ID+`","title":"Ready","fields":`+benefitFields+`}`)
 			code, raw := call(t, &p, "POST", "/api/nodes/bulk", fmt.Sprintf(`{"ids":[%q,%q],"state":%q}`, missing.ID, ready.ID, state))
 			result := decode[bulkResult](t, code, raw, 200)
-			if len(result.Items) != 1 || result.Items[0].ID != ready.ID || result.Items[0].State != state || len(result.Skipped) != 1 || result.Skipped[0].ID != missing.ID || !strings.Contains(result.Skipped[0].Reason, "benefit_de") {
+			if len(result.Items) != 1 || result.Items[0].ID != ready.ID || result.Items[0].State != state || len(result.Skipped) != 1 || result.Skipped[0].ID != missing.ID || !strings.Contains(result.Skipped[0].Reason, "benefit_de") || result.Skipped[0].Code != ticketbenefits.RequiredCode {
 				t.Fatalf("bulk: %s", raw)
 			}
 			// Seed historical data; all tested changes and reversals go through HTTP.

@@ -2,6 +2,7 @@
 import { ref, watch, type Ref } from 'vue'
 import { APIError, createNode, createRelation, deleteNode, deleteRelation, getKinds, getNode, getRelations, listNodes, lookupNodes, moveNode, updateNode, type Kind, type ListItem, type ListParent, type NodePatch, type Relation, type WorkNode } from './api'
 import { linkBody, linkedSentence, relationLabel, unlinkedSentence, type RelationChoice } from './relations'
+import { benefitGateError } from './doneGate'
 import { toast } from './toast'
 import { statusMeta } from './work'
 
@@ -166,6 +167,10 @@ export function useTicket(item: Ref<ListItem | null>, context: {
         return 'error'
       }
       if (e instanceof APIError && (e.status === 404 || e.status === 410)) { gone.value = true; return 'error' }
+      if (benefitGateError(e)) {
+        toast(`${target.key} needs a 2–4 word pill and a benefit in both languages.`, { tone: 'error' })
+        return 'error'
+      }
       toast(`${target.key} was not saved: ${message(e)}`, { tone: 'error' })
       return 'error'
     }

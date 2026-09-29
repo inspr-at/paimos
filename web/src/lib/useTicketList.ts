@@ -2,6 +2,8 @@
 import { reactive, ref, type Ref } from 'vue'
 import { APIError, bulkChange, getNode, listNodes, undoEvent, updateNode, type BulkChange, type BulkResult, type Facets, type ListItem } from './api'
 import { activeDimensions, apiParams, DIMENSION_BY_KEY, LIST_FACETS, rowTags, WORK_KINDS, type Dimension, type EpicOption, type ListFilters } from './ticketList'
+import { askDoneGate } from './doneGateAsk'
+import { benefitGateError, completionFields, needsBenefitPrompt } from './doneGate'
 import { toast } from './toast'
 import { normaliseState, statusMeta } from './work'
 
@@ -156,15 +158,24 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   // Optimistic status change: the row updates at once and the server confirms.
   // The PATCH carries the row's updated_at as If-Unmodified-Since; a newer
   // server copy answers 412, nothing is written, and the latest version is shown.
-  async function setStatus(row: ListItem, state: string, options: { undo?: boolean } = {}): Promise<boolean> {
+  // A ticket entering completion is asked for its benefit before the row moves,
+  // so cancelling leaves the list as it was.
+  async function setStatus(row: ListItem, state: string, options: { undo?: boolean; fields?: Record<string, unknown> } = {}): Promise<boolean> {
     const target = rows.value.find(item => item.id === row.id) ?? row
-    const before = { state: target.state, updated_at: target.updated_at }
+    const before = { state: target.state, updated_at: target.updated_at, fields: target.fields }
     if (normaliseState(before.state) === normaliseState(state)) return false
+    let fields = options.fields
+    if (!fields && needsBenefitPrompt(target, state)) {
+      const text = await askDoneGate({ key: target.key, title: target.title, state, fields: target.fields ?? {} })
+      if (!text) return false
+      fields = completionFields(target.fields, text)
+    }
     target.state = state
+    if (fields) target.fields = fields
     shiftFacet(before.state, state)
     try {
-      const saved = await updateNode(target.id, { state }, { ifUnmodifiedSince: before.updated_at })
-      Object.assign(target, { state: saved.state, updated_at: saved.updated_at })
+      const saved = await updateNode(target.id, fields ? { state, fields } : { state }, { ifUnmodifiedSince: before.updated_at })
+      Object.assign(target, { state: saved.state, fields: saved.fields, updated_at: saved.updated_at })
       if (!options.undo) {
         toast(`${target.key} is now ${statusMeta(saved.state).label}`, { action: { label: 'Undo', run: () => void setStatus(target, before.state, { undo: true }) } })
       }
@@ -184,6 +195,15 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
       }
       shiftFacet(state, before.state)
       Object.assign(target, before)
+      if (!options.fields && benefitGateError(e)) {
+        const text = await askDoneGate({ key: target.key, title: target.title, state, fields: before.fields ?? {} })
+        if (!text) return false
+        return setStatus(target, state, { ...options, fields: completionFields(before.fields, text) })
+      }
+      if (benefitGateError(e)) {
+        toast(`${target.key} keeps its status. Add a 2–4 word pill and a benefit in both languages.`, { tone: 'error' })
+        return false
+      }
       toast(`${target.key} keeps its status: ${message(e)}`, { tone: 'error', action: { label: 'Retry', run: () => void setStatus(target, state, options) } })
       return false
     }
