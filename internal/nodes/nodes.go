@@ -65,7 +65,7 @@ func (m *Module) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	node, err := m.createNode(r.Context(), p, in)
+	node, err := m.createNode(r.Context(), p, in, cliClient(r))
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -192,7 +192,11 @@ func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, er
 	return node, err
 }
 
-func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCreate) (nodeJSON, error) {
+func cliClient(r *http.Request) bool {
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Aeon-Client")), "cli")
+}
+
+func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCreate, cli bool) (nodeJSON, error) {
 	kindID, ok := parseUUID(in.KindID)
 	if !ok {
 		return nodeJSON{}, badRequest("invalid kind_id")
@@ -305,9 +309,14 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			var f map[string]any
 			_ = json.Unmarshal(fields, &f)
 			if f["estimate_hours"] == nil {
-				node.Warnings = append(node.Warnings, "add an agent-hours estimate with --estimate (for example 2h or 30m)")
+				node.Warnings = append(node.Warnings, missingEstimateWarning(cli))
 			}
 		}
+		views, err := loadEstimates(ctx, tx, []string{loaded.ID})
+		if err != nil {
+			return err
+		}
+		node.Estimate = views[loaded.ID]
 		return nil
 	})
 	return node, err

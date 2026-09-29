@@ -105,6 +105,9 @@ func TestEstimateCLIFlagsAndPlan(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(map[string]any{"items": []apiNode{ticket, existing}})
 		case r.Method == "PATCH" || r.Method == "POST":
+			if r.Header.Get("X-Aeon-Client") != "cli" {
+				t.Error("CLI client header missing")
+			}
 			if r.Method == "PATCH" && r.Header.Get("If-Unmodified-Since") != revision {
 				t.Error("missing revision")
 			}

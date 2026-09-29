@@ -79,7 +79,11 @@ export function widthOf(id: ColumnId, prefs: ListPrefs | null | undefined): numb
 // The columns to show, in order. `customised` is true when a saved choice applies.
 export function visibleColumns(tableWidth: number, options: { phone: boolean; present?: Present; prefs?: ListPrefs | null }): { columns: ColumnDef[]; customised: boolean } {
   if (options.phone) {
-    const phone = options.present?.eta ? [...PHONE, 'eta' as const] : PHONE
+    // A phone card keeps its own set. ETA and an hour estimate join it when a
+    // loaded row has one; a saved choice does not hide them.
+    const phone: ColumnId[] = [...PHONE]
+    if (options.present?.eta) phone.push('eta')
+    if (options.present?.estimate) phone.push('estimate')
     return { columns: phone.map(id => COLUMN_BY_ID.get(id)!), customised: false }
   }
   const prefs = options.prefs

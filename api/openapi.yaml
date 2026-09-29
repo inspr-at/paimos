@@ -1597,7 +1597,9 @@ paths:
       operationId: createNode
       description: |
         Allocate a tenant-scoped key, or preserve a supplied import key.
+        The created node includes the same read-only estimate view as a later read when it has hours or open children.
         Any create of a portal_product, portal_feature or portal_wish, and any create that places a node under a portal parent, requires a person with settings.manage. Agents are refused.
+        Optional header X-Aeon-Client with value cli changes only the wording of a missing-estimate warning; it grants nothing.
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/NodeCreate'
@@ -9393,7 +9395,7 @@ components:
         warnings:
           type: array
           items: {type: string}
-          description: Non-blocking ticket benefit guidance and an estimate warning for agents creating work without an estimate.
+          description: "Non-blocking ticket benefit guidance. An agent creating a ticket or task without estimate_hours is told to set that field. Header X-Aeon-Client set to cli names the --estimate flag instead, and changes only that sentence."
         fields:
           type: object
           description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
@@ -9429,7 +9431,7 @@ components:
     TicketEstimate:
       type: object
       required: [hours, estimated_children, open_children]
-      description: Read-only estimate view on node reads and lists, omitted when there are no hours and no open children. Epics sum direct visible open ticket/task children using configured state categories, excluding deleted children. Null hours means no child has an estimate. Other work uses fields.estimate_hours; legacy invalid values are unknown. Counts are zero outside epics.
+      description: Read-only estimate view on node creates, reads and lists, omitted when there are no hours and no open children. Epics sum direct visible open ticket/task children using configured state categories, excluding deleted children. Null hours means no child has an estimate. Other work uses fields.estimate_hours; legacy invalid values are unknown. Counts are zero outside epics.
       properties:
         hours: {type: [number, 'null'], exclusiveMinimum: 0}
         estimated_children: {type: integer, minimum: 0}

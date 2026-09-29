@@ -43,6 +43,18 @@ for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
       await expect.poll(() => calls.some(c => c.method === 'GET' && c.query.get('sort')?.split(',').includes('estimate'))).toBe(true)
       await expect(page.locator('tr.ticket-row:not(.ghost) .key')).toHaveText(['PHAROS-12', 'PHAROS-11', 'PHAROS-10', 'PHAROS-13', 'PHAROS-14'])
     }
+    if (width === 390) {
+      const card = row(page, 'PHAROS-11')
+      const value = card.locator('.c-estimate .mono')
+      await expect(value).toBeVisible()
+      await expect(value).toHaveText('~2h est.')
+      await expect(card.locator('.c-updated')).toBeVisible()
+      await expect(row(page, 'PHAROS-10').locator('.c-estimate .mono')).toHaveText('~2.5h')
+      await expect(row(page, 'PHAROS-14').locator('.c-estimate')).toBeHidden()
+      const titleBox = await card.locator('.title-text').boundingBox()
+      const estimateBox = await value.boundingBox()
+      expect(titleBox && estimateBox && titleBox.x + titleBox.width <= estimateBox.x + 1).toBeTruthy()
+    }
     await fits(page); await shot(page, `list-${width}-${theme}`)
     await row(page, 'PHAROS-11').locator('.title-text').click()
     const control = panel(page).getByRole('button', { name: 'Estimate: ~2h, agent draft by Estimate worker. Edit estimate' })
@@ -82,6 +94,23 @@ test('estimate edit preserves the draft after a revision conflict, supports canc
   await expect(panel(page).getByRole('button', { name: 'Add estimate' })).toBeVisible()
   const patches = calls.filter(c => c.method === 'PATCH' && c.path === '/api/nodes/n-1')
   expect((patches.at(-1)!.body as { fields: Record<string, unknown> }).fields.estimate_hours).toBeNull()
+})
+
+test('an epic with open children and no hours shows coverage on the empty estimate', async ({ page }) => {
+  const data = world()
+  const epic = data.nodes.find(node => node.id === 'n-epic')!
+  epic.estimate = { hours: null, estimated_children: 0, open_children: 3 }
+  await mockWork(page, data)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/p/PHAROS')
+  const empty = row(page, 'PHAROS-10').locator('.c-estimate .empty')
+  await expect(empty).toBeVisible()
+  await expect(empty).toHaveAttribute('data-tip', '0 of 3 open children estimated · agent hours')
+  await expect(empty).toHaveAttribute('aria-label', '0 of 3 open children estimated · agent hours')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(row(page, 'PHAROS-10').locator('.c-estimate')).toBeHidden()
+  await expect(row(page, 'PHAROS-11').locator('.c-estimate .mono')).toBeVisible()
+  await fits(page)
 })
 
 test('read-only work and epic rollups have no estimate editor', async ({ page }) => {

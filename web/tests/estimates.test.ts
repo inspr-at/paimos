@@ -18,6 +18,9 @@ test('draft attribution, confirmation, legacy points and epic coverage remain di
   assert.equal(estimateDisplay({ fields: { estimate_lp: 3 } }).text, '3 pt')
   assert.equal(estimateHours({ fields: { estimate_hours: '2' } }), null)
   assert.equal(estimateDisplay({ ...item, kind_slug: 'epic', estimate: { hours: 250, estimated_children: 3, open_children: 5 } }).tip, '3 of 5 open children estimated · agent hours')
+  const uncovered = estimateDisplay({ kind_slug: 'epic', fields: {}, estimate: { hours: null, estimated_children: 0, open_children: 4 } })
+  assert.equal(uncovered.text, '')
+  assert.equal(uncovered.tip, '0 of 4 open children estimated · agent hours')
   assert.equal(estimateHours({ ...item, kind_slug: 'epic', estimate: { hours: null, estimated_children: 0, open_children: 5 } }), null)
 })
 

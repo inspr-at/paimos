@@ -49,6 +49,9 @@ func TestEstimateValidationAttributionAndPreservation(t *testing.T) {
 	}
 	for _, actor := range []tenant.Principal{p, agent} {
 		n := mustNode(t, actor, fmt.Sprintf(`{"kind_id":%q,"title":"Estimate","fields":{"estimate_hours":1.50,"estimate_by":%q,"estimate_at":"fake","estimate_confirmed":true}}`, kind.ID, p.ID))
+		if n.Estimate == nil || n.Estimate.Hours == nil || *n.Estimate.Hours != 1.5 || n.Estimate.EstimatedChildren != 0 || n.Estimate.OpenChildren != 0 || n.Estimate.By == nil || n.Estimate.By.ID != actor.ID || n.Estimate.By.Name != actor.Name {
+			t.Fatalf("create estimate view: %+v", n.Estimate)
+		}
 		f := estimateFieldsOf(t, n)
 		if f["estimate_source"] != string(actor.Kind) || f["estimate_by"] != actor.ID || f["estimate_confirmed"] != (actor.Kind == tenant.Person) {
 			t.Fatalf("provenance: %v", f)
@@ -81,8 +84,19 @@ func TestEstimateValidationAttributionAndPreservation(t *testing.T) {
 		}
 	}
 	missing := mustNode(t, agent, fmt.Sprintf(`{"kind_id":%q,"title":"Draft"}`, kind.ID))
-	if !strings.Contains(strings.Join(missing.Warnings, " "), "--estimate") {
-		t.Fatal("agent warning absent", missing.Warnings)
+	if missing.Estimate != nil || strings.Contains(strings.Join(missing.Warnings, " "), "--estimate") || !strings.Contains(strings.Join(missing.Warnings, " "), "fields.estimate_hours") {
+		t.Fatal("api warning", missing.Estimate, missing.Warnings)
+	}
+	mux := http.NewServeMux()
+	New(appPool, nil).Mount(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes", strings.NewReader(fmt.Sprintf(`{"kind_id":%q,"title":"CLI draft"}`, kind.ID)))
+	req = req.WithContext(tenant.WithPrincipal(req.Context(), agent))
+	req.Header.Set("X-Aeon-Client", "cli")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	cliNode := decode[nodeJSON](t, rec.Code, rec.Body.Bytes(), http.StatusCreated)
+	if !strings.Contains(strings.Join(cliNode.Warnings, " "), "--estimate") || strings.Contains(strings.Join(cliNode.Warnings, " "), "fields.estimate_hours") {
+		t.Fatal("cli warning", cliNode.Warnings)
 	}
 	other := addPrincipal(t, "estimate-other")
 	code, _ := call(t, &other, "PATCH", "/api/nodes/"+missing.ID, `{"fields":{"estimate_hours":2}}`)
