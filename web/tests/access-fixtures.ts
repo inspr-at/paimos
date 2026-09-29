@@ -433,7 +433,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       if (!agentRow) return route.fulfill({ status: 404, json: { error: 'agent not found' } })
       if (agentRow.service) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       const scopes = old ? [...old.scopes] : Array.isArray(body.scopes) ? (body.scopes as string[]).map(k => k.replace(/:/g, '.')) : []
-      if (scopes.length > 32 || scopes.some(k => !REGISTRY.find(p => p.key === k)?.agent_grantable)) return route.fulfill({ status: 400, json: { error: 'invalid scopes' } })
+      if (scopes.length > 256 || scopes.some(k => !REGISTRY.find(p => p.key === k)?.agent_grantable)) return route.fulfill({ status: 400, json: { error: 'invalid scopes' } })
       // Never more than the creator holds, nor (on a shared role) than the agent's role.
       const agentRole = world.roles.find(r => r.id === agentRow.workspace_role)
       const projectScopes = world.bindings.filter(b => b.principal_id === agentRow.principal_id).flatMap(b => world.roles.find(r => r.id === b.role_id)?.permissions ?? []).filter(k => REGISTRY.find(p => p.key === k)?.grantable_at.includes('project'))
