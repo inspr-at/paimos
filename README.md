@@ -64,10 +64,14 @@ live children. The transaction records one `harness.adopted` event per child and
 `harness.handed_over` on the old lead; stopped children remain historical.
 A healthy lead is never replaced. `harness run-heartbeat --role coordinator
 --source-session NATIVE_UUID` uses that stable native reference; use a fresh
-private state directory for the new process generation. For a different native
-session, pass `--succeeds OLD_SESSION_UUID` to `harness register` or
-`harness run-heartbeat`. The predecessor must belong to the same principal and
-project. A handed-over generation cannot revive through a late heartbeat.
+private state directory for the new process generation. After an unclean
+restart, the helper retries an active-generation registration conflict at the
+heartbeat interval while its owner process lives, logging each retry. Once the
+predecessor's heartbeat expires, registration and child adoption proceed
+automatically. For a different native session, pass `--succeeds OLD_SESSION_UUID`
+to `harness register` or `harness run-heartbeat`. The predecessor must belong to
+the same principal and project. A handed-over generation cannot revive through
+a late heartbeat.
 
 On **Agents**, the old lead links to its successor and adopted workers link back
 to the old lead. Drag a live worker to a live lead, or choose **Move to lead…**

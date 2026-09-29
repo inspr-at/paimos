@@ -28,12 +28,21 @@ func TestCoordinatorHandover(t *testing.T) {
 			childBody["harness_session_ref"] = "ended-ref-" + uid()
 			ended := reg(childBody)
 			expect(t, f.call(f.agent, "POST", base+"/"+ended["id"].(string)+"/stop", map[string]any{"reason": "process_exited"}, childBody["worker_lease"].(string)), 200)
-			if mode == "lost" {
-				age(t, f, old["id"].(string), "20 minutes", false)
-			} else if mode != "healthy" {
+			if mode != "lost" && mode != "healthy" {
 				expect(t, f.call(f.agent, "POST", base+"/"+old["id"].(string)+"/stop", map[string]any{"reason": "process_exited"}, body["worker_lease"].(string)), 200)
 			}
 			body["worker_lease"] = "new-lease-" + uid()
+			if mode == "lost" {
+				// An unclean restart initially conflicts while the predecessor
+				// still counts as healthy. The same registration must adopt its
+				// live children once the heartbeat-lost window passes.
+				w := f.call(f.person, "POST", base, body, "")
+				expect(t, w, 409)
+				if decode(t, w)["error"] != "active generation conflicts with registration" {
+					t.Fatal("unclean restart did not return the retryable conflict")
+				}
+				age(t, f, old["id"].(string), "20 minutes", false)
+			}
 			if mode == "explicit" {
 				body["harness_session_ref"] = "different-ref-" + uid()
 				body["succeeds_session_id"] = old["id"]
