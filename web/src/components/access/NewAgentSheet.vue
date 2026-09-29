@@ -58,18 +58,18 @@ onMounted(() => { void projects.load() })
       <label for="agent-description">Description <span class="optional">optional</span></label>
       <textarea id="agent-description" v-model="description" class="field" rows="2" maxlength="1000" :disabled="busy" placeholder="What this agent does" />
       <label for="agent-role">Role <span class="optional">permission ceiling</span></label>
-      <select id="agent-role" v-model="roleId" class="field" :disabled="busy" :aria-invalid="tried && !validRole">
+      <select id="agent-role" v-model="roleId" class="field" :disabled="busy" :aria-invalid="tried && !validRole" :aria-describedby="tried && !validRole ? 'agent-role-error' : undefined">
         <option value="" disabled>Choose a role</option>
         <option v-for="r in roles" :key="r.id" :value="r.id" :disabled="!grantable(r)">{{ r.name }}{{ grantable(r) ? '' : ' — beyond your permissions' }}</option>
       </select>
-      <p v-if="tried && !validRole" class="error">Choose a role you may grant.</p>
+      <p v-if="tried && !validRole" id="agent-role-error" class="error">Choose a role you may grant.</p>
       <label for="agent-project-access">Project access</label>
       <select id="agent-project-access" v-model="scope" class="field" :disabled="busy" aria-describedby="agent-access-effect">
         <option value="workspace">Workspace role</option>
         <option value="projects">Selected projects only</option>
       </select>
       <p id="agent-access-effect" class="hint">{{ effect }}</p>
-      <fieldset v-if="scope === 'projects'" class="projects" :aria-invalid="tried && !selected.length" tabindex="-1">
+      <fieldset v-if="scope === 'projects'" class="projects" :aria-invalid="tried && !selected.length" :aria-describedby="tried && !selected.length ? 'agent-projects-error' : undefined" tabindex="-1">
         <legend class="sr-only">Projects</legend>
         <p v-if="projects.loading" class="hint" role="status">Loading projects…</p>
         <p v-else-if="projects.error" class="error" role="alert">Projects could not be loaded. <button type="button" class="btn sm" @click="projects.load(true)">Try again</button></p>
@@ -78,7 +78,7 @@ onMounted(() => { void projects.load() })
           <input v-model="selected" type="checkbox" :value="project.id" :disabled="busy || selected.length >= 50 && !selected.includes(project.id)" />
           <span :title="project.title">{{ project.title }}</span>
         </label>
-        <p v-if="tried && !selected.length" class="error">Choose at least one project.</p>
+        <p v-if="tried && !selected.length" id="agent-projects-error" class="error">Choose at least one project.</p>
       </fieldset>
       <p v-if="!allowed" class="error" role="alert">Only a person with Manage agent keys may create an agent.</p>
       <p v-if="error" class="error" role="alert">{{ error }}</p>

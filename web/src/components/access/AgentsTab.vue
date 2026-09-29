@@ -89,7 +89,13 @@ onMounted(loadKeys)
 <template>
   <div class="agents-tab">
     <div class="agent-toolbar" :class="{ 'empty-toolbar': !working.length }">
-      <p class="lead">{{ working.length ? 'Agent identities and keys for your CLIs and scripts.' : 'No agents yet. Create one for a CLI or script.' }}</p>
+      <div class="lead-block">
+        <p v-if="working.length" class="lead">Agent identities and keys for your CLIs and scripts.</p>
+        <template v-else>
+          <p class="lead"><RouterLink to="/agents/register-agent">Connect a computer (the agent daemon, no key to handle)</RouterLink></p>
+          <p class="lead">New agent (a key for a CLI or script)</p>
+        </template>
+      </div>
       <button v-if="manageKeys" type="button" class="btn primary" @click="creatingAgent = true"><AppIcon name="plus" :size="14" />New agent</button>
     </div>
     <ul v-if="working.length" class="agents" aria-label="Agents">
@@ -146,8 +152,10 @@ onMounted(loadKeys)
 .agents-tab { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .agent-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .agent-toolbar .btn { flex-shrink: 0; }
-.empty-toolbar { padding: 8px 0; }
-.lead { font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.empty-toolbar { padding: 8px 0; align-items: flex-end; }
+.lead-block { display: grid; gap: 2px; min-width: 0; flex: 1 1 16rem; }
+.lead { font-size: 13px; line-height: 1.5; color: var(--ink-2); overflow-wrap: break-word; }
+.lead a { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 3px; }
 .agents { display: grid; margin: 0; padding: 0; list-style: none; }
 .agent { border-bottom: 1px solid var(--line); }
 .row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto 150px; align-items: center; gap: 12px; min-height: 58px; }

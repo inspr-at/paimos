@@ -22,6 +22,8 @@ for (const width of [390, 1600]) for (const colorScheme of ['light', 'dark'] as 
     await mockAccess(page, world)
     await page.goto('/settings/access/agents')
     await expect(page.locator('.agents-tab')).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Connect a computer (the agent daemon, no key to handle)' })).toHaveAttribute('href', '/agents/register-agent')
+    await expect(page.locator('.agents-tab')).toContainText('New agent (a key for a CLI or script)')
     await shot(page, `${width}-${colorScheme}-empty`)
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.getByRole('button', { name: 'New agent', exact: true }).click()
@@ -76,6 +78,7 @@ test('selected projects, clipboard rejection and duplicate-name recovery', async
   await form.getByLabel('Project access', { exact: true }).selectOption('projects')
   await form.getByRole('button', { name: 'Create agent', exact: true }).click()
   await expect(form).toContainText('Choose at least one project')
+  await expect(form.locator('fieldset.projects')).toHaveAttribute('aria-describedby', 'agent-projects-error')
   await form.getByRole('checkbox', { name: 'Pharos', exact: true }).check()
   await form.getByRole('button', { name: 'Create agent', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: 'Create first key for project-helper' })
@@ -105,6 +108,7 @@ for (const who of ['member', 'guest', 'agent'] as const) test(`${who} has no new
   else await expect(page.locator('.access-card')).toBeVisible()
   await expect(page.getByRole('button', { name: 'New agent', exact: true })).toHaveCount(0)
   await expect(page.getByRole('dialog', { name: 'New agent', exact: true })).toHaveCount(0)
+  await expect(page).toHaveURL(/\/settings\/access\/agents$/)
 })
 
 test('computer pairing offers the CLI path directly', async ({ page }) => {

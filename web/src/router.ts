@@ -5,6 +5,7 @@ import { setPageTitle } from './lib/brand'
 import { useProjects } from './stores/projects'
 import { useSession } from './stores/session'
 import { sessionEnded } from './lib/api'
+import { can, ensurePermissions, permissionsRevoked } from './lib/authz'
 import { toast } from './lib/toast'
 import { takeSignInReturn } from './lib/signInReturn'
 import ProjectsView from './views/ProjectsView.vue'
@@ -171,6 +172,19 @@ router.beforeEach(async (to, from) => {
     if (!from.matched.length) {
       const returnPath = takeSignInReturn()
       if (returnPath !== '/') return returnPath
+    }
+  }
+  // ?new=1 opens the new-agent sheet only for a person who may create one.
+  // Strip it here, once identity and permissions have settled: a later replace
+  // from the page is cancelled by the permission refresh this guard starts.
+  // A failed answer is not a denial, so the deep link stays until we know.
+  if (to.params.section === 'access' && to.params.tab === 'agents' && to.query.new === '1' && session.identity) {
+    const settled = await ensurePermissions()
+    const mayCreate = session.identity.principal.kind === 'person' && can('keys.manage') && can('members.read')
+    if ((settled === 'known' || permissionsRevoked()) && !mayCreate) {
+      const query = { ...to.query }
+      delete query.new
+      return { path: to.path, query, hash: to.hash, replace: true }
     }
   }
 })

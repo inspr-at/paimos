@@ -85,10 +85,15 @@ async function create() {
   }
   finally { busy.value = false }
 }
+function selectKey(input: HTMLInputElement | undefined) {
+  if (!input) return
+  input.focus()
+  input.setSelectionRange(0, input.value.length)
+}
 async function copy() {
   if (!created.value) return
   try { await navigator.clipboard.writeText(created.value.token); copied.value = true; copyFallback.value = false }
-  catch { copied.value = false; copyFallback.value = true; tokenInput.value?.focus(); tokenInput.value?.select() }
+  catch { copied.value = false; copyFallback.value = true; selectKey(tokenInput.value) }
 }
 async function copyCommand() {
   try { await navigator.clipboard.writeText(loginCommand); commandCopied.value = true; commandFallback.value = false }
@@ -140,7 +145,7 @@ async function copyCommand() {
     <div v-else class="body">
       <p class="once"><AppIcon name="info" :size="14" /><span>This key is shown only now; copy it before closing.</span></p>
       <div class="token">
-        <input ref="tokenInput" class="field mono" readonly :value="created.token" aria-label="New agent key" @focus="($event.target as HTMLInputElement).select()" />
+        <input ref="tokenInput" class="field mono" readonly :value="created.token" aria-label="New agent key" @focus="selectKey($event.target as HTMLInputElement)" />
         <button type="button" class="btn token-copy" data-session-keep @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="14" />{{ copied ? 'Copied' : 'Copy key' }}</button>
       </div>
       <p class="expiry-note">{{ created.expires_at ? `Expires ${absoluteTime(created.expires_at)}.` : 'It never expires.' }}{{ rotateKey ? ' The old key is now revoked.' : '' }}</p>
