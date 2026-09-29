@@ -37,7 +37,7 @@ func makeRegistry() []Permission {
 		{"stage", "prepare deploy verify apply"},
 		{"models", "read manage resolve"}, {"plugins", "read manage invoke"},
 		{"imports", "read manage"}, {"views", "read write share"},
-		{"events", "read undo undo_other"}, {"search", "read"},
+		{"events", "read undo undo_other"}, {"search", "read"}, {"outcome", "read write"},
 		{"hours", "read write approve"}, {"quotes", "read write issue accept delete manage portal_read portal_accept"},
 		{"crm", "read write manage"}, {"cost_units", "read write manage"},
 		{"project_groups", "read write"}, {"profile", "read write manage portal_read portal_write"},
@@ -145,7 +145,7 @@ func builtinPermissions(key string) []string {
 
 func productReadGroup(group string) bool {
 	switch group {
-	case "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "stage_handoffs", "harness", "work_orders", "runs", "run", "approvals", "inbox", "models", "views", "events", "search", "hours", "quotes", "crm", "cost_units", "project_groups", "profile":
+	case "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "stage_handoffs", "harness", "work_orders", "runs", "run", "approvals", "inbox", "models", "views", "events", "search", "hours", "quotes", "crm", "cost_units", "project_groups", "profile", "outcome":
 		return true
 	}
 	return false
@@ -153,7 +153,7 @@ func productReadGroup(group string) bool {
 
 func guestReadGroup(group string) bool {
 	switch group {
-	case "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "views", "events", "search", "profile":
+	case "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "views", "events", "search", "profile", "outcome":
 		return true
 	}
 	return false

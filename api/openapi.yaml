@@ -5437,6 +5437,41 @@ paths:
       responses:
         '200': {description: Totals, content: {application/json: {schema: {$ref: '#/components/schemas/TimeTotals'}}}}
         '404': {$ref: '#/components/responses/Error'}
+  /outcomes:
+    get:
+      operationId: listOutcomes
+      summary: List objective outcome events
+      description: Returns append-only outcome events visible in the caller's projects. At least one of ticket_node_id, session_id or rules_version is required. Filters combine. rules_version matches exactly and skips rows with no rules version. Ticket completion and release publication are included; they are recorded automatically.
+      security: *auth
+      parameters:
+        - {name: ticket_node_id, in: query, schema: {type: string}, description: Ticket node id or issue key}
+        - {name: session_id, in: query, schema: {type: string, format: uuid}}
+        - {name: rules_version, in: query, schema: {type: string, maxLength: 128}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: Newest outcomes first, content: {application/json: {schema: {$ref: '#/components/schemas/OutcomeList'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: recordOutcome
+      summary: Record a review, fix round, CI result or revert
+      description: "Requires outcome.write in the ticket's project. Agents also need that scope on the key. Idempotency-Key replays the same outcome when the body matches and conflicts when it does not. Keys starting with auto: are reserved. ticket_done and released cannot be posted."
+      security: *auth
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OutcomeRecord'}
+      responses:
+        '201': {description: Recorded, content: {application/json: {schema: {$ref: '#/components/schemas/OutcomeEvent'}}}}
+        '200': {description: Idempotent replay of the same outcome, content: {application/json: {schema: {$ref: '#/components/schemas/OutcomeEvent'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
 components:
   # Reporter-facing versions are independent of the product release coordinate.
   # Additive optional response fields require a minor bump; removals, type changes,
@@ -9174,6 +9209,46 @@ components:
               reservation_id: {type: string, format: uuid}
               window_id: {type: string, format: uuid}
               unit: {type: string, enum: [requests, tokens, cost_micros, percent]}
+    OutcomeList:
+      type: object
+      additionalProperties: false
+      required: [outcomes]
+      properties:
+        outcomes:
+          type: array
+          items: {$ref: '#/components/schemas/OutcomeEvent'}
+    OutcomeEvent:
+      type: object
+      required: [id, kind, ticket_node_id, ticket_key, project_id, source, payload, actor_principal_id, recorded_at, idempotency_key]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [review_verdict, fix_round, ci_result, revert, ticket_done, released]}
+        ticket_node_id: {type: string, format: uuid}
+        ticket_key: {type: string}
+        project_id: {type: string, format: uuid}
+        session_id: {type: [string, "null"], format: uuid}
+        rules_version: {type: [string, "null"], description: Absent until a rules version is recorded.}
+        release_node_id: {type: [string, "null"], format: uuid}
+        release_key: {type: [string, "null"]}
+        release_title: {type: [string, "null"]}
+        source: {type: string, enum: [recorded, automatic]}
+        payload: {type: object, additionalProperties: true}
+        actor_principal_id: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        idempotency_key: {type: string}
+    OutcomeRecord:
+      type: object
+      additionalProperties: false
+      required: [kind, ticket, payload]
+      properties:
+        kind: {type: string, enum: [review_verdict, fix_round, ci_result, revert]}
+        ticket: {type: string, description: Ticket node id or issue key}
+        session_id: {type: [string, "null"], format: uuid}
+        rules_version: {type: [string, "null"], maxLength: 128, description: Optional until a rules version is recorded.}
+        payload:
+          type: object
+          additionalProperties: true
+          description: "review_verdict requires verdict ok or changes and may include reviewer_model, route, author_family, round, blocking_count, findings and summary. fix_round requires round. ci_result requires result pass or fail, repo and number (the pull request) and may include name and summary. revert requires summary and may include target."
     Error:
       type: object
       required: [error]
