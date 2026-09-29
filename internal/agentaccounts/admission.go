@@ -72,7 +72,7 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 		return nil, nil, err
 	}
 	blindHarness := a.Harness == "grok" || a.Harness == "cursor" || a.Harness == "pi"
-	block, err := loadVendorBlock(ctx, tx, a)
+	block, err := loadVendorBlock(ctx, tx, a, now)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -299,85 +299,113 @@ func boolInt(v bool) int64 {
 }
 
 type vendorBlock struct {
-	active bool
 	until  *time.Time
 	readAt *time.Time
 	epoch  time.Time
 }
 
 func (b vendorBlock) waiting(now time.Time) bool {
-	return b.active && b.until != nil && b.until.After(now)
+	return b.until != nil && b.until.After(now)
 }
 
 func (b vendorBlock) refreshDue(now time.Time) bool {
-	return b.active && !b.waiting(now)
+	return !b.epoch.IsZero() && !b.waiting(now)
 }
 
-func loadVendorBlock(ctx context.Context, tx pgx.Tx, a Account) (vendorBlock, error) {
-	named, err := readingDenial(ctx, tx, a.ID)
+type denial struct {
+	until time.Time
+	at    time.Time
+}
+
+// effectiveDenial is the sole precedence rule for unresolved vendor stops.
+// Only future deadlines block admission; the latest wins regardless of source
+// or arrival order. Expired stops retain only their latest epoch, so recovery
+// is eligible after every wait ends and keeps its once-per-generation fence.
+func effectiveDenial(now time.Time, named, unnamed []denial) vendorBlock {
+	var block vendorBlock
+	for _, group := range [][]denial{named, unnamed} {
+		for _, d := range group {
+			if d.at.After(block.epoch) {
+				block.epoch = d.at
+			}
+			if d.until.After(now) && (block.until == nil || d.until.After(*block.until) || d.until.Equal(*block.until) && d.at.After(*block.readAt)) {
+				block.until, block.readAt = timePtr(d.until), timePtr(d.at)
+			}
+		}
+	}
+	if block.readAt == nil && !block.epoch.IsZero() {
+		block.readAt = timePtr(block.epoch)
+	}
+	return block
+}
+
+func loadVendorBlock(ctx context.Context, tx pgx.Tx, a Account, now time.Time) (vendorBlock, error) {
+	named, err := readingDenials(ctx, tx, a.ID)
 	if err != nil {
 		return vendorBlock{}, err
 	}
-	unnamed, err := blindDenial(ctx, tx, a.ID)
+	unnamed, err := blindDenials(ctx, tx, a.ID)
 	if err != nil {
 		return vendorBlock{}, err
 	}
 	// Clear each denial on its own epoch before choosing. A recovery that
 	// finishes a named denial must not hide a later stop that names no window:
 	// that stop keeps the one-hour backoff, including across a daemon restart.
-	// A denying reading that is still in force takes precedence.
-	named, err = dropClearedDenial(ctx, tx, a.ID, named)
+	named, err = dropClearedDenials(ctx, tx, a.ID, named)
 	if err != nil {
 		return vendorBlock{}, err
 	}
-	unnamed, err = dropClearedDenial(ctx, tx, a.ID, unnamed)
+	unnamed, err = dropClearedDenials(ctx, tx, a.ID, unnamed)
 	if err != nil {
 		return vendorBlock{}, err
 	}
-	if named.active {
-		return named, nil
-	}
-	return unnamed, nil
+	return effectiveDenial(now, named, unnamed), nil
 }
 
-// dropClearedDenial forgets a denial once a later run has finished without a
-// vendor stop. An inactive block stays inactive.
-func dropClearedDenial(ctx context.Context, tx pgx.Tx, accountID string, block vendorBlock) (vendorBlock, error) {
-	if !block.active {
-		return vendorBlock{}, nil
+// Clear each bucket separately: clearing the one with the latest reset must
+// not hide a newer denial in another bucket.
+func dropClearedDenials(ctx context.Context, tx pgx.Tx, accountID string, denials []denial) ([]denial, error) {
+	remaining := denials[:0]
+	for _, d := range denials {
+		cleared, err := denialClearedByRun(ctx, tx, accountID, d.at)
+		if err != nil {
+			return nil, err
+		}
+		if !cleared {
+			remaining = append(remaining, d)
+		}
 	}
-	cleared, err := denialClearedByRun(ctx, tx, accountID, block.epoch)
-	if err != nil || cleared {
-		return vendorBlock{}, err
-	}
-	return block, nil
+	return remaining, nil
 }
 
-// readingDenial is the denying bucket whose reset is latest. A newer allowance
-// on one bucket does not hide another bucket that still denies.
-func readingDenial(ctx context.Context, tx pgx.Tx, accountID string) (vendorBlock, error) {
-	var resets, readAt time.Time
-	err := tx.QueryRow(ctx, `SELECT resets_at, read_at FROM (
+// readingDenials keeps every denying bucket until clearing and precedence
+// have been evaluated. An allowance on one bucket does not clear another.
+func readingDenials(ctx context.Context, tx pgx.Tx, accountID string) ([]denial, error) {
+	rows, err := tx.Query(ctx, `SELECT resets_at, read_at FROM (
  SELECT DISTINCT ON (window_kind, bucket) window_kind, bucket, resets_at, read_at, ordinary_usage_allowed
  FROM account_capacity_readings
  WHERE account_id=$1 AND source<>'estimate' AND ordinary_usage_allowed IS NOT NULL
  ORDER BY window_kind, bucket, read_at DESC, CASE source WHEN 'harness' THEN 0 ELSE 1 END
 ) latest
  WHERE ordinary_usage_allowed=false
- ORDER BY resets_at DESC, read_at DESC, window_kind, bucket
- LIMIT 1`, accountID).Scan(&resets, &readAt)
-	if isNoRows(err) {
-		return vendorBlock{}, nil
-	}
+ ORDER BY resets_at DESC, read_at DESC, window_kind, bucket`, accountID)
 	if err != nil {
-		return vendorBlock{}, err
+		return nil, err
 	}
-	read := readAt.UTC()
-	until := resets.UTC()
-	return vendorBlock{active: true, until: &until, readAt: &read, epoch: read}, nil
+	defer rows.Close()
+	var denials []denial
+	for rows.Next() {
+		var d denial
+		if err := rows.Scan(&d.until, &d.at); err != nil {
+			return nil, err
+		}
+		d.until, d.at = d.until.UTC(), d.at.UTC()
+		denials = append(denials, d)
+	}
+	return denials, rows.Err()
 }
 
-func blindDenial(ctx context.Context, tx pgx.Tx, accountID string) (vendorBlock, error) {
+func blindDenials(ctx context.Context, tx pgx.Tx, accountID string) ([]denial, error) {
 	var at *time.Time
 	err := tx.QueryRow(ctx, `SELECT max(t.at) FROM run_telemetry t
  JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
@@ -385,11 +413,10 @@ func blindDenial(ctx context.Context, tx pgx.Tx, accountID string) (vendorBlock,
   SELECT 1 FROM account_capacity_readings r WHERE r.account_id=$1 AND r.source<>'estimate'
   AND r.ordinary_usage_allowed=true AND r.read_at>t.at)`, accountID).Scan(&at)
 	if err != nil || at == nil {
-		return vendorBlock{}, err
+		return nil, err
 	}
 	stop := at.UTC()
-	until := stop.Add(vendorStopBackoff)
-	return vendorBlock{active: true, until: &until, readAt: &stop, epoch: stop}, nil
+	return []denial{{until: stop.Add(vendorStopBackoff), at: stop}}, nil
 }
 
 // denialClearedByRun is a run that started after the denial and finished
