@@ -23,7 +23,7 @@ test('the account menu opens Settings on Personal: theme, greeting and keys', as
   const data = await setup(page)
   await page.goto('/')
   await page.getByRole('button', { name: /^Account for / }).click()
-  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'Personal settings' }).click()
   await expect(page).toHaveURL('/settings/personal')
   await expect(page).toHaveTitle(/^Settings · /)
   await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Workspace/, /^Access/, /^Business/, /^Projects/, /^Product portal/])

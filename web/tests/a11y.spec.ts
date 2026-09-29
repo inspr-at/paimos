@@ -75,7 +75,7 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
   ['account menu', signedIn, '/', async page => {
     await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
     await page.getByRole('button', { name: /^Account for/ }).click()
-    await expect(page.getByRole('dialog', { name: 'Account' })).toBeVisible()
+    await expect(page.getByRole('menu', { name: 'Account' })).toBeVisible()
   }],
   ['shortcut sheet', signedIn, '/p/PHAROS', async page => {
     await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(5)

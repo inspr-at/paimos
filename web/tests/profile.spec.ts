@@ -134,7 +134,8 @@ test('a photo: pick it, crop it with the keyboard, see it everywhere', async ({ 
   expect(c.x + c.size).toBeLessThanOrEqual(1000); expect(c.y + c.size).toBeLessThanOrEqual(500)
   await expect(page.locator('.toast').filter({ hasText: 'Your photo is updated.' })).toBeVisible()
   // The picture, versioned by its hash, in the header and on the profile.
-  await expect(page.getByRole('button', { name: /^Account for / }).locator('img')).toHaveAttribute('src', /\/api\/people\/11111111-1111-4111-8111-111111111111\/avatar\/64\?v=/)
+  // The header avatar sits inside a round button (AEON-312): the small picture, the 64 for sharp screens.
+  await expect(page.getByRole('button', { name: /^Account for / }).locator('img')).toHaveAttribute('srcset', /\/api\/people\/11111111-1111-4111-8111-111111111111\/avatar\/64\?v=/)
   await expect(page.getByRole('button', { name: 'Change your photo' }).locator('img')).toBeVisible()
 })
 
@@ -203,7 +204,7 @@ test('the greeting sits above Projects, drawn once with the time zone, and opens
   expect(firstRow.y + firstRow.height).toBeLessThan(800 - 40)
   // Back and forth inside the app: still one draw per page load.
   await page.getByRole('button', { name: /^Account for / }).click()
-  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'Personal settings' }).click()
   await expect(page).toHaveURL('/settings/personal')
   await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Projects' }).click()
   await expect(welcome).toContainText('Good afternoon, Markus')

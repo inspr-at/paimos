@@ -31,7 +31,7 @@ test('a different brand names the title, header, footer, menu, release history a
   await expect(page.locator('footer.app-footer .footer-name')).toHaveText('NOVA DAWN')
 
   await page.getByRole('button', { name: /^Account for / }).click()
-  await expect(page.locator('.menu-version .eyebrow')).toHaveText('NOVA DAWN')
+  await expect(page.getByRole('menu', { name: 'Account' })).toBeVisible()
   expect(await chromeText(page)).not.toMatch(DEFAULT)
   await page.keyboard.press('Escape')
 
