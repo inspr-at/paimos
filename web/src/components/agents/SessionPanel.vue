@@ -22,6 +22,7 @@ import { activityOf, currentStep, type ActivitySession } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 import { attentionReasonText } from '../../lib/agentSignals'
 import EtaCell from '../work/EtaCell.vue'
+import DeliveryRating from '../work/DeliveryRating.vue'
 import { etaFromSession } from '../../lib/eta'
 
 // One session in the docked panel: who and where, the bound ticket, recent runs with
@@ -197,6 +198,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <ol v-if="timeline.length" class="activity-timeline" aria-label="Recent activity">
           <li v-for="(item, index) in timeline.slice(0, 6)" :key="`${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ item.note }}</span></li>
         </ol>
+        <DeliveryRating v-if="s" :session-id="s.id" />
       </section>
 
       <section class="block first" aria-labelledby="setup-title">

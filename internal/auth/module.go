@@ -327,6 +327,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "stage.<op>", true
 		}
 	case "nodes":
+		// A person rates a delivery. An agent key must not inherit nodes.read here.
+		if len(parts) == 3 && parts[2] == "delivery-ratings" {
+			return "", false
+		}
 		if len(parts) > 2 && parts[2] == "time-totals" && read {
 			return "hours.read", true
 		}
@@ -426,6 +430,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			}
 		}
 	case "harness-sessions":
+		if len(parts) >= 3 && parts[2] == "delivery-rating" {
+			return "", false
+		}
 		return harnessScope(parts[1:], read), true
 	case "agent-pairing":
 		if r.Method == "GET" && r.URL.Path == "/api/agent-pairing/self" || r.Method == "POST" && r.URL.Path == "/api/agent-pairing/self/disconnect" {

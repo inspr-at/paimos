@@ -16,7 +16,7 @@ func TestSessionSelectReadsUsageRowsOnly(t *testing.T) {
 			t.Fatalf("query reads %s: %s", forbidden, query)
 		}
 	}
-	for _, need := range []string{"u.model", "u.cached_input_tokens", "u.estimated_cost_usd", "u.billing_mode", "u.subscription_label", "s.created_at"} {
+	for _, need := range []string{"u.model", "u.cached_input_tokens", "u.estimated_cost_usd", "u.billing_mode", "u.subscription_label", "s.created_at", "s.harness"} {
 		if !strings.Contains(query, need) {
 			t.Fatalf("query missing %s", need)
 		}
@@ -54,7 +54,7 @@ func TestAggregateCountsASessionOnceAcrossModels(t *testing.T) {
 		{id: "s1", projectID: "p", projectKey: "P", projectTitle: "Proj", ticketID: &ticket, ticketKey: &key, ticketTitle: &title, created: at, reported: true, model: &beta, input: i64p(7), output: i64p(2), cost: &second, provisional: true, billingMode: &api},
 		{id: "s2", projectID: "p", projectKey: "P", projectTitle: "Proj", created: at.Add(time.Hour)},
 	}
-	total, _, models, subs, trend, tickets, unknown, err := aggregate(rows)
+	total, _, models, harnesses, subs, trend, tickets, unknown, err := aggregate(rows)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +72,9 @@ func TestAggregateCountsASessionOnceAcrossModels(t *testing.T) {
 	}
 	if len(models) != 3 || models[0].Label != "alpha" || models[0].Sessions != 1 || models[1].Sessions != 1 || models[2].Label != "Unreported" {
 		t.Fatalf("models %+v", models)
+	}
+	if len(harnesses) != 1 || harnesses[0].Label != "Unreported" || harnesses[0].Sessions != 2 {
+		t.Fatalf("harness %+v", harnesses)
 	}
 	planGroup := findLabel(subs, "Plan")
 	apiGroup := findLabel(subs, "API")

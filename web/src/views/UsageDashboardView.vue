@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import { loadUsageDashboard } from '../lib/usageDashboard'
 import UsageTrendChart from '../components/usage/UsageTrendChart.vue'
+import { formatRating } from '../lib/deliveryRating'
 import { billingLabel, compactCount, costStateLabel, formatAllowanceAmount, formatCount, formatTokens, formatUSD, formatWhen, paceLabel, rangeBounds, unitLabel, type AllowanceWindow, type CostState, type UsageDashboard, type UsageGroup, type UsageTicket } from '../lib/usageFormat'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
@@ -119,17 +120,49 @@ const gaps = computed(() => {
   return parts.length ? `Totals are incomplete: ${parts.join(', ')}.` : 'Totals are incomplete.'
 })
 
-type GroupBy = 'project' | 'model' | 'subscription'
+type GroupBy = 'project' | 'model' | 'harness' | 'subscription'
 const groupBy = ref<GroupBy>('project')
 const groupOptions: { id: GroupBy; label: string }[] = [
   { id: 'project', label: 'Project' },
   { id: 'model', label: 'Model' },
+  { id: 'harness', label: 'Harness' },
   { id: 'subscription', label: 'Subscription' },
 ]
 const groupRows = computed(() => {
   const data = visible.value
   if (!data) return []
-  return groupBy.value === 'project' ? data.by_project : groupBy.value === 'model' ? data.by_model : data.by_subscription
+  if (groupBy.value === 'project') return data.by_project
+  if (groupBy.value === 'model') return data.by_model
+  if (groupBy.value === 'harness') return data.by_harness ?? []
+  return data.by_subscription
+})
+function harnessName(value: string) {
+  if (!value || value === 'Unreported') return value || 'Unreported'
+  return value.slice(0, 1).toUpperCase() + value.slice(1)
+}
+function groupLabel(group: UsageGroup) {
+  return groupBy.value === 'harness' ? harnessName(group.label) : group.label
+}
+const ratingGroups = computed(() => {
+  const ratings = visible.value?.ratings
+  if (!ratings || (groupBy.value !== 'model' && groupBy.value !== 'harness')) return []
+  return groupBy.value === 'model' ? ratings.by_model ?? [] : ratings.by_harness ?? []
+})
+const showRating = computed(() => groupRows.value.some(row => ratingGroups.value.some(item => item.label === row.label && item.votes > 0)))
+function ratingText(label: string) {
+  const found = ratingGroups.value.find(item => item.label === label && item.votes > 0)
+  return found ? formatRating(found.average) : ''
+}
+const ratingFact = computed(() => {
+  const ratings = visible.value?.ratings
+  if (!ratings || ratings.votes < 1) return null
+  const value = formatRating(ratings.average)
+  if (!value) return null
+  const lines = [
+    ...(ratings.by_model ?? []).map(item => `${item.label} ${formatRating(item.average)}`),
+    ...(ratings.by_harness ?? []).map(item => `${harnessName(item.label)} ${formatRating(item.average)}`),
+  ].filter(line => !line.endsWith(' '))
+  return { value, detail: plural(ratings.votes, 'vote', 'votes'), tip: lines.join(' · ') }
 })
 
 function amount(value: number | null, window: AllowanceWindow) {
@@ -218,6 +251,13 @@ const rankingNote = 'Ranked by the known list estimate of sessions that started 
               <span v-if="coverage(visible.totals, item[0])" class="coverage" aria-hidden="true">{{ coverage(visible.totals, item[0]) }} reports</span>
             </dd>
           </div>
+          <div v-if="ratingFact">
+            <dt>Rating</dt>
+            <dd :data-tip="ratingFact.tip || undefined">
+              {{ ratingFact.value }}
+              <span class="coverage">{{ ratingFact.detail }}</span>
+            </dd>
+          </div>
         </dl>
         <p v-if="gaps" class="gaps"><AppIcon name="info" :size="14" />{{ gaps }}</p>
       </section>
@@ -242,11 +282,11 @@ const rankingNote = 'Ranked by the known list estimate of sessions that started 
           <p v-if="!groupRows.length" class="empty">Nothing in this range.</p>
           <table v-else class="grid">
             <caption class="sr-only">By {{ groupBy }}</caption>
-            <thead><tr><th>{{ groupOptions.find(option => option.id === groupBy)?.label }}</th><th class="r">Sessions</th><th class="r opt">Input</th><th class="r">List estimate</th></tr></thead>
+            <thead><tr><th>{{ groupOptions.find(option => option.id === groupBy)?.label }}</th><th class="r">Sessions</th><th class="r opt">Input</th><th class="r cost">List estimate</th><th v-if="showRating" class="r rating">Rating</th></tr></thead>
             <tbody>
               <tr v-for="group in groupRows" :key="group.label + (group.key ?? '')">
                 <td class="name">
-                  <span class="ellipsis" :title="group.label">{{ group.label }}</span>
+                  <span class="ellipsis" :title="groupLabel(group)">{{ groupLabel(group) }}</span>
                   <span v-if="groupBy === 'subscription' && group.billing_mode" class="sub">{{ billingLabel[group.billing_mode] }}</span>
                 </td>
                 <td class="r num">{{ formatCount(group.sessions) }}</td>
@@ -259,6 +299,7 @@ const rankingNote = 'Ranked by the known list estimate of sessions that started 
                   <span v-else class="unknown"><span aria-hidden="true">–</span><span class="sr-only">Unknown</span></span>
                   <span v-if="stateNote(group.cost_state)" class="state">{{ stateNote(group.cost_state) }}</span>
                 </td>
+                <td v-if="showRating" class="r num rating">{{ ratingText(group.label) }}</td>
               </tr>
             </tbody>
           </table>
@@ -366,6 +407,8 @@ const rankingNote = 'Ranked by the known list estimate of sessions that started 
 .grid th:nth-child(2) { width: 76px; }
 .grid th:nth-child(3) { width: 72px; }
 .grid th:last-child { width: 128px; }
+.grid th.cost { width: 128px; }
+.grid th.rating { width: 64px; }
 .grid td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .grid tr:last-child td { border-bottom: 0; }
 .grid tbody tr:hover td { background: var(--row-hover); }
@@ -426,5 +469,7 @@ const rankingNote = 'Ranked by the known list estimate of sessions that started 
   .window-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
   .grid th:nth-child(2) { width: 64px; }
   .grid th:last-child { width: 108px; }
+  .grid th.cost { width: 108px; }
+  .grid th.rating { width: 52px; }
 }
 </style>

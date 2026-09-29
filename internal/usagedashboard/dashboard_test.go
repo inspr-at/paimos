@@ -420,6 +420,63 @@ func TestDashboardMissingUsageIsAnError(t *testing.T) {
 	}
 }
 
+func TestDashboardRatesByVoteSnapshot(t *testing.T) {
+	w := newWorld(t)
+	project := w.project(t, w.home, "VIS-1", "Visible project")
+	ticket := w.ticket(t, w.home, project, "VIS-2", "Known ticket")
+	at := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	sessionID := w.session(t, w.home, project, &ticket, at, "session-model-decoy", nil, []modelUsage{
+		{model: "gpt-4.1", in: i64(10), out: i64(2), cached: i64(0), cost: str("1.000000000000"), billing: "api"},
+	}, 1)
+	for i, voter := range []tenant.Principal{w.home, w.member} {
+		score := 5 - i
+		w.tx(t, w.home, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `INSERT INTO agent_delivery_votes
+				(tenant_id, session_id, ticket_node_id, voter_principal_id, score, tags, comment, harness, model)
+				VALUES ($1,$2,$3,$4,$5,'{}','','codex','vote-model')`, w.home.TenantID, sessionID, ticket, voter.ID, score)
+			return err
+		})
+	}
+	code, page, body := w.get(t, w.home, "/api/usage/dashboard?from=2026-09-10T00:00:00Z&to=2026-09-11T00:00:00Z")
+	if code != 200 {
+		t.Fatalf("status %d %s", code, body)
+	}
+	if page.Totals.Sessions != 1 || usd(t, page.Totals.EstimatedCostUSD) != "1.000000000000" {
+		t.Fatalf("usage totals changed %+v", page.Totals)
+	}
+	if got := group(t, page.ByModel, "gpt-4.1"); got.Sessions != 1 {
+		t.Fatalf("priced model %+v", got)
+	}
+	if got := group(t, page.ByHarness, "codex"); got.Sessions != 1 {
+		t.Fatalf("harness usage %+v", page.ByHarness)
+	}
+	if page.Ratings.Votes != 2 || page.Ratings.Average == nil || *page.Ratings.Average != "4.50" {
+		t.Fatalf("ratings %+v", page.Ratings)
+	}
+	if len(page.Ratings.ByModel) != 1 || page.Ratings.ByModel[0].Label != "vote-model" || page.Ratings.ByModel[0].Votes != 2 || page.Ratings.ByModel[0].Average == nil || *page.Ratings.ByModel[0].Average != "4.50" {
+		t.Fatalf("rating models %+v", page.Ratings.ByModel)
+	}
+	if len(page.Ratings.ByHarness) != 1 || page.Ratings.ByHarness[0].Label != "codex" || page.Ratings.ByHarness[0].Votes != 2 {
+		t.Fatalf("rating harness %+v", page.Ratings.ByHarness)
+	}
+	if strings.Contains(body, "session-model-decoy") {
+		t.Fatalf("dashboard grouped the session model instead of the vote snapshot: %s", body)
+	}
+}
+
+func TestDashboardMissingVotesStayEmpty(t *testing.T) {
+	w := newWorld(t)
+	if _, err := w.db.App.Exec(t.Context(), `DROP TABLE agent_delivery_votes`); err != nil {
+		t.Fatal(err)
+	}
+	project := w.project(t, w.home, "VIS-1", "Visible project")
+	w.session(t, w.home, project, nil, time.Date(2026, 9, 10, 8, 0, 0, 0, time.UTC), "session-model-decoy", nil, nil, 1)
+	code, page, body := w.get(t, w.home, "/api/usage/dashboard?from=2026-09-10&to=2026-09-11")
+	if code != 200 || page.Totals.Sessions != 1 || page.Ratings.Votes != 0 || page.Ratings.Average != nil || page.Ratings.ByModel == nil || page.Ratings.ByHarness == nil {
+		t.Fatalf("missing votes %d %+v %s", code, page.Ratings, body)
+	}
+}
+
 func TestDashboardRejectsBadRange(t *testing.T) {
 	w := newWorld(t)
 	for _, raw := range []string{

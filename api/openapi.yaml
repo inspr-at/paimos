@@ -2919,6 +2919,10 @@ paths:
         A provisional window, including mixed settled evidence, returns null used, headroom and hard remaining.
         Declared allowance, explicit reservations and the pace-cap schedule stay numbers. Null is unknown, not zero.
         Project visibility follows harness sessions. The most expensive tickets are a ranking, not a session list.
+        by_harness groups the same usage rows by session harness. ratings are person votes on the
+        sessions in this read, grouped by the model and harness stored with each vote, not by the
+        priced usage row. average is a decimal string; null means nobody voted. Token and list-price
+        totals are unchanged. A missing vote table leaves ratings empty rather than failing the read.
       parameters:
         - {name: from, in: query, schema: {type: string}, description: RFC3339 or YYYY-MM-DD. Both from and to, or neither (then the last 30 UTC days).}
         - {name: to, in: query, schema: {type: string}, description: Exclusive end. Span at most 366 days.}
@@ -2930,7 +2934,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [from, to, generated_at, attribution, trend_basis, list_price_currency, truncated, totals, by_project, by_model, by_subscription, trend, tickets, tickets_cost_unknown, allowance]
+                required: [from, to, generated_at, attribution, trend_basis, list_price_currency, truncated, totals, by_project, by_model, by_harness, by_subscription, trend, tickets, tickets_cost_unknown, allowance, ratings]
                 properties:
                   from: {type: string, format: date-time}
                   to: {type: string, format: date-time}
@@ -2942,11 +2946,13 @@ paths:
                   totals: {$ref: '#/components/schemas/UsageGroup'}
                   by_project: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
                   by_model: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
+                  by_harness: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
                   by_subscription: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
                   trend: {type: array, items: {$ref: '#/components/schemas/UsageTrend'}}
                   tickets: {type: array, maxItems: 12, items: {$ref: '#/components/schemas/UsageTicket'}}
                   tickets_cost_unknown: {type: integer, minimum: 0, description: Visible tickets whose list estimate is entirely unknown. They are not ranked.}
                   allowance: {$ref: '#/components/schemas/UsageAllowance'}
+                  ratings: {$ref: '#/components/schemas/DeliveryRatingSummary'}
         '400': {description: Invalid range or project}
         '401': {description: Authentication required}
         '403': {description: Permission denied}
@@ -4767,6 +4773,63 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/delivery-ratings:
+    get:
+      operationId: listDeliveryRatings
+      summary: Person ratings and objective signals for sessions on a ticket, epic or task
+      description: >
+        Person session only. One row per visible session whose ticket is this node
+        or a visible descendant, newest first, at most 80. mine is the caller's vote.
+        votes and average cover every person's vote on that session. average is null
+        when nobody has voted and is a two-decimal string, never a JSON number.
+        Signals count review rounds, CI failures and reverts from ticket events when
+        those events exist. Zero means none were recorded. An event that names a
+        session counts only for that session. An event that names none counts only
+        while the session was running.
+      security: [{session: []}]
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Ratings, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRatingPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /harness-sessions/{sessionId}/delivery-rating:
+    parameters:
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getDeliveryRating
+      summary: The caller's rating, the session average and objective signals
+      description: Person session only. 404 when the session or its ticket is not visible. 409 when the session has no ticket. harness, model and account_label are the session's current metadata.
+      security: [{session: []}]
+      responses:
+        '200': {description: Rating, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRating'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: saveDeliveryRating
+      summary: Create or replace the caller's rating of this session
+      description: >
+        Person session only. One vote per person per session. A later save replaces
+        score, tags and comment and refreshes the stored model, harness and account
+        from the session. Tags are quality, rework and taste.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeliveryVoteWrite'}
+      responses:
+        '200': {description: Rating, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRating'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /nodes/{nodeId}/time-totals:
     get:
       operationId: getNodeTimeTotals
@@ -7064,6 +7127,65 @@ components:
         unknown_cost_sessions: {type: integer, minimum: 0}
         unknown_token_models: {type: integer, minimum: 0}
         unknown_cost_models: {type: integer, minimum: 0}
+    DeliveryRatingPage:
+      type: object
+      required: [node_id, sessions]
+      properties:
+        node_id: {type: string, format: uuid}
+        sessions: {type: array, maxItems: 80, items: {$ref: '#/components/schemas/DeliveryRating'}}
+    DeliveryRating:
+      type: object
+      description: One visible session. harness, model and account_label are current session metadata. The usage aggregate groups the snapshot stored with each vote.
+      required: [session_id, ticket_node_id, harness, model, account_label, mine, votes, average, signals]
+      properties:
+        session_id: {type: string, format: uuid}
+        ticket_node_id: {type: string, format: uuid}
+        harness: {type: string}
+        model: {type: [string, 'null']}
+        account_label: {type: [string, 'null']}
+        mine: {oneOf: [{$ref: '#/components/schemas/DeliveryVote'}, {type: 'null'}]}
+        votes: {type: integer, minimum: 0}
+        average: {type: [string, 'null'], pattern: '^(?:[1-4]\.[0-9]{2}|5\.00)$', description: Mean of scores from 1 to 5, two decimal places, half up. Null when nobody has voted. Never a JSON number.}
+        signals: {$ref: '#/components/schemas/DeliverySignals'}
+    DeliveryVote:
+      type: object
+      required: [score, tags, comment, updated_at]
+      properties:
+        score: {type: integer, minimum: 1, maximum: 5}
+        tags: {type: array, maxItems: 3, uniqueItems: true, items: {type: string, enum: [quality, rework, taste]}}
+        comment: {type: string, maxLength: 2000}
+        updated_at: {type: string, format: date-time}
+    DeliveryVoteWrite:
+      type: object
+      additionalProperties: false
+      required: [score, tags, comment]
+      properties:
+        score: {type: integer, minimum: 1, maximum: 5}
+        tags: {type: array, maxItems: 3, uniqueItems: true, items: {type: string, enum: [quality, rework, taste]}}
+        comment: {type: string, maxLength: 2000}
+    DeliverySignals:
+      type: object
+      description: Counts from ticket events. Zero means none of that kind were recorded.
+      required: [review_rounds, ci_failures, reverts]
+      properties:
+        review_rounds: {type: integer, minimum: 0, description: Distinct rounds of review.verdict, review.round, gate.finding or gate.verdict.}
+        ci_failures: {type: integer, minimum: 0, description: Events of type ci.failed, ci.failure or check.failed.}
+        reverts: {type: integer, minimum: 0, description: Undone events, or change.reverted, node.reverted or delivery.reverted. A delivery.rated event is not a signal.}
+    DeliveryRatingSummary:
+      type: object
+      required: [votes, average, by_model, by_harness]
+      properties:
+        votes: {type: integer, minimum: 0}
+        average: {type: [string, 'null'], pattern: '^(?:[1-4]\.[0-9]{2}|5\.00)$'}
+        by_model: {type: array, items: {$ref: '#/components/schemas/DeliveryRatingGroup'}}
+        by_harness: {type: array, items: {$ref: '#/components/schemas/DeliveryRatingGroup'}}
+    DeliveryRatingGroup:
+      type: object
+      required: [label, votes, average]
+      properties:
+        label: {type: string}
+        votes: {type: integer, minimum: 1}
+        average: {type: string, pattern: '^(?:[1-4]\.[0-9]{2}|5\.00)$'}
     NonNegativeIntString:
       type: [string, 'null']
       pattern: '^(0|[1-9][0-9]{0,18})$'
