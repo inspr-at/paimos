@@ -269,6 +269,7 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   await expect(details.locator('.metric')).toHaveText([/Running/, /184k/, /22k/, /\$3\.84/])
   await expect(details.locator('.run-row .run-chip')).toHaveText(['Running', 'Completed', 'Failed'])
   await expect(details.locator('.callout')).toHaveCount(0) // Principal-only approval stays in Needs you, not on this session.
+  await details.getByRole('tab', { name: /Messages/ }).click()
   await expect(details.locator('.msg')).toHaveCount(4)
   await expect(details.locator('.msg.mine')).toHaveCount(2)
   await expect(details.locator('.msg').last()).toContainText('Awaiting reply')
