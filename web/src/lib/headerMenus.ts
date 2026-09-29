@@ -6,14 +6,26 @@
 export type SystemState = 'checking' | 'healthy' | 'degraded' | 'down'
 export interface SystemProbe { health: { status?: string; db?: string } | null; ready: boolean | null }
 export interface SystemSummary { state: SystemState; label: string; detail: string }
-// Unreachable, a database that is down, or a server that is not ready each say so
-// in words; colour only repeats it.
+// Operational only once the server is up, its database answers and readiness is
+// confirmed; anything unconfirmed says so in words (colour only repeats it).
 export function summarizeStatus(probe: SystemProbe | null): SystemSummary {
   if (!probe) return { state: 'checking', label: 'Checking…', detail: '' }
   if (!probe.health) return { state: 'down', label: 'Unreachable', detail: 'The server did not answer.' }
-  if (probe.health.db && probe.health.db !== 'ok') return { state: 'degraded', label: 'Degraded', detail: 'The database is not answering.' }
-  if (probe.ready === false) return { state: 'degraded', label: 'Degraded', detail: 'The server is not ready for requests.' }
+  if (probe.health.db !== 'ok' || probe.health.status !== 'ok') return { state: 'degraded', label: 'Degraded', detail: 'The database is not answering.' }
+  if (probe.ready === null) return { state: 'degraded', label: 'Unavailable', detail: 'Readiness could not be checked.' }
+  if (!probe.ready) return { state: 'degraded', label: 'Degraded', detail: 'The server is not ready for requests.' }
   return { state: 'healthy', label: 'Operational', detail: '' }
+}
+
+// ---------- Agent inbox hooks: messages reach an agent at every turn ----------
+export const HOOK_COMMANDS = [
+  { harness: 'Claude Code', command: 'aeon hook install --harness claude --scope user' },
+  { harness: 'Codex', command: 'aeon hook install --harness codex --scope user' },
+] as const
+export const HOOK_DOCS_ANCHOR = 'operator-installed-turn-boundary-hooks-aeon-281'
+export function hookDocsUrl(repository: string | null | undefined): string {
+  const repo = repository && /^[\w.-]+\/[\w.-]+$/.test(repository) ? repository : 'inspr-at/paimos'
+  return `https://github.com/${repo}/blob/main/docs/AGENT_INTEGRATION.md#${HOOK_DOCS_ANCHOR}`
 }
 
 // ---------- Feedback: one inbox message to the workspace owner ----------

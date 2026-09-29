@@ -3,13 +3,13 @@
 // The gear menu is about the app and the workspace (AEON-312): workspace settings
 // for admins, connecting agents, the release history and shortcuts, help and
 // feedback, and whether the system is well. The avatar beside it is about me.
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../../lib/api'
 import { can, myWorkspaceRole } from '../../lib/authz'
 import { run } from '../../lib/commands'
 import { feedbackRecipient, sendFeedback, type FeedbackRecipient } from '../../lib/feedback'
-import { FEEDBACK_MAX, feedbackBody, summarizeStatus, type SystemProbe } from '../../lib/headerMenus'
+import { FEEDBACK_MAX, HOOK_COMMANDS, feedbackBody, hookDocsUrl, summarizeStatus, type SystemProbe } from '../../lib/headerMenus'
 import { displayHeadline, hasUsableNotes, localizedNote } from '../../lib/releases'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import { useReleases } from '../../stores/releases'
@@ -26,7 +26,8 @@ const version = useVersion()
 const route = useRoute()
 const router = useRouter()
 const menu = ref<InstanceType<typeof HeaderMenu>>()
-const pane = ref<'menu' | 'help'>('menu')
+const pane = ref<'menu' | 'help' | 'hooks'>('menu')
+const PANES = { help: 'Help and feedback', hooks: 'Agent inbox hooks' } as const
 
 // Who sees what: Workspace settings for admins, keys for whoever manages them,
 // connecting a computer for people of the workspace (not guests).
@@ -36,30 +37,58 @@ const connect = computed(() => session.identity?.principal.kind !== 'agent' && !
 const canFeedback = computed(() => can('inbox.send'))
 const newCount = computed(() => releases.newCount)
 
-// ---------- System status: read each time the menu opens ----------
+// ---------- System status: read fresh on every open and every re-check ----------
+// Health, readiness and the running version come straight from the server (never
+// a cached answer), and the deploy time is re-read with the release history, so
+// a deploy since the page loaded shows at once.
 const probe = ref<SystemProbe | null>(null)
+const serverVersion = ref('')
 let probing = 0
 async function check() {
   const turn = ++probing
   probe.value = null
+  now.value = Date.now()
   const health = api('/health').then(r => r.ok ? r.json() as Promise<SystemProbe['health']> : { status: 'error', db: 'down' }).catch(() => null)
   const ready = api('/ready').then(r => r.ok).catch(() => null)
+  const running = api('/version').then(r => r.ok ? r.json() as Promise<{ version?: unknown }> : null).then(body => typeof body?.version === 'string' ? body.version : '').catch(() => '')
+  void releases.load(true)
   const answer = { health: await health, ready: await ready }
-  if (turn === probing) probe.value = answer
+  const at = await running
+  if (turn !== probing) return
+  probe.value = answer
+  serverVersion.value = at
 }
 const status = computed(() => summarizeStatus(probe.value))
-const running = computed(() => version.value?.version ?? '')
+const running = computed(() => serverVersion.value || version.value?.version || '')
 const liveSince = computed(() => releases.history?.live_since ?? '')
-const deployed = computed(() => liveSince.value ? `deployed ${relativeTime(liveSince.value, { long: true })}` : '')
+// The elapsed time ticks while the menu is open.
+const now = ref(Date.now())
+let ticker: ReturnType<typeof setInterval> | undefined
+const deployed = computed(() => liveSince.value ? `deployed ${relativeTime(liveSince.value, { long: true, now: now.value })}` : '')
 // The row itself says it short; its name and tip say it in full.
-const deployedShort = computed(() => liveSince.value ? `deployed ${relativeTime(liveSince.value)}` : '')
+const deployedShort = computed(() => liveSince.value ? `deployed ${relativeTime(liveSince.value, { now: now.value })}` : '')
 const statusName = computed(() => ['System status', status.value.label, status.value.detail, running.value && `version ${running.value}`, deployed.value].filter(Boolean).join(', '))
 
 function opened() {
   pane.value = 'menu'
-  void version.load()
-  void releases.load()
   void check()
+  clearInterval(ticker)
+  ticker = setInterval(() => { now.value = Date.now() }, 15_000)
+}
+function closed() { clearInterval(ticker); ticker = undefined; copied.value = '' }
+onBeforeUnmount(() => clearInterval(ticker))
+
+// ---------- Agent inbox hooks ----------
+const docsUrl = computed(() => hookDocsUrl(releases.history?.repository))
+const copied = ref('')
+function openHooks() {
+  pane.value = 'hooks'
+  copied.value = ''
+  void menu.value?.focusFirst('.pane-back')
+}
+async function copyCommand(command: string, harness: string) {
+  try { await navigator.clipboard.writeText(command); copied.value = `${harness} command copied` }
+  catch { copied.value = 'Copying is not available here; select the command instead.' }
 }
 
 // ---------- Actions ----------
@@ -97,8 +126,9 @@ async function openHelp() {
   }
 }
 function backToMenu() {
+  const from = pane.value
   pane.value = 'menu'
-  void menu.value?.focusFirst('[data-help-item]')
+  void menu.value?.focusFirst(from === 'hooks' ? '[data-hooks-item]' : '[data-help-item]')
 }
 async function send() {
   const text = draft.value.trim()
@@ -123,16 +153,25 @@ function edited() { sendKey = ''; sent.value = '' }
 
 <template>
   <HeaderMenu
-    v-if="session.identity" id="app-menu" ref="menu" :role="pane === 'help' ? 'dialog' : 'menu'" :label="pane === 'help' ? 'Help and feedback' : 'App and workspace'"
-    trigger-label="App and workspace" tip="Settings and help" class="app-menu" @open="opened"
+    v-if="session.identity" id="app-menu" ref="menu" :role="pane === 'menu' ? 'menu' : 'dialog'" :label="pane === 'menu' ? 'App and workspace' : PANES[pane]"
+    trigger-label="App and workspace" tip="Settings and help" class="app-menu" @open="opened" @close="closed"
   >
     <template #trigger><AppIcon name="gear" /></template>
 
     <template v-if="pane === 'menu'">
-      <template v-if="admin || connect || keys">
-        <button v-if="admin" class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/settings/workspace')"><AppIcon name="gear" /><span class="hm-text">Workspace settings</span></button>
-        <button v-if="connect" class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/agents/register-agent')"><AppIcon name="monitor" /><span class="hm-text">Connect a computer</span></button>
-        <button v-if="keys" class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/settings/access/agents')"><AppIcon name="key" /><span class="hm-text">Agent keys</span></button>
+      <template v-if="admin">
+        <button class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/settings/workspace')"><AppIcon name="gear" /><span class="hm-text">Workspace settings</span></button>
+        <hr class="hm-sep" role="separator" />
+      </template>
+      <template v-if="connect || keys">
+        <div role="group" aria-labelledby="app-menu-agents">
+          <p id="app-menu-agents" class="eyebrow hm-label">Agents</p>
+          <button v-if="connect" class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/agents/register-agent')"><AppIcon name="monitor" /><span class="hm-text">Connect a computer</span></button>
+          <button v-if="keys" class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/settings/access/agents')"><AppIcon name="key" /><span class="hm-text">Agent keys</span></button>
+          <button class="hm-item" type="button" role="menuitem" tabindex="-1" aria-haspopup="dialog" data-hooks-item @click="openHooks">
+            <AppIcon name="terminal" /><span class="hm-text">Inbox hooks</span><span class="hm-end" aria-hidden="true"><AppIcon name="chevron-right" :size="14" /></span>
+          </button>
+        </div>
         <hr class="hm-sep" role="separator" />
       </template>
       <button class="hm-item" type="button" role="menuitem" tabindex="-1" @click="showReleases()">
@@ -159,6 +198,23 @@ function edited() { sendKey = ''; sent.value = '' }
         </span>
       </button>
     </template>
+
+    <div v-else-if="pane === 'hooks'" class="help-pane hooks-pane">
+      <div class="pane-head">
+        <button class="icon-btn flat pane-back" type="button" aria-label="Back to the menu" @click="backToMenu"><AppIcon name="chevron-left" /></button>
+        <h2 class="pane-title">Agent inbox hooks</h2>
+      </div>
+      <p class="pane-lead">Messages reach your agent at every turn, with no watcher running. Run once on the agent’s computer, then restart the agent.</p>
+      <div v-for="hook in HOOK_COMMANDS" :key="hook.harness" class="hook">
+        <span class="eyebrow">{{ hook.harness }}</span>
+        <div class="hook-line">
+          <code class="hook-command">{{ hook.command }}</code>
+          <button class="icon-btn flat hook-copy" type="button" :aria-label="`Copy the ${hook.harness} command`" data-tip="Copy" @click="copyCommand(hook.command, hook.harness)"><AppIcon name="copy" :size="15" /></button>
+        </div>
+      </div>
+      <p class="copied" role="status">{{ copied }}</p>
+      <a class="btn sm ghost docs-link" :href="docsUrl" target="_blank" rel="noopener noreferrer">Setup guide<AppIcon name="external" :size="14" /></a>
+    </div>
 
     <div v-else class="help-pane">
       <div class="pane-head">
@@ -251,7 +307,17 @@ function edited() { sendKey = ''; sent.value = '' }
 .to { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sent { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ok); }
 .error { font-size: 12.5px; color: var(--danger); }
+/* Inbox hooks: the one command per harness, copyable. */
+.pane-lead { padding: 0 10px 4px; font-size: 13px; line-height: 1.45; color: var(--ink-2); }
+.hook { display: grid; gap: 4px; padding: 4px 10px; }
+.hook .eyebrow { margin: 0; }
+.hook-line { display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 10px; border-radius: 8px; background: var(--code-bg); box-shadow: inset 0 0 0 1px var(--line); }
+.hook-command { flex: 1; min-width: 0; font: 500 12px/1.5 var(--mono); color: var(--ink); overflow-wrap: anywhere; font-variant-ligatures: none; }
+.hook-copy { width: 32px; height: 32px; flex-shrink: 0; }
+.copied { min-height: 18px; padding: 0 10px; font-size: 12px; color: var(--ok); }
+.docs-link { justify-self: start; gap: 6px; margin: 0 2px 4px; color: var(--teal-ink); }
 @media (max-width: 600px), (pointer: coarse) {
+  .hook-copy, .docs-link { min-width: 44px; min-height: 44px; }
   .pane-back { width: 44px; height: 44px; }
   .news-open, .feedback-foot .btn { min-height: 44px; }
   .feedback-text { font-size: 16px; }

@@ -259,7 +259,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', shortcut); window.
 @media (max-width: 1100px) { .search-pill { width: 200px; } }
 @media (max-width: 900px) { .search-pill { width: 180px; } }
 @media (max-width: 600px) {
-  .app-header { gap: 6px; padding: 0 12px; }
+  .app-header { gap: 4px; padding: 0 10px; }
   .lockup { min-height: 44px; min-width: 44px; justify-content: center; }
   /* Signed in, the Projects place is home and the footer carries the name: the lockup steps aside for the places. */
   .app-header:has(.places) .lockup { display: none; }
@@ -284,7 +284,12 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', shortcut); window.
   .search-pill { width: 44px; height: 44px; padding: 0; justify-content: center; }
   .pill-text, .pill-keys { display: none; }
   .app-header :deep(.header-btn) { width: 44px; height: 44px; }
-  /* The theme lives in the account menu on phones. */
-  .theme-btn { display: none; }
+}
+/* The narrowest phones with all three places: the moon gives its room to the
+   breadcrumb (a ticket key stays whole) and becomes the first row of the avatar
+   sheet instead (AEON-312). With two places it stays in the header. */
+@media (max-width: 430px) {
+  .app-header:has(.places > .place:nth-child(3)) { gap: 2px; padding: 0 8px; }
+  .app-header:has(.places > .place:nth-child(3)) .theme-btn { display: none; }
 }
 </style>

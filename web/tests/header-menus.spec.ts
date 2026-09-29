@@ -10,13 +10,16 @@ import { expect, test, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { mockGuestPermissions } from './authz-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
+import { businessData, mockBusiness } from './business-fixtures'
+import { mockSettings, settingsData } from './settings-fixtures'
 
 type Role = 'admin' | 'member' | 'guest'
-interface World { sent: Record<string, unknown>[]; ready: number; owner: boolean }
+interface World { sent: Record<string, unknown>[]; ready: number | 'fail'; owner: boolean; business: boolean }
 
-async function signIn(page: Page, role: Role, world: Partial<World> = {}) {
-  const state: World = { sent: [], ready: 200, owner: false, ...world }
+async function signIn(page: Page, role: Role, world: Partial<World> = {}): Promise<World & { history: ReturnType<typeof releaseHistory>; releaseState: { server: string } }> {
+  const state: World = { sent: [], ready: 200, owner: false, business: false, ...world }
   await mockWork(page, fixtures(), role === 'admin' ? { admin: true } : role === 'guest' ? { readOnly: true } : {})
+  if (state.business) { await mockBusiness(page, businessData()); await mockSettings(page, settingsData()) }
   if (role === 'guest') {
     await page.route('**/api/me/permissions*', route => route.fulfill({ json: mockGuestPermissions(new URL(route.request().url()).searchParams.get('project_id') ?? undefined, ['p-pharos']) }))
     await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: 'person', roles: [] }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
@@ -32,9 +35,10 @@ async function signIn(page: Page, role: Role, world: Partial<World> = {}) {
       ],
     },
   })
-  await mockReleases(page, history)
+  const releaseState = await mockReleases(page, history)
+  Object.assign(state, { history, releaseState })
   await page.route('**/api/health', route => route.fulfill({ json: { status: 'ok', db: 'ok' } }))
-  await page.route('**/api/ready', route => route.fulfill({ status: state.ready, json: { status: state.ready === 200 ? 'ready' : 'unavailable' } }))
+  await page.route('**/api/ready', route => state.ready === 'fail' ? route.abort() : route.fulfill({ status: state.ready, json: { status: state.ready === 200 ? 'ready' : 'unavailable' } }))
   await page.route('**/api/inbox/feedback-recipient', route => state.owner
     ? route.fulfill({ status: 404, json: { code: 'not_found', message: 'not found' } })
     : route.fulfill({ json: { principal_id: '99999999-9999-4999-8999-999999999999', name: 'Ada Lindqvist' } }))
@@ -43,7 +47,7 @@ async function signIn(page: Page, role: Role, world: Partial<World> = {}) {
     state.sent.push(route.request().postDataJSON())
     return route.fulfill({ status: 201, json: { id: 'm1' } })
   })
-  return state
+  return state as World & { history: ReturnType<typeof releaseHistory>; releaseState: { server: string } }
 }
 async function home(page: Page) {
   await page.goto('/')
@@ -73,8 +77,9 @@ test.describe('gear menu', () => {
     await home(page)
     const menu = await openGear(page)
     const items = await names(page, 'App and workspace')
-    expect(items.slice(0, 6)).toEqual(['Workspace settings', 'Connect a computer', 'Agent keys', expect.stringMatching(/^Release history/), 'Keyboard shortcuts', 'Help & feedback'])
-    expect(items[6]).toMatch(/^System status, Operational, version \d{12}\.\d+\.\d+, deployed 50 min ago$/)
+    expect(items.slice(0, 7)).toEqual(['Workspace settings', 'Connect a computer', 'Agent keys', 'Inbox hooks', expect.stringMatching(/^Release history/), 'Keyboard shortcuts', 'Help & feedback'])
+    await expect(menu.getByRole('group', { name: 'Agents' }).getByRole('menuitem')).toHaveCount(3)
+    expect(items[7]).toMatch(/^System status, Operational, version \d{12}\.\d+\.\d+, deployed 50 min ago$/)
     await expect(menu.getByRole('menuitem', { name: 'Workspace settings' })).toBeFocused()
     await menu.getByRole('menuitem', { name: 'Workspace settings' }).click()
     await expect(page).toHaveURL('/settings/workspace')
@@ -115,6 +120,8 @@ test.describe('gear menu', () => {
     await page.keyboard.press('ArrowDown')
     const menu = page.getByRole('menu', { name: 'App and workspace' })
     await expect(menu.getByRole('menuitem', { name: 'Connect a computer' })).toBeFocused()
+    await page.keyboard.press('ArrowDown')
+    await expect(menu.getByRole('menuitem', { name: 'Inbox hooks' })).toBeFocused()
     await page.keyboard.press('ArrowDown')
     await expect(menu.getByRole('menuitem', { name: /^Release history/ })).toBeFocused()
     await page.keyboard.press('End')
@@ -171,6 +178,51 @@ test.describe('gear menu', () => {
     await openGear(page)
     await page.getByRole('menuitem', { name: 'Help & feedback' }).click()
     await expect(page.getByRole('dialog', { name: 'Help and feedback' })).toContainText('You own this workspace, so your team’s feedback comes to you.')
+  })
+
+  test('readiness that cannot be read is never Operational', async ({ page }) => {
+    await signIn(page, 'member', { ready: 'fail' })
+    await home(page)
+    await gear(page).click()
+    const status = page.getByRole('menuitem', { name: /^System status/ })
+    await expect(status).toHaveAccessibleName(/^System status, Unavailable, Readiness could not be checked\./)
+    await expect(status).not.toContainText('Operational')
+  })
+
+  test('status reads fresh on every open: a deploy since the page loaded shows, and the time ticks', async ({ page }) => {
+    await page.clock.install()
+    const state = await signIn(page, 'member')
+    await home(page)
+    const first = await openGear(page)
+    await expect(first.getByRole('menuitem', { name: /^System status/ })).toHaveAccessibleName(new RegExp(`version ${state.history.current.replace(/\./g, '\\.')}, deployed 50 min ago$`))
+    // Two minutes on, the elapsed time follows without reopening.
+    await page.clock.fastForward('02:00')
+    await expect(first.getByRole('menuitem', { name: /^System status/ })).toHaveAccessibleName(/deployed 52 min ago$/)
+    await page.keyboard.press('Escape')
+    // A new version goes live: the next open shows it, not the cached one.
+    state.releaseState.server = '260929235900.0.0'
+    const browserNow = await page.evaluate(() => Date.now())
+    Object.assign(state.history, { current: '260929235900.0.0', live_since: new Date(browserNow - 60_000).toISOString() })
+    await gear(page).click()
+    await expect(page.getByRole('menuitem', { name: /^System status/ })).toHaveAccessibleName(/version 260929235900\.0\.0, deployed 1 min ago$/)
+  })
+
+  test('inbox hooks: the one command per harness, copyable, with the setup guide', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await signIn(page, 'member')
+    await home(page)
+    await openGear(page)
+    await page.getByRole('menuitem', { name: 'Inbox hooks' }).click()
+    const pane = page.getByRole('dialog', { name: 'Agent inbox hooks' })
+    await expect(pane.getByRole('button', { name: 'Back to the menu' })).toBeFocused()
+    await expect(pane).toContainText('Messages reach your agent at every turn')
+    await expect(pane.locator('code')).toHaveText(['aeon hook install --harness claude --scope user', 'aeon hook install --harness codex --scope user'])
+    await pane.getByRole('button', { name: 'Copy the Codex command' }).click()
+    await expect(pane.getByRole('status')).toHaveText('Codex command copied')
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('aeon hook install --harness codex --scope user')
+    await expect(pane.getByRole('link', { name: 'Setup guide' })).toHaveAttribute('href', 'https://github.com/inspr-at/aeon/blob/main/docs/AGENT_INTEGRATION.md#operator-installed-turn-boundary-hooks-aeon-281')
+    await pane.getByRole('button', { name: 'Back to the menu' }).click()
+    await expect(page.getByRole('menuitem', { name: 'Inbox hooks' })).toBeFocused()
   })
 })
 
@@ -229,6 +281,47 @@ test.describe('avatar menu', () => {
 })
 
 test.describe('phones', () => {
+  // AEON-312: a ticket key stays whole beside the places, search, gear and avatar;
+  // the moon stays in the header when there is room and otherwise leads the avatar sheet.
+  for (const width of [375, 390]) {
+    test(`with three places at ${width} the ticket key stays whole and the moon leads the avatar sheet`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.emulateMedia({ colorScheme: 'light' })
+      await signIn(page, 'admin', { business: true })
+      await page.goto('/p/PHAROS/PHAROS-11?view=full')
+      await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('link')).toHaveCount(3)
+      const key = page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')
+      await expect(key).toHaveText('PHAROS-11')
+      expect(await key.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+      await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeHidden()
+      const menu = await openAccount(page)
+      await expect(menu.getByRole('menuitem').first()).toHaveAccessibleName('Switch to dark theme')
+      await expect(menu.getByRole('menuitem').first()).toBeFocused()
+      await page.keyboard.press('Enter')
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+      await expect(menu.getByRole('menuitem').first()).toHaveAccessibleName('Switch to light theme')
+      await expect(menu.getByRole('menuitemradio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'true')
+    })
+  }
+  for (const [width, business] of [[390, false], [440, true], [1600, true]] as const) {
+    test(`the moon stays in the header at ${width}${business ? ' with three places' : ''}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.emulateMedia({ colorScheme: 'light' })
+      await signIn(page, 'admin', { business })
+      await page.goto('/p/PHAROS/PHAROS-11?view=full')
+      const moon = page.getByRole('button', { name: 'Switch to dark theme' })
+      await expect(moon).toBeVisible()
+      const box = (await moon.boundingBox())!
+      expect(Math.round(box.width)).toBe(width < 600 ? 44 : 34)
+      const key = page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')
+      expect(await key.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+      await openAccount(page)
+      await expect(page.getByRole('menu', { name: 'Account' }).getByRole('menuitem').first()).toHaveAccessibleName('Personal settings')
+    })
+  }
+})
+
+test.describe('phone sheets', () => {
   test.use({ viewport: { width: 375, height: 812 } })
   test('menus are bottom sheets with 44 px rows and no sideways scroll', async ({ page }) => {
     await signIn(page, 'admin')
@@ -254,7 +347,7 @@ test.describe('phones', () => {
 const SHOTS = process.env.HEADER_SHOTS
 test.describe('screenshots', () => {
   test.skip(!SHOTS, 'Screenshots only with HEADER_SHOTS=<dir>.')
-  const cases: { name: string; role: Role; act: (page: Page) => Promise<void> }[] = [
+  const cases: { name: string; role: Role; business?: boolean; path?: string; act: (page: Page) => Promise<void> }[] = [
     { name: 'header', role: 'admin', act: async () => {} },
     { name: 'gear-admin', role: 'admin', act: async page => { await openGear(page) } },
     { name: 'gear-member', role: 'member', act: async page => { await openGear(page) } },
@@ -264,13 +357,17 @@ test.describe('screenshots', () => {
       await expect(page.getByLabel('Feedback for Ada Lindqvist')).toBeEnabled()
     } },
     { name: 'avatar', role: 'member', act: async page => { await openAccount(page) } },
+    { name: 'hooks-member', role: 'member', act: async page => { await openGear(page); await page.getByRole('menuitem', { name: 'Inbox hooks' }).click() } },
+    { name: 'ticket-header-business', role: 'admin', business: true, path: '/p/PHAROS/PHAROS-11?view=full', act: async () => {} },
+    { name: 'avatar-business', role: 'admin', business: true, path: '/p/PHAROS/PHAROS-11?view=full', act: async page => { await openAccount(page) } },
   ]
   for (const width of [375, 390, 1600]) for (const theme of ['light', 'dark'] as const) for (const shot of cases) {
     test(`${shot.name} ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
-      await signIn(page, shot.role)
-      await home(page)
+      await signIn(page, shot.role, { business: !!shot.business })
+      if (shot.path) { await page.goto(shot.path); await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toBeVisible() }
+      else await home(page)
       await shot.act(page)
       await page.waitForTimeout(150)
       mkdirSync(SHOTS!, { recursive: true })

@@ -7,7 +7,7 @@ import { computed, nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { accountEmail, accountName } from '../../lib/api'
 import { run } from '../../lib/commands'
-import { setTheme, themeChoice, type ThemeChoice } from '../../lib/theme'
+import { dark, setTheme, themeChoice, toggleTheme, type ThemeChoice } from '../../lib/theme'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
@@ -18,6 +18,13 @@ const session = useSession()
 const router = useRouter()
 const menu = ref<InstanceType<typeof HeaderMenu>>()
 const busy = ref(false)
+// On the narrowest phones the header's moon steps aside for the breadcrumb; its
+// quick toggle then leads this sheet instead (AEON-312).
+const moonHidden = ref(false)
+function opened() {
+  const moon = document.querySelector<HTMLElement>('.app-header .theme-btn')
+  moonHidden.value = !!moon && getComputedStyle(moon).display === 'none'
+}
 const error = ref('')
 const name = computed(() => session.identity ? accountName(session.identity) : '')
 const email = computed(() => session.identity ? accountEmail(session.identity) : '')
@@ -48,7 +55,7 @@ async function signOut() {
 </script>
 
 <template>
-  <HeaderMenu v-if="session.identity" id="account-menu" ref="menu" label="Account" :trigger-label="`Account for ${name}`" class="account" @close="error = ''">
+  <HeaderMenu v-if="session.identity" id="account-menu" ref="menu" label="Account" :trigger-label="`Account for ${name}`" class="account" @open="opened" @close="error = ''">
     <template #trigger="{ phone }">
       <Avatar :id="session.identity.principal.id" :name="name" :size="phone ? 36 : 28" />
     </template>
@@ -60,6 +67,9 @@ async function signOut() {
         <p class="account-tenant" title="Workspace"><AppIcon name="folder" :size="12" /><span class="sr-only">Workspace: </span>{{ session.identity.tenant.name }}</p>
       </div>
     </div>
+    <button v-if="moonHidden" class="hm-item quick-theme" type="button" role="menuitem" tabindex="-1" @click="toggleTheme()">
+      <AppIcon :name="dark ? 'sun' : 'moon'" /><span class="hm-text">{{ dark ? 'Switch to light theme' : 'Switch to dark theme' }}</span>
+    </button>
     <button class="hm-item" type="button" role="menuitem" tabindex="-1" @click="personal"><AppIcon name="user" /><span class="hm-text">Personal settings</span></button>
     <div class="theme-row" role="group" aria-labelledby="account-theme-label">
       <span id="account-theme-label" class="eyebrow">Theme</span>
