@@ -9,6 +9,7 @@ import {
 } from '../../lib/journey'
 import type { Approval } from '../../lib/agents'
 import { canDecideApproval } from '../../lib/agentState'
+import { deployTargetSentence } from '../../lib/deployTarget'
 import { can } from '../../lib/authz'
 import { JOURNEY, type JourneyContext, type NextState } from '../../lib/journeyContext'
 import { useJourneyData } from '../../lib/useJourneyData'
@@ -223,7 +224,7 @@ async function runNext() {
   const withGate = confirmation.approval
   const asker = withGate ? askerOf(agents, withGate.agent_principal_id, withGate.agent_name).name : ''
   const gateName = gate.value === 'deploy' ? 'deployment' : gate.value
-  const target = action.stage === 'deploy' && release.value ? ` ${releaseName(release.value)} goes to ${plugins.value.some(p => p.id === 'pharos') ? 'Pharos' : 'the host'}.` : ''
+  const target = action.stage === 'deploy' ? ` ${deployTargetSentence(withGate)}` : ''
   const body = `${withGate && withGate.decision === null ? `This approves the ${gateName} gate that ${asker === 'An agent' ? 'an agent' : asker} asked for. ` : ''}${CONFIRM_LONG[action.renewal_action ?? action.key] ?? ACTION_LONG[action.renewal_action ?? action.key]}${target}`
   const ok = await confirmAction({ title: `${action.label}?`, body, confirmLabel: next.value.label })
   if (!ok) return

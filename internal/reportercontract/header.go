@@ -17,10 +17,10 @@ const (
 	StageEvidence   = "stage-evidence/1.0"
 	StageResult     = "stage-result/1.0"
 	StageLaunch     = "stage-launch/1.0"
-	Journey         = "journey/1.2"
+	Journey         = "journey/1.3"
 	Me              = "me/1.0"
 	BaselineBatches = "baseline-batches/1.0"
-	Approvals       = "approvals/1.0"
+	Approvals       = "approvals/1.1"
 	HarnessSession  = "harness-session/1.2"
 )
 

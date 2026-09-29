@@ -2,6 +2,8 @@
 
 package journey
 
+import "github.com/inspr-at/paimos/internal/deploytarget"
+
 // Gate and approval scope names are the R2 contract for journey decisions.
 // An agent proposes the scope on the project or release node; a person decides
 // it through the approvals API. This package never writes that decision.
@@ -54,17 +56,19 @@ type LaunchReadiness struct {
 
 // JourneyStage is one step on the eight-stage rail.
 type JourneyStage struct {
-	Key                   string  `json:"key"`
-	State                 string  `json:"state"`
-	GateScope             string  `json:"gate_scope"`
-	GateApprovalID        *string `json:"gate_approval_id"`
-	GateLive              bool    `json:"gate_live"`
-	GateOfferID           *string `json:"gate_offer_id,omitempty"`
-	GateOfferState        string  `json:"gate_offer_state,omitempty"`
-	GateOfferExpiresAt    string  `json:"gate_offer_expires_at,omitempty"`
-	HandoffID             *string `json:"handoff_id"`
-	HandoffAttempt        *int    `json:"handoff_attempt"`
-	HandoffAuthorityEpoch *int64  `json:"handoff_authority_epoch"`
+	Key                   string               `json:"key"`
+	State                 string               `json:"state"`
+	GateScope             string               `json:"gate_scope"`
+	GateApprovalID        *string              `json:"gate_approval_id"`
+	GateLive              bool                 `json:"gate_live"`
+	GateOfferID           *string              `json:"gate_offer_id,omitempty"`
+	GateOfferState        string               `json:"gate_offer_state,omitempty"`
+	GateOfferExpiresAt    string               `json:"gate_offer_expires_at,omitempty"`
+	HandoffID             *string              `json:"handoff_id"`
+	HandoffAttempt        *int                 `json:"handoff_attempt"`
+	HandoffAuthorityEpoch *int64               `json:"handoff_authority_epoch"`
+	Target                *deploytarget.Target `json:"target,omitempty"`
+	TargetDigestSHA256    string               `json:"target_digest_sha256,omitempty"`
 }
 
 // JourneyNextAction is the single call to action for the project.

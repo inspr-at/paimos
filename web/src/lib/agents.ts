@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import type { DeployTarget } from './deployTarget'
 // The agents workspace HTTP surface for a person's session: harness sessions and
 // their typed controls, runs, approvals, accounts with allowance windows, models
 // and project messages. Worker-only endpoints (heartbeat, drain, claim) are absent.
@@ -77,6 +78,8 @@ export interface Approval {
   resource_id?: string | null; run_id?: string | null; rationale: string; expires_at: string; proposed_at: string
   decision: 'approved' | 'denied' | null; decided_by_principal_id?: string | null
   risk?: 'low' | 'medium' | 'high'
+  target?: DeployTarget | null
+  target_digest_sha256?: string
 }
 export interface ModelProfile { id: string; slug: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean }
 export interface ModelResolution { role: string; profile: ModelProfile | null; owner_required: boolean; source: string }
