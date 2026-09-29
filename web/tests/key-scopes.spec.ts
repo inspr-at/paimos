@@ -87,6 +87,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await open(page)
     const dir = process.env.KEY_SCOPES_SHOTS ?? testInfo.outputDir
     mkdirSync(dir, { recursive: true })
+    await agent(page).getByRole('button', { name: /^Edit scopes/ }).scrollIntoViewIfNeeded()
     await page.screenshot({ path: join(dir, `keys-${width}-${theme}.png`), fullPage: true })
     await edit(page)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
