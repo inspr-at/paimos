@@ -38,7 +38,7 @@ func TestAttachModesIdentityAndLease(t *testing.T) {
 				var sent []attachwatch.DeviceRequest
 				var observeErr error
 				offline := false
-				revoked, missingConsent := false, false
+				revoked, expired, missingConsent := false, false, false
 				m, err := NewAttachManager(AttachConfig{Origin: "https://paired.test", ComputerID: "11111111-1111-4111-8111-111111111111", Host: "fixture", Workspace: root, Executables: map[string]string{"codex": exe}, Exchange: func(_ context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 					sent = append(sent, in)
 					if offline {
@@ -49,6 +49,9 @@ func TestAttachModesIdentityAndLease(t *testing.T) {
 						state = "active"
 						if revoked {
 							state = "detached"
+						}
+						if expired {
+							state = "unreachable"
 						}
 					}
 					if missingConsent {
@@ -140,8 +143,8 @@ func TestAttachModesIdentityAndLease(t *testing.T) {
 				case "missing consent":
 					missingConsent = true
 				case "lease expired":
-					expired := time.Now().Add(-time.Second)
-					m.sessions[v.ID].view.LeaseUntil = &expired
+					// Release 12 makes the server's clock authoritative for expiry.
+					expired = true
 				}
 				ended, err := poll()
 				if end == "confirmed exit" {

@@ -46,7 +46,7 @@ func TestAttachLeaseUsesServerDecisionUnderClockSkew(t *testing.T) {
 							state = "unreachable"
 						}
 					}
-					return attachwatch.View{RequestID: in.RequestID, Digest: in.Digest, Snapshot: in.Snapshot, State: state, LeaseUntil: &lease}, nil
+					return attachwatch.View{ConsentMode: attachwatch.ConsentAeon, ConsentDigest: attachwatch.ConsentDigest(in.RequestID, in.Digest, attachwatch.ConsentAeon), RequestID: in.RequestID, Digest: in.Digest, Snapshot: in.Snapshot, State: state, LeaseUntil: &lease}, nil
 				}})
 				if err != nil {
 					t.Fatal(err)
