@@ -11,6 +11,43 @@ import (
 	"testing"
 )
 
+func TestClaudeCacheCreationAndConfigDir(t *testing.T) {
+	dir := t.TempDir()
+	var calls []hbCall
+	srv := hbServer(t, &calls, nil)
+	defer srv.Close()
+	rt, _, _ := heartbeatRuntime(t, srv)
+	path := claudeUsagePath(t, dir, "cache.jsonl")
+	line := `{"uuid":"11111111-1111-4111-8111-111111111112","type":"assistant","message":{"model":"claude-sonnet-4","usage":{"input_tokens":12,"output_tokens":4,"cache_read_input_tokens":2,"cache_creation_input_tokens":28}}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts := heartbeatTestOptions(dir)
+	opts.Transcript = path
+	opts.BillingMode = "api"
+	session := openUsageSession(t, rt, opts)
+	if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {
+		t.Fatal(err)
+	}
+	posted := usagePosts(calls)
+	if len(posted) != 1 || numField(posted[0], "input_tokens") != 42 || numField(posted[0], "cached_input_tokens") != 2 || numField(posted[0], "output_tokens") != 4 {
+		t.Fatalf("cache creation omitted: %#v", posted)
+	}
+
+	home := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", home)
+	configured := heartbeatOptions{}
+	configured.normalize()
+	if configured.ClaudeProjects != filepath.Join(home, "projects") {
+		t.Fatalf("config dir projects %s", configured.ClaudeProjects)
+	}
+	explicit := heartbeatOptions{ClaudeProjects: filepath.Join(home, "explicit")}
+	explicit.normalize()
+	if explicit.ClaudeProjects != filepath.Join(home, "explicit") {
+		t.Fatalf("explicit projects %s", explicit.ClaudeProjects)
+	}
+}
+
 func TestHarnessUsageSourcesReportMonotonicTotals(t *testing.T) {
 	dir := t.TempDir()
 	var calls []hbCall
@@ -34,7 +71,7 @@ func TestHarnessUsageSourcesReportMonotonicTotals(t *testing.T) {
 		t.Fatal(err)
 	}
 	posted := usagePosts(calls)
-	if len(posted) != 1 || posted[0]["model"] != "claude-sonnet-4" || numField(posted[0], "input_tokens") != 12 || numField(posted[0], "cached_input_tokens") != 2 || numField(posted[0], "output_tokens") != 4 || posted[0]["billing_mode"] != "api" || posted[0]["subscription_label"] != nil {
+	if len(posted) != 1 || posted[0]["model"] != "claude-sonnet-4" || numField(posted[0], "input_tokens") != 21 || numField(posted[0], "cached_input_tokens") != 2 || numField(posted[0], "output_tokens") != 4 || posted[0]["billing_mode"] != "api" || posted[0]["subscription_label"] != nil {
 		t.Fatalf("claude transcript: %#v", posted)
 	}
 	if err = rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {

@@ -136,7 +136,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.Role, "role", 0, "worker or coordinator")
 			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source")
 			fs.string(&o.CodexIndex, "codex-index", 0, "Codex session_index.jsonl (default ~/.codex/session_index.jsonl)")
-			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default ~/.claude/projects)")
+			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
 			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage and its title")
 			fs.string(&o.UsageSource, "usage-source", 0, "usage log family: claude, codex, cursor, or grok")
 			fs.string(&o.UsageFile, "usage-file", 0, "explicit usage log; credential paths are rejected")
@@ -185,7 +185,9 @@ func (o *heartbeatOptions) normalize() {
 		}
 	}
 	if o.ClaudeProjects == "" {
-		if home, err := os.UserHomeDir(); err == nil {
+		if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+			o.ClaudeProjects = filepath.Join(dir, "projects")
+		} else if home, err := os.UserHomeDir(); err == nil {
 			o.ClaudeProjects = filepath.Join(home, ".claude", "projects")
 		}
 	}

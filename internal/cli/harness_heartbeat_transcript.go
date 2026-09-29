@@ -592,7 +592,19 @@ func noteUsageLine(line []byte, fallback string, sums map[string]usageSum, poiso
 			return nil
 		}
 	}
+	created := int64(0)
+	if raw, ok := rec.Message.Usage["cache_creation_input_tokens"]; ok && len(bytes.TrimSpace(raw)) > 0 && string(raw) != "null" {
+		var okCreated bool
+		created, okCreated = jsonToken(raw)
+		if !okCreated {
+			return nil
+		}
+	}
 	inclusive, ok := addTokens(input, cached)
+	if !ok {
+		return errUsageOverflow
+	}
+	inclusive, ok = addTokens(inclusive, created)
 	if !ok {
 		return errUsageOverflow
 	}
