@@ -72,14 +72,23 @@ jobs:
       # Backstop for sign-notarize.sh's EXIT trap, which a cancellation during
       # notarization can skip: however the signing step ended, delete the
       # temporary keychain (private key), drop it from the search list and
-      # remove every signing temp file (.p12, .p8, zip). Idempotent.
+      # remove every signing temp file (.p12, .p8, zip). Idempotent. Every
+      # operation is attempted; failures are collected and fail the step at
+      # the end.
       - name: Remove signing keychain and temp files
         if: always()
         run: |
-          set -uo pipefail
-          for kc in "$RUNNER_TEMP"/sign.*/signing.keychain-db; do
+          set +e +o pipefail
+          : "${RUNNER_TEMP:?RUNNER_TEMP is not set}"
+          rt="$(cd "$RUNNER_TEMP" 2>/dev/null && pwd -P)"
+          if [ -z "$rt" ] || [ "$rt" -ef / ]; then
+            echo "::error::RUNNER_TEMP is not a usable directory; refusing to clean up"
+            exit 1
+          fi
+          failed=0
+          for kc in "$rt"/sign.*/signing.keychain-db; do
             [ -e "$kc" ] || continue
-            security delete-keychain "$kc" 2>/dev/null || true
+            security delete-keychain "$kc" || { echo "::error::could not delete $kc"; failed=1; }
           done
           kept=()
           while IFS= read -r k; do
@@ -87,12 +96,15 @@ jobs:
             case "$k" in ""|*/signing.keychain-db) ;; *) kept+=("$k") ;; esac
           done < <(security list-keychains -d user)
           [ ${#kept[@]} -gt 0 ] || kept=("$HOME/Library/Keychains/login.keychain-db")
-          security list-keychains -d user -s "${kept[@]}"
-          rm -rf "$RUNNER_TEMP"/sign.*
-          if compgen -G "$RUNNER_TEMP/sign.*" >/dev/null || security list-keychains -d user | grep -q signing.keychain-db; then
-            echo "::error::signing keychain or temp files remain"
-            exit 1
+          security list-keychains -d user -s "${kept[@]}" || { echo "::error::could not restore the keychain search list"; failed=1; }
+          rm -rf "$rt"/sign.* || failed=1
+          if compgen -G "$rt/sign.*" >/dev/null; then
+            echo "::error::signing temp files remain"
+            failed=1
           fi
+          list="$(security list-keychains -d user)"
+          case "$list" in *signing.keychain-db*) echo "::error::signing keychain is still on the search list"; failed=1 ;; esac
+          [ "$failed" = 0 ] || exit 1
           echo "signing keychain and temp files removed"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

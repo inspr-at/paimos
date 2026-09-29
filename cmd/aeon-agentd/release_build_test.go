@@ -3,8 +3,11 @@ package main
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestReleaseBuildsSplitDarwinCGO(t *testing.T) {
@@ -53,15 +56,37 @@ func TestReleaseSignsDarwinAgentdBeforeChecksums(t *testing.T) {
 	if !strings.Contains(rest, "SHA256SUMS") {
 		t.Fatal("checksums must be computed in the release job, after signing")
 	}
-	sign = strings.Index(darwin, "- name: Sign and notarize paimos-agentd")
-	cleanup := strings.Index(darwin, "- name: Remove signing keychain and temp files")
-	if cleanup < sign || !strings.Contains(darwin[cleanup:], "if: always()") ||
-		!strings.Contains(darwin[cleanup:], "security delete-keychain") ||
-		!strings.Contains(darwin[cleanup:], `rm -rf "$RUNNER_TEMP"/sign.*`) {
-		t.Fatal("agentd-darwin needs an always() step after signing that deletes the keychain and signing temp files")
+	var wf releaseWorkflow
+	if err := yaml.Unmarshal([]byte(workflow), &wf); err != nil {
+		t.Fatalf("release.yml: %v", err)
 	}
-	if on := topLevelBlock(workflow, "on"); on != "  push:\n    tags:\n      - \"v*\"\n" {
-		t.Fatalf("release workflow must trigger on v* tags only, got:\n%s", on)
+	if want := map[string]any{"push": map[string]any{"tags": []any{"v*"}}}; !reflect.DeepEqual(wf.On, want) {
+		t.Fatalf("release workflow must trigger on v* tags only, got %#v", wf.On)
+	}
+	steps := wf.Jobs["agentd-darwin"].Steps
+	signAt := -1
+	for i, st := range steps {
+		if st.Name == "Sign and notarize paimos-agentd" {
+			signAt = i
+		}
+	}
+	if signAt < 0 || signAt+1 >= len(steps) {
+		t.Fatal("agentd-darwin has no step after signing")
+	}
+	cleanup := steps[signAt+1]
+	if cleanup.Name != "Remove signing keychain and temp files" || cleanup.If != "always()" {
+		t.Fatalf("the step right after signing must be the always() keychain cleanup, got %q if %q", cleanup.Name, cleanup.If)
+	}
+	if len(cleanup.Env) != 0 {
+		t.Fatal("the cleanup step must not receive any env (no secrets)")
+	}
+	for _, needle := range []string{`: "${RUNNER_TEMP:?`, `[ "$rt" -ef / ]`, "set +e", "security delete-keychain", `rm -rf "$rt"/sign.*`, `[ "$failed" = 0 ] || exit 1`} {
+		if !strings.Contains(cleanup.Run, needle) {
+			t.Fatalf("cleanup step missing %s", needle)
+		}
+	}
+	if guard, rm := strings.Index(cleanup.Run, "RUNNER_TEMP:?"), strings.Index(cleanup.Run, "rm -rf"); guard > strings.Index(cleanup.Run, "security delete-keychain") || guard > rm {
+		t.Fatal("cleanup must validate RUNNER_TEMP before any filesystem operation")
 	}
 	entries, err := os.ReadDir("../../.github/workflows")
 	if err != nil {
@@ -82,20 +107,16 @@ func TestReleaseSignsDarwinAgentdBeforeChecksums(t *testing.T) {
 	}
 }
 
-// topLevelBlock returns the indented body of a top-level YAML key.
-func topLevelBlock(doc, key string) string {
-	_, after, ok := strings.Cut(doc, "\n"+key+":\n")
-	if !ok {
-		return ""
-	}
-	var b strings.Builder
-	for _, line := range strings.SplitAfter(after, "\n") {
-		if line != "\n" && !strings.HasPrefix(line, " ") {
-			break
-		}
-		b.WriteString(line)
-	}
-	return strings.TrimRight(b.String(), "\n") + "\n"
+type releaseWorkflow struct {
+	On   any `yaml:"on"`
+	Jobs map[string]struct {
+		Steps []struct {
+			Name string            `yaml:"name"`
+			If   string            `yaml:"if"`
+			Env  map[string]string `yaml:"env"`
+			Run  string            `yaml:"run"`
+		} `yaml:"steps"`
+	} `yaml:"jobs"`
 }
 
 func readRepo(t *testing.T, rel string) string {
