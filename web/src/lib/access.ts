@@ -22,7 +22,7 @@ export interface Person {
   // The server says who is the last active owner (contract v2 #5); the UI never counts role keys.
   last_owner: boolean
 }
-export interface Agent { principal_id: string; name: string; has_avatar: boolean; workspace_role: RoleRef | null; key_count: number; last_seen_at: string | null; service: boolean }
+export interface Agent { description?: string; project_roles?: ProjectRole[]; principal_id: string; name: string; has_avatar: boolean; workspace_role: RoleRef | null; key_count: number; last_seen_at: string | null; service: boolean }
 export type InviteStatus = 'pending' | 'expired' | 'revoked' | 'accepted'
 export interface Invite {
   id: string; email: string; workspace_role: RoleRef | null; project_roles: ProjectRole[]; status: InviteStatus
@@ -95,6 +95,8 @@ export async function getAudit(): Promise<{ items: AuditEvent[]; complete: boole
   }
   return { items: items.reverse(), complete: false }
 }
+export const createAgent = (body: { name: string; description?: string; workspace_role_id?: string; project_roles?: { project_id: string; role_id: string }[] }) => call<Agent>('/members/agents', 'POST', body)
+
 // Agent keys (existing endpoints): a new key's secret is shown only once.
 export interface AgentKeyCreated { id: string; token: string; prefix: string; name: string; expires_at: string | null }
 export const createAgentKey = (agent: PrincipalRef, expiresAt: string | null, scopes: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { principal_id: agent.principal_id, name: agent.name, scopes, ...(expiresAt ? { expires_at: expiresAt } : {}) })
@@ -128,9 +130,13 @@ export const keyHint = (prefix: string) => prefix.length > 12 ? `aeon_…${prefi
 // agent on a shared role (built-in or custom) is capped by that role; an agent
 // with no role, or with the role the server keeps for it alone, is not
 // (internal/auth ensureAgentBinding). null means no cap from the role.
-export function agentScopeCeiling(agent: Pick<Agent, 'principal_id' | 'workspace_role'>, roles: Role[]): Set<string> | null {
+export function agentScopeCeiling(agent: Pick<Agent, 'principal_id' | 'workspace_role' | 'project_roles'>, roles: Role[], registry: Permission[] = []): Set<string> | null {
   const role = agent.workspace_role ? roles.find(r => r.id === agent.workspace_role!.id) : undefined
-  if (!role) return null
+  if (!role && agent.project_roles?.length) {
+    const projectKeys = new Set(registry.filter(p => p.grantable_at.includes('project')).map(p => p.key))
+    return new Set(agent.project_roles.flatMap(pr => roles.find(r => r.id === pr.role.id)?.permissions ?? []).filter(k => projectKeys.has(k)))
+  }
+  if (!role) return agent.workspace_role ? new Set() : null
   if (!role.builtin && role.key === `agent_${agent.principal_id.replace(/-/g, '')}`) return null
   return new Set(role.permissions)
 }
@@ -280,6 +286,7 @@ export function auditSentence(event: AuditEvent, names: Names): { actor: string;
     case 'invite.created': return { actor, subject: str(after.email), text: `invited ${str(after.email) || 'someone'}` }
     case 'invite.revoked': return { actor, subject: str(either.email), text: `revoked the invite for ${str(either.email) || 'someone'}` }
     case 'invite.accepted': return { actor, subject: str(either.email) || who, text: `accepted the invite${str(either.email) ? ` for ${str(either.email)}` : ''}` }
+    case 'principal.agent_created': return { actor, subject: who, text: `created the agent ${who || str(after.name)}` }
     case 'principal.deactivated': return { actor, subject: who, text: `deactivated ${who}; their sessions and keys were revoked` }
     case 'principal.reactivated': return { actor, subject: who, text: `reactivated ${who}` }
     case 'principal.alias_linked':
