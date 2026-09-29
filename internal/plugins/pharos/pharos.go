@@ -101,7 +101,7 @@ type Decision struct {
 
 var (
 	versionScheme = map[string]bool{
-		"legacy": true, "inspr-calendar-v1": true, "inspr-calendar-v2": true, "inspr-calver-3": true,
+		"legacy": true, "inspr-calendar-v1": true, "inspr-calendar-v2": true,
 	}
 	digestRe  = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	symbolRe  = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)

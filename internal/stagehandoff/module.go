@@ -416,7 +416,7 @@ func validateEvidence(e EvidenceWrite) error {
 			return fail(400, "invalid Pharos evidence")
 		}
 		a := e.Artifact
-		if !symbolicRE.MatchString(*e.Workflow) || !symbolicRE.MatchString(*e.Environment) || !slices.Contains([]string{"legacy", "inspr-calendar-v1", "inspr-calendar-v2", "inspr-calver-3"}, a.VersionScheme) || a.Version == "" || a.ReleaseChannel == "" || a.ReleaseSequence < 1 || !hexRE.MatchString(a.DigestSHA256) || a.CommitDigest == "" || a.ManifestCoordinate == "" || !hexRE.MatchString(a.ManifestDigestSHA256) {
+		if !symbolicRE.MatchString(*e.Workflow) || !symbolicRE.MatchString(*e.Environment) || !slices.Contains([]string{"legacy", "inspr-calendar-v1", "inspr-calendar-v2"}, a.VersionScheme) || a.Version == "" || a.ReleaseChannel == "" || a.ReleaseSequence < 1 || !hexRE.MatchString(a.DigestSHA256) || a.CommitDigest == "" || a.ManifestCoordinate == "" || !hexRE.MatchString(a.ManifestDigestSHA256) {
 			return fail(400, "invalid artifact identity")
 		}
 	case "authorization":

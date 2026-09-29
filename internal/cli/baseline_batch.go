@@ -179,7 +179,7 @@ func validateBuiltReceipt(v builtReceipt) error {
 		(v.OCIIndexDigest != "" && !digest(v.OCIIndexDigest)) || !digest(v.QADigest) ||
 		!builtCoordRE.MatchString(v.ReleaseManifestCoordinate) || !builtSymbolRE.MatchString(v.ReleaseChannel) ||
 		!builtVerRE.MatchString(v.Version) || v.ReleaseSequence < 0 ||
-		v.VersionScheme != "legacy" && v.VersionScheme != "inspr-calendar-v1" && v.VersionScheme != "inspr-calendar-v2" && v.VersionScheme != "inspr-calver-3" {
+		v.VersionScheme != "legacy" && v.VersionScheme != "inspr-calendar-v1" && v.VersionScheme != "inspr-calendar-v2" {
 		return usagef("invalid built receipt")
 	}
 	return nil

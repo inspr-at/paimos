@@ -6767,7 +6767,7 @@ components:
       properties:
         project_node_id: {type: string, format: uuid}
         release_node_id: {type: string, format: uuid}
-        version_scheme: {type: [string, 'null'], enum: [legacy, inspr-calendar-v1, inspr-calendar-v2, inspr-calver-3, null]}
+        version_scheme: {type: [string, 'null'], enum: [legacy, inspr-calendar-v1, inspr-calendar-v2, null]}
         version: {type: [string, 'null']}
         release_sequence: {type: integer, minimum: 1}
         registration:
@@ -6791,7 +6791,7 @@ components:
       additionalProperties: false
       required: [version_scheme, version, release_channel, release_sequence, digest_sha256, commit_digest, manifest_coordinate, manifest_digest_sha256]
       properties:
-        version_scheme: {type: string, enum: [legacy, inspr-calendar-v1, inspr-calendar-v2, inspr-calver-3]}
+        version_scheme: {type: string, enum: [legacy, inspr-calendar-v1, inspr-calendar-v2]}
         version: {type: string}
         release_channel: {type: string}
         release_sequence: {type: integer, minimum: 1}

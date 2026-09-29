@@ -63,7 +63,10 @@ func validCandidateVersion(scheme, version string) bool {
 	switch scheme {
 	case "legacy":
 		return classicVersionRE.MatchString(version)
-	case releasehistory.SchemeCalVer3, releasehistory.SchemeCalVer2:
+	// Stage contracts (stage-evidence/1.0, shared with Pharos) still list only
+	// inspr-calendar-v2; inspr-calver-3 joins with the coordinated Pharos
+	// migration (PHAROS-327), not here.
+	case releasehistory.SchemeCalVer2:
 		return releasehistory.ValidVersion(version)
 	case "inspr-calendar-v1":
 		if !candidateCalendarV1.MatchString(version) {

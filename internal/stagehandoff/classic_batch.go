@@ -67,7 +67,7 @@ func validateClassicBuilt(in classicBuiltReceipt) error {
 		in.ExpectedImplementationExecution < 0 || in.ExpectedImplementationAuthorityEpoch < 0 ||
 		(in.ExpectedImplementationExecution == 0) != (in.ExpectedImplementationAuthorityEpoch == 0) ||
 		!classicCommitRE.MatchString(in.Commit) || !classicCoordinateRE.MatchString(in.ReleaseManifestCoordinate) ||
-		!slicesContains([]string{"legacy", "inspr-calendar-v1", "inspr-calendar-v2", "inspr-calver-3"}, in.VersionScheme) ||
+		!slicesContains([]string{"legacy", "inspr-calendar-v1", "inspr-calendar-v2"}, in.VersionScheme) ||
 		!symbolicRE.MatchString(in.ReleaseChannel) || in.ReleaseSequence < 0 || !classicVersionRE.MatchString(in.Version) {
 		return fail(400, "invalid built receipt")
 	}
