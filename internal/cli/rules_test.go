@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -128,6 +129,9 @@ func TestRulesPreviewOnlineOfflineAndRefusedCache(t *testing.T) {
 		if status != 200 {
 			w.WriteHeader(status)
 			return
+		}
+		if r.Header.Get(rules.ClientMaximumHeader) != strconv.Itoa(rules.SessionFileLimit(c.Harness)) {
+			t.Error("CLI did not report the harness read limit")
 		}
 		if r.URL.Query().Get("person_id") != c.PersonID || r.URL.Query().Get("agent_id") != c.AgentID {
 			t.Error("lost request context")

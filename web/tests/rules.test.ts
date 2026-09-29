@@ -541,6 +541,7 @@ test('budget refusals keep another person’s size private in the message', asyn
   const { rulesMessage } = await import('../src/lib/rules.ts')
   assert.equal(rulesMessage(new RulesError(422, 'rules_budget_exceeded', 'x', 12345, 12000)), 'The merged file is 12,345 bytes. The limit is 12,000.')
   assert.equal(rulesMessage(new RulesError(422, 'rules_budget_exceeded', 'A session file for another person or agent would exceed the limit.')), 'A session file for another person or agent would exceed the limit.')
+  assert.match(rulesMessage(new RulesError(409, 'doctrine_duplicate', 'Rule "copied" duplicates the doctrine rule inspr-at/inspr-modules/docs/AGENTS-KERNEL.md#secrets. Propose a change instead of publishing a second copy.')), /Propose a change/)
   assert.match(rulesMessage(new RulesError(503, 'busy', 'busy')), /Nothing was changed/)
   assert.equal(replyUncertain(new RulesError(503, 'busy', 'busy')), false)
   assert.equal(replyUncertain(new RulesError(503, 'outcome_unknown', 'unknown')), true)

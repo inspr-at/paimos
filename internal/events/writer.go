@@ -37,6 +37,10 @@ type Change struct {
 	// At preserves a source timestamp during import; nil uses the database clock.
 	At     *time.Time
 	UndoOf *int64
+	// Metadata is optional job context stored beside the snapshots. Nil stores
+	// SQL NULL. A value must be a JSON object, for example a background job
+	// name and the reason it wrote the event.
+	Metadata json.RawMessage
 }
 
 // Writer can be injected behind an interface with the Append method below.
@@ -85,11 +89,27 @@ func Append(ctx context.Context, tx pgx.Tx, p tenant.Principal, c Change) (Event
 			return Event{}, err
 		}
 	}
+	meta, err := objectMetadata(c.Metadata)
+	if err != nil {
+		return Event{}, err
+	}
 	return scanEvent(tx.QueryRow(ctx, `INSERT INTO events
-	  (tenant_id, actor_principal_id, node_id, type, before, after, at, undo_of)
-	  VALUES ($1,$2,$3,$4,$5,$6,coalesce($7::timestamptz,clock_timestamp()),$8)
+	  (tenant_id, actor_principal_id, node_id, type, before, after, at, undo_of, metadata)
+	  VALUES ($1,$2,$3,$4,$5,$6,coalesce($7::timestamptz,clock_timestamp()),$8,$9::jsonb)
 	  RETURNING id, actor_principal_id::text, node_id::text, type, before, after, at, undo_of`,
-		p.TenantID, p.ID, c.NodeID, c.Type, before, after, c.At, c.UndoOf))
+		p.TenantID, p.ID, c.NodeID, c.Type, before, after, c.At, c.UndoOf, meta))
+}
+
+// objectMetadata accepts only a JSON object. An empty value stores NULL.
+func objectMetadata(raw json.RawMessage) (any, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil || doc == nil {
+		return nil, fmt.Errorf("event metadata: object required")
+	}
+	return []byte(raw), nil
 }
 
 func snapshot(v any) (json.RawMessage, error) {

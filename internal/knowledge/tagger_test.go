@@ -4,6 +4,7 @@ package knowledge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -12,6 +13,91 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 )
+
+func TestTaggerWritesSystemEvent(t *testing.T) {
+	f := setup(t)
+	ticket := addNode(t, f, "DONE-36", "ticket", "Keep the other fields", &f.project)
+	setFields(t, f, ticket, map[string]any{"priority": "low", "tags": []any{"ops"}})
+	closeAged(t, f, ticket, "done", "1 hour")
+	open := addNode(t, f, "OPEN-36", "ticket", "Incident on an open ticket", &f.project)
+	addComment(t, f, open, "The incident stayed on the open ticket.")
+
+	n, err := TagOnce(t.Context(), f.db.App)
+	if err != nil || n != 2 {
+		t.Fatalf("nominated %d %v", n, err)
+	}
+	var actorName, actorKind string
+	var roles []string
+	var before, after, meta []byte
+	err = f.db.Admin.QueryRow(t.Context(), `SELECT p.name, p.kind, p.roles, e.before, e.after, e.metadata
+		FROM events e
+		JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id
+		WHERE e.tenant_id=$1 AND e.node_id=$2::uuid AND e.type='node.updated'`, f.a.TenantID, ticket).Scan(&actorName, &actorKind, &roles, &before, &after, &meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actorName != "System" || actorKind != "agent" || len(roles) != 1 || roles[0] != "system" {
+		t.Fatalf("actor %s %s %v", actorName, actorKind, roles)
+	}
+	var recorded map[string]string
+	if err = json.Unmarshal(meta, &recorded); err != nil || recorded["job"] != "learning-tagger" || recorded["reason"] != "method learning tagger" {
+		t.Fatalf("metadata %s", meta)
+	}
+	var prior, next struct {
+		Priority string   `json:"priority"`
+		Tags     []string `json:"tags"`
+	}
+	if err = json.Unmarshal(jsonField(t, before, "fields"), &prior); err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(jsonField(t, after, "fields"), &next); err != nil {
+		t.Fatal(err)
+	}
+	if prior.Priority != "low" || len(prior.Tags) != 1 || prior.Tags[0] != "ops" {
+		t.Fatalf("before %s", before)
+	}
+	if next.Priority != "low" || len(next.Tags) != 2 || next.Tags[0] != "ops" || next.Tags[1] != processLearningTag {
+		t.Fatalf("after %s", after)
+	}
+	var created, updates int
+	if err = f.db.Admin.QueryRow(t.Context(), `SELECT
+		count(*) FILTER (WHERE e.type='principal.created'),
+		count(*) FILTER (WHERE e.type='node.updated')
+		FROM events e
+		JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id
+		WHERE e.tenant_id=$1 AND p.name='System'`, f.a.TenantID).Scan(&created, &updates); err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 || updates != 1 {
+		t.Fatalf("system events created=%d updates=%d", created, updates)
+	}
+	var openUpdates int
+	if err = f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND node_id=$2::uuid AND type='node.updated'`, f.a.TenantID, open).Scan(&openUpdates); err != nil {
+		t.Fatal(err)
+	}
+	if openUpdates != 0 {
+		t.Fatalf("open ticket events %d", openUpdates)
+	}
+	again, err := TagOnce(t.Context(), f.db.App)
+	if err != nil || again != 0 {
+		t.Fatalf("second pass %d %v", again, err)
+	}
+	if err = f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND type='node.updated' AND actor_principal_id IN (SELECT id FROM principals WHERE tenant_id=$1 AND name='System')`, f.a.TenantID).Scan(&updates); err != nil {
+		t.Fatal(err)
+	}
+	if updates != 1 {
+		t.Fatalf("replay wrote %d node updates", updates)
+	}
+}
+
+func jsonField(t *testing.T, raw []byte, key string) []byte {
+	t.Helper()
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc[key]
+}
 
 func TestTaggerWithoutOutcomeTable(t *testing.T) {
 	f := setup(t)

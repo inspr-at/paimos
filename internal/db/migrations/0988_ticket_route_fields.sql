@@ -1,6 +1,8 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- AEON-329. route_role and area classify a ticket or task. Provenance columns
 -- are server-written. Existing node values are not rewritten.
+SET LOCAL lock_timeout = '5s';
+
 CREATE FUNCTION aeon_ticket_route_properties() RETURNS jsonb
 LANGUAGE sql IMMUTABLE AS $$
 SELECT jsonb_build_object(

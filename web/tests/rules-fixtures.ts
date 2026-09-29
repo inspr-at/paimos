@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test'
+import type { RuleBudgetBlocker } from '../src/lib/rules'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 export const RULE_PROJECT = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -32,6 +33,8 @@ export interface RulesMockOptions {
   denyNamedPreview?: boolean
   /** AEON-315: the named agents the members listing returns. */
   agents?: { principal_id: string; name: string; preview?: { allowed: boolean; reason?: string; creator_name?: string } }[]
+  budgetCeiling?: number
+  blockingClients?: RuleBudgetBlocker[]
 }
 
 export async function mockRules(page: Page, options: RulesMockOptions = {}): Promise<RulesMock> {
@@ -184,10 +187,10 @@ export async function mockRules(page: Page, options: RulesMockOptions = {}): Pro
     }
     if (path === '/api/rules/budget') {
       if (method === 'PUT') {
-        if (body.max_bytes < 2000 || body.max_bytes > 12000) return route.fulfill({ status: 400, json: { error: 'the session file budget must be between 2000 and 12000 bytes', code: 'invalid_budget' } })
+        if (body.max_bytes < 2000 || body.max_bytes > (options.budgetCeiling ?? 12000)) return route.fulfill({ status: 400, json: { error: 'the session file budget must be between 2000 and 12000 bytes', code: 'invalid_budget' } })
         state.budget = { max_bytes: body.max_bytes, layer_max_bytes: body.layer_max_bytes ?? {} }
       }
-      return route.fulfill({ json: { ...state.budget, default_bytes: 12000, min_bytes: 2000, ceiling_bytes: 12000, min_layer_bytes: 500 } })
+      return route.fulfill({ json: { ...state.budget, default_bytes: 12000, min_bytes: 2000, ceiling_bytes: options.budgetCeiling ?? 12000, min_layer_bytes: 500, blocking_clients: options.blockingClients } })
     }
     if (path === '/api/rules/explained' && method === 'GET') {
       if (options.denyNamedPreview && url.searchParams.get('agent_id')) {
@@ -260,6 +263,7 @@ export async function mockRules(page: Page, options: RulesMockOptions = {}): Pro
       if (options.comparisonStatus) return route.fulfill({ status: options.comparisonStatus, json: { error: 'unavailable', code: 'not_found' } })
       return route.fulfill({ json: { comparisons: options.comparisons ?? [] } })
     }
+    if (path === '/api/rules/doctrine' && method === 'GET') return route.fulfill({ json: { sources: [] } })
     if (path === '/api/rules/merged' && method === 'GET') {
       if (options.denyNamedPreview && url.searchParams.get('agent_id')) {
         return route.fulfill({ status: 403, json: { error: "You didn't create a key for this agent.", code: 'not_key_creator' } })

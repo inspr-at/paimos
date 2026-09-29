@@ -250,7 +250,7 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			fields, err = canonicalRouteFields(p, kind.Slug, fields, nil)
 		}
 		if err == nil {
-			fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields)
+			fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields, nil)
 		}
 		if err != nil {
 			return err
@@ -407,7 +407,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				fields, err = canonicalRouteFields(p, kind.Slug, fields, current.Fields)
 			}
 			if err == nil {
-				fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields)
+				fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields, current.Fields)
 			}
 			if err != nil {
 				return err

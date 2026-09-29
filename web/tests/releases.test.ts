@@ -286,15 +286,6 @@ test('a history cached before the deploy still says a newer version is live', ()
   assert.equal(liveServer(PAGE, ''), PAGE)
   assert.equal(liveServer('dev', SERVER), SERVER)
   assert.equal(liveServer(SERVER, 'dev'), SERVER)
-  // The poll already saw the deploy; the cached history still names this page.
-  assert.equal(releaseNotice(PAGE, PAGE, SERVER, SERVER), 'update')
-  assert.equal(releaseNotice(PAGE, PAGE, '', SERVER), 'update')
-  assert.equal(releaseNotice(PAGE, 'dev', SERVER, SERVER), 'update')
-  // A history that has already caught up stays ahead of an older poll.
-  assert.equal(releaseNotice(PAGE, SERVER, '', PAGE), 'update')
-  // Without the poll, a stale history still names a version it does not have.
-  assert.equal(releaseNotice(PAGE, PAGE, SERVER, null), 'missing')
-  assert.equal(releaseNotice(PAGE, PAGE, SERVER), 'missing')
 })
 
 test('language and view: the address, then the remembered choice, then the profile; Highlights by default', () => {

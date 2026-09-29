@@ -65,6 +65,7 @@ import (
 	"github.com/inspr-at/paimos/internal/releases"
 	"github.com/inspr-at/paimos/internal/requirements"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/search"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -263,6 +264,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			inbox.New(pool),
 			harness.New(pool),
 			rules.New(pool),
+			doctrine.New(pool, doctrine.Options{CredentialsDir: cfg.DoctrineCredentialsDir}),
 			ticketwork.New(pool),
 			outcomes.New(pool),
 			deliveryvote.New(pool),
@@ -272,7 +274,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			approvals.New(pool),
 			modelregistry.New(pool),
 			agentaccounts.New(pool),
-			agentpairing.New(pool, cfg.PublicURL, cfg.BootstrapTenantSlug),
+			agentpairing.New(pool, cfg.PublicURL, cfg.BootstrapTenantSlug, cfg.PairingNixGuide),
 			// R3: journey
 			journey.New(pool),
 			requirements.New(pool),
@@ -293,7 +295,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			hours.New(pool, pluginRegistry),
 			directory.New(pool, pluginRegistry),
 		},
-		Middleware: []func(http.Handler) http.Handler{authMod.Middleware},
+		Middleware: []func(http.Handler) http.Handler{authMod.Middleware, (doctrine.Credentials{Dir: cfg.DoctrineCredentialsDir}).CatalogMiddleware},
 	}
 	if messagingMod != nil {
 		api.Modules = append(api.Modules, messagingMod)
@@ -306,7 +308,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		ln = listened
 	}
 	srv := &http.Server{
-		Handler:           agentpairing.GuidePage(api.Handler(), webFS, cfg.PublicURL),
+		Handler:           agentpairing.GuidePage(api.Handler(), webFS, cfg.PublicURL, cfg.PairingNixGuide),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       time.Minute,
 	}

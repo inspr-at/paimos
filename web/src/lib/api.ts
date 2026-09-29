@@ -241,11 +241,11 @@ export const deleteProjectGroup = (id: string) => json<ProjectGroupWrite>(`/proj
 export const assignProjectGroup = (groupId: string | null, projectIds: string[]) => json<ProjectGroupWrite>('/project-groups/assign', 'POST', { group_id: groupId, project_ids: projectIds })
 export const undoGroupEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 // B2 ticket activity and comments.
-export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent'
+export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent' | 'tags'
 export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }
 export interface ActivityItem {
   id: string; at: string; type: 'comment' | 'change' | 'created'
-  author: { id: string | null; name: string; has_avatar?: boolean }
+  author: { id: string | null; name: string; has_avatar?: boolean; automatic?: boolean; job?: string; reason?: string }
   body_markdown?: string; changes?: ActivityChange[]
 }
 const authored = <T extends ActivityItem | { items: ActivityItem[] }>(value: T): T => { learnPictures('items' in value ? value.items.map(item => item.author) : [value.author]); return value }

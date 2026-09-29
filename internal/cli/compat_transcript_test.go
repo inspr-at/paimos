@@ -12,6 +12,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/rules"
 )
 
 // Doctrine inventory (read-only grep of paimos/doctrine, paimos/AGENTS.md and
@@ -72,6 +74,8 @@ func transcriptFixture(t *testing.T, kind, slug string, calls *[]transcriptReque
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}, "next_cursor": nil})
 		case r.Method == "GET" && r.URL.Path == "/api/projects/"+transcriptProjectID+"/harness-sessions":
 			_ = json.NewEncoder(w).Encode([]map[string]string{{"id": transcriptSessionID}})
+		case r.Method == "GET" && r.URL.Path == "/api/projects/"+transcriptProjectID+"/harness-sessions/"+transcriptSessionID:
+			_, _ = w.Write([]byte(`{"ok":true,"harness":"codex"}`))
 		case r.Method == "GET" && r.URL.Path == "/api/me":
 			_, _ = w.Write([]byte(`{"principal":{"id":"44444444-4444-4444-8444-444444444444","name":"worker"}}`))
 		case r.Method == "GET" && r.URL.Path == "/api/models/resolve":
@@ -276,7 +280,7 @@ func TestHarnessCompatTranscripts(t *testing.T) {
 	}{
 		{"register", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions", `{"ok":true}`, []string{"--project", "AEON", "--agent", "worker", "--harness", "codex", "--host", "local", "--harness-session-file", ref, "--worker-lease-file", lease, "--ticket-id", "7", "--work-shape", "ship", "--model", "gpt-6-sol", "--effort", "xhigh", "--account-label", "Codex Pro", "--harness-version", "1.2.3", "--brief", "AEON-213", "--worktree", "/Code/aeon", "--branch", "tm1.session-metadata"}},
 		{"list", "GET", "/api/projects/" + transcriptProjectID + "/harness-sessions", `[{"id":"` + transcriptSessionID + `"}]`, []string{"--project", "AEON"}},
-		{"status", "GET", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID, `{"ok":true}`, []string{"--project", "AEON", "--session", transcriptSessionID}},
+		{"status", "GET", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID, `{"ok":true,"harness":"codex"}`, []string{"--project", "AEON", "--session", transcriptSessionID}},
 		{"orchestrator", "GET", "/api/projects/" + transcriptProjectID + "/harness-sessions/orchestrator", `{"ok":true}`, []string{"--project", "AEON"}},
 		{"bind", "PATCH", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/binding", `{"ok":true}`, []string{"--project", "AEON", "--session", transcriptSessionID, "--revision", "1", "--work-shape", "unknown"}},
 		{"heartbeat", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/heartbeat", `{"ok":true}`, append(append([]string{}, baseWorker...), "--phase", "working", "--activity-kind", "turn_started", "--activity-sequence", "1", "--note", "Running PDF tests", "--model", "gpt-6-sol", "--effort", "xhigh", "--account-label", "Codex Pro", "--harness-version", "1.2.3", "--brief", "AEON-214", "--worktree", "/Code/aeon", "--branch", "tm1.session-metadata", "--commit", "abc1234:Store session setup")},
@@ -322,6 +326,9 @@ func TestHarnessCompatTranscripts(t *testing.T) {
 				t.Fatalf("classic --ticket-id did not resolve: %+v", last.body)
 			}
 			if tc.name == "register" || tc.name == "heartbeat" {
+				if last.body["max_session_file_bytes"] != float64(rules.SessionFileLimit("codex")) {
+					t.Fatalf("%s reported %v, want Codex's project_doc_max_bytes", tc.name, last.body["max_session_file_bytes"])
+				}
 				for key, want := range map[string]string{"model": "gpt-6-sol", "reasoning_effort": "xhigh", "account_label": "Codex Pro", "harness_version": "1.2.3", "worktree": "/Code/aeon", "branch": "tm1.session-metadata"} {
 					if last.body[key] != want {
 						t.Fatalf("%s: %s = %v, want %s", tc.name, key, last.body[key], want)

@@ -15,7 +15,9 @@
 // Imported history is compared in ascending source timestamp/event-ID order,
 // independently per source instance. The first snapshot establishes a baseline
 // rather than inventing previous values. Only status, priority, assignee, title
-// and parent differences survive; native state becomes product field status.
+// and parent differences survive on an import; native state becomes product
+// field status. A native node update also keeps a labels change: fields.tags,
+// names in stored order, including a tag written by the System principal.
 // Imported creation uses the source creation time rather than ingestion time.
 // Re-imported comment revisions retain their first event ID and position.
 // Classic authors resolve through paimos-classic identities and tenant-local

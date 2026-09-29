@@ -66,6 +66,9 @@ const what = (view: SessionView) => (view.status.reasons?.[0]?.detail || view.st
 .problem-chip .open { flex: none; height: 24px; padding: 0 10px; font-size: 12px; }
 @media (max-width: 720px) {
   .live-line { gap: 0; margin-top: 8px; }
+  /* While loading, hold the phone shape of a loaded line (the count, then one
+     row of 44px state buttons), so the header below does not jump. */
+  .live-line:has(> .line-skeleton) { min-height: 65px; align-content: flex-start; }
   .live-total { width: 100%; margin: 0 0 2px; }
   .state-count { height: 44px; padding: 0 10px 0 0; }
   .state-count + .state-count { padding-left: 8px; }

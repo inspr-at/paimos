@@ -3,6 +3,7 @@
 package agentsetup
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,53 @@ import (
 	"testing"
 	"time"
 )
+
+func TestEndedPairingRecoveryPreservesStateAndNeedsFreshApproval(t *testing.T) {
+	for _, state := range []string{"revoked", "draining", "denied", "expired"} {
+		t.Run(state, func(t *testing.T) {
+			e, api, _, opts, exec := engineFixture(t)
+			if _, err := e.Begin(t.Context(), opts); err != nil {
+				t.Fatal(err)
+			}
+			saved, err := e.load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved.Phase = state
+			if state == "draining" || state == "revoked" {
+				saved.DisconnectAll = true
+				saved.View.ComputerState = state
+			}
+			if err := e.save(saved, false); err != nil {
+				t.Fatal(err)
+			}
+			before, err := e.Store.Read(snapshotName, 1<<20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := len(exec.calls)
+			p, err := e.Begin(t.Context(), opts)
+			if err == nil || !strings.Contains(err.Error(), "--state-root") || !strings.Contains(p.Action, "approve the new code") || !strings.Contains(p.Action, "Keep this pairing's state") {
+				t.Fatal("ended pairing lacks actionable recovery")
+			}
+			after, err := e.Store.Read(snapshotName, 1<<20)
+			if err != nil || !bytes.Equal(before, after) || api.createCount != 1 || len(exec.calls) != calls {
+				t.Fatal("recovery changed old authority or touched a service")
+			}
+			// The documented explicit new root creates a new request, never
+			// inherits the old approval, and leaves the old root for cleanup.
+			freshAPI := &setupAPI{}
+			fresh := &Engine{Store: testStore(t), API: freshAPI, Services: e.Services, Now: e.Now}
+			p, err = fresh.Begin(t.Context(), opts)
+			if err != nil || p.Stage != "awaiting_approval" || freshAPI.createCount != 1 || freshAPI.request.RequestID == api.request.RequestID {
+				t.Fatal("fresh state did not request new person approval")
+			}
+			if _, err := fresh.Store.Read(RuntimeName, 1<<20); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("fresh state gained a runtime before approval")
+			}
+		})
+	}
+}
 
 const testTenant = "11111111-1111-4111-8111-111111111111"
 const testComputer = "22222222-2222-4222-8222-222222222222"
@@ -153,10 +201,10 @@ type fixtureExecutor struct {
 
 func (x *fixtureExecutor) Run(_ context.Context, c Command) ([]byte, error) {
 	x.calls = append(x.calls, c)
-	if len(c.Args) > 0 && c.Args[0] == "bootstrap" {
+	if len(c.Args) > 0 && (c.Args[0] == "bootstrap" || c.Args[0] == "--user" && len(c.Args) > 1 && c.Args[1] == "enable") {
 		x.active = true
 	}
-	if len(c.Args) > 0 && c.Args[0] == "bootout" {
+	if len(c.Args) > 0 && (c.Args[0] == "bootout" || c.Args[0] == "--user" && len(c.Args) > 1 && c.Args[1] == "disable") {
 		x.active = false
 	}
 	if c.Path == "/bin/ps" {
@@ -165,6 +213,9 @@ func (x *fixtureExecutor) Run(_ context.Context, c Command) ([]byte, error) {
 	if len(c.Args) > 0 && (c.Args[0] == "print" || c.Args[0] == "--user" && len(c.Args) > 1 && c.Args[1] == "is-active") {
 		if x.active {
 			return []byte("active"), nil
+		}
+		if c.Args[0] == "--user" {
+			return nil, &CommandError{ExitCode: 3}
 		}
 		return nil, &CommandError{ExitCode: 113}
 	}
@@ -247,7 +298,7 @@ func TestSetupApprovalAndRetryDoNotDuplicateServiceOrCredential(t *testing.T) {
 	}
 	starts := 0
 	for _, c := range x.calls {
-		if len(c.Args) > 0 && c.Args[0] == "bootstrap" {
+		if len(c.Args) > 0 && (c.Args[0] == "bootstrap" || c.Args[0] == "--user" && len(c.Args) > 1 && c.Args[1] == "enable") {
 			starts++
 		}
 		for _, arg := range c.Args {
@@ -345,11 +396,66 @@ func TestServiceConflictNeverStartsAndManagedSymlinkPreserved(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(dir, name)); err != nil {
 		t.Fatal(err)
 	}
+	o.StartService = true
 	if _, err := e.Begin(t.Context(), o); !errors.Is(err, ErrDeclarative) {
 		t.Fatal("managed service overwritten")
 	}
 	b, _ := os.ReadFile(target)
 	if string(b) != "managed fixture" {
 		t.Fatal("managed service changed")
+	}
+}
+
+func TestManagedPairingWaitsForPersonAndNeverControlsService(t *testing.T) {
+	e, a, _, o, x := engineFixture(t)
+	e.Services.Executable = "/nix/store/fixture-aeon/bin/aeon-agentd"
+	o.Candidates[0].Managed = true
+	p, err := e.Begin(t.Context(), o)
+	if err != nil || p.Stage != "awaiting_approval" || p.UserCode != "123-456-789" {
+		t.Fatalf("managed pairing: %s %v", p.Stage, err)
+	}
+	if _, err := e.Store.Read(RuntimeName, 128<<10); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("runtime created before approval")
+	}
+	e.Now = func() time.Time { return time.Now().Add(time.Minute) }
+	p, err = e.Step(t.Context())
+	if err != nil || p.Stage != "awaiting_approval" {
+		t.Fatal("person approval bypassed")
+	}
+	a.approved = true
+	e.Now = func() time.Time { return time.Now().Add(2 * time.Minute) }
+	p, err = e.Step(t.Context())
+	if err != nil || p.Stage != "connected" {
+		t.Fatalf("approved pairing failed: %s %v", p.Stage, err)
+	}
+	if len(x.calls) != 0 {
+		t.Fatal("declarative service was inspected or controlled")
+	}
+	if _, err := e.Store.Read("service.json", 64<<10); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("declarative service adopted")
+	}
+	p, err = e.Disconnect(t.Context(), "")
+	if err != nil || p.Stage != "disconnected" || len(x.calls) != 0 {
+		t.Fatal("disconnect controlled declarative service")
+	}
+}
+
+func TestAddManagedHarnessRequiresFreshPersonApproval(t *testing.T) {
+	e, a, _, o, x := engineFixture(t)
+	e.Services.Executable = "/nix/store/fixture-aeon/bin/aeon-agentd"
+	approveFixture(t, e, a, o)
+	a.approved = false
+	c := o.Candidates[0]
+	c.Harness, c.Label, c.Managed = "cursor", "cursor@example.test", true
+	p, err := e.AddHarness(t.Context(), []Candidate{c})
+	if err != nil || p.Stage != "awaiting_approval" || len(x.calls) != 0 {
+		t.Fatalf("managed add: %s %v", p.Stage, err)
+	}
+	if a.request.ExistingComputerID != testComputer || a.request.Accounts[0].Harness != "cursor" {
+		t.Fatal("added harness lost computer binding")
+	}
+	config, err := ReadRuntimeConfig(e.Store.Path())
+	if err != nil || len(config.Accounts) != 1 || config.Accounts[0].Harness != "codex" {
+		t.Fatal("unapproved harness reached runtime")
 	}
 }

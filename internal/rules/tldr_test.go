@@ -145,7 +145,7 @@ func isCode(err error, code string) bool {
 }
 
 func TestBudgetBoundsAndLayerCaps(t *testing.T) {
-	for _, b := range []Budget{{MaxBytes: 1999}, {MaxBytes: 12001}, {MaxBytes: 12000, Layers: LayerBytes{Company: 499}}, {MaxBytes: 12000, Layers: LayerBytes{Agent: 12001}}} {
+	for _, b := range []Budget{{MaxBytes: 1999}, {MaxBytes: 64001}, {MaxBytes: 12000, Layers: LayerBytes{Company: 499}}, {MaxBytes: 12000, Layers: LayerBytes{Agent: 12001}}} {
 		if err := b.Validate(); !isCode(err, "invalid_budget") {
 			t.Fatalf("%+v: %v", b, err)
 		}
@@ -179,8 +179,7 @@ func TestBudgetBoundsAndLayerCaps(t *testing.T) {
 	if !errors.As(err, &e) || e.Layer != "" || e.ActualBytes != m.ByteSize || e.MaxBytes != m.ByteSize-1 {
 		t.Fatalf("total: %v", err)
 	}
-	// The ceiling stays 12,000 bytes: deployed clients accept exactly that and
-	// refuse one byte more, whatever the workspace budget says.
+	// The default stays 12,000 bytes while upgraded clients support 64,000.
 	big := []Snapshot{floorSnapshot(), testSnapshot("p", Scope{Layer: "project", ProjectID: testProject}, bulky("proj", 40)...)}
 	if _, err = Merge(testContext(), big, now); !isCode(err, "rules_budget_exceeded") {
 		t.Fatalf("default budget: %v", err)
@@ -329,7 +328,7 @@ func TestExplanationLifecycleOverHTTP(t *testing.T) {
 	// People read the file with its explanations next to each exact line.
 	var x Explained
 	json.Unmarshal(w.call(member, "GET", "/api/rules/explained?"+url.Values{"project_id": {w.project}, "person_id": {member.ID}, "role": {"builder"}, "harness": {"codex"}}.Encode(), nil, 200), &x)
-	if x.Budget.MaxBytes != MaxBytes || x.Problem != nil || len(x.Sets) != 1 || x.Sets[0].TLDR == nil || x.Usage.Company != x.ByteSize-len(SessionHeader) {
+	if x.Budget.MaxBytes != LegacyMaxBytes || x.Problem != nil || len(x.Sets) != 1 || x.Sets[0].TLDR == nil || x.Usage.Company != x.ByteSize-len(SessionHeader) {
 		t.Fatalf("explained: %+v", x)
 	}
 	for _, r := range x.Rules {
@@ -359,7 +358,7 @@ func TestWorkspaceBudgetSetting(t *testing.T) {
 	company := w.floor(admin)
 	var view BudgetView
 	json.Unmarshal(w.call(member, "GET", "/api/rules/budget", nil, 200), &view)
-	if view.MaxBytes != MaxBytes || view.DefaultBytes != MaxBytes || view.MinBytes != MinBudgetBytes || view.CeilingBytes != MaxBytes || view.Layers != (LayerBytes{}) {
+	if view.MaxBytes != LegacyMaxBytes || view.DefaultBytes != LegacyMaxBytes || view.MinBytes != MinBudgetBytes || view.CeilingBytes != LegacyMaxBytes || view.Layers != (LayerBytes{}) {
 		t.Fatalf("default: %+v", view)
 	}
 	w.call(member, "PUT", "/api/rules/budget", Budget{MaxBytes: 8000}, 403)
@@ -368,7 +367,7 @@ func TestWorkspaceBudgetSetting(t *testing.T) {
 	agent.Scopes = []string{"rules.read", "settings.manage"}
 	w.call(agent, "PUT", "/api/rules/budget", Budget{MaxBytes: 8000}, 403)
 	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 1000}, 400)
-	// 12,000 bytes is the ceiling deployed clients enforce; a budget never raises it.
+	// The product ceiling remains bounded even after compatible clients report.
 	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBytes + 1}, 400)
 	w.call(admin, "PUT", "/api/rules/budget", map[string]any{"max_bytes": 12000, "layer_max_bytes": map[string]int{"robots": 600}}, 400)
 
@@ -376,7 +375,7 @@ func TestWorkspaceBudgetSetting(t *testing.T) {
 	project := w.layer(admin, Scope{Layer: "project", ProjectID: w.project})
 	mid := w.set(admin, project, "Mid", bulky("mid", 12)...)
 	json.Unmarshal(w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 5000}, 200), &view)
-	if view.MaxBytes != 5000 || view.CeilingBytes != MaxBytes {
+	if view.MaxBytes != 5000 || view.CeilingBytes != LegacyMaxBytes {
 		t.Fatalf("saved: %+v", view)
 	}
 	body := w.call(admin, "POST", "/api/rules/publish", batch("", item(mid, "auto")), 422)
@@ -438,7 +437,7 @@ func TestSingleSetPublishAndRestoreKeepTheBudget(t *testing.T) {
 	s := get()
 	json.Unmarshal(w.call(admin, "PUT", "/api/rules/sets/"+s.ID+"/draft", draftInput{ExpectedRevision: s.Revision, Name: s.Name, Rules: []Rule{testRule("tone", "Be brief.")}}, 200), &s)
 	w.publish(admin, s, "260929110001.0.0")
-	json.Unmarshal(w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBytes, Layers: LayerBytes{Project: 500}}, 200), new(BudgetView))
+	json.Unmarshal(w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: LegacyMaxBytes, Layers: LayerBytes{Project: 500}}, 200), new(BudgetView))
 	versions := func() int {
 		var list struct{ Versions []Snapshot }
 		json.Unmarshal(w.call(admin, "GET", "/api/rules/sets/"+big.ID+"/versions", nil, 200), &list)

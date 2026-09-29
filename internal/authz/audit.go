@@ -22,8 +22,8 @@ var accessEventTypes = []string{
 	"role.created", "role.updated", "role.deleted",
 	"binding.set", "binding.removed",
 	"invite.created", "invite.revoked", "invite.accepted",
-	"principal.deactivated", "principal.reactivated", "principal.alias_linked", "principal.alias_unlinked",
-	"agent_key.created", "agent_key.revoked", "agent_key.scopes_extended",
+	"principal.agent_created", "principal.deactivated", "principal.reactivated", "principal.alias_linked", "principal.alias_unlinked",
+	"agent_key.created", "agent_key.revoked", "agent_key.scopes_extended", "agent_key.scopes_changed",
 	"authz.role_created", "authz.role_updated", "authz.role_deleted",
 	"authz.workspace_role_changed", "authz.binding_reassigned", "authz.binding_migrated",
 	"authz.agent_binding_created", "authz.agent_binding_migrated", "authz.owner_fallback",
@@ -158,8 +158,8 @@ func mapAuditType(stored string, after any) (string, bool) {
 	case "role.created", "role.updated", "role.deleted",
 		"binding.set", "binding.removed",
 		"invite.created", "invite.revoked", "invite.accepted",
-		"principal.deactivated", "principal.reactivated", "principal.alias_linked", "principal.alias_unlinked",
-		"agent_key.created", "agent_key.revoked", "agent_key.scopes_extended":
+		"principal.agent_created", "principal.deactivated", "principal.reactivated", "principal.alias_linked", "principal.alias_unlinked",
+		"agent_key.created", "agent_key.revoked", "agent_key.scopes_extended", "agent_key.scopes_changed":
 		return stored, true
 	case "authz.role_created":
 		return "role.created", true

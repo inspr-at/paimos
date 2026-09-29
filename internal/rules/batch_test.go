@@ -22,6 +22,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -421,7 +422,7 @@ func (w *batchWorld) refusedOwn(admin tenant.Principal, label string, s Set) {
 	w.t.Helper()
 	body := w.call(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")), 422)
 	var e Error
-	if err := json.Unmarshal(body, &e); err != nil || e.Code != "rules_budget_exceeded" || e.ActualBytes <= MaxBytes || e.MaxBytes != MaxBytes {
+	if err := json.Unmarshal(body, &e); err != nil || e.Code != "rules_budget_exceeded" || e.ActualBytes <= LegacyMaxBytes || e.MaxBytes != LegacyMaxBytes {
 		w.t.Fatalf("%s: %s", label, body)
 	}
 	noContent(w.t, label, body)
@@ -817,7 +818,7 @@ func TestBudgetCapFitsTheDeadline(t *testing.T) {
 	c := testContext()
 	c.AgentID = ""
 	render := func() {
-		if _, err := merge(c, store, time.Now(), true, nil, DefaultBudget()); err != nil {
+		if _, err := merge(c, store, time.Now(), true, nil, DefaultBudget(), doctrine.Catalog{}); err != nil {
 			var e *Error
 			if !errors.As(err, &e) || e.Code != "floor_missing" && e.Code != "rules_budget_exceeded" {
 				t.Fatal(err)

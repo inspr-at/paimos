@@ -157,7 +157,11 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		if state != "pending" {
 			return nil
 		}
-		if leaseUntil != nil && leaseUntil.After(time.Now()) {
+		now, err := m.databaseNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if leaseUntil != nil && leaseUntil.After(now) {
 			work.State = "leased"
 			return nil
 		}
@@ -317,7 +321,11 @@ func (m *messaging) complete(ctx context.Context, p tenant.Principal, project st
 			if state != "pending" {
 				return &httpError{409, "delivery_conflict", "delivery is not pending"}
 			}
-			if leaseUntil == nil || !leaseUntil.After(time.Now()) {
+			now, err := m.databaseNow(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if leaseUntil == nil || !leaseUntil.After(now) {
 				return &httpError{409, "lease_conflict", "delivery lease expired"}
 			}
 			if in.EffectiveLevel == "steer" && (requested != "steer" || maximum != "steer" || adapter == "claude_resume" || adapter == "claude_channel" || adapter == "agentd_cursor") {
@@ -409,7 +417,11 @@ func (m *messaging) unavailableDelivery(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			return err
 		}
-		if state != "pending" || token == nil || *token != in.LeaseToken || leaseUntil == nil || !leaseUntil.After(time.Now()) || fallback == nil || (target != nil && *target == *fallback) {
+		now, err := m.databaseNow(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		if state != "pending" || token == nil || *token != in.LeaseToken || leaseUntil == nil || !leaseUntil.After(now) || fallback == nil || (target != nil && *target == *fallback) {
 			return &httpError{409, "delivery_conflict", "delivery cannot reroute"}
 		}
 		if _, err := tx.Exec(r.Context(), `UPDATE inbox_message_deliveries SET effective_target_id=$2::uuid,lease_token=NULL,lease_until=NULL,fallback_reason=$3 WHERE id=$1::uuid`, in.ID, *fallback, in.FallbackReason); err != nil {
@@ -425,6 +437,18 @@ func (m *messaging) unavailableDelivery(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"delivery_id": in.ID, "rerouted": true})
+}
+
+// databaseNow is the authority for delivery leases. lease_until is written with
+// clock_timestamp(); judging it with the API host clock treats a fresh lease as
+// expired when the host is ahead, and honors an expired lease when the host is behind.
+func (m *messaging) databaseNow(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+	if m.databaseClock != nil {
+		return m.databaseClock(ctx, tx)
+	}
+	var now time.Time
+	err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+	return now, err
 }
 
 // lockDeliveryMessage takes the message row lock before a delivery row lock,

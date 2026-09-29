@@ -50,6 +50,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/rules/sets/{setId}/publish", "rules.publish", m.publish, unknownChange}, {"POST /api/rules/sets/{setId}/restore", "rules.publish", m.restore, unknownChange},
 		{"GET /api/rules/sets/{setId}/versions", "rules.read", m.versions, ""}, {"GET /api/rules/sets/{setId}/versions/{version}", "rules.read", m.version, ""},
 		{"GET /api/rules/merged", "rules.read", m.merged, ""},
+		{"GET /api/rules/channels", "rules.read", m.channels, ""},
 		{"GET /api/rules/comparisons", "rules.read", m.listComparisons, ""},
 		{"POST /api/rules/comparisons", "rules.write", m.createComparison, "The comparison may have been saved. Reload before uploading it again."},
 		{"GET /api/rules/explained", "rules.read", m.explained, ""},
@@ -155,6 +156,7 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 					return err
 				}
 			}
+			r = r.WithContext(withDoctrineCatalog(r.Context()))
 			if out, err = fn(r, tx, p); err != nil {
 				return err
 			}
@@ -320,6 +322,11 @@ func writeFailure(w http.ResponseWriter, err error) {
 func actorOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal) (string, error) {
 	id := p.ID
 	if p.Kind == tenant.Agent {
+		// Rule scopes and merged contexts require a human owner. Operator
+		// keys have none; never substitute an arbitrary person or service actor.
+		if p.KeyCreatorID == "" {
+			return "", fail(403, "rules_owner_required", "rules access requires an agent key created by a signed-in person; operator-created keys have no human rule owner")
+		}
 		id = p.KeyCreatorID
 	}
 	if !workorders.UUID(id) {
@@ -446,7 +453,15 @@ func (m *Module) merged(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
-	merged, err := MergeWithin(c, snapshots, time.Now().UTC(), limits)
+	maximum, err := RequestMaximum(r)
+	if err != nil {
+		return nil, err
+	}
+	cat, err := loadDoctrineCatalog(r.Context(), tx)
+	if err != nil {
+		return nil, err
+	}
+	merged, err := MergeDeliveredForClient(c, snapshots, time.Now().UTC(), limits, maximum, cat)
 	if err != nil {
 		return nil, err
 	}

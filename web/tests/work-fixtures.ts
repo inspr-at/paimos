@@ -3,9 +3,9 @@
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page } from '@playwright/test'
-import { deriveAgentState, normalizeAgentState } from '../src/lib/agentSignals.ts'
+import { deriveAgentState, normalizeAgentState, STATE_PRIORITY } from '../src/lib/agentSignals.ts'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
-import { compareServerLead, leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
+import { leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { planningSortValue, type PlanningColumn } from '../src/lib/planning.ts'
 
@@ -80,7 +80,7 @@ export function fixtures(options: MockOptions = {}) {
   for (let index = 0; index < (options.bigProject ?? 0); index++) {
     add({ id: `n-big-${index}`, key: `AEON-${100 + index}`, kind_slug: 'ticket', title: `Generated ticket ${index + 1}`, state: 'backlog', project: 'p-aeon', fields: { priority: 'medium' }, updated_at: ago(index + 1) })
   }
-  const activity: Record<string, { id: string; at: string; type: 'comment' | 'change' | 'created'; author: { id: string | null; name: string }; body_markdown?: string; changes?: { field: string; from: string | null; to: string | null }[] }[]> = {
+  const activity: Record<string, { id: string; at: string; type: 'comment' | 'change' | 'created'; author: { id: string | null; name: string; automatic?: boolean; job?: string; reason?: string }; body_markdown?: string; changes?: { field: string; from: string | null; to: string | null }[] }[]> = {
     // Newest first, like the API.
     'n-1': [
       { id: '9', at: ago(0.5), type: 'comment', author: { id: mira.id, name: mira.name }, body_markdown: 'Token rotation is **done**; cleanup next.' },
@@ -139,8 +139,9 @@ export function liveAgent(fields: Partial<LiveAgentMock> & Pick<LiveAgentMock, '
 }
 export interface Call { path: string; method: string; query: URLSearchParams; body: unknown; headers: Record<string, string> }
 
-// usage: the caller holds harness.read, so planning keeps its cost (AEON-329).
-function item(node: MockNode, data: Fixtures, usage = true) {
+// hideLead: the caller cannot read harness sessions, so the server sends no
+// lead_worker (AEON-316 gates it on the same visibility as the live read).
+function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
   const kindIds: Record<string, string> = { epic: 'k-epic', ticket: 'k-ticket', task: 'k-task', project: 'k-project' }
   const parent = node.parent_id ? data.nodes.find(n => n.id === node.parent_id) : undefined
   const project = data.projects.find(p => p.id === node.project)!
@@ -148,7 +149,7 @@ function item(node: MockNode, data: Fixtures, usage = true) {
   // the payload reads like an older server's.
   const person = typeof node.fields.assignee === 'string' ? data.people.find(p => p.id === node.fields.assignee) : undefined
   const assignee = person ? { id: person.id, name: person.name, ...(person.has_avatar === undefined ? {} : { has_avatar: person.has_avatar }) } : null
-  const lead = leadOf(data, node)
+  const lead = hideLead ? undefined : leadOf(data, node)
   return {
     id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
@@ -213,8 +214,27 @@ function costUnit(node: MockNode): string {
 }
 const release = (node: MockNode) => labelOf(node.fields.release)
 const personName = (data: Fixtures, id: unknown) => typeof id === 'string' ? data.people.find(p => p.id === id)?.name ?? '' : ''
-// Live workers on one ticket, in the server's lead order (attention at the
-// viewer's thresholds, then start, heartbeat and public facts — not a session id).
+// Mock stand-in for the list query's lead order. The server chooses; this
+// only keeps fixture rows in that order (attention at the viewer's thresholds,
+// then a worker before a coordinator, then start, heartbeat and public facts).
+function compareServerLead(a: LiveAgent, b: LiveAgent) {
+  const rank = (agent: LiveAgent) => STATE_PRIORITY[agent.state ?? 'working']
+  const beat = (agent: LiveAgent) => {
+    const parsed = Date.parse(agent.heartbeat_at ?? '')
+    return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
+  }
+  return rank(a) - rank(b)
+    || Number(a.role === 'coordinator') - Number(b.role === 'coordinator')
+    || Date.parse(a.since) - Date.parse(b.since)
+    || beat(a) - beat(b)
+    || a.harness.localeCompare(b.harness)
+    || (a.activity_sequence ?? 0) - (b.activity_sequence ?? 0)
+    || a.phase.localeCompare(b.phase)
+    || a.activity.localeCompare(b.activity)
+    || who(a).localeCompare(who(b))
+    || leadWorkerKey(a).localeCompare(leadWorkerKey(b))
+}
+// Live workers on one ticket, in the server's lead order.
 function liveOn(data: Fixtures, node: MockNode): LiveAgent[] {
   const preferences = normalizeAgentState(data.preferences['agent-state'])
   return data.live.flatMap(agent => {
@@ -558,7 +578,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       }
       const limit = Number(query.get('limit') ?? 50), offset = Number((query.get('cursor') ?? 'o:0').slice(2))
       const pageRows = rows.slice(offset, offset + limit)
-      return route.fulfill({ json: { items: pageRows.map(n => item(n, data, !options.readOnly)), next_cursor: offset + limit < rows.length ? `o:${offset + limit}` : null, ...(Object.keys(facets).length ? { facets } : {}) } })
+      return route.fulfill({ json: { items: pageRows.map(n => item(n, data, options.liveStatus === 403, !options.readOnly && options.liveStatus !== 403)), next_cursor: offset + limit < rows.length ? `o:${offset + limit}` : null, ...(Object.keys(facets).length ? { facets } : {}) } })
     }
     const agentWorkPath = /^\/api\/nodes\/([^/]+)\/agent-work$/.exec(path)
     if (agentWorkPath && method === 'GET') {
