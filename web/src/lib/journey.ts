@@ -86,8 +86,6 @@ export interface Handoff {
   id: string; project_node_id: string; release_node_id: string; stage: 'deploy' | 'access'; operation: 'prepare' | 'apply' | 'deploy' | 'verify'
   plugin_id: string; attempt: number; authority_epoch: number; state: 'requested' | 'active' | 'blocked' | 'succeeded' | 'failed' | 'revoked'
   expires_at: string; result?: { outcome: 'succeeded' | 'failed'; blocker_code?: string; completed_at: string }
-  target?: DeployTarget | null
-  target_digest_sha256?: string
 }
 
 // ---------- Requests ----------

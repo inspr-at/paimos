@@ -58,7 +58,6 @@ function namedJourney() {
   const world = journeyWorld('deploy')
   Object.assign(world.approvals[0], { target: namedTarget, target_digest_sha256: digest })
   Object.assign(world.journey.stages.find(stage => stage.key === 'deploy')!, { target: namedTarget, target_digest_sha256: digest })
-  Object.assign(world.handoffs['h-1'] as object, { target: { ...namedTarget, hosts: ['app-02'], environment: 'staging' }, target_digest_sha256: otherDigest })
   return world
 }
 
@@ -66,6 +65,7 @@ test('Needs you names destinations and keeps target-less approvals usable', asyn
   await openAgents(page)
   const named = queue(page).locator('.item', { hasText: 'app-01' })
   await expect(named.getByRole('region', { name: /Deploy target: app-01/ })).toContainText(namedTarget.change)
+  await expect(named.getByText('named by the agent', { exact: true })).toBeVisible()
   await expect(named.getByRole('region')).not.toContainText('imac0')
   const absent = queue(page).locator('.item', { hasText: 'Deploy wherever the session host is' })
   await expect(absent.getByRole('region', { name: 'Target not named' })).toBeVisible()
@@ -79,16 +79,20 @@ test('Needs you names destinations and keeps target-less approvals usable', asyn
   await expect(historical.locator('.past-outcome')).toHaveText('Approved')
 })
 
-for (const named of [true, false]) {
-  test(`journey decision and confirmation preserve optional targets: ${named}`, async ({ page }) => {
-    await page.setViewportSize({ width: 1600, height: 1000 })
+for (const width of [390, 1600]) for (const named of [true, false]) {
+  test(`journey decision and confirmation preserve optional targets: ${named} at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
     await mockWork(page, fixtures())
     const calls = await mockJourney(page, named ? namedJourney() : journeyWorld('deploy'))
     await page.goto('/p/PHAROS?view=journey')
     const card = page.getByRole('region', { name: 'Decision: The host did not apply it' })
     await expect(card.getByRole('region', { name: named ? /Deploy target: app-01/ : 'Target not named' })).toBeVisible()
     const history = page.getByRole('region', { name: 'Handoffs · deploy and verify' })
-    await expect(history.getByRole('region', { name: named ? /Deploy target: app-02/ : 'Target not named' })).toBeVisible()
+    // The strict 1.0 handoff has no target; never attribute the current stage's
+    // destination to a historical attempt. The stage and approval carry it.
+    await expect(history.getByRole('region', { name: /Deploy target:|Target not named/ })).toHaveCount(0)
+    await expect(page.getByRole('region', { name: 'Target', exact: true })).toContainText(named ? 'app-01' : 'Target not named')
+    if (named) await expect(card.getByText('named by the agent', { exact: true })).toBeVisible()
     await card.getByRole('button', { name: 'Approve and retry deployment' }).click()
     const dialog = page.getByRole('dialog', { name: 'Retry deployment?' })
     await expect(dialog).toContainText(named ? 'Server: app-01 · production' : 'Target not named')
@@ -97,12 +101,24 @@ for (const named of [true, false]) {
   })
 }
 
+test('deploy target uses journey metadata when no approval is available', async ({ page }) => {
+  await mockWork(page, fixtures())
+  const world = namedJourney()
+  world.approvals = []
+  await mockJourney(page, world)
+  await page.goto('/p/PHAROS?view=journey')
+  const target = page.getByRole('region', { name: 'Target', exact: true })
+  await expect(target).toContainText('app-01 · production')
+  await expect(target).toContainText('named by the agent')
+})
+
 test('deploy target screenshots', async ({ page }) => {
   test.skip(!process.env.DEPLOY_TARGET_SHOTS, 'Opt-in visual evidence')
   test.setTimeout(120_000)
   for (const surface of ['agents', 'journey']) {
     if (surface === 'agents') {
       await openAgents(page)
+      await expect(page.getByRole('region', { name: 'Live now' }).locator('.name').first()).toBeVisible()
       await queue(page).getByRole('button', { name: /^Decided/ }).click()
     } else {
       await mockWork(page, fixtures())
@@ -117,13 +133,13 @@ test('deploy target screenshots', async ({ page }) => {
         await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
         await page.getByText('app-01 · production', { exact: true }).first().scrollIntoViewIfNeeded()
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-        await page.screenshot({ path: `${process.env.DEPLOY_TARGET_SHOTS}/${surface}-${theme}-${width}.png`, fullPage: true })
+        await page.screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/${surface}-${theme}-${width}.png`, fullPage: true })
         if (surface === 'agents') {
-          await queue(page).locator('.item', { hasText: 'Deploy wherever the session host is' }).screenshot({ path: `${process.env.DEPLOY_TARGET_SHOTS}/missing-${theme}-${width}.png` })
-          await queue(page).locator('.history').screenshot({ path: `${process.env.DEPLOY_TARGET_SHOTS}/approval-history-${theme}-${width}.png` })
+          await queue(page).locator('.item', { hasText: 'Deploy wherever the session host is' }).screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/missing-${theme}-${width}.png` })
+          await queue(page).locator('.history').screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/approval-history-${theme}-${width}.png` })
         } else {
-          await page.getByRole('region', { name: 'Decision: The host did not apply it' }).screenshot({ path: `${process.env.DEPLOY_TARGET_SHOTS}/decision-${theme}-${width}.png` })
-          await page.getByRole('region', { name: 'Handoffs · deploy and verify' }).screenshot({ path: `${process.env.DEPLOY_TARGET_SHOTS}/handoff-history-${theme}-${width}.png` })
+          await page.getByRole('region', { name: 'Decision: The host did not apply it' }).screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/decision-${theme}-${width}.png` })
+          await page.getByRole('region', { name: 'Handoffs · deploy and verify' }).screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/handoff-history-${theme}-${width}.png` })
         }
       }
     }

@@ -148,11 +148,43 @@ func testJourneyTargetRoundtrip(t *testing.T, named bool) {
 	if err := json.Unmarshal(handoff.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	if named && (created.Target == nil || created.Target.Hosts[0] != "edge-1" || len(created.TargetDigestSHA256) != 64) {
-		t.Fatalf("handoff lost target: %+v", created)
+	// PHAROS strictly decodes 1.0. The accepted target is stored, but the
+	// handoff response must not expose it; the journey supplies it to the web.
+	if handoff.Header().Get("Aeon-Contract") != "stage-handoffs/1.0" {
+		t.Fatal("handoff contract changed")
 	}
-	if !named && (created.Target != nil || created.TargetDigestSHA256 != "") {
-		t.Fatal("invented target")
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(handoff.Body.Bytes(), &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"target", "target_digest_sha256"} {
+		if _, ok := fields[key]; ok {
+			t.Fatalf("PHAROS response contains %s", key)
+		}
+	}
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		var stored bool
+		if err := tx.QueryRow(ctx, `SELECT target IS NOT NULL AND target_digest_sha256 IS NOT NULL FROM stage_handoffs WHERE id=$1::uuid`, created.ID).Scan(&stored); err != nil {
+			return err
+		}
+		if stored != named {
+			t.Fatal("handoff storage lost or invented target")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	view = f.journey(t, f.person, http.MethodGet, "/api/projects/"+project+"/journey", "")
+	for _, stage := range view.Stages {
+		if stage.Key != "deploy" {
+			continue
+		}
+		if named && (stage.Target == nil || stage.Target.Hosts[0] != "edge-1" || len(stage.TargetDigestSHA256) != 64) {
+			t.Fatal("journey lost handoff target")
+		}
+		if !named && (stage.Target != nil || stage.TargetDigestSHA256 != "") {
+			t.Fatal("journey invented target")
+		}
 	}
 	if created.ID == "" || created.PluginID != "pharos" || created.Stage != "deploy" || created.Operation != "deploy" {
 		t.Fatalf("wrong handoff: %+v", created)

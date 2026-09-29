@@ -83,6 +83,9 @@ type RequestWrite struct {
 	Target                  *deploytarget.Target `json:"target,omitempty"`
 	TargetDigestSHA256      string               `json:"-"`
 }
+
+// Handoff keeps target metadata internal for strict PHAROS 1.0 readers.
+// Journey, approvals and audit events expose the target separately.
 type Handoff struct {
 	ID                     string                 `json:"id"`
 	ProjectNodeID          string                 `json:"project_node_id"`
@@ -102,8 +105,8 @@ type Handoff struct {
 	PredecessorDigest      string                 `json:"predecessor_digest"`
 	ContextDigest          string                 `json:"context_digest"`
 	PrerequisiteSealSHA256 string                 `json:"prerequisite_seal_sha256"`
-	Target                 *deploytarget.Target   `json:"target,omitempty"`
-	TargetDigestSHA256     string                 `json:"target_digest_sha256,omitempty"`
+	Target                 *deploytarget.Target   `json:"-"`
+	TargetDigestSHA256     string                 `json:"-"`
 	Result                 *Result                `json:"result,omitempty"`
 	Admission              *HandoffAdmissionState `json:"admission,omitempty"`
 }

@@ -29,7 +29,7 @@ const facts = computed(() => {
   <section v-if="shown" class="target" :class="[view.standing, { compact }]" :aria-label="view.aria || 'Target not named'">
     <p class="head">
       <span class="mark" aria-hidden="true"><AppIcon name="server" :size="14" /></span>
-      <span class="where">{{ view.where || 'Target not named' }}</span>
+      <span class="destination"><span class="where">{{ view.where || 'Target not named' }}</span><small v-if="view.standing === 'named'" class="source">named by the agent</small></span>
     </p>
     <dl v-if="facts.length" class="facts">
       <template v-for="[label, value] in facts" :key="label">
@@ -52,6 +52,8 @@ const facts = computed(() => {
   display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px;
   background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2);
 }
+.destination { display: grid; gap: 2px; min-width: 0; }
+.source { color: var(--ink-3); font-size: 11.5px; line-height: 1.35; }
 .where { min-width: 0; font-size: 13.5px; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
 .facts { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 4px 10px; margin: 0; }
 .facts dt { margin: 0; font: 600 10px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }

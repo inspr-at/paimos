@@ -13,7 +13,7 @@ import "net/http"
 const Header = "Aeon-Contract"
 
 const (
-	StageHandoffs   = "stage-handoffs/1.1"
+	StageHandoffs   = "stage-handoffs/1.0"
 	StageEvidence   = "stage-evidence/1.0"
 	StageResult     = "stage-result/1.0"
 	StageLaunch     = "stage-launch/1.0"

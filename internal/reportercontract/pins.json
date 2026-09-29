@@ -2457,8 +2457,8 @@
     }
   },
   "stage-handoffs": {
-    "version": "stage-handoffs/1.1",
-    "sha256": "aad9d1a36fc8d06ee56fb47927421a05041d2096b57648c9faebc853e677fd4b",
+    "version": "stage-handoffs/1.0",
+    "sha256": "15ca943d8910a3ab2b41fbc839ab68e80506875bbbf0ae590b1af34276134c52",
     "shape": {
       "GET /stage-handoffs/{handoffId} 200": {
         "properties": {
@@ -2648,67 +2648,6 @@
               "string",
               "null"
             ]
-          },
-          "target": {
-            "additionalProperties": false,
-            "anyOf": [
-              {
-                "properties": {
-                  "hosts": {
-                    "minItems": 1
-                  }
-                },
-                "required": [
-                  "hosts"
-                ]
-              },
-              {
-                "required": [
-                  "environment"
-                ]
-              }
-            ],
-            "properties": {
-              "change": {
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
-              },
-              "environment": {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              "hosts": {
-                "items": {
-                  "maxLength": 255,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "maxItems": 32,
-                "type": "array",
-                "uniqueItems": true
-              },
-              "image": {
-                "maxLength": 512,
-                "minLength": 1,
-                "type": "string"
-              },
-              "service": {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              }
-            },
-            "required": [
-              "service",
-              "change"
-            ],
-            "type": "object"
-          },
-          "target_digest_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "type": "string"
           }
         },
         "required": [
@@ -2920,67 +2859,6 @@
               "string",
               "null"
             ]
-          },
-          "target": {
-            "additionalProperties": false,
-            "anyOf": [
-              {
-                "properties": {
-                  "hosts": {
-                    "minItems": 1
-                  }
-                },
-                "required": [
-                  "hosts"
-                ]
-              },
-              {
-                "required": [
-                  "environment"
-                ]
-              }
-            ],
-            "properties": {
-              "change": {
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
-              },
-              "environment": {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              "hosts": {
-                "items": {
-                  "maxLength": 255,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "maxItems": 32,
-                "type": "array",
-                "uniqueItems": true
-              },
-              "image": {
-                "maxLength": 512,
-                "minLength": 1,
-                "type": "string"
-              },
-              "service": {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              }
-            },
-            "required": [
-              "service",
-              "change"
-            ],
-            "type": "object"
-          },
-          "target_digest_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "type": "string"
           }
         },
         "required": [

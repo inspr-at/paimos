@@ -4865,7 +4865,7 @@ components:
   # Additive optional response fields require a minor bump; removals, type changes,
   # and newly required fields require a major bump. Never add a version body field.
   headers:
-    StageHandoffsContract: {description: Stage handoff response contract, schema: {type: string, enum: ['stage-handoffs/1.1']}}
+    StageHandoffsContract: {description: Stage handoff response contract, schema: {type: string, enum: ['stage-handoffs/1.0']}}
     StageEvidenceContract: {description: Stage evidence response contract, schema: {type: string, enum: ['stage-evidence/1.0']}}
     StageResultContract: {description: Stage result response contract, schema: {type: string, enum: ['stage-result/1.0']}}
     StageLaunchContract: {description: Stage launch response contract, schema: {type: string, enum: ['stage-launch/1.0']}}
@@ -6024,8 +6024,6 @@ components:
             it as authority.
         result: {$ref: '#/components/schemas/StageResult'}
         admission: {$ref: '#/components/schemas/StageHandoffAdmissionState'}
-        target: {$ref: '#/components/schemas/DeployTarget', description: Recorded deployment target metadata}
-        target_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Informational target digest}
     StageHandoffAdmissionState:
       type: object
       required: [admission_id, epoch, expires_at]

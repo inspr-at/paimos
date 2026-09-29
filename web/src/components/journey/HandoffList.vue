@@ -3,7 +3,6 @@
 import { BLOCKER_LABEL, type Handoff } from '../../lib/journey'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
-import TargetSummary from '../deploy/TargetSummary.vue'
 
 // Stage handoffs to a plugin (Pharos deploys and verifies, Janus prepares and
 // applies access) as a compact timeline: attempt, operation, state and result.
@@ -21,7 +20,6 @@ const icon = (h: Handoff) => h.state === 'succeeded' ? 'check' : h.state === 'fa
       <span class="what">
         <span>{{ OPERATION[handoff.operation] }} · <b>{{ handoff.plugin_id === 'pharos' ? 'Pharos' : handoff.plugin_id === 'janus' ? 'Janus' : handoff.plugin_id }}</b> · attempt {{ handoff.attempt }}</span>
         <small>{{ STATE[handoff.state] }}<template v-if="handoff.result?.blocker_code"> · {{ BLOCKER_LABEL[handoff.result.blocker_code] ?? handoff.result.blocker_code.replace(/_/g, ' ') }}</template><template v-if="handoff.state === 'requested' || handoff.state === 'active'"> · expires {{ relativeTime(handoff.expires_at, { now }) }}</template></small>
-        <TargetSummary v-if="handoff.operation === 'deploy' || handoff.operation === 'verify'" compact :approval="{ scope: 'journey.deploy', target: handoff.target }" />
       </span>
       <time v-if="handoff.result" :datetime="handoff.result.completed_at" :data-tip="absoluteTime(handoff.result.completed_at)">{{ relativeTime(handoff.result.completed_at, { now }) }}</time>
       <span v-else class="when">open</span>

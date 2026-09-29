@@ -359,6 +359,48 @@ func testPharosOptionalTarget(t *testing.T, named bool) {
 	m, p, project, release, bearer := fixture(t)
 	handler := (&httpapi.Server{Modules: []httpapi.Module{m}}).Handler()
 	ctx := context.Background()
+	assertInternalTarget := func(h Handoff) {
+		t.Helper()
+		err := db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
+			stored, err := loadHandoff(ctx, tx, h.ID, false)
+			if err != nil {
+				return err
+			}
+			if stored.TargetDigestSHA256 != h.TargetDigestSHA256 || (stored.Target != nil) != named {
+				t.Fatal("stored target changed")
+			}
+			var eventTarget bool
+			if err := tx.QueryRow(ctx, `SELECT after ? 'target' AND after ? 'target_digest_sha256' FROM events WHERE type='stage_handoff.requested' AND after->>'id'=$1`, h.ID).Scan(&eventTarget); err != nil {
+				return err
+			}
+			if eventTarget != named {
+				t.Fatal("audit target changed")
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		read := httptest.NewRequest(http.MethodGet, "/api/stage-handoffs/"+h.ID, nil).
+			WithContext(tenant.WithPrincipal(t.Context(), fixturePerson(t, m, p.TenantID)))
+		got := httptest.NewRecorder()
+		handler.ServeHTTP(got, read)
+		if got.Code != http.StatusOK {
+			t.Fatalf("get: %d %s", got.Code, got.Body.String())
+		}
+		if got.Header().Get("Aeon-Contract") != "stage-handoffs/1.0" {
+			t.Fatal("handoff version changed")
+		}
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(got.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range []string{"target", "target_digest_sha256"} {
+			if _, ok := body[field]; ok {
+				t.Fatalf("PHAROS response contains %s", field)
+			}
+		}
+	}
 	err := db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var human string
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE kind='person' LIMIT 1`).Scan(&human); err != nil {
@@ -442,6 +484,7 @@ func testPharosOptionalTarget(t *testing.T, named bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertInternalTarget(h)
 	routeFixtureAgent(t, m, &p, "pharos")
 	a := Artifact{VersionScheme: "inspr-calendar-v2", Version: "260923000000.0.0", ReleaseChannel: "stable", ReleaseSequence: 1, DigestSHA256: emptyDigest, CommitDigest: "commit", ManifestCoordinate: "manifest", ManifestDigestSHA256: emptyDigest}
 	e := EvidenceWrite{Sequence: 1, Kind: "deployment", Outcome: "succeeded", ObservedAt: time.Now().UTC(), AuthorityEpoch: h.AuthorityEpoch, Workflow: stringPtr("deploy"), Environment: stringPtr("production"), Artifact: &a}
@@ -533,6 +576,7 @@ func testPharosOptionalTarget(t *testing.T, named bool) {
 	if !named && verification.Target != nil {
 		t.Fatal("invented verify target")
 	}
+	assertInternalTarget(verification)
 	verificationEvidence := EvidenceWrite{Sequence: 1, Kind: "verification", Outcome: "succeeded", ObservedAt: time.Now().UTC(), AuthorityEpoch: verification.AuthorityEpoch, Workflow: stringPtr("verify"), Environment: stringPtr("production"), Artifact: &a}
 	if resp := routedTestRequest(t, handler, p, bearer, "/api/stage-handoffs/"+verification.ID+"/evidence", verificationEvidence); resp.Code != http.StatusCreated {
 		t.Fatalf("Pharos verify evidence: %d %s", resp.Code, resp.Body.String())

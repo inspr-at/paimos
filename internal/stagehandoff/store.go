@@ -229,6 +229,7 @@ func (m *Module) create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in R
 		return h, fail(403, "stage gate is not approved")
 	}
 	if in.Operation == "verify" {
+		// Retain audit metadata internally; Handoff excludes it from PHAROS responses.
 		var targetDigest *string
 		err := tx.QueryRow(ctx, `SELECT target,target_digest_sha256 FROM stage_handoffs WHERE release_node_id=$1::uuid AND stage='deploy' AND operation='deploy' ORDER BY attempt DESC LIMIT 1`, in.ReleaseNodeID).Scan(&h.Target, &targetDigest)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
