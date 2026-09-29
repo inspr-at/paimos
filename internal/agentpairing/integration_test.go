@@ -1138,3 +1138,52 @@ func TestPairingLegacyUnsupportedVerificationRemainsPairedUntilExpiry(t *testing
 		t.Fatal("unavailable legacy verification never expires")
 	}
 }
+
+func TestPairingHarnessStatusesStayScopedAndRecover(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude", "codex")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	reconcile := func(statuses map[string]string, status int) agentpairing.View {
+		t.Helper()
+		var result agentpairing.View
+		w := f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": agentpairing.SetupProgress{State: "connected", HarnessStatuses: statuses}}, false, "", status)
+		if status == 200 {
+			decodeResult(t, w, &result)
+		}
+		return result
+	}
+	for _, statuses := range []map[string]string{
+		{"claude": "blocked", "codex": "ready"},
+		{"claude": "ready", "codex": "ready"},
+		{"claude": "blocked", "codex": "blocked"},
+	} {
+		reported := reconcile(statuses, 200)
+		if reported.SetupState != "connected" || reported.SetupError != "" || reported.RuntimePrefix != "" || reported.HarnessStatuses["claude"] != statuses["claude"] || reported.HarnessStatuses["codex"] != statuses["codex"] {
+			t.Fatal("reconcile lost typed harness status or leaked authority")
+		}
+		var listed struct {
+			Computers []agentpairing.View `json:"computers"`
+		}
+		decodeResult(t, f.call("GET", "/api/agent-pairing/computers", nil, true, "", 200), &listed)
+		if len(listed.Computers) != 1 || listed.Computers[0].HarnessStatuses["claude"] != statuses["claude"] || listed.Computers[0].HarnessStatuses["codex"] != statuses["codex"] {
+			t.Fatal("computer list lost per-harness status")
+		}
+		var detail agentpairing.View
+		decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &detail)
+		if detail.HarnessStatuses["claude"] != statuses["claude"] {
+			t.Fatal("computer detail lost status")
+		}
+	}
+	reconcile(map[string]string{"claude": "local diagnostic text"}, 400)
+	reconcile(map[string]string{"arbitrary-local-path": "ready"}, 400)
+	reconcile(map[string]string{"cursor": "ready"}, 400)
+	if result := reconcile(nil, 200); len(result.HarnessStatuses) != 0 || result.SetupState != "connected" {
+		t.Fatal("legacy progress retained stale harness status")
+	}
+	// Another computer's report cannot overwrite this one.
+	other := f.propose("cursor")
+	f.approve(other, "connect_only")
+	f.redeem(other)
+	f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": other.id, "lifecycle_secret": other.lifecycle, "progress": agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "ready"}}}, false, "", 400)
+}

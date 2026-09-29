@@ -263,7 +263,32 @@ func cleanup(ctx context.Context, tx pgx.Tx, computer string, in proofRequest) e
 		default:
 			return fail(400, "invalid_request", "unknown setup error")
 		}
-		if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET setup_state=$2,setup_error=$3,last_seen_at=clock_timestamp() WHERE id=$1 AND state='connected'`, computer, in.Progress.State, in.Progress.ErrorCode); err != nil {
+		for harness, status := range in.Progress.HarnessStatuses {
+			switch harness {
+			case "claude", "codex", "cursor", "grok":
+			default:
+				return fail(400, "invalid_request", "unknown harness")
+			}
+			switch status {
+			case "ready", "blocked", "login_required", "checking", "draining":
+			default:
+				return fail(400, "invalid_request", "unknown harness status")
+			}
+			var enrolled bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$1 AND a.harness=$2)`, computer, harness).Scan(&enrolled); err != nil {
+				return err
+			}
+			if !enrolled {
+				return fail(400, "invalid_request", "harness is not enrolled on this computer")
+			}
+		}
+		// A legacy daemon omits the report. Clear old readiness rather than
+		// retaining a stale ready/blocked claim after a downgrade.
+		statuses := in.Progress.HarnessStatuses
+		if statuses == nil {
+			statuses = map[string]string{}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET setup_state=$2,setup_error=$3,harness_statuses=$4,last_seen_at=clock_timestamp() WHERE id=$1 AND state='connected'`, computer, in.Progress.State, in.Progress.ErrorCode, statuses); err != nil {
 			return err
 		}
 	}

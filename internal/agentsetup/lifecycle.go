@@ -484,19 +484,15 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 }
 
 func observedProgress(v View, local LocalStatus) *SetupProgress {
-	p := &SetupProgress{State: "provisioning"}
-	if len(local.HarnessErrors) > 0 {
-		// Keep the existing public progress vocabulary. The specific, value-free
-		// local diagnostic is rendered by the setup status command above.
-		p.State, p.ErrorCode = "setup_failed", "installation_failed"
-		return p
-	}
-	if local.LoginRequired {
+	p := &SetupProgress{State: "provisioning", HarnessStatuses: local.HarnessStatuses}
+	if local.LoginRequired && !local.Ready {
 		p.State = "login_required"
 		p.ErrorCode = "login_required"
 		return p
 	}
-	if local.Ready {
+	// A runtime hold is not an installation failure. Setup remains complete
+	// even when every harness is held; per-harness readiness stays explicit.
+	if local.Ready || len(local.HarnessErrors) > 0 {
 		p.State = "connected"
 	}
 	for _, a := range v.Enrollments {

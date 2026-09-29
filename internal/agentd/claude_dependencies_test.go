@@ -175,7 +175,7 @@ func TestClaudeDependencyBreakAndRepinHoldDoNotStarveCodex(t *testing.T) {
 			}
 			status := s.Lifecycle("")
 			issue := status.HarnessErrors[Claude]
-			if status.Ready || status.LoginRequired || issue == "" || len(status.HarnessErrors) != 1 {
+			if !status.Ready || status.LoginRequired || issue == "" || len(status.HarnessErrors) != 1 || status.HarnessStatuses[Claude] != "blocked" || status.HarnessStatuses[Codex] != "ready" {
 				t.Fatalf("failure hidden or treated as login: %+v", status)
 			}
 			if (failure == "node" || failure == "sdk") && !strings.Contains(issue, "repin") {
@@ -202,7 +202,7 @@ func TestClaudeDependencyBreakAndRepinHoldDoNotStarveCodex(t *testing.T) {
 			if err := s.PollOnce(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			if status := s.Lifecycle(""); !status.Ready || status.LoginRequired || len(status.HarnessErrors) != 0 {
+			if status := s.Lifecycle(""); !status.Ready || status.LoginRequired || len(status.HarnessErrors) != 0 || status.HarnessStatuses[Claude] != "ready" || status.HarnessStatuses[Codex] != "ready" {
 				t.Fatalf("repaired Claude did not recover: %+v", status)
 			}
 		})

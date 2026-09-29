@@ -193,3 +193,31 @@ func TestUncertainRestartDoesNotRelaunchVerification(t *testing.T) {
 }
 
 var _ = time.Second
+
+// Readiness describes usable accounts, never cleanup or process ownership.
+func TestLifecycleReadinessIsPerHarness(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "checking" {
+		t.Fatalf("unprobed account is ready: %+v", status)
+	}
+	s.probedAccounts["account"] = true
+	if status := s.Lifecycle(""); !status.Ready || status.HarnessStatuses[Codex] != "ready" {
+		t.Fatalf("healthy account not ready: %+v", status)
+	}
+	s.SetHarnessHold(Codex, "waiting for active runs")
+	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "blocked" {
+		t.Fatalf("held account is ready: %+v", status)
+	}
+	s.SetHarnessHold(Codex, "")
+	s.loginRequired["account"] = true
+	if status := s.Lifecycle(""); status.Ready || !status.LoginRequired || status.HarnessStatuses[Codex] != "login_required" {
+		t.Fatalf("unsigned account is ready: %+v", status)
+	}
+	s.loginRequired["account"] = false
+	if _, err := s.Drain(DrainRequest{DaemonID: s.daemonID}); err != nil {
+		t.Fatal(err)
+	}
+	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "draining" || !status.AllFenced {
+		t.Fatalf("fenced account is ready: %+v", status)
+	}
+}

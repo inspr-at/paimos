@@ -25,6 +25,7 @@ type DrainRequest struct {
 // LifecycleStatus does not conflate telemetry acceptance with observed exit.
 // Only a drained status permits removing a pairing-owned service or credential.
 type LifecycleStatus struct {
+	HarnessStatuses         map[string]string `json:"harness_statuses,omitempty"`
 	HarnessErrors           map[string]string `json:"harness_errors,omitempty"`
 	LoginRequired           bool              `json:"login_required"`
 	VerificationUnavailable []string          `json:"verification_unavailable_account_ids"`
@@ -131,12 +132,16 @@ func (s *Supervisor) Drain(req DrainRequest) (LifecycleStatus, error) {
 func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	v := LifecycleStatus{DaemonID: s.daemonID, Generation: s.generation, State: "drained", ActiveRunIDs: []string{}, UnconfirmedRunIDs: []string{}, SettlementPendingRunIDs: []string{}, FencedAccountIDs: []string{}, VerificationResults: map[string]string{}, HarnessErrors: map[string]string{}}
 	s.mu.Lock()
-	v.Ready = len(s.accounts) > 0
+	v.HarnessStatuses = map[string]string{}
 	v.AllFenced, _ = s.readFence("")
 	for _, a := range s.accounts {
+		status := "checking"
 		fenced, e := s.readFence(a.ID)
 		if fenced || e != nil {
 			v.FencedAccountIDs = append(v.FencedAccountIDs, a.ID)
+		}
+		if v.AllFenced || fenced || e != nil {
+			status = "draining"
 		} else {
 			issue := s.harnessHolds[a.Harness]
 			if issue == "" {
@@ -144,17 +149,23 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 			}
 			if issue != "" {
 				v.HarnessErrors[a.Harness] = issue
-				v.Ready = false
-			}
-			if !s.probedAccounts[a.ID] || s.blockedAccounts[a.ID] {
-				v.Ready = false
-			}
-			if s.loginRequired[a.ID] && issue == "" {
+				status = "blocked"
+			} else if s.loginRequired[a.ID] {
+				status = "login_required"
 				v.LoginRequired = true
+			} else if s.probedAccounts[a.ID] && !s.blockedAccounts[a.ID] {
+				status = "ready"
+				v.Ready = true
 			}
 			if adapter, ok := s.adapters[a.Harness].(VerificationAdapter); !ok || !adapter.VerificationSupported() {
 				v.VerificationUnavailable = append(v.VerificationUnavailable, a.ID)
 			}
+		}
+		// A harness is usable if any of its accounts is ready. Otherwise keep
+		// the most actionable state; a fenced account cannot hide a live one.
+		priority := map[string]int{"draining": 1, "checking": 2, "login_required": 3, "blocked": 4, "ready": 5}
+		if priority[status] > priority[v.HarnessStatuses[a.Harness]] {
+			v.HarnessStatuses[a.Harness] = status
 		}
 	}
 	entries := make([]*owned, 0, len(s.runs))

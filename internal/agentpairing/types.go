@@ -58,8 +58,9 @@ type deviceRequest struct {
 	ExistingProof string `json:"existing_lifecycle_secret,omitempty"`
 }
 type SetupProgress struct {
-	State     string `json:"state"`
-	ErrorCode string `json:"error_code,omitempty"`
+	HarnessStatuses map[string]string `json:"harness_statuses,omitempty"`
+	State           string            `json:"state"`
+	ErrorCode       string            `json:"error_code,omitempty"`
 }
 
 type proofRequest struct {
@@ -98,6 +99,7 @@ type Enrollment struct {
 	ActiveRunIDs      []string `json:"active_run_ids"`
 }
 type View struct {
+	HarnessStatuses           map[string]string                 `json:"harness_statuses,omitempty"`
 	VerificationCapabilities  map[string]VerificationCapability `json:"verification_capabilities"`
 	VerificationHelperVersion string                            `json:"verification_helper_version"`
 	ExistingComputerID        string                            `json:"existing_computer_id,omitempty"`

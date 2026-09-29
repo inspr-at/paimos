@@ -338,14 +338,24 @@ func TestStatusSurfacesClaudeDependencyAndRepinFailures(t *testing.T) {
 	for _, issue := range []string{"Claude dependencies changed/invalid: run aeon-agentd repin --harness claude", "Claude repin pending: waiting for active Claude runs to exit", "Claude CLI executable changed or unavailable; restore the approved physical executable, then retry"} {
 		e, a, l, o, _ := engineFixture(t)
 		approveFixture(t, e, a, o)
-		l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "unconfirmed", HarnessErrors: map[string]string{"claude": issue}}
+		l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "unconfirmed", HarnessErrors: map[string]string{"claude": issue}, HarnessStatuses: map[string]string{"claude": "blocked"}}
 		p, err := e.Status(t.Context())
 		if err != nil || p.Stage != "blocked" || p.Action != issue || p.LocalProcesses != "unconfirmed" {
 			t.Fatal("specific Claude failure was hidden", p, err)
 		}
 		progress := observedProgress(a.view, l.states[""])
-		if progress.State != "setup_failed" || progress.ErrorCode != "installation_failed" {
-			t.Fatal("dependency failure reported as sign-in or ready")
+		if progress.State != "connected" || progress.ErrorCode != "" || progress.HarnessStatuses["claude"] != "blocked" {
+			t.Fatal("runtime hold confused with installation failure or harness readiness")
 		}
+		if err = e.SyncFences(t.Context()); err != nil || a.progress == nil || a.progress.State != "connected" || a.progress.HarnessStatuses["claude"] != "blocked" {
+			t.Fatal("runtime hold lost during reconciliation", err)
+		}
+	}
+}
+
+func TestReadyHarnessKeepsComputerConnectedDuringOtherLogin(t *testing.T) {
+	p := observedProgress(View{}, LocalStatus{Ready: true, LoginRequired: true, HarnessStatuses: map[string]string{"claude": "login_required", "codex": "ready"}})
+	if p.State != "connected" || p.ErrorCode != "" || p.HarnessStatuses["claude"] != "login_required" || p.HarnessStatuses["codex"] != "ready" {
+		t.Fatalf("one login hid healthy harness: %+v", p)
 	}
 }
