@@ -1,0 +1,30 @@
+{
+  "session": {
+    "inputTokens": 100,
+    "outputTokens": 20,
+    "reasoningTokens": 4,
+    "cachedReadTokens": 10,
+    "cacheCreationTokens": 3,
+    "totalTokens": 137,
+    "costUsdTicks": 125000000,
+    "modelCalls": 2,
+    "turnCount": 1,
+    "primaryModelId": "grok-4",
+    "modelUsage": {
+      "grok-4": {
+        "inputTokens": 80,
+        "outputTokens": 15,
+        "reasoningTokens": 2,
+        "cachedReadTokens": 7,
+        "cacheCreationTokens": 1
+      },
+      "grok-4-fast": {
+        "inputTokens": 20,
+        "outputTokens": 5,
+        "reasoningTokens": 2,
+        "cachedReadTokens": 3,
+        "cacheCreationTokens": 2
+      }
+    }
+  }
+}

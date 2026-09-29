@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentdwire"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/piprobe"
+	"github.com/inspr-at/paimos/internal/version"
 )
 
 type stringsFlag []string
@@ -161,7 +162,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	if err != nil {
 		return err
 	}
-	executable, err = filepath.EvalSymlinks(executable)
+	executable, err = setupExecutable(command, executable, home)
 	if err != nil {
 		return err
 	}
@@ -321,32 +322,18 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		return errors.New("unknown setup command")
 	}
 	store.Unlock()
+	if command == "status" && err == nil {
+		p = setupVersionStatus(ctx, engine.API, origin, p)
+	}
 	if e := printSetupProgress(out, jsonOutput, p); e != nil {
 		return e
 	}
 	if err != nil {
 		return err
 	}
-	for !once && (command == "setup" || command == "add-harness") && (p.Stage == "awaiting_approval" || p.Stage == "requesting" || p.Stage == "provisioning" || p.Stage == "verification_pending") {
-		wait := 5 * time.Second
-		if p.RetryAfterSeconds > 5 {
-			wait = time.Duration(p.RetryAfterSeconds) * time.Second
-		}
-		timer := time.NewTimer(wait)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return errors.New("setup paused; rerun the same command to resume")
-		case <-timer.C:
-		}
-		p, err = engine.Step(ctx)
-		store.Unlock()
-		if e := printSetupProgress(out, jsonOutput, p); e != nil {
-			return e
-		}
-		if err != nil {
-			return err
-		}
+	p, err = pollSetupProgress(ctx, command, p, once, jsonOutput, out, engine, store.Unlock, waitSetupPoll)
+	if err != nil {
+		return err
 	}
 	if command == "setup" || command == "add-harness" {
 		switch p.Stage {
@@ -355,6 +342,80 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		}
 	}
 	return nil
+}
+
+func setupExecutable(command, executable, home string) (string, error) {
+	if command == "setup" || command == "pair" || command == "add-harness" {
+		return agentsetup.ServiceExecutable(executable, home)
+	}
+	// Maintenance uses the running binary, even when an installer link was
+	// removed or now targets a newer release. Unit ownership checks still apply.
+	return filepath.EvalSymlinks(executable)
+}
+
+func setupVersionStatus(ctx context.Context, api agentsetup.PairingAPI, origin string, p agentsetup.Progress) agentsetup.Progress {
+	p.VersionStatus = "unavailable"
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	g, err := api.Guide(ctx)
+	if err != nil || g.Protocol != "pairing-v1" || strings.TrimRight(g.InstanceURL, "/") != strings.TrimRight(origin, "/") || g.Version == "" || g.Version == "dev" || version.Version == "dev" {
+		return p
+	}
+	p.VersionStatus = "matching"
+	if g.Version != version.Version {
+		p.VersionStatus = "mismatch"
+		p.Action = strings.TrimSpace(p.Action + " Installed helper and instance versions differ; check the published releases before upgrading.")
+	}
+	return p
+}
+
+type setupPoller interface {
+	Status(context.Context) (agentsetup.Progress, error)
+	Step(context.Context) (agentsetup.Progress, error)
+}
+
+func waitSetupPoll(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func pollSetupProgress(ctx context.Context, command string, p agentsetup.Progress, once, jsonOutput bool, out io.Writer, engine setupPoller, unlock func(), waitFor func(context.Context, time.Duration) error) (agentsetup.Progress, error) {
+	for !once && setupNeedsPoll(command, p) {
+		wait := 5 * time.Second
+		if p.RetryAfterSeconds > 5 {
+			wait = time.Duration(p.RetryAfterSeconds) * time.Second
+		}
+		if err := waitFor(ctx, wait); err != nil {
+			return p, errors.New(command + " paused; rerun the same command to resume")
+		}
+		var err error
+		if command == "disconnect" {
+			p, err = engine.Status(ctx)
+		} else {
+			p, err = engine.Step(ctx)
+		}
+		unlock()
+		if e := printSetupProgress(out, jsonOutput, p); e != nil {
+			return p, e
+		}
+		if err != nil {
+			return p, err
+		}
+	}
+	return p, nil
+}
+
+func setupNeedsPoll(command string, p agentsetup.Progress) bool {
+	if command == "disconnect" {
+		return p.Stage == "draining"
+	}
+	return (command == "setup" || command == "add-harness") && (p.Stage == "awaiting_approval" || p.Stage == "requesting" || p.Stage == "provisioning" || p.Stage == "verification_pending")
 }
 
 func claudeNodeOption(requested string, discovered, saved []agentsetup.Candidate) (string, error) {

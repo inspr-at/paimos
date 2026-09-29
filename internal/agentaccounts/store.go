@@ -104,9 +104,9 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		           SELECT 1 FROM account_reservations r
 		           WHERE r.tenant_id = w.tenant_id AND r.window_id = w.id
 		             AND r.state = 'settled' AND r.actual_units = 0
-		       ) AS provisional
+		       ) AS provisional, w.capacity_read_at, w.capacity_allowed, COALESCE(w.capacity_kind,''), w.capacity_bucket, w.capacity_retired, w.capacity_refresh_run::text
 		FROM account_allowance_windows w
-		WHERE NOT w.pairing_verification
+		WHERE NOT w.pairing_verification AND NOT w.capacity_retired
 		ORDER BY w.account_id, w.starts_at, w.id`)
 	if err != nil {
 		return nil, err
@@ -115,9 +115,12 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 	byAccount := map[string][]Window{}
 	for rows.Next() {
 		var w Window
-		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional); err != nil {
+		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun); err != nil {
 			return nil, err
 		}
+		if w.capacityReadAt != nil {
+			w.Provisional = w.capacityKind == "refresh"
+		} // Vendor percentage is measured; token settlement is irrelevant.
 		byAccount[w.AccountID] = append(byAccount[w.AccountID], w)
 	}
 	if err := rows.Err(); err != nil {
@@ -252,6 +255,9 @@ type probeWrite struct {
 	DaemonGeneration string  `json:"daemon_generation"`
 	Available        bool    `json:"available"`
 	HostLabel        *string `json:"host_label"`
+	// Failure says why a probe failed: auth_failed only when the vendor status
+	// command confirmed a sign-out for this account, else unavailable.
+	Failure string `json:"failure,omitempty"`
 }
 
 func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string, in probeWrite) (Account, error) {
@@ -273,6 +279,18 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 		}
 		in.HostLabel = &label
 	}
+	failure := ""
+	switch {
+	case in.Available && in.Failure != "":
+		return Account{}, fail(http.StatusBadRequest, "a successful probe has no failure")
+	case in.Available:
+	case in.Failure == "" || in.Failure == "unavailable":
+		failure = "unavailable"
+	case in.Failure == "auth_failed":
+		failure = "auth_failed"
+	default:
+		return Account{}, fail(http.StatusBadRequest, "invalid probe failure")
+	}
 	if err := agentpairing.AccountFence(ctx, tx, accountID, false); err != nil {
 		return Account{}, err
 	}
@@ -288,8 +306,9 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE agent_accounts
-		SET last_probe_at = now(), last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END
-		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel); err != nil {
+		SET last_probe_at = now(), last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END,
+		    last_probe_failure = $5
+		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure); err != nil {
 		return Account{}, err
 	}
 	after, err := getAccount(ctx, tx, accountID)

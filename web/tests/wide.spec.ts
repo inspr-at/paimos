@@ -144,13 +144,16 @@ test.describe('edit mode', () => {
     // Status, priority and assignee use the app's own menus, styled as fields.
     await expect(form.locator('select')).toHaveCount(0)
     await form.getByRole('button', { name: 'Priority Medium' }).click()
-    await page.getByRole('menu', { name: 'Priority of PHAROS-12' }).getByRole('menuitemradio', { name: 'High' }).click()
+    const priority = page.getByRole('menu', { name: 'Priority of PHAROS-12' })
+    await expect(priority.getByRole('menuitemradio', { name: 'Medium' }).locator('svg.medium')).toHaveAttribute('stroke-width', '1.8')
+    await expect(priority.getByRole('menuitemradio', { name: 'Medium' }).locator('svg.medium path')).toHaveAttribute('d', 'M7 3.2 10.8 7 7 10.8 3.2 7Z')
+    await priority.getByRole('menuitemradio', { name: 'High' }).click()
     await expect(form.getByRole('button', { name: 'Priority High' })).toBeFocused()
     // From the keyboard: ArrowDown opens, digits pick.
     await form.getByRole('button', { name: 'Status Backlog' }).focus()
     await page.keyboard.press('ArrowDown')
     await expect(page.getByRole('menu', { name: 'Status of PHAROS-12' })).toBeVisible()
-    await page.keyboard.press('3')
+    await page.keyboard.press('4')
     await expect(form.getByRole('button', { name: 'Status In progress' })).toBeFocused()
     await form.getByRole('button', { name: 'Assignee Unassigned' }).click()
     await page.getByRole('textbox', { name: 'Find assignee' }).fill('mira')

@@ -16,6 +16,7 @@ export function accountEmail(identity: Identity) {
 
 import { learnPictures } from './avatar.ts'
 import type { TicketEta } from './eta.ts'
+import type { TicketEstimate } from './estimates.ts'
 
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
 
@@ -102,6 +103,7 @@ export interface Kind {
   allowed_child_kinds: string[] | null; field_schema: Record<string, unknown>
 }
 export interface WorkNode {
+  estimate?: TicketEstimate
   id: string; key: string; kind_id: string; title: string; body: string
   fields: Record<string, unknown>; state: string; parent_id: string | null
   position: string; created_at: string; updated_at: string; deleted_at?: string | null
@@ -164,12 +166,15 @@ export const searchNodes = (q: string, params: { kind_id?: string; state?: strin
 export interface ListPerson { id: string; name: string; has_avatar?: boolean }
 export interface ListParent { id: string; key: string; title: string; kind_slug: string }
 export interface ListProject { id: string; key: string; title: string }
+export interface LeadWorker { name: string; key: string }
 export interface ListItem extends WorkNode {
   kind_slug: string; kind_label: string; priority: string | null; assignee: ListPerson | null
   parent: ListParent | null; children_count: number; project: ListProject | null
   // The nearest epic above the item (a task's is its ticket's epic); absent on older servers.
   epic?: ListProject | null
   eta?: TicketEta
+  // The live worker the Assignee cell leads with. Absent when none is bound.
+  lead_worker?: LeadWorker | null
 }
 export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }
@@ -233,11 +238,11 @@ export const deleteProjectGroup = (id: string) => json<ProjectGroupWrite>(`/proj
 export const assignProjectGroup = (groupId: string | null, projectIds: string[]) => json<ProjectGroupWrite>('/project-groups/assign', 'POST', { group_id: groupId, project_ids: projectIds })
 export const undoGroupEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 // B2 ticket activity and comments.
-export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent'
+export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent' | 'tags'
 export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }
 export interface ActivityItem {
   id: string; at: string; type: 'comment' | 'change' | 'created'
-  author: { id: string | null; name: string; has_avatar?: boolean }
+  author: { id: string | null; name: string; has_avatar?: boolean; automatic?: boolean; job?: string; reason?: string }
   body_markdown?: string; changes?: ActivityChange[]
 }
 const authored = <T extends ActivityItem | { items: ActivityItem[] }>(value: T): T => { learnPictures('items' in value ? value.items.map(item => item.author) : [value.author]); return value }

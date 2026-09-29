@@ -48,6 +48,7 @@ type Dashboard struct {
 	TicketsCostUnknown int             `json:"tickets_cost_unknown"`
 	Allowance          AllowanceReport `json:"allowance"`
 	Ratings            Ratings         `json:"ratings"`
+	Work               Work            `json:"work"`
 }
 
 // Ratings is rework by exception for the sessions in this dashboard.
@@ -232,6 +233,7 @@ func (m *Module) dashboard(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		Trend: []UsageTrend{}, Tickets: []UsageTicket{},
 		Allowance: AllowanceReport{State: "withheld", Windows: []AllowanceWindow{}},
 		Ratings:   emptyRatings(),
+		Work:      emptyWork(),
 	}
 	if err := tx.QueryRow(r.Context(), `SELECT now()`).Scan(&out.GeneratedAt); err != nil {
 		return nil, err
@@ -271,6 +273,11 @@ func (m *Module) dashboard(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		return nil, err
 	}
 	out.Allowance = allowance
+	work, err := loadWork(r.Context(), tx, from, to, out.GeneratedAt, project)
+	if err != nil {
+		return nil, err
+	}
+	out.Work = work
 	return out, nil
 }
 
@@ -558,7 +565,9 @@ func (b *bucket) add(row sessionRow) error {
 	b.input.add(row.input, false)
 	b.output.add(row.output, false)
 	b.cached.add(row.cached, false)
-	if row.cost == nil {
+	// Only api billing contributes dollars. A stored estimate on a subscription
+	// or unknown row is historical and stays out of the sum.
+	if rowMode(row) != "api" || row.cost == nil {
 		b.costUnknown++
 		return nil
 	}

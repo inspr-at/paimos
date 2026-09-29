@@ -135,3 +135,23 @@ export function formatEta(input: EtaInput | null | undefined, mode: EtaMode, now
     tip: tip.join('\n'),
   }
 }
+
+// The report time a stale progress reading can name. A stale ready estimate
+// leads; a stale live estimate is the fallback; a flag without a side still
+// uses whichever timestamp was stored.
+export function progressReportedAt(eta: TicketEta | null | undefined): string | null {
+  if (!eta) return null
+  if (eta.ready_stale && eta.ready_reported_at) return eta.ready_reported_at
+  if (eta.live_stale && eta.live_reported_at) return eta.live_reported_at
+  if (eta.eta_stale || eta.ready_stale || eta.live_stale) return eta.ready_reported_at || eta.live_reported_at || null
+  return null
+}
+
+// What a screen reader says for the compact progress cell, including when the
+// ETA column is hidden. The clock matches the estimate tooltip.
+export function progressAccessibleName(pct: number, stale: boolean, reportedAt: string | null | undefined, now: number, timeZone = 'UTC'): string {
+  const done = `${pct}% done`
+  if (!stale) return done
+  if (!valid(reportedAt)) return `${done}, estimate stale`
+  return `${done}, estimate stale since ${clock(reportedAt, now, timeZone)}`
+}

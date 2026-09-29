@@ -3,7 +3,9 @@
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page } from '@playwright/test'
+import { deriveAgentState, normalizeAgentState, STATE_PRIORITY } from '../src/lib/agentSignals.ts'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
+import { leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
@@ -15,6 +17,7 @@ export interface MockNode {
   id: string; key: string; kind_slug: string; title: string; body: string; state: string
   fields: Record<string, unknown>; parent_id: string | null; project: string
   created_at: string; updated_at: string
+  estimate?: import('../src/lib/estimates').TicketEstimate
   eta?: Record<string, unknown>
 }
 export interface MockView {
@@ -75,7 +78,7 @@ export function fixtures(options: MockOptions = {}) {
   for (let index = 0; index < (options.bigProject ?? 0); index++) {
     add({ id: `n-big-${index}`, key: `AEON-${100 + index}`, kind_slug: 'ticket', title: `Generated ticket ${index + 1}`, state: 'backlog', project: 'p-aeon', fields: { priority: 'medium' }, updated_at: ago(index + 1) })
   }
-  const activity: Record<string, { id: string; at: string; type: 'comment' | 'change' | 'created'; author: { id: string | null; name: string }; body_markdown?: string; changes?: { field: string; from: string | null; to: string | null }[] }[]> = {
+  const activity: Record<string, { id: string; at: string; type: 'comment' | 'change' | 'created'; author: { id: string | null; name: string; automatic?: boolean; job?: string; reason?: string }; body_markdown?: string; changes?: { field: string; from: string | null; to: string | null }[] }[]> = {
     // Newest first, like the API.
     'n-1': [
       { id: '9', at: ago(0.5), type: 'comment', author: { id: mira.id, name: mira.name }, body_markdown: 'Token rotation is **done**; cleanup next.' },
@@ -134,7 +137,9 @@ export function liveAgent(fields: Partial<LiveAgentMock> & Pick<LiveAgentMock, '
 }
 export interface Call { path: string; method: string; query: URLSearchParams; body: unknown; headers: Record<string, string> }
 
-function item(node: MockNode, data: Fixtures) {
+// hideLead: the caller cannot read harness sessions, so the server sends no
+// lead_worker (AEON-316 gates it on the same visibility as the live read).
+function item(node: MockNode, data: Fixtures, hideLead = false) {
   const kindIds: Record<string, string> = { epic: 'k-epic', ticket: 'k-ticket', task: 'k-task', project: 'k-project' }
   const parent = node.parent_id ? data.nodes.find(n => n.id === node.parent_id) : undefined
   const project = data.projects.find(p => p.id === node.project)!
@@ -142,6 +147,7 @@ function item(node: MockNode, data: Fixtures) {
   // the payload reads like an older server's.
   const person = typeof node.fields.assignee === 'string' ? data.people.find(p => p.id === node.fields.assignee) : undefined
   const assignee = person ? { id: person.id, name: person.name, ...(person.has_avatar === undefined ? {} : { has_avatar: person.has_avatar }) } : null
+  const lead = hideLead ? undefined : leadOf(data, node)
   return {
     id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
@@ -152,6 +158,8 @@ function item(node: MockNode, data: Fixtures) {
     project: { id: project.id, key: project.key, title: project.title },
     epic: epicAbove(node, data),
     ...(node.eta ? { eta: node.eta } : {}),
+    ...(node.estimate ? { estimate: node.estimate } : {}),
+    ...(lead ? { lead_worker: { name: who(lead), key: leadWorkerKey(lead) } } : {}),
   }
 }
 // The nearest epic above a node, like the server's list projection.
@@ -203,6 +211,47 @@ function costUnit(node: MockNode): string {
 }
 const release = (node: MockNode) => labelOf(node.fields.release)
 const personName = (data: Fixtures, id: unknown) => typeof id === 'string' ? data.people.find(p => p.id === id)?.name ?? '' : ''
+// Mock stand-in for the list query's lead order. The server chooses; this
+// only keeps fixture rows in that order (attention at the viewer's thresholds,
+// then a worker before a coordinator, then start, heartbeat and public facts).
+function compareServerLead(a: LiveAgent, b: LiveAgent) {
+  const rank = (agent: LiveAgent) => STATE_PRIORITY[agent.state ?? 'working']
+  const beat = (agent: LiveAgent) => {
+    const parsed = Date.parse(agent.heartbeat_at ?? '')
+    return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
+  }
+  return rank(a) - rank(b)
+    || Number(a.role === 'coordinator') - Number(b.role === 'coordinator')
+    || Date.parse(a.since) - Date.parse(b.since)
+    || beat(a) - beat(b)
+    || a.harness.localeCompare(b.harness)
+    || (a.activity_sequence ?? 0) - (b.activity_sequence ?? 0)
+    || a.phase.localeCompare(b.phase)
+    || a.activity.localeCompare(b.activity)
+    || who(a).localeCompare(who(b))
+    || leadWorkerKey(a).localeCompare(leadWorkerKey(b))
+}
+// Live workers on one ticket, in the server's lead order.
+function liveOn(data: Fixtures, node: MockNode): LiveAgent[] {
+  const preferences = normalizeAgentState(data.preferences['agent-state'])
+  return data.live.flatMap(agent => {
+    const ticket = agent.ticket
+    if (!ticket || ticket.id !== node.id || agent.project_id !== node.project || ticket.project_id !== node.project) return []
+    if (agent.phase === 'stopped' || agent.stopped_at) return []
+    if (/archived/i.test(agent.stop_reason ?? '')) return []
+    const live: LiveAgent = { ...agent, ticket }
+    return [{ ...live, state: deriveAgentState(live, now, preferences) }]
+  }).sort(compareServerLead)
+}
+function leadOf(data: Fixtures, node: MockNode) { return liveOn(data, node)[0] }
+// The name an assignee sort uses: the stored person, else the lead live worker.
+// Empty is last in both directions.
+function shownAssignee(data: Fixtures, node: MockNode): string {
+  const stored = personName(data, node.fields.assignee).trim()
+  if (stored) return stored.toLowerCase()
+  const lead = leadOf(data, node)
+  return lead ? who(lead).trim().toLowerCase() : ''
+}
 
 function completionRefusal(node: MockNode, nextState: string, fields: Record<string, unknown>): { error: string; code: string } | null {
   if (node.kind_slug !== 'ticket' || completedTicketState(node.state) || !completedTicketState(nextState)) return null
@@ -487,12 +536,18 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       rows = [...rows].sort((a, b) => {
         for (const raw of sort) {
           const desc = raw.startsWith('-'), field = desc ? raw.slice(1) : raw
-          const etaMissing = (n: MockNode) => field === 'eta_ready' ? !n.eta?.eta_ready_at : field === 'progress' ? typeof n.eta?.progress_pct !== 'number' : false
-          if ((field === 'eta_ready' || field === 'progress') && etaMissing(a) !== etaMissing(b)) return etaMissing(a) ? 1 : -1
-          const value = (n: MockNode): string | number => field === 'state' ? (STATE_ORDER.indexOf(normal(n.state)) + 1 || 99)
+          if (field === 'assignee') {
+            const x = shownAssignee(data, a), y = shownAssignee(data, b)
+            if (!x !== !y) return x ? -1 : 1
+            if (x !== y) return (x < y ? -1 : 1) * (desc ? -1 : 1)
+            continue
+          }
+          const etaMissing = (n: MockNode) => field === 'estimate' ? (n.kind_slug === 'epic' ? n.estimate?.hours == null : typeof n.fields.estimate_hours !== 'number' || n.fields.estimate_hours <= 0) : field === 'eta_ready' ? !n.eta?.eta_ready_at : field === 'progress' ? typeof n.eta?.progress_pct !== 'number' : false
+          if ((field === 'estimate' || field === 'eta_ready' || field === 'progress') && etaMissing(a) !== etaMissing(b)) return etaMissing(a) ? 1 : -1
+          const value = (n: MockNode): string | number => field === 'estimate' ? (n.kind_slug === 'epic' ? n.estimate?.hours ?? 0 : Number(n.fields.estimate_hours ?? 0)) : field === 'state' ? (STATE_ORDER.indexOf(normal(n.state)) + 1 || 99)
             : field === 'priority' ? PRIORITY_ORDER.indexOf(typeof n.fields.priority === 'string' ? n.fields.priority : 'none')
             : field === 'updated_at' ? Date.parse(n.updated_at) : field === 'created_at' ? Date.parse(n.created_at) : field === 'key' ? Number(n.key.split('-')[1]) : field === 'title' ? n.title
-            : field === 'kind' ? n.kind_slug : field === 'assignee' ? (personName(data, n.fields.assignee) || '\uffff')
+            : field === 'kind' ? n.kind_slug
             : field === 'eta_ready' ? Date.parse(String(n.eta?.eta_ready_at ?? '')) || 0
             : field === 'progress' ? (typeof n.eta?.progress_pct === 'number' ? n.eta.progress_pct : 0) : 0
           const x = value(a), y = value(b)
@@ -512,7 +567,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       }
       const limit = Number(query.get('limit') ?? 50), offset = Number((query.get('cursor') ?? 'o:0').slice(2))
       const pageRows = rows.slice(offset, offset + limit)
-      return route.fulfill({ json: { items: pageRows.map(n => item(n, data)), next_cursor: offset + limit < rows.length ? `o:${offset + limit}` : null, ...(Object.keys(facets).length ? { facets } : {}) } })
+      return route.fulfill({ json: { items: pageRows.map(n => item(n, data, options.liveStatus === 403)), next_cursor: offset + limit < rows.length ? `o:${offset + limit}` : null, ...(Object.keys(facets).length ? { facets } : {}) } })
     }
     const agentWorkPath = /^\/api\/nodes\/([^/]+)\/agent-work$/.exec(path)
     if (agentWorkPath && method === 'GET') {
@@ -564,6 +619,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       const hits = data.nodes.filter(n => n.title.toLowerCase().includes(q)).map(n => ({ node: { ...item(n, data) }, score: 0.9 }))
       return route.fulfill({ json: { items: hits, next_cursor: null } })
     }
+    if (path === '/api/outcomes' && method === 'GET') return route.fulfill({ json: { outcomes: [] } })
     return route.fulfill({ status: 404, json: { error: 'Unmocked route' } })
   })
   return calls

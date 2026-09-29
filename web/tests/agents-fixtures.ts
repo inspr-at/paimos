@@ -4,6 +4,7 @@
 // message targets and project messages. Ids for projects, tickets and the person
 // come from the caller, so captures can sit on real projects and tickets.
 import type { Page, Route } from '@playwright/test'
+import { defaultSchedule, type CapacityWorld } from './capacity-fixtures'
 
 export interface AgentWorld {
   me: string
@@ -101,6 +102,8 @@ export interface AgentMockOptions {
   readMark?: { sessionId: string; event: number; id: string }
   // The next N marker PUTs fail. The call is still recorded.
   failReadMarks?: number
+  capacity?: CapacityWorld
+  capacityForbidden?: boolean
 }
 // Routes only the agents surfaces; everything else falls through to earlier routes
 // or the real server.
@@ -120,7 +123,8 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     const messagesPath = /^\/api\/projects\/([^/]+)\/(messages|message-targets)$/.exec(path)
     const resolutionPath = /^\/api\/projects\/([^/]+)\/messages\/([^/]+)\/resolution$/.exec(path)
     const known = provenancePath || readMarkerPath || sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
-    if (!known) return route.fallback()
+    const pairing = !!options.capacity && path === '/api/agent-pairing/computers'
+    if (!known && !pairing) return route.fallback()
     calls.push({ path, method, body, query: url.searchParams })
     const q = url.searchParams
     if (path === '/api/harness-sessions') {
@@ -198,6 +202,16 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       }
       const newest = q.get('newest_first') === 'true', limit = Number(q.get('limit') ?? 10), after = Number(q.get('after') ?? 0)
       let all = [...data.messages, ...data.sent].filter(m => m.project === project)
+      const session = q.get('session')
+      if (session) {
+        const belongs = new Set(all.filter(m => m.sender_session_id === session || m.recipient_session_id === session).map(m => m.id))
+        let previous = -1
+        while (previous !== belongs.size) {
+          previous = belongs.size
+          for (const m of all) if (!m.sender_session_id && !m.recipient_session_id && !m.is_action_request && m.reply_to && belongs.has(m.reply_to)) belongs.add(m.id)
+        }
+        all = all.filter(m => belongs.has(m.id))
+      }
       if (q.get('pending') === 'true') all = all.filter(m => m.is_action_request && !m.human_resolution_outcome)
       all = newest ? all.filter(m => !after || m.sent_event_id < after).reverse() : all.filter(m => m.sent_event_id > after)
       const page = all.slice(0, limit)
@@ -211,6 +225,14 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       if (options.failDecision) return route.fulfill({ status: 409, json: { error: 'The request expired while you were deciding' } })
       if (decision[2] === 'decision') Object.assign(found, { decision: (body as { decision: string }).decision, decided_by_principal_id: 'me' })
       return route.fulfill({ json: found })
+    }
+    if (path.startsWith('/api/agent-accounts/capacity') || pairing) {
+      if (options.capacityForbidden || options.accountsForbidden) return route.fulfill({ status: 403, json: { error: 'account.read permission required' } })
+      const answer = options.capacity?.handle(path, method, body)
+      if (answer) return answer.status === 204 ? route.fulfill({ status: 204, body: '' }) : route.fulfill({ status: answer.status ?? 200, json: answer.json })
+      // Without a capacity world: accounts without readings and the default schedule.
+      if (path === '/api/agent-accounts/capacity' || path === '/api/agent-accounts/capacity/preview') return route.fulfill({ json: data.accounts.map(a => ({ account_id: a.id, schedule: defaultSchedule(), windows: [] })) })
+      if (path === '/api/agent-accounts/capacity/schedule') return method === 'PUT' ? route.fulfill({ status: 204, body: '' }) : route.fulfill({ json: [] })
     }
     if (path === '/api/agent-accounts') return options.accountsForbidden ? route.fulfill({ status: 403, json: { error: 'admin session required' } }) : route.fulfill({ json: data.accounts })
     const account = /^\/api\/agent-accounts\/([^/]+)$/.exec(path)

@@ -55,6 +55,7 @@ import (
 	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
+	"github.com/inspr-at/paimos/internal/outcomes"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
@@ -64,6 +65,7 @@ import (
 	"github.com/inspr-at/paimos/internal/releases"
 	"github.com/inspr-at/paimos/internal/requirements"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/search"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -233,6 +235,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	// AEON-280: delivery deadlines and the attempt cap; one runner across
 	// processes through an advisory lock.
 	go inbox.NewSweeper(pool).Run(ctx)
+	// AEON-288: one daily pass nominates method learnings. It never accepts them.
+	go knowledge.NewTagger(pool).Run(ctx)
 	api := &httpapi.Server{
 		Pool:  pool,
 		Brand: &productBrand,
@@ -260,7 +264,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			inbox.New(pool),
 			harness.New(pool),
 			rules.New(pool),
+			doctrine.New(pool, doctrine.Options{CredentialsDir: cfg.DoctrineCredentialsDir}),
 			ticketwork.New(pool),
+			outcomes.New(pool),
 			deliveryvote.New(pool),
 			usagedashboard.New(pool),
 			workorders.New(pool),
@@ -289,7 +295,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			hours.New(pool, pluginRegistry),
 			directory.New(pool, pluginRegistry),
 		},
-		Middleware: []func(http.Handler) http.Handler{authMod.Middleware},
+		Middleware: []func(http.Handler) http.Handler{authMod.Middleware, (doctrine.Credentials{Dir: cfg.DoctrineCredentialsDir}).CatalogMiddleware},
 	}
 	if messagingMod != nil {
 		api.Modules = append(api.Modules, messagingMod)

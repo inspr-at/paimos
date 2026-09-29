@@ -23,12 +23,14 @@ import (
 
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/eta"
+	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/version"
 )
 
 // cmdHarnessV2 is the complete P5.3 harness command tree.
 func (rt *runtime) cmdHarnessV2() *Command {
 	return &Command{Name: "harness", Short: "Manage durable harness generations", Use: "harness <command>", subs: []*Command{
-		rt.harnessRegister(), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessProvenance(),
+		rt.harnessRegister(), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessRun(), rt.harnessProvenance(),
 	}}
 }
 
@@ -143,6 +145,25 @@ func (rt *runtime) harnessRegistration(path string) (string, string, error) {
 // lease cannot follow a server redirect to another origin.
 func (rt *runtime) harnessDo(method, path, lease string, body, dest any) error {
 	return rt.harnessDoCtx(context.Background(), method, path, lease, body, dest)
+}
+
+// reportedSessionFileLimit reads the registered harness and reports what that
+// harness reads by default. A fixture with no harness field keeps the product
+// ceiling; a real session always carries one.
+func (rt *runtime) reportedSessionFileLimit(projectID, sessionID string) (int, error) {
+	var known struct {
+		Harness string `json:"harness"`
+	}
+	if err := rt.harnessDo(http.MethodGet, harnessPath(projectID, sessionID), "", nil, &known); err != nil {
+		return 0, err
+	}
+	if known.Harness == "" {
+		return rules.MaxBytes, nil
+	}
+	if !modelHarnesses[known.Harness] {
+		return 0, usagef("unsupported session harness %q", known.Harness)
+	}
+	return rules.SessionFileLimit(known.Harness), nil
 }
 
 // harnessDoCtx is harnessDo bound to ctx so a heartbeat can abort on shutdown.
@@ -272,7 +293,7 @@ func (rt *runtime) harnessTicket(projectID, key string, classicID int) (*string,
 }
 
 func (rt *runtime) harnessRegister() *Command {
-	var project, agent, harness, host, label, model, effort, accountLabel, harnessVersion, brief, worktree, branch, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID string
+	var project, agent, harness, host, label, model, effort, accountLabel, harnessVersion, brief, worktree, branch, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID, succeeds string
 	var ticketIDFlag int
 	var caps []string
 	return &Command{Name: "register", Short: "Register one public harness generation", Use: "harness register --project KEY --agent NAME --harness KIND --host HOST --harness-session-file PATH --worker-lease-file PATH", addFlags: func(fs *flagSet) {
@@ -294,6 +315,7 @@ func (rt *runtime) harnessRegister() *Command {
 		fs.string(&management, "management", 0, "managed or unmanaged")
 		fs.string(&role, "role", 0, "worker or coordinator")
 		fs.string(&parent, "parent-session", 0, "parent public session UUID")
+		fs.string(&succeeds, "succeeds", 0, "stopped or heartbeat-lost predecessor coordinator UUID")
 		fs.string(&ticket, "ticket", 0, "ticket node key")
 		fs.int(&ticketIDFlag, "ticket-id", "classic numeric ticket id")
 		fs.string(&shape, "work-shape", 0, "ship or scout")
@@ -350,6 +372,13 @@ func (rt *runtime) harnessRegister() *Command {
 		if me.Principal.Name != agent {
 			return usagef("--agent must name the authenticated agent")
 		}
+		var predecessor *string
+		if succeeds != "" {
+			if !validUUID(succeeds) {
+				return usagef("invalid --succeeds session")
+			}
+			predecessor = &succeeds
+		}
 		var ticketID, parentID, run, order *string
 		if parent != "" {
 			if !validUUID(parent) {
@@ -380,8 +409,10 @@ func (rt *runtime) harnessRegister() *Command {
 			}
 			order = &orderID
 		}
+		body := map[string]any{"succeeds_session_id": predecessor, "max_session_file_bytes": rules.SessionFileLimit(harness), "rules_client_version": version.Version, "agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "display_label": label, "model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersion, "brief": brief, "worktree": worktree, "branch": branch, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}
+		attachVendorSessionRef(body, harness, ref, lease)
 		var out any
-		err = rt.harnessDo(http.MethodPost, harnessPath(projectID, ""), "", map[string]any{"agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "display_label": label, "model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersion, "brief": brief, "worktree": worktree, "branch": branch, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}, &out)
+		err = rt.harnessDo(http.MethodPost, harnessPath(projectID, ""), "", body, &out)
 		if err != nil {
 			return err
 		}
@@ -460,6 +491,7 @@ func (rt *runtime) harnessBind() *Command {
 	}}
 }
 func (rt *runtime) harnessWorker(kind string) *Command {
+	var capacityOptions heartbeatCapacity
 	var project, session, agent, leaseFile, phase, activity, activityKind, note, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason, etaReady, etaLive, progress string
 	// The sentinel distinguishes an omitted flag from --label "", which clears a label.
 	const omittedLabel = "\x00"
@@ -473,6 +505,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		fs.string(&leaseFile, "worker-lease-file", 0, "private generation lease file")
 		switch kind {
 		case "heartbeat":
+			capacityOptions.flags(fs)
 			fs.string(&phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&label, "label", 0, "current session display name (empty clears it)")
 			fs.string(&note, "note", 0, "current step, at most 120 characters")
@@ -498,6 +531,9 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 			fs.string(&reason, "reason", 0, "stop reason")
 		}
 	}, run: func([]string) error {
+		if err := capacityOptions.validate(); err != nil {
+			return err
+		}
 		id, err := rt.harnessProject(project)
 		if err != nil {
 			return err
@@ -538,7 +574,11 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 					return usagef("unknown activity kind %q", activityKind)
 				}
 			}
-			body = map[string]any{"phase": phase, "activity": activity, "activity_sequence": sequence}
+			limit, err := rt.reportedSessionFileLimit(id, session)
+			if err != nil {
+				return err
+			}
+			body = map[string]any{"max_session_file_bytes": limit, "rules_client_version": version.Version, "phase": phase, "activity": activity, "activity_sequence": sequence}
 			if label != omittedLabel {
 				body["display_label"] = label
 			}
@@ -607,6 +647,11 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		err = rt.harnessDo(http.MethodPost, path, lease, body, &out)
 		if err != nil {
 			return err
+		}
+		if kind == "heartbeat" {
+			if err := rt.reportHeartbeatCapacity(context.Background(), capacityOptions); err != nil {
+				return err
+			}
 		}
 		return rt.printHarness(out)
 	}}

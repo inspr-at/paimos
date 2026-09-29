@@ -23,6 +23,8 @@ func isolate(t *testing.T) {
 	for _, k := range []string{
 		"AEON_URL", "AEON_API_KEY", "AEON_API_KEY_FILE",
 		"PAIMOS_URL", "PAIMOS_API_KEY", "PAIMOS_API_KEY_FILE",
+		"CLAUDE_CODE_SESSION_ID", "CODEX_SESSION_ID", "CODEX_THREAD_ID",
+		"AEON_SESSION_ID", "AEON_SESSION_FILE", "AEON_SESSION_STATE_DIR",
 	} {
 		t.Setenv(k, "")
 	}

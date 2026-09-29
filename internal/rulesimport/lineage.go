@@ -121,6 +121,8 @@ func mergeImported(existing, imported []DraftRule) (merged []DraftRule, added, u
 		if err = rejectEdited(merged[i]); err != nil {
 			return nil, 0, 0, 0, err
 		}
+		// Keep the explanation; the server marks it for a check when the text changed.
+		rule.TLDR = merged[i].TLDR
 		merged[i] = rule
 		updated++
 	}
@@ -148,6 +150,7 @@ func mergeImported(existing, imported []DraftRule) (merged []DraftRule, added, u
 			return nil, 0, 0, 0, fmt.Errorf("%w: duplicate imported identity", ErrDraftConflict)
 		}
 		delete(index, oldID)
+		rule.TLDR = merged[j].TLDR
 		merged[j] = rule
 		index[rule.Identity] = j
 		used[j] = true

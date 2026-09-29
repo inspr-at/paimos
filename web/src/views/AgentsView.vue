@@ -2,33 +2,36 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { accountName } from '../lib/accountCascade'
 import { can, myPermissions } from '../lib/authz'
 import { pairingPermissions } from '../lib/agentPairing'
-import { message, subscribeAgents, type AgentAccount, type Approval, type SessionControl } from '../lib/agents'
+import { message, subscribeAgents, type Approval, type SessionControl } from '../lib/agents'
 import { canDecideApproval as allowedToDecide, controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
+import type { AgentState } from '../lib/agentSignals'
 import { confirmAction } from '../lib/confirm'
 import { toast } from '../lib/toast'
 import { TICKET_PEEK } from '../lib/ticketPeek'
 import { usePoller } from '../lib/usePolledData'
 import { useAgents, type HeldRequest, type SessionView } from '../stores/agents'
+import { useCapacity } from '../stores/capacity'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
-import AccountsCard from '../components/agents/AccountsCard.vue'
 import ApprovalQueue from '../components/agents/ApprovalQueue.vue'
 import SessionList from '../components/agents/SessionList.vue'
 import { controlPermitted } from '../lib/managedControl'
 import SessionPanel from '../components/agents/SessionPanel.vue'
-import LiveNow from '../components/agents/LiveNow.vue'
+import LiveLine from '../components/agents/LiveLine.vue'
+import CapacityCard from '../components/agents/CapacityCard.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
 import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
 
-// Markus's desk for agents: what waits on him first, then every live session grouped
-// by state, with accounts and pacing folded below them. A session opens in the docked panel.
+// Markus's desk for agents: a compact live line under the title, what waits on him
+// (only when something does), the accounts with today's plan, then every session
+// grouped by state. A session opens in the docked panel.
 const agents = useAgents()
+const capacity = useCapacity()
 const projects = useProjects()
 const session = useSession()
 const route = useRoute()
@@ -66,20 +69,8 @@ const canRevoke = computed(() => session.identity?.principal.kind === 'person' &
 const canDecide = computed(() => session.identity?.principal.kind === 'person' && (can('approvals.decide') || canResolve.value))
 const canDecideApproval = (approval: Approval) => session.identity?.principal.kind === 'person' && allowedToDecide(approval, can)
 const history = computed(() => decidedApprovals(agents.approvals, agents.now))
-// At most three counts: what waits on Markus, what is in trouble, what runs.
-// The table groups below carry every other state.
-const summary = computed(() => {
-  if (!agents.loaded) return ''
-  const parts: string[] = []
-  if (agents.needsCount) parts.push(`${agents.needsCount} ${agents.needsCount === 1 ? 'needs' : 'need'} you`)
-  if (agents.sessionsState === 'ready') {
-    const trouble = agents.grouped.problem.length + agents.grouped.unresponsive.length
-    const live = agents.views.filter(v => v.session.phase !== 'stopped' && !v.session.stopped_at).length
-    if (trouble) parts.push(`${trouble} with a problem`)
-    if (live) parts.push(`${live} live`)
-  }
-  return parts.join(' · ')
-})
+const showCapacity = computed(() => agents.loaded && capacity.state !== 'forbidden' && agents.accountsState !== 'forbidden')
+const waiting = computed(() => agents.needsCount + capacity.signins.length)
 
 // ---------- Resources and people ----------
 function resource(approval: Approval): Resource {
@@ -139,17 +130,14 @@ async function control(view: SessionView, kind: SessionControl['kind']) {
     toast(kind === 'stop' ? `Stop sent to ${view.name}.` : `Interrupt sent to ${view.name}.`)
   } catch (e) { toast(message(e), { tone: 'error' }) }
 }
-async function refreshAllowance() {
-  // A refresh already in flight may have started before this window existed.
-  await agents.loadAll()
-  await agents.loadAll()
-}
-async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
-  if (state === 'draining') {
-    const ok = await confirmAction({ title: `Drain ${accountName(account)}?`, body: 'Running work finishes; no new runs start on this account until you resume it.', confirmLabel: 'Drain account' })
-    if (!ok) return
-  }
-  await agents.setAccount(account, state)
+// The live line's counts jump to the first session in that state.
+function jump(state: AgentState) {
+  const states = state === 'problem' ? ['problem', 'unresponsive'] : state === 'waiting' ? ['waiting'] : [state]
+  const el = [...document.querySelectorAll<HTMLElement>('.agents-page .row[data-state]')].find(row => states.includes(row.dataset.state ?? ''))
+  if (!el?.dataset.row) return
+  cursor.value = el.dataset.row
+  el.focus({ preventScroll: true })
+  el.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
 }
 function review(approval: Approval) {
   if (window.innerWidth < 1100) void closePanel()
@@ -229,7 +217,7 @@ function keydown(event: KeyboardEvent) {
 
 // ---------- Live ----------
 let stop: (() => void) | undefined
-const poller = usePoller(() => agents.loadAll(), 20_000, { invalidate: agents.invalidatePolls })
+const poller = usePoller(() => Promise.all([agents.loadAll(), capacity.load()]), 20_000, { invalidate: () => { agents.invalidatePolls(); capacity.invalidate() } })
 let clock: ReturnType<typeof setInterval> | undefined
 let debounce: ReturnType<typeof setTimeout> | undefined
 function changed() {
@@ -239,6 +227,7 @@ function changed() {
 }
 onMounted(() => {
   void agents.loadAll()
+  void capacity.load()
   stop = subscribeAgents(changed, value => { live.value = value }, () => agents.deliveryChanged())
   poller.start()
   clock = setInterval(() => agents.tick(), 1000)
@@ -257,7 +246,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       <div class="head-main">
         <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
         <h1 id="agents-title">Agents</h1>
-        <p class="summary"><span v-if="summary">{{ summary }}</span><span v-else-if="!agents.loaded" class="skeleton summary-skeleton" /></p>
+        <LiveLine :views="agents.views" :now="agents.now" :loaded="agents.loaded" @open="openSession" @jump="jump" />
       </div>
       <div class="head-side">
         <div class="head-links">
@@ -283,13 +272,13 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
          page does not jump as each read lands. -->
     <div :key="agents.loaded ? 'ready' : 'loading'" class="layout">
       <div class="main-col">
-        <LiveNow :views="agents.views" :now="agents.now" :selected="sessionId" :loaded="agents.loaded" :can-start="canStart" @open="id => id ? openSession(id) : startDialog?.open()" />
         <ApprovalQueue
-          v-if="!agents.loaded || agents.needsCount || history.length"
-          ref="queue" :pending="agents.pending" :held="agents.held" :history="history" :now="agents.now" :loaded="agents.loaded"
+          v-if="agents.loaded && waiting"
+          ref="queue" :pending="agents.pending" :held="agents.held" :signins="capacity.signins" :history="history" :now="agents.now" :loaded="agents.loaded"
           :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :can-resolve="canResolve" :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
           @focus-row="id => cursor = id" @open-agent="openAgent"
         />
+        <CapacityCard v-if="showCapacity" />
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
         <SessionList
           v-if="agents.loaded"
@@ -298,12 +287,13 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()" @history="agents.loadHistory(true)" @older="agents.loadOlderHistory()"
         />
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
+        <ApprovalQueue
+          v-if="agents.loaded && !waiting && history.length" history-only
+          :pending="[]" :held="[]" :history="history" :now="agents.now" :loaded="agents.loaded" cursor="" :can-decide="false" :can-decide-approval="() => false" :can-resolve="false"
+          :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
+        />
         <RunQueue v-if="agents.loaded" />
         <ConnectedComputers v-if="agents.loaded" :permissions="pairingAccess" compact-empty embedded />
-        <details v-if="agents.loaded" class="accounts-disclosure glass-card">
-          <summary class="accounts-summary"><AppIcon name="gauge" :size="15" /><span>Accounts and pacing</span><AppIcon class="disclosure-chev" name="chevron-right" :size="15" /></summary>
-          <AccountsCard :accounts="agents.accounts" :state="agents.accountsUpdatedAt !== null ? 'ready' : agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'" :set="setAccount" @allowance-created="refreshAllowance()" />
-        </details>
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
           <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
@@ -329,8 +319,6 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .context-link { display: inline-flex; align-items: center; height: 40px; padding: 0 10px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 550; white-space: nowrap; text-decoration: none; }
 @media (hover: hover) { .context-link:hover { background: var(--row-hover); color: var(--ink); } }
 .context-link:focus-visible { box-shadow: var(--focus-ring); }
-.summary { margin-top: 6px; min-height: 20px; font-size: 13.5px; color: var(--ink-2); }
-.summary-skeleton { display: inline-block; width: 160px; }
 /* One quiet freshness element: a dot and a word, details on hover. */
 .freshness { display: inline-flex; align-items: center; gap: 7px; height: 40px; padding: 0 8px 0 4px; margin-right: 4px; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .freshness.stale { color: var(--gold-ink); }
@@ -339,15 +327,6 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .freshness.stale .live-mark { background: var(--gold); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; container: agents-layout / inline-size; }
 .main-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
-.accounts-disclosure { overflow: clip; }
-.accounts-summary { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 18px; color: var(--ink); font-size: 15px; font-weight: 650; cursor: pointer; list-style: none; }
-.accounts-summary::-webkit-details-marker { display: none; }
-.accounts-summary > svg:first-child { color: var(--ink-3); }
-.accounts-summary .disclosure-chev { margin-left: auto; color: var(--ink-3); transition: transform .2s ease; }
-.accounts-disclosure[open] .disclosure-chev { transform: rotate(90deg); }
-@media (hover: hover) { .accounts-summary:hover { background: var(--row-hover); } }
-.accounts-summary:focus-visible { outline: none; box-shadow: inset var(--focus-ring); }
-@media (prefers-reduced-motion: reduce) { .accounts-summary .disclosure-chev { transition: none; } }
 .inline-error { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); font-size: 13px; color: var(--danger); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 4px 0; font-size: 12px; color: var(--ink-3); }
 .hint .keycap + .keycap { margin-left: 2px; }

@@ -4,6 +4,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -22,5 +23,12 @@ func TestOpenAPISpecParses(t *testing.T) {
 	}
 	if spec["openapi"] == nil || spec["paths"] == nil {
 		t.Fatal("api/openapi.yaml lacks openapi or paths")
+	}
+	paths, _ := spec["paths"].(map[string]any)
+	outcomes, _ := paths["/outcomes"].(map[string]any)
+	post, _ := outcomes["post"].(map[string]any)
+	description, ok := post["description"].(string)
+	if !ok || !strings.Contains(description, "auto:") || strings.Contains(description, "\n") {
+		t.Fatalf("recordOutcome description = %#v", post["description"])
 	}
 }

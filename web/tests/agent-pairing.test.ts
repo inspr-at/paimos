@@ -97,7 +97,7 @@ function guidePayload(overrides: Record<string, unknown> = {}): PairingGuide {
     platforms: ['darwin/arm64', 'linux/amd64'],
     version: '260927181849.0.0',
     platform_qualification: 'candidate; consult the exact release service qualification evidence',
-    setup_command: "<verified absolute paimos-agentd path> setup --url 'https://aeon.example' --workspace <absolute approved folder> --state-root <absolute private folder outside repos> --harness <codex|claude|cursor|grok|pi> --start-service",
+    setup_command: "aeon-agentd pair --url 'https://aeon.example'",
     install_available: false,
     install_targets: [],
     ...overrides,
@@ -495,7 +495,7 @@ test('the public guide uses the server address and stores only a human code', ()
   const presented = presentPublicGuide(published)
   const lead = [...presented.steps, presented.address, presented.note].join('\n')
   assert.match(presented.address, /https:\/\/aeon\.example\/agents\/register-agent/)
-  assert.match(presented.setupCommand, /setup --url 'https:\/\/aeon\.example'/)
+  assert.match(presented.setupCommand, /pair --url 'https:\/\/aeon\.example'/)
   assert.match(presented.installNote, /not published a verified installer/)
   assert.equal(lead.includes(presented.setupCommand), false)
   assert.equal(lead.includes('aeon.barta.cm'), false)
@@ -992,4 +992,15 @@ test('six blocked accounts of seven keep the full count and are not labeled read
   const old = (await listPairingComputers())[0]!
   assert.equal(describeHarnessHint(old, 'codex'), 'At least 5 of 7 accounts need attention')
   assert.equal(describeEnrollmentStatus(old, { account_id: omitted, harness: 'codex' }).includes('Ready'), false)
+})
+
+test('Homebrew commands are additive, bounded and published by this instance', async () => {
+  const command = "brew install inspr-at/tap/aeon-agentd\naeon-agentd pair --url 'https://other.example'"
+  globalThis.fetch = async () => jsonResponse(guidePayload({ homebrew_command: command }))
+  assert.equal(presentPublicGuide(await getPairingGuide()).homebrewCommand, command)
+  assert.equal(presentPublicGuide(guidePayload()).homebrewCommand, '')
+  for (const bad of [[], 'x'.repeat(4001)]) {
+    globalThis.fetch = async () => jsonResponse(guidePayload({ homebrew_command: bad }))
+    await assert.rejects(getPairingGuide)
+  }
 })

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // U10: the project journey inside the project page. The rail with the one next
 // action, gates as approvals, the plan with tri-state features, the release walker
-// (A3), intake, the blocked deploy gate and the header's compact stage.
+// (A3), intake, the blocked deploy gate and the footer's flow pill.
 import { test, expect, type Page } from '@playwright/test'
 import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
@@ -20,14 +20,15 @@ async function open(page: Page, start: JourneyStart = 'plan', path = '/p/PHAROS?
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Project journey' })
 const writes = (calls: { method: string; path: string }[], suffix: string) => calls.filter(c => c.method !== 'GET' && c.path.endsWith(suffix))
 
-test('Journey is a third view of the project, with the stage and next action in the header', async ({ page }) => {
+test('Journey is a third view of the project, with the stage and next action in the footer', async ({ page }) => {
   const errors = watchErrors(page)
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockWork(page, fixtures())
   await mockJourney(page, journeyWorld('plan'))
   await page.goto('/p/PHAROS')
-  const chip = page.getByRole('button', { name: /^Journey: Plan, stage 4 of 8\. Next: Start build/ })
+  const chip = page.locator('footer.app-footer').getByRole('button', { name: /^Journey: Plan, stage 4 of 8\. Next: Start build/ })
   await expect(chip).toBeVisible()
+  await expect(page.locator('.project-head .journey-chip')).toHaveCount(0)
   await page.getByRole('tablist', { name: 'Project sections' }).getByRole('tab', { name: 'Journey' }).click()
   await expect(page).toHaveURL('/p/PHAROS/journey')
   await expect(rail(page).locator('li')).toHaveCount(8)
@@ -286,7 +287,7 @@ test('a past Inspire of a project started here folds away as history, with its s
   await expect(page.getByText('Sources · stored with the project')).toBeVisible()
 })
 
-test('the header chip hides until the project has really started its journey', async ({ page }) => {
+test('the footer pill hides until the project has really started its journey', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockWork(page, fixtures())
   await mockJourney(page, journeyWorld('inspire', { noIntake: true }))
@@ -296,7 +297,7 @@ test('the header chip hides until the project has really started its journey', a
   await expect(page.locator('.journey-chip')).toHaveCount(0)
 })
 
-test('the header chip shows once there are sources, or when the stage is derived', async ({ page }) => {
+test('the footer pill shows once there are sources, or when the stage is derived', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockWork(page, fixtures())
   await mockJourney(page, journeyWorld('inspire'))

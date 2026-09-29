@@ -503,7 +503,7 @@ func TestPairingGuideIsAgentReadableAndPublicRoutesExact(t *testing.T) {
 	r.Host = "attacker.invalid"
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	for _, want := range []string{"Connect a computer", "paimos-agentd path&gt;&#34; pair --url ", "/assets/pinned.js", "short code", "Server version:", "Nix / Home Manager", "aeon-agentd pair --url", "services.aeon.enable", "needs a paired-service update", "Cursor ask mode and an isolated config do not enforce a no-tools policy.", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", "Qualified verification with enforced no-tools mode."} {
+	for _, want := range []string{"Connect a computer", "brew install inspr-at/tap/aeon-agentd", "/assets/pinned.js", "short code", "Server version:", "Nix / Home Manager", "aeon-agentd pair --url", "services.aeon.enable", "needs a paired-service update", "Cursor ask mode and an isolated config do not enforce a no-tools policy.", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", "Qualified verification with enforced no-tools mode."} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("guide lacks %s", want)
 		}
@@ -780,12 +780,14 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 		t.Fatal("Nix guide is not bound to the server origin and owning module")
 	}
 	for _, target := range guide.Targets {
-		if !strings.HasPrefix(target.ArtifactURL, "https://github.com/inspr-at/paimos/releases/download/v260927160212.0.0/paimos-agentd-") || !strings.Contains(target.Command, "mkdir \"$aeon_pairing_dir\"") || !strings.Contains(target.Command, "if (n != 1) exit 1") || strings.Contains(target.Command, "attacker.invalid") {
+		if !strings.HasPrefix(target.ArtifactURL, "https://github.com/inspr-at/paimos/releases/download/v260927160212.0.0/paimos-agentd-") || !strings.Contains(target.Command, "mkdir \"$aeon_pairing_dir\"") || !strings.Contains(target.Command, "if (n != 1) exit 1") || strings.Contains(target.Command, "attacker.invalid") || !strings.Contains(target.Command, "aeon-agentd pair --url $aeon_pair_url") || !strings.Contains(target.Command, "'https://pairing.test'") {
 			t.Fatalf("unsafe install contract: %+v", target)
 		}
 		check := strings.Index(target.Command, " -c selected.SHA256SUMS")
 		install := strings.Index(target.Command, "install -m 0700")
-		if check < 0 || install < check {
+		link := strings.Index(target.Command, "ln -sfn \"$aeon_pairing_dir/paimos-agentd\" \"$aeon_bin\"")
+		next := strings.Index(target.Command, "aeon-agentd pair --url $aeon_pair_url")
+		if check < 0 || install < check || link < install || next < link {
 			t.Fatal("artifact becomes executable before checksum verification")
 		}
 	}

@@ -1,0 +1,537 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package cli
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"github.com/inspr-at/paimos/internal/sessionusage"
+)
+
+const usageWalkLimit = 4000
+
+type usageTarget struct {
+	Source   string
+	Path     string
+	Snapshot bool
+}
+
+func usageBilling(o heartbeatOptions) (mode, label string) {
+	switch o.BillingMode {
+	case "api":
+		return "api", ""
+	case "subscription":
+		return "subscription", heartbeatText(o.SubscriptionLabel, 120)
+	default:
+		return "", ""
+	}
+}
+
+func pendingBilling(pending heartbeatPendingUsage) string {
+	if pending.BillingMode == "" {
+		return "unknown"
+	}
+	return pending.BillingMode
+}
+
+func resolveHeartbeatUsage(o heartbeatOptions) (usageTarget, error) {
+	switch o.BillingMode {
+	case "", "unknown", "api", "subscription":
+	default:
+		return usageTarget{}, usagef("invalid --billing-mode")
+	}
+	if o.SubscriptionLabel != "" && o.BillingMode != "subscription" {
+		return usageTarget{}, usagef("--subscription-label requires subscription billing")
+	}
+	source := usageSourceOf(o)
+	if source == "" {
+		return usageTarget{}, nil
+	}
+	switch source {
+	case "claude", "codex", "cursor", "grok":
+	default:
+		return usageTarget{}, usagef("invalid --usage-source")
+	}
+	path := o.UsageFile
+	if path == "" && source == "claude" {
+		path = o.Transcript
+	}
+	if path == "" {
+		path = locateUsageFile(o, source)
+	}
+	if path == "" {
+		return usageTarget{Source: source, Snapshot: source == "grok"}, nil
+	}
+	if !allowedUsagePath(source, path) {
+		return usageTarget{}, usagef("usage file is not a session log")
+	}
+	return usageTarget{Source: source, Path: path, Snapshot: source == "grok"}, nil
+}
+
+func usageSourceOf(o heartbeatOptions) string {
+	if o.UsageSource != "" {
+		return o.UsageSource
+	}
+	if o.Transcript != "" {
+		return "claude"
+	}
+	switch o.Harness {
+	case "claude", "codex", "cursor", "grok":
+		return o.Harness
+	default:
+		return ""
+	}
+}
+
+func locateUsageFile(o heartbeatOptions, source string) string {
+	id := o.UsageID
+	if id == "" && validUUID(o.SourceSession) {
+		id = o.SourceSession
+	}
+	switch source {
+	case "claude":
+		if id == "" || o.ClaudeProjects == "" {
+			return ""
+		}
+		return findClaudeTranscript(o.ClaudeProjects, id)
+	case "cursor":
+		if o.StateDir == "" {
+			return ""
+		}
+		path := filepath.Join(o.StateDir, "cursor.jsonl")
+		if regularUsageFile("cursor", path) {
+			return path
+		}
+		return ""
+	case "codex":
+		if id == "" || o.CodexHome == "" {
+			return ""
+		}
+		return findCodexRollout(o.CodexHome, id)
+	case "grok":
+		if id == "" || o.GrokHome == "" {
+			return ""
+		}
+		return findGrokUsage(o.GrokHome, o.Worktree, id)
+	default:
+		return ""
+	}
+}
+
+func usageID(id string) bool {
+	if len(id) < 8 || len(id) > 128 {
+		return false
+	}
+	for i, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case i > 0 && (r == '-' || r == '_'):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// allowedUsagePath reports whether path is this source's vendor usage log.
+// It is the resolveHarnessPath allowlist, judged on the absolute path.
+func allowedUsagePath(source, path string) bool {
+	kind, ok := harnessKindForSource(source)
+	if !ok {
+		return false
+	}
+	_, ok = resolveHarnessPath(kind, path)
+	return ok
+}
+
+func usagePathParts(path string) []string {
+	raw := strings.Split(filepath.ToSlash(path), "/")
+	parts := make([]string, 0, len(raw))
+	for _, part := range raw {
+		if part != "" && part != "." {
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
+// credentialUsageName reports a credential-store name. It judges the name as
+// APFS compares names (fsFold), so every spelling APFS treats as the same
+// file gets the same verdict, and nothing APFS keeps distinct is folded in.
+func credentialUsageName(name string) bool {
+	base := fsFold(name)
+	switch base {
+	case "auth.json", "cli-config.json", "cookies", "cookies.db", "cookies.binarycookies",
+		"keychain", "keychains", "login.keychain", "login.keychain-db",
+		"credentials", "credentials.json", "secrets", ".ssh", ".gnupg", ".aws", ".netrc", ".docker", ".password-store":
+		return true
+	}
+	if strings.HasPrefix(base, ".credentials") || strings.HasPrefix(base, ".env") || strings.HasPrefix(base, "id_") {
+		return true
+	}
+	if strings.HasSuffix(base, ".key") || strings.HasSuffix(base, ".age") {
+		return true
+	}
+	return strings.Contains(base, "credential") || strings.Contains(base, "keychain") || strings.Contains(base, "cookie")
+}
+
+func regularUsageFile(source, path string) bool {
+	kind, ok := harnessKindForSource(source)
+	if !ok {
+		return false
+	}
+	_, err := statHarnessFile(kind, path)
+	return err == nil
+}
+
+func findCodexRollout(home, thread string) string {
+	if !usageID(thread) {
+		return ""
+	}
+	root := filepath.Join(home, "sessions")
+	info, err := os.Lstat(root)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return ""
+	}
+	suffix := "-" + thread + ".jsonl"
+	var found string
+	n := 0
+	stop := errors.New("usage walk limit")
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		n++
+		if n > usageWalkLimit {
+			return stop
+		}
+		if err != nil || d == nil {
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		name := d.Name()
+		if !d.IsDir() && strings.HasPrefix(name, "rollout-") && strings.HasSuffix(name, suffix) && path > found {
+			found = path
+		}
+		return nil
+	})
+	if !regularUsageFile("codex", found) || !pathInsideRoot(root, found) {
+		return ""
+	}
+	return found
+}
+
+func findGrokUsage(home, worktree, id string) string {
+	if !usageID(id) {
+		return ""
+	}
+	root := filepath.Join(home, "sessions")
+	info, err := os.Lstat(root)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return ""
+	}
+	if strings.TrimSpace(worktree) != "" {
+		primary := filepath.Join(root, encodeURIComponent(worktree), id, "usage.json")
+		if regularUsageFile("grok", primary) && pathInsideRoot(root, primary) {
+			return primary
+		}
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return ""
+	}
+	var found string
+	for i, entry := range entries {
+		if i >= usageWalkLimit {
+			break
+		}
+		if entry.Type()&os.ModeSymlink != 0 || !entry.IsDir() {
+			continue
+		}
+		candidate := filepath.Join(root, entry.Name(), id, "usage.json")
+		if regularUsageFile("grok", candidate) && pathInsideRoot(root, candidate) && candidate > found {
+			found = candidate
+		}
+	}
+	return found
+}
+
+func encodeURIComponent(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if urlUnreserved(c) {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+	}
+	return b.String()
+}
+
+func urlUnreserved(c byte) bool {
+	switch {
+	case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		return true
+	}
+	return strings.ContainsRune("-_.!~*'()", rune(c))
+}
+
+func pathInsideRoot(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func noteHarnessLine(source string, line []byte, fallback string, sums map[string]usageSum, poisoned, seen map[string]bool, ring *[]string, codex *heartbeatCodexCursor) error {
+	if source == "codex" {
+		if codex == nil {
+			codex = &heartbeatCodexCursor{}
+		}
+		if model, ok := sessionusage.CodexContextModel(line); ok {
+			codex.Model = model
+			return nil
+		}
+		noteCodexTotals(line, fallback, sums, poisoned, codex)
+		return nil
+	}
+	parsed, ok, err := sessionusage.ParseHeartbeatLine(source, fallback, line)
+	if err != nil {
+		return errUsageOverflow
+	}
+	if !ok || parsed.Model == "" || poisoned[parsed.Model] {
+		return nil
+	}
+	if parsed.ID != "" {
+		if seen[parsed.ID] || len(seen) >= heartbeatUsageSeenMax {
+			return nil
+		}
+		seen[parsed.ID] = true
+		*ring = append(*ring, parsed.ID)
+	}
+	cur := sums[parsed.Model]
+	if parsed.Absolute {
+		if cur.absolute && (parsed.Input < cur.input || parsed.Output < cur.output || parsed.Cached < cur.cached) {
+			return nil
+		}
+		sums[parsed.Model] = usageSum{input: parsed.Input, output: parsed.Output, cached: parsed.Cached, reasoning: parsed.Reasoning, reasoningKnown: parsed.ReasoningKnown, absolute: true}
+		return nil
+	}
+	addUsageDelta(sums, poisoned, parsed)
+	return nil
+}
+
+// noteCodexTotals turns one session-wide cumulative Codex record into a delta
+// for the model in context. The baseline always moves to the new totals, so
+// tokens that cannot be attributed to a model are dropped, never re-counted
+// under the next model. A record below the baseline is stale and ignored.
+func noteCodexTotals(line []byte, fallback string, sums map[string]usageSum, poisoned map[string]bool, codex *heartbeatCodexCursor) {
+	snap, ok := sessionusage.CodexTotals(line)
+	if !ok {
+		return
+	}
+	if snap.Input < codex.Input || snap.Output < codex.Output || snap.Cached < codex.Cached {
+		return
+	}
+	delta := sessionusage.HeartbeatLine{
+		Input: snap.Input - codex.Input, Output: snap.Output - codex.Output, Cached: snap.Cached - codex.Cached,
+	}
+	switch {
+	case !snap.ReasoningKnown:
+		// Reasoning since the last known total is unknown until a record
+		// carries it again.
+		codex.ReasoningKnown = false
+	case !codex.ReasoningKnown:
+		// A total after an unknown stretch only re-establishes the baseline;
+		// the increase cannot be attributed to the model in context.
+		codex.Reasoning, codex.ReasoningKnown = snap.Reasoning, true
+	case snap.Reasoning >= codex.Reasoning:
+		delta.Reasoning, delta.ReasoningKnown = snap.Reasoning-codex.Reasoning, true
+		codex.Reasoning = snap.Reasoning
+	default:
+		// Codex can revise reasoning down while input grows; the attributed
+		// baseline never moves backwards.
+		delta.ReasoningKnown = true
+	}
+	codex.Input, codex.Output, codex.Cached = snap.Input, snap.Output, snap.Cached
+	if delta.Cached > delta.Input {
+		delta.Cached = delta.Input
+	}
+	// Reasoning is a subset of output. An increase that cannot be one is not
+	// attributed rather than reported as an impossible figure.
+	if delta.ReasoningKnown && delta.Reasoning > delta.Output {
+		delta.Reasoning, delta.ReasoningKnown = 0, false
+	}
+	model := snap.Model
+	if model == "" {
+		model = codex.Model
+	}
+	if model == "" {
+		model = fallback
+	}
+	if model == "" || !heartbeatModelRE.MatchString(model) || poisoned[model] {
+		return
+	}
+	if delta.Input == 0 && delta.Output == 0 && delta.Cached == 0 && (!delta.ReasoningKnown || delta.Reasoning == 0) {
+		return
+	}
+	delta.Model = model
+	addUsageDelta(sums, poisoned, delta)
+}
+
+func addUsageDelta(sums map[string]usageSum, poisoned map[string]bool, parsed sessionusage.HeartbeatLine) {
+	cur := sums[parsed.Model]
+	nextIn, ok1 := addTokens(cur.input, parsed.Input)
+	nextOut, ok2 := addTokens(cur.output, parsed.Output)
+	nextCached, ok3 := addTokens(cur.cached, parsed.Cached)
+	nextReasoning, reasoningKnown, ok4 := addUsageReasoning(cur, parsed)
+	if !ok1 || !ok2 || !ok3 || !ok4 {
+		poisoned[parsed.Model] = true
+		delete(sums, parsed.Model)
+		return
+	}
+	sums[parsed.Model] = usageSum{input: nextIn, output: nextOut, cached: nextCached, reasoning: nextReasoning, reasoningKnown: reasoningKnown}
+}
+
+func addUsageReasoning(cur usageSum, parsed sessionusage.HeartbeatLine) (int64, bool, bool) {
+	fresh := cur.input == 0 && cur.output == 0 && cur.cached == 0 && cur.reasoning == 0 && !cur.reasoningKnown
+	if fresh {
+		return parsed.Reasoning, parsed.ReasoningKnown, true
+	}
+	if !cur.reasoningKnown || !parsed.ReasoningKnown {
+		return 0, false, true
+	}
+	next, ok := addTokens(cur.reasoning, parsed.Reasoning)
+	return next, true, ok
+}
+
+func (rt *runtime) reportSnapshotUsage(ctx context.Context, projectID string, o heartbeatOptions, session *heartbeatSession, path string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	lines, err := readGrokUsage(path, heartbeatText(o.Model, 128))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	sums := map[string]usageSum{}
+	for _, line := range lines {
+		cur := sums[line.Model]
+		if cur.absolute && (line.Input < cur.input || line.Output < cur.output || line.Cached < cur.cached) {
+			continue
+		}
+		sums[line.Model] = usageSum{input: line.Input, output: line.Output, cached: line.Cached, reasoning: line.Reasoning, reasoningKnown: line.ReasoningKnown, absolute: true}
+	}
+	models := make([]string, 0, len(sums))
+	for model := range sums {
+		models = append(models, model)
+	}
+	slices.Sort(models)
+	mode, label := usageBilling(o)
+	created := make([]heartbeatPendingUsage, 0, len(models))
+	for _, model := range models {
+		sum := sums[model]
+		prev := usageByModel(session.disk.Usage, model)
+		if prev != nil && (sum.input < prev.Input || sum.output < prev.Output || sum.cached < prev.Cached) {
+			continue
+		}
+		reasoning, reasoningKnown := holdReasoning(prev, sum.reasoning, sum.reasoningKnown)
+		if prev != nil && sum.input == prev.Input && sum.output == prev.Output && sum.cached == prev.Cached && sameReasoning(prev.Reasoning, reasoning, reasoningKnown) {
+			continue
+		}
+		if sum.input == 0 && sum.output == 0 && sum.cached == 0 && (!reasoningKnown || reasoning == 0) {
+			continue
+		}
+		seq := int64(1)
+		if prev != nil {
+			seq = prev.Sequence + 1
+		}
+		created = append(created, heartbeatPendingUsage{
+			Model: model, Sequence: seq, Input: sum.input, Output: sum.output, Cached: sum.cached,
+			Reasoning:   reasoningPointer(reasoning, reasoningKnown),
+			ReportID:    usageReportID(session.id, model, seq, sum.input, sum.output, sum.cached, reasoningPointer(reasoning, reasoningKnown)),
+			BillingMode: mode, SubscriptionLabel: label,
+		})
+	}
+	if len(created) == 0 {
+		return nil
+	}
+	session.disk.PendingUsage = append(session.disk.PendingUsage, created...)
+	if err := saveHeartbeatSession(session); err != nil {
+		session.disk.PendingUsage = session.disk.PendingUsage[:len(session.disk.PendingUsage)-len(created)]
+		return err
+	}
+	return rt.replayPendingUsage(ctx, projectID, session)
+}
+
+func readGrokUsage(path, fallback string) ([]sessionusage.HeartbeatLine, error) {
+	if !allowedUsagePath("grok", path) {
+		return nil, usagef("usage file is not a session log")
+	}
+	f, err := openHarnessFile(harnessGrokUsage, path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, 1<<20+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > 1<<20 {
+		return nil, usagef("usage snapshot is too large")
+	}
+	return sessionusage.ParseGrokUsage(raw, fallback)
+}
+
+func snapshotCaughtUp(path, fallback string, session *heartbeatSession) bool {
+	lines, err := readGrokUsage(path, fallback)
+	if err != nil {
+		return errors.Is(err, os.ErrNotExist)
+	}
+	for _, line := range lines {
+		if line.Input == 0 && line.Output == 0 && line.Cached == 0 && (!line.ReasoningKnown || line.Reasoning == 0) {
+			continue
+		}
+		prev := usageByModel(session.disk.Usage, line.Model)
+		if prev == nil || line.Input > prev.Input || line.Output > prev.Output || line.Cached > prev.Cached || (line.ReasoningKnown && (prev.Reasoning == nil || line.Reasoning > *prev.Reasoning)) {
+			return false
+		}
+	}
+	return true
+}
+
+func usageCaughtUp(o heartbeatOptions, session *heartbeatSession) bool {
+	target, err := resolveHeartbeatUsage(o)
+	if err != nil || target.Path == "" {
+		return err == nil
+	}
+	if target.Snapshot {
+		return snapshotCaughtUp(target.Path, heartbeatText(o.Model, 128), session)
+	}
+	return heartbeatTranscriptCaughtUp(target.Source, target.Path, session.disk.UsageOffset)
+}
+
+func usageOutstanding(o heartbeatOptions, session *heartbeatSession) bool {
+	target, err := resolveHeartbeatUsage(o)
+	if err != nil || session == nil || target.Path == "" {
+		return false
+	}
+	if target.Snapshot {
+		return !snapshotCaughtUp(target.Path, heartbeatText(o.Model, 128), session)
+	}
+	return heartbeatTranscriptOutstanding(target.Source, target.Path, session.disk.UsageOffset, session.disk.UsageDiscard)
+}

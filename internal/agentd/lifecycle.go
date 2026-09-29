@@ -32,6 +32,7 @@ type LifecycleStatus struct {
 	HarnessDetails          map[string]agentsetup.HarnessDetail `json:"harness_details,omitempty"`
 	HarnessStatuses         map[string]string                   `json:"harness_statuses,omitempty"`
 	HarnessErrors           map[string]string                   `json:"harness_errors,omitempty"`
+	CapacityAccounts        []CapacityAccountStatus             `json:"capacity_accounts,omitzero"`
 	LoginRequired           bool                                `json:"login_required"`
 	VerificationUnavailable []string                            `json:"verification_unavailable_account_ids"`
 	Ready                   bool                                `json:"ready"`
@@ -139,6 +140,10 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	s.mu.Lock()
 	v.HarnessStatuses = map[string]string{}
 	v.HarnessDetails = map[string]agentsetup.HarnessDetail{}
+	if s.capacityCapturing {
+		v.State = "capturing"
+		v.Ready = false
+	}
 	v.AllFenced, _ = s.readFence("")
 	launchable := 0
 	perHarness := map[string][]harnessAccountState{}
@@ -204,6 +209,12 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 		v.HarnessFailed = false
 	} else if launchable == 0 && len(v.BlockedAccounts) > 0 {
 		v.HarnessFailed = true
+	}
+	if s.capacityCapturing {
+		v.Ready = false
+		if s.closing || v.AllFenced || len(v.FencedAccountIDs) > 0 {
+			v.State = "draining"
+		}
 	}
 	entries := make([]*owned, 0, len(s.runs))
 	for _, e := range s.runs {

@@ -71,7 +71,7 @@ func TestRunHistoryPagingFiltersAndTelemetry(t *testing.T) {
 		}
 	}
 	got := get(f.person, "/api/runs?session="+session).Items[0]
-	if got.Outcome == nil || *got.Outcome != "completed" || got.DurationMS == nil || *got.DurationMS != 2123 || got.EffectiveModel == nil || *got.EffectiveModel != "effective-test" || got.InputTokens != 123 || got.OutputTokens != 45 || got.Cost != 9007199254740993 {
+	if got.Outcome == nil || *got.Outcome != "completed" || got.DurationMS == nil || *got.DurationMS != 2123 || got.EffectiveModel == nil || *got.EffectiveModel != "effective-test" || got.InputTokens != 123 || got.OutputTokens != 45 || got.Cost != 9007199254740993 || got.ActiveMS != nil || got.OutcomeDetail != nil || got.RetryOfRunID != nil {
 		t.Fatalf("telemetry %+v", got)
 	}
 	var queued agentruns.Run

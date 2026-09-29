@@ -4,15 +4,24 @@ import { computed, ref, useId } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import BizIcon from '../business/BizIcon.vue'
 import MarkdownBody from '../MarkdownBody.vue'
+import RuleTldrEditor from './RuleTldrEditor.vue'
 import { HARNESS_LABEL, HARNESSES, ROLE_LABEL, ROLES, ruleSwitchLabel, type AgentRule } from '../../lib/rules'
 
 // One rule as agents read it: the text rendered as Markdown, a lock when it is
-// locked, and only the exceptions as quiet tags. Everything technical (reason,
-// details, source, identity) waits behind the row's own disclosure.
-const props = defineProps<{ rule: AgentRule; heldBy?: string; pending?: boolean; switchable?: boolean; switchDisabled?: boolean; setName?: string }>()
+// locked, and only the exceptions as quiet tags. Its explanation for people
+// (TL;DR) sits quietly underneath. Everything technical (reason, details,
+// source, identity) waits behind the row's own disclosure, where the
+// explanation can be written or edited in place.
+const props = defineProps<{
+  rule: AgentRule; heldBy?: string; pending?: boolean; switchable?: boolean; switchDisabled?: boolean; setName?: string
+  /** Saves this rule's explanation into the draft; absent when the caller may not write. */
+  explain?: (value: { en: string; de?: string } | null) => Promise<string | null>
+}>()
 const emit = defineEmits<{ toggle: [enabled: boolean] }>()
 const open = ref(false)
+const editing = ref(false)
 const id = useId()
+const checkTip = 'The rule text changed after this explanation was written. Open the details to check it.'
 
 const date = (value: string) => new Date(value).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 const only = (picked: string[] | undefined, all: readonly string[], label: (value: never) => string) =>
@@ -56,8 +65,21 @@ function onSwitch(event: Event) {
         <MarkdownBody class="rule-text" :body="rule.text || 'Untitled rule'" />
         <span v-for="tag in tags" :key="tag" class="tag">{{ tag }}</span>
       </div>
+      <p v-if="rule.tldr?.en" class="tldr" :title="rule.tldr.de ? `${rule.tldr.en} · ${rule.tldr.de}` : rule.tldr.en">
+        <span class="tldr-text">{{ rule.tldr.en }}</span>
+        <span v-if="rule.tldr.check" class="check" :data-tip="checkTip">Check</span>
+      </p>
       <div v-if="open" :id="`${id}-more`" class="more">
+        <RuleTldrEditor v-if="editing && explain" :value="rule.tldr" :save="explain" @done="editing = false" />
         <dl>
+          <template v-if="!editing && (rule.tldr?.en || explain)">
+            <dt>Explanation</dt>
+            <dd class="explanation">
+              <span v-if="rule.tldr?.en" class="words">{{ rule.tldr.en }}<span v-if="rule.tldr.de" class="faint de" lang="de">{{ rule.tldr.de }}</span></span>
+              <span v-else class="faint">None yet</span>
+              <button v-if="explain" type="button" class="link" @click="editing = true">{{ rule.tldr?.en ? (rule.tldr.check ? 'Check' : 'Edit') : 'Add' }}</button>
+            </dd>
+          </template>
           <dt>Why</dt><dd><MarkdownBody class="small-md" :body="rule.why" /></dd>
           <template v-if="rule.details"><dt>Details</dt><dd><MarkdownBody class="small-md" :body="rule.details" /></dd></template>
           <dt>Source</dt><dd>{{ rule.source.reference }}<span v-if="rule.source.edited_here" class="faint"> · edited here</span></dd>
@@ -95,8 +117,19 @@ dd { margin: 0; min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
 .rule .small-md :deep(p) { margin: 0 0 .4em; color: var(--ink-2); }
 .rule .small-md :deep(p:last-child) { margin-bottom: 0; }
 .more-btn { color: var(--ink-3); }
+.tldr { display: flex; align-items: baseline; gap: 8px; margin: 1px 0 0; min-width: 0; color: var(--ink-3); font-size: 12.5px; line-height: 1.45; }
+.tldr-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.check { flex: none; padding: 0 7px; border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font-size: 11px; font-weight: 600; line-height: 17px; }
+.more .tldr-edit { margin-bottom: 10px; }
+.explanation { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.explanation .words { min-width: 0; }
+.explanation .de { display: block; margin-top: 2px; }
+.faint { color: var(--ink-3); }
+.link { padding: 0; border: 0; background: none; color: var(--teal-ink); font-size: 12.5px; font-weight: 650; cursor: pointer; }
+.link:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 4px; }
 @media (hover: hover) { .rule:not(:hover):not(:focus-within) .more-btn[aria-expanded="false"] { opacity: .55; } }
 @media (max-width: 600px) {
+  .tldr-text { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   dd + dt { margin-top: 6px; }
   .lead .switch { position: relative; }

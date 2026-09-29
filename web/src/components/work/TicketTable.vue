@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { estimateDisplay } from '../../lib/estimates'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
-import { ticketWorkers, type LiveAgent } from '../../lib/liveAgents'
+import { ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
 import type { GroupBy, RowGroup, EpicRef } from '../../lib/ticketList'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
@@ -16,7 +17,7 @@ import StatusIcon from './StatusIcon.vue'
 import TicketWorkers from './TicketWorkers.vue'
 import QuickCreateRow, { type QuickDraft } from './QuickCreateRow.vue'
 import EtaCell from './EtaCell.vue'
-import { etaFromTicket } from '../../lib/eta'
+import { etaFromTicket, progressAccessibleName, progressReportedAt } from '../../lib/eta'
 
 const NO_WORKERS: LiveAgent[] = []
 
@@ -92,7 +93,7 @@ const emit = defineEmits<{
   release: [row: ListItem, anchor: HTMLElement]
 }>()
 
-const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated', eta: 'c-eta' }
+const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated', progress: 'c-progress', eta: 'c-eta' }
 // Columns follow the table's own width (the docked panel narrows it; wide screens
 // add columns) and the person's saved choice. Decided here rather than in CSS so
 // every colspan matches the visible columns.
@@ -104,19 +105,30 @@ const phone = ref(phoneQuery.matches)
 const live = useLiveAgents()
 const workersById = computed(() => ticketWorkers(live.forProject(props.projectId), props.projectId))
 function workersOf(row: ListItem) { return workersById.value.get(row.id) ?? NO_WORKERS }
+// The server names the lead. Other live workers stay in the feed's order after it.
+function assigneeWorkers(row: ListItem) { return withServerLead(workersOf(row), row.lead_worker) }
 // Release, Tags and Estimate earn their automatic columns only when some loaded row has one.
 const present = computed(() => {
   const rows = [...props.rowsById.values()]
   const listed = props.outline ? props.outline.flatMap(entry => entry.type === 'row' ? [entry.row] : []) : rows
   return {
     assigned: props.showAssignee,
-    workers: listed.some(row => workersOf(row).length > 0),
-    estimate: rows.some(row => !!estimate(row)),
+    workers: listed.some(row => workersOf(row).length > 0 || !!row.lead_worker?.name),
+    estimate: rows.some(row => !!estimate(row) || (row.kind_slug === 'epic' && (row.estimate?.open_children ?? 0) > 0)),
     release: rows.some(row => !!releaseLabel(row.fields) || props.nativeReleases?.get(row.id)?.status === 'member'),
     tags: rows.some(row => tagList(row.fields).length > 0),
-    eta: listed.some(row => !!etaFromTicket(row.eta)),
+    progress: listed.some(row => progressOf(row) != null),
+    eta: listed.some(row => { const eta = etaFromTicket(row.eta); return !!eta?.ready || !!eta?.live }),
   }
 })
+const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+function progressOf(row: ListItem): { pct: number; stale: boolean; label: string } | null {
+  const eta = etaFromTicket(row.eta)
+  if (!eta || typeof eta.progress !== 'number') return null
+  const pct = Math.max(0, Math.min(100, Math.round(eta.progress)))
+  const stale = !!eta.stale
+  return { pct, stale, label: progressAccessibleName(pct, stale, stale ? progressReportedAt(row.eta) : null, props.now, timeZone) }
+}
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs }))
 const columns = computed(() => layout.value.columns.map(def => ({ ...def, field: def.sort, cls: CLS[def.id] })))
 const ids = computed(() => columns.value.map(column => column.id))
@@ -231,11 +243,11 @@ function autofit(id: ColumnId) {
   emit('widths', { ...(props.prefs?.widths ?? {}), [id]: next })
 }
 watch(() => props.prefs?.widths, () => { if (!resizing) dragWidths.value = {} })
-function estimate(row: ListItem) {
-  const hours = row.fields.estimate_hours, points = row.fields.estimate_lp
-  if (typeof hours === 'number' && hours > 0) return `${hours} h`
-  if (typeof points === 'number' && points > 0) return `${points} pt`
-  return ''
+function estimate(row: ListItem) { return estimateDisplay(row).text }
+// An epic with open children and no hours still has coverage to explain.
+function emptyEstimateTip(row: ListItem) {
+  if (row.kind_slug !== 'epic' || (row.estimate?.open_children ?? 0) < 1 || estimate(row)) return ''
+  return estimateDisplay(row).tip
 }
 const grid = ref<HTMLTableElement>()
 const quick = ref<InstanceType<typeof QuickCreateRow>>()
@@ -675,8 +687,8 @@ defineExpose({
               </td>
               <td v-else-if="column.id === 'assignee'" class="c-assignee">
                 <div class="cell">
-                  <span v-if="entry.row.assignee" class="owner" :class="{ 'with-workers': workersOf(entry.row).length }" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></span>
-                  <TicketWorkers v-if="workersOf(entry.row).length" :workers="workersOf(entry.row)" :ticket-key="entry.row.key" />
+                  <span v-if="entry.row.assignee" class="owner" :class="{ 'with-workers': assigneeWorkers(entry.row).length }" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></span>
+                  <TicketWorkers v-if="assigneeWorkers(entry.row).length" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" />
                   <span v-else-if="!entry.row.assignee" class="empty" aria-label="Unassigned">—</span>
                 </div>
               </td>
@@ -713,9 +725,18 @@ defineExpose({
                   <span v-else class="empty" aria-label="No cost unit">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'estimate'" class="c-estimate"><div class="cell"><span v-if="estimate(entry.row)" class="mono">{{ estimate(entry.row) }}</span><span v-else class="empty" aria-label="No estimate">—</span></div></td>
+              <td v-else-if="column.id === 'estimate'" class="c-estimate"><div class="cell"><span v-if="estimate(entry.row)" class="mono" :class="{ 'estimate-draft': estimateDisplay(entry.row).draft }" :data-tip="estimateDisplay(entry.row).tip">{{ estimate(entry.row) }}<span v-if="estimateDisplay(entry.row).draft" class="estimate-mark"> est.</span></span><span v-else class="empty" :aria-label="emptyEstimateTip(entry.row) || 'No estimate'" :data-tip="emptyEstimateTip(entry.row) || undefined">—</span></div></td>
               <td v-else-if="column.id === 'created'" class="c-created"><div class="cell"><time :datetime="entry.row.created_at" :data-tip="absoluteTime(entry.row.created_at)">{{ relativeTime(entry.row.created_at, { now }) }}</time></div></td>
               <td v-else-if="column.id === 'updated'" class="c-updated"><div class="cell"><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }) }}</time></div></td>
+              <td v-else-if="column.id === 'progress'" class="c-progress">
+                <div class="cell">
+                  <span v-if="progressOf(entry.row)" class="progress-read" :class="{ stale: progressOf(entry.row)!.stale }" role="img" :aria-label="progressOf(entry.row)!.label" :data-tip="progressOf(entry.row)!.label">
+                    <span class="bar" aria-hidden="true"><i :style="{ width: `${progressOf(entry.row)!.pct}%` }" /></span>
+                    <span class="pct" aria-hidden="true">{{ progressOf(entry.row)!.pct }}%</span>
+                  </span>
+                  <span v-else class="empty" aria-label="No progress">—</span>
+                </div>
+              </td>
               <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" /></div></td>
             </template>
           </tr>
@@ -793,7 +814,7 @@ thead th:hover .col-resize::after { opacity: 1; }
 .ticket-row td { height: var(--row-h); padding: 0 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .ticket-row td:first-child { padding-left: 18px; }
 .cell { display: flex; align-items: center; gap: 8px; min-width: 0; height: calc(var(--row-h) - 1px); line-height: 18px; white-space: nowrap; }
-.c-updated .cell, .c-created .cell, .c-estimate .cell, .c-eta .cell { justify-content: flex-end; }
+.c-updated .cell, .c-created .cell, .c-estimate .cell, .c-progress .cell, .c-eta .cell { justify-content: flex-end; }
 @media (hover: hover) { .ticket-row:hover td { background: var(--row-hover); } }
 .ticket-row.cursor td, .ticket-row.open td { background: var(--row-selected); }
 /* The ticket shown in the panel also carries a hairline ring in the row's own shape (no edge accents, rule 11). */
@@ -898,7 +919,19 @@ td.c-title { position: relative; overflow: hidden; }
 .title-workers { flex: 0 0 auto; min-width: 0; max-width: 132px; }
 .empty { color: var(--ink-3); }
 .c-updated time, .c-created time { color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.c-estimate .mono.estimate-draft { color: var(--ink-3); }
+.estimate-mark { font-size: 10px; }
 .c-estimate .mono { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.progress-read { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; max-width: 100%; color: var(--ink-2); }
+.progress-read .bar { width: 36px; height: 4px; flex: none; box-shadow: none; }
+.progress-read .bar > i { box-shadow: none; }
+.progress-read .pct { flex: none; font: 500 11px/1 var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; color: var(--ink-2); }
+.progress-read.stale, .progress-read.stale .pct { color: var(--ink-3); }
+.progress-read.stale .bar > i { opacity: .45; }
+/* The percent lives in Progress once that column is on; ETA keeps the time. */
+.table-card:has(col.c-progress) .c-eta :deep(.pct) { display: none; }
+th.c-progress, th.c-eta, td.c-progress, td.c-eta { padding-left: 8px; padding-right: 8px; }
+th.c-progress .th-sort, th.c-eta .th-sort { letter-spacing: .08em; }
 .epic-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-2); font-size: 12.5px; }
 .epic-name { overflow: hidden; text-overflow: ellipsis; }
 .cost-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-2); font-size: 12.5px; }
@@ -1011,8 +1044,23 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row.cursor, .ticket-row.open { background: var(--row-selected); }
   .tickets colgroup { display: none; }
   .c-key { grid-area: key; } .c-status { grid-area: status; } .c-prio { grid-area: prio; } .c-updated { grid-area: updated; }
-  /* A ticket with an estimate shows it where Updated sits; the estimate is the
-     fresher answer to "when" while an agent works on it. */
+  /* An hour estimate sits at the end of the title line. An empty cell stays off the card. */
+  .c-estimate { grid-area: estimate; justify-self: end; align-self: center; min-width: 0; }
+  .c-estimate .cell { height: auto; }
+  .ticket-row:not(:has(.c-estimate .mono)) .c-estimate { display: none !important; }
+  .ticket-row:has(.c-estimate .mono) { grid-template-areas: "key status prio updated" "title title title estimate"; }
+  .table-card.selecting .ticket-row:has(.c-estimate .mono) { grid-template-areas: "check key status prio updated" "check title title title estimate"; }
+  .c-progress { grid-area: progress; justify-self: end; min-width: 0; }
+  .ticket-row:not(:has(.progress-read)) .c-progress { display: none !important; }
+  .ticket-row:has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress"; }
+  .table-card.selecting .ticket-row:has(.progress-read) {
+    grid-template-columns: 44px auto auto minmax(0, 1fr) auto;
+    grid-template-areas: "check key status prio updated" "check title title title progress";
+  }
+  /* With both, the title spans two lines beside progress over the estimate. */
+  .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress" "title title title estimate"; }
+  .table-card.selecting .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "check key status prio updated" "check title title title progress" "check title title title estimate"; }
+  /* A ready time shows where Updated sits; it is the fresher answer to "when". */
   .ticket-row:not(:has(.eta-cell)) .c-eta, .ticket-row:has(.eta-cell) .c-updated { display: none !important; }
   .c-eta { grid-area: updated; justify-self: end; min-width: 0; }
   .c-title { grid-area: title; }

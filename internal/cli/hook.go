@@ -74,8 +74,21 @@ func (rt *runtime) runInboxHook(ctx context.Context, event string) error {
 		return err
 	}
 	session, err := inboxHookSession()
-	if err != nil || session == "" {
+	if err != nil {
 		return err
+	}
+	// A configured explicit binding that is missing or empty stays a no-op.
+	// Only a session with none of the AEON_SESSION sources set may use the vendor id.
+	if session == "" && os.Getenv("AEON_SESSION_ID") == "" && os.Getenv("AEON_SESSION_FILE") == "" && os.Getenv("AEON_SESSION_STATE_DIR") == "" {
+		if ref := normalizeVendorRef(input.Session); ref != "" {
+			session, err = rt.lookupVendorSession(ctx, ref)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if session == "" {
+		return nil
 	}
 	// exact_session (AEON-280) makes the server return only rows bound to this
 	// generation; the client-side check below stays as defense in depth.
@@ -154,6 +167,12 @@ func (rt *runtime) runInboxHook(ctx context.Context, event string) error {
 	return nil
 }
 
+var (
+	errSessionFileUnavailable = errors.New("session file unavailable")
+	errInvalidSessionFile     = errors.New("invalid session file")
+	errInvalidAeonSessionID   = errors.New("invalid Aeon session id")
+)
+
 func inboxHookSession() (string, error) {
 	id := strings.TrimSpace(os.Getenv("AEON_SESSION_ID"))
 	if id == "" {
@@ -169,17 +188,17 @@ func inboxHookSession() (string, error) {
 			return "", nil
 		}
 		if err != nil {
-			return "", errors.New("session file unavailable")
+			return "", errSessionFileUnavailable
 		}
 		defer file.Close()
 		raw, err := io.ReadAll(io.LimitReader(file, 257))
 		if err != nil || len(raw) > 256 {
-			return "", errors.New("invalid session file")
+			return "", errInvalidSessionFile
 		}
 		id = strings.TrimSpace(string(raw))
 	}
 	if !validUUID(id) {
-		return "", errors.New("invalid Aeon session id")
+		return "", errInvalidAeonSessionID
 	}
 	return strings.ToLower(id), nil
 }

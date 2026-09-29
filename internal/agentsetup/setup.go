@@ -116,6 +116,7 @@ type Progress struct {
 	BlockedAccounts   []BlockedAccount         `json:"blocked_accounts,omitempty"`
 	HarnessDetails    map[string]HarnessDetail `json:"harness_details,omitempty"`
 	HarnessStatuses   map[string]string        `json:"harness_statuses,omitempty"`
+	VersionStatus     string                   `json:"version_status,omitempty"`
 	AccountingState   string                   `json:"accounting_state,omitempty"`
 	Schema            string                   `json:"schema"`
 	Stage             string                   `json:"stage"`

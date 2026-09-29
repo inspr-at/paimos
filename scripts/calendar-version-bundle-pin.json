@@ -1,6 +1,6 @@
 {
   "repository": "inspr-at/inspr",
-  "revision": "317f872bc061576fc0b45d274d3a22f69bcd4c8a",
-  "configSha256": "7843f3515ce329277d2d576000bd60ac410d725b241d502a9a3fecb2533d956d",
-  "manifestSha256": "b1125b92bf8c0bb0a9e14968924230f04503d226b63d0a0aee544efbdaf00af2"
+  "revision": "01b3080948c21899cbbacbfa3447da6799af1b56",
+  "configSha256": "bf6aa144cd73dc97dc941f0f0914138b04ae0a28fbead5123465b15b1f2a2fd9",
+  "manifestSha256": "d4dcb8c05d0fcad7d60183156166c5a30f21e6abc1ac0c274ee3e0791e5ea912"
 }

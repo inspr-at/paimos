@@ -2,6 +2,7 @@
 import { mkdirSync } from 'node:fs'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
+import { mockEffectivePermissions } from './authz-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { mockAllowanceRoutes } from './allowance-window-fixtures'
 import { fixtures, me, mockWork } from './work-fixtures'
@@ -25,9 +26,8 @@ async function setup(page: Page, options: { manage?: boolean; kind?: 'person' | 
   return { data, routes }
 }
 async function openAccounts(page: Page) {
-  await page.goto('/agents')
-  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-  await page.getByText('Accounts and pacing', { exact: true }).first().click()
+  await page.goto('/settings/accounts')
+  await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible()
   return page.getByRole('region', { name: 'Accounts and pacing' })
 }
 const row = (page: Page, name: string) => page.getByRole('region', { name: 'Accounts and pacing' }).locator('.account').filter({ hasText: name })
@@ -54,6 +54,12 @@ async function fillWindow(page: Page, name: string, start: string, end: string, 
 
 test('a viewer does not get an allowance editor', async ({ page }) => {
   await setup(page, { readOnly: true })
+  // A viewer who may read accounts sees them in Settings → Accounts, without editors.
+  await page.route('**/api/me/permissions*', route => {
+    const effective = mockEffectivePermissions('viewer')
+    effective.workspace.permissions.push('account.read')
+    return route.fulfill({ json: effective })
+  })
   const accounts = await openAccounts(page)
   await expect(accounts).toContainText('Pi on hsb1')
   await expect(page.getByRole('button', { name: /Add allowance window/ })).toHaveCount(0)
@@ -209,8 +215,7 @@ test('screenshots at 390 and 1600 in light and dark', async ({ page }) => {
       for (const width of [1600, 390] as const) {
         await page.setViewportSize({ width, height: width === 1600 ? 1000 : 844 })
         await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
-        await page.goto('/agents')
-        await page.getByText('Accounts and pacing', { exact: true }).first().click()
+        await page.goto('/settings/accounts')
         const form = await fillWindow(page, 'Pi on hsb1', times.start, times.end, '1')
         const save = form.getByRole('button', { name: 'Save allowance window' })
         await save.scrollIntoViewIfNeeded()

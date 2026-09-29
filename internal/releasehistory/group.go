@@ -16,12 +16,15 @@ const (
 
 // TicketNote is one linked ticket's current release-note text. Hidden tickets
 // are not noted. Empty strings stay empty; the client picks the language.
+// Group is this ticket's own fixes or features, so a commit shared by several
+// tickets does not decide it for all of them (AEON-305).
 type TicketNote struct {
 	Key       string `json:"key"`
 	PillEN    string `json:"pill_en"`
 	PillDE    string `json:"pill_de"`
 	BenefitEN string `json:"benefit_en"`
 	BenefitDE string `json:"benefit_de"`
+	Group     string `json:"group,omitempty"`
 }
 
 // TicketMeta is the part of a linked ticket that decides a change's group.
@@ -151,6 +154,10 @@ func linkedNotes(tickets []string, meta map[string]TicketMeta) []TicketNote {
 		seen[key] = true
 		note := *m.Note
 		note.Key = key
+		note.Group = GroupFeatures
+		if m.Bug {
+			note.Group = GroupFixes
+		}
 		out = append(out, note)
 	}
 	return out

@@ -27,7 +27,8 @@ for (const theme of ['light', 'dark'] as const) {
       for (const value of ['AEON-221', '/Code/aeon-sc1', 'sc1.state-colours', 'abc1234', 'Integrate session states']) await expect(work).toContainText(value)
       await page.getByRole('button', { name: 'Close session details' }).click()
     }
-    for (const state of ['working', 'waiting', 'throttled', 'problem']) await expect(page.locator(`.live-now .tile[data-state="${state}"]`)).toBeVisible()
+    // The live line carries each state's mark (AEON-299 replaced the tiles).
+    for (const state of ['working', 'waiting', 'throttled', 'problem']) await expect(page.locator(`.live-line [data-mark="${state}"]`).first()).toBeVisible()
     await page.goto('/')
     for (const layout of ['Cards', 'List']) {
       await page.getByRole('radio', { name: `${layout} view`, exact: true }).click()
@@ -151,45 +152,30 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.goto('/agents')
     await expect(page.locator('.row[data-state="awaiting"] .agent-state-label')).toHaveText('Awaiting heartbeat')
     await expect(page.locator('.group-row').filter({ hasText: 'Needs attention' })).toBeVisible()
-    await expect(page.locator('.page-head .summary')).toContainText('live')
-    // Closing a session retains the page keyboard cursor. Native summary Enter
-    // must still toggle Accounts instead of reopening that session.
+    await expect(page.getByRole('group', { name: 'Live sessions' })).toContainText('live')
+    // Closing a session retains the page keyboard cursor and returns to the list.
     await page.locator('[data-state="working"] .agent-link').click()
     await page.getByRole('button', { name: 'Close session details' }).click()
     await expect(page).toHaveURL(/\/agents$/)
-    const accounts = page.locator('.accounts-disclosure')
-    const toggle = accounts.locator('summary')
-    await expect(accounts).not.toHaveAttribute('open', '')
-    await expect(accounts.locator('.accounts')).not.toBeVisible()
     const main = (await page.locator('.main-col').boundingBox())!
     const layout = (await page.locator('.layout').boundingBox())!
     expect(Math.abs(main.width - layout.width)).toBeLessThan(2)
+    // Accounts sit above the sessions now (AEON-299); account management is in Settings.
     const sessions = (await page.locator('.sessions').boundingBox())!
-    const disclosure = (await accounts.boundingBox())!
-    expect(disclosure.y).toBeGreaterThanOrEqual(sessions.y + sessions.height)
-    await toggle.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: testInfo.outputPath(`sc2-${theme}-${width}-accounts-collapsed.png`), fullPage: true })
-    await toggle.focus()
-    await page.keyboard.press('Enter')
-    await expect(accounts.locator('.accounts')).toBeVisible()
-    await expect(page).toHaveURL(/\/agents$/)
-    await expect(page.getByRole('complementary', { name: 'Session details' })).not.toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath(`sc2-${theme}-${width}-accounts-expanded.png`), fullPage: true })
-    await page.keyboard.press('Space')
-    await expect(accounts.locator('.accounts')).not.toBeVisible()
+    const accounts = (await page.locator('.cap').boundingBox())!
+    expect(accounts.y + accounts.height).toBeLessThanOrEqual(sessions.y)
     await page.locator('h1').scrollIntoViewIfNeeded()
-    const tiles = page.locator('.live-now .tile')
-    await expect(tiles).toHaveCount(6)
     await page.mouse.move(0, 0)
-    const surfaces = await tiles.evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor))
+    // State counts in the live line share one neutral surface; the colour is in the mark.
+    const counts = page.locator('.live-line .state-count')
+    const surfaces = await counts.evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor))
     expect(new Set(surfaces).size).toBe(1)
     const rows = page.locator('.row[data-state]:not(.active):not(.selected)')
     expect(new Set(await rows.evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor))).size).toBe(1)
-    const problem = page.locator('.tile[data-state="problem"]')
-    await expect(problem.locator('[data-expression="problem"]')).toBeVisible()
-    await expect(problem.locator('.smile')).toHaveCount(0)
+    await expect(page.locator('.live-line [data-mark="problem"]').first()).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath(`sc2-${theme}-${width}-agents.png`), fullPage: true })
-    await problem.locator('.tile-open').click()
+    const problem = page.locator('.row[data-state="problem"]').first()
+    await problem.locator('.agent-link').click()
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('.now-step')).toHaveText('Reported stop reason: worker failed: exit 2')
     if (width === 1600) {
@@ -198,7 +184,6 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
       expect(listBounds.x + listBounds.width).toBeLessThanOrEqual(panelBounds.x)
       expect(panelBounds.x - listBounds.x - listBounds.width).toBeLessThan(40)
     }
-    await expect(accounts.locator('.accounts')).not.toBeVisible()
     await expect(panel.getByRole('region', { name: 'Session state evidence' })).toContainText('Last heartbeat:')
     await page.screenshot({ path: testInfo.outputPath(`sc2-${theme}-${width}-problem.png`), fullPage: true })
     await page.getByRole('button', { name: 'Close session details' }).click()

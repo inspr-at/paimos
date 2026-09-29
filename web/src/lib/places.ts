@@ -39,3 +39,10 @@ export function sequence(window = SEQUENCE_MS) {
     return armed === null ? null : 'armed'
   }
 }
+
+// The armed chord may finish through the release menu g just opened, and only
+// while that menu is the only layer and the arm is still inside the window.
+// Any other menu or dialog, or an expired arm, does not.
+export function releaseChordOpen(labels: readonly string[], armedAt: number | null, now: number, window = SEQUENCE_MS): boolean {
+  return armedAt !== null && now - armedAt <= window && labels.length === 1 && labels[0].startsWith('Release for ')
+}

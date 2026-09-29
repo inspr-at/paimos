@@ -15,14 +15,14 @@ import { fixtures, liveAgent, me, mockWork, type Fixtures } from './work-fixture
 import { mockEffectivePermissions } from './authz-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { mockStartAgent } from './start-agent-fixtures'
-import { mockAnonymousGuide, mockPairing } from './agent-pairing-fixtures'
+import { mockAnonymousGuide, mockChecksumGuide, mockPairing } from './agent-pairing-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { RULE_PERSON, RULE_PROJECT, mockRules } from './rules-fixtures'
 import { journeyWorld, mockJourney, PROJECT, retryJourneyWorld, type JourneyWorld } from './journey-fixtures'
-import { mockReleases, releaseHistory } from './releases-fixtures'
+import { mockReleases, presentedHistory, releaseHistory } from './releases-fixtures'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
 import { mockIndicator } from './agent-indicator-fixtures'
-import type { UsageDashboard, UsageGroup } from '../src/lib/usageFormat.ts'
+import { setupUsage } from './usage-fixtures'
 
 test.skip(process.env.VISUAL_AUDIT !== '1', 'The visual audit runs only with VISUAL_AUDIT=1.')
 // The header glimpse draws with WebGL; software GL keeps it drawable headless.
@@ -161,67 +161,11 @@ async function startReady(page: Page) {
 }
 
 // ---------------------------------------------------------------- usage
-function usageGroup(label: string, sessions: number, cost: string | null, input: number, output: number, extra: Partial<UsageGroup> = {}): UsageGroup {
-  const known = cost ? sessions : 0
-  return {
-    label, key: label, sessions, usage_rows: sessions + 1, unreported_sessions: cost ? 0 : sessions,
-    input_tokens: cost ? String(input) : null, input_known_rows: known, input_unknown_rows: cost ? 0 : sessions,
-    output_tokens: cost ? String(output) : null, output_known_rows: known, output_unknown_rows: cost ? 0 : sessions,
-    cached_input_tokens: cost ? String(Math.round(input * 0.6)) : null, cached_input_known_rows: known, cached_input_unknown_rows: cost ? 0 : sessions,
-    tokens_state: cost ? 'known' : 'unknown', estimated_cost_usd: cost, cost_known_rows: known, cost_unknown_rows: cost ? 0 : sessions,
-    cost_state: cost ? 'known' : 'unknown', provisional_rows: 0, provisional_sessions: 0, ...extra,
-  }
-}
-function usageDashboard(): UsageDashboard {
-  const trend = Array.from({ length: 30 }, (_, i) => {
-    const day = new Date(Date.parse('2026-08-29T00:00:00Z') + i * 86_400_000).toISOString().slice(0, 10)
-    const sessions = [3, 5, 2, 0, 7, 11, 4, 6, 9, 14, 8, 3, 1, 0, 5, 12, 16, 9, 7, 4, 10, 13, 18, 22, 15, 9, 6, 11, 19, 24][i]!
-    return { day, group: usageGroup('', sessions, sessions ? (sessions * 7.35).toFixed(12) : null, sessions * 180_000, sessions * 21_000, i % 9 === 4 ? { cost_state: 'partial', unreported_sessions: 1 } : {}) }
-  })
-  return {
-    from: '2026-08-29T00:00:00Z', to: '2026-09-28T00:00:00Z', generated_at: '2026-09-28T09:30:00Z',
-    attribution: 'lifetime_for_sessions_started_in_range', trend_basis: 'session_started_utc_day', list_price_currency: 'USD', truncated: false,
-    totals: usageGroup('All visible sessions', 272, '1998.420000000000', 48_960_000, 5_712_000, { unreported_sessions: 9, cost_state: 'partial', tokens_state: 'partial', cost_unknown_rows: 9, provisional_rows: 3, provisional_sessions: 2 }),
-    by_project: [
-      usageGroup('Aeon', 141, '1204.110000000000', 25_400_000, 3_010_000, { key: 'AEON', id: 'p-aeon' }),
-      usageGroup('Pharos', 72, '512.900000000000', 12_900_000, 1_480_000, { key: 'PHAROS', id: 'p-pharos' }),
-      usageGroup('Studio infrastructure', 41, '266.300000000000', 8_100_000, 910_000, { key: 'PRJ-26', id: 'p-frozen' }),
-      usageGroup('Unreported', 9, null, 0, 0, { key: '' }),
-    ],
-    by_model: [
-      usageGroup('claude-fable-high', 88, '903.200000000000', 19_000_000, 2_200_000),
-      usageGroup('gpt-6-sol', 71, '611.400000000000', 14_400_000, 1_700_000),
-      usageGroup('composer-2.5-fast', 44, '188.020000000000', 7_100_000, 840_000),
-      usageGroup('anthropic/claude-sonnet-5', 38, '240.600000000000', 6_300_000, 720_000),
-      usageGroup('grok-4.7', 22, '55.200000000000', 2_160_000, 252_000),
-      usageGroup('Unreported', 9, null, 0, 0),
-    ],
-    by_subscription: [
-      usageGroup('Claude Max', 102, '1011.000000000000', 21_000_000, 2_500_000, { billing_mode: 'subscription' }),
-      usageGroup('Codex Pro', 71, '611.400000000000', 14_400_000, 1_700_000, { billing_mode: 'subscription' }),
-      usageGroup('Cursor Business', 44, '188.020000000000', 7_100_000, 840_000, { billing_mode: 'mixed' }),
-      usageGroup('OpenRouter API', 46, '188.000000000000', 6_460_000, 672_000, { billing_mode: 'api' }),
-      usageGroup('Unreported', 9, null, 0, 0, { billing_mode: 'unreported' }),
-    ],
-    trend,
-    tickets: [
-      ['AEON-266', 'Visual audit capture of the September screens', 'p-aeon', 'AEON', 12, '96.400000000000'],
-      ['AEON-253', 'Bind rules bootstrap receive to the selected CLI', 'p-aeon', 'AEON', 9, '81.020000000000'],
-      ['AEON-252', 'Reserve stable95 person-operated rules draft import', 'p-aeon', 'AEON', 17, '140.550000000000'],
-      ['PHAROS-11', 'Connect Hetzner Cloud for managed provisioning', 'p-pharos', 'PHAROS', 21, '162.000000000000'],
-      ['PHAROS-12', 'Add an Oracle Cloud connector', 'p-pharos', 'PHAROS', 8, null],
-      ['AEON-227', 'Add existing tickets from Plan and add a selection to a new release', 'p-aeon', 'AEON', 6, '44.800000000000'],
-      ['AEON-213', 'Session metadata: model, effort, account and work context', 'p-aeon', 'AEON', 11, '73.210000000000'],
-      ['PRJ-26-4', 'Rotate the hsb1 backup keys', 'p-frozen', 'PRJ-26', 3, '12.900000000000'],
-    ].map(([key, title, project, projectKey, sessions, cost]) => ({ ...usageGroup(String(title), Number(sessions), cost as string | null, Number(sessions) * 190_000, Number(sessions) * 22_000, { key: String(key), id: `n-${key}` }), project_id: String(project), project_key: String(projectKey) })),
-    tickets_cost_unknown: 3,
-    allowance: { state: 'visible', windows: [
-      { account_id: 'a-1', label: 'Claude Max', harness: 'claude', account_state: 'available', window_id: 'w-1', unit: 'tokens', allowance: 5_000_000, used: 3_600_000, reserved: 120_000, pace_model: 'steady', burst_ratio: '0.0500', starts_at: '2026-09-28T07:00:00Z', ends_at: '2026-09-28T12:00:00Z', provisional: false, pace_cap: 3_300_000, headroom: 1_280_000, hard_remaining: 1_280_000 },
-      { account_id: 'a-2', label: 'Codex Pro', harness: 'codex', account_state: 'available', window_id: 'w-2', unit: 'requests', allowance: 1500, used: 450, reserved: 10, pace_model: 'steady', burst_ratio: '0.1000', starts_at: '2026-09-27T19:30:00Z', ends_at: '2026-09-28T19:30:00Z', provisional: false, pace_cap: 900, headroom: 1040, hard_remaining: 1040 },
-      { account_id: 'a-3', label: 'Cursor Business', harness: 'cursor', account_state: 'available', window_id: 'w-3', unit: 'cost_micros', allowance: 200_000_000, used: 96_000_000, reserved: 0, pace_model: 'frontload', burst_ratio: '0.1000', starts_at: '2026-09-13T00:00:00Z', ends_at: '2026-10-13T00:00:00Z', provisional: false, pace_cap: 120_000_000, headroom: 104_000_000, hard_remaining: 104_000_000 },
-      { account_id: 'a-4', label: 'SuperGrok', harness: 'grok', account_state: 'unavailable', window_id: 'w-4', unit: 'tokens', allowance: 1_000_000, used: null, reserved: 0, pace_model: 'unrestricted', burst_ratio: '0.1000', starts_at: '2026-09-28T06:00:00Z', ends_at: '2026-09-28T10:00:00Z', provisional: true, pace_cap: 1_000_000, headroom: null, hard_remaining: null },
-    ] },
-  }
+// AEON-301: the merged page; fixtures and setup live in usage-fixtures.ts.
+async function openUsage(page: Page, content = '.tiles') {
+  await page.goto('/agents/usage')
+  await heading(page, 'Usage', 1)
+  await visible(page, content)
 }
 
 // ---------------------------------------------------------------- rules
@@ -523,6 +467,7 @@ const ticketRow = (page: Page, key: string) => grid(page).locator('tr.ticket-row
 const ticketPanel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
 
 // ---------------------------------------------------------------- the shots
+const PRESENTED_NOW = Date.parse('2026-09-29T12:00:00Z')
 const shots: Shot[] = [
   // 1. Agents overview
   { screen: 'agents', state: 'overview', setup: page => agentsSetup(page, 'busy'), act: page => openAgents(page) },
@@ -531,8 +476,7 @@ const shots: Shot[] = [
     await page.getByRole('button', { name: /^Stopped/ }).first().click()
     const history = page.locator(`[data-row="s:${LEAD}"] .history-toggle`)
     if (await history.isEnabled()) await history.click()
-    await page.getByText('Accounts and pacing', { exact: true }).first().click()
-    await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Accounts' })).toBeVisible()
   } },
   { screen: 'agents', state: 'eta', setup: page => agentsSetup(page, 'eta'), act: async page => { await openAgents(page); await visible(page, '.eta-cell') } },
   { screen: 'session-panel', state: 'eta', setup: page => agentsSetup(page, 'eta'), act: async page => {
@@ -578,16 +522,30 @@ const shots: Shot[] = [
     await expect(startDialog(page).getByText('Account is draining', { exact: true })).toBeVisible()
   } },
   { screen: 'start-agent', state: 'accounts-card', setup: async page => { await mockStartAgent(page, { catalog: 'two-hosts' }) }, act: async page => {
-    await page.goto('/agents')
-    await page.getByText('Accounts and pacing', { exact: true }).first().click()
+    await page.goto('/settings/accounts')
     await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('5-hour')
   } },
   // 5. Connected computers and pairing
   { screen: 'pairing', state: 'nix-guide', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')
     await heading(page, 'Connect a computer')
-    await page.getByText('Nix / Home Manager', { exact: true }).click()
+    await page.getByLabel('Install on this computer').selectOption('nix')
     await page.getByText('Declarative service', { exact: true }).click()
+  } },
+  { screen: 'pairing', state: 'homebrew-guide', setup: mockAnonymousGuide, act: async page => {
+    await page.goto('/agents/register-agent')
+    await heading(page, 'Connect a computer')
+  } },
+  { screen: 'pairing', state: 'homebrew-upgrades', setup: mockAnonymousGuide, act: async page => {
+    await page.goto('/agents/register-agent')
+    await heading(page, 'Connect a computer')
+    await page.getByText('Release and upgrades', { exact: true }).click()
+  } },
+  { screen: 'pairing', state: 'fallback-guide', setup: mockChecksumGuide, act: async page => {
+    await page.goto('/agents/register-agent')
+    await heading(page, 'Connect a computer')
+    await page.getByLabel('Install on this computer').selectOption('manual')
+    await page.getByText('Disconnect and uninstall', { exact: true }).click()
   } },
   { screen: 'pairing', state: 'public-guide', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')
@@ -617,11 +575,14 @@ const shots: Shot[] = [
     await page.getByRole('button', { name: 'Disconnect' }).first().click()
     await expect(page.getByRole('dialog').getByRole('button', { name: 'Disconnect', exact: true })).toBeVisible()
   } },
-  // 6. Usage dashboard
-  { screen: 'usage', state: 'dashboard', setup: async page => {
-    await mockWork(page, fixtures())
-    await page.route('**/api/usage/dashboard**', route => route.fulfill({ json: usageDashboard() }))
-  }, act: async page => { await page.goto('/agents/usage'); await heading(page, 'Usage', 1); await visible(page, '.summary-card') } },
+  // 6. Usage: capacity now, then what agents got done (AEON-301)
+  { screen: 'usage', state: 'reality', setup: async page => { await setupUsage(page, { variant: 'unreported' }) }, act: page => openUsage(page) },
+  { screen: 'usage', state: 'reported', setup: async page => { await setupUsage(page, { variant: 'reported' }) }, act: page => openUsage(page) },
+  { screen: 'usage', state: 'empty-range', setup: async page => { await setupUsage(page, { variant: 'empty' }) }, act: page => openUsage(page, '.quiet-line') },
+  { screen: 'usage', state: 'no-capacity', setup: async page => { await setupUsage(page, { variant: 'unreported', noAccounts: true }) }, act: page => openUsage(page) },
+  { screen: 'usage', state: 'no-accounts', setup: async page => { await setupUsage(page, { variant: 'unreported', noPools: true }) }, act: page => openUsage(page) },
+  { screen: 'usage', state: 'partial-pool', setup: async page => { await setupUsage(page, { variant: 'unreported', unmeasured: true }) }, act: page => openUsage(page) },
+  { screen: 'usage', state: 'accounts-error', setup: async page => { await setupUsage(page, { variant: 'unreported' }); await page.route(/\/api\/agent-accounts(\?.*)?$/, route => route.fulfill({ status: 503, json: { error: 'temporarily unavailable' } })) }, act: page => openUsage(page) },
   // 7. Agent rules editor
   { screen: 'rules', state: 'empty', setup: page => rulesSetup(page, true), act: page => openRules(page, true) },
   { screen: 'rules', state: 'populated', setup: page => rulesSetup(page, false), act: page => openRules(page, false) },
@@ -718,6 +679,14 @@ const shots: Shot[] = [
     await page.goto(`/releases/${releaseHistory().current}`)
     await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
   } },
+  // AEON-305: a presented release, one with benefits only, one with internal changes only.
+  ...([['history-presented', 0], ['history-benefits-only', 1], ['history-internal', 3]] as const).map(([state, index]) => ({ screen: 'releases', state, setup: async (page: Page) => {
+    await mockWork(page, fixtures())
+    await mockReleases(page, presentedHistory(PRESENTED_NOW))
+  }, act: async (page: Page) => {
+    await page.goto(`/releases/${presentedHistory(PRESENTED_NOW).releases[index].version}`)
+    await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
+  } })),
   // 10. Project view, header glimpse, ticket workspace
   { screen: 'project', state: 'tickets-glimpse-workers', motion: true, setup: async page => {
     await page.clock.setSystemTime(AT)
@@ -757,6 +726,22 @@ const shots: Shot[] = [
     await projectAgents(page)
     await ticketAgentWork(page)
   }, act: async page => { await page.goto('/p/PHAROS/PHAROS-11'); await expect(ticketPanel(page)).toBeVisible(); await page.waitForTimeout(400) } },
+  { screen: 'ticket', state: 'workspace-outcomes', setup: async page => {
+    page.setDefaultTimeout(30_000)
+    await page.clock.setSystemTime(AT)
+    await mockWork(page, ticketDataWithAgents())
+    await projectAgents(page)
+    await ticketAgentWork(page)
+    await page.route('**/api/outcomes*', route => route.fulfill({ json: { outcomes: [
+      { id: 'o-1', kind: 'review_verdict', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos', session_id: null, rules_version: null, release_node_id: null, release_key: null, release_title: null, source: 'recorded', payload: { verdict: 'pass', reviewer_model: 'codex', route: 'backend', round: 2, findings: 1, summary: 'One naming mismatch in the release note, otherwise the benefit text is ready to ship with the candidate.' }, actor_principal_id: 'a-1', recorded_at: new Date(AT - 2 * 60 * 60_000).toISOString(), idempotency_key: 'review-1' },
+      { id: 'o-2', kind: 'fix_round', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos', session_id: null, rules_version: null, release_node_id: null, release_key: null, release_title: null, source: 'recorded', payload: { round: 2, summary: 'Renamed the release note field.' }, actor_principal_id: 'a-1', recorded_at: new Date(AT - 3 * 60 * 60_000).toISOString(), idempotency_key: 'fix-2' },
+      { id: 'o-3', kind: 'ci_result', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos', session_id: null, rules_version: null, release_node_id: null, release_key: null, release_title: null, source: 'recorded', payload: { result: 'fail', name: 'web' }, actor_principal_id: 'a-1', recorded_at: new Date(AT - 4 * 60 * 60_000).toISOString(), idempotency_key: 'ci-1' },
+      { id: 'o-4', kind: 'released', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos', session_id: null, rules_version: null, release_node_id: 'rel-1', release_key: 'PHAROS-90', release_title: 'September release', source: 'automatic', payload: { version: '260929120000.0.0' }, actor_principal_id: 'a-1', recorded_at: new Date(AT - 5 * 60 * 60_000).toISOString(), idempotency_key: 'rel-1' },
+    ] } }))
+  }, act: async page => {
+    await page.goto('/p/PHAROS/PHAROS-11')
+    await expect(ticketPanel(page).getByRole('region', { name: 'Outcomes' })).toBeVisible()
+  } },
   { screen: 'ticket', state: 'benefits-missing', setup: async page => {
     await page.clock.setSystemTime(AT)
     await mockWork(page, ticketDataWithAgents())

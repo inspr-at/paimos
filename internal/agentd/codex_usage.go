@@ -21,6 +21,10 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 		return
 	}
 	method, _, model := eventProbe(raw)
+	if method == "account/rateLimits/updated" || method == "rateLimits/updated" {
+		p.emitCapacity(raw, "update")
+		return
+	}
 	if method == "thread/settings/updated" {
 		var frame struct {
 			Params struct {
@@ -67,8 +71,10 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 				ThreadID   string `json:"threadId"`
 				TokenUsage struct {
 					Total struct {
-						Input  *int64 `json:"inputTokens"`
-						Output *int64 `json:"outputTokens"`
+						Input     *int64 `json:"inputTokens"`
+						Output    *int64 `json:"outputTokens"`
+						Cached    *int64 `json:"cachedInputTokens"`
+						Reasoning *int64 `json:"reasoningOutputTokens"`
 					} `json:"total"`
 				} `json:"tokenUsage"`
 			} `json:"params"`
@@ -77,7 +83,13 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 			total := frame.Params.TokenUsage.Total
 			if total.Input != nil && total.Output != nil && *total.Input >= p.inputTokens && *total.Output >= p.outputTokens {
 				ev := AdapterEvent{Kind: "usage", InputTokensDelta: cumulativeDelta(*total.Input, &p.inputTokens), OutputTokensDelta: cumulativeDelta(*total.Output, &p.outputTokens)}
-				if ev.InputTokensDelta != 0 || ev.OutputTokensDelta != 0 {
+				if total.Cached != nil && *total.Cached >= p.cachedTokens && *total.Cached <= *total.Input {
+					ev.CachedInputTokensDelta = cumulativeDelta(*total.Cached, &p.cachedTokens)
+				}
+				if total.Reasoning != nil && *total.Reasoning >= p.reasoningTokens && *total.Reasoning <= *total.Output {
+					ev.ReasoningTokensDelta = cumulativeDelta(*total.Reasoning, &p.reasoningTokens)
+				}
+				if ev.InputTokensDelta != 0 || ev.OutputTokensDelta != 0 || ev.CachedInputTokensDelta != 0 || ev.ReasoningTokensDelta != 0 {
 					p.observe(ev)
 				}
 			}
@@ -121,7 +133,12 @@ func (p *codexProcess) signalTerminal() {
 }
 
 // eventMu is held. Generation plus controlMu fences a timer that races a wake.
+// A daemon context that is already cancelled completes the idle wait now.
 func (p *codexProcess) armIdleCompletion() {
+	if p.shutdownRequested {
+		p.completeIdleLocked()
+		return
+	}
 	delay := p.idleTimeout
 	if delay <= 0 {
 		delay = defaultCodexIdleTimeout
@@ -133,12 +150,74 @@ func (p *codexProcess) armIdleCompletion() {
 		defer p.controlMu.Unlock()
 		p.eventMu.Lock()
 		defer p.eventMu.Unlock()
-		if generation != p.idleGeneration || !p.idlePublished || p.invalid || p.sealed || p.abandoned.Load() {
+		if generation != p.idleGeneration || !p.idlePublished || p.invalid || p.sealed || p.abandoned.Load() || p.finishing {
 			return
 		}
-		p.finishing = true
-		p.once.Do(func() { p.done <- true })
+		p.completeIdleLocked()
 	})
+}
+
+// eventMu is held. Stops the wake timer and releases Wait exactly once.
+func (p *codexProcess) completeIdleLocked() {
+	if p.idleTimer != nil {
+		p.idleTimer.Stop()
+	}
+	p.idleGeneration++
+	p.finishing = true
+	p.once.Do(func() { p.done <- true })
+}
+
+// bindLifetime attaches the daemon context. Wait observes its cancellation
+// only while a clean idle wake window is open.
+func (p *codexProcess) bindLifetime(ctx context.Context) {
+	if ctx == nil || ctx.Done() == nil {
+		return
+	}
+	p.shutdownWait.Store(&codexShutdown{done: ctx.Done()})
+}
+
+// finishIdleOnShutdown records daemon cancellation. It ends the wait only
+// when the session is already in a clean idle window; a busy turn keeps running
+// and the next idle arm completes immediately.
+func (p *codexProcess) finishIdleOnShutdown() bool {
+	p.controlMu.Lock()
+	defer p.controlMu.Unlock()
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
+	p.shutdownRequested = true
+	if !p.persistent || p.finishing || p.sealed || p.invalid || !p.idlePublished || p.abandoned.Load() {
+		return false
+	}
+	p.completeIdleLocked()
+	return true
+}
+
+// awaitCompletion blocks until the turn ends, the child exits, or a cancelled
+// daemon context ends a clean idle wait. Cancellation before the turn is idle
+// does not fail that turn.
+func (p *codexProcess) awaitCompletion() {
+	sawShutdown := false
+	for {
+		var shutdown <-chan struct{}
+		if !sawShutdown {
+			if signal := p.shutdownWait.Load(); signal != nil {
+				shutdown = signal.done
+			}
+		}
+		select {
+		case <-p.done:
+			return
+		case <-p.waitDone:
+			return
+		case <-p.readDone:
+			return
+		case <-shutdown:
+			sawShutdown = true
+			if p.finishIdleOnShutdown() {
+				return
+			}
+		}
+	}
 }
 
 func (p *codexProcess) startTurn(ctx context.Context, r StartRequest) error {
@@ -177,11 +256,7 @@ func (p *codexProcess) waitForTurn(stop func(context.Context) error, timeout tim
 	if p.abandoned.Load() {
 		return errors.New("Codex turn completion unconfirmed")
 	}
-	select {
-	case <-p.done:
-	case <-p.waitDone:
-	case <-p.readDone:
-	}
+	p.awaitCompletion()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	stopErr := stop(ctx)

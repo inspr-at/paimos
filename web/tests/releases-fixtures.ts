@@ -99,3 +99,43 @@ export async function mockReleases(page: Page, history: History | Record<string,
   await page.route('**/api/version', route => route.fulfill({ json: { version: state.server, scheme: 'inspr-calendar-v2', ...(options.brand ? { brand: options.brand } : {}) } }))
   return state
 }
+
+// AEON-305: the newest release introduces itself (theme, headline, intro in
+// English and German) and tells its benefits and fixes from linked tickets.
+// The next one has benefits but no presentation; the rest stay as generated.
+type Linked = { key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string }
+const LINKED: Record<string, Linked> = {
+  'AEON-305': { key: 'AEON-305', pill_en: 'Named releases', pill_de: 'Benannte Releases', benefit_en: 'Every release opens with its theme and one sentence about what it changes for you.', benefit_de: 'Jedes Release beginnt mit seinem Thema und einem Satz dazu, was sich für dich ändert.' },
+  'AEON-289': { key: 'AEON-289', pill_en: 'Changes by ticket', pill_de: 'Änderungen nach Ticket', benefit_en: 'Features and fixes are listed once per ticket, with the commits folded away.', benefit_de: 'Features und Fixes stehen einmal pro Ticket, die Commits sind eingeklappt.' },
+  'AEON-290': { key: 'AEON-290', pill_en: 'Older notes filled in', pill_de: 'Ältere Notizen ergänzt', benefit_en: 'Releases from before the notes existed now show what they delivered.', benefit_de: 'Releases aus der Zeit vor den Notizen zeigen jetzt, was sie geliefert haben.' },
+  'AEON-301': { key: 'AEON-301', pill_en: 'Search stays put', pill_de: 'Suche bleibt stehen', benefit_en: 'Closing a release keeps your search and the row you were on.', benefit_de: 'Beim Schließen eines Releases bleiben Suche und Zeile erhalten.' },
+  'AEON-74': { key: 'AEON-74', pill_en: 'Wide lists', pill_de: 'Breite Listen', benefit_en: 'Wide screens show more columns, and edit mode uses the app’s own dropdowns.', benefit_de: 'Breite Bildschirme zeigen mehr Spalten, der Bearbeitungsmodus nutzt die eigenen Auswahllisten.' },
+}
+export function presentedHistory(now = Date.now(), repository = 'inspr-at/aeon') {
+  const history = releaseHistory(now, repository)
+  const [newest, second] = history.releases as Array<History['releases'][number] & Record<string, unknown>>
+  const at = newest.changes[0].at
+  const row = (i: number, subject: string, key: string, group: 'features' | 'fixes') => ({
+    commit: sha(`${newest.version}-p${i}`), subject, type: 'other', scope: '', tickets: [key], at, group, linked_tickets: [LINKED[key]],
+  })
+  newest.headline = 'stable104'
+  newest.tickets = ['AEON-305', 'AEON-289', 'AEON-290', 'AEON-301']
+  newest.changes = [
+    { ...newest.changes[0], tickets: [] },
+    row(1, 'P0.x: release presentation store, API and present CLI (AEON-305)', 'AEON-305', 'features'),
+    row(2, 'P0.x: release detail with kicker, headline and benefit rows (AEON-305)', 'AEON-305', 'features'),
+    row(3, 'P0.x: one line per ticket in features and fixes (AEON-289)', 'AEON-289', 'features'),
+    row(4, 'P0.x: backfill historical release notes (AEON-290)', 'AEON-290', 'features'),
+    row(5, 'P0.x: keep the search when a release closes (AEON-301)', 'AEON-301', 'fixes'),
+    { commit: sha(`${newest.version}-p6`), subject: 'P0.x: pin the Go module vendor hash', type: 'other', scope: '', tickets: [], at },
+  ]
+  ;(newest as Record<string, unknown>).presentation = {
+    theme_en: 'Releases with a name', theme_de: 'Releases mit Namen',
+    headline_en: 'Every release says what it is about.', headline_de: 'Jedes Release sagt, worum es geht.',
+    intro_en: 'The release history now opens each version with its theme and a short introduction, followed by what got better and what was fixed.',
+    intro_de: 'Die Release-Historie beginnt jede Version mit ihrem Thema und einer kurzen Einführung, danach folgt, was besser wurde und was behoben ist.',
+    revision: 1, updated_at: at,
+  }
+  second.changes = second.changes.map(c => c.tickets.includes('AEON-74') && c.type === 'feat' ? { ...c, group: 'features', linked_tickets: [LINKED['AEON-74']] } : c)
+  return history
+}

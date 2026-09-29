@@ -134,11 +134,14 @@ func redact(msg, secret string) string {
 func (rt *runtime) root() *Command {
 	subs := []*Command{
 		rt.cmdAuth(),
+		rt.cmdKeys(),
 		rt.cmdWhoami(""),
 		rt.cmdIssue(),
+		rt.cmdOutcome(),
 		rt.cmdProject(),
 		rt.cmdRelation(),
 		rt.cmdRulesImport(),
+		rt.cmdRulesTLDR(),
 		rt.cmdRulesCompare(),
 		rt.cmdRules(),
 		rt.cmdTag(),
@@ -222,7 +225,7 @@ func (rt *runtime) login(rawURL, name, keyFile string) error {
 	if err != nil {
 		return err
 	}
-	key, err := rt.readLoginKey(keyFile)
+	key, err := rt.readSecret(keyFile, "API key")
 	if err != nil {
 		return err
 	}
@@ -266,42 +269,42 @@ func (rt *runtime) login(rawURL, name, keyFile string) error {
 	return nil
 }
 
-func (rt *runtime) readLoginKey(keyFile string) (string, error) {
-	keyFile = strings.TrimSpace(keyFile)
-	if keyFile != "" && keyFile != "-" {
-		key, err := readKeyFile(keyFile)
+func (rt *runtime) readSecret(file, label string) (string, error) {
+	file = strings.TrimSpace(file)
+	if file != "" && file != "-" {
+		key, err := readKeyFile(file)
 		if err != nil {
-			return "", fmt.Errorf("read key file: %w", err)
+			return "", fmt.Errorf("read %s file: %w", label, err)
 		}
 		return key, nil
 	}
-	return rt.readKeyStdin()
+	return rt.readSecretStdin(label)
 }
 
-func (rt *runtime) readKeyStdin() (string, error) {
+func (rt *runtime) readSecretStdin(label string) (string, error) {
 	if f, ok := rt.stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
-		fmt.Fprint(rt.stderr, "API key (input hidden): ")
+		fmt.Fprintf(rt.stderr, "%s (input hidden): ", label)
 		raw, err := term.ReadPassword(int(f.Fd()))
 		fmt.Fprintln(rt.stderr)
 		if err != nil {
-			return "", fmt.Errorf("read API key: %w", err)
+			return "", fmt.Errorf("read %s: %w", label, err)
 		}
 		key, err := oneLineSecret(string(raw))
 		if err != nil {
-			return "", usagef("API key is required")
+			return "", usagef("%s is required", label)
 		}
 		return key, nil
 	}
 	raw, err := io.ReadAll(io.LimitReader(rt.stdin, 8<<10))
 	if err != nil {
-		return "", fmt.Errorf("read API key: %w", err)
+		return "", fmt.Errorf("read %s: %w", label, err)
 	}
 	if len(raw) == 8<<10 {
-		return "", usagef("API key is too long")
+		return "", usagef("%s is too long", label)
 	}
 	key, err := oneLineSecret(string(raw))
 	if err != nil {
-		return "", usagef("API key is required")
+		return "", usagef("%s is required", label)
 	}
 	return key, nil
 }

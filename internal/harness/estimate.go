@@ -188,7 +188,7 @@ func (m *Module) stampSessions(ctx context.Context, tx pgx.Tx, sessions []*Sessi
 	for _, s := range sessions {
 		stampSessionEta(s, interval, now)
 	}
-	return nil
+	return stampMoveRights(ctx, tx, sessions)
 }
 
 func stampSessionEta(s *Session, interval time.Duration, now time.Time) {

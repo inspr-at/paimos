@@ -57,6 +57,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	Handle(mux, m.pool, "PATCH /api/roles/{id}", "roles.manage", m.patchRole)
 	Handle(mux, m.pool, "DELETE /api/roles/{id}", "roles.manage", m.deleteRole)
 	Handle(mux, m.pool, "GET /api/members", "members.read", m.members)
+	Handle(mux, m.pool, "POST /api/members/agents", "keys.manage", m.createAgent)
 	Handle(mux, m.pool, "PUT /api/members/{principal_id}/workspace-role", "members.manage", m.putWorkspaceRole)
 	Handle(mux, m.pool, "POST /api/members/invites", "members.manage", m.createInvite)
 	Handle(mux, m.pool, "POST /api/members/invites/{id}/provision", "members.manage", m.retryInviteProvision)

@@ -49,7 +49,7 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: paimos-agentd pair|setup|status|disconnect|add-harness|repin|attach|serve|control")
+		return errors.New("usage: paimos-agentd pair|setup|status|disconnect|add-harness|repin|attach|serve|control|capacity")
 	}
 	switch args[0] {
 	case "--version", "version":
@@ -61,10 +61,12 @@ func run(args []string, out io.Writer) error {
 		return attachCommand(args[1:], out)
 	case "serve":
 		return serve(args[1:])
+	case "capacity":
+		return capacityCommand(args[1:], out)
 	case "control":
 		return control(args[1:], out)
 	default:
-		return errors.New("usage: paimos-agentd pair|setup|status|disconnect|add-harness|repin|attach|serve|control")
+		return errors.New("usage: paimos-agentd pair|setup|status|disconnect|add-harness|repin|attach|serve|control|capacity")
 	}
 }
 
@@ -80,6 +82,8 @@ func serve(args []string) error {
 	f.SetOutput(io.Discard)
 	var base, keyFile, workspace, state, daemonID, accountsPath, codexPath, claudePath, nodePath, sdkPath, piPath, cursorPath string
 	var estimateRequests, estimateTokens, estimateCost int64
+	var capacityInterval time.Duration
+	f.DurationVar(&capacityInterval, "capacity-interval", 5*time.Minute, "minimum interval between idle quota captures")
 	var setupRoot string
 	var codexIdleTimeout time.Duration
 	f.DurationVar(&codexIdleTimeout, "codex-idle-timeout", 10*time.Minute, "complete a clean idle Codex run after this wake window")
@@ -103,10 +107,16 @@ func serve(args []string) error {
 		return err
 	}
 	if setupRoot != "" {
-		if f.NFlag() != 1 || len(f.Args()) != 0 {
+		allowedFlags := true
+		f.Visit(func(v *flag.Flag) {
+			if v.Name != "setup-root" && v.Name != "capacity-interval" {
+				allowedFlags = false
+			}
+		})
+		if !allowedFlags || len(f.Args()) != 0 {
 			return errors.New("paired serve does not accept runtime overrides")
 		}
-		return servePaired(setupRoot)
+		return servePaired(setupRoot, capacityInterval)
 	}
 	if len(f.Args()) != 0 || agentd.ValidateBaseURL(base) != nil {
 		return errors.New("invalid AEON URL or arguments")
@@ -164,6 +174,7 @@ func serve(args []string) error {
 	codexEmails := map[string]string{}
 	claudeHomes := map[string]string{}
 	grokBindings := map[string]agentd.GrokBinding{}
+	grokHomes, cursorHomes := map[string]string{}, map[string]string{}
 	accounts := []agentd.EnrolledAccount{}
 	for _, a := range reg.Accounts {
 		if a.Key == "" || a.AccountID == "" {
@@ -178,9 +189,15 @@ func serve(args []string) error {
 			piHomes[a.Key] = a.Home
 		case agentd.Cursor:
 			cursorIDs[a.Key] = a.Identity
+			if a.Home != "" {
+				cursorHomes[a.Key] = a.Home
+			}
 		case agentd.Claude:
 			claudeHomes[a.Key] = a.Home
 		case agentd.Grok:
+			if a.Home != "" {
+				grokHomes[a.Key] = a.Home
+			}
 			if a.Grok == nil {
 				return errors.New("native Grok binding missing")
 			}
@@ -224,20 +241,25 @@ func serve(args []string) error {
 		adapters = append(adapters, a)
 	}
 	if cursorPath != "" {
-		a := agentd.NewCursorAdapter(cursorPath, cursorIDs)
-		a.Nodes, err = resolveNodes(cursorPath, cursorIDs)
+		cursor := agentd.NewCursorAdapter(cursorPath, cursorIDs)
+		if len(cursorHomes) > 0 {
+			cursor.Homes = cursorHomes
+		}
+		cursor.Nodes, err = resolveNodes(cursorPath, cursorIDs)
 		if err != nil {
 			return err
 		}
-		adapters = append(adapters, a)
+		adapters = append(adapters, cursor)
 	}
 	if len(grokBindings) > 0 {
-		adapters = append(adapters, agentd.NewGrokAdapter(grokBindings))
+		grok := agentd.NewGrokAdapter(grokBindings)
+		grok.Homes = grokHomes
+		adapters = append(adapters, grok)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	s, err := agentd.NewSupervisor(ctx, agentd.Config{API: agentd.NewRemote(base, key), StateRoot: state, DaemonID: daemonID,
-		Workspace: workspace, Adapters: adapters, EstimatedUnits: estimates, Accounts: accounts})
+		Workspace: workspace, Adapters: adapters, EstimatedUnits: estimates, Accounts: accounts, CapacityInterval: capacityInterval})
 	if err != nil {
 		return err
 	}
@@ -247,27 +269,34 @@ func serve(args []string) error {
 		return err
 	}
 	defer local.Close()
+	captureCtx, stopCapture := context.WithCancel(ctx)
+	captureDone := make(chan struct{})
+	go func() { defer close(captureDone); s.RunCapacityCaptures(captureCtx) }()
+	defer func() { stopCapture(); <-captureDone }()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	stopping := false
 	for {
-		if stopping {
+		if stopping || ctx.Err() != nil {
+			stopping = true
+			stopCapture()
+			<-captureDone
 			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			closeErr := s.Close(closeCtx)
 			cancel()
 			if closeErr == nil {
 				return nil
 			}
+			// The serve context already cancelled a clean Codex idle wait.
+			// Retry without the steady-state poll interval or the idle window.
+			awaitDrainRetry()
+			continue
 		}
-		pollCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		pollCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		err := s.PollOnce(pollCtx)
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			fmt.Fprintln(os.Stderr, "agentd poll failed; inspect AEON availability and account bindings")
-		}
-		if stopping {
-			<-ticker.C
-			continue
 		}
 		select {
 		case <-ctx.Done():
@@ -275,6 +304,12 @@ func serve(args []string) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// awaitDrainRetry is the pause between Close attempts after SIGTERM.
+// Busy turns are left to finish. Idle Codex waits are not.
+func awaitDrainRetry() {
+	time.Sleep(200 * time.Millisecond)
 }
 
 func control(args []string, out io.Writer) error {

@@ -48,6 +48,31 @@ func markerCount(t *testing.T, f *harnessFixture, p tenant.Principal) int {
 	return n
 }
 
+func TestSessionReadMarkerAcceptsLinkedUnboundReplies(t *testing.T) {
+	f := fixture(t)
+	session, other := attentionSession(t, f), attentionSession(t, f)
+	question, questionEvent := boundMessage(t, f, session, f.person.ID, f.agent.ID)
+	reply, replyEvent := boundMessage(t, f, other, f.agent.ID, f.person.ID)
+	followup, followupEvent := boundMessage(t, f, other, f.person.ID, f.agent.ID)
+	unrelated, unrelatedEvent := boundMessage(t, f, other, f.agent.ID, f.person.ID)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE inbox_compat_messages SET recipient_session_id=NULL,reply_to_id=$2 WHERE id=$1`, reply, question); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE inbox_compat_messages SET recipient_session_id=NULL,reply_to_id=$2 WHERE id=$1`, followup, reply)
+		return err
+	})
+	path := "/api/projects/" + f.project + "/harness-sessions/" + session + "/read-marker"
+	for _, marker := range []map[string]any{
+		{"last_read_message_id": question, "last_read_event_id": questionEvent},
+		{"last_read_message_id": reply, "last_read_event_id": replyEvent},
+		{"last_read_message_id": reply, "last_read_event_id": followupEvent},
+	} {
+		expect(t, f.call(f.person, "PUT", path, marker, ""), 200)
+	}
+	expect(t, f.call(f.person, "PUT", path, map[string]any{"last_read_message_id": unrelated, "last_read_event_id": unrelatedEvent}, ""), 400)
+}
+
 func TestSessionReadMarkerIsolationAndMonotonic(t *testing.T) {
 	f := fixture(t)
 	session := attentionSession(t, f)

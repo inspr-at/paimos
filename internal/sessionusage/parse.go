@@ -142,6 +142,7 @@ type modelState struct {
 	input      counter
 	output     counter
 	cached     counter
+	reasoning  counter
 }
 
 func (p *parser) add(rec usageRecord) error {
@@ -191,7 +192,8 @@ func (p *parser) add(rec usageRecord) error {
 	st.input.add(rec.delta.input, rec.delta.inputKnown)
 	st.output.add(rec.delta.output, true)
 	st.cached.add(rec.delta.cached, rec.delta.cachedKnown)
-	for _, c := range []counter{st.input, st.output, st.cached} {
+	st.reasoning.add(rec.delta.reasoning, rec.delta.reasoningKnown)
+	for _, c := range []counter{st.input, st.output, st.cached, st.reasoning} {
 		if c.value > maxToken {
 			return fmt.Errorf("%w: token overflow", ErrRejected)
 		}
@@ -211,12 +213,22 @@ func applyCumulative(st *modelState, rec usageRecord) error {
 	// 'last' describes the latest vendor call, not necessarily the difference
 	// since a previous notification. Duplicate and coalesced notifications exist.
 	if last := rec.delta; last != nil {
-		if last.input > total.input || last.output > total.output || last.cachedKnown && total.cachedKnown && last.cached > total.cached {
+		if last.input > total.input || last.output > total.output || last.cachedKnown && total.cachedKnown && last.cached > total.cached || last.reasoningKnown && total.reasoningKnown && last.reasoning > total.reasoning {
 			return fmt.Errorf("%w: last usage exceeds total", ErrRejected)
 		}
 	}
 	if st.input.known && st.cached.known && total.cachedKnown && total.input-total.cached < st.input.value-st.cached.value {
 		return fmt.Errorf("%w: uncached cumulative usage decreased", ErrRejected)
+	}
+	// A vendor can revise a cumulative reasoning total downward while input
+	// still grows. Keep the higher known reasoning total so the capture remains
+	// usable. A reasoning-only decrease is rejected.
+	if st.reasoning.known && total.reasoningKnown && total.reasoning < st.reasoning.value {
+		advanced := total.input > st.input.value || total.output > st.output.value || total.cachedKnown && st.cached.known && total.cached > st.cached.value
+		if !advanced {
+			return fmt.Errorf("%w: cumulative counter decreased or became unknown", ErrRejected)
+		}
+		total.reasoning = st.reasoning.value
 	}
 	if err := st.input.replace(total.input, total.inputKnown); err != nil {
 		return err
@@ -224,7 +236,10 @@ func applyCumulative(st *modelState, rec usageRecord) error {
 	if err := st.output.replace(total.output, true); err != nil {
 		return err
 	}
-	return st.cached.replace(total.cached, total.cachedKnown)
+	if err := st.cached.replace(total.cached, total.cachedKnown); err != nil {
+		return err
+	}
+	return st.reasoning.replace(total.reasoning, total.reasoningKnown)
 }
 func (c *counter) replace(value int64, known bool) error {
 	if c.set && c.known && (!known || value < c.value) {
@@ -261,7 +276,7 @@ func (p *parser) result() Result {
 		provisional := !p.opt.Final || measure != statusKnown
 		out.Reports = append(out.Reports, UsageReport{
 			ReportID: reportID(p.opt.SessionID, model, seq), Model: model, Sequence: seq,
-			InputTokens: st.input.pointer(), OutputTokens: st.output.pointer(), CachedInputTokens: st.cached.pointer(),
+			InputTokens: st.input.pointer(), OutputTokens: st.output.pointer(), CachedInputTokens: st.cached.pointer(), ReasoningTokens: st.reasoning.pointer(),
 			Provisional: provisional, AccountID: optional(p.opt.AccountID), AccountLabel: optional(p.opt.AccountLabel),
 			BillingMode: p.opt.BillingMode, SubscriptionLabel: optional(p.opt.SubscriptionLabel),
 		})

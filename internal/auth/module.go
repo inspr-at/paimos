@@ -80,6 +80,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agent-keys", m.handleCreateAgentKey)
 	mux.HandleFunc("GET /api/agent-keys", m.handleListAgentKeys)
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
+	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
+	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	if m.cfg.Dev() {
 		mux.HandleFunc("POST /api/auth/dev-login", m.handleDevLogin)
 	}
@@ -151,7 +153,11 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 						permissionErr = err
 					} else if ok {
 						scope = resolved
-						permissionErr = authz.RequirePattern(ctx, r.Pattern, scope)
+						// A failed project retry must keep the original denial:
+						// its diagnostic must not reveal that the target exists.
+						if resolvedErr := authz.RequirePattern(ctx, r.Pattern, scope); !errors.Is(resolvedErr, authz.ErrForbidden) {
+							permissionErr = resolvedErr
+						}
 					}
 				}
 				ctx = authz.WithRouteScope(ctx, scope)
@@ -166,7 +172,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 						if receiptRoute(r) {
 							writeReceiptNotFound(w)
 						} else {
-							httpapi.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "permission denied", "code": "forbidden", "reason": "This action needs a permission you do not hold"})
+							authz.WriteForbidden(w, err)
 						}
 					} else {
 						writeInternal(w)
@@ -261,7 +267,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if len(parts) == 2 && (parts[1] == "layers" || parts[1] == "sets") && (read || r.Method == http.MethodPost) {
 			return scope("rules")
 		}
-		if len(parts) == 2 && parts[1] == "merged" && read {
+		if len(parts) == 2 && (parts[1] == "merged" || parts[1] == "doctrine" || parts[1] == "channels") && read {
 			return "rules.read", true
 		}
 		if len(parts) == 2 && parts[1] == "comparisons" && (read || r.Method == http.MethodPost) {
@@ -389,6 +395,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "views", "preferences", "project-groups":
 		return scope("views")
 	case "knowledge":
+		// Listing candidates is ordinary knowledge read. Accept and dismiss stay
+		// with a person: an agent key has no authority on those two routes, and
+		// the handler refuses every agent again.
+		if r.Method == http.MethodPost && len(parts) == 4 && parts[1] == "learnings" && (parts[3] == "accept" || parts[3] == "dismiss" || parts[3] == "draft") {
+			return "", false
+		}
 		return scope("knowledge")
 	case "approvals":
 		if len(parts) == 1 {
@@ -449,18 +461,25 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "run.claim", true
 		}
 	case "agent-accounts":
+		if r.Method == "GET" && len(parts) == 3 && parts[2] == "readings" {
+			return "account.probe", true
+		}
 		if read {
 			return "account.read", true
 		}
 		if r.Method == "POST" && len(parts) == 2 && parts[1] == "route" {
 			return "account.route", true
 		}
-		if r.Method == "POST" && len(parts) == 3 && parts[2] == "probe" {
+		if r.Method == "POST" && len(parts) == 3 && (parts[2] == "probe" || parts[2] == "readings") {
 			return "account.probe", true
 		}
 		return "account.manage", true
 	case "stage-handoffs":
 		return "stage.<op>", true
+	case "outcomes":
+		if len(parts) == 1 && (read || r.Method == http.MethodPost) {
+			return scope("outcome")
+		}
 	case "me":
 		// Any key may read its own identity; the rest of /api/me is for people.
 		if len(parts) == 1 && read {
@@ -513,7 +532,7 @@ func agentHasScope(have []string, want string) bool {
 		}
 		return false
 	}
-	return hasScope(have, want)
+	return hasScope(have, want) || authz.CoordinatorCeiling(have, want)
 }
 
 func publicRequest(r *http.Request) bool {

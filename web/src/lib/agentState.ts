@@ -245,7 +245,7 @@ export function bindingWindow(windows: AllowanceWindow[] | undefined, now: numbe
   return (measured.length ? measured : summaries).sort((a, b) => a.left - b.left)[0] ?? null
 }
 export const PACE_LABEL: Record<Pace, string> = { ahead: 'Ahead of pace', on: 'On pace', under: 'Room to spare' }
-export const UNIT_LABEL: Record<AllowanceWindow['unit'], string> = { requests: 'requests', tokens: 'tokens', cost_micros: 'spend' }
+export const UNIT_LABEL: Record<AllowanceWindow['unit'], string> = { requests: 'requests', tokens: 'tokens', cost_micros: 'spend', percent: 'percent' }
 
 // Why a typed control cannot be sent right now, or '' when it can. Controls exist
 // only for sessions Aeon owns that advertise them, one at a time.

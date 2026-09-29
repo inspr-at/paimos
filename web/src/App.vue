@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
 import ConfirmHost from './components/ConfirmHost.vue'
@@ -20,7 +20,7 @@ import { useSession } from './stores/session'
 import { useReleases } from './stores/releases'
 import { brand } from './lib/brand'
 import { toast } from './lib/toast'
-import { displayHeadline, getRelease } from './lib/releases'
+import { getRelease, releaseTitle } from './lib/releases'
 import { useProfile } from './stores/profile'
 import { headerFolded } from './lib/chrome'
 import { usePoller } from './lib/usePolledData'
@@ -79,15 +79,37 @@ function openReleases(version?: string) {
   openedHere = true
   void router.push({ path: route.path, query: { ...route.query, releases: version ?? 'all' }, hash: route.hash })
 }
+// A release and a language or view chosen in quick succession (a choice whose
+// filter hides the selected release moves the selection) both land: each
+// replace carries what is still on its way, until the address has it.
+const releasesNext = reactive<{ version?: string; query: Record<string, string> }>({ query: {} })
+watch(() => route.fullPath, () => {
+  if (releasesNext.version === releasesTarget.value) delete releasesNext.version
+  for (const [key, value] of Object.entries(releasesNext.query)) if (route.query[key] === value) delete releasesNext.query[key]
+})
+watch(releasesOpen, open => { if (!open) { delete releasesNext.version; releasesNext.query = {} } })
+function replaceReleases() {
+  // Keep the history's language and view (and any other query) across versions.
+  const query = { ...route.query, ...releasesNext.query }
+  const version = releasesNext.version
+  if (releasesRoute.value) void router.replace({ path: version ? `/releases/${version}` : route.path, query, hash: route.hash })
+  else void router.replace({ path: route.path, query: version ? { ...query, releases: version } : query, hash: route.hash })
+}
 function selectRelease(version: string) {
-  if (releasesRoute.value) { if (route.params.version !== version) void router.replace(`/releases/${version}`) }
-  else if (releasesQuery.value !== version) void router.replace({ path: route.path, query: { ...route.query, releases: version }, hash: route.hash })
+  if ((releasesNext.version ?? releasesTarget.value) === version) return
+  releasesNext.version = version
+  replaceReleases()
+}
+function setReleasesQuery(key: string, value: string) {
+  if ((releasesNext.query[key] ?? route.query[key]) === value) return
+  releasesNext.query[key] = value
+  replaceReleases()
 }
 function closeReleases() {
   if (openedHere && typeof window.history.state?.back === 'string') { openedHere = false; router.back(); return }
   openedHere = false
   if (releasesRoute.value) { void router.replace('/'); return }
-  const { releases: _releases, ...rest } = route.query
+  const { releases: _releases, release_lang: _lang, release_view: _view, ...rest } = route.query
   void router.replace({ path: route.path, query: rest, hash: route.hash })
 }
 // The release history's mark goes home: a real navigation to /, which also closes the overlay.
@@ -95,7 +117,7 @@ function goHome() { openedHere = false; void router.push('/') }
 // A ticket open beside the history can go to its full page, which leaves the history.
 function leaveReleasesFor(path: string) { openedHere = false; void router.push(path) }
 watch(releasesOpen, open => { if (!open) openedHere = false })
-watch(command, value => { if (value?.command.name === 'releases') { consume(); openReleases() } })
+watch(command, value => { if (value?.command.name === 'releases') { const { version } = value.command; consume(); openReleases(version) } })
 
 // Signed in: remember what was seen, count what is new, and notice a newer version on the server.
 watch(() => session.identity?.principal.id, id => {
@@ -117,7 +139,8 @@ watch(() => releases.available, async version => {
   // The new server knows what the release was about; say it in its reading form.
   const release = await getRelease(version)
   if (version !== releases.available) return
-  const about = release?.headline ? `: ${displayHeadline(release, profile.profile?.locale)}` : ''
+  const title = release ? releaseTitle(release, profile.profile?.locale) : ''
+  const about = title ? `: ${title}` : ''
   toast(`${brand.value.wordmark} was updated to ${version}${about}`, {
     sticky: true, key: 'update',
     actions: [{ label: 'What’s new', run: () => openReleases(version) }, { label: 'Reload', run: () => window.location.reload() }],
@@ -125,7 +148,13 @@ watch(() => releases.available, async version => {
 })
 
 // ---------- Footer: on phones it folds away while reading down and returns on the way up ----------
+// A project flow pill lives in the footer, so the bar stays while that pill is shown.
 const footerHidden = ref(false)
+const flowPillShown = ref(false)
+function onFlowPill(shown: boolean) {
+  flowPillShown.value = shown
+  if (shown) footerHidden.value = false
+}
 const phoneQuery = window.matchMedia('(max-width: 600px)')
 let lastTop = 0, travel = 0, settleUntil = 0
 function scrolled() {
@@ -134,6 +163,7 @@ function scrolled() {
   const top = el.scrollTop
   const delta = top - lastTop
   lastTop = top
+  if (flowPillShown.value) { footerHidden.value = false; travel = 0; return }
   if (!phoneQuery.matches || Date.now() < settleUntil) return
   // Near the end of the page the footer stays: it is where the page ends.
   const nearEnd = el.scrollHeight - el.clientHeight - top < 48
@@ -183,8 +213,8 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
       </div>
     </main>
     <!-- A row of the shell: the page, docked panels and toasts all end above it. -->
-    <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openReleases()" />
-    <ReleasesSheet v-if="releasesOpen" :target="releasesTarget" @select="selectRelease" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
+    <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openReleases()" @pill="onFlowPill" />
+    <ReleasesSheet v-if="releasesOpen" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
     <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
     <ToastHost />
     <ConfirmHost />

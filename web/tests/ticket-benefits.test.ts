@@ -35,7 +35,8 @@ test('snapshot notes displace Git headlines and ticket guesses while archives st
   assert.equal(localizedNote(fields, 'de-CH').benefitLang, 'de')
   assert.equal(historicalTagFallback(r), false)
   assert.deepEqual(ticketsOf(r), ['TEST-7'])
-  assert.equal(matches(r, { q: 'erklären', features: false, fixes: false, tickets: false }), true)
+  assert.equal(matches(r, { q: 'erklären', features: false, fixes: false, tickets: false }, 'de'), true)
+  assert.equal(matches(r, { q: 'erklären', features: false, fixes: false, tickets: false }, 'en'), false)
   r.notes!.items = []; r.notes!.gaps = ['Missing membership']
   assert.equal(displayHeadline(r), 'Release notes unavailable')
   assert.deepEqual(ticketsOf(r), [])

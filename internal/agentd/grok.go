@@ -28,7 +28,11 @@ var grokAssets embed.FS
 // The native adapter executes an isolated conversation without workspace I/O.
 type GrokBinding = grokprobe.Binding
 
-type GrokAdapter struct{ Bindings map[string]GrokBinding }
+type GrokAdapter struct {
+	Bindings map[string]GrokBinding
+	Homes    map[string]string
+	billing  *grokBillingCapability
+}
 
 func NewGrokAdapter(bindings ...map[string]GrokBinding) *GrokAdapter {
 	a := &GrokAdapter{Bindings: map[string]GrokBinding{}}

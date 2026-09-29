@@ -43,7 +43,7 @@ func TestNpmAdapterProbeAndLaunch(t *testing.T) {
 			nodes := map[string]harnesslaunch.Node{"account": node}
 			var a interface {
 				Adapter
-				ProbeStatus(context.Context, string) (bool, error)
+				ProbeHarness(context.Context, string) (ProbeStatus, error)
 			}
 			if harness == Codex {
 				c := NewCodexAdapter(path, map[string]string{"account": home})
@@ -55,8 +55,8 @@ func TestNpmAdapterProbeAndLaunch(t *testing.T) {
 				c.Nodes = nodes
 				a = c
 			}
-			if available, err := a.ProbeStatus(t.Context(), "account"); !available || err != nil {
-				t.Fatal("pinned probe failed", err)
+			if status, err := a.ProbeHarness(t.Context(), "account"); !status.OK || err != nil {
+				t.Fatal("pinned probe failed", status, err)
 			}
 			r.Profile.Harness = harness
 			p, err := a.Start(t.Context(), r, func(AdapterEvent) {})
@@ -69,7 +69,7 @@ func TestNpmAdapterProbeAndLaunch(t *testing.T) {
 				t.Fatal(err)
 			}
 			nodes["account"] = harnesslaunch.Node{}
-			if available, err := a.ProbeStatus(t.Context(), "account"); available || !errors.Is(err, harnesslaunch.ErrStart) {
+			if status, err := a.ProbeHarness(t.Context(), "account"); status.OK || status.Failure == ProbeAuthFailed || !errors.Is(err, harnesslaunch.ErrStart) {
 				t.Fatal("missing pin reported as login", err)
 			}
 			if _, err := a.Start(t.Context(), r, func(AdapterEvent) {}); !errors.Is(err, harnesslaunch.ErrStart) {

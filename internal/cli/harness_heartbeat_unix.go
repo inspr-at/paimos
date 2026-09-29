@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -188,11 +189,34 @@ func (h *heartbeatHold) remove(name string) error {
 	return err
 }
 
-// openNoFollow opens a regular file owned by this user. O_NONBLOCK rejects a
-// FIFO without waiting for a writer; the descriptor is closed unless the file
-// is a private unlinked regular file.
+var errRefusedFile = errors.New("refusing an unowned, linked or non-regular file")
+
+// openNoFollow opens a regular file owned by this user without following any
+// path component. macOS publishes /var, /tmp and /etc as symlinks; only that
+// system prefix is rewritten to the link's direct target. Every later
+// component is opened with O_NOFOLLOW, so a symlinked parent inside the
+// usage tree is refused. O_NONBLOCK rejects a FIFO without waiting.
 func openNoFollow(path string) (*os.File, error) {
-	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	abs = rewriteSystemSymlinkPrefix(filepath.Clean(abs))
+	if abs == string(os.PathSeparator) {
+		return nil, errRefusedFile
+	}
+	parent, base := filepath.Split(abs)
+	parent = filepath.Clean(parent)
+	base = strings.TrimSuffix(base, string(os.PathSeparator))
+	if base == "" || base == "." || base == ".." {
+		return nil, errRefusedFile
+	}
+	dirfd, err := openNoFollowDir(parent)
+	if err != nil {
+		return nil, err
+	}
+	defer unix.Close(dirfd)
+	fd, err := unix.Openat(dirfd, base, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
 	if errors.Is(err, unix.ENOENT) {
 		return nil, os.ErrNotExist
 	}
@@ -202,7 +226,64 @@ func openNoFollow(path string) (*os.File, error) {
 	var st unix.Stat_t
 	if unix.Fstat(fd, &st) != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1 || st.Uid != uint32(os.Getuid()) {
 		unix.Close(fd)
-		return nil, errors.New("refusing an unowned, linked or non-regular file")
+		return nil, errRefusedFile
 	}
-	return os.NewFile(uintptr(fd), path), nil
+	return os.NewFile(uintptr(fd), abs), nil
+}
+
+func openNoFollowDir(dir string) (int, error) {
+	fd, err := unix.Open(string(os.PathSeparator), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, err
+	}
+	if dir == string(os.PathSeparator) {
+		return fd, nil
+	}
+	rel := strings.TrimPrefix(filepath.Clean(dir), string(os.PathSeparator))
+	for _, name := range strings.Split(rel, string(os.PathSeparator)) {
+		if name == "" || name == "." || name == ".." {
+			unix.Close(fd)
+			return -1, errRefusedFile
+		}
+		next, err := unix.Openat(fd, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		unix.Close(fd)
+		if errors.Is(err, unix.ENOENT) {
+			return -1, os.ErrNotExist
+		}
+		if err != nil {
+			return -1, err
+		}
+		fd = next
+	}
+	return fd, nil
+}
+
+// rewriteSystemSymlinkPrefix replaces a root-level system symlink (/var,
+// /tmp, /etc) with the direct target of that symlink. Later components are
+// not rewritten and are not followed.
+func rewriteSystemSymlinkPrefix(abs string) string {
+	for _, name := range []string{"var", "tmp", "etc"} {
+		prefix := string(os.PathSeparator) + name
+		if abs != prefix && !strings.HasPrefix(abs, prefix+string(os.PathSeparator)) {
+			continue
+		}
+		info, err := os.Lstat(prefix)
+		if err != nil || info.Mode()&os.ModeSymlink == 0 {
+			return abs
+		}
+		target, err := os.Readlink(prefix)
+		if err != nil || target == "" || strings.Contains(target, "..") || strings.Contains(target, "\x00") {
+			return abs
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(string(os.PathSeparator), target)
+		}
+		target = filepath.Clean(target)
+		if !filepath.IsAbs(target) || target == prefix || strings.HasPrefix(target, prefix+string(os.PathSeparator)) {
+			return abs
+		}
+		rest := strings.TrimPrefix(abs, prefix)
+		return filepath.Clean(target + rest)
+	}
+	return abs
 }

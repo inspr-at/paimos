@@ -2,6 +2,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import type { Approval, ProjectMessage } from '../../lib/agents'
+import { HARNESS_NAME, LOGIN_COMMAND, type AccountRow } from '../../lib/capacity'
+import { toast } from '../../lib/toast'
 import { RISK_LABEL, expiresIn, expiresSoon, riskFor, scopeLabel, type Asker, type Resource } from '../../lib/agentState'
 import { confirmAction } from '../../lib/confirm'
 import { relativeTime } from '../../lib/work'
@@ -13,10 +15,13 @@ import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
 
 // What waits on Markus: permission requests (approve or deny, with a reason the agent
-// sees) and held action requests. Decided and expired requests fold into a history.
+// sees), held action requests, and accounts that need a new vendor sign-in. The desk
+// shows it only when something waits; decided and expired requests fold into a
+// quiet history (history-only mode when nothing waits, so Revoke stays reachable).
 type Held = ProjectMessage & { projectId: string }
 const props = defineProps<{
   pending: Approval[]; held: Held[]; history: Approval[]; now: number; cursor: string; canDecide: boolean; canDecideApproval: (approval: Approval) => boolean; canResolve: boolean; canRevoke: boolean; loaded: boolean
+  signins?: AccountRow[]; historyOnly?: boolean
   asker: (principalId: string, fallbackName?: string | null) => Asker; resource: (approval: Approval) => Resource
   decide: (approval: Approval, decision: 'approved' | 'denied', reason: string) => Promise<void>
   revoke: (approval: Approval) => Promise<void>
@@ -83,18 +88,41 @@ async function revoke(approval: Approval) {
   catch (e) { error.value = e instanceof Error ? e.message : 'Revoking did not work. Please try again.' }
 }
 const outcome = (approval: Approval) => revoked.value.has(approval.id) ? 'Revoked' : approval.decision === 'approved' ? 'Approved' : approval.decision === 'denied' ? 'Denied' : 'Expired'
-const count = computed(() => props.pending.length + props.held.length)
+const count = computed(() => props.pending.length + props.held.length + (props.signins?.length ?? 0))
+const vendor = (row: AccountRow) => HARNESS_NAME[row.harness] ?? row.harness
+async function copyLogin(row: AccountRow) {
+  const command = LOGIN_COMMAND[row.harness]
+  if (!command) return
+  try { await navigator.clipboard?.writeText(command) } catch { /* the toast still names it */ }
+  toast(`Copied: ${command} — run it on ${row.host}.`)
+}
 // The asker's harness shows as its mark; the address label maps back to the key.
 const harnessOf = (label: string) => label.toLowerCase()
 defineExpose({ begin, cancel, isOpen: () => !!open.value })
 </script>
 
 <template>
-  <section class="queue glass-card" :class="{ clear: loaded && !count }" :style="appearance('waiting')" aria-labelledby="needs-title">
+  <section v-if="historyOnly" class="decided" aria-label="Decided requests">
+    <div class="history">
+      <button type="button" class="history-toggle" :aria-expanded="showHistory" aria-controls="approval-history" @click="showHistory = !showHistory">
+        <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showHistory }" />Decided<span class="mono">{{ history.length }}</span>
+      </button>
+      <ul v-if="showHistory" id="approval-history" class="history-list">
+        <li v-for="approval in history.slice(0, 20)" :key="approval.id" class="past" :class="outcome(approval).toLowerCase()">
+          <AppIcon :name="outcome(approval) === 'Approved' ? 'check' : outcome(approval) === 'Expired' ? 'clock' : 'close'" :size="13" class="past-icon" />
+          <span class="past-what">{{ scopeLabel(approval.scope) }}</span>
+          <span class="past-who">{{ named(approval).name }}</span>
+          <span class="past-outcome">{{ outcome(approval) }}</span>
+          <time class="past-time" :datetime="approval.proposed_at">{{ relativeTime(approval.proposed_at, { now }) }}</time>
+          <button v-if="approval.decision === 'approved' && !revoked.has(approval.id) && canRevoke" type="button" class="btn sm ghost revoke" @click="revoke(approval)">Revoke</button>
+        </li>
+      </ul>
+    </div>
+  </section>
+  <section v-else class="queue glass-card" :class="{ clear: loaded && !count }" :style="appearance('waiting')" aria-labelledby="needs-title">
     <header class="card-head">
       <h2 id="needs-title">Needs you</h2>
       <span v-if="count" class="count-badge">{{ count }}</span>
-      <p v-else-if="loaded" class="all-clear"><AppIcon name="check" :size="14" />Nothing waits on you</p>
     </header>
 
     <div v-if="!loaded" class="skeleton-rows" role="status" aria-label="Loading requests">
@@ -196,6 +224,16 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
           </template>
         </div>
       </li>
+      <li v-for="row in signins ?? []" :key="row.id" class="item signin" :data-row="`g:${row.id}`" tabindex="-1" :aria-label="`${vendor(row)} needs a new sign-in on ${row.host}`">
+        <span class="mark key"><AppIcon name="key" :size="16" /></span>
+        <div class="body">
+          <p class="line1"><strong class="what">{{ vendor(row) }} needs a new sign-in on {{ row.host }}</strong></p>
+          <p class="line2 signin-help"><template v-if="LOGIN_COMMAND[row.harness]">Run <code>{{ LOGIN_COMMAND[row.harness] }}</code> there · </template>agents skip this account until then</p>
+        </div>
+        <div v-if="LOGIN_COMMAND[row.harness]" class="row-actions">
+          <button type="button" class="btn sm" @click.stop="copyLogin(row)"><AppIcon name="copy" :size="13" />Copy command</button>
+        </div>
+      </li>
     </ul>
 
     <footer v-if="loaded && history.length" class="history">
@@ -219,9 +257,16 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 
 <style scoped>
 .queue { overflow: clip; container: queue / inline-size; }
+/* Something waits: a warm full tint and a soft gold ring, never an edge bar. */
+.queue:not(.clear) { background: linear-gradient(165deg, color-mix(in srgb, var(--gold-2) 16%, var(--surface-raised-2)), color-mix(in srgb, var(--gold-2) 10%, var(--glass)) 60%); box-shadow: var(--shadow), 0 0 0 1px color-mix(in srgb, var(--gold) 38%, transparent); }
+.queue:not(.clear) .item + .item { box-shadow: 0 -1px 0 color-mix(in srgb, var(--gold) 18%, transparent); }
+.item.signin .mark.key { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); }
+.signin-help code { padding: 1px 6px; border-radius: 5px; background: var(--surface-sunken); font: 500 12px var(--mono); color: var(--ink); }
+.decided { padding: 0 4px; }
+.decided .history { border-top: 0; padding: 0; }
 .card-head { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 10px 18px 8px; }
 .queue.clear .card-head { padding-bottom: 10px; }
-.card-head h2 { font-size: 15px; font-weight: 650; }
+.card-head h2 { font-size: 17px; font-weight: 600; }
 .count-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--gold); color: #fff; font: 700 11px/1 var(--mono); font-variant-numeric: tabular-nums; }
 .all-clear { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-3); }
 .skeleton-rows { display: grid; gap: 4px; padding: 0 8px 8px; }

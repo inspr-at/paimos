@@ -10,7 +10,7 @@
 // The manifest is generated at build time (see the generate command in this
 // package's generate directory) from the sources below; nothing is invented:
 //
-//   - Git: every annotated tag v<version> whose version is an inspr-calendar-v2
+//   - Git: every annotated tag v<version> whose version is a calendar
 //     coordinate. The tag message gives the headline and the release sequence,
 //     the tagger date gives tagged_at, the tagged commit is the source commit,
 //     and version.json at that tag gives reserved_at, the release channel and
@@ -59,7 +59,8 @@
 //	                   current ticket metadata, so past releases follow it
 //	                   without a migration. A features or fixes change also
 //	                   carries linked_tickets: key plus pill and benefit in
-//	                   English and German. Hidden tickets, and tickets with no
+//	                   English and German, and the ticket's own group (fixes
+//	                   for a bug, else features). Hidden tickets, and tickets with no
 //	                   pill or benefit, are omitted. The text is read when the
 //	                   history is served, so a later edit shows on past releases.
 //	changes_omitted    how many more changes there were beyond the listed ones
@@ -77,8 +78,13 @@
 //
 //	GET /api/releases            the whole history plus the running version
 //	GET /api/releases/{version}  one release (with or without the leading v)
+//	PUT /api/releases/{version}/presentation     set theme, headline, intro
+//	DELETE /api/releases/{version}/presentation  remove them
 //
-// Both require an authenticated principal. The manifest is embedded in the
+// The reads require an authenticated principal. The presentation writes
+// (AEON-305) require releases.deploy on the served product project and record
+// one event per change; aeon release-notes present is the offline equivalent.
+// Reads attach the stored presentation as the additive presentation member. The manifest is embedded in the
 // binary (data/history.json when generated, else data/empty.json). WithBackfills
 // adds immutable database snapshots for the caller's tenant and visible product
 // project. Tagged snapshots win, followed by native journey snapshots, then

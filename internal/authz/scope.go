@@ -32,6 +32,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/usage/dashboard":                    true,
 	"GET /api/projects":                           true,
 	"GET /api/nodes":                              true,
+	"GET /api/outcomes":                           true,
 	"GET /api/nodes/lookup":                       true,
 	"GET /api/nodes/tree":                         true,
 	"GET /api/search":                             true,
@@ -40,6 +41,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/from-classic":                       true,
 	"GET /api/knowledge":                          true,
 	"GET /api/knowledge/graph":                    true,
+	"GET /api/knowledge/learnings":                true,
 	"GET /api/knowledge/resolve":                  true,
 	"GET /api/tickets/graph":                      true,
 	"GET /api/relations":                          true,
@@ -75,10 +77,15 @@ var ProjectDecidedRoutes = map[string]bool{
 	"GET /api/rules/sets/{setId}/versions":           true,
 	"GET /api/rules/sets/{setId}/versions/{version}": true,
 	"GET /api/rules/merged":                          true,
+	"GET /api/rules/channels":                        true,
 	"GET /api/rules/comparisons":                     true,
 	"POST /api/rules/comparisons":                    true,
+	"GET /api/rules/explained":                       true,
+	"PUT /api/rules/sets/{setId}/tldr":               true,
+	"GET /api/rules/budget":                          true,
 	"POST /api/rules/publish":                        true,
 	"POST /api/nodes":                                true,
+	"POST /api/outcomes":                             true,
 	"POST /api/relations":                            true,
 	"POST /api/knowledge":                            true,
 }
@@ -99,6 +106,14 @@ func routeTarget(pattern string, values map[string]string) (kind, id string) {
 		return "node", values["nodeId"]
 	case strings.HasPrefix(pattern, "GET /api/knowledge/{id}") || strings.HasPrefix(pattern, "PATCH /api/knowledge/{id}") || strings.HasPrefix(pattern, "DELETE /api/knowledge/{id}"):
 		return "node", values["id"]
+	case pattern == "POST /api/knowledge/learnings/{learningId}/accept" || pattern == "POST /api/knowledge/learnings/{learningId}/dismiss" || pattern == "POST /api/knowledge/learnings/{learningId}/draft":
+		// Accept and dismiss name the source item, not a project. The node's
+		// project_id is that item's project, including a project node itself.
+		nodeID, ok := learningSourceNode(values["learningId"])
+		if !ok {
+			return "", ""
+		}
+		return "node", nodeID
 	case strings.Contains(pattern, " /api/attachments/{id}"):
 		return "attachment", values["id"]
 	case values["relationId"] != "":
@@ -113,6 +128,32 @@ func routeTarget(pattern string, values map[string]string) (kind, id string) {
 		return "session", values["sessionId"]
 	}
 	return "", ""
+}
+
+// learningSourceNode is the node a method-learning id names. Ticket ids are
+// "n-<uuid>"; comment ids are "c-<uuid>-<event id>". The uuid is the node the
+// comment is on, which is the project itself when the comment belongs to a project.
+func learningSourceNode(raw string) (string, bool) {
+	switch {
+	case strings.HasPrefix(raw, "n-") && uuidPattern.MatchString(raw[2:]):
+		return raw[2:], true
+	case strings.HasPrefix(raw, "c-") && len(raw) > 39 && raw[38] == '-' && uuidPattern.MatchString(raw[2:38]) && decimalID(raw[39:]):
+		return raw[2:38], true
+	default:
+		return "", false
+	}
+}
+
+func decimalID(s string) bool {
+	if s == "" || s[0] == '0' {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 type routeScopeKey struct{}

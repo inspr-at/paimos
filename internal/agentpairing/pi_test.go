@@ -127,14 +127,14 @@ func TestAllFiveGuidedHarnesses(t *testing.T) {
 	if v := f.redeem(p); len(v.Enrollments) != 5 {
 		t.Fatal("fifth harness was not enrolled")
 	}
-	// The guided command is now `pair --url` and offers every signed-in
-	// harness; the guide names pi through its verification capability.
-	var guide struct {
-		Capabilities map[string]json.RawMessage `json:"verification_capabilities"`
+	guide := f.call("GET", "/api/agent-pairing/guide", nil, false, "", 200)
+	// The guide's pair command discovers harnesses (AEON-333); pi is published
+	// through the guide's verification capabilities.
+	var published struct {
+		Capabilities map[string]any `json:"verification_capabilities"`
 	}
-	decodeResult(t, f.call("GET", "/api/agent-pairing/guide", nil, false, "", 200), &guide)
-	if _, ok := guide.Capabilities["pi"]; !ok {
-		t.Fatal("guide omits pi")
+	if err := json.Unmarshal(guide.Body.Bytes(), &published); err != nil || published.Capabilities["pi"] == nil {
+		t.Fatal("guide omits pi", err)
 	}
 	var v agentpairing.View
 	decodeResult(t, f.call("POST", "/api/agent-pairing/lookup", map[string]string{"user_code": p.code}, true, "", 200), &v)

@@ -145,7 +145,7 @@ func TestForceControlIdentityExpiryAndReplay(t *testing.T) {
 	identity.DaemonID = s.daemonID
 	identity.Generation = s.generation
 	expiry := time.Now().Add(time.Minute)
-	req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", Generation: s.generation, CorrelationID: "force-1", Operation: "force_stop", ExpectedOwnership: &identity, ExpiresAt: &expiry}
+	req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", Generation: s.generation, CorrelationID: "force-1", Operation: "force_stop", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}
 	if _, err := s.Control(t.Context(), req); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("local transport bypassed human recovery authorization: %v", err)
 	}
@@ -161,10 +161,14 @@ func TestForceControlIdentityExpiryAndReplay(t *testing.T) {
 	}
 	identity.ProcessID = correct
 	expiry = time.Now().Add(-time.Second)
+	req.deadline = expiry
 	if _, err := s.control(t.Context(), req, true); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("expired confirmation=%v", err)
 	}
-	expiry = time.Now().Add(time.Minute)
+	// The database can be far behind this daemon. Only its remaining budget,
+	// translated by the transport, reaches the real process signal lock.
+	expiry = time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+	req.deadline = time.Now().Add(time.Minute)
 	first, err := s.control(t.Context(), req, true)
 	if err != nil {
 		t.Fatal(err)
@@ -302,7 +306,7 @@ func TestExpiredForceReportFailureNeverEscalatesThroughHeartbeat(t *testing.T) {
 	// A completion using an already-cancelled context is classified separately
 	// from loss of process ownership, so it also cannot invoke heartbeat cleanup.
 	a.mu.Lock()
-	a.harnessControls = []HarnessControl{{ID: "cancelled-force", Kind: "force_stop", ExpiresAt: &expires}}
+	a.harnessControls = []HarnessControl{{ID: "cancelled-force", Kind: "force_stop", ExpiresAt: &expires, deadline: expires}}
 	a.mu.Unlock()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

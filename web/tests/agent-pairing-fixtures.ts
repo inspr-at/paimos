@@ -9,7 +9,7 @@ const ACCOUNT_2 = '55555555-5555-4555-8555-555555555555'
 const MODEL = '66666666-6666-4666-8666-666666666666'
 const DIGEST = 'ab'.repeat(32)
 
-export const SETUP_COMMAND = `"<verified absolute paimos-agentd path>" pair --url 'https://aeon.example'`
+export const SETUP_COMMAND = `aeon-agentd pair --url 'https://aeon.example'`
 export const NIX_PAIR_COMMAND = "aeon-agentd pair --url 'https://aeon.example'"
 
 export function pairingGuide() {
@@ -21,6 +21,7 @@ export function pairingGuide() {
     version: '260927181849.0.0',
     platform_qualification: 'candidate; consult the exact release service qualification evidence',
     setup_command: SETUP_COMMAND,
+    homebrew_command: `brew install inspr-at/tap/aeon-agentd\n${SETUP_COMMAND}`,
     verification_capabilities: { pi: { supported: false, policy: 'unavailable', reason: 'pi verification has no qualified no-tools policy for extensions and provider configuration.' } },
     install_available: false,
     install_targets: [],
@@ -34,6 +35,17 @@ export function pairingGuide() {
       prerequisite_note: 'Use aeon-agentd on PATH from a reviewed release pin with pair; a service module alone does not ensure this.',
     },
   }
+}
+
+export async function mockChecksumGuide(page: Page) {
+  await mockAnonymousGuide(page)
+  const targets = ['darwin/arm64', 'darwin/amd64', 'linux/arm64', 'linux/amd64'].map(platform => ({
+    platform: platform.split('/')[0], arch: platform.split('/')[1],
+    service: platform.startsWith('darwin') ? 'launchd-user' : 'systemd-user',
+    qualification: 'candidate', artifact_url: `https://release.example/${platform}`, checksums_url: 'https://release.example/SHA256SUMS',
+    command: `# Fixture checksum installer for ${platform}\n# Downloads and verifies the release before linking ~/.local/bin/aeon-agentd.`,
+  }))
+  await page.route('**/api/agent-pairing/guide', route => route.fulfill({ json: { ...pairingGuide(), install_available: true, install_targets: targets } }))
 }
 
 function verification(mode: string | null = null) {
@@ -139,3 +151,6 @@ export async function mockAnonymousGuide(page: Page) {
     return route.fulfill({ status: 404, json: { error: 'unmocked' } })
   })
 }
+
+// Builders for other fixtures (capacity, agents desk).
+export { base as pairingView, enrollment as pairingEnrollment }

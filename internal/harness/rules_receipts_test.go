@@ -340,6 +340,22 @@ func TestRulesReceiptContextCredentialAndGenerationFencing(t *testing.T) {
 	}
 }
 
+// Receipts accept the upgraded 64,000-byte ceiling and reject one byte more.
+func TestRulesReceiptByteSizeBoundary(t *testing.T) {
+	f, session, lease, in := receiptFixture(t)
+	path := session + "/rules-receipts"
+	size := rules.MaxBytes
+	in.ByteSize = &size
+	receiptResponse(t, f.call(f.agent, "POST", path, in, lease), false)
+	rev, over := int64(1), rules.MaxBytes+1
+	next := in
+	next.RequestID, next.ExpectedRevision, next.ByteSize = uid(), &rev, &over
+	expect(t, f.call(f.agent, "POST", path, next, lease), 400)
+	if rules.MaxBytes != 64000 {
+		t.Fatalf("unexpected upgraded session file ceiling %d", rules.MaxBytes)
+	}
+}
+
 func TestRulesReceiptRejectsUnboundedOrAuthorityClaims(t *testing.T) {
 	f, session, lease, in := receiptFixture(t)
 	path := session + "/rules-receipts"
@@ -352,7 +368,7 @@ func TestRulesReceiptRejectsUnboundedOrAuthorityClaims(t *testing.T) {
 		func(m map[string]any) { m["version"] = "260230100000.0.0" },
 		func(m map[string]any) { m["body_sha256"] = "wrong" },
 		func(m map[string]any) { m["body_sha256"] = strings.Repeat("a", 9000) },
-		func(m map[string]any) { m["byte_size"] = 12001 },
+		func(m map[string]any) { m["byte_size"] = rules.MaxBytes + 1 },
 		func(m map[string]any) { m["byte_size"] = 0 },
 		func(m map[string]any) { delete(m, "byte_size") },
 		func(m map[string]any) { m["source"] = "published" },

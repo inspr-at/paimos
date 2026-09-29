@@ -35,6 +35,7 @@ type SessionModelUsage struct {
 	InputTokens       *int64    `json:"input_tokens"`
 	OutputTokens      *int64    `json:"output_tokens"`
 	CachedInputTokens *int64    `json:"cached_input_tokens"`
+	ReasoningTokens   *int64    `json:"reasoning_tokens"`
 	Provisional       bool      `json:"provisional"`
 	PriceVersion      *int64    `json:"price_version"`
 	EstimatedCostUSD  *string   `json:"estimated_cost_usd"`
@@ -55,6 +56,7 @@ type usageReport struct {
 	InputTokens       *int64  `json:"input_tokens"`
 	OutputTokens      *int64  `json:"output_tokens"`
 	CachedInputTokens *int64  `json:"cached_input_tokens"`
+	ReasoningTokens   *int64  `json:"reasoning_tokens"`
 	Provisional       *bool   `json:"provisional"`
 	AccountID         *string `json:"account_id"`
 	AccountLabel      *string `json:"account_label"`
@@ -84,13 +86,16 @@ func (in *usageReport) validate() error {
 		return workorders.Fail(400, "invalid report identity, model, sequence or provisional flag")
 	}
 	in.ReportID = strings.ToLower(in.ReportID)
-	for _, count := range []*int64{in.InputTokens, in.OutputTokens, in.CachedInputTokens} {
+	for _, count := range []*int64{in.InputTokens, in.OutputTokens, in.CachedInputTokens, in.ReasoningTokens} {
 		if count != nil && (*count < 0 || *count > maxUsageCount) {
 			return workorders.Fail(400, "token count must be 0..1000000000000 or null")
 		}
 	}
 	if in.InputTokens != nil && in.CachedInputTokens != nil && *in.CachedInputTokens > *in.InputTokens {
 		return workorders.Fail(400, "cached input exceeds inclusive input tokens")
+	}
+	if in.OutputTokens != nil && in.ReasoningTokens != nil && *in.ReasoningTokens > *in.OutputTokens {
+		return workorders.Fail(400, "reasoning tokens exceed output")
 	}
 	if in.AccountID != nil {
 		if !workorders.UUID(*in.AccountID) {
@@ -114,8 +119,9 @@ func (in *usageReport) validate() error {
 func (in usageReport) snapshot(sessionID string) SessionModelUsage {
 	return SessionModelUsage{SessionID: sessionID, Model: in.Model, Sequence: in.Sequence,
 		InputTokens: in.InputTokens, OutputTokens: in.OutputTokens, CachedInputTokens: in.CachedInputTokens,
-		Provisional: *in.Provisional || in.InputTokens == nil || in.OutputTokens == nil || in.CachedInputTokens == nil,
-		AccountID:   in.AccountID, AccountLabel: in.AccountLabel, BillingMode: in.BillingMode,
+		ReasoningTokens: in.ReasoningTokens,
+		Provisional:     *in.Provisional || in.InputTokens == nil || in.OutputTokens == nil || in.CachedInputTokens == nil,
+		AccountID:       in.AccountID, AccountLabel: in.AccountLabel, BillingMode: in.BillingMode,
 		SubscriptionLabel: in.SubscriptionLabel, Currency: "USD", CostStatus: "unknown", MetadataSource: "reported"}
 }
 
@@ -127,7 +133,7 @@ func usageTransition(old, next SessionModelUsage) error {
 	if next.Sequence <= old.Sequence {
 		return workorders.Fail(409, "usage sequence must increase")
 	}
-	for _, counts := range [][2]*int64{{old.InputTokens, next.InputTokens}, {old.OutputTokens, next.OutputTokens}, {old.CachedInputTokens, next.CachedInputTokens}} {
+	for _, counts := range [][2]*int64{{old.InputTokens, next.InputTokens}, {old.OutputTokens, next.OutputTokens}, {old.CachedInputTokens, next.CachedInputTokens}, {old.ReasoningTokens, next.ReasoningTokens}} {
 		if counts[0] != nil && (counts[1] == nil || *counts[1] < *counts[0]) {
 			return workorders.Fail(409, "known cumulative tokens cannot decrease or become unknown")
 		}
@@ -138,7 +144,8 @@ func usageTransition(old, next SessionModelUsage) error {
 	}
 	if !old.Provisional && (next.Provisional ||
 		!sameUsageValue(old.InputTokens, next.InputTokens) || !sameUsageValue(old.OutputTokens, next.OutputTokens) ||
-		!sameUsageValue(old.CachedInputTokens, next.CachedInputTokens) || !sameUsageValue(old.AccountID, next.AccountID) ||
+		!sameUsageValue(old.CachedInputTokens, next.CachedInputTokens) || !sameUsageValue(old.ReasoningTokens, next.ReasoningTokens) ||
+		!sameUsageValue(old.AccountID, next.AccountID) ||
 		!sameUsageValue(old.AccountLabel, next.AccountLabel) || old.BillingMode != next.BillingMode ||
 		!sameUsageValue(old.SubscriptionLabel, next.SubscriptionLabel)) {
 		return workorders.Fail(409, "final usage counters and metadata are immutable")
@@ -146,12 +153,18 @@ func usageTransition(old, next SessionModelUsage) error {
 	return nil
 }
 
-const usageColumns = `session_id::text,model,sequence,input_tokens,output_tokens,cached_input_tokens,provisional,price_version,estimated_cost_usd::text,account_id::text,account_label,billing_mode,subscription_label,reported_at`
+const usageColumns = `session_id::text,model,sequence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,provisional,price_version,estimated_cost_usd::text,account_id::text,account_label,billing_mode,subscription_label,reported_at`
 
 func scanUsage(row pgx.Row) (SessionModelUsage, error) {
 	out := SessionModelUsage{Currency: "USD", CostStatus: "unknown", MetadataSource: "reported"}
-	err := row.Scan(&out.SessionID, &out.Model, &out.Sequence, &out.InputTokens, &out.OutputTokens, &out.CachedInputTokens,
+	err := row.Scan(&out.SessionID, &out.Model, &out.Sequence, &out.InputTokens, &out.OutputTokens, &out.CachedInputTokens, &out.ReasoningTokens,
 		&out.Provisional, &out.PriceVersion, &out.EstimatedCostUSD, &out.AccountID, &out.AccountLabel, &out.BillingMode, &out.SubscriptionLabel, &out.ReportedAt)
+	// Only api billing is priced. A stored estimate on a subscription or
+	// unknown row is historical: it is never returned, and its price version
+	// never pins a later api price.
+	if out.BillingMode != "api" {
+		out.PriceVersion, out.EstimatedCostUSD = nil, nil
+	}
 	if out.EstimatedCostUSD != nil {
 		out.CostStatus = "estimated"
 	}
@@ -229,21 +242,26 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 			return nil, workorders.Fail(400, "account must belong to tenant and session harness")
 		}
 	}
-	price, err := loadUsagePrice(ctx, tx, next.Model, next.PriceVersion)
-	if err == nil {
-		next.PriceVersion = &price.Version
-		next.EstimatedCostUSD = estimateUsageCost(next, price)
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
+	if next.BillingMode == "api" {
+		price, err := loadUsagePrice(ctx, tx, next.Model, next.PriceVersion)
+		if err == nil {
+			next.PriceVersion = &price.Version
+			next.EstimatedCostUSD = estimateUsageCost(next, price)
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	} else {
+		next.PriceVersion = nil
+		next.EstimatedCostUSD = nil
 	}
 	out, err := scanUsage(tx.QueryRow(ctx, `INSERT INTO harness_session_usage
-        (tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,provisional,price_version,estimated_cost_usd,account_id,account_label,billing_mode,subscription_label)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::numeric,$11,$12,$13,$14)
+        (tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,provisional,price_version,estimated_cost_usd,account_id,account_label,billing_mode,subscription_label)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12,$13,$14,$15)
         ON CONFLICT (tenant_id,session_id,model) DO UPDATE SET sequence=EXCLUDED.sequence,input_tokens=EXCLUDED.input_tokens,
-        output_tokens=EXCLUDED.output_tokens,cached_input_tokens=EXCLUDED.cached_input_tokens,provisional=EXCLUDED.provisional,
+        output_tokens=EXCLUDED.output_tokens,cached_input_tokens=EXCLUDED.cached_input_tokens,reasoning_tokens=EXCLUDED.reasoning_tokens,provisional=EXCLUDED.provisional,
         price_version=EXCLUDED.price_version,estimated_cost_usd=EXCLUDED.estimated_cost_usd,account_id=EXCLUDED.account_id,
         account_label=EXCLUDED.account_label,billing_mode=EXCLUDED.billing_mode,subscription_label=EXCLUDED.subscription_label,reported_at=clock_timestamp()
-        RETURNING `+usageColumns, p.TenantID, s.ID, next.Model, next.Sequence, next.InputTokens, next.OutputTokens, next.CachedInputTokens,
+        RETURNING `+usageColumns, p.TenantID, s.ID, next.Model, next.Sequence, next.InputTokens, next.OutputTokens, next.CachedInputTokens, next.ReasoningTokens,
 		next.Provisional, next.PriceVersion, next.EstimatedCostUSD, next.AccountID, next.AccountLabel, next.BillingMode, next.SubscriptionLabel))
 	if err != nil {
 		return nil, err

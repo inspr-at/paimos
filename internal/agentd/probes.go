@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,22 +20,31 @@ import (
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
-type boundedProbe struct {
-	bytes.Buffer
-	max int
+// probeCapture keeps at most max bytes of a probe stream. It deliberately has
+// no embedded buffer, so io.Copy cannot promote a ReadFrom past the cap; any
+// byte beyond it sets overflow and stops the copy.
+type probeCapture struct {
+	buf      []byte
+	max      int
+	overflow bool
 }
 
-func (b *boundedProbe) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > b.max {
+func (c *probeCapture) Write(p []byte) (int, error) {
+	if c.overflow || len(c.buf)+len(p) > c.max {
+		c.overflow = true
 		return 0, errors.New("probe output exceeds bound")
 	}
-	return b.Buffer.Write(p)
+	c.buf = append(c.buf, p...)
+	return len(p), nil
 }
 
-func probeCommand(ctx context.Context, path string, env []string, args ...string) ([]byte, error) {
+// probeRun runs a vendor status command. A non-zero exit still returns its
+// bounded output, so a clear "signed out" answer can be told apart from a probe
+// that could not run (missing binary, timeout, oversized or ambiguous output).
+func probeRun(ctx context.Context, path string, env []string, args ...string) ([]byte, int, error) {
 	path, err := pinnedExecutable(path)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	op, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -41,26 +52,116 @@ func probeCommand(ctx context.Context, path string, env []string, args ...string
 	if env != nil {
 		cmd.Env = env
 	}
-	stdout, stderr := &boundedProbe{max: 4096}, &boundedProbe{max: 4096}
+	stdout, stderr := &probeCapture{max: probeOutputMax}, &probeCapture{max: probeOutputMax}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
+	code := 0
+	err = cmd.Run()
+	// Oversized output is unavailable whatever the exit: its kept prefix is not
+	// the whole answer and must never be parsed.
+	if stdout.overflow || stderr.overflow {
+		return nil, 0, errors.New("account probe output exceeds bound")
+	}
+	if err != nil {
 		var exit *exec.ExitError
-		if op.Err() != nil || !errors.As(err, &exit) || exit.ExitCode() == 126 || exit.ExitCode() == 127 {
-			return nil, harnesslaunch.ErrStart
+		if !errors.As(err, &exit) || op.Err() != nil || exit.ExitCode() < 0 {
+			// AEON-341: a launcher that cannot run or never answers failed to
+			// start; callers without start semantics still read it as unavailable.
+			return nil, 0, harnesslaunch.ErrStart
+		}
+		code = exit.ExitCode()
+		if code == 126 || code == 127 {
+			return nil, 0, harnesslaunch.ErrStart
+		}
+	}
+	if len(stdout.buf) != 0 && len(stderr.buf) != 0 {
+		return nil, 0, errors.New("account probe output ambiguous")
+	}
+	if len(stdout.buf) != 0 {
+		return stdout.buf, code, nil
+	}
+	return stderr.buf, code, nil
+}
+
+// probeOutputMax caps each probe stream; vendor status answers are far smaller.
+const probeOutputMax = 4096
+
+// decodeProbeJSON decodes one JSON document into v, rejecting any object that
+// repeats a key. Keys are compared after unescaping and case-insensitively,
+// because encoding/json matches field names that way: "loggedIn" twice, or
+// "loggedIn" and "LOGGEDIN", would otherwise let the last one silently win.
+func decodeProbeJSON(raw []byte, v any) error {
+	if err := rejectDuplicateKeys(raw); err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, v)
+}
+
+func rejectDuplicateKeys(raw []byte) error {
+	type frame struct {
+		object  bool
+		wantKey bool
+		keys    []string
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var stack []*frame
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var top *frame
+		if len(stack) > 0 {
+			top = stack[len(stack)-1]
+		}
+		if d, ok := tok.(json.Delim); ok && (d == '}' || d == ']') {
+			stack = stack[:len(stack)-1]
+			if len(stack) > 0 && stack[len(stack)-1].object {
+				stack[len(stack)-1].wantKey = true
+			}
+			continue
+		}
+		if top != nil && top.object && top.wantKey {
+			key, _ := tok.(string)
+			for _, seen := range top.keys {
+				if strings.EqualFold(seen, key) {
+					return errors.New("duplicate JSON key")
+				}
+			}
+			top.keys = append(top.keys, key)
+			top.wantKey = false
+			continue
+		}
+		switch tok {
+		case json.Delim('{'):
+			stack = append(stack, &frame{object: true, wantKey: true})
+		case json.Delim('['):
+			stack = append(stack, &frame{})
+		default:
+			if top != nil && top.object {
+				top.wantKey = true
+			}
+		}
+	}
+}
+
+func probeCommand(ctx context.Context, path string, env []string, args ...string) ([]byte, error) {
+	out, code, err := probeRun(ctx, path, env, args...)
+	if err != nil || code != 0 {
+		if errors.Is(err, harnesslaunch.ErrStart) {
+			return nil, err
 		}
 		return nil, errors.New("account probe unavailable")
 	}
-	if stdout.Len() != 0 && stderr.Len() != 0 {
-		return nil, errors.New("account probe output ambiguous")
-	}
-	if stdout.Len() != 0 {
-		return stdout.Bytes(), nil
-	}
-	return stderr.Bytes(), nil
+	return out, nil
 }
 
-// launcherReady checks the same service environment before classifying login.
+// launcherReady checks the same service environment before classifying login
+// (AEON-341).
 func launcherReady(ctx context.Context, path, node string, env []string) error {
 	if err := harnesslaunch.Validate(path, node); err != nil {
 		return err
@@ -71,27 +172,58 @@ func launcherReady(ctx context.Context, path, node string, env []string) error {
 	return nil
 }
 
-func (a *CodexAdapter) Probe(ctx context.Context, key string) bool {
-	available, _ := a.ProbeStatus(ctx, key)
-	return available
+var (
+	probeOK          = ProbeStatus{OK: true}
+	probeAuthFailed  = ProbeStatus{Failure: ProbeAuthFailed}
+	probeUnavailable = ProbeStatus{Failure: ProbeUnavailable}
+)
+
+func (a *CodexAdapter) Probe(ctx context.Context, key string) bool { return a.ProbeStatus(ctx, key).OK }
+
+// ProbeStatus reads `codex login status`. Only its explicit "Not logged in"
+// answer is an authentication failure.
+func (a *CodexAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus {
+	status, _ := a.ProbeHarness(ctx, key)
+	return status
 }
-func (a *CodexAdapter) ProbeStatus(ctx context.Context, key string) (bool, error) {
+
+// ProbeHarness is ProbeStatus plus a start failure (AEON-341): the launcher and
+// its pinned Node are checked in the service environment before sign-in is
+// classified.
+func (a *CodexAdapter) ProbeHarness(ctx context.Context, key string) (ProbeStatus, error) {
 	home, err := localHome(a.Homes, key)
 	if err != nil {
-		return false, harnesslaunch.ErrStart
+		return probeUnavailable, harnesslaunch.ErrStart
 	}
 	env := harnesslaunch.Environment(withEnv("CODEX_HOME", home), a.Nodes[key].Path)
 	if err := launcherReady(ctx, a.Path, a.Nodes[key].Path, env); err != nil {
-		return false, err
+		return probeUnavailable, err
 	}
 	if strings.TrimSpace(a.Emails[key]) == "" {
-		return false, nil
+		return probeUnavailable, nil
 	}
-	raw, err := probeCommand(ctx, a.Path, env, "login", "status")
+	raw, code, err := probeRun(ctx, a.Path, env, "login", "status")
 	if errors.Is(err, harnesslaunch.ErrStart) {
-		return false, err
+		return probeUnavailable, err
 	}
-	return err == nil && strings.TrimSpace(string(raw)) == "Logged in using ChatGPT", nil
+	if err != nil {
+		return probeUnavailable, nil
+	}
+	return codexStatus(raw, code), nil
+}
+
+// codexStatus: the whole output must be exactly one recognized answer; extra
+// lines or a contradiction are unavailable, never a sign-out.
+func codexStatus(raw []byte, code int) ProbeStatus {
+	switch strings.TrimSpace(string(raw)) {
+	case "Logged in using ChatGPT":
+		if code == 0 {
+			return probeOK
+		}
+	case "Not logged in":
+		return probeAuthFailed
+	}
+	return probeUnavailable
 }
 
 func (a *PiAdapter) Probe(ctx context.Context, key string) bool {
@@ -166,65 +298,195 @@ func (a *PiAdapter) probe(ctx context.Context, key string, fresh bool) (bool, er
 }
 
 func (a *CursorAdapter) Probe(ctx context.Context, key string) bool {
-	available, _ := a.ProbeStatus(ctx, key)
-	return available
+	return a.ProbeStatus(ctx, key).OK
 }
-func (a *CursorAdapter) ProbeStatus(ctx context.Context, key string) (bool, error) {
-	env := harnesslaunch.Environment(os.Environ(), a.Nodes[key].Path)
-	if err := launcherReady(ctx, a.Path, a.Nodes[key].Path, env); err != nil {
-		return false, err
+
+// ProbeStatus reads `cursor-agent status --format json`. A parsed answer that
+// says unauthenticated, or authenticated as another user, is an authentication
+// failure; anything unreadable is unavailable.
+func (a *CursorAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus {
+	status, _ := a.ProbeHarness(ctx, key)
+	return status
+}
+
+// ProbeHarness is ProbeStatus plus a start failure (AEON-341).
+func (a *CursorAdapter) ProbeHarness(ctx context.Context, key string) (ProbeStatus, error) {
+	environment, err := a.launchEnvironment(key)
+	if err != nil {
+		return probeUnavailable, harnesslaunch.ErrStart
+	}
+	if err := launcherReady(ctx, a.Path, a.Nodes[key].Path, environment); err != nil {
+		return probeUnavailable, err
 	}
 	expected := a.Identities[key]
 	if expected == "" {
-		return false, nil
+		return probeUnavailable, nil
 	}
-	raw, err := probeCommand(ctx, a.Path, env, "status", "--format", "json")
+	raw, code, err := probeRun(ctx, a.Path, environment, "status", "--format", "json")
 	if errors.Is(err, harnesslaunch.ErrStart) {
-		return false, err
+		return probeUnavailable, err
 	}
 	if err != nil {
-		return false, nil
+		return probeUnavailable, nil
 	}
+	return cursorStatus(raw, code, expected), nil
+}
+
+// launchEnvironment is the account's isolated environment (AEON-298), or the
+// service environment for legacy enrollments, with the pinned Node first on
+// PATH (AEON-341).
+func (a *CursorAdapter) launchEnvironment(key string) ([]string, error) {
+	env, err := a.accountEnvironment(key)
+	if err != nil {
+		return nil, err
+	}
+	node := a.Nodes[key].Path
+	if env == nil {
+		return harnesslaunch.Environment(os.Environ(), node), nil
+	}
+	if node != "" {
+		for i, entry := range env {
+			if rest, ok := strings.CutPrefix(entry, "PATH="); ok {
+				env[i] = "PATH=" + filepath.Dir(node) + string(os.PathListSeparator) + rest
+			}
+		}
+	}
+	return env, nil
+}
+
+func cursorStatus(raw []byte, code int, expected string) ProbeStatus {
 	var status struct {
-		Status          string `json:"status"`
-		IsAuthenticated bool   `json:"isAuthenticated"`
+		Status          *string `json:"status"`
+		IsAuthenticated *bool   `json:"isAuthenticated"`
 		UserInfo        *struct {
 			UserID json.RawMessage `json:"userId"`
 		} `json:"userInfo"`
 	}
-	return json.Unmarshal(raw, &status) == nil && status.Status == "authenticated" && status.IsAuthenticated && status.UserInfo != nil && strings.Trim(string(status.UserInfo.UserID), "\"") == expected, nil
+	if decodeProbeJSON(raw, &status) != nil || status.Status == nil || status.IsAuthenticated == nil {
+		return probeUnavailable
+	}
+	// Only an explicit, consistent answer counts: signed out, or signed in as
+	// another user. Unknown status words, contradictions and a missing or null
+	// identity are unavailable.
+	if !*status.IsAuthenticated {
+		if cursorSignedOut[*status.Status] {
+			return probeAuthFailed
+		}
+		return probeUnavailable
+	}
+	if *status.Status != "authenticated" || status.UserInfo == nil {
+		return probeUnavailable
+	}
+	id, ok := cursorIdentity(status.UserInfo.UserID)
+	want := strings.TrimSpace(expected)
+	if !ok || want == "" {
+		return probeUnavailable
+	}
+	if id != want {
+		return probeAuthFailed
+	}
+	if code != 0 {
+		return probeUnavailable
+	}
+	return probeOK
 }
 
+// cursorIdentity decodes a Cursor userId: a non-empty string or an integer,
+// normalized to its text ("42" and 42 are the same account). Anything else
+// (objects, arrays, booleans, null, blank or fractional values) is not an identity.
+func cursorIdentity(raw json.RawMessage) (string, bool) {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil || dec.More() {
+		return "", false
+	}
+	switch id := v.(type) {
+	case string:
+		id = strings.TrimSpace(id)
+		return id, id != ""
+	case json.Number:
+		n, err := strconv.ParseInt(id.String(), 10, 64)
+		if err != nil {
+			return "", false
+		}
+		return strconv.FormatInt(n, 10), true
+	}
+	return "", false
+}
+
+// cursorSignedOut lists the status words cursor-agent uses for a signed-out
+// session; any other word with isAuthenticated false is not a confirmed sign-out.
+var cursorSignedOut = map[string]bool{"unauthenticated": true, "not_authenticated": true, "logged_out": true, "signed_out": true}
+
 func (a *ClaudeAdapter) Probe(ctx context.Context, key string) bool {
-	available, _ := a.ProbeAccount(ctx, key)
-	return available
+	return a.ProbeStatus(ctx, key).OK
+}
+
+// ProbeStatus reads `claude auth status --json`. loggedIn false, an API key
+// login, or a different email is an authentication failure for this account.
+// A local dependency failure (AEON-342) is unavailable, never a sign-out.
+func (a *ClaudeAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus {
+	status, _ := a.ProbeAccountStatus(ctx, key)
+	return status
 }
 
 // ProbeAccount separates local dependency failures from vendor sign-in state.
 // Dependency diagnostics are value-free; vendor output is never surfaced.
 func (a *ClaudeAdapter) ProbeAccount(ctx context.Context, key string) (bool, error) {
+	status, err := a.ProbeAccountStatus(ctx, key)
+	return status.OK, err
+}
+
+// ProbeAccountStatus is ProbeAccount with the probe's cause (AEON-298).
+func (a *ClaudeAdapter) ProbeAccountStatus(ctx context.Context, key string) (ProbeStatus, error) {
 	resolved, err := a.resolved("")
 	if err != nil {
-		return false, err
+		return probeUnavailable, err
 	}
 	return resolved.probeResolved(ctx, key), nil
 }
 
-func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) bool {
+func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStatus {
 	home, err := localHome(a.Homes, key)
 	if err != nil {
-		return false
+		return probeUnavailable
 	}
-	raw, err := probeCommand(ctx, a.ClaudePath, claudeEnvironment(home, a.NodePath, a.ClaudePath), "auth", "status", "--json")
+	raw, code, err := probeRun(ctx, a.ClaudePath, claudeEnvironment(home, a.NodePath, a.ClaudePath), "auth", "status", "--json")
 	if err != nil {
-		return false
+		return probeUnavailable
 	}
 	var status struct {
-		LoggedIn   bool   `json:"loggedIn"`
+		LoggedIn   *bool  `json:"loggedIn"`
 		Email      string `json:"email"`
 		AuthMethod string `json:"authMethod"`
 	}
-	return json.Unmarshal(raw, &status) == nil && status.LoggedIn && (a.Emails == nil || status.AuthMethod != "api_key" && strings.EqualFold(status.Email, a.Emails[key]) && a.Emails[key] != "")
+	if decodeProbeJSON(raw, &status) != nil || status.LoggedIn == nil {
+		return probeUnavailable
+	}
+	if !*status.LoggedIn {
+		return probeAuthFailed
+	}
+	if a.Emails != nil {
+		if a.Emails[key] == "" {
+			return probeUnavailable
+		}
+		// An API-key login or a different email is explicitly another account;
+		// a login without an email says nothing about which account it is.
+		if status.AuthMethod == "api_key" {
+			return probeAuthFailed
+		}
+		if strings.TrimSpace(status.Email) == "" {
+			return probeUnavailable
+		}
+		if !strings.EqualFold(status.Email, a.Emails[key]) {
+			return probeAuthFailed
+		}
+	}
+	if code != 0 {
+		return probeUnavailable
+	}
+	return probeOK
 }
 
 func (a *GrokAdapter) Probe(ctx context.Context, key string) bool {
@@ -235,4 +497,4 @@ func (a *GrokAdapter) Probe(ctx context.Context, key string) bool {
 	return a.probeNative(ctx, b)
 }
 
-var _ io.Writer = (*boundedProbe)(nil)
+var _ io.Writer = (*probeCapture)(nil)

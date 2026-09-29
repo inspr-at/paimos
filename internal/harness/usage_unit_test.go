@@ -25,6 +25,11 @@ func TestUsageExactCost(t *testing.T) {
 			if got == nil || *got != tc.want {
 				t.Fatalf("cost %v, want %s", got, tc.want)
 			}
+			reason := int64(20)
+			u.ReasoningTokens = &reason
+			if again := estimateUsageCost(u, p); again == nil || *again != *got {
+				t.Fatal("reasoning changed the estimate")
+			}
 			u.CachedInputTokens = nil
 			if estimateUsageCost(u, p) != nil {
 				t.Fatal("unknown cache produced a cost")
@@ -50,7 +55,7 @@ func TestUsageRateValidation(t *testing.T) {
 }
 
 func TestUsageTransition(t *testing.T) {
-	old := SessionModelUsage{Sequence: 3, InputTokens: usagePtr(int64(100)), OutputTokens: usagePtr(int64(20)), CachedInputTokens: usagePtr(int64(40)), Provisional: true, BillingMode: "unknown"}
+	old := SessionModelUsage{Sequence: 3, InputTokens: usagePtr(int64(100)), OutputTokens: usagePtr(int64(20)), CachedInputTokens: usagePtr(int64(40)), ReasoningTokens: usagePtr(int64(4)), Provisional: true, BillingMode: "unknown"}
 	for _, tc := range []struct {
 		name   string
 		change func(*SessionModelUsage)
@@ -65,6 +70,9 @@ func TestUsageTransition(t *testing.T) {
 		{"cache decreases", func(n *SessionModelUsage) { n.CachedInputTokens = usagePtr(int64(39)) }, false},
 		{"uncached decreases", func(n *SessionModelUsage) { n.CachedInputTokens = usagePtr(int64(41)) }, false},
 		{"known becomes unknown", func(n *SessionModelUsage) { n.OutputTokens = nil }, false},
+		{"reasoning decreases", func(n *SessionModelUsage) { n.ReasoningTokens = usagePtr(int64(3)) }, false},
+		{"reasoning becomes unknown", func(n *SessionModelUsage) { n.ReasoningTokens = nil }, false},
+		{"reasoning grows", func(n *SessionModelUsage) { n.ReasoningTokens = usagePtr(int64(5)) }, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			next := old
@@ -84,6 +92,12 @@ func TestUsageTransition(t *testing.T) {
 	next.AccountLabel = usagePtr("different")
 	if usageTransition(old, next) == nil {
 		t.Fatal("final metadata changed")
+	}
+	next = old
+	next.Sequence++
+	next.ReasoningTokens = usagePtr(int64(5))
+	if usageTransition(old, next) == nil {
+		t.Fatal("final reasoning changed")
 	}
 	next = old
 	next.Sequence++

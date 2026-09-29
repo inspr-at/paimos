@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -206,7 +207,7 @@ func concurrentIndex(body string, stmts []string) (string, string, error) {
 		return "", "", nil
 	}
 	if len(stmts) == 1 {
-		pattern := `^CREATE INDEX CONCURRENTLY ([a-z_][a-z0-9_]*) ON ([a-z_][a-z0-9_]*)\s*\(`
+		pattern := `^CREATE INDEX CONCURRENTLY (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*) ON ([a-z_][a-z0-9_]*)\s*\(`
 		if match := regexp.MustCompile(pattern).FindStringSubmatch(stmts[0]); match != nil {
 			return match[1], match[2], nil
 		}
@@ -215,6 +216,23 @@ func concurrentIndex(body string, stmts []string) (string, string, error) {
 }
 
 func applyConcurrentIndex(ctx context.Context, conn *pgxpool.Conn, name, stmt, index, table string) error {
+	// SET LOCAL cannot cover nontransactional DDL. Bound lock acquisition on
+	// this connection, then restore its previous setting even after cancellation.
+	var lockTimeout string
+	if err := conn.QueryRow(ctx, `SHOW lock_timeout`).Scan(&lockTimeout); err != nil {
+		return fmt.Errorf("read lock timeout for %s: %w", name, err)
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := conn.Exec(cleanup, `SELECT set_config('lock_timeout', $1, false)`, lockTimeout); err != nil {
+			// Never return a connection with a changed setting to the pool.
+			_ = conn.Conn().Close(cleanup)
+		}
+	}()
+	if _, err := conn.Exec(ctx, `SET lock_timeout = '5s'`); err != nil {
+		return fmt.Errorf("set lock timeout for %s: %w", name, err)
+	}
 	// The migration advisory lock remains held on this connection. A crash can
 	// leave either a valid index before recording, or an invalid partial build.
 	// Reuse only a valid index on the expected table; rebuild an invalid one.
@@ -239,6 +257,15 @@ func applyConcurrentIndex(ctx context.Context, conn *pgxpool.Conn, name, stmt, i
 	if !valid {
 		if _, err := conn.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("migrate %s: %w", name, err)
+		}
+		// IF NOT EXISTS may also skip a conflicting non-index relation. Never
+		// record a skipped or incomplete build as a successful migration.
+		if err := conn.QueryRow(ctx, `SELECT indisvalid AND indrelid=$2::regclass
+			FROM pg_index WHERE indexrelid=to_regclass($1)`, index, table).Scan(&valid); err != nil {
+			return fmt.Errorf("verify %s: %w", name, err)
+		}
+		if !valid {
+			return fmt.Errorf("verify %s: index %s is not valid on %s", name, index, table)
 		}
 	}
 	if _, err := conn.Exec(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, name); err != nil {

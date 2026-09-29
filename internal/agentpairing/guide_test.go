@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/version"
 )
 
 func TestNixGuideBelongsToDeploymentOnly(t *testing.T) {
@@ -71,5 +72,46 @@ func TestNixGuideBelongsToDeploymentOnly(t *testing.T) {
 				t.Fatal("guide accepted a configuration write")
 			}
 		})
+	}
+}
+
+func TestGuideCommandsHaveNoPlaceholders(t *testing.T) {
+	old := version.Version
+	version.Version = "260929113854.0.0"
+	t.Cleanup(func() { version.Version = old })
+	mux := http.NewServeMux()
+	agentpairing.New(nil, origin, "tenant", nixGuideFixture()).Mount(mux)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/api/agent-pairing/guide", nil)
+	r.Host = "attacker.invalid"
+	mux.ServeHTTP(w, r)
+	var guide struct {
+		Pair    string                       `json:"setup_command"`
+		Brew    string                       `json:"homebrew_command"`
+		Targets []agentpairing.InstallTarget `json:"install_targets"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &guide) != nil {
+		t.Fatal("guide unavailable")
+	}
+	want := "aeon-agentd pair --url '" + origin + "'"
+	if guide.Pair != want || guide.Brew != "brew install inspr-at/tap/aeon-agentd\n"+want || len(guide.Targets) != 4 {
+		t.Fatal("guide commands differ from instance")
+	}
+	for _, target := range guide.Targets {
+		if strings.Contains(target.Command, "<verified") || strings.Contains(target.Command, "<absolute") {
+			t.Fatal("installer has placeholders")
+		}
+	}
+	html := httptest.NewRecorder()
+	agentpairing.GuidePage(http.NotFoundHandler(), nil, origin, nixGuideFixture()).ServeHTTP(html, httptest.NewRequest("GET", "/agents/register-agent", nil))
+	for _, forbidden := range []string{"placeholder", "&lt;verified", "attacker.invalid", "Install only the matching verified release"} {
+		if strings.Contains(html.Body.String(), forbidden) {
+			t.Fatalf("HTML includes %s", forbidden)
+		}
+	}
+	for _, required := range []string{"brew install inspr-at/tap/aeon-agentd", "aeon-agentd disconnect", "brew uninstall aeon-agentd", "~/.local/bin", "Nix / Home Manager", "tap’s current signed release", "helper/instance version mismatch", "does not drain or restart", "verify Touch ID on the new daemon"} {
+		if !strings.Contains(html.Body.String(), required) {
+			t.Fatalf("HTML missing %s", required)
+		}
 	}
 }

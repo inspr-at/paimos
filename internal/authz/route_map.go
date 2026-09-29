@@ -17,6 +17,7 @@ const PublicRoute = "public"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/reparent":              "harness.write",
 	"GET /api/me/security/session-watching":                                             "profile.read",
 	"PUT /api/me/security/session-watching":                                             "profile.write",
 	"POST /api/agent-pairing/attach":                                                    "harness.worker",
@@ -35,9 +36,19 @@ var RoutePermissions = map[string]string{
 	"GET /api/rules/sets/{setId}/versions":                                              "rules.read",
 	"GET /api/rules/sets/{setId}/versions/{version}":                                    "rules.read",
 	"GET /api/rules/merged":                                                             "rules.read",
+	"GET /api/rules/channels":                                                           "rules.read",
 	"GET /api/rules/comparisons":                                                        "rules.read",
 	"POST /api/rules/comparisons":                                                       "rules.write",
+	"GET /api/rules/explained":                                                          "rules.read",
+	"PUT /api/rules/sets/{setId}/tldr":                                                  "rules.write",
+	"GET /api/rules/budget":                                                             "rules.read",
+	"PUT /api/rules/budget":                                                             "settings.manage",
 	"POST /api/rules/publish":                                                           "rules.publish",
+	"GET /api/rules/doctrine":                                                           "rules.read",
+	"POST /api/rules/doctrine/sources":                                                  "settings.manage",
+	"PUT /api/rules/doctrine/sources/{sourceId}":                                        "settings.manage",
+	"DELETE /api/rules/doctrine/sources/{sourceId}":                                     "settings.manage",
+	"POST /api/rules/doctrine/sources/{sourceId}/index":                                 "settings.manage",
 	"GET /api/agent-pairing/guide":                                                      "public",
 	"POST /api/agent-pairing/device":                                                    "public",
 	"POST /api/agent-pairing/redeem":                                                    "public",
@@ -52,6 +63,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/agent-pairing/self":                                                       "run.claim",
 	"POST /api/agent-pairing/self/disconnect":                                           "run.claim",
 
+	"GET /api/agent-keys/{id}/scopes":                                        "keys.manage",
+	"PATCH /api/agent-keys/{id}/scopes":                                      "keys.manage",
 	"DELETE /api/agent-keys/{id}":                                            "keys.manage",
 	"DELETE /api/members/invites/{id}":                                       "members.manage",
 	"DELETE /api/members/{principal_id}/aliases/{from_principal_id}":         "members.manage",
@@ -116,6 +129,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/kinds/{kindId}":                                                "nodes.read",
 	"GET /api/knowledge":                                                     "knowledge.read",
 	"GET /api/knowledge/graph":                                               "knowledge.read",
+	"GET /api/knowledge/learnings":                                           "knowledge.read",
 	"GET /api/knowledge/resolve":                                             "knowledge.read",
 	"GET /api/knowledge/{id}":                                                "knowledge.read",
 	"GET /api/me":                                                            "profile.read|profile.portal_read",
@@ -126,6 +140,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/models":                                                        "models.read",
 	"GET /api/models/resolve":                                                "models.read",
 	"GET /api/node-keys/{key}":                                               "nodes.read",
+	"GET /api/outcomes":                                                      "outcome.read",
 	"GET /api/nodes":                                                         "nodes.read",
 	"GET /api/nodes/lookup":                                                  "nodes.read",
 	"GET /api/nodes/tree":                                                    "nodes.read",
@@ -144,8 +159,17 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/harness-sessions":                         "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/orchestrator":            "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}":             "harness.read",
+	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/lookup":      "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker": "harness.read",
 	"GET /api/inbox/message-status":                                          "inbox.receipt",
+	"POST /api/agent-accounts/{accountId}/capacity/approve":                  "account.manage",
+	"GET /api/agent-accounts/capacity":                                       "account.read",
+	"GET /api/agent-accounts/{accountId}/readings":                           "account.read|account.probe", // Handler requires read for people, probe + ownership for agents.
+	"POST /api/agent-accounts/{accountId}/readings":                          "account.probe",
+	"POST /api/agent-accounts/capacity/preview":                              "account.read",
+	"GET /api/agent-accounts/capacity/schedule":                              "account.read",
+	"PUT /api/agent-accounts/capacity/schedule":                              "account.manage",
+	"GET /api/inbox/feedback-recipient":                                      "inbox.send",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}": "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/recovery":             "harness.read",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/remove":              "harness.read",
@@ -194,11 +218,13 @@ var RoutePermissions = map[string]string{
 	"GET /api/relations":                                                              "relations.read",
 	"GET /api/releases":                                                               "releases.read",
 	"GET /api/releases/{version}":                                                     "releases.read",
-	"GET /api/roles":                                                                  "roles.read",
-	"GET /api/runs":                                                                   "run.read",
-	"GET /api/runs/queued":                                                            "run.read",
-	"GET /api/runs/{runId}":                                                           "run.read",
-	"GET /api/search":                                                                 "search.read",
+	"PUT /api/releases/{version}/presentation":                                        "releases.deploy",
+	"DELETE /api/releases/{version}/presentation":                                     "releases.deploy",
+	"GET /api/roles":        "roles.read",
+	"GET /api/runs":         "run.read",
+	"GET /api/runs/queued":  "run.read",
+	"GET /api/runs/{runId}": "run.read",
+	"GET /api/search":       "search.read",
 	// Readers, or the routed plugin agent holding that handoff's operation scope,
 	// can inspect attempt, supersession and current authority on the existing route.
 	"GET /api/stage-handoffs/{handoffId}":                                                       "stage_handoffs.read|stage.prepare|stage.deploy|stage.verify|stage.apply",
@@ -254,6 +280,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/agent-accounts/{accountId}/probe":                                                "account.probe",
 	"POST /api/agent-accounts/{accountId}/windows":                                              "account.manage",
 	"POST /api/agent-keys":                                                                      "keys.manage",
+	"POST /api/members/agents":                                                                  "keys.manage",
 	"POST /api/members/invites":                                                                 "members.manage",
 	"POST /api/members/invites/{id}/provision":                                                  "members.manage",
 	"POST /api/members/{principal_id}/aliases":                                                  "members.manage",
@@ -278,9 +305,13 @@ var RoutePermissions = map[string]string{
 	"POST /api/events/{eventId}/undo":                                                           "events.undo",
 	"POST /api/inbox/messages":                                                                  "inbox.send",
 	"POST /api/inbox/messages/{messageId}/ack":                                                  "inbox.send",
+	"POST /api/inbox/session-binding":                                                           "inbox.send",
 	"POST /api/inbox/targets":                                                                   "inbox.send|inbox.manage",
 	"POST /api/kinds":                                                                           "kinds.manage",
 	"POST /api/knowledge":                                                                       "knowledge.write",
+	"POST /api/knowledge/learnings/{learningId}/accept":                                         "knowledge.write",
+	"POST /api/knowledge/learnings/{learningId}/dismiss":                                        "knowledge.write",
+	"POST /api/knowledge/learnings/{learningId}/draft":                                          "knowledge.write",
 	"POST /api/me/avatar":                                                                       "profile.write|profile.portal_write",
 	"GET /api/model-prices":                                                                     "harness.read",
 	"POST /api/model-prices":                                                                    "models.manage",
@@ -292,6 +323,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts":                "harness.worker",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/usage":                         "harness.worker",
 	"POST /api/models":                                                                          "models.manage",
+	"POST /api/outcomes":                                                                        "outcome.write",
 	"POST /api/nodes":                                                                           "nodes.write",
 	"POST /api/nodes/bulk":                                                                      "nodes.write",
 	"POST /api/portal/wishes/{wishId}/hide":                                                     "settings.manage",
@@ -407,6 +439,7 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	if declaration == PublicRoute {
 		return nil
 	}
+	var denialErr error = ErrForbidden
 	for _, permission := range strings.Split(declaration, "|") {
 		err := Require(ctx, permission, scope)
 		if err == nil {
@@ -415,6 +448,12 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 		if !errors.Is(err, ErrForbidden) {
 			return err
 		}
+		// Prefer a missing key scope only after this route alternative's role
+		// authority passed; otherwise keep the first denial.
+		var d *denial
+		if denialErr == ErrForbidden || errors.As(err, &d) && d.reason == "missing_key_scope" {
+			denialErr = err
+		}
 	}
-	return ErrForbidden
+	return denialErr
 }

@@ -22,6 +22,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -119,7 +120,7 @@ func (w *batchWorld) set(p tenant.Principal, l Layer, name string, rules ...Rule
 	if err := json.Unmarshal(w.call(p, "POST", "/api/rules/sets", map[string]any{"layer_id": l.ID, "name": name}, 200), &s); err != nil {
 		w.t.Fatal(err)
 	}
-	if err := json.Unmarshal(w.call(p, "PUT", "/api/rules/sets/"+s.ID+"/draft", draftInput{1, name, rules}, 200), &s); err != nil {
+	if err := json.Unmarshal(w.call(p, "PUT", "/api/rules/sets/"+s.ID+"/draft", draftInput{ExpectedRevision: 1, Name: name, Rules: rules}, 200), &s); err != nil {
 		w.t.Fatal(err)
 	}
 	return s
@@ -127,6 +128,23 @@ func (w *batchWorld) set(p tenant.Principal, l Layer, name string, rules ...Rule
 func (w *batchWorld) publish(p tenant.Principal, s Set, version string) {
 	w.t.Helper()
 	w.call(p, "POST", "/api/rules/sets/"+s.ID+"/publish", map[string]any{"expected_revision": s.Revision, "version": version}, 200)
+}
+
+// publishUnchecked writes a version without the budget check that every
+// publication route runs, to seed a file that is already oversized.
+func (w *batchWorld) publishUnchecked(p tenant.Principal, s Set, version string) {
+	w.t.Helper()
+	ctx := w.t.Context()
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), w.d.App, w.tid, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.rules_access','on',true),set_config('aeon.rules_owner',$1,true),set_config('aeon.rules_projects',$2,true),set_config('aeon.visible_projects','*',true),set_config('aeon.rules_write','on',true)`, p.ID, "{"+w.project+"}"); err != nil {
+			return err
+		}
+		_, err := publishSet(ctx, tx, p, s, s.Revision, version, "")
+		return err
+	})
+	if err != nil {
+		w.t.Fatal(err)
+	}
 }
 func (w *batchWorld) events(where string, args ...any) int {
 	w.t.Helper()
@@ -404,7 +422,7 @@ func (w *batchWorld) refusedOwn(admin tenant.Principal, label string, s Set) {
 	w.t.Helper()
 	body := w.call(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")), 422)
 	var e Error
-	if err := json.Unmarshal(body, &e); err != nil || e.Code != "rules_budget_exceeded" || e.ActualBytes <= MaxBytes || e.MaxBytes != MaxBytes {
+	if err := json.Unmarshal(body, &e); err != nil || e.Code != "rules_budget_exceeded" || e.ActualBytes <= LegacyMaxBytes || e.MaxBytes != LegacyMaxBytes {
 		w.t.Fatalf("%s: %s", label, body)
 	}
 	noContent(w.t, label, body)
@@ -501,9 +519,10 @@ func TestBatchBudgetKeepsOtherOwnersPrivate(t *testing.T) {
 	w.publish(colleague, w.set(colleague, theirs, "Helper", bulky("agent", 2)...), "260928090005.0.0")
 	w.refusedHidden(admin, "another owner's agent", w.set(admin, company, "Three", bulky("companya", 6)...))
 
-	// Unrelated: the colleague's own file is oversized already (single publish
-	// does not check the budget), yet the admin's person rules do not touch it.
-	w.publish(colleague, w.set(colleague, private, "More", bulky("more", 8)...), "260928090006.0.0")
+	// Unrelated: the colleague's own file is oversized already (seeded past the
+	// budget check, like data from before it), yet the admin's person rules do
+	// not touch it.
+	w.publishUnchecked(colleague, w.set(colleague, private, "More", bulky("more", 8)...), "260928090006.0.0")
 	own := w.layer(admin, Scope{Layer: "person", OwnerID: admin.ID})
 	w.call(admin, "POST", "/api/rules/publish", batch("", item(w.set(admin, own, "Pacing", testRule("pacing", "One step at a time.")), "auto")), 200)
 	// A company rule touches everyone's file, so it is refused, generically.
@@ -543,7 +562,7 @@ func TestBudgetCheckRestoresVisibilityInTheTransaction(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err = budgetCheck(t.Context(), tx, admin, admin.ID, company, time.Now()); err != nil {
+		if _, err = budgetCheck(t.Context(), tx, admin, admin.ID, company, time.Now(), DefaultBudget()); err != nil {
 			return err
 		}
 		var owner, seenProjects string
@@ -799,7 +818,7 @@ func TestBudgetCapFitsTheDeadline(t *testing.T) {
 	c := testContext()
 	c.AgentID = ""
 	render := func() {
-		if _, err := merge(c, store, time.Now(), true, nil); err != nil {
+		if _, err := merge(c, store, time.Now(), true, nil, DefaultBudget(), doctrine.Catalog{}); err != nil {
 			var e *Error
 			if !errors.As(err, &e) || e.Code != "floor_missing" && e.Code != "rules_budget_exceeded" {
 				t.Fatal(err)
@@ -849,7 +868,7 @@ func BenchmarkBudgetCheck(b *testing.B) {
 				return err
 			}
 			ctx := withDeadline(b.Context(), time.Now().Add(time.Minute))
-			_, err = budgetCheck(ctx, tx, admin, admin.ID, sets[:1], time.Now())
+			_, err = budgetCheck(ctx, tx, admin, admin.ID, sets[:1], time.Now(), DefaultBudget())
 			return err
 		})
 		if err != nil {
@@ -1147,7 +1166,7 @@ func TestLostAcknowledgementOfOtherWritesIsUnknown(t *testing.T) {
 		}
 		unknownAnswer(t, label, body, wording)
 	}
-	lose("PUT", "/api/rules/sets/"+s.ID+"/draft", draftInput{s.Revision, "Short", []Rule{testRule("short", "A shorter rule.")}}, unknownChange, "draft")
+	lose("PUT", "/api/rules/sets/"+s.ID+"/draft", draftInput{ExpectedRevision: s.Revision, Name: "Short", Rules: []Rule{testRule("short", "A shorter rule.")}}, unknownChange, "draft")
 	lose("POST", "/api/rules/sets/"+s.ID+"/publish", map[string]any{"expected_revision": s.Revision + 1, "version": "261001000000.0.0"}, unknownChange, "single publish")
 	lose("POST", "/api/rules/sets/"+s.ID+"/restore", map[string]any{"expected_revision": s.Revision + 1, "version": "261001000000.0.0", "new_version": "261001000001.0.0"}, unknownChange, "restore")
 	lose("POST", "/api/rules/sets", map[string]any{"layer_id": company.ID, "name": "Maybe"}, unknownSet, "set creation")

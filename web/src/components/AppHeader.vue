@@ -11,20 +11,19 @@ import { useBusiness } from '../stores/business'
 import { useCustomers } from '../stores/customers'
 import { useQuotes } from '../stores/quotes'
 import { useProfile } from '../stores/profile'
-import Avatar from './Avatar.vue'
-import { dark, setTheme, themeChoice, toggleTheme, type ThemeChoice } from '../lib/theme'
+import { dark, toggleTheme } from '../lib/theme'
 import { can } from '../lib/authz'
 import { command, consume, run } from '../lib/commands'
 import { fatal } from '../lib/fatal'
-import { accountEmail, accountName } from '../lib/api'
 import { usePoller } from '../lib/usePolledData'
-import { placeOf, sequence, visiblePlaces, type PlaceId } from '../lib/places'
+import { placeOf, releaseChordOpen, sequence, visiblePlaces, type PlaceId } from '../lib/places'
 import { SETTINGS_SECTIONS, sectionOf } from '../lib/settings'
 import AppIcon from './AppIcon.vue'
 import KeyCap from './KeyCap.vue'
 import BizIcon from './business/BizIcon.vue'
 import CommandPalette from './CommandPalette.vue'
-import VersionDisplay from './VersionDisplay.vue'
+import AccountMenu from './header/AccountMenu.vue'
+import AppMenu from './header/AppMenu.vue'
 
 const session = useSession()
 const projects = useProjects()
@@ -35,17 +34,8 @@ const quotes = useQuotes()
 const profile = useProfile()
 const route = useRoute()
 const router = useRouter()
-const open = ref(false)
-const busy = ref(false)
-const error = ref('')
-const account = ref<HTMLElement>()
-const trigger = ref<HTMLButtonElement>()
-const panel = ref<HTMLElement>()
 const palette = ref<InstanceType<typeof CommandPalette>>()
-const themes: { value: ThemeChoice; label: string; icon: 'sun' | 'moon' | 'monitor' }[] = [{ value: 'light', label: 'Light', icon: 'sun' }, { value: 'dark', label: 'Dark', icon: 'moon' }, { value: 'system', label: 'System', icon: 'monitor' }]
 const writable = computed(() => can('nodes.write', project.value?.id))
-const name = computed(() => session.identity ? accountName(session.identity) : '')
-const email = computed(() => session.identity ? accountEmail(session.identity) : '')
 
 // The legacy workspace view keeps its own search; everywhere else search is global.
 const globalSearch = computed(() => !!session.identity)
@@ -82,52 +72,7 @@ const profilesPage = computed(() => route.path.startsWith('/settings/business/pr
 const settingsSection = computed(() => route.path.startsWith('/settings') ? SETTINGS_SECTIONS.find(section => section.id === (profilesPage.value ? 'business' : sectionOf(route.params.section))) ?? null : null)
 const placeLabel = (id: PlaceId) => id === 'agents' && agents.needsCount ? `Agents, ${agents.needsCount} ${agents.needsCount === 1 ? 'needs' : 'need'} you` : undefined
 
-async function toggleMenu() {
-  open.value = !open.value
-  if (open.value) { await nextTick(); focusTheme() }
-}
-function focusTheme() { panel.value?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus() }
-// Up and down walk the menu's rows (the theme group is one stop); left and right choose a theme.
-function menuKeys(event: KeyboardEvent) {
-  // Keys pressed inside the menu belong to it, not to the page underneath (Escape and ⌘K still pass).
-  if (event.key !== 'Escape' && !event.metaKey && !event.ctrlKey) event.stopPropagation()
-  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
-  const items = [...(panel.value?.querySelectorAll<HTMLElement>('button:not(:disabled):not([role="radio"][aria-checked="false"]), [role="button"]') ?? [])]
-  const index = items.indexOf(document.activeElement as HTMLElement)
-  event.preventDefault()
-  items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
-}
-function themeKeys(event: KeyboardEvent) {
-  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-  event.preventDefault()
-  const index = themes.findIndex(theme => theme.value === themeChoice.value)
-  setTheme(themes[(index + (event.key === 'ArrowRight' ? 1 : -1) + themes.length) % themes.length].value)
-  void nextTick(focusTheme)
-}
-function showShortcuts() { closeMenu(); run({ name: 'shortcuts' }) }
-function showReleases() { closeMenu(); run({ name: 'releases' }) }
-async function showSettings() { closeMenu(); await router.push('/settings') }
 watch(command, value => { if (value?.command.name === 'palette') { consume(); palette.value?.open() } })
-function closeMenu(restoreFocus = false) {
-  open.value = false
-  if (restoreFocus) trigger.value?.focus()
-}
-function outside(event: PointerEvent) {
-  if (event.target instanceof Node && !account.value?.contains(event.target)) closeMenu()
-}
-function focusOut(event: FocusEvent) {
-  if (event.relatedTarget instanceof Node && !account.value?.contains(event.relatedTarget)) closeMenu()
-}
-async function signOut() {
-  busy.value = true
-  error.value = ''
-  try {
-    await session.signOut()
-    closeMenu()
-    await router.replace('/signin')
-  } catch { error.value = 'Sign out didn’t complete. Please try again.' }
-  finally { busy.value = false }
-}
 function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
@@ -142,14 +87,43 @@ function shortcut(event: KeyboardEvent) {
 }
 // g p · g a · g b: go to a place. Listened for first (capture), so the second key
 // never reaches the page (p is Priority on an open ticket, a approves on Agents).
+// g on an open ticket also opens the release menu; that one layer must not swallow
+// the place key that follows. Any other menu, dialog or focused field cancels the
+// arm, and an expired arm must not re-arm inside one.
 const nextKey = sequence()
+let armedAt: number | null = null
+function layerLabels(): string[] {
+  return [...document.querySelectorAll('dialog[open], .floating')].map(layer => layer.getAttribute('aria-label') ?? '')
+}
+function releaseFromChord(now = Date.now()): Element | null {
+  if (!releaseChordOpen(layerLabels(), armedAt, now)) return null
+  return document.querySelector('dialog[open], .floating')
+}
+function disarmChord(now = Date.now()) {
+  if (armedAt === null) return
+  nextKey('\0', now, places.value)
+  armedAt = null
+}
 function placeKeys(event: KeyboardEvent) {
-  if (!session.identity || event.metaKey || event.ctrlKey || event.altKey || event.repeat || typing(event.target) || document.querySelector('dialog[open], .floating')) return
-  const hit = nextKey(event.key, Date.now(), places.value)
+  if (!session.identity || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return
+  const now = Date.now()
+  if (typing(event.target) || (document.querySelector('dialog[open], .floating') && !releaseFromChord(now))) {
+    disarmChord(now)
+    return
+  }
+  const hit = nextKey(event.key, now, places.value)
+  armedAt = hit === 'armed' ? now : null
   if (!hit || hit === 'armed') return
   event.preventDefault(); event.stopImmediatePropagation()
   if (route.path !== hit.to) void router.push(hit.to)
 }
+function chordPointer(event: PointerEvent) {
+  if (armedAt === null) return
+  const layer = releaseFromChord()
+  if (layer && event.target instanceof Node && layer.contains(event.target)) return
+  disarmChord()
+}
+function chordFocus(event: FocusEvent) { if (typing(event.target)) disarmChord() }
 // The Agents badge: permission requests and held action requests, checked each minute.
 const needsPoll = usePoller(() => agents.loadNeeds(true), 60_000, { enabled: () => !!session.identity && !agentsPage.value, invalidate: agents.invalidatePolls })
 watch(() => session.identity?.principal.id, id => {
@@ -158,15 +132,55 @@ watch(() => session.identity?.principal.id, id => {
   void agents.loadNeeds(true)
   void business.loadPlugins(true)
 }, { immediate: true })
+// Phones: the moon steps aside only when the breadcrumb's page (a ticket key) would
+// otherwise clip, and comes back as soon as the free room holds it (AEON-312). The
+// decision is measured, never guessed from the number of places; its quick toggle
+// then leads the avatar sheet. Room within a tenth of a pixel counts as enough, so
+// subpixel noise never keeps it away; should its return clip the key anyway, it
+// stays away at that width until the width, the page or the fonts change.
+const header = ref<HTMLElement>()
+const moonAway = ref(false)
+const narrow = window.matchMedia('(max-width: 600px)')
+let returnedAt = -1
+let heldAt = -1
+function fitMoon() {
+  const el = header.value
+  if (!el || !narrow.matches) { moonAway.value = false; return }
+  const crumb = el.querySelector<HTMLElement>('.crumbs > .crumb.current')
+  const overflow = crumb ? crumb.scrollWidth - crumb.clientWidth : 0
+  const width = el.clientWidth
+  if (!moonAway.value) {
+    if (overflow > 0.5) { moonAway.value = true; if (returnedAt === width) heldAt = width }
+    return
+  }
+  if (heldAt === width) return
+  const spacer = el.querySelector<HTMLElement>('.spacer')
+  const gap = parseFloat(getComputedStyle(el).columnGap) || 0
+  if (spacer && spacer.getBoundingClientRect().width - Math.max(0, overflow) >= 44 + gap - 0.1) { moonAway.value = false; returnedAt = width }
+}
+let fitFrame = 0
+function refit() { cancelAnimationFrame(fitFrame); fitFrame = requestAnimationFrame(() => { fitMoon(); fitFrame = requestAnimationFrame(fitMoon) }) }
+function remeasure() { heldAt = -1; refit() }
+const resized = new ResizeObserver(refit)
+const crumbsChanged = new MutationObserver(refit)
+// A web font swapping in changes the room without resizing the header.
+const fonts = 'fonts' in document ? document.fonts : undefined
+watch([() => route.fullPath, () => places.value.length, navReady], () => { heldAt = -1; void nextTick(refit) })
 onMounted(() => {
-  document.addEventListener('pointerdown', outside); window.addEventListener('keydown', shortcut); window.addEventListener('keydown', placeKeys, true)
+  if (header.value) { resized.observe(header.value); crumbsChanged.observe(header.value, { childList: true, subtree: true, characterData: true }) }
+  narrow.addEventListener('change', remeasure)
+  fonts?.addEventListener('loadingdone', remeasure)
+  void fonts?.ready.then(remeasure)
+  refit()
+  window.addEventListener('keydown', shortcut); window.addEventListener('keydown', placeKeys, true)
+  window.addEventListener('pointerdown', chordPointer, true); window.addEventListener('focusin', chordFocus, true)
   needsPoll.start()
 })
-onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); needsPoll.stop() })
+onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop() })
 </script>
 
 <template>
-  <header class="app-header">
+  <header ref="header" class="app-header">
     <RouterLink class="lockup" to="/" :aria-label="`${brand.wordmark} home`" :class="{ compact: !!projectKey || !!pageTitle || !!settingsSection || businessCrumbs.length > 0 }">
       <span class="mark-backing"><img :src="mark" width="26" height="26" alt="" /></span>
       <span class="wordmark">{{ brand.product }}<sup>{{ brand.release_name }}</sup></span>
@@ -233,36 +247,12 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
       <span class="pill-text">Search</span>
       <span class="pill-keys"><KeyCap k="mod" /><KeyCap k="K" /></span>
     </button>
-    <button class="icon-btn header-btn theme-btn" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme()">
+    <!-- Quick light or dark; the avatar menu has the full choice, System included. -->
+    <button class="icon-btn header-btn theme-btn" :class="{ away: moonAway }" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme()">
       <AppIcon :name="dark ? 'sun' : 'moon'" />
     </button>
-    <div v-if="session.identity" ref="account" class="account" @keydown.esc.stop.prevent="closeMenu(true)" @focusout="focusOut">
-      <button ref="trigger" class="avatar-btn header-btn" type="button" :aria-expanded="open" aria-controls="account-panel" :aria-label="`Account for ${name}`" @click="toggleMenu">
-        <Avatar :id="session.identity?.principal.id" :name="name" :size="34" />
-      </button>
-      <div v-if="open" id="account-panel" ref="panel" class="account-panel pop" role="dialog" aria-label="Account" @keydown="menuKeys">
-        <div class="who">
-          <Avatar :id="session.identity.principal.id" :name="name" :size="40" class="who-avatar" />
-          <div class="who-text">
-            <p class="account-name">{{ name }}</p>
-            <p v-if="email" class="account-email">{{ email }}</p>
-            <p class="account-tenant" title="Workspace"><AppIcon name="folder" :size="12" /><span class="sr-only">Workspace: </span>{{ session.identity.tenant.name }}</p>
-          </div>
-        </div>
-        <div class="menu-block">
-          <p class="eyebrow">Theme</p>
-          <div class="seg theme-seg" role="radiogroup" aria-label="Theme" @keydown="themeKeys">
-            <button v-for="option in themes" :key="option.value" type="button" role="radio" :aria-checked="themeChoice === option.value" :tabindex="themeChoice === option.value ? 0 : -1" @click="setTheme(option.value)"><AppIcon :name="option.icon" :size="13" />{{ option.label }}</button>
-          </div>
-        </div>
-        <button class="menu-row" type="button" @click="showSettings"><AppIcon name="gear" />Settings</button>
-        <button class="menu-row" type="button" @click="showReleases"><AppIcon name="history" />Release history</button>
-        <button class="menu-row" type="button" aria-keyshortcuts="?" @click="showShortcuts"><AppIcon name="keyboard" />Keyboard shortcuts<kbd class="keycap row-key" aria-hidden="true">?</kbd></button>
-        <button class="menu-row" type="button" :disabled="busy" @click="signOut"><AppIcon name="logout" />{{ busy ? 'Signing out…' : 'Sign out' }}</button>
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <div class="menu-version"><span class="eyebrow">{{ brand.wordmark }}</span><VersionDisplay /></div>
-      </div>
-    </div>
+    <AppMenu />
+    <AccountMenu />
     <CommandPalette v-if="globalSearch" ref="palette" :can-write="writable" />
   </header>
 </template>
@@ -316,7 +306,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .sep { color: var(--ink-3); font-weight: 300; font-size: 16px; }
 .mono-crumb { font: 500 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
 .spacer { flex: 1 1 0; min-width: 0; }
-.search-pill, .header-btn, .account { flex-shrink: 0; }
+.search-pill, .header-btn { flex-shrink: 0; }
 .needs-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--gold-2); color: #3a2804; font: 700 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface-raised); }
 .search-pill {
   display: inline-flex; align-items: center; gap: 9px; width: 240px; height: 34px; padding: 0 6px 0 12px; border: 1px solid var(--glass-edge); border-radius: 999px;
@@ -327,34 +317,6 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .search-pill:focus-visible { box-shadow: var(--focus-ring); }
 .pill-text { flex: 1; text-align: left; }
 .pill-keys { display: inline-flex; gap: 3px; }
-.account { position: relative; }
-.avatar-btn { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; background: transparent; }
-.avatar-btn :deep(.avatar) { box-shadow: 0 0 0 1px var(--glass-rim), 0 2px 6px rgba(32, 60, 61, .12); transition: box-shadow .15s ease; }
-.avatar-btn:hover :deep(.avatar), .avatar-btn[aria-expanded="true"] :deep(.avatar) { box-shadow: 0 0 0 1.5px var(--teal), 0 2px 8px rgba(32, 60, 61, .18); }
-.avatar-btn:active { filter: brightness(.96); }
-.avatar-btn:focus-visible { box-shadow: var(--focus-ring); }
-.account-panel { position: absolute; right: 0; top: 44px; width: min(300px, calc(100vw - 24px)); padding: 8px; }
-.who { display: flex; align-items: center; gap: 12px; padding: 10px 10px 12px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
-.who-avatar { flex-shrink: 0; }
-.who-text { min-width: 0; }
-.account-name { color: var(--ink); font-weight: 650; font-size: 14px; overflow-wrap: anywhere; }
-.account-email { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
-.account-tenant { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; padding: 2px 8px 2px 6px; border-radius: 999px; background: var(--code-bg); font-size: 11.5px; color: var(--ink-2); }
-.menu-block { display: grid; gap: 6px; padding: 8px 10px 10px; }
-.menu-block .eyebrow { margin: 0; }
-.theme-seg { display: grid; grid-template-columns: repeat(3, 1fr); }
-.theme-seg button { height: 30px; gap: 5px; padding: 0 6px; }
-.menu-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
-@media (max-width: 600px) { .menu-row { height: 44px; } }
-.menu-row svg { color: var(--ink-2); }
-@media (hover: hover) { .menu-row:hover:not(:disabled) { background: var(--row-hover); } }
-.menu-row:active:not(:disabled) { background: var(--row-selected); }
-.menu-row:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
-.row-key { margin-left: auto; }
-.error { margin: 8px 10px 4px; }
-.menu-version { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px; padding: 0 10px; border-top: 1px solid var(--line); }
-.menu-version .eyebrow { letter-spacing: .2em; }
-.menu-version .eyebrow { margin: 0; }
 /* Narrower desktops: the wordmark steps back on inner pages, then the place labels. */
 @media (max-width: 1180px) { .lockup.compact .wordmark { display: none; } }
 @media (max-width: 980px) {
@@ -366,7 +328,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 @media (max-width: 1100px) { .search-pill { width: 200px; } }
 @media (max-width: 900px) { .search-pill { width: 180px; } }
 @media (max-width: 600px) {
-  .app-header { gap: 6px; padding: 0 12px; }
+  .app-header { gap: 4px; padding: 0 10px; }
   .lockup { min-height: 44px; min-width: 44px; justify-content: center; }
   /* Signed in, the Projects place is home and the footer carries the name: the lockup steps aside for the places. */
   .app-header:has(.places) .lockup { display: none; }
@@ -390,8 +352,10 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
   .crumb-short { display: inline; }
   .search-pill { width: 44px; height: 44px; padding: 0; justify-content: center; }
   .pill-text, .pill-keys { display: none; }
-  .header-btn, .avatar-btn { width: 44px; height: 44px; }
-  /* The theme lives in the account menu on phones. */
-  .theme-btn { display: none; }
+  .app-header :deep(.header-btn) { width: 44px; height: 44px; }
 }
+/* The narrowest phones: round buttons sit close, as the places do, so a ticket
+   key keeps its room. The moon steps aside only when measured room runs out. */
+@media (max-width: 430px) { .app-header { gap: 2px; padding: 0 8px; } }
+@media (max-width: 600px) { .theme-btn.away { display: none; } }
 </style>

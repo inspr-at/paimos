@@ -319,25 +319,25 @@ func TestDashboardAggregatesVisibleSessionsOnly(t *testing.T) {
 	if page.Attribution != "lifetime_for_sessions_started_in_range" || page.TrendBasis != "session_started_utc_day" || page.ListPriceCurrency != "USD" || page.Truncated {
 		t.Fatalf("attribution %+v", page)
 	}
-	if page.Totals.Sessions != 5 || page.Totals.UsageRows != 5 || page.Totals.UnreportedSessions != 1 || page.Totals.TokensState != "partial" || page.Totals.CostState != "partial" || page.Totals.ProvisionalRows != 1 || page.Totals.ProvisionalSessions != 1 || page.Totals.CostUnknownRows != 3 {
+	if page.Totals.Sessions != 5 || page.Totals.UsageRows != 5 || page.Totals.UnreportedSessions != 1 || page.Totals.TokensState != "partial" || page.Totals.CostState != "partial" || page.Totals.ProvisionalRows != 1 || page.Totals.ProvisionalSessions != 1 || page.Totals.CostUnknownRows != 5 {
 		t.Fatalf("totals %+v", page.Totals)
 	}
 	if page.Totals.InputTokens == nil || *page.Totals.InputTokens != "1112" || page.Totals.InputKnownRows != 5 || page.Totals.InputUnknownRows != 1 || page.Totals.OutputTokens == nil || *page.Totals.OutputTokens != "427" || page.Totals.CachedInputTokens == nil || *page.Totals.CachedInputTokens != "52" || page.Totals.CachedInputKnownRows != 4 || page.Totals.CachedInputUnknownRows != 2 {
 		t.Fatalf("tokens %+v", page.Totals)
 	}
-	if usd(t, page.Totals.EstimatedCostUSD) != "1.500000000001" || page.Totals.CostKnownRows != 3 {
+	if usd(t, page.Totals.EstimatedCostUSD) != "0.000000000001" || page.Totals.CostKnownRows != 1 {
 		t.Fatalf("cost %+v", page.Totals)
 	}
 	if got := group(t, page.ByProject, "Visible project"); got.Sessions != 5 || got.Key != "VIS-1" {
 		t.Fatalf("project %+v", got)
 	}
-	if got := group(t, page.ByModel, "gpt-4.1"); got.Sessions != 3 || usd(t, got.EstimatedCostUSD) != "1.500000000001" || got.CostState != "known" {
+	if got := group(t, page.ByModel, "gpt-4.1"); got.Sessions != 3 || usd(t, got.EstimatedCostUSD) != "0.000000000001" || got.CostState != "partial" {
 		t.Fatalf("model %+v", got)
 	}
 	if got := group(t, page.ByModel, "Unreported"); got.Sessions != 1 || got.CostState != "unknown" || got.EstimatedCostUSD != nil {
 		t.Fatalf("unreported model %+v", got)
 	}
-	if got := group(t, page.BySubscription, "Codex Pro"); got.Sessions != 2 || got.BillingMode != "subscription" || usd(t, got.EstimatedCostUSD) != "1.500000000000" {
+	if got := group(t, page.BySubscription, "Codex Pro"); got.Sessions != 2 || got.BillingMode != "subscription" || got.EstimatedCostUSD != nil || got.CostState != "unknown" {
 		t.Fatalf("subscription %+v", got)
 	}
 	if got := group(t, page.BySubscription, "Claude Max"); got.Sessions != 1 || got.BillingMode != "subscription" || got.CostState != "unknown" || got.ProvisionalRows != 1 {
@@ -356,16 +356,28 @@ func TestDashboardAggregatesVisibleSessionsOnly(t *testing.T) {
 	if len(page.Trend) != 1 || page.Trend[0].Day != "2026-09-10" || page.Trend[0].Group.Sessions != 5 || page.Trend[0].Group.Label != "" {
 		t.Fatalf("trend %+v", page.Trend)
 	}
-	if page.TicketsCostUnknown != 1 || len(page.Tickets) != 2 {
+	if page.TicketsCostUnknown != 2 || len(page.Tickets) != 1 {
 		t.Fatalf("tickets %d unknown %d", len(page.Tickets), page.TicketsCostUnknown)
 	}
-	if page.Tickets[0].Key != "VIS-2" || page.Tickets[0].Sessions != 2 || usd(t, page.Tickets[0].EstimatedCostUSD) != "1.500000000000" || page.Tickets[0].CostState != "partial" || page.Tickets[1].Key != "VIS-3" || usd(t, page.Tickets[1].EstimatedCostUSD) != "0.000000000001" {
+	if page.Tickets[0].Key != "VIS-3" || page.Tickets[0].Sessions != 1 || usd(t, page.Tickets[0].EstimatedCostUSD) != "0.000000000001" {
 		t.Fatalf("rank %+v", page.Tickets)
 	}
-	for _, forbidden := range []string{"Hidden beacon", "HID-2", "Foreign spend", "FOR-2", "Foreign Sub", "ud1-opaque-key", "ud1-measured-key", "ud1-mixed-key", "Pacing window", "Measured window", "Mixed window", "session-model-decoy", "ghost-model", "session-account-decoy", "99.000000000000", "9.000000000000", "8.000000000000", "list_cost_micros", "covered"} {
+	for _, forbidden := range []string{"Hidden beacon", "HID-2", "Foreign spend", "FOR-2", "Foreign Sub", "ud1-opaque-key", "ud1-measured-key", "ud1-mixed-key", "Pacing window", "Measured window", "Mixed window", "session-account-decoy", "1.250000000000", "0.250000000000", "99.000000000000", "9.000000000000", "8.000000000000", "list_cost_micros", "covered"} {
 		if bytes.Contains([]byte(body), []byte(forbidden)) {
 			t.Fatalf("member response leaked %s", forbidden)
 		}
+	}
+	// Usage models come from usage rows only. The registered session model
+	// appears only in the work breakdown (AEON-301), which is about sessions.
+	for _, usage := range [][]usagedashboard.UsageGroup{page.ByModel, page.ByHarness, page.BySubscription, page.ByProject} {
+		for _, g := range usage {
+			if g.Label == "session-model-decoy" || g.Label == "ghost-model" {
+				t.Fatalf("usage breakdown used the session model: %+v", g)
+			}
+		}
+	}
+	if len(page.Work.ByModel) != 2 || page.Work.ByModel[0].Label != "session-model-decoy" || page.Work.ByModel[0].Sessions != 4 {
+		t.Fatalf("work models %+v", page.Work.ByModel)
 	}
 	if page.Allowance.State != "withheld" || len(page.Allowance.Windows) != 0 {
 		t.Fatalf("allowance %+v", page.Allowance)
@@ -380,7 +392,7 @@ func TestDashboardAggregatesVisibleSessionsOnly(t *testing.T) {
 	if code != 200 || !bytes.Contains([]byte(body), []byte("Hidden beacon")) || bytes.Contains([]byte(body), []byte("Foreign spend")) || bytes.Contains([]byte(body), []byte("ud1-opaque-key")) {
 		t.Fatalf("admin visibility %d %s", code, body)
 	}
-	if admin.Totals.Sessions != 6 || admin.Totals.InputTokens == nil || *admin.Totals.InputTokens != "1121" || usd(t, admin.Totals.EstimatedCostUSD) != "10.500000000001" {
+	if admin.Totals.Sessions != 6 || admin.Totals.InputTokens == nil || *admin.Totals.InputTokens != "1121" || usd(t, admin.Totals.EstimatedCostUSD) != "0.000000000001" || admin.Totals.CostKnownRows != 1 || admin.Totals.CostState != "partial" {
 		t.Fatalf("admin totals %+v", admin.Totals)
 	}
 	if admin.Allowance.State != "visible" || len(admin.Allowance.Windows) != 3 {
@@ -405,8 +417,13 @@ func TestDashboardAggregatesVisibleSessionsOnly(t *testing.T) {
 	if bytes.Count([]byte(body), []byte(`"used":null`)) < 2 || bytes.Contains([]byte(body), []byte(`"used":0`)) || bytes.Contains([]byte(body), []byte(`"hard_remaining":0`)) {
 		t.Fatalf("unknown allowance was zero or omitted: %s", body)
 	}
-	if admin.Tickets[0].Key != "HID-2" || usd(t, admin.Tickets[0].EstimatedCostUSD) != "9.000000000000" {
+	if len(admin.Tickets) != 1 || admin.Tickets[0].Key != "VIS-3" || usd(t, admin.Tickets[0].EstimatedCostUSD) != "0.000000000001" {
 		t.Fatalf("admin rank %+v", admin.Tickets)
+	}
+	for _, forbidden := range []string{"1.250000000000", "0.250000000000", "9.000000000000", "99.000000000000"} {
+		if bytes.Contains([]byte(body), []byte(forbidden)) {
+			t.Fatalf("admin response summed subscription estimate %s", forbidden)
+		}
 	}
 }
 
@@ -478,8 +495,19 @@ func TestDashboardRatesByVoteSnapshot(t *testing.T) {
 	if len(page.Ratings.ByHarness) != 1 || page.Ratings.ByHarness[0].Label != "codex" || page.Ratings.ByHarness[0].Votes != 2 || page.Ratings.ByHarness[0].Exceptions != 1 {
 		t.Fatalf("rating harness %+v", page.Ratings.ByHarness)
 	}
-	if strings.Contains(body, "vote-model") || strings.Contains(body, "session-model-decoy") {
-		t.Fatalf("rate followed a vote snapshot or the session model instead of the delivery: %s", body)
+	if strings.Contains(body, "vote-model") {
+		t.Fatalf("rate followed a vote snapshot instead of the delivery: %s", body)
+	}
+	// The registered session model is only a work group (AEON-301), never a rating or usage label.
+	for _, g := range append(append([]usagedashboard.RatingGroup{}, page.Ratings.ByModel...), page.Ratings.ByHarness...) {
+		if g.Label == "session-model-decoy" {
+			t.Fatalf("rate followed the session model instead of the delivery: %+v", g)
+		}
+	}
+	for _, g := range page.ByModel {
+		if g.Label == "session-model-decoy" {
+			t.Fatalf("usage model followed the session model: %+v", g)
+		}
 	}
 }
 

@@ -22,8 +22,15 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 )
+
+// CoordinatorPermissions is the CLI coordinator key ceiling (AEON-327).
+// Pairing does not mint it. models.read is safe on the key: the registry
+// holds no secrets. rules.read is on the ceiling only; authorization grants
+// it on projects the key can already read, not as a workspace permission.
+var CoordinatorPermissions = authz.CoordinatorKeyScopes
 
 const VerificationTask = "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."
 const VerificationSeconds = 60

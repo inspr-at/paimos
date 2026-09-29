@@ -3,6 +3,8 @@ import { test, expect, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 
 const canonical = '260923120000.0.0'
+// The shared renderer's accessible name: canonical version and its UTC date-time (INSPR-CalVer3).
+const versionName = `${canonical} · 2026-09-23 12:00:00 UTC`
 const identity = { principal: { id: 'person-1', name: 'Markus Barta', email: 'markus@barta.com' }, tenant: { id: 'tenant-1', name: 'INSPR Studio' } }
 const projects = [
   { id: 'p1', key: 'PRJ-1', title: 'Bakery pickup orders', state: 'active', open: 12, in_progress: 3, done: 20, total: 35, last_activity: '2026-09-23T10:00:00Z' },
@@ -71,7 +73,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         await expect(page.locator('h1')).toBeVisible()
         // Sign-in's card carries the copyable version; signed in, the footer bar's pill opens the release history.
         if (screen.startsWith('signin')) await expect(page.locator('footer [data-version-view="pretty"]')).toBeVisible()
-        else await expect(page.locator('footer.app-footer .version-pill .calendar-version[role="img"]')).toHaveAttribute('aria-label', canonical)
+        else await expect(page.locator('footer.app-footer .version-pill .calendar-version[role="img"]')).toHaveAttribute('aria-label', versionName)
         await page.evaluate(() => document.fonts.ready)
         await noOverflow(page)
         // Sign-in is a bare page: no header, the card carries brand, version and theme.
@@ -110,12 +112,12 @@ test('server-authorized email login and account logout use POST', async ({ page 
   await expect(page).toHaveURL('/')
   await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
   await page.getByRole('button', { name: 'Account for Markus Barta' }).click()
-  // Focus lands on the chosen theme; the account menu is a small dialog.
-  await expect(page.getByRole('radio', { name: 'System' })).toBeFocused()
+  // Focus lands on the first item of the account menu.
+  await expect(page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Personal settings' })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('button', { name: 'Account for Markus Barta' })).toBeFocused()
   await page.keyboard.press('Enter')
-  await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Sign out', exact: true }).click()
   await expect(page).toHaveURL('/signin')
   expect(calls).toContainEqual({ path: '/api/auth/dev-login', method: 'POST', body: JSON.stringify({ email: 'markus@barta.com' }) })
   expect(calls).toContainEqual({ path: '/api/auth/logout', method: 'POST', body: null })
@@ -200,7 +202,7 @@ test('sign-out then Back never restores a protected page from cache', async ({ p
   await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/agents')))
   await expect(page).toHaveURL('/agents')
   await page.getByRole('button', { name: 'Account for Markus Barta' }).click()
-  await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Sign out', exact: true }).click()
   await expect(page).toHaveURL(/\/signin/)
   await page.goBack()
   await expect(page).toHaveURL(/\/signin/)
@@ -223,7 +225,7 @@ test('failed sign-out retains identity and allows retry', async ({ page }) => {
   await mockAPI(page, { logoutFailure: true })
   await page.goto('/')
   await page.getByRole('button', { name: 'Account for Markus Barta' }).click()
-  await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Sign out', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('Sign out didn’t complete')
   await expect(page).toHaveURL('/')
 })
@@ -254,17 +256,25 @@ test('theme follows the OS and explicit choice wins without hover layout shift',
   expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim())).toBe('#f7f6f2')
 })
 
-test('version uses Pretty mode, keyboard reveal, exact clipboard and one request', async ({ page, context }) => {
+test('version uses six-segment Pretty, keyboard reveal, exact clipboard and one request', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const calls = await mockAPI(page, { signedIn: false })
   await page.goto('/signin')
-  const version = page.locator('footer').getByRole('button', { name: `Copy version ${canonical}` })
+  const version = page.locator('footer').getByRole('button', { name: `${versionName} — Copy version` })
   await expect(version).toHaveAttribute('data-version-view', 'pretty')
+  await expect(version).toHaveAttribute('title', versionName)
   await page.evaluate(() => document.fonts.ready)
+  // INSPR-CalVer3: the decorative v and the .0.0 tail are never drawn; the
+  // seconds take no width at rest and appear on reveal.
+  const drawn = await version.evaluate(el => el.textContent ?? '')
+  expect(drawn).not.toContain('.0.0')
+  expect(drawn.trimStart().startsWith('v')).toBe(false)
   const before = await version.boundingBox()
+  const seconds = version.locator('[data-collapsed="true"]').first()
+  expect((await seconds.boundingBox())?.width ?? 0).toBe(0)
   await version.focus()
-  await expect(version).toHaveAttribute('data-version-view', 'technical')
-  expect(await version.boundingBox()).toEqual(before)
+  await expect(version).toHaveAttribute('data-version-view', 'revealed')
+  await expect.poll(async () => (await version.boundingBox())!.width).toBeGreaterThan(before!.width)
   await page.keyboard.press('Enter')
   await expect(version).toHaveAttribute('data-copy-state', 'copied')
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(canonical)

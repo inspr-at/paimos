@@ -5,6 +5,7 @@ import { AccessError, type Agent, type AgentKeyCreated, agentScopeCeiling, COORD
 import type { AgentKey } from '../../lib/settings'
 import { can, myPermissions } from '../../lib/authz'
 import { useAccess } from '../../stores/access'
+import { agentLoginCommand } from '../../lib/agentLogin'
 import { absoluteTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import AccessSheet from './AccessSheet.vue'
@@ -13,7 +14,7 @@ import { problem } from './accessText'
 // A new key for an agent: what it may call (its scopes; none means nothing) and
 // how long it works. It never does more than the agent's role allows. Its secret
 // is shown once, here, to copy into the agent's configuration.
-const props = defineProps<{ agent: Agent; rotateKey?: AgentKey }>()
+const props = defineProps<{ agent: Agent; rotateKey?: AgentKey; firstKey?: boolean }>()
 const emit = defineEmits<{ close: []; created: [] }>()
 const LIFETIMES = [{ days: 30, label: '30 days' }, { days: 90, label: '90 days' }, { days: 365, label: '365 days' }, { days: 0, label: 'Never' }]
 const expiryAfter = (lifetimeDays: number) => new Date(Math.floor(Date.now() / 1000) * 1000 + lifetimeDays * 86_400_000).toISOString()
@@ -27,7 +28,7 @@ const term = ref('')
 // A scope can go on the key when I hold it and the agent's role allows it; the
 // rest show, disabled, with the reason.
 const mine = computed(() => myPermissions())
-const ceiling = computed(() => agentScopeCeiling(props.agent, access.roles))
+const ceiling = computed(() => agentScopeCeiling(props.agent, access.roles, access.registry))
 const held = computed(() => new Set([...mine.value].filter(k => !ceiling.value || ceiling.value.has(k))))
 // When my permissions or the agent's role shrink, scopes no longer allowed leave the selection.
 watch(held, now => { if (props.rotateKey) return; const kept = [...scopes.value].filter(k => now.has(k)); if (kept.length !== scopes.value.size) scopes.value = new Set(kept) })
@@ -46,6 +47,12 @@ const allowed = computed(() => can('keys.manage'))
 const scopeProblem = computed(() => !scopes.value.size ? 'Choose at least one thing it may do; a key without scopes can do nothing.'
   : scopes.value.size > MAX_KEY_SCOPES ? `A key holds at most ${MAX_KEY_SCOPES} scopes; clear ${scopes.value.size - MAX_KEY_SCOPES}.` : '')
 const copied = ref(false)
+const copyFallback = ref(false)
+const tokenInput = ref<HTMLInputElement>()
+const commandInput = ref<HTMLTextAreaElement>()
+const commandCopied = ref(false)
+const commandFallback = ref(false)
+const loginCommand = agentLoginCommand(window.location.origin)
 const role = computed(() => props.agent.workspace_role?.name)
 const rotationProblem = computed(() => props.rotateKey?.scopes.some(k => !held.value.has(k))
   ? 'The original scopes exceed what you or this agent’s role may grant. Rotation keeps those scopes, so it cannot continue.' : '')
@@ -78,11 +85,24 @@ async function create() {
   }
   finally { busy.value = false }
 }
-async function copy() { if (!created.value) return; try { await navigator.clipboard.writeText(created.value.token); copied.value = true } catch { copied.value = false } }
+function selectKey(input: HTMLInputElement | undefined) {
+  if (!input) return
+  input.focus()
+  input.setSelectionRange(0, input.value.length)
+}
+async function copy() {
+  if (!created.value) return
+  try { await navigator.clipboard.writeText(created.value.token); copied.value = true; copyFallback.value = false }
+  catch { copied.value = false; copyFallback.value = true; selectKey(tokenInput.value) }
+}
+async function copyCommand() {
+  try { await navigator.clipboard.writeText(loginCommand); commandCopied.value = true; commandFallback.value = false }
+  catch { commandCopied.value = false; commandFallback.value = true; commandInput.value?.focus(); commandInput.value?.select() }
+}
 </script>
 
 <template>
-  <AccessSheet :title="created ? 'Key ready' : `${rotateKey ? 'Rotate key' : 'New key'} for ${agent.name}`" size="center" @close="busy || emit('close')">
+  <AccessSheet :title="created ? 'Key ready' : `${rotateKey ? 'Rotate key' : firstKey ? 'Create first key' : 'New key'} for ${agent.name}`" size="center" @close="busy || emit('close')">
     <div v-if="!created" class="body">
       <p v-if="rotateKey" class="note"><AppIcon name="refresh" :size="14" /><span>Rotate {{ keyHint(rotateKey.prefix) }}: create a replacement with the same scopes and revoke the old key immediately when you confirm. Copy the new key into {{ agent.name }}’s configuration to reconnect it.</span></p>
       <p v-else class="note"><AppIcon name="shield" :size="14" /><span>The key does only what you tick below, and never more than {{ agent.name }}’s role{{ role ? ` (${role})` : '' }} allows. Revoking it stops it at once.</span></p>
@@ -100,7 +120,7 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
         <p v-if="rotationProblem" class="field-error" role="alert">{{ rotationProblem }}</p>
       </div>
       <fieldset v-else id="key-scopes" class="scopes" tabindex="-1" :aria-invalid="tried && !!scopeProblem" :aria-describedby="tried && scopeProblem ? 'key-scopes-error' : undefined">
-        <legend class="label">What it may do <span class="count">{{ scopes.size }} chosen, at most {{ MAX_KEY_SCOPES }}</span></legend>
+        <legend class="label">What it may do <span class="count">{{ scopes.size }} chosen</span></legend>
         <div class="presets">
           <label class="search-field find">
             <AppIcon name="search" :size="14" />
@@ -123,16 +143,25 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
       <p v-if="error" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
     </div>
     <div v-else class="body">
-      <p class="once"><AppIcon name="info" :size="14" /><span>This key is shown only now. Copy it into {{ agent.name }}’s configuration; afterwards only its prefix, aeon_{{ created.prefix }}_…, is shown.{{ created.expires_at ? ` It works until ${absoluteTime(created.expires_at)}.` : ' It never expires.' }}{{ rotateKey ? ' The old key is now revoked.' : '' }}</span></p>
+      <p class="once"><AppIcon name="info" :size="14" /><span>This key is shown only now; copy it before closing.</span></p>
       <div class="token">
-        <input class="field mono" readonly :value="created.token" aria-label="New agent key" @focus="($event.target as HTMLInputElement).select()" />
-        <button type="button" class="btn primary token-copy" data-session-keep @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="14" />{{ copied ? 'Copied' : 'Copy key' }}</button>
+        <input ref="tokenInput" class="field mono" readonly :value="created.token" aria-label="New agent key" @focus="selectKey($event.target as HTMLInputElement)" />
+        <button type="button" class="btn token-copy" data-session-keep @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="14" />{{ copied ? 'Copied' : 'Copy key' }}</button>
       </div>
+      <p class="expiry-note">{{ created.expires_at ? `Expires ${absoluteTime(created.expires_at)}.` : 'It never expires.' }}{{ rotateKey ? ' The old key is now revoked.' : '' }}</p>
+      <p v-if="copied || copyFallback" class="copy-status" :class="{ 'sr-only': copied }" role="status">{{ copied ? 'Key copied.' : 'Clipboard unavailable. The key is selected; copy it with your keyboard or touch menu.' }}</p>
+      <section class="cli-login" aria-labelledby="cli-login-title">
+        <h3 id="cli-login-title">Use with the CLI</h3>
+        <p class="expiry-note">Run this command, then paste the key at the hidden prompt.</p>
+        <textarea ref="commandInput" class="field mono login-command" readonly :value="loginCommand" aria-label="CLI login command" rows="3" @focus="($event.target as HTMLTextAreaElement).select()" />
+        <button type="button" class="btn sm" data-session-keep @click="copyCommand"><AppIcon :name="commandCopied ? 'check' : 'copy'" :size="14" />{{ commandCopied ? 'Command copied' : 'Copy command' }}</button>
+        <p v-if="commandCopied || commandFallback" class="copy-status" :class="{ 'sr-only': commandCopied }" role="status">{{ commandCopied ? 'Command copied; paste the key only when prompted.' : 'Command selected; copy it with your keyboard or touch menu.' }}</p>
+      </section>
     </div>
     <template #foot>
       <template v-if="!created">
         <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-        <button type="button" class="btn primary" :disabled="busy || !allowed || !!rotationProblem" :data-tip="allowed ? undefined : lostPermission('keys.manage')" @click="create"><AppIcon name="key" :size="13" />{{ busy ? (rotateKey ? 'Rotating…' : 'Creating…') : (rotateKey ? 'Rotate key' : 'Create key') }}</button>
+        <button type="button" class="btn primary" :disabled="busy || !allowed || !!rotationProblem" :data-tip="allowed ? undefined : lostPermission('keys.manage')" @click="create"><AppIcon name="key" :size="13" />{{ busy ? (rotateKey ? 'Rotating…' : 'Creating…') : (rotateKey ? 'Rotate key' : firstKey ? 'Create first key' : 'Create key') }}</button>
       </template>
       <button v-else type="button" class="btn primary" data-session-keep @click="emit('close')">Done</button>
     </template>
@@ -140,6 +169,11 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
 </template>
 
 <style scoped>
+.cli-login { display: grid; gap: 8px; padding-top: 4px; min-width: 0; }
+.cli-login h3 { font-size: 14px; font-weight: 600; }
+.cli-login .btn { justify-self: start; }
+.login-command { height: auto; min-height: 88px; resize: none; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
+.copy-status { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
 .expiry-note { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
 .rotation-scopes { display: grid; gap: 8px; }
 .rotation-scopes ul { margin: 0; padding-left: 18px; font-size: 12px; overflow-wrap: anywhere; }
@@ -171,5 +205,5 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
 .empty { font-size: 13px; color: var(--ink-3); }
 .field-error { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--danger); }
 .token .field { font-size: 12.5px; }
-@media (max-width: 600px) { .seg { grid-template-columns: repeat(2, 1fr); border-radius: 16px; } .seg button { height: 44px; } .token { grid-template-columns: 1fr; } .token .btn { height: 44px; } .scope-group { grid-template-columns: minmax(0, 1fr); } .scope-row { min-height: 44px; align-items: center; } .scope-row input { margin: 0; } .chip-btn { height: 44px; } }
+@media (max-width: 600px) { .cli-login .btn { min-height: 44px; } .seg { grid-template-columns: repeat(2, 1fr); border-radius: 16px; } .seg button { height: 44px; } .token { grid-template-columns: 1fr; } .token .btn { height: 44px; } .scope-group { grid-template-columns: minmax(0, 1fr); } .scope-row { min-height: 44px; align-items: center; } .scope-row input { margin: 0; } .chip-btn { height: 44px; } }
 </style>

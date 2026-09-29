@@ -45,11 +45,11 @@ import ReleasePicker from '../components/work/ReleasePicker.vue'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../lib/releaseAssign'
 import { listNativeMemberships, openedMembershipMessage, type NativeReleaseView } from '../lib/releaseMembership'
 import { useJourney } from '../stores/journey'
-import JourneyChip from '../components/journey/JourneyChip.vue'
+import { flowPillContext } from '../lib/flowPillContext'
 import HeaderGlimpse from '../components/work/HeaderGlimpse.vue'
 import type KnowledgeEntryPageType from '../components/knowledge/KnowledgeEntryPage.vue'
 import type KnowledgeTabType from '../components/knowledge/KnowledgeTab.vue'
-import { DOCK_LIST_RESERVE, DOCK_MEDIA, entryPath, isKnowledgeType, parseEntryParam, type KnowledgeType } from '../lib/knowledge'
+import { DOCK_LIST_RESERVE, DOCK_MEDIA, entryPath, isKnowledgeType, parseEntryParam, type KnowledgeEntry, type KnowledgeType } from '../lib/knowledge'
 import { filtersFromQuery as knowledgeFiltersFrom, filtersToQuery as knowledgeQuery, useKnowledge, type KnowledgeFilters } from '../lib/useKnowledge'
 import type { Stage } from '../lib/journey'
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
@@ -309,6 +309,20 @@ function setSection(id: string) {
   void router.push({ path: ticketKey.value ? ticketPath(ticketKey.value) : sectionPath(target),
     query: { ...saved, ...(ticketKey.value ? ticketSectionQuery(target) : {}) } })
 }
+watch([project, journeyActive, journeyStage], () => {
+  const current = project.value
+  if (!current) { flowPillContext.value = null; return }
+  const active = journeyActive.value
+  const stage = journeyStage.value
+  flowPillContext.value = {
+    projectId: current.id,
+    active,
+    open() {
+      if (active) journeyStageTo((stage ?? 'inspire') as Stage)
+      else setSection('journey')
+    },
+  }
+}, { immediate: true })
 let viewIntent = 0
 async function setView(view: string) {
   const intent = ++viewIntent, within = projectKey.value, sectionAtClick = section.value
@@ -713,6 +727,14 @@ watch(project, current => { if (current) remember({ type: 'project', key: curren
 // One write at a time. A later filter reads the address after the earlier one has
 // landed, and a replace that lost to another navigation is sent once more.
 let knowledgeWrite: Promise<unknown> = Promise.resolve()
+function learningAccepted(entry: KnowledgeEntry) {
+  knowledge.upsert(entry)
+  knowledgeEntry.value?.applyServer(entry)
+}
+function learningReverted() {
+  void knowledge.load()
+  void knowledgeEntry.value?.reload()
+}
 function updateKnowledge(patch: Partial<KnowledgeFilters>) {
   knowledgeWrite = knowledgeWrite.catch(() => undefined).then(async () => {
     const go = () => {
@@ -1316,6 +1338,7 @@ onBeforeUnmount(() => {
   knowledge.stop()
   dockQuery.removeEventListener('change', onDockWidth)
   phoneQuery.removeEventListener('change', onPhone)
+  flowPillContext.value = null
 })
 
 // ---------- Document title ----------
@@ -1341,7 +1364,6 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
             <span v-else-if="project.archived" class="chip state-chip">Archived</span>
           </div>
           <p v-if="project.description" class="description" :data-tip="project.description.length > 120 ? project.description : undefined">{{ project.description }}</p>
-          <div :class="{ 'journey-chip-slot': journeyActive }"><JourneyChip :project-id="project.id" :active="journeyActive" @go="journeyActive ? journeyStageTo(journeyStage as Stage ?? 'inspire') : setSection('journey')" /></div>
         </div>
         <HeaderGlimpse v-if="headerGraphReady && headerGraph && !graphActive" :project-id="project.id" :project-key="project.routeKey" :ticket-count="counts?.total ?? 0" :enabled="headerGraph" @active="glimpseActive = $event" />
         <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
@@ -1398,7 +1420,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
-        :filters="knowledgeFilters" :can-write="knowledgeWritable" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge"
+        :filters="knowledgeFilters" :can-write="knowledgeWritable" :person="session.identity?.principal.kind === 'person'" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge" @accepted="learningAccepted" @reverted="learningReverted"
       />
       <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
         :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />
@@ -1498,7 +1520,6 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .head-flex.with-glimpse .head-main { align-self: center; }
 .head-main { min-width: 0; flex: 1; position: relative; z-index: 1; }
 .head-stats { position: relative; z-index: 1; }
-.journey-chip-slot { min-height: 40px; }
 .title-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .key-badge.big { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 7px; }
 .title-line h1 { font-size: 30px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1576,7 +1597,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .stat-line { flex-wrap: wrap; gap: 4px 14px; }
 }
 @media (max-width: 720px) {
-  .project-page { padding: 14px 12px 8px; }
+  .project-page { padding: 14px 12px 16px; }
   .toolbar-wrap { margin: 0 -12px; padding: 0 12px; }
   .title-line { gap: 10px; }
   .title-line h1 { font-size: 24px; }

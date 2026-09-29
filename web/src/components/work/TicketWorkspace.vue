@@ -27,6 +27,7 @@ import StatusMenu from './StatusMenu.vue'
 import RelationList from './RelationList.vue'
 import RelationPicker from './RelationPicker.vue'
 import TicketAgentWork from './TicketAgentWork.vue'
+import TicketOutcomes from './TicketOutcomes.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 import TicketBenefits from './TicketBenefits.vue'
@@ -504,7 +505,7 @@ defineExpose({
           <InlineTitle ref="title" :value="item.title" :editable="editable" :large="mode === 'full'" :save="ticket.setTitle" />
           <TicketProperties
             class="ws-props" :class="{ 'only-narrow': mode === 'full' }" :item="item" :editable="editable" layout="row" :now="now"
-            :release-view="releaseView" :release-editable="canRelease"
+            :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate"
             @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
             @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
           />
@@ -532,6 +533,7 @@ defineExpose({
           </div>
 
           <TicketAgentWork v-if="item.kind_slug === 'ticket' || item.kind_slug === 'epic' || item.kind_slug === 'task'" class="ws-block" :node-id="item.id" :kind="item.kind_slug" />
+          <TicketOutcomes v-if="item.kind_slug === 'ticket'" class="ws-block" :node-id="item.id" />
           <ChildList
             v-if="hasChildren" class="ws-block" :children="ticket.children.value" :loading="ticket.childrenLoading.value" :editable="editable"
             :child-label="item.kind_slug === 'epic' ? 'ticket' : 'task'" :progress="ticket.childProgress()" :add="title => ticket.addChild(title, project.routeKey)"
@@ -572,7 +574,7 @@ defineExpose({
           <div class="side-card">
             <TicketProperties
               :item="item" :editable="editable" layout="column" :now="now"
-              :release-view="releaseView" :release-editable="canRelease"
+              :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate"
               @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
               @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
             />

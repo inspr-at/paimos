@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
-import { RULE_PROJECT, mockRules } from './rules-fixtures'
+import { RULE_AGENT, RULE_PROJECT, mockRules } from './rules-fixtures'
 
 async function setup(page: Page, options: Parameters<typeof mockRules>[1] = {}) {
   await mockWork(page, fixtures())
@@ -160,23 +160,65 @@ test('an agent cannot publish or import', async ({ page }) => {
   expect(rules.calls.some(call => call.method !== 'GET' && call.path.startsWith('/api/rules'))).toBe(false)
 })
 
-test('preview shows the merged session file for this project, you and the builder role', async ({ page }) => {
+test('preview lists controlled agents first and disables the rest with a plain reason', async ({ page }) => {
+  const rules = await setup(page, {
+    denyNamedPreview: true,
+    agents: [
+      { principal_id: '33333333-3333-4333-8333-333333333333', name: 'Zebra', preview: { allowed: true } },
+      { principal_id: '44444444-4444-4444-8444-444444444444', name: 'Middle', preview: { allowed: false, reason: 'key_revoked' } },
+      { principal_id: RULE_AGENT, name: 'Able', preview: { allowed: true } },
+      { principal_id: '55555555-5555-4555-8555-555555555555', name: 'Principal link operator', preview: { allowed: false, reason: 'not_key_creator', creator_name: 'Ada Lovelace' } },
+    ],
+  })
+  await page.goto('/settings/agent-rules')
+  await page.getByRole('button', { name: 'Preview' }).click()
+  const dialog = page.getByRole('dialog', { name: 'What agents receive' })
+  await dialog.getByRole('button', { name: 'Change' }).click()
+  const named = dialog.getByRole('combobox', { name: 'Named agent' })
+  await expect(named.locator('option')).toHaveText([
+    'None',
+    'Able',
+    'Zebra',
+    'Middle · Your key for this agent was revoked.',
+    "Principal link operator · Ada Lovelace created this agent's key.",
+  ])
+  await expect(named.locator('option').nth(3)).toHaveJSProperty('disabled', true)
+  await expect(named.locator('option').nth(4)).toHaveJSProperty('disabled', true)
+  await named.selectOption(RULE_AGENT)
+  await expect(dialog.getByRole('alert')).toContainText("You didn't create a key for this agent.")
+  expect(rules.calls.some(call => call.path.includes('agent_id=' + RULE_AGENT) && call.path.startsWith('/api/rules/explained'))).toBe(true)
+  for (const theme of ['light', 'dark'] as const) {
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    for (const width of [1600, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      await expect(dialog.getByRole('combobox', { name: 'Named agent' })).toBeVisible()
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 || document.body.scrollWidth > document.body.clientWidth + 1)
+      expect(overflow, `${theme} ${width}`).toBe(false)
+    }
+  }
+})
+
+test('preview explains the session file for this project, you and the builder role', async ({ page }) => {
   const rules = await setup(page)
   await page.goto('/settings/agent-rules')
   await page.getByRole('button', { name: 'Preview' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Session file' })
-  await expect(dialog.getByLabel('Session file', { exact: true })).toContainText('Never print the environment.')
-  await expect(dialog).toContainText('58 of 12,000 bytes')
-  await expect(dialog).toContainText('Aeon · Markus Barta · Builder · Claude')
-  await expect(dialog.getByRole('combobox')).toHaveCount(0)
-  const merged = rules.calls.find(call => call.path.startsWith('/api/rules/merged'))
-  expect(merged?.path).toContain('project_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
-  expect(merged?.path).toContain('harness=claude-code')
-  expect(merged?.path).toContain('role=builder')
-  await dialog.getByRole('button', { name: 'Preview for…' }).click()
-  await dialog.getByRole('combobox', { name: 'Harness' }).selectOption('cursor')
-  await expect.poll(() => rules.calls.filter(call => call.path.startsWith('/api/rules/merged')).at(-1)?.path).toContain('harness=cursor')
-  expect(rules.calls.filter(call => call.path.startsWith('/api/rules/merged')).every(call => call.method === 'GET')).toBe(true)
+  const dialog = page.getByRole('dialog', { name: 'What agents receive' })
+  await expect(dialog.getByRole('table', { name: 'Explanation and exact rule' })).toContainText('Never print the environment.')
+  await expect(dialog).toContainText('Aeon · Markus Barta · Builder')
+  await expect(dialog.getByRole('radio', { name: 'Claude' })).toHaveAttribute('aria-checked', 'true')
+  await expect(dialog.getByLabel('Session file', { exact: true })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Show exact file' }).click()
+  await expect(dialog.getByLabel('Session file', { exact: true })).toContainText('- [keep-secrets] Never print the environment.')
+  await expect(dialog).toContainText('of 12,000 bytes')
+  const explained = rules.calls.find(call => call.path.startsWith('/api/rules/explained'))
+  expect(explained?.path).toContain('project_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+  expect(explained?.path).toContain('harness=claude-code')
+  expect(explained?.path).toContain('role=builder')
+  await dialog.getByRole('radio', { name: 'Cursor' }).click()
+  await expect.poll(() => rules.calls.filter(call => call.path.startsWith('/api/rules/explained')).at(-1)?.path).toContain('harness=cursor')
+  await expect(dialog.getByRole('table')).toContainText('Use the Cursor rules file.')
+  expect(rules.calls.filter(call => call.path.startsWith('/api/rules/explained')).every(call => call.method === 'GET')).toBe(true)
+  expect(rules.calls.some(call => call.path.startsWith('/api/rules/merged'))).toBe(false)
 })
 
 test('rule details stay behind the row disclosure', async ({ page }) => {

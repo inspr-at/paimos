@@ -10,12 +10,14 @@ import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
 import AgentStateLabel from '../agents/AgentStateLabel.vue'
 import TicketHours from '../business/TicketHours.vue'
+import TicketEstimate from './TicketEstimate.vue'
+import type { SaveResult } from '../../lib/useTicket'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
 
 // Status, priority, assignee and release (editable popovers), type (read-only),
 // the parent epic, and estimate and dates only when they have values.
-const props = defineProps<{ item: ListItem; editable: boolean; layout: 'row' | 'column'; now: number; releaseView?: NativeReleaseView; releaseEditable?: boolean }>()
+const props = defineProps<{ item: ListItem; editable: boolean; layout: 'row' | 'column'; now: number; releaseView?: NativeReleaseView; releaseEditable?: boolean; saveEstimate?: (hours: number | null) => Promise<SaveResult> }>()
 const emit = defineEmits<{ status: [anchor: HTMLElement]; priority: [anchor: HTMLElement]; assignee: [anchor: HTMLElement]; epic: [anchor: HTMLElement]; release: [anchor: HTMLElement]; openParent: [key: string] }>()
 
 function text(value: unknown): string { return typeof value === 'string' ? value.trim() : '' }
@@ -25,13 +27,6 @@ function day(value: unknown): string {
   const time = Date.parse(raw.length === 10 ? `${raw}T12:00:00` : raw)
   return Number.isNaN(time) ? raw : new Date(time).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
-const estimate = computed(() => {
-  const hours = props.item.fields.estimate_hours
-  const points = props.item.fields.estimate_lp
-  if (typeof hours === 'number' && hours > 0) return `${hours} h`
-  if (typeof points === 'number' && points > 0) return `${points} pt`
-  return ''
-})
 const start = computed(() => day(props.item.fields.start_date))
 const due = computed(() => day(props.item.fields.end_date))
 const releaseInfo = computed(() => releaseCell(props.releaseView))
@@ -84,7 +79,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
         <span v-else class="prop-static faint">No epic</span>
       </dd>
     </div>
-    <div v-if="estimate" class="prop"><dt>Estimate</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Estimate</span><span class="mono">{{ estimate }}</span></span></dd></div>
+    <TicketEstimate :item="item" :editable="editable" :save="saveEstimate" />
     <div v-if="start" class="prop"><dt>Start</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Start</span>{{ start }}</span></dd></div>
     <div v-if="due" class="prop"><dt>Due</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Due</span>{{ due }}</span></dd></div>
     <div v-if="item.kind_slug !== 'epic' && (releaseEditable || releaseInfo.kind === 'member')" class="prop">
@@ -106,14 +101,14 @@ const target = (event: Event) => event.currentTarget as HTMLElement
 /* The panel reserves this row's height (hours arrive late); the chips keep together at its top rather than spreading over it. */
 .props.row { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; }
 @media (max-width: 600px) { .props.row { gap: 12px; } }
-.props.row dt { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-.props.row dd { margin: 0; }
+.props.row :deep(dt) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.props.row :deep(dd) { margin: 0; }
 /* A long epic title ends in an ellipsis inside the row; the chip never runs off the edge. */
-.props.row .prop, .props.row dd { min-width: 0; max-width: 100%; }
+.props.row .prop, .props.row :deep(dd) { min-width: 0; max-width: 100%; }
 .props.column { display: grid; gap: 2px; }
-.props.column .prop { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; min-height: 34px; }
-.props.column dt { font: 500 10.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
-.props.column dd { margin: 0; min-width: 0; }
+.props.column :deep(.prop) { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; min-height: 34px; }
+.props.column :deep(dt) { font: 500 10.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
+.props.column :deep(dd) { margin: 0; min-width: 0; }
 .prop-btn, .prop-static { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 28px; padding: 0 11px 0 9px; border: 0; border-radius: 999px; font-size: 12.5px; color: var(--ink); white-space: nowrap; }
 .row .prop-btn, .row .prop-static { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
 .column .prop-btn, .column .prop-static { margin-left: -9px; background: transparent; }

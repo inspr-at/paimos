@@ -12,8 +12,9 @@
 // section is TW1).
 //
 // Null counters and a null estimate are unknown, not zero. A reported
-// subscription label is metadata, not verified coverage, and it does not
-// remove the list estimate. Allowance pacing uses registered
+// subscription label is metadata, not verified coverage. Dashboard dollar
+// totals count only billing_mode api, so a stored estimate on a subscription
+// or unknown row is not summed. Allowance pacing uses registered
 // account_allowance_windows and only for callers who hold account.read.
 // A provisional window, including mixed settled evidence, leaves used,
 // headroom and hard remaining null. Declared allowance, explicit

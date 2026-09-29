@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -29,10 +30,25 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 	if err := rt.replayPendingUsage(ctx, projectID, session); err != nil {
 		return err
 	}
-	if o.Transcript == "" {
+	target, err := resolveHeartbeatUsage(o)
+	if err != nil {
+		return err
+	}
+	if target.Path == "" {
 		return nil
 	}
-	sums, next, recent, discarding, err := scanUsageWindow(ctx, o.Transcript, heartbeatText(o.Model, 128), session.disk.UsageOffset, heartbeatUsageWindow, session.disk.UsageRecent, session.disk.UsageDiscard)
+	if target.Snapshot {
+		return rt.reportSnapshotUsage(ctx, projectID, o, session, target.Path)
+	}
+	source := target.Source
+	if source == "" {
+		source = "claude"
+	}
+	codexStart := session.disk.UsageCodex
+	if source == "codex" && codexStart == nil && session.disk.UsageOffset > 0 {
+		codexStart = legacyCodexCursor(session.disk.Usage)
+	}
+	sums, next, recent, discarding, codex, err := scanUsageWindowState(ctx, target.Path, heartbeatText(o.Model, 128), session.disk.UsageOffset, heartbeatUsageWindow, session.disk.UsageRecent, session.disk.UsageDiscard, source, codexStart)
 	if err != nil {
 		return err
 	}
@@ -46,38 +62,62 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 		sum := sums[model]
 		prev := usageByModel(session.disk.Usage, model)
 		input, output, cached := sum.input, sum.output, sum.cached
-		if prev != nil {
-			var ok1, ok2, ok3 bool
+		reasoning, reasoningKnown := sum.reasoning, sum.reasoningKnown
+		if sum.absolute {
+			if prev != nil && (input < prev.Input || output < prev.Output || cached < prev.Cached) {
+				continue
+			}
+		} else if prev != nil {
+			var ok1, ok2, ok3, ok4 bool
 			input, ok1 = addTokens(prev.Input, sum.input)
 			output, ok2 = addTokens(prev.Output, sum.output)
 			cached, ok3 = addTokens(prev.Cached, sum.cached)
-			if !ok1 || !ok2 || !ok3 {
-				continue
+			if reasoningKnown && prev.Reasoning != nil {
+				reasoning, ok4 = addTokens(*prev.Reasoning, sum.reasoning)
+			} else if reasoningKnown && prev.Reasoning == nil {
+				reasoning, ok4 = sum.reasoning, true
+			} else if prev.Reasoning != nil {
+				reasoning, reasoningKnown, ok4 = *prev.Reasoning, true, true
+			} else {
+				ok4 = true
 			}
-			if input == prev.Input && output == prev.Output && cached == prev.Cached {
+			if !ok1 || !ok2 || !ok3 || !ok4 {
 				continue
 			}
 			if input < prev.Input || output < prev.Output || cached < prev.Cached {
 				continue
 			}
 		}
-		if input == 0 && output == 0 && cached == 0 {
+		reasoning, reasoningKnown = holdReasoning(prev, reasoning, reasoningKnown)
+		var valid bool
+		if reasoning, reasoningKnown, valid = fitUsageReport(prev, input, output, cached, reasoning, reasoningKnown); !valid {
+			fmt.Fprintf(rt.stderr, "heartbeat: usage for %s is not a valid cumulative report; skipped\n", model)
+			continue
+		}
+		if prev != nil && input == prev.Input && output == prev.Output && cached == prev.Cached && sameReasoning(prev.Reasoning, reasoning, reasoningKnown) {
+			continue
+		}
+		if input == 0 && output == 0 && cached == 0 && (!reasoningKnown || reasoning == 0) {
 			continue
 		}
 		seq := int64(1)
 		if prev != nil {
 			seq = prev.Sequence + 1
 		}
+		mode, label := usageBilling(o)
 		created = append(created, heartbeatPendingUsage{
 			Model: model, Sequence: seq, Input: input, Output: output, Cached: cached,
-			ReportID: usageReportID(session.id, model, seq, input, output, cached),
-			Offset:   next, Recent: recent, Discard: discarding,
+			Reasoning: reasoningPointer(reasoning, reasoningKnown),
+			ReportID:  usageReportID(session.id, model, seq, input, output, cached, reasoningPointer(reasoning, reasoningKnown)),
+			Offset:    next, Recent: recent, Discard: discarding, Codex: codex,
+			BillingMode: mode, SubscriptionLabel: label,
 		})
 	}
 	if len(created) == 0 {
 		session.disk.UsageOffset = next
 		session.disk.UsageRecent = trimRecent(recent)
 		session.disk.UsageDiscard = discarding
+		session.disk.UsageCodex = codex
 		return nil
 	}
 	session.disk.PendingUsage = append(session.disk.PendingUsage, created...)
@@ -88,11 +128,53 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 	return rt.replayPendingUsage(ctx, projectID, session)
 }
 
+// fitUsageReport checks one cumulative per-model report against the rules the
+// server enforces before it is persisted, so a report that can never be
+// accepted is not queued. Reasoning above output falls back to the last
+// accepted reasoning (or unknown when none was reported); cached above input
+// or counters below the last accepted ones make the report invalid.
+func fitUsageReport(prev *heartbeatUsageDisk, input, output, cached, reasoning int64, reasoningKnown bool) (int64, bool, bool) {
+	if input < 0 || output < 0 || cached < 0 || cached > input || (reasoningKnown && reasoning < 0) {
+		return reasoning, reasoningKnown, false
+	}
+	if prev != nil && (input < prev.Input || output < prev.Output || cached < prev.Cached || input-cached < prev.Input-prev.Cached) {
+		return reasoning, reasoningKnown, false
+	}
+	if reasoningKnown && reasoning > output {
+		if prev == nil || prev.Reasoning == nil {
+			return 0, false, true
+		}
+		reasoning = *prev.Reasoning
+	}
+	if prev != nil && prev.Reasoning != nil && (!reasoningKnown || reasoning < *prev.Reasoning || reasoning > output) {
+		return reasoning, reasoningKnown, false
+	}
+	return reasoning, reasoningKnown, true
+}
+
+// legacyCodexCursor rebuilds the Codex baseline for state written before the
+// cursor existed. Each stored figure was a session-wide cumulative total, so
+// the largest one is what has already been reported.
+func legacyCodexCursor(items []heartbeatUsageDisk) *heartbeatCodexCursor {
+	cur := &heartbeatCodexCursor{}
+	for _, item := range items {
+		cur.Input = max(cur.Input, item.Input)
+		cur.Output = max(cur.Output, item.Output)
+		cur.Cached = max(cur.Cached, item.Cached)
+		if item.Reasoning != nil {
+			cur.Reasoning = max(cur.Reasoning, *item.Reasoning)
+			cur.ReasoningKnown = true
+		}
+	}
+	return cur
+}
+
 type usageAck struct {
-	Sequence int64
-	Input    *int64
-	Output   *int64
-	Cached   *int64
+	Sequence  int64
+	Input     *int64
+	Output    *int64
+	Cached    *int64
+	Reasoning *int64
 }
 
 func (rt *runtime) replayPendingUsage(ctx context.Context, projectID string, session *heartbeatSession) error {
@@ -115,7 +197,13 @@ func (rt *runtime) postPendingUsage(ctx context.Context, projectID string, sessi
 		"output_tokens":       pending.Output,
 		"cached_input_tokens": pending.Cached,
 		"provisional":         provisional,
-		"billing_mode":        "unknown",
+		"billing_mode":        pendingBilling(pending),
+	}
+	if pending.Reasoning != nil {
+		body["reasoning_tokens"] = *pending.Reasoning
+	}
+	if pending.BillingMode == "subscription" && pending.SubscriptionLabel != "" {
+		body["subscription_label"] = pending.SubscriptionLabel
 	}
 	var result struct {
 		Usage struct {
@@ -123,6 +211,7 @@ func (rt *runtime) postPendingUsage(ctx context.Context, projectID string, sessi
 			InputTokens       *int64 `json:"input_tokens"`
 			OutputTokens      *int64 `json:"output_tokens"`
 			CachedInputTokens *int64 `json:"cached_input_tokens"`
+			ReasoningTokens   *int64 `json:"reasoning_tokens"`
 		} `json:"usage"`
 	}
 	path := harnessPath(projectID, session.id) + "/usage"
@@ -133,14 +222,22 @@ func (rt *runtime) postPendingUsage(ctx context.Context, projectID string, sessi
 	if heartbeatStatus(err) == http.StatusConflict {
 		return rt.reconcileUsage(ctx, projectID, session, pending)
 	}
+	if status := heartbeatStatus(err); status == http.StatusBadRequest || status == http.StatusUnprocessableEntity {
+		// The server will never accept these bytes. Drop the report so it
+		// does not block every later one; the cursor still moves past it.
+		fmt.Fprintf(rt.stderr, "heartbeat: usage report for %s rejected (%d); dropped\n", pending.Model, status)
+		dropUsage(session, pending)
+		return nil
+	}
 	if err != nil {
 		return err
 	}
 	commitUsage(session, pending, usageAck{
-		Sequence: result.Usage.Sequence,
-		Input:    result.Usage.InputTokens,
-		Output:   result.Usage.OutputTokens,
-		Cached:   result.Usage.CachedInputTokens,
+		Sequence:  result.Usage.Sequence,
+		Input:     result.Usage.InputTokens,
+		Output:    result.Usage.OutputTokens,
+		Cached:    result.Usage.CachedInputTokens,
+		Reasoning: result.Usage.ReasoningTokens,
 	})
 	return nil
 }
@@ -153,6 +250,7 @@ func (rt *runtime) reconcileUsage(ctx context.Context, projectID string, session
 			InputTokens       *int64 `json:"input_tokens"`
 			OutputTokens      *int64 `json:"output_tokens"`
 			CachedInputTokens *int64 `json:"cached_input_tokens"`
+			ReasoningTokens   *int64 `json:"reasoning_tokens"`
 		} `json:"items"`
 	}
 	if err := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id)+"/usage", "", nil, &page); err != nil {
@@ -165,14 +263,40 @@ func (rt *runtime) reconcileUsage(ctx context.Context, projectID string, session
 		if item.Sequence < pending.Sequence || *item.InputTokens < pending.Input || *item.OutputTokens < pending.Output || *item.CachedInputTokens < pending.Cached {
 			continue
 		}
-		commitUsage(session, pending, usageAck{Sequence: item.Sequence, Input: item.InputTokens, Output: item.OutputTokens, Cached: item.CachedInputTokens})
+		if pending.Reasoning != nil && (item.ReasoningTokens == nil || *item.ReasoningTokens < *pending.Reasoning) {
+			continue
+		}
+		commitUsage(session, pending, usageAck{Sequence: item.Sequence, Input: item.InputTokens, Output: item.OutputTokens, Cached: item.CachedInputTokens, Reasoning: item.ReasoningTokens})
 		return nil
 	}
 	return errors.New("usage report is still unacknowledged")
 }
 
+// dropUsage removes a report the server rejected for good. The model's
+// accepted totals stay as they were; the scan cursor advances as on commit.
+func dropUsage(session *heartbeatSession, pending heartbeatPendingUsage) {
+	if len(session.disk.PendingUsage) > 0 {
+		session.disk.PendingUsage = session.disk.PendingUsage[1:]
+	}
+	advanceUsageCursor(session, pending)
+}
+
+func advanceUsageCursor(session *heartbeatSession, pending heartbeatPendingUsage) {
+	if pending.Codex != nil && pending.Offset >= session.disk.UsageOffset {
+		session.disk.UsageCodex = pending.Codex
+	}
+	if pending.Offset > session.disk.UsageOffset || (pending.Offset == session.disk.UsageOffset && pending.Discard != session.disk.UsageDiscard) {
+		session.disk.UsageOffset = pending.Offset
+		session.disk.UsageDiscard = pending.Discard
+	}
+	if len(pending.Recent) > 0 {
+		session.disk.UsageRecent = trimRecent(pending.Recent)
+	}
+}
+
 func commitUsage(session *heartbeatSession, pending heartbeatPendingUsage, ack usageAck) {
 	seq, input, output, cached := pending.Sequence, pending.Input, pending.Output, pending.Cached
+	reasoning := pending.Reasoning
 	if ack.Sequence > 0 {
 		seq = ack.Sequence
 	}
@@ -185,7 +309,10 @@ func commitUsage(session *heartbeatSession, pending heartbeatPendingUsage, ack u
 	if ack.Cached != nil {
 		cached = *ack.Cached
 	}
-	next := heartbeatUsageDisk{Model: pending.Model, Sequence: seq, Input: input, Output: output, Cached: cached}
+	if ack.Reasoning != nil {
+		reasoning = ack.Reasoning
+	}
+	next := heartbeatUsageDisk{Model: pending.Model, Sequence: seq, Input: input, Output: output, Cached: cached, Reasoning: reasoning}
 	if prev := usageByModel(session.disk.Usage, pending.Model); prev == nil {
 		session.disk.Usage = append(session.disk.Usage, next)
 	} else {
@@ -194,13 +321,7 @@ func commitUsage(session *heartbeatSession, pending heartbeatPendingUsage, ack u
 	if len(session.disk.PendingUsage) > 0 {
 		session.disk.PendingUsage = session.disk.PendingUsage[1:]
 	}
-	if pending.Offset > session.disk.UsageOffset || (pending.Offset == session.disk.UsageOffset && pending.Discard != session.disk.UsageDiscard) {
-		session.disk.UsageOffset = pending.Offset
-		session.disk.UsageDiscard = pending.Discard
-	}
-	if len(pending.Recent) > 0 {
-		session.disk.UsageRecent = trimRecent(pending.Recent)
-	}
+	advanceUsageCursor(session, pending)
 }
 
 func codexSessionLabel(path, sessionID string) (string, bool) {
@@ -208,10 +329,10 @@ func codexSessionLabel(path, sessionID string) (string, bool) {
 }
 
 func readCodexSessionLabel(ctx context.Context, path, sessionID string) (string, bool) {
-	if ctx.Err() != nil || path == "" || !validUUID(sessionID) || unsafeHeartbeatPath(path) {
+	if ctx.Err() != nil || path == "" || !validUUID(sessionID) {
 		return "", false
 	}
-	f, err := openNoFollow(path)
+	f, err := openHarnessFile(harnessCodexIndex, path)
 	if err != nil {
 		return "", false
 	}
@@ -259,10 +380,10 @@ func readClaudeSessionLabel(ctx context.Context, o heartbeatOptions, sessionID s
 }
 
 func claudeTitleFile(ctx context.Context, path string) (string, bool) {
-	if ctx.Err() != nil || path == "" || unsafeHeartbeatPath(path) {
+	if ctx.Err() != nil || path == "" {
 		return "", false
 	}
-	f, err := openNoFollow(path)
+	f, err := openHarnessFile(harnessClaudeTranscript, path)
 	if err != nil {
 		return "", false
 	}
@@ -374,8 +495,7 @@ func findClaudeTranscript(root, sessionID string) string {
 			continue
 		}
 		candidate := filepath.Join(root, entry.Name(), name)
-		st, err := os.Lstat(candidate)
-		if err != nil || !st.Mode().IsRegular() || st.Mode()&os.ModeSymlink != 0 {
+		if _, err := statHarnessFile(harnessClaudeTranscript, candidate); err != nil {
 			continue
 		}
 		return candidate
@@ -384,7 +504,9 @@ func findClaudeTranscript(root, sessionID string) string {
 }
 
 type usageSum struct {
-	input, output, cached int64
+	input, output, cached, reasoning int64
+	reasoningKnown                   bool
+	absolute                         bool
 }
 
 type countingReader struct {
@@ -399,13 +521,45 @@ func (c *countingReader) Read(p []byte) (int, error) {
 }
 
 func scanUsageWindow(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool) (map[string]usageSum, int64, []string, bool, error) {
+	return scanUsageWindowSource(ctx, path, fallback, offset, maxBytes, recent, discarding, "claude")
+}
+
+// scanUsageWindowSource scans one window with a fresh Codex cursor. It is the
+// single-window form; the heartbeat uses scanUsageWindowState so the Codex
+// model and baseline carry over between beats.
+func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool, source string) (map[string]usageSum, int64, []string, bool, error) {
+	sums, next, ring, disc, _, err := scanUsageWindowState(ctx, path, fallback, offset, maxBytes, recent, discarding, source, nil)
+	return sums, next, ring, disc, err
+}
+
+// scanUsageWindowState scans one window and returns the Codex cursor that
+// belongs to the returned offset. On error the input cursor is returned.
+func scanUsageWindowState(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool, source string, codex *heartbeatCodexCursor) (map[string]usageSum, int64, []string, bool, *heartbeatCodexCursor, error) {
+	// A scan from the start of a fresh log begins at known zero totals.
+	cur := &heartbeatCodexCursor{ReasoningKnown: offset == 0}
+	if codex != nil {
+		copied := *codex
+		cur = &copied
+	}
+	sums, next, ring, disc, err := scanUsageLines(ctx, path, fallback, offset, maxBytes, recent, discarding, source, cur)
+	if err != nil || source != "codex" {
+		return sums, next, ring, disc, codex, err
+	}
+	return sums, next, ring, disc, cur, nil
+}
+
+func scanUsageLines(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool, source string, codex *heartbeatCodexCursor) (map[string]usageSum, int64, []string, bool, error) {
 	if ctx.Err() != nil {
 		return nil, offset, recent, discarding, ctx.Err()
 	}
-	if path == "" || unsafeHeartbeatPath(path) || maxBytes <= 0 {
+	if path == "" || maxBytes <= 0 {
 		return nil, offset, recent, discarding, nil
 	}
-	f, err := openNoFollow(path)
+	kind, ok := harnessKindForSource(source)
+	if !ok || !allowedUsagePath(source, path) {
+		return nil, offset, recent, discarding, usagef("usage file is not a session log")
+	}
+	f, err := openHarnessFile(kind, path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, offset, recent, discarding, nil
@@ -500,7 +654,13 @@ func scanUsageWindow(ctx context.Context, path, fallback string, offset, maxByte
 			continue
 		}
 		if len(line) > 0 {
-			if lineErr := noteUsageLine(line, fallback, sums, poisoned, seen, &ring); lineErr != nil {
+			var lineErr error
+			if source == "" || source == "claude" {
+				lineErr = noteUsageLine(line, fallback, sums, poisoned, seen, &ring)
+			} else {
+				lineErr = noteHarnessLine(source, line, fallback, sums, poisoned, seen, &ring, codex)
+			}
+			if lineErr != nil {
 				return nil, offset, recent, discarding, lineErr
 			}
 		}
@@ -554,7 +714,19 @@ func noteUsageLine(line []byte, fallback string, sums map[string]usageSum, poiso
 			return nil
 		}
 	}
+	created := int64(0)
+	if raw, ok := rec.Message.Usage["cache_creation_input_tokens"]; ok && len(bytes.TrimSpace(raw)) > 0 && string(raw) != "null" {
+		var okCreated bool
+		created, okCreated = jsonToken(raw)
+		if !okCreated {
+			return nil
+		}
+	}
 	inclusive, ok := addTokens(input, cached)
+	if !ok {
+		return errUsageOverflow
+	}
+	inclusive, ok = addTokens(inclusive, created)
 	if !ok {
 		return errUsageOverflow
 	}
@@ -656,8 +828,36 @@ func usageByModel(items []heartbeatUsageDisk, model string) *heartbeatUsageDisk 
 	return nil
 }
 
-func usageReportID(session, model string, seq, input, output, cached int64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("aeon-heartbeat-usage-v1\x00%s\x00%s\x00%d\x00%d\x00%d\x00%d", session, model, seq, input, output, cached)))
+func reasoningPointer(value int64, known bool) *int64 {
+	if !known {
+		return nil
+	}
+	v := value
+	return &v
+}
+
+func sameReasoning(stored *int64, value int64, known bool) bool {
+	if stored == nil {
+		return !known
+	}
+	return known && *stored == value
+}
+
+// holdReasoning keeps a known cumulative total from moving backwards. An
+// absolute vendor snapshot can revise reasoning down while input still grows.
+func holdReasoning(prev *heartbeatUsageDisk, value int64, known bool) (int64, bool) {
+	if prev != nil && prev.Reasoning != nil && (!known || value < *prev.Reasoning) {
+		return *prev.Reasoning, true
+	}
+	return value, known
+}
+
+func usageReportID(session, model string, seq, input, output, cached int64, reasoning *int64) string {
+	reason := "unknown"
+	if reasoning != nil {
+		reason = strconv.FormatInt(*reasoning, 10)
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("aeon-heartbeat-usage-v2\x00%s\x00%s\x00%d\x00%d\x00%d\x00%d\x00%s", session, model, seq, input, output, cached, reason)))
 	sum[6] = sum[6]&0x0f | 0x50
 	sum[8] = sum[8]&0x3f | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])

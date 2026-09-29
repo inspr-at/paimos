@@ -19,6 +19,7 @@ type heartbeatHold struct {
 }
 
 type heartbeatDisk struct {
+	CapacityStarted       bool                    `json:"capacity_started,omitempty"`
 	AppliedModelSequence  int64                   `json:"applied_model_sequence,omitempty"`
 	AppliedRenameSequence int64                   `json:"applied_rename_sequence,omitempty"`
 	RequestedLabel        string                  `json:"requested_label,omitempty"`
@@ -40,6 +41,7 @@ type heartbeatDisk struct {
 	UsageOffset           int64                   `json:"usage_offset,omitempty"`
 	UsageRecent           []string                `json:"usage_recent,omitempty"`
 	UsageDiscard          bool                    `json:"usage_discard,omitempty"`
+	UsageCodex            *heartbeatCodexCursor   `json:"usage_codex,omitempty"`
 	OwnerPID              int                     `json:"owner_pid,omitempty"`
 	OwnerStart            string                  `json:"owner_start,omitempty"`
 	BoundWorktree         string                  `json:"bound_worktree,omitempty"`
@@ -52,26 +54,47 @@ type heartbeatDisk struct {
 	SourcesRecorded       bool                    `json:"sources_recorded,omitempty"`
 }
 
+// heartbeatCodexCursor is the Codex scan context that must survive between
+// beats, committed together with the usage offset: the model named by the
+// latest turn_context and the session-wide cumulative totals already
+// attributed to some model. A token record is attributed as its increase
+// over these totals, so a model switch never re-counts earlier tokens.
+type heartbeatCodexCursor struct {
+	Model     string `json:"model,omitempty"`
+	Input     int64  `json:"input"`
+	Output    int64  `json:"output"`
+	Cached    int64  `json:"cached"`
+	Reasoning int64  `json:"reasoning"`
+	// ReasoningKnown is false once a record omitted reasoning: the next
+	// reported total re-establishes the baseline without attributing it.
+	ReasoningKnown bool `json:"reasoning_known,omitempty"`
+}
+
 type heartbeatUsageDisk struct {
-	Model    string `json:"model"`
-	Sequence int64  `json:"sequence"`
-	Input    int64  `json:"input"`
-	Output   int64  `json:"output"`
-	Cached   int64  `json:"cached"`
+	Model     string `json:"model"`
+	Sequence  int64  `json:"sequence"`
+	Input     int64  `json:"input"`
+	Output    int64  `json:"output"`
+	Cached    int64  `json:"cached"`
+	Reasoning *int64 `json:"reasoning,omitempty"`
 }
 
 // heartbeatPendingUsage is the exact report persisted before it is posted.
 // A lost response replays these bytes; the transcript is not reread into a new id.
 type heartbeatPendingUsage struct {
-	Model    string   `json:"model"`
-	Sequence int64    `json:"sequence"`
-	Input    int64    `json:"input"`
-	Output   int64    `json:"output"`
-	Cached   int64    `json:"cached"`
-	ReportID string   `json:"report_id"`
-	Offset   int64    `json:"offset"`
-	Recent   []string `json:"recent,omitempty"`
-	Discard  bool     `json:"discard,omitempty"`
+	Model             string                `json:"model"`
+	Sequence          int64                 `json:"sequence"`
+	Input             int64                 `json:"input"`
+	Output            int64                 `json:"output"`
+	Cached            int64                 `json:"cached"`
+	Reasoning         *int64                `json:"reasoning,omitempty"`
+	ReportID          string                `json:"report_id"`
+	Offset            int64                 `json:"offset"`
+	Recent            []string              `json:"recent,omitempty"`
+	Discard           bool                  `json:"discard,omitempty"`
+	Codex             *heartbeatCodexCursor `json:"codex,omitempty"`
+	BillingMode       string                `json:"billing_mode,omitempty"`
+	SubscriptionLabel string                `json:"subscription_label,omitempty"`
 }
 
 type heartbeatSession struct {

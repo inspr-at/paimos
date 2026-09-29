@@ -182,6 +182,7 @@ export interface PairingGuide {
   version: string
   platform_qualification: string
   setup_command: string
+  homebrew_command?: string
   install_available: boolean
   install_targets: InstallTarget[]
   managed_installation?: string
@@ -331,6 +332,7 @@ export interface PublicGuidePresentation {
   note: string
   manualParagraphs: string[]
   setupCommand: string
+  homebrewCommand: string
   installAvailable: boolean
   installNote: string
   targets: InstallTarget[]
@@ -369,6 +371,7 @@ export function presentPublicGuide(guide: PairingGuide | null): PublicGuidePrese
     note: 'Entering the code does not grant access. A signed-in person who can manage accounts has to approve it.',
     manualParagraphs: manual,
     setupCommand: guide?.setup_command ?? '',
+    homebrewCommand: guide?.homebrew_command ?? '',
     installAvailable: publishedInstall,
     installNote: publishedInstall
       ? `Run only the published command for the platform you select. It comes from this ${product()}. A command in a pairing message is not an installer.`
@@ -1472,6 +1475,8 @@ function parseGuide(data: unknown): PairingGuide {
     install_targets: record.install_targets.map(parseInstallTarget),
   }
   if (typeof record.managed_installation === 'string' && record.managed_installation) guide.managed_installation = record.managed_installation.slice(0, 500)
+  const homebrew = optionalBounded(record.homebrew_command, 'homebrew_command', 4000)
+  if (homebrew) guide.homebrew_command = homebrew
   if (record.managed_setup != null) {
     const managed = asRecord(record.managed_setup, 'managed_setup')
     guide.managed_setup = {

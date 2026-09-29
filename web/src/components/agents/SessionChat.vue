@@ -3,14 +3,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { APIError, api } from '../../lib/api'
 import { messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
-import { attentionReasonText } from '../../lib/agentSignals'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
-import { belongsToSession, collapseMessages } from './sessionMessages'
+import { collapseMessages } from './sessionMessages'
 import { keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, saveReadMark, statusDone, unreadGroups, type ReadMark } from './sessionChat'
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
@@ -24,7 +23,7 @@ const person = computed(() => identity.identity?.principal.kind === 'person')
 const s = computed(() => props.view.session)
 const messages = computed(() => agents.thread(s.value))
 const address = computed(() => agents.addressOf(s.value.agent_principal_id))
-const current = computed(() => collapseMessages(messages.value.filter(m => belongsToSession(m, s.value.id))))
+const current = computed(() => collapseMessages(messages.value))
 const ended = computed(() => s.value.phase === 'stopped' || !!s.value.stopped_at || !!s.value.archived_at)
 // Managed sessions (AEON-260) take input only through the Session controls above:
 // no composer and no Reply here.
@@ -45,6 +44,7 @@ const newFrom = ref<string>()
 const newCount = ref(0)
 watch(() => unread.value.length, n => emit('unread', n), { immediate: true })
 function markRead(event: number, id: string) {
+  if (holdingMarker()) return
   if (!me.value || !id || !Number.isFinite(event)) return
   if (!mark.value || mark.value.event < event) mark.value = saveReadMark(me.value, s.value.id, event, id)
   if (!person.value || !mark.value) return
@@ -66,13 +66,27 @@ let flushAgain = false
 let boundProject = ''
 let boundSession = ''
 let readGeneration = 0
+// The first server read is in flight and this browser has no watermark yet.
+// Screen observations must not mark the provisional bottom view as read.
+let markerHold = 0
+let awaitingServerPlacement = false
+let userMoved = false
+let placed = false
+let adjusting = false
+let anchorTop = 0
+let placeChain: Promise<void> = Promise.resolve()
+const holdingMarker = () => markerHold !== 0 && markerHold === readGeneration
 function arm() {
   if (!pending || !person.value) return
   if (flushTimer !== undefined) clearTimeout(flushTimer)
   flushTimer = setTimeout(() => { flushTimer = undefined; void flush() }, readMarkFlushDelay)
 }
-function reconcileDivider() {
-  if (!entered) return
+function syncDivider() {
+  if (!entered || holdingMarker()) {
+    newFrom.value = undefined
+    newCount.value = 0
+    return
+  }
   const first = unread.value[0]
   newFrom.value = first && current.value[0]?.id !== first.id ? first.id : undefined
   newCount.value = unread.value.length
@@ -111,35 +125,55 @@ async function flush() {
   flushAgain = false
   if (pending) await flush()
 }
+function releaseMarkerHold(generation: number) {
+  if (markerHold !== generation) return
+  markerHold = 0
+  const waiting = awaitingServerPlacement
+  awaitingServerPlacement = false
+  if (!entered || generation !== readGeneration) return
+  syncDivider()
+  if (waiting && !readerMoved()) void schedulePlace(generation)
+  else observe()
+}
 async function pullReadMark(projectId: string, sessionId: string, viewer: string, generation: number) {
   try {
     const response = await api(readPath(projectId, sessionId))
-    if (!response.ok || generation !== readGeneration || s.value.id !== sessionId) return
-    const remote = markerFromServer(await response.json())
-    if (remote && preferReadMark(mark.value, remote) === remote) {
-      mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
-      reconcileDivider()
+    if (generation !== readGeneration || s.value.id !== sessionId) return
+    if (!response.ok) {
+      releaseMarkerHold(generation)
+      return
     }
+    const remote = markerFromServer(await response.json())
+    const advanced = !!(remote && preferReadMark(mark.value, remote) === remote)
+    if (advanced && remote) mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
+    const waiting = awaitingServerPlacement && generation === readGeneration
+    const held = markerHold === generation
+    if (held) markerHold = 0
+    if (waiting && entered && !readerMoved() && advanced) {
+      awaitingServerPlacement = false
+      await schedulePlace(generation)
+    } else if (waiting || advanced) {
+      if (waiting) awaitingServerPlacement = false
+      syncDivider()
+      if (waiting && entered) observe()
+    }
+    // The reader left the provisional bottom before the marker arrived.
+    if (held && entered && placed && userMoved) observe()
     const current = mark.value
     if (!person.value || !current?.id || (remote && current.event <= remote.event)) return
     boundProject = projectId
     boundSession = sessionId
     pending = queueReadMark(pending, current)
     arm()
-  } catch { /* Offline: the local watermark stands. */ }
+  } catch {
+    // Offline: the local watermark stands, and a provisional landing may observe.
+    releaseMarkerHold(generation)
+  }
 }
 function repull() {
   if (!person.value || !me.value) return
   void pullReadMark(s.value.project_id, s.value.id, me.value, readGeneration)
 }
-
-// Shared-inbox attention belongs to the agent principal, not this session: one quiet
-// line above the thread.
-const inboxNotes = computed(() => (s.value.attention_reasons ?? []).filter(r => r.scope === 'shared' || !r.blocking).map(r => {
-  if (r.scope !== 'shared' || r.kind !== 'reply') return { code: attentionReasonText(r).code, text: attentionReasonText(r).detail }
-  const actor = r.actor === 'agent' ? 'another agent' : r.actor === 'person' ? 'a person' : 'someone'
-  return { code: `${r.scope}-${r.kind}-${r.actor}`, text: `Shared inbox: ${r.count} ${r.count === 1 ? 'reply' : 'replies'} outstanding, waiting for ${actor}.` }
-}))
 
 // ---------- Scrolling ----------
 const scroller = ref<HTMLElement>()
@@ -149,40 +183,161 @@ const distance = ref(0)
 const below = computed(() => props.active ? unread.value.length : 0)
 const jump = computed(() => distance.value > 160 || (below.value > 0 && distance.value > 32))
 let stick = true, lastTop = 0, entered = false, loaded = false
+// Finger origin for a touch. A move downward (clientY grows) scrolls the thread up.
+let touchY: number | undefined
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+const markerPending = () => holdingMarker() || awaitingServerPlacement
+const upwardKey = (key: string) => key === 'ArrowUp' || key === 'PageUp' || key === 'Home'
+// A thread that already fits has scrollTop 0 and produces no scroll event, so
+// nothing would pin it again. An upward gesture unpins only when it can scroll.
+const canScrollUp = () => (scroller.value?.scrollTop ?? 0) > 0
+// Input runs before the browser queues scroll. Remember the reader so a marker
+// resolved in that gap cannot reclaim the position. Clear the pinned bottom
+// only for an upward gesture that can scroll, or for a real scroll while that
+// marker is still pending. A tap or click never unpins.
+function claimReader() {
+  if (!props.active || !entered) return false
+  userMoved = true
+  awaitingServerPlacement = false
+  return true
+}
+function onWheel(event: WheelEvent) {
+  const pending = markerPending()
+  if (!claimReader()) return
+  if ((event.deltaY < 0 && canScrollUp()) || pending) stick = false
+}
+function onPointerDown() {
+  claimReader()
+}
+function onTouchStart(event: TouchEvent) {
+  const point = event.touches?.[0] ?? event.changedTouches?.[0]
+  touchY = point?.clientY
+  claimReader()
+}
+function onTouchMove(event: TouchEvent) {
+  const point = event.touches?.[0] ?? event.changedTouches?.[0]
+  if (!point || touchY === undefined || point.clientY <= touchY + 8) return
+  const pending = markerPending()
+  if (!claimReader()) return
+  if (canScrollUp() || pending) stick = false
+}
+function onTouchEnd() {
+  touchY = undefined
+}
+function onScrollKey(event: KeyboardEvent) {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
+  if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) return
+  const target = event.target
+  if (target instanceof HTMLElement && target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return
+  const pending = markerPending()
+  if (!claimReader()) return
+  if ((upwardKey(event.key) && canScrollUp()) || pending) stick = false
+}
+function readerMoved() {
+  // Also cover scrollbar/accessibility/programmatic scrolling whose scroll
+  // event has not yet run. Our own placements update anchorTop synchronously.
+  const el = scroller.value
+  if (placed && el && !adjusting && Math.abs(el.scrollTop - anchorTop) > 2) {
+    const pending = markerPending()
+    const upward = el.scrollTop < anchorTop - 2
+    if (claimReader() && (upward || pending)) stick = false
+  }
+  return userMoved
+}
 function onScroll() {
   const el = scroller.value
   if (!el) return
+  const top = el.scrollTop
   if (nearBottom(el)) stick = true
-  else if (el.scrollTop < lastTop - 2) stick = false
-  lastTop = el.scrollTop
-  distance.value = el.scrollHeight - el.scrollTop - el.clientHeight
+  else if (top < lastTop - 2) stick = false
+  lastTop = top
+  distance.value = el.scrollHeight - top - el.clientHeight
+  if (!entered || !placed) return
+  if (Math.abs(top - anchorTop) <= 2 || adjusting) {
+    if (adjusting) anchorTop = top
+    return
+  }
+  userMoved = true
+  awaitingServerPlacement = false
 }
+// The reader asked for the latest post: a late server mark must not pull them away.
 function toBottom(smooth = false) {
   const el = scroller.value
   if (!el) return
+  userMoved = true
+  awaitingServerPlacement = false
   stick = true
   el.scrollTo({ top: el.scrollHeight, behavior: smooth && !reduced() ? 'smooth' : 'auto' })
+  anchorTop = el.scrollTop
   if (!smooth || reduced()) onScroll()
 }
-// Opening the tab lands on the first unread message, or at the bottom. The "New"
-// divider marks where unread starts, unless everything is new.
-async function enter() {
-  entered = true
-  const first = unread.value[0]
-  newFrom.value = first && current.value[0]?.id !== first.id ? first.id : undefined
-  newCount.value = unread.value.length
-  await nextTick()
+// Keep a pinned bottom without treating the move as the reader's own scroll.
+function keepBottom() {
   const el = scroller.value
   if (!el) return
-  const target = el.querySelector<HTMLElement>('.new-divider') ?? (first ? el.querySelector<HTMLElement>(`.msg[data-id="${CSS.escape(first.id)}"]`) : null)
+  adjusting = true
+  stick = true
+  el.scrollTop = el.scrollHeight
+  anchorTop = el.scrollTop
+  lastTop = el.scrollTop
+  distance.value = el.scrollHeight - el.scrollTop - el.clientHeight
+  adjusting = false
+}
+function schedulePlace(generation: number) {
+  const run = placeChain.then(() => placeThread(generation))
+  placeChain = run.then(() => undefined, () => undefined)
+  return run
+}
+// Reopening resumes at the first unread message. A first visit, with no mark on
+// this browser or the server, shows the latest exchange. A server mark that
+// arrives after that provisional landing moves the reader unless they scrolled.
+async function placeThread(generation: number) {
+  if (generation !== readGeneration || !entered || !props.active) return
+  // Read displacement before inserting the divider: browser scroll anchoring
+  // from that DOM change is not user intent. Input handlers remain synchronous
+  // across the nextTick boundaries below.
+  readerMoved()
+  // The server mark can arrive while the thread paints. Sync again so the
+  // divider and the scroll use that mark, not the provisional bottom.
+  syncDivider()
+  let synced = mark.value?.event ?? null
+  await nextTick()
+  if (generation !== readGeneration || !entered || !props.active) return
+  if (userMoved) {
+    if (!holdingMarker()) observe()
+    return
+  }
+  if ((mark.value?.event ?? null) !== synced) {
+    syncDivider()
+    await nextTick()
+    if (generation !== readGeneration || !entered || !props.active || userMoved) return
+  }
+  const el = scroller.value
+  if (!el) return
+  const first = unread.value[0]
+  const target = mark.value ? el.querySelector<HTMLElement>('.new-divider') ?? (first ? el.querySelector<HTMLElement>(`.msg[data-id="${CSS.escape(first.id)}"]`) : null) : null
+  adjusting = true
   if (target) {
     el.scrollTop = Math.max(0, target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12)
     stick = nearBottom(el)
-  } else toBottom()
+  } else {
+    el.scrollTop = el.scrollHeight
+    stick = true
+  }
+  anchorTop = el.scrollTop
   lastTop = el.scrollTop
-  onScroll()
-  observe()
+  distance.value = el.scrollHeight - el.scrollTop - el.clientHeight
+  adjusting = false
+  placed = true
+  if (holdingMarker()) awaitingServerPlacement = true
+  else observe()
+}
+async function enter() {
+  entered = true
+  userMoved = false
+  placed = false
+  touchY = undefined
+  await schedulePlace(readGeneration)
 }
 watch(() => props.active, active => {
   if (active && loaded) void enter()
@@ -195,7 +350,7 @@ watch(() => current.value.map(m => `${m.id}:${m.count}`).join(), async (_now, _b
   onCleanup(() => { cancelled = true })
   await nextTick()
   if (cancelled || !props.active || !entered) return
-  if (stick) toBottom()
+  if (stick) keepBottom()
   else onScroll()
   observe()
 })
@@ -203,11 +358,14 @@ watch(() => current.value.map(m => `${m.id}:${m.count}`).join(), async (_now, _b
 // ---------- Seen: in view while the tab and the page are visible ----------
 let seen: IntersectionObserver | undefined
 let resize: ResizeObserver | undefined
+let observeGeneration = 0
 function observe() {
   const el = scroller.value
-  if (!el || typeof IntersectionObserver === 'undefined') return
   seen?.disconnect()
+  if (!el || holdingMarker() || typeof IntersectionObserver === 'undefined') return
+  const generation = ++observeGeneration
   seen = new IntersectionObserver(entries => {
+    if (generation !== observeGeneration || holdingMarker()) return
     if (!props.active || document.visibilityState !== 'visible') return
     const rootHeight = el.clientHeight
     let best: { event: number; id: string } | undefined
@@ -232,7 +390,7 @@ onMounted(() => {
   window.addEventListener('focus', onFocus)
   if (typeof ResizeObserver !== 'undefined' && scroller.value) {
     // The keyboard or a taller composer shrinks the thread: stay on the latest post.
-    resize = new ResizeObserver(() => { if (props.active && entered && stick) toBottom() })
+    resize = new ResizeObserver(() => { if (props.active && entered && stick) keepBottom() })
     resize.observe(scroller.value)
   }
 })
@@ -271,7 +429,7 @@ watch(() => agents.deliveryPulse, () => refreshReceipts())
 let refreshedAt = 0
 async function refresh() {
   refreshedAt = Date.now()
-  await agents.refreshThread(s.value.project_id)
+  await agents.refreshThread(s.value.project_id, s.value.id)
 }
 watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
   const generation = ++readGeneration
@@ -285,6 +443,12 @@ watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
   mark.value = local
   statuses.value = {}
   entered = false; loaded = false; newFrom.value = undefined; distance.value = 0; stick = true
+  userMoved = false
+  placed = false
+  awaitingServerPlacement = false
+  touchY = undefined
+  markerHold = viewer && person.value && !local ? generation : 0
+  seen?.disconnect()
   draft.value = ''; replyTo.value = null; sendError.value = ''
   const projectId = s.value.project_id
   boundProject = projectId
@@ -333,11 +497,12 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 <template>
   <div class="session-chat">
     <div class="thread-wrap">
-      <div ref="scroller" class="thread-scroll" @scroll.passive="onScroll">
-        <section v-if="inboxNotes.length" class="inbox-note" aria-label="Inbox attention">
-          <p v-for="note in inboxNotes" :key="note.code"><AppIcon name="inbox" :size="13" />{{ note.text }}</p>
-        </section>
-        <SessionMessages :messages="messages" :session-id="s.id" :principal-id="s.agent_principal_id" :address="address" :now="now"
+      <div ref="scroller" class="thread-scroll" @scroll.passive="onScroll"
+        @wheel.capture.passive="onWheel" @touchstart.capture.passive="onTouchStart"
+        @touchmove.capture.passive="onTouchMove" @touchend.capture.passive="onTouchEnd"
+        @touchcancel.capture.passive="onTouchEnd" @pointerdown.capture.passive="onPointerDown"
+        @keydown.capture="onScrollKey">
+        <SessionMessages :messages="messages" :principal-id="s.agent_principal_id" :now="now"
           :can-reply="canWrite && !composeBlock && !managed" :new-from="newFrom" :new-count="newCount" :statuses="statuses" @reply="reply" />
       </div>
       <Transition name="jump">
@@ -376,9 +541,6 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 .session-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .thread-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 18px 24px 20px; }
-.inbox-note { display: grid; gap: 4px; margin-bottom: 12px; }
-.inbox-note p { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
-.inbox-note svg { flex: none; color: var(--ink-3); }
 .jump { position: absolute; right: 16px; bottom: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 40px; height: 40px; padding: 0; border: 0; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); }
 .jump svg { flex: none; }
 .jump.labelled { padding: 0 12px 0 14px; color: var(--teal-ink); }

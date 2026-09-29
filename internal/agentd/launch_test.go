@@ -84,7 +84,7 @@ func (a *claimFaultAPI) ReportForClaim(_ context.Context, _, _, generation strin
 	if generation != a.claimGeneration {
 		return ErrGeneration
 	}
-	if previous, exists := a.accepted[report.Sequence]; exists && previous != report {
+	if previous, exists := a.accepted[report.Sequence]; exists && !reflect.DeepEqual(previous, report) {
 		return ErrTelemetryProtocol
 	}
 	a.accepted[report.Sequence] = report

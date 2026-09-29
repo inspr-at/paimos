@@ -116,6 +116,17 @@ paths:
         - $ref: '#/components/parameters/projectId'
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/workerLease'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phase, activity_sequence]
+              properties:
+                phase: {type: string}
+                activity_sequence: {type: integer, minimum: 0}
+                max_session_file_bytes: {type: [integer, 'null'], minimum: 2000, maximum: 64000, description: "Optional; omitted/null resets capability to legacy 12000."}
+                rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80}
       responses:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Updated heartbeat and phase}
@@ -128,7 +139,8 @@ paths:
         - $ref: '#/components/parameters/workerLease'
       responses:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
-        '200': {description: Claimed typed owned controls}
+        '409': {description: Managed worker required}
+        '200': {description: 'Claimed controls. expires_in_ms is the remaining database-clock authorization, rounded down and at most 45000. Expired controls are settled first and omitted.'}
   /api/projects/{projectId}/harness-sessions/{sessionId}/drain:
     post:
       operationId: drainHarnessInbox
@@ -172,6 +184,8 @@ paths:
         '409': {description: 'Unmanaged, unsupported or stale generation'}
   /api/projects/{projectId}/harness-sessions/{sessionId}/managed-context:
     post:
+      parameters:
+        - {name: X-Aeon-Max-Session-File-Bytes, in: header, schema: {type: integer, minimum: 2000, maximum: 64000}, description: "Omission means 12000. Delivery also respects the registered maximum; whole-rule compatibility cut with note, never dropping locked rules."}
       operationId: managedHarnessContext
       description: Exact managed worker lease; ephemeral ADR-004 rules for the bound session only.
       responses:
@@ -352,7 +366,7 @@ components:
         context: {$ref: '#/components/schemas/HarnessRulesReceiptContext'}
         body_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Worker-reported SHA256 of exact merged bytes, never a hash of a version label'}
         version: {type: string, maxLength: 16, pattern: '^(floor-only|[0-9]{12}\.0\.0)$', description: Worker-reported calendar version or floor-only; no assertion of publication}
-        byte_size: {type: integer, minimum: 1, maximum: 12000}
+        byte_size: {type: integer, minimum: 1, maximum: 64000}
         source: {type: string, enum: [online, cache, floor-only], description: Worker-reported source; cache/floor-only are stale fallback evidence and never fresh authority}
     HarnessRulesReceipt:
       type: object
@@ -386,6 +400,9 @@ components:
       type: object
       required: [agent_principal_id, harness, host, management_mode, role, harness_session_ref, worker_lease]
       properties:
+        succeeds_session_id: {type: [string, 'null'], format: uuid, description: Explicit same-principal coordinator predecessor in this project.}
+        max_session_file_bytes: {type: [integer, 'null'], minimum: 2000, maximum: 64000, description: "Optional; omitted/null means legacy 12000."}
+        rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80}
         agent_principal_id: {type: string, format: uuid}
         run_id: {type: [string, 'null'], format: uuid}
         ticket_node_id: {type: [string, 'null'], format: uuid}
@@ -399,6 +416,7 @@ components:
         work_shape: {type: string, enum: [unknown, ship, scout]}
         advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop]}}
         harness_session_ref: {type: string, writeOnly: true}
+        vendor_session_ref: {type: string, writeOnly: true, description: 'Optional harness-native session id. Digested like harness_session_ref. Omitted on replay does not clear a stored value.'}
         worker_lease: {type: string, writeOnly: true}
     HarnessBinding:
       type: object

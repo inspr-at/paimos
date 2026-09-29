@@ -4,7 +4,10 @@ import { onBeforeUnmount, ref, watchEffect } from 'vue'
 import { renderVersion, disposeVersion } from '../vendor/calendar-version-display/version.js'
 import display from '../vendor/calendar-version-display/display.json'
 import { useVersion } from '../stores/version'
+import { VERSION_COPY_TEXT } from '../lib/version-copy'
 
+// menuitem: inside a menu the copy control is one of its items (roving focus, AEON-312).
+const props = defineProps<{ menuitem?: boolean }>()
 const version = useVersion()
 const host = ref<HTMLElement>()
 void version.load()
@@ -15,10 +18,9 @@ watchEffect(() => {
     disposeVersion(host.value)
     host.value.textContent = 'dev'
   } else {
-    renderVersion(host.value, value, scheme, { config: display, mode: 'pretty', brand: '#D69B31' })
-    if (host.value.getAttribute('role') === 'button') {
-      host.value.setAttribute('aria-label', `Copy version ${value}`)
-    }
+    renderVersion(host.value, value, scheme, { config: display, mode: 'pretty', brand: '#D69B31', text: VERSION_COPY_TEXT })
+    // The renderer names the copy control itself (AEON-309); inside a menu it becomes one of its items.
+    if (props.menuitem && host.value.getAttribute('role') === 'button') { host.value.setAttribute('role', 'menuitem'); host.value.setAttribute('tabindex', '-1') }
   }
 }, { flush: 'post' })
 onBeforeUnmount(() => { if (host.value) disposeVersion(host.value) })

@@ -4,7 +4,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
-import { businessData, mockBusiness, type BusinessMockOptions } from './business-fixtures'
+import { businessData, mockBusiness, NOW, type BusinessMockOptions } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 
 const places = (page: Page) => page.getByRole('navigation', { name: 'Places' })
@@ -46,6 +46,61 @@ test('Business shows only while one of its parts is open', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
   await expect(places(page).getByRole('link')).toHaveText(['Projects', 'Agents'])
+})
+
+test('g then b crosses the release menu g opened; another menu blocks a new arm, and an expired arm or a field stays on the ticket', async ({ page }) => {
+  await setup(page)
+  await page.goto('/p/PHAROS/PHAROS-11')
+  const ticket = page.locator('.ticket-ws')
+  await expect(ticket).toBeVisible()
+  await page.locator('main').focus()
+  const release = page.getByRole('dialog', { name: 'Release for PHAROS-11' })
+  await page.keyboard.press('g')
+  await expect(release).toBeVisible()
+  await page.keyboard.press('b')
+  await expect(page).toHaveURL('/business')
+  await expect(release).toHaveCount(0)
+
+  await page.goto('/p/PHAROS/PHAROS-11')
+  await expect(ticket).toBeVisible()
+  await page.locator('main').focus()
+  await page.keyboard.press('g')
+  await expect(release).toBeVisible()
+  await page.getByRole('button', { name: 'Status: In progress. Change status of PHAROS-11' }).click()
+  const status = page.getByRole('menu', { name: 'Status of PHAROS-11' })
+  await expect(status).toBeVisible()
+  await expect(release).toHaveCount(0)
+  await page.keyboard.press('p')
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
+  await expect(status).toBeVisible()
+  // Status is another menu, so g inside it never arms and p stays on the ticket.
+  // The expired arm is separate: g opens Release, the clock jumps 1.6s, and b stays.
+  await page.keyboard.press('g')
+  await page.keyboard.press('p')
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
+  await expect(status).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await expect(status).toHaveCount(0)
+  await page.locator('main').focus()
+  await page.keyboard.press('g')
+  await expect(release).toBeVisible()
+  await page.clock.setFixedTime(NOW.getTime() + 1_600)
+  await page.keyboard.press('b')
+  // The URL is already the ticket, so a router.push would pass an immediate check.
+  await page.waitForTimeout(1_000)
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
+  await page.keyboard.press('Escape')
+  await expect(release).toHaveCount(0)
+  await page.locator('main').focus()
+  await page.keyboard.press('g')
+  await expect(release).toBeVisible()
+  const comment = ticket.getByLabel('Add a comment')
+  await comment.click()
+  await expect(release).toHaveCount(0)
+  await page.keyboard.press('p')
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
+  await expect(comment).toHaveValue('p')
 })
 
 test('g p, g a and g b go to the places; typing in a field never does', async ({ page }) => {

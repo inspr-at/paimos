@@ -6,7 +6,7 @@ import AppIcon from '../AppIcon.vue'
 // One modal for the rules page: a title, one short line, a body that scrolls on
 // its own and a footer that always stays in view with the dialog's one action.
 // 'side' slides in from the right (preview, history); 'center' is a task dialog.
-const props = withDefaults(defineProps<{ title: string; lede?: string; size?: 'center' | 'wide' | 'side'; busy?: boolean }>(), { lede: '', size: 'center', busy: false })
+const props = withDefaults(defineProps<{ title: string; lede?: string; size?: 'center' | 'wide' | 'side' | 'sheet'; busy?: boolean }>(), { lede: '', size: 'center', busy: false })
 const emit = defineEmits<{ close: [] }>()
 const dialog = ref<HTMLDialogElement>()
 const id = useId()
@@ -48,8 +48,9 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 .size-center, .size-wide { width: min(560px, calc(100vw - 24px)); margin: auto; }
 .size-wide { width: min(760px, calc(100vw - 24px)); }
 .size-center .card, .size-wide .card { max-height: min(760px, calc(100dvh - 24px)); border-radius: 16px; }
-.size-side { position: fixed; inset: 0 0 0 auto; width: min(560px, 100vw); height: 100%; margin: 0; }
-.size-side .card { height: 100%; border-radius: 16px 0 0 16px; }
+.size-side, .size-sheet { position: fixed; inset: 0 0 0 auto; width: min(560px, 100vw); height: 100%; margin: 0; }
+.size-sheet { width: min(860px, 100vw); }
+.size-side .card, .size-sheet .card { height: 100%; border-radius: 16px 0 0 16px; }
 .head { display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px 12px; }
 .titles { flex: 1; min-width: 0; }
 .head h2 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
@@ -61,7 +62,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 @media (max-width: 600px) {
   .size-center, .size-wide { width: 100vw; margin: auto 0 0; }
   .size-center .card, .size-wide .card { max-height: 92dvh; border-radius: 16px 16px 0 0; }
-  .size-side .card { border-radius: 0; }
+  .size-side .card, .size-sheet .card { border-radius: 0; }
   .head { padding: 16px 16px 10px; }
   .body { padding: 4px 16px 14px; }
   .pinned { padding: 10px 16px 2px; }
@@ -69,7 +70,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 }
 @media (prefers-reduced-motion: no-preference) {
   .rules-dialog[open] .card { animation: rules-dialog-in .16s ease-out; }
-  .size-side[open] .card { animation-name: rules-dialog-side; }
+  .size-side[open] .card, .size-sheet[open] .card { animation-name: rules-dialog-side; }
 }
 @keyframes rules-dialog-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes rules-dialog-side { from { opacity: .4; transform: translateX(24px); } }

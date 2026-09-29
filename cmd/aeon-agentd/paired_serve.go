@@ -35,6 +35,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	piNodes := map[string]piprobe.Node{}
 	codexNodes, cursorNodes := map[string]harnesslaunch.Node{}, map[string]harnesslaunch.Node{}
 	grokBindings := map[string]agentd.GrokBinding{}
+	grokHomes, cursorHomes := map[string]string{}, map[string]string{}
 	paths := map[string]string{}
 	accounts := []agentd.EnrolledAccount{}
 	for _, a := range c.Accounts {
@@ -57,6 +58,9 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 			claudeEmails[a.Key] = a.Identity
 		case agentd.Cursor:
 			cursorIDs[a.Key] = a.Identity
+			if a.Home != "" {
+				cursorHomes[a.Key] = a.Home
+			}
 			cursorNodes[a.Key] = a.Node
 		case agentd.Pi:
 			if !piprobe.ValidProvider(a.Identity) || !filepath.IsAbs(a.Home) {
@@ -65,6 +69,9 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 			piHomes[a.Key], piProviders[a.Key] = a.Home, a.Identity
 			piNodes[a.Key] = a.PiNode
 		case agentd.Grok:
+			if a.Home != "" {
+				grokHomes[a.Key] = a.Home
+			}
 			if a.Grok.BinaryPath != a.Path || a.Grok.PrincipalSHA256 != a.Identity || a.Grok.AuthPath == "" || a.Grok.ScratchRoot == "" {
 				return nil, nil, errors.New("native Grok private binding unavailable")
 			}
@@ -87,9 +94,12 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 		adapters = append(adapters, a)
 	}
 	if p := paths[agentd.Cursor]; p != "" {
-		a := agentd.NewCursorAdapter(p, cursorIDs)
-		a.Nodes = cursorNodes
-		adapters = append(adapters, a)
+		cursor := agentd.NewCursorAdapter(p, cursorIDs)
+		if len(cursorHomes) > 0 {
+			cursor.Homes = cursorHomes
+		}
+		cursor.Nodes = cursorNodes
+		adapters = append(adapters, cursor)
 	}
 	if p := paths[agentd.Pi]; p != "" {
 		a := agentd.NewPiAdapter(p, piHomes)
@@ -98,12 +108,14 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 		adapters = append(adapters, a)
 	}
 	if len(grokBindings) > 0 {
-		adapters = append(adapters, agentd.NewGrokAdapter(grokBindings))
+		grok := agentd.NewGrokAdapter(grokBindings)
+		grok.Homes = grokHomes
+		adapters = append(adapters, grok)
 	}
 	return accounts, adapters, nil
 }
 
-func servePaired(root string) error {
+func servePaired(root string, capacityInterval time.Duration) error {
 	c, err := agentsetup.ReadRuntimeConfig(root)
 	if err != nil {
 		return err
@@ -129,7 +141,7 @@ func servePaired(root string) error {
 	defer stop()
 	state := filepath.Join(root, "daemon")
 	remote := agentd.NewRemote(c.Origin, string(key))
-	s, err := agentd.NewSupervisor(ctx, agentd.Config{API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1}})
+	s, err := agentd.NewSupervisor(ctx, agentd.Config{CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1}})
 	if err != nil {
 		return err
 	}
@@ -163,41 +175,44 @@ func servePaired(root string) error {
 	if err != nil {
 		return err
 	}
+	captureCtx, stopCapture := context.WithCancel(ctx)
+	captureDone := make(chan struct{})
+	go func() { defer close(captureDone); s.RunCapacityCaptures(captureCtx) }()
+	defer func() { stopCapture(); <-captureDone }()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	stopping := false
 	for {
-		if stopping {
-			op, cancel := context.WithTimeout(context.Background(), time.Second)
+		if stopping || ctx.Err() != nil {
+			stopping = true
+			stopCapture()
+			<-captureDone
+			op, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			err = s.Close(op)
 			cancel()
 			if err == nil {
 				return nil
 			}
-		}
-		op, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		watches.Sweep(op)
-		if !stopping {
-			// Lifecycle reconciliation is required before every fresh dispatch;
-			// the independent tombstone proof still works after key revocation.
-			err = syncPairing(op, root, c.Origin, s)
-			if err == nil {
-				next, _, readErr := agentsetup.ReadRuntime(root)
-				if readErr == nil {
-					c, readErr = pollPairedRuntime(op, s, root, c, next)
-					if errors.Is(readErr, errStopDaemon) {
-						stopping = true
-					}
-				}
-			}
-		} else {
-			_ = s.PollOnce(op)
-		}
-		cancel()
-		if stopping {
-			<-ticker.C
+			awaitDrainRetry()
 			continue
 		}
+		op, cancel := context.WithTimeout(ctx, 20*time.Second)
+		watches.Sweep(op)
+		// Lifecycle reconciliation is required before every fresh dispatch;
+		// the independent tombstone proof still works after key revocation.
+		err = syncPairing(op, root, c.Origin, s)
+		if err == nil {
+			next, _, readErr := agentsetup.ReadRuntime(root)
+			if readErr == nil {
+				// Claude repins and dependency repairs hold only Claude;
+				// identity or binding changes still stop the daemon.
+				c, readErr = pollPairedRuntime(op, s, root, c, next)
+				if errors.Is(readErr, errStopDaemon) {
+					stopping = true
+				}
+			}
+		}
+		cancel()
 		select {
 		case <-ctx.Done():
 			stopping = true

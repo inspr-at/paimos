@@ -19,7 +19,7 @@ import (
 // AEON-291: a one-click removal from Agents answers its event_id so the undo
 // toast can reverse it through POST /api/events/{id}/undo.
 func UndoHandlers() map[string]events.UndoFunc {
-	return map[string]events.UndoFunc{"harness.removed": undoRemoval}
+	return map[string]events.UndoFunc{"harness.removed": undoRemoval, "harness.reparented": undoReparent}
 }
 
 // undoRemoval puts the record back exactly as it was before removal: the same
