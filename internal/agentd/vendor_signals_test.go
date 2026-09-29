@@ -471,9 +471,13 @@ func TestCodexRealMidrunLimitThroughAdapter(t *testing.T) {
 			}
 			err = proc.Wait()
 			limited := vendor == "codex_midrun_limit"
+			wantHits := 0
+			if limited {
+				wantHits = 2 // The error notification and failed turn both carry the real error variant.
+			}
 			mu.Lock()
 			defer mu.Unlock()
-			if (err != nil) != limited || (len(hits) > 0) != limited || !proc.(interface{ ProcessExited() bool }).ProcessExited() {
+			if (err != nil) != limited || len(hits) != wantHits || !proc.(interface{ ProcessExited() bool }).ProcessExited() {
 				t.Fatalf("mid-run binding/settlement failed: error=%v hits=%d", err, len(hits))
 			}
 			for _, hit := range hits {

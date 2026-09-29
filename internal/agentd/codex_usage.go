@@ -250,7 +250,12 @@ func (p *codexProcess) awaitCompletion() {
 
 func (p *codexProcess) startTurn(ctx context.Context, r StartRequest) error {
 	// Each request stays on the fresh thread owned by this connection.
+	p.eventMu.Lock()
 	thread := p.threadID
+	// turn/start explicitly selects this model, including after an idle wake.
+	// A previous turn's model switch must not change the new turn's quota scope.
+	p.capacityModel = r.Profile.Model
+	p.eventMu.Unlock()
 	raw, err := p.request(ctx, "jsonrpc", "turn/start", map[string]any{"threadId": thread, "input": []map[string]string{{"type": "text", "text": r.Prompt}}, "model": r.Profile.Model, "effort": r.Profile.Effort})
 	turn, parseErr := sessionusage.CodexStartedTurn(raw)
 	p.eventMu.Lock()
