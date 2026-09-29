@@ -560,7 +560,13 @@ transcript I/O, expiry and offline teardown in both modes),
 leases, expiry/revocation, text refusal and cross-tenant RLS/404), and the
 platform-specific process tests (native macOS/Linux kernel identity and exit).
 `cmd/aeon-agentd/paired_serve_test.go` verifies the paired-origin pin against an
-alternate remote and `AEON_URL`. The reporter contract is `harness-session/1.4`:
+alternate remote, `AEON_URL` and HTTP redirects before either mode
+can attach. `TestAttachModesProtectionMatrix` checks consent, mode tampering,
+terminal states and old-daemon refusal for both modes. The status-only text
+regression backdates the poll clock and observes the relay directly, so rate
+limiting cannot hide a missing content guard. The approval browser spec covers
+both modes and consent policies at 1600/390 pixels in light and dark.
+The reporter contract is `harness-session/1.4`:
 existing state values stay intact; optional `watch.process_state` carries a
 confirmed exit. The existing default-off permission and code-attempt-cap tests
 remain in `internal/agentpairing/watch_test.go`.
