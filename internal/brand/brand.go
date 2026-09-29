@@ -15,7 +15,7 @@
 //	  "short_name": "AEON"        where space is short (titles, "What's new in …")
 //	}
 //
-// Versions stay calendar versions (inspr-calendar-v2); nothing here is one.
+// Versions stay calendar versions (inspr-calver-3); nothing here is one.
 package brand
 
 import (

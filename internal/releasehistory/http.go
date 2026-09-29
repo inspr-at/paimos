@@ -125,7 +125,7 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 	}
 	v := strings.TrimPrefix(r.PathValue("version"), "v")
 	if !ValidVersion(v) {
-		httpapi.WriteError(w, http.StatusBadRequest, "not an inspr-calendar-v2 version")
+		httpapi.WriteError(w, http.StatusBadRequest, "not a calendar version")
 		return
 	}
 	h, err := m.historyFor(r.Context())

@@ -980,7 +980,7 @@ paths:
                 required: [version, scheme, brand]
                 properties:
                   version: {type: string, description: "YYMMDDhhmmss.0.0 or dev"}
-                  scheme: {type: string, enum: [inspr-calendar-v2]}
+                  scheme: {type: string, enum: [inspr-calendar-v2, inspr-calver-3], description: "inspr-calver-3 for builds from AEON-309 on; inspr-calendar-v2 for earlier builds"}
                   brand: {$ref: '#/components/schemas/Brand'}
   /projects/{projectId}/releases/{releaseId}/note-snapshot:
     get:
@@ -1028,7 +1028,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Release'}
-        '400': {description: Not an inspr-calendar-v2 version}
+        '400': {description: Not a calendar version (inspr-calver-3 or inspr-calendar-v2 coordinate)}
         '401': {description: Authentication required}
         '500': {description: Stored release notes could not be read}
         '404': {description: No such release in this build's history}
@@ -5589,7 +5589,7 @@ components:
         version:
           type: "string"
           pattern: "^[1-9][0-9]{11}\\.0\\.0$"
-          description: "inspr-calendar-v2; valid Gregorian UTC coordinate, immutable within set"
+          description: "Calendar coordinate YYMMDDhhmmss.0.0 (inspr-calver-3; inspr-calendar-v2 for history); valid Gregorian UTC, immutable within set"
         sha256:
           type: "string"
           pattern: "^[a-f0-9]{64}$"
@@ -5645,7 +5645,7 @@ components:
               version:
                 type: "string"
                 pattern: "^(auto|[1-9][0-9]{11}\\.0\\.0)$"
-                description: "auto (the server assigns the next inspr-calendar-v2 coordinate, strictly later than the set's current publication) or an explicit valid UTC calendar coordinate"
+                description: "auto (the server assigns the next calendar coordinate, strictly later than the set's current publication) or an explicit valid UTC calendar coordinate"
             required: ["set_id", "expected_revision", "version"]
         note:
           type: "string"
@@ -5678,7 +5678,7 @@ components:
         version:
           type: "string"
           pattern: "^[1-9][0-9]{11}\\.0\\.0$"
-          description: "inspr-calendar-v2; valid Gregorian UTC coordinate, immutable within set"
+          description: "Calendar coordinate YYMMDDhhmmss.0.0 (inspr-calver-3; inspr-calendar-v2 for history); valid Gregorian UTC, immutable within set"
         note:
           type: "string"
           maxLength: 500
@@ -5694,11 +5694,11 @@ components:
         version:
           type: "string"
           pattern: "^[1-9][0-9]{11}\\.0\\.0$"
-          description: "inspr-calendar-v2; valid Gregorian UTC coordinate, immutable within set"
+          description: "Calendar coordinate YYMMDDhhmmss.0.0 (inspr-calver-3; inspr-calendar-v2 for history); valid Gregorian UTC, immutable within set"
         new_version:
           type: "string"
           pattern: "^[1-9][0-9]{11}\\.0\\.0$"
-          description: "inspr-calendar-v2; valid Gregorian UTC coordinate, immutable within set"
+          description: "Calendar coordinate YYMMDDhhmmss.0.0 (inspr-calver-3; inspr-calendar-v2 for history); valid Gregorian UTC, immutable within set"
         note:
           type: "string"
           maxLength: 500
@@ -5748,7 +5748,7 @@ components:
               version:
                 type: "string"
                 pattern: "^[1-9][0-9]{11}\\.0\\.0$"
-                description: "inspr-calendar-v2; valid Gregorian UTC coordinate, immutable within set"
+                description: "Calendar coordinate YYMMDDhhmmss.0.0 (inspr-calver-3; inspr-calendar-v2 for history); valid Gregorian UTC, immutable within set"
               sha256:
                 type: "string"
             required: ["set_id", "version", "sha256"]
@@ -6767,7 +6767,7 @@ components:
       properties:
         project_node_id: {type: string, format: uuid}
         release_node_id: {type: string, format: uuid}
-        version_scheme: {type: [string, 'null'], enum: [legacy, inspr-calendar-v1, inspr-calendar-v2, null]}
+        version_scheme: {type: [string, 'null'], enum: [legacy, inspr-calendar-v1, inspr-calendar-v2, inspr-calver-3, null]}
         version: {type: [string, 'null']}
         release_sequence: {type: integer, minimum: 1}
         registration:
@@ -6791,7 +6791,7 @@ components:
       additionalProperties: false
       required: [version_scheme, version, release_channel, release_sequence, digest_sha256, commit_digest, manifest_coordinate, manifest_digest_sha256]
       properties:
-        version_scheme: {type: string, enum: [legacy, inspr-calendar-v1, inspr-calendar-v2]}
+        version_scheme: {type: string, enum: [legacy, inspr-calendar-v1, inspr-calendar-v2, inspr-calver-3]}
         version: {type: string}
         release_channel: {type: string}
         release_sequence: {type: integer, minimum: 1}
@@ -7490,7 +7490,7 @@ components:
       required: [released_at, notes]
       properties:
         released_at: {type: string, format: date-time}
-        version: {type: string, description: Present only when the frozen version is an inspr-calendar-v2 coordinate}
+        version: {type: string, description: Present only when the frozen version is a calendar coordinate (inspr-calver-3 or inspr-calendar-v2)}
         notes:
           type: array
           items:

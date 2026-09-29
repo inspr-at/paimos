@@ -1,7 +1,9 @@
 // Release checks for PAIMOS AEON (AEON-6).
 // 1. The vendored INSPR presentation bundle matches the checked-in pin literals. Expected values live in
 //    calendar-version-bundle-pin.json and are never derived from the candidate bytes; bundled JS is never executed here.
-// 2. version.json is the one authoritative version source and holds a valid inspr-calendar-v2 coordinate.
+// 2. version.json is the one authoritative version source and holds a valid calendar coordinate. New
+//    reservations declare inspr-calver-3 (INSPR-CalVer3); inspr-calendar-v2 (INSPR-CalVer2) stays valid only
+//    for versions reserved up to LAST_CALVER2, which are history and never rewritten (AEON-309).
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -10,7 +12,20 @@ import { checkQuoteEvidence } from "./check-quote-evidence.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const FILES = ["auto-animate-license.js", "auto-animate.js", "display.json", "manifest.json", "package.json", "presentation.js", "schemes.json", "version-interaction.js", "version.js"];
+const FILES = ["display.json", "manifest.json", "package.json", "presentation.js", "schemes.json", "version-interaction.js", "version.js"];
+
+// The current scheme, and the last version Aeon reserved under its predecessor. Both schemes share one
+// coordinate (YYMMDDhhmmss.0.0), so versions keep sorting as time across the switch.
+export const SCHEME = "inspr-calver-3";
+export const CALVER2 = "inspr-calendar-v2";
+export const LAST_CALVER2 = "260929113854.0.0";
+
+// schemeError says why a version.json declaration is not allowed, or returns "".
+export function schemeError(scheme, version) {
+  if (scheme === SCHEME) return version > LAST_CALVER2 ? "" : `${SCHEME} versions must be later than the last ${CALVER2} version ${LAST_CALVER2}`;
+  if (scheme === CALVER2) return version <= LAST_CALVER2 ? "" : `new reservations declare ${SCHEME}; ${CALVER2} is history only (last ${LAST_CALVER2})`;
+  return `unknown version scheme ${scheme}`;
+}
 
 export function validCalendarVersion(v) {
   const m = /^([1-9][0-9])(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])([01][0-9]|2[0-3])([0-5][0-9])([0-5][0-9])\.0\.0$/.exec(v || "");
@@ -38,10 +53,11 @@ export function verifyRelease() {
   if (sha(readFileSync(join(dir, "display.json"))) !== pin.configSha256) fail("display config differs from the pin");
   const verPath = join(root, "version.json");
   let exists = true; try { lstatSync(verPath); } catch { exists = false; }
-  if (!exists) { if (process.argv.includes("--release")) fail("version.json is required for a release"); return { version: "dev", scheme: "inspr-calendar-v2", bundle: `${pin.repository}@${pin.revision.slice(0, 7)}` }; }
+  if (!exists) { if (process.argv.includes("--release")) fail("version.json is required for a release"); return { version: "dev", scheme: SCHEME, bundle: `${pin.repository}@${pin.revision.slice(0, 7)}` }; }
   const ver = JSON.parse(readFileSync(verPath, "utf8"));
-  if (ver.version_scheme !== "inspr-calendar-v2") fail(`unknown version scheme ${ver.version_scheme}`);
   if (!validCalendarVersion(ver.version)) fail(`invalid calendar version ${ver.version}`);
+  const schemeWhy = schemeError(ver.version_scheme, ver.version);
+  if (schemeWhy) fail(schemeWhy);
   if (!Number.isInteger(ver.release_sequence) || ver.release_sequence < 1 || !ver.release_channel) fail("release channel and sequence required");
   return { version: ver.version, scheme: ver.version_scheme, sequence: ver.release_sequence, bundle: `${pin.repository}@${pin.revision.slice(0, 7)}` };
 }

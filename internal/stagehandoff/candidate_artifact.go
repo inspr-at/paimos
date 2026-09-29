@@ -63,7 +63,7 @@ func validCandidateVersion(scheme, version string) bool {
 	switch scheme {
 	case "legacy":
 		return classicVersionRE.MatchString(version)
-	case "inspr-calendar-v2":
+	case releasehistory.SchemeCalVer3, releasehistory.SchemeCalVer2:
 		return releasehistory.ValidVersion(version)
 	case "inspr-calendar-v1":
 		if !candidateCalendarV1.MatchString(version) {

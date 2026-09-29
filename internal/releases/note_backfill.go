@@ -288,7 +288,7 @@ func backfillAuthorize(ctx context.Context, tx pgx.Tx, actor tenant.Principal) e
 }
 
 func manifestSnapshot(ctx context.Context, tx pgx.Tx, actor tenant.Principal, projectID string, rel releasehistory.Release, released time.Time) (releasehistory.NoteSnapshot, []string, error) {
-	snap := releasehistory.NoteSnapshot{Schema: releasehistory.SnapshotSchema, TenantID: actor.TenantID, ProjectID: projectID, Version: rel.Version, VersionScheme: "inspr-calendar-v2", Revision: 1, ReleasedAt: &released, MembershipSource: releasehistory.ManifestMembershipSource, FieldSource: releasehistory.FieldSource, Tickets: []releasehistory.NoteTicket{}}
+	snap := releasehistory.NoteSnapshot{Schema: releasehistory.SnapshotSchema, TenantID: actor.TenantID, ProjectID: projectID, Version: rel.Version, VersionScheme: releasehistory.SchemeOf(rel.Version), Revision: 1, ReleasedAt: &released, MembershipSource: releasehistory.ManifestMembershipSource, FieldSource: releasehistory.FieldSource, Tickets: []releasehistory.NoteTicket{}}
 	excluded := []string{}
 	keys := append([]string{}, rel.Tickets...)
 	for _, c := range rel.Changes {
