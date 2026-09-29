@@ -348,9 +348,11 @@ func TestSupervisorUsageArchiveDetachesWithoutStoppingRun(t *testing.T) {
 	s, api, proc := testSupervisor(t)
 	defer s.Close(context.Background())
 	var calls atomic.Int32
-	// The usage POST blocks in the handler until release. finish therefore
-	// runs while that write is in flight; the 410 is delivered only after
-	// shutdown has started. A lost 410 used to be retried as a second write.
+	// The usage POST stays blocked until the test has seen reporter
+	// cancellation, and only then is the 410 released. Delivering the archive
+	// response before that cancellation lets the old bug pass: the client
+	// observes the 410 while the reporter is still running. A lost 410 used
+	// to be retried as a second write.
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var enteredOnce sync.Once
@@ -368,6 +370,9 @@ func TestSupervisorUsageArchiveDetachesWithoutStoppingRun(t *testing.T) {
 		}
 		enteredOnce.Do(func() { close(entered) })
 		<-release
+		if err := r.Context().Err(); err != nil {
+			t.Errorf("in-flight usage POST ended before the archived response: %v", err)
+		}
 		calls.Add(1)
 		w.WriteHeader(410)
 		_, _ = w.Write([]byte(`{"error":"harness generation archived"}`))
@@ -390,7 +395,21 @@ func TestSupervisorUsageArchiveDetachesWithoutStoppingRun(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	settled := make(chan error, 1)
+	cancelled := make(chan struct{})
+	stop := entry.usage.cancel
+	var ack sync.Once
+	entry.usage.cancel = func() {
+		stop()
+		// The monitor settles usage again after the child exits. Cancel is
+		// idempotent; the acknowledgement must be too.
+		ack.Do(func() { close(cancelled) })
+	}
 	go func() { settled <- entry.usage.finish(ctx) }()
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reporter cancellation was not acknowledged")
+	}
 	releaseWrite()
 	if err := <-settled; !errors.Is(err, ErrHarnessArchived) {
 		t.Fatal(err)

@@ -119,7 +119,7 @@ func TestCodexModelUsageThroughSupervisorAndTelemetryHTTP(t *testing.T) {
 	var statuses []int
 	receipts := make(map[string][]byte)
 	attempts, replays := 0, 0
-	firstAccepted, releaseFirst := make(chan struct{}), make(chan struct{})
+	firstAccepted := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/projects/project/harness-sessions/session/usage" {
 			base.mu.Lock()
@@ -159,12 +159,16 @@ func TestCodexModelUsageThroughSupervisorAndTelemetryHTTP(t *testing.T) {
 			first := attempts == 1
 			mu.Unlock()
 			if first {
-				// Commit before losing the response: finish must retry this receipt.
+				// The receipt is committed, then the response is lost. Shutdown
+				// no longer cancels this POST, so the test closes the connection
+				// instead of waiting for request cancellation.
 				close(firstAccepted)
-				select {
-				case <-r.Context().Done():
-				case <-releaseFirst:
+				conn, _, hijackErr := w.(http.Hijacker).Hijack()
+				if hijackErr != nil {
+					t.Error(hijackErr)
+					return
 				}
+				_ = conn.Close()
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"usage": map[string]any{}, "replayed": replayed})
@@ -182,7 +186,6 @@ func TestCodexModelUsageThroughSupervisorAndTelemetryHTTP(t *testing.T) {
 		_, _ = w.Write(recorder.Body.Bytes())
 	}))
 	defer server.Close()
-	defer close(releaseFirst) // Release the handler before server.Close on any fatal.
 	remote := NewRemote(server.URL, token)
 	remote.daemonID, remote.generation = "daemon", s.generation
 	s.api = &codexTelemetryAPI{usageTestAPI: &usageTestAPI{fakeAPI: base, remote: remote}, runID: run.ID}
