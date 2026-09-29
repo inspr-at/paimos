@@ -142,10 +142,15 @@ function shortcut(event: KeyboardEvent) {
 }
 // g p · g a · g b: go to a place. Listened for first (capture), so the second key
 // never reaches the page (p is Priority on an open ticket, a approves on Agents).
+// g on an open ticket also opens the release menu; that layer must not swallow
+// the place key that follows.
 const nextKey = sequence()
+let chord = false
 function placeKeys(event: KeyboardEvent) {
-  if (!session.identity || event.metaKey || event.ctrlKey || event.altKey || event.repeat || typing(event.target) || document.querySelector('dialog[open], .floating')) return
+  if (!session.identity || event.metaKey || event.ctrlKey || event.altKey || event.repeat || typing(event.target)) return
+  if (!chord && document.querySelector('dialog[open], .floating')) return
   const hit = nextKey(event.key, Date.now(), places.value)
+  chord = hit === 'armed'
   if (!hit || hit === 'armed') return
   event.preventDefault(); event.stopImmediatePropagation()
   if (route.path !== hit.to) void router.push(hit.to)

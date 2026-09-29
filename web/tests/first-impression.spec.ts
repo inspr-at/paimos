@@ -94,7 +94,8 @@ test.describe('sign-in', () => {
     await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
     await page.route('**/api/me', route => route.fulfill({ status: 401, json: { error: 'unauthorized', dev_mode: false } }))
     await page.getByRole('link', { name: /Pharos/ }).first().click()
-    await expect(page).toHaveURL('/signin?error=expired&return=/p/PHAROS')
+    // The project home canonicalises to its tickets section, and sign-in returns there.
+    await expect(page).toHaveURL('/signin?error=expired&return=/p/PHAROS/tickets')
     await expect(page.getByRole('alert')).toContainText('Your session ended')
   })
 
@@ -231,7 +232,8 @@ test.describe('404 and errors', () => {
     await expect(page.getByRole('heading', { name: 'PAIMOS AEON was updated.' })).toBeVisible()
     await page.unroute(chunk)
     await page.getByRole('button', { name: 'Reload' }).click()
-    await expect(page).toHaveURL('/p/PHAROS')
+    // Reload keeps the canonical tickets section rather than the bare project path.
+    await expect(page).toHaveURL('/p/PHAROS/tickets')
     await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(5)
   })
 })

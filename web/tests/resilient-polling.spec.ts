@@ -49,7 +49,8 @@ test('Live Agents pauses in a hidden tab and refreshes when shown and back onlin
   data.live.push(liveAgent({ project_id: 'p-aeon', name: 'aeon-worker' }))
   await mockWork(page, data)
   let attempts = 0
-  await page.route('**/api/harness-sessions/live', async route => {
+  // The live read includes inactive sessions, so the URL is /live?include_inactive=true.
+  await page.route('**/api/harness-sessions/live*', async route => {
     attempts++
     if (attempts === 1) { await new Promise(resolve => setTimeout(resolve, 150)); return route.abort('timedout') }
     return route.fallback()
