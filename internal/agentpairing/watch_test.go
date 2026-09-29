@@ -55,7 +55,12 @@ func requestWatch(t *testing.T, f *fixture, key string, in attachwatch.DeviceReq
 func activateWatch(t *testing.T, f *fixture, key string, in *attachwatch.DeviceRequest) attachwatch.View {
 	t.Helper()
 	v := requestWatch(t, f, key, *in)
-	f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest}, true, "", 200)
+	body := map[string]string{"request_digest": v.Digest}
+	if in.Snapshot.Mode == attachwatch.ModeLease {
+		body["consent_digest"] = v.ConsentDigest
+		in.ConsentDigest = v.ConsentDigest
+	}
+	f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", body, true, "", 200)
 	in.Operation = "poll"
 	in.Digest = v.Digest
 	in.Sequence = 1

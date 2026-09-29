@@ -32,7 +32,12 @@ func attachProcInfo(pid, flavor int, buf []byte) (int, error) {
 func observeAttachProcess(pid int) (attachObservation, error) {
 	fail := errors.New("kernel process identity unavailable")
 	first, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
-	if err != nil || first.Proc.P_pid != int32(pid) || first.Proc.P_stat == 5 {
+	// SysctlKinfoProc reports EIO for an empty result. Confirm absence with
+	// signal 0 (existence check only); EIO or a permission failure alone is not exit.
+	if err != nil && errors.Is(unix.Kill(pid, 0), syscall.ESRCH) || err == nil && (first.Proc.P_pid != int32(pid) || first.Proc.P_stat == 5) {
+		return attachObservation{}, errAttachExited
+	}
+	if err != nil {
 		return attachObservation{}, fmt.Errorf("%w: sysctl %v", fail, err)
 	}
 	session, err := unix.Getsid(pid)

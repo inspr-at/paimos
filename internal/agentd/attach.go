@@ -81,13 +81,18 @@ func (m *AttachManager) request(s *localAttach, id, operation string) attachwatc
 	return attachwatch.DeviceRequest{Operation: operation, RequestID: id, ComputerID: m.cfg.ComputerID, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), Sequence: s.sequence}
 }
 func (m *AttachManager) end(ctx context.Context, id string, s *localAttach) {
+	m.endAs(ctx, id, s, "detach")
+}
+func (m *AttachManager) endAs(ctx context.Context, id string, s *localAttach, operation string) {
 	delete(m.sessions, id)
 	if s.cancelConfirmation != nil {
 		s.cancelConfirmation()
 	}
-	s.tail.close()
+	if s.tail != nil {
+		s.tail.close()
+	}
 	if s.requested {
-		_, _ = m.cfg.Exchange(ctx, m.request(s, id, "detach"))
+		_, _ = m.cfg.Exchange(ctx, m.request(s, id, operation))
 	}
 }
 func (m *AttachManager) Sweep(ctx context.Context) {
@@ -115,7 +120,7 @@ func (m *AttachManager) Close(ctx context.Context) {
 func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in AttachLocalRequest) (AttachLocalView, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	reject := errors.New("attach rejected; inspect the process, approved folder and transcript")
+	reject := errors.New("attach rejected; inspect the process and approved folder")
 	if in.Operation == "preview" {
 		if len(m.sessions) >= 8 || !workorders.UUID(in.ProjectID) || !workorders.UUID(in.TicketID) {
 			return AttachLocalView{}, reject
@@ -129,19 +134,29 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		if err != nil || approved == "" || observed.Executable != physical {
 			return AttachLocalView{}, reject
 		}
-		tail, err := openAttachTail(in.Transcript, observed.UID)
-		if err != nil {
-			return AttachLocalView{}, reject
+		// No path means metadata-only attach. Do not discover or open any transcript.
+		mode, fileID := attachwatch.ModeLease, ""
+		var tail *attachTail
+		if in.Transcript != "" { // Preserve explicitly requested legacy watches.
+			tail, err = openAttachTail(in.Transcript, observed.UID)
+			if err != nil {
+				return AttachLocalView{}, reject
+			}
+			mode, fileID = "", tail.id
 		}
 		var b [16]byte
 		if _, err = rand.Read(b[:]); err != nil {
-			tail.close()
+			if tail != nil {
+				tail.close()
+			}
 			return AttachLocalView{}, reject
 		}
 		id := fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
-		s := &localAttach{peer: peer.Process, snapshot: attachwatch.Snapshot{ComputerID: m.cfg.ComputerID, ProjectID: in.ProjectID, TicketID: in.TicketID, Host: m.cfg.Host, Harness: in.Harness, Process: observed.Process, Transcript: in.Transcript, FileID: tail.id, Platform: runtime.GOOS}, tail: tail, touched: time.Now(), view: attachwatch.View{State: "local_review"}}
+		s := &localAttach{peer: peer.Process, snapshot: attachwatch.Snapshot{Mode: mode, ComputerID: m.cfg.ComputerID, ProjectID: in.ProjectID, TicketID: in.TicketID, Host: m.cfg.Host, Harness: in.Harness, Process: observed.Process, Transcript: in.Transcript, FileID: fileID, Platform: runtime.GOOS}, tail: tail, touched: time.Now(), view: attachwatch.View{State: "local_review"}}
 		if !s.snapshot.Valid() {
-			tail.close()
+			if tail != nil {
+				tail.close()
+			}
 			return AttachLocalView{}, reject
 		}
 		m.sessions[id] = s
@@ -157,7 +172,12 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		return m.localView(in.ID, s), nil
 	}
 	observed, err := m.observe(s.snapshot.Process.PID)
-	if err != nil || observed.Process != s.snapshot.Process || !independentAttachPeer(peer, observed, m.observe) || s.tail.check() != nil || in.Digest != s.snapshot.Digest() {
+	if errors.Is(err, errAttachExited) && s.snapshot.Mode == attachwatch.ModeLease {
+		m.endAs(ctx, in.ID, s, "exited")
+		s.view.State = "confirmed_exited"
+		return m.localView(in.ID, s), nil
+	}
+	if err != nil || observed.Process != s.snapshot.Process || !independentAttachPeer(peer, observed, m.observe) || s.tail != nil && s.tail.check() != nil || in.Digest != s.snapshot.Digest() {
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("identity changed; watch detached")
 	}
@@ -214,7 +234,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	req.LocalConfirmed = s.confirmedDigest != "" && s.confirmedDigest == s.view.ConsentDigest
 	s.sequence++
 	req.Sequence = s.sequence
-	if s.view.State == "active" {
+	if s.view.State == "active" && s.tail != nil {
 		req.Text, err = s.tail.next()
 		if err != nil {
 			m.end(ctx, in.ID, s)
@@ -222,7 +242,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		}
 	}
 	observed, err = m.observe(s.snapshot.Process.PID)
-	if err != nil || observed.Process != s.snapshot.Process || !independentAttachPeer(peer, observed, m.observe) || s.tail.check() != nil {
+	if err != nil || observed.Process != s.snapshot.Process || !independentAttachPeer(peer, observed, m.observe) || s.tail != nil && s.tail.check() != nil {
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("identity changed; watch detached")
 	}
@@ -259,7 +279,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("watch ended; attach again")
 	}
-	if s.view.State != "active" && view.State == "active" {
+	if s.view.State != "active" && view.State == "active" && s.tail != nil {
 		// Approval time is not permission to upload turns written before activation.
 		if err = s.tail.startNow(); err != nil {
 			m.end(ctx, in.ID, s)

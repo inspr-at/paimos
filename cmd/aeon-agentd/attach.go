@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -25,6 +26,16 @@ import (
 )
 
 func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote) (*agentd.AttachManager, error) {
+	// Freeze the paired origin even if a caller supplied a differently configured
+	// remote; never follow a redirect carrying registration or poll authority.
+	if remote == nil || remote.Client == nil || remote.Client.HTTP == nil {
+		return nil, errors.New("paired transport unavailable")
+	}
+	pairedClient := *remote.Client
+	pairedClient.BaseURL = c.Origin
+	pairedHTTP := *remote.Client.HTTP
+	pairedHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	pairedClient.HTTP = &pairedHTTP
 	host, proof, err := agentsetup.ReadAttachProof(root, c)
 	if err != nil {
 		return nil, err
@@ -45,14 +56,14 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 	defer cancel()
 	var registered attachwatch.View
 	registration := map[string]string{"operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey, "local_auth_capability": agentd.CurrentLocalAuthCapability()}
-	if err = remote.Client.Do(ctx, "POST", "/api/agent-pairing/attach", registration, &registered); err != nil || registered.State != "registered" {
+	if err = pairedClient.Do(ctx, "POST", "/api/agent-pairing/attach", registration, &registered); err != nil || registered.State != "registered" {
 		return nil, errors.New("paired instance refused watch registration")
 	}
 	return agentd.NewAttachManager(agentd.AttachConfig{Origin: c.Origin, ComputerID: c.ComputerID, Host: host, Workspace: c.Workspace, Executables: paths,
 		Exchange: func(ctx context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 			in.PollKey = pollKey
 			var out attachwatch.View
-			err := remote.Client.Do(ctx, "POST", "/api/agent-pairing/attach", in, &out)
+			err := pairedClient.Do(ctx, "POST", "/api/agent-pairing/attach", in, &out)
 			return out, err
 		}})
 }
@@ -66,9 +77,9 @@ func attachCommand(args []string, out io.Writer) error {
 	f.StringVar(&in.Harness, "harness", "", "paired harness name")
 	f.StringVar(&in.ProjectID, "project-id", "", "project UUID")
 	f.StringVar(&in.TicketID, "ticket-id", "", "ticket UUID")
-	f.StringVar(&in.Transcript, "transcript", "", "physical transcript file path")
-	if f.Parse(args) != nil || len(f.Args()) != 0 || !filepath.IsAbs(root) || in.PID < 1 || !filepath.IsAbs(in.Transcript) {
-		return errors.New("usage: aeon-agentd attach --setup-root PATH --pid PID --harness NAME --project-id UUID --ticket-id UUID --transcript PATH")
+	f.StringVar(&in.Transcript, "transcript", "", "legacy watch only: physical transcript file path")
+	if f.Parse(args) != nil || len(f.Args()) != 0 || !filepath.IsAbs(root) || in.PID < 1 || in.Transcript != "" && !filepath.IsAbs(in.Transcript) {
+		return errors.New("usage: aeon-agentd attach --setup-root PATH --pid PID --harness NAME --project-id UUID --ticket-id UUID [--transcript PATH]")
 	}
 	// Never read confirmation from stdin, an agent pipe, a flag or fetched text.
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
@@ -96,10 +107,18 @@ func attachCommand(args []string, out io.Writer) error {
 		_, _ = client.Attach(op, agentd.AttachLocalRequest{Operation: "detach", ID: localID})
 	}()
 	p := view.Snapshot.Process
-	fmt.Fprintf(tty, "Watch this running session on %s\nHost: %s · %s · PID %d · UID %d\nStarted: %s\nExecutable: %s\nFolder: %s\nTranscript: %s (%s)\nProject: %s · Ticket: %s\n", view.Origin, view.Snapshot.Host, view.Snapshot.Harness, p.PID, p.UID, p.Started, p.Executable, p.CWD, view.Snapshot.Transcript, view.Snapshot.FileID, view.Snapshot.ProjectID, view.Snapshot.TicketID)
-	fmt.Fprintln(tty, "Only new turns after approval. Audience: people explicitly granted harness.watch in this project.")
-	fmt.Fprintln(tty, "Do not attach mixed-context or confidential sessions. Redaction is best effort; same-user processes are not isolated.")
-	fmt.Fprint(tty, "Type WATCH for the best-effort local check, then approve in your paired browser: ")
+	verb, confirmation := "Attach", "ATTACH"
+	if in.Transcript != "" {
+		verb, confirmation = "Watch", "WATCH"
+	}
+	fmt.Fprintf(tty, "%s this running session on %s\nHost: %s · %s · PID %d · UID %d\nStarted: %s\nExecutable: %s\nFolder: %s\nProject: %s · Ticket: %s\n", verb, view.Origin, view.Snapshot.Host, view.Snapshot.Harness, p.PID, p.UID, p.Started, p.Executable, p.CWD, view.Snapshot.ProjectID, view.Snapshot.TicketID)
+	if in.Transcript == "" {
+		fmt.Fprintln(tty, "Session status only. No conversation text is read or shared.")
+	} else {
+		fmt.Fprintf(tty, "Transcript: %s (%s)\nOnly new turns after approval. Audience: people explicitly granted harness.watch in this project.\n", view.Snapshot.Transcript, view.Snapshot.FileID)
+	}
+	fmt.Fprintln(tty, "Only attach a single trust context. Same-user processes are not isolated.")
+	fmt.Fprintf(tty, "Type %s for the local check, then approve in your paired browser: ", confirmation)
 	// Bound input and handle Ctrl-C without leaving a background attach running.
 	answers := make(chan string, 1)
 	go func() {
@@ -111,7 +130,7 @@ func attachCommand(args []string, out io.Writer) error {
 	case <-ctx.Done():
 		return nil
 	case answer := <-answers:
-		if answer != "WATCH" {
+		if answer != confirmation {
 			return errors.New("attach cancelled")
 		}
 	}
@@ -132,6 +151,10 @@ func attachCommand(args []string, out io.Writer) error {
 			if err != nil {
 				return errors.New("watch ended or unreachable; start a new attach to resume")
 			}
+			if next.State == "confirmed_exited" || next.State == "detached" || next.State == "unreachable" {
+				fmt.Fprintf(out, "Attach: %s\n", next.State)
+				return nil
+			}
 			if next.Reason != "" {
 				return errors.New(next.Reason)
 			}
@@ -139,7 +162,7 @@ func attachCommand(args []string, out io.Writer) error {
 				fmt.Fprintln(out, "Waiting for local confirmation on the paired Mac; watch is not active yet.")
 			}
 			if next.State != previous {
-				fmt.Fprintf(out, "Watch: %s\n", next.State)
+				fmt.Fprintf(out, "Attach: %s\n", next.State)
 				previous = next.State
 			}
 		}

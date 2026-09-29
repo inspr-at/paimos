@@ -708,7 +708,7 @@ paths:
   /agent-pairing/attach:
     post:
       operationId: attachDevice
-      summary: Paired daemon requests, activates, renews or detaches a read-only watch
+      summary: Paired daemon requests, activates, renews or ends an attached session
       description: >-
         The single paired-runtime attach route. At daemon startup, register requires the
         paired bearer, computer lifecycle proof and a fresh memory-only poll_key. Registration
@@ -723,7 +723,11 @@ paths:
         Missing confirmation never activates; request-supplied policy overrides are refused.
         Registration may report local_auth_capability. Omission is stored as unreported.
         That report is advisory and never satisfies local confirmation. A later poll cannot change it.
-        Text is host-redacted and relayed in memory only, never stored.
+        A snapshot with mode=lease attaches metadata only: transcript and file_id must be
+        empty, text is rejected, and no conversation stream is available. Its approval is
+        single-use and requires consent_digest. The exited operation is only for a kernel
+        confirmation that the pinned process has exited; loss of contact is unreachable.
+        Legacy snapshots without mode retain the existing live-watch protocol.
       requestBody:
         required: true
         content:
@@ -789,7 +793,7 @@ paths:
       responses:
         '200': {description: 'Approved snapshot; activation requires the registered daemon poll key and, for local_auth, its local confirmation'}
         '403': {description: Same-origin paired owner required}
-        '409': {description: Digest differs from reviewed snapshot}
+        '409': {description: Digest differs from reviewed snapshot or lease approval already consumed}
         '410': {description: Approval expired or revoked}
   /agent-pairing/attach/{requestId}/revoke:
     parameters:
@@ -5915,7 +5919,18 @@ components:
       type: object
       additionalProperties: false
       required: [computer_id, project_id, ticket_id, host, harness, process, transcript, file_id]
+      description: Mode lease is metadata only; omitted mode preserves the legacy watch contract.
+      allOf:
+        - if:
+            required: [mode]
+            properties:
+              mode: {const: lease}
+          then:
+            properties:
+              transcript: {const: ''}
+              file_id: {const: ''}
       properties:
+        mode: {type: string, const: lease}
         computer_id: {type: string, format: uuid}
         project_id: {type: string, format: uuid}
         ticket_id: {type: string, format: uuid}
@@ -5934,10 +5949,10 @@ components:
             operation: {const: register}
           required: [device_proof]
         - properties:
-            operation: {enum: [request, poll, detach]}
+            operation: {enum: [request, poll, detach, exited]}
           required: [request_id, snapshot, request_digest]
       properties:
-        operation: {type: string, enum: [register, request, poll, detach]}
+        operation: {type: string, enum: [register, request, poll, detach, exited]}
         request_id: {type: string, format: uuid}
         computer_id: {type: string, format: uuid}
         device_proof: {type: string, writeOnly: true, description: 'Existing computer lifecycle proof; registration only, never watch authority'}
@@ -5951,7 +5966,7 @@ components:
           enum: [available, unsupported, unsigned, no_gui, policy]
           description: Registration only. An omitted registration is stored as unreported. A later poll cannot change it. This value never satisfies local confirmation.
         sequence: {type: integer, minimum: 1}
-        text: {type: string, maxLength: 16384, description: Host-redacted new complete records only; no persistence or replay}
+        text: {type: string, maxLength: 16384, description: Legacy watch only; rejected for mode=lease}
     AttachView:
       type: object
       required: [request_id, request_digest, snapshot, state, expires_at]
@@ -5959,7 +5974,7 @@ components:
         request_id: {type: string, format: uuid}
         request_digest: {type: string}
         snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
-        state: {type: string, enum: [pending, approved, active, detached, unreachable]}
+        state: {type: string, enum: [pending, approved, active, detached, unreachable, confirmed_exited]}
         expires_at: {type: string, format: date-time}
         lease_until: {type: [string, 'null'], format: date-time}
         session_id: {type: [string, 'null'], format: uuid}
@@ -9097,9 +9112,10 @@ components:
           type: object
           description: Content-free attach status, present on attached session detail only
           properties:
+            mode: {type: string, const: lease, description: Metadata only; no conversation viewer}
             request_id: {type: string, format: uuid}
             owner_id: {type: string, format: uuid}
-            state: {type: string, enum: [active, detached, unreachable]}
+            state: {type: string, enum: [active, detached, unreachable, confirmed_exited]}
             lease_until: {type: [string, 'null'], format: date-time}
         host: {type: string}
         management_mode: {type: string, enum: [managed, unmanaged]}

@@ -28,8 +28,11 @@ func linuxAttachStat(raw []byte) (start string, parent, session int, tty bool, e
 		return "", 0, 0, false, errors.New("invalid process stat")
 	}
 	fields := strings.Fields(string(raw[end+1:]))
-	if len(fields) < 20 || fields[0] == "Z" {
+	if len(fields) < 20 {
 		return "", 0, 0, false, errors.New("process unavailable")
+	}
+	if fields[0] == "Z" || fields[0] == "X" {
+		return "", 0, 0, false, errAttachExited
 	}
 	parent, err = strconv.Atoi(fields[1])
 	if err != nil {
@@ -46,12 +49,15 @@ func observeAttachProcess(pid int) (attachObservation, error) {
 	fail := errors.New("kernel process identity unavailable")
 	root := fmt.Sprintf("/proc/%d", pid)
 	raw, err := os.ReadFile(root + "/stat")
+	if os.IsNotExist(err) && errors.Is(unix.Kill(pid, 0), unix.ESRCH) {
+		return attachObservation{}, errAttachExited
+	}
 	if err != nil {
 		return attachObservation{}, fail
 	}
 	start, parent, session, tty, err := linuxAttachStat(raw)
 	if err != nil {
-		return attachObservation{}, fail
+		return attachObservation{}, err
 	}
 	var st unix.Stat_t
 	if unix.Stat(root, &st) != nil {

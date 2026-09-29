@@ -21,6 +21,7 @@ import (
 )
 
 func TestPairedAttachRegistersFreshMemoryOnlyKeyAtEveryStart(t *testing.T) {
+	t.Setenv("AEON_URL", "https://unpaired.invalid")
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +70,7 @@ func TestPairedAttachRegistersFreshMemoryOnlyKeyAtEveryStart(t *testing.T) {
 	}
 	store.Close()
 	c := agentsetup.RuntimeConfig{Origin: server.URL, TenantID: tenant, PrincipalID: principal, ComputerID: computer, Workspace: root}
-	remote := agentd.NewRemote(server.URL, "fixture-runtime-bearer")
+	remote := agentd.NewRemote("https://unpaired.invalid", "fixture-runtime-bearer")
 	remote.Client.HTTP = server.Client()
 	for i := 0; i < 2; i++ {
 		manager, err := pairedAttach(root, c, remote)
