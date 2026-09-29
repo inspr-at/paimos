@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
@@ -249,7 +250,17 @@ func (r *Remote) YieldHarness(ctx context.Context, s HarnessSession) ([]HarnessC
 	var result struct {
 		Controls []HarnessControl `json:"controls"`
 	}
+	started := time.Now()
 	err := r.harnessWorker(ctx, s, "/yield", struct{}{}, &result)
+	for i := range result.Controls {
+		c := &result.Controls[i]
+		// Deduct the full round trip, including body decoding. Starting the TTL
+		// at receipt would extend authorization after a slow response. Missing,
+		// invalid or legacy TTLs fail closed; expires_at is audit metadata only.
+		if c.ExpiresInMS > 0 && c.ExpiresInMS <= 45000 {
+			c.deadline = started.Add(time.Duration(c.ExpiresInMS) * time.Millisecond)
+		}
+	}
 	return result.Controls, err
 }
 

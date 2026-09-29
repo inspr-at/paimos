@@ -86,6 +86,9 @@ type HarnessSession struct {
 }
 
 type HarnessControl struct {
+	// deadline is local, monotonic, and never serialized or persisted.
+	deadline          time.Time
+	ExpiresInMS       int64                  `json:"expires_in_ms"`
 	Value             string                 `json:"value,omitempty"`
 	Text              string                 `json:"text,omitempty"`
 	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
@@ -275,6 +278,8 @@ type EnrolledAccount struct {
 }
 
 type ControlRequest struct {
+	// Only the authenticated yield transport supplies a monotonic deadline.
+	deadline          time.Time
 	Value             string                 `json:"value,omitempty"`
 	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
 	ExpectedOwnership *ownedprocess.Identity `json:"expected_ownership,omitempty"`

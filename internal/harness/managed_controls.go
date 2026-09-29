@@ -21,6 +21,15 @@ import (
 
 const managedControlCapability = "managed_control_v1"
 
+// Both timestamps belong to the database. Never interpret expires_at with the
+// API host or daemon wall clock. Cap the budget at the authorization window.
+func controlTTL(expires *time.Time, now time.Time) time.Duration {
+	if expires == nil {
+		return 0
+	}
+	return max(0, min(expires.Sub(now), ownershipWindow))
+}
+
 // Text never reaches SQL or events. Missing text after restart is a rejection,
 // not an invitation to reconstruct or replay input. The relay is bounded even
 // when no worker polls. Tenant and session are part of every lookup.
@@ -34,7 +43,7 @@ type controlText struct {
 }
 
 func relayKey(tenantID, sessionID, id string) string { return tenantID + "/" + sessionID + "/" + id }
-func (q *controlRelay) put(key, text string, expires time.Time) bool {
+func (q *controlRelay) put(key, text string, started time.Time, ttl time.Duration) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.items == nil {
@@ -48,6 +57,9 @@ func (q *controlRelay) put(key, text string, expires time.Time) bool {
 	if len(q.items) >= 256 {
 		return false
 	}
+	// started was sampled locally before fetching the DB budget and carries a
+	// monotonic reading. DB round-trip time cannot extend retention.
+	expires := started.Add(ttl)
 	q.items[key] = controlText{text, expires}
 	// Remove expired content even when the relay receives no further traffic.
 	time.AfterFunc(time.Until(expires), func() { q.take(key) })
@@ -157,8 +169,15 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if err = record(r.Context(), tx, p, s, "control_requested", nil, c); err != nil {
 		return nil, err
 	}
-	if in.Kind == "steer" && !m.controlText.put(relayKey(p.TenantID, s.ID, c.ID), in.Text, *c.ExpiresAt) {
-		return nil, workorders.Fail(429, "transient control queue full")
+	if in.Kind == "steer" {
+		started := time.Now()
+		now, err := m.ownershipNow(r.Context(), tx)
+		if err != nil {
+			return nil, err
+		}
+		if !m.controlText.put(relayKey(p.TenantID, s.ID, c.ID), in.Text, started, controlTTL(c.ExpiresAt, now)) {
+			return nil, workorders.Fail(429, "transient control queue full")
+		}
 	}
 	return c, nil
 }
