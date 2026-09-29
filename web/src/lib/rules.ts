@@ -553,6 +553,7 @@ export function rulesMessage(error: unknown): string {
   if (error.code === 'outcome_unknown') return error.message || 'The result is unknown. Reload to see the current state before trying again.'
   if (error.code === 'busy') return 'The rules are busy right now. Nothing was changed; try again in a moment.'
   if (error.code === 'ambiguous_identity') return 'Two rules of the same rank share an identity, so the merge stops.'
+  if (error.code === 'doctrine_duplicate') return error.message || 'That rule is already in the doctrine. Propose a change instead of publishing a second copy.'
   if (error.code === 'forbidden') return 'You do not have permission for that.'
   if (error.code === 'not_found') return 'That rules record is no longer there.'
   if (error.code === 'invalid_rule' || error.code === 'invalid_scope' || error.code === 'invalid_version') return error.message || 'The rules request was not accepted.'

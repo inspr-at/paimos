@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -50,6 +51,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/rules/sets/{setId}/publish", "rules.publish", m.publish, unknownChange}, {"POST /api/rules/sets/{setId}/restore", "rules.publish", m.restore, unknownChange},
 		{"GET /api/rules/sets/{setId}/versions", "rules.read", m.versions, ""}, {"GET /api/rules/sets/{setId}/versions/{version}", "rules.read", m.version, ""},
 		{"GET /api/rules/merged", "rules.read", m.merged, ""},
+		{"GET /api/rules/channels", "rules.read", m.channels, ""},
 		{"GET /api/rules/comparisons", "rules.read", m.listComparisons, ""},
 		{"POST /api/rules/comparisons", "rules.write", m.createComparison, "The comparison may have been saved. Reload before uploading it again."},
 		{"POST /api/rules/publish", "rules.publish", m.publishBatch, unknownBatch},
@@ -481,7 +483,11 @@ func (m *Module) merged(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		}
 		snapshots = append(snapshots, snap)
 	}
-	merged, err := Merge(c, snapshots, time.Now().UTC())
+	cat, err := doctrine.LoadCatalog(r.Context(), tx)
+	if err != nil {
+		return nil, err
+	}
+	merged, err := MergeDelivered(c, snapshots, time.Now().UTC(), cat)
 	if err != nil {
 		return nil, err
 	}

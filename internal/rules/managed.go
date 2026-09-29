@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -45,5 +46,9 @@ func ForManagedSession(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 			snapshots = append(snapshots, snap)
 		}
 	}
-	return Merge(c, snapshots, time.Now().UTC())
+	cat, err := doctrine.LoadCatalog(ctx, tx)
+	if err != nil {
+		return Merged{}, err
+	}
+	return MergeDelivered(c, snapshots, time.Now().UTC(), cat)
 }

@@ -129,6 +129,7 @@ func (rt *runtime) cmdDoctor() *Command {
 		} else {
 			checks = append(checks, doctorCheck{Name: "schema", Status: "ok", Detail: fmt.Sprintf("version=%s kinds=%d", s.Version, len(s.Entities))})
 		}
+		checks = append(checks, rt.rulesChannelCheck())
 		return rt.renderDoctor(checks)
 	}}
 }

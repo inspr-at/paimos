@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/releasehistory"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 )
 
 // Merge evaluates expiration before precedence, including disabled exceptions.
@@ -16,7 +17,15 @@ import (
 // A lower layer never replaces a higher identity, including locked rules; any
 // tightening must use a distinct identity instead of guessing prose semantics.
 func Merge(c Context, snapshots []Snapshot, now time.Time) (Merged, error) {
-	return merge(c, snapshots, now, false, nil)
+	return merge(c, snapshots, now, false, nil, doctrine.Catalog{})
+}
+
+// MergeDelivered is Merge for a workspace that pins doctrine. Git-backed rules
+// (AEON-318 identities, or the same text) stay on the harness channel: they are
+// omitted here, and the session file names the expected release instead.
+// Doctrine bytes are not added to the session budget.
+func MergeDelivered(c Context, snapshots []Snapshot, now time.Time, cat doctrine.Catalog) (Merged, error) {
+	return merge(c, snapshots, now, false, nil, cat)
 }
 
 // errStopped is returned when stop reports that the caller's time is up.
@@ -27,7 +36,7 @@ var errStopped = &Error{Status: 503, Code: "busy", Message: "the rules store is 
 // snapshot once (validSnapshot) and ordered them by rank and set id
 // (sortSnapshots), and stop, checked per snapshot, ends the work early when the
 // caller's deadline has passed.
-func merge(c Context, snapshots []Snapshot, now time.Time, validated bool, stop func() bool) (Merged, error) {
+func merge(c Context, snapshots []Snapshot, now time.Time, validated bool, stop func() bool, cat doctrine.Catalog) (Merged, error) {
 	out := Merged{Context: c, Versions: []VersionRef{}, Rules: []Rule{}, Version: "floor-only"}
 	if err := ValidateContext(c); err != nil {
 		return out, err
@@ -67,6 +76,9 @@ func merge(c Context, snapshots []Snapshot, now time.Time, validated bool, stop 
 			out.Version = s.Version
 		}
 		for _, r := range s.Rules {
+			if _, copied := cat.Match(r.Text, r.Source.Identity, r.Source.Reference); copied {
+				continue
+			}
 			if len(r.Roles) > 0 && !slices.Contains(r.Roles, c.Role) || len(r.Harnesses) > 0 && !slices.Contains(r.Harnesses, c.Harness) {
 				continue
 			}
@@ -100,6 +112,8 @@ func merge(c Context, snapshots []Snapshot, now time.Time, validated bool, stop 
 	slices.Sort(keys)
 	var body, floor strings.Builder
 	body.WriteString(SessionHeader)
+	// The pointer is session-channel bytes. Doctrine text is not.
+	body.WriteString(cat.Pointer())
 	for _, k := range keys {
 		r := chosen[k]
 		if !r.Enabled {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/releasehistory"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -362,7 +363,11 @@ func budgetCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, caller stri
 			readable[key] = err == nil
 		}
 	}
-	check := budget{work: w, tenant: p.TenantID, batch: batch, now: now, shared: sortSnapshots(shared), projects: projects, readable: readable}
+	cat, err := doctrine.LoadCatalog(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	check := budget{work: w, tenant: p.TenantID, batch: batch, now: now, shared: sortSnapshots(shared), projects: projects, readable: readable, doctrine: cat}
 	if err = check.person(noPerson, nil); err != nil {
 		return 0, err
 	}
@@ -458,6 +463,7 @@ type budget struct {
 	ownMax     int
 	ownOver    int
 	hiddenOver bool
+	doctrine   doctrine.Catalog
 }
 
 // sortSnapshots orders snapshots as merge does, once, so each render can skip it.
@@ -522,7 +528,7 @@ func (b *budget) person(person string, owned []Snapshot) error {
 							break
 						}
 					}
-					m, err := merge(c, snapshots, b.now, true, stop)
+					m, err := merge(c, snapshots, b.now, true, stop, b.doctrine)
 					if errors.Is(err, errStopped) {
 						return err
 					}
