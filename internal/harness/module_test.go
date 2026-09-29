@@ -93,6 +93,9 @@ func fixtureWithOwnershipClock(t *testing.T, now func() time.Time) *harnessFixtu
 		return err
 	})
 	f.key = "aeon_" + prefix + "_" + secret
+	// Registration needs worker authority; keep read authority absent so the
+	// live-list privacy fixtures still exercise a worker-only caller.
+	f.agent.Scopes = []string{"harness.worker"}
 	if now == nil {
 		harness.New(f.db.App).Mount(f.mux)
 	} else {

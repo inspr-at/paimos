@@ -535,7 +535,8 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
     <header class="intro">
       <p class="eyebrow">Agents</p>
       <h1>Connect a computer</h1>
-      <p class="lede">{{ adding ? 'Add a harness on a computer that is already paired. It keeps the same daemon.' : `Use your existing AI accounts with ${brand.short_name}.` }}</p>
+      <p class="lede">{{ adding ? 'Add a harness on a computer that is already paired. It keeps the same daemon.' : 'Pair a computer with agentd; no API key needed.' }}</p>
+      <p class="key-path">For a CLI or script, <RouterLink to="/settings/access/agents?new=1">create an agent and key</RouterLink>.</p>
     </header>
 
     <ol class="steps" aria-label="Setup progress">
@@ -788,6 +789,8 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .intro h1 { margin-top: 6px; }
 .lede, .sub, .next, .note, .copy { color: var(--ink-2); }
 .lede { margin-top: 8px; }
+.key-path { margin-top: 4px; font-size: 13px; color: var(--ink-2); }
+.key-path a { text-decoration: underline; text-underline-offset: 3px; }
 .sub, .note { font-size: 13px; }
 .steps { display: flex; align-items: center; gap: 0; margin: 22px 0; padding: 0; list-style: none; }
 .steps li { display: flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: 13px; font-weight: 600; white-space: nowrap; }

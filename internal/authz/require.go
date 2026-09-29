@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -121,10 +120,13 @@ func permitEffective(p tenant.Principal, permission string, effective Effective,
 		allowed = allowed || contains(effective.anyProject, permission)
 	}
 	if !allowed {
-		return ErrForbidden
+		if scope.ProjectID != "" && effective.Workspace.Role == nil && (effective.Project == nil || effective.Project.Role == nil) {
+			return &denial{reason: "missing_project_access"}
+		}
+		return &denial{reason: "missing_role_permission"}
 	}
 	if p.Kind == tenant.Agent && !containsScope(p.Scopes, permission) && !CoordinatorCeiling(p.Scopes, permission) {
-		return ErrForbidden
+		return &denial{reason: "missing_key_scope", scope: permission}
 	}
 	return nil
 }
@@ -404,7 +406,7 @@ func Handle(mux *http.ServeMux, pool *pgxpool.Pool, pattern, permission string, 
 		}
 		ctx := BindPool(r.Context(), pool)
 		if err := Require(ctx, permission, scope); err != nil {
-			httpapi.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "permission denied", "code": "forbidden", "reason": err.Error()})
+			WriteForbidden(w, err)
 			return
 		}
 		handler(w, r.WithContext(ctx))

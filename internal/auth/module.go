@@ -80,6 +80,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agent-keys", m.handleCreateAgentKey)
 	mux.HandleFunc("GET /api/agent-keys", m.handleListAgentKeys)
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
+	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
+	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	if m.cfg.Dev() {
 		mux.HandleFunc("POST /api/auth/dev-login", m.handleDevLogin)
 	}
@@ -151,7 +153,11 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 						permissionErr = err
 					} else if ok {
 						scope = resolved
-						permissionErr = authz.RequirePattern(ctx, r.Pattern, scope)
+						// A failed project retry must keep the original denial:
+						// its diagnostic must not reveal that the target exists.
+						if resolvedErr := authz.RequirePattern(ctx, r.Pattern, scope); !errors.Is(resolvedErr, authz.ErrForbidden) {
+							permissionErr = resolvedErr
+						}
 					}
 				}
 				ctx = authz.WithRouteScope(ctx, scope)
@@ -166,7 +172,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 						if receiptRoute(r) {
 							writeReceiptNotFound(w)
 						} else {
-							httpapi.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "permission denied", "code": "forbidden", "reason": "This action needs a permission you do not hold"})
+							authz.WriteForbidden(w, err)
 						}
 					} else {
 						writeInternal(w)

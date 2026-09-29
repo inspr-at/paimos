@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -151,6 +152,10 @@ func WriteError(w http.ResponseWriter, err error) {
 	}
 	if errors.As(err, &coded) {
 		httpapi.WriteJSON(w, coded.HTTPStatus(), map[string]string{"error": coded.Error(), "code": coded.ErrorCode()})
+		return
+	}
+	if errors.Is(err, authz.ErrForbidden) {
+		authz.WriteForbidden(w, err)
 		return
 	}
 	var e *Error

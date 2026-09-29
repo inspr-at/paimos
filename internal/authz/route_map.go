@@ -63,6 +63,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/agent-pairing/self":                                                       "run.claim",
 	"POST /api/agent-pairing/self/disconnect":                                           "run.claim",
 
+	"GET /api/agent-keys/{id}/scopes":                                        "keys.manage",
+	"PATCH /api/agent-keys/{id}/scopes":                                      "keys.manage",
 	"DELETE /api/agent-keys/{id}":                                            "keys.manage",
 	"DELETE /api/members/invites/{id}":                                       "members.manage",
 	"DELETE /api/members/{principal_id}/aliases/{from_principal_id}":         "members.manage",
@@ -278,6 +280,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/agent-accounts/{accountId}/probe":                                                "account.probe",
 	"POST /api/agent-accounts/{accountId}/windows":                                              "account.manage",
 	"POST /api/agent-keys":                                                                      "keys.manage",
+	"POST /api/members/agents":                                                                  "keys.manage",
 	"POST /api/members/invites":                                                                 "members.manage",
 	"POST /api/members/invites/{id}/provision":                                                  "members.manage",
 	"POST /api/members/{principal_id}/aliases":                                                  "members.manage",
@@ -436,6 +439,7 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	if declaration == PublicRoute {
 		return nil
 	}
+	var denialErr error = ErrForbidden
 	for _, permission := range strings.Split(declaration, "|") {
 		err := Require(ctx, permission, scope)
 		if err == nil {
@@ -444,6 +448,12 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 		if !errors.Is(err, ErrForbidden) {
 			return err
 		}
+		// Prefer a missing key scope only after this route alternative's role
+		// authority passed; otherwise keep the first denial.
+		var d *denial
+		if denialErr == ErrForbidden || errors.As(err, &d) && d.reason == "missing_key_scope" {
+			denialErr = err
+		}
 	}
-	return ErrForbidden
+	return denialErr
 }
