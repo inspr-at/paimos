@@ -119,9 +119,10 @@ func TestSessionThreadConcurrentMigrationRecovery(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	// One migration connection makes the setting-restoration assertion exact.
+	// The historical token migration leases a second connection. Inspect both
+	// afterward so the setting-restoration assertion covers the DDL connection.
 	cfg := d.App.Config()
-	cfg.MaxConns = 1
+	cfg.MaxConns = 2
 	cfg.ConnConfig.RuntimeParams["lock_timeout"] = "7s"
 	runner, err := pgxpool.NewWithConfig(t.Context(), cfg)
 	if err != nil {
@@ -130,12 +131,19 @@ func TestSessionThreadConcurrentMigrationRecovery(t *testing.T) {
 	t.Cleanup(runner.Close)
 	checkTimeout := func() {
 		t.Helper()
-		var timeout string
-		if err := runner.QueryRow(t.Context(), `SHOW lock_timeout`).Scan(&timeout); err != nil {
-			t.Fatal(err)
-		}
-		if timeout != "7s" {
-			t.Fatalf("migration leaked lock_timeout: %s", timeout)
+		for range cfg.MaxConns {
+			conn, err := runner.Acquire(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Release()
+			var timeout string
+			if err := conn.QueryRow(t.Context(), `SHOW lock_timeout`).Scan(&timeout); err != nil {
+				t.Fatal(err)
+			}
+			if timeout != "7s" {
+				t.Fatalf("migration leaked lock_timeout: %s", timeout)
+			}
 		}
 	}
 	files := map[string]string{
