@@ -9545,7 +9545,7 @@ components:
               description: Ready and live estimates when an active agent has reported one. Absent when unknown.
               $ref: '#/components/schemas/TicketEta'
             lead_worker:
-              description: The live worker the Assignee cell leads with, when one is bound. name is the permission-projected label (session label, principal name, or harness label). key is a stable token for that worker. It carries a session id only when the caller may already open the session; otherwise it is public fields and does not contain the session id. Absent when no live worker is bound. The assignee sort uses this same worker.
+              description: The live worker the Assignee cell leads with, when one is bound. name is the authoritative permission-projected label (session label, principal name, or harness label). key is a stable matching token. It carries a session id only when the caller may already open the session; otherwise it uses only the public harness and session start, which may coincide for indistinguishable sessions. Heartbeats, state and names never change the key. Absent when no live worker is bound. The assignee sort and this projection use the same query snapshot.
               type: object
               required: [name, key]
               properties:

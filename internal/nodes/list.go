@@ -461,10 +461,14 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			var fields, position string
 			var assigneeID, assigneeName, parentID, parentKey, parentTitle, parentKind, projectID, projectKey, projectTitle, epicID, epicKey, epicTitle *string
 			var assigneeAvatar bool
-			err = rows.Scan(&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &assigneeAvatar, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle)
+			var leadName, leadKey *string
+			err = rows.Scan(&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &assigneeAvatar, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle, &leadName, &leadKey)
 			if err != nil {
 				rows.Close()
 				return err
+			}
+			if leadName != nil && leadKey != nil {
+				item.LeadWorker = &leadWorker{Name: *leadName, Key: *leadKey}
 			}
 			item.Fields = json.RawMessage(fields)
 			item.Position = trimDecimal(position)
@@ -534,16 +538,6 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 				if view, ok := views[page.Items[i].ID]; ok {
 					copied := view
 					page.Items[i].Eta = &copied
-				}
-			}
-			leads, err := loadLeadWorkers(ctx, tx, ids, q.seen, q.leadYellow, q.leadRed)
-			if err != nil {
-				return err
-			}
-			for i := range page.Items {
-				if lead, ok := leads[page.Items[i].ID]; ok {
-					copied := lead
-					page.Items[i].LeadWorker = &copied
 				}
 			}
 		}
@@ -706,96 +700,16 @@ func normalizeLeadMinutes(yellow, red int) (int, int) {
 	return yellow, red
 }
 
-// loadLeadWorkers resolves the lead session for each page row. The order is
-// assigneeLeadOrder, so the name matches an assignee sort of the same rows.
-func loadLeadWorkers(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeSeen, yellow, red int) (map[string]leadWorker, error) {
-	out := map[string]leadWorker{}
-	if len(ids) == 0 {
-		return out, nil
-	}
-	projects := seen.projects
-	if projects == nil {
-		projects = []string{}
-	}
-	shown := assigneeShownExpr("ticket.project_id", "$2", "$3", "$4")
-	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (s.ticket_node_id)
-        s.ticket_node_id::text, `+shown+`,
-        s.id::text, s.harness, s.created_at, s.heartbeat_at, s.role, s.phase, s.activity,
-        coalesce(s.display_label, ''), coalesce(agent.name, ''), ticket.project_id::text
-      FROM harness_sessions s
-      JOIN nodes ticket ON ticket.tenant_id=s.tenant_id AND ticket.id=s.ticket_node_id
-      LEFT JOIN principals agent ON agent.tenant_id=s.tenant_id AND agent.id=s.agent_principal_id
-      LEFT JOIN agent_runs run ON run.tenant_id=s.tenant_id AND run.id=s.run_id
-      WHERE s.tenant_id=current_setting('aeon.tenant_id')::uuid
-        AND s.ticket_node_id = ANY($1::uuid[])
-        AND `+assigneeWorkerEligible+`
-      ORDER BY s.ticket_node_id, `+assigneeLeadOrder(yellow, red), ids, seen.harnessAll, projects, seen.members)
-	if err != nil {
-		return nil, dbErr("lead workers", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var ticketID, name, sessionID, harness, role, phase, activity, label, principal string
-		var projectID *string
-		var since time.Time
-		var heartbeat *time.Time
-		if err := rows.Scan(&ticketID, &name, &sessionID, &harness, &since, &heartbeat, &role, &phase, &activity, &label, &principal, &projectID); err != nil {
-			return nil, err
-		}
-		if name == "" {
-			continue
-		}
-		project := ""
-		if projectID != nil {
-			project = *projectID
-		}
-		showLabel := seen.showsSessionLabel(project)
-		out[ticketID] = leadWorker{
-			Name: name,
-			Key:  leadWorkerKey(seen.harnessAll, sessionID, harness, since, heartbeat, role, phase, activity, label, principal, showLabel, showLabel || seen.members),
-		}
-	}
-	return out, rows.Err()
-}
-
-func (s assigneeSeen) showsSessionLabel(projectID string) bool {
-	if s.harnessAll {
-		return true
-	}
-	for _, id := range s.projects {
-		if id == projectID {
-			return true
-		}
-	}
-	return false
-}
-
-// leadWorkerKey matches the web leadWorkerKey. A workspace harness reader
-// gets the session id they can already open. Everyone else gets public
-// fields only, plus a label or principal name when that projection includes it.
-func leadWorkerKey(showSession bool, sessionID, harness string, since time.Time, heartbeat *time.Time, role, phase, activity, label, name string, showLabel, showName bool) string {
-	if showSession && sessionID != "" {
-		return "s:" + sessionID
-	}
-	beat := ""
-	if heartbeat != nil {
-		beat = jsonTime(*heartbeat)
-	}
-	if !showLabel || strings.TrimSpace(label) == "" {
-		label = ""
-	}
-	if !showName {
-		name = ""
-	}
-	return strings.Join([]string{"v", harness, jsonTime(since), beat, role, phase, activity, label, name}, "\x01")
-}
-
-func jsonTime(t time.Time) string {
-	raw, err := t.MarshalJSON()
-	if err != nil || len(raw) < 2 {
-		return ""
-	}
-	return string(raw[1 : len(raw)-1])
+// assigneeLeadKeyExpr matches the web leadWorkerKey. Restricted viewers get
+// only immutable public facts: harness and start. Both sides canonicalize the
+// live feed's RFC3339Nano timestamp to UTC, trimming fractional zeros. Sessions
+// indistinguishable to that viewer can share a key; names and telemetry cannot
+// change it or disclose a withheld identity.
+func assigneeLeadKeyExpr(harnessAll string) string {
+	return `CASE WHEN ` + harnessAll + ` THEN 's:' || s.id::text
+        ELSE 'v' || chr(1) || s.harness || chr(1) ||
+            rtrim(rtrim(to_char(s.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US'), '0'), '.') || 'Z'
+    END`
 }
 
 // assigneeLeadOrder is the server's only lead choice. Rank matches the web
@@ -804,9 +718,9 @@ func jsonTime(t time.Time) string {
 // working, idle, stale. Waiting is a yielded phase, a waiting run, a stale
 // estimate, or a pending approval on this session's run. Ties break by a
 // worker before a coordinator, then start, then heartbeat, then public
-// session facts. The session id is never a key: a withheld id must not
-// decide which name is shown or sorted.
-func assigneeLeadOrder(yellow, red int) string {
+// session facts, the projected name and the stable viewer-visible key. A
+// withheld label or session id must not decide which name is shown or sorted.
+func assigneeLeadOrder(yellow, red int, shown, key string) string {
 	if yellow == 0 && red == 0 {
 		yellow, red = 3, 10
 	}
@@ -831,7 +745,7 @@ func assigneeLeadOrder(yellow, red int) string {
     WHEN s.phase IN ('starting','working','stopping') AND s.activity NOT IN ('idle','throttled') THEN 5
     WHEN s.heartbeat_at IS NULL OR s.heartbeat_at <= now() - make_interval(mins => %d) THEN 7
     ELSE 6
-END, (s.role = 'coordinator'), s.created_at, s.heartbeat_at NULLS LAST, s.harness, s.activity_sequence, s.phase, s.activity`, red, yellow, yellow)
+END, (s.role = 'coordinator'), s.created_at, s.heartbeat_at NULLS LAST, s.harness, s.activity_sequence, s.phase, s.activity, (`+shown+`) COLLATE "C", (`+key+`) COLLATE "C"`, red, yellow, yellow)
 }
 
 // assigneeWorkerEligible is who may lead: bound, not stopped, not archived.
@@ -857,26 +771,22 @@ func assigneeShownExpr(projectID, harnessAll, projects, members string) string {
     END`
 }
 
-// assigneeWorkerJoin picks the lead worker and names it the way this caller
-// would see it. It is attached only while sorting by assignee. ap.name IS
-// NULL inside the lateral skips the lookup when a stored name already
-// decides the order. The partial index harness_sessions_ticket_eta
-// (tenant, ticket, stopped_at IS NULL) probes one ticket, so a list that is
-// not sorted by assignee never touches the table. The page's lead_worker
-// field uses the same order in loadLeadWorkers. harnessAll, projects and
-// members are the boolean and uuid[] placeholders from assigneeSeen.
-func assigneeWorkerJoin(harnessAll, projects, members string, yellow, red int) string {
-	shown := assigneeShownExpr("f.project_id", harnessAll, projects, members)
+// assigneeWorkerJoin chooses and projects the lead together. Assignee sorts
+// carry these exact values through paging; other sorts attach the lookup only
+// to the selected page. The partial index harness_sessions_ticket_eta probes
+// one ticket, and both paths use one statement snapshot.
+func assigneeWorkerJoin(nodeID, projectID, harnessAll, projects, members string, yellow, red int) string {
+	shown := assigneeShownExpr(projectID, harnessAll, projects, members)
+	key := assigneeLeadKeyExpr(harnessAll)
 	return ` LEFT JOIN LATERAL (
-    SELECT ` + shown + ` AS shown_name
+    SELECT ` + shown + ` AS shown_name, ` + key + ` AS lead_key
     FROM harness_sessions s
     LEFT JOIN principals agent ON agent.tenant_id=s.tenant_id AND agent.id=s.agent_principal_id
     LEFT JOIN agent_runs run ON run.tenant_id=s.tenant_id AND run.id=s.run_id
-    WHERE ap.name IS NULL
-      AND s.tenant_id=current_setting('aeon.tenant_id')::uuid
-      AND s.ticket_node_id=f.id
+    WHERE s.tenant_id=current_setting('aeon.tenant_id')::uuid
+      AND s.ticket_node_id=` + nodeID + `
       AND ` + assigneeWorkerEligible + `
-    ORDER BY ` + assigneeLeadOrder(yellow, red) + `
+    ORDER BY ` + assigneeLeadOrder(yellow, red, shown, key) + `
     LIMIT 1
 ) worker ON true `
 }
@@ -1115,22 +1025,30 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	prefix, args := listFilterSQL(q, true)
 	args = append(args, anchor, q.Limit+1)
 	anchorArg, limitArg := fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args))
-	people := ""
+	projects := q.seen.projects
+	if projects == nil {
+		projects = []string{}
+	}
+	args = append(args, q.seen.harnessAll, projects, q.seen.members)
+	harnessAll, projectArg, members := fmt.Sprintf("$%d", len(args)-2), fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args))
+	workerJoin := func(nodeID, projectID string) string {
+		return assigneeWorkerJoin(nodeID, projectID, harnessAll, projectArg, members, q.leadYellow, q.leadRed)
+	}
+	people, orderedLead := "", ""
+	leadColumns := "worker.shown_name,worker.lead_key"
+	pageWorker := workerJoin("n.id", "n.project_id")
 	if sortsBy(q, "assignee") {
-		projects := q.seen.projects
-		if projects == nil {
-			projects = []string{}
-		}
-		args = append(args, q.seen.harnessAll, projects, q.seen.members)
-		people = ` LEFT JOIN principals ap ON ap.tenant_id=current_setting('aeon.tenant_id')::uuid AND ap.id=f.assignee_id::uuid` +
-			assigneeWorkerJoin(fmt.Sprintf("$%d", len(args)-2), fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args)), q.leadYellow, q.leadRed)
+		people = ` LEFT JOIN principals ap ON ap.tenant_id=current_setting('aeon.tenant_id')::uuid AND ap.id=f.assignee_id::uuid` + workerJoin("f.id", "f.project_id")
+		orderedLead = ",worker.shown_name AS lead_name,worker.lead_key"
+		leadColumns = "s.lead_name,s.lead_key"
+		pageWorker = ""
 	}
 	etaJoin := ""
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {
 		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta(f.id) eta ON true`
 	}
-	sql := prefix + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn FROM filtered f` + people + etaJoin + `),
-    selected AS (SELECT id,rn FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
+	sql := prefix + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + `),
+    selected AS (SELECT * FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
     -- Count visible children for the page once instead of rescanning nodes per row.
     child_counts AS MATERIALIZED (
         SELECT c.parent_id,count(*)::int AS child_count FROM nodes c
@@ -1143,10 +1061,10 @@ func listSQL(q listQuery, anchor any) (string, []any) {
            par.id::text,par.key,par.title,pk.slug,
            coalesce(cc.child_count,0),
            project.id::text,project.key,project.title,
-           epic.id::text,epic.key,epic.title
+           epic.id::text,epic.key,epic.title,` + leadColumns + `
     FROM selected s JOIN nodes n ON n.id=s.id JOIN node_kinds k ON k.id=n.kind_id
     LEFT JOIN child_counts cc ON cc.parent_id=n.id
-    ` + assigneeJoin + `
+    ` + assigneeJoin + pageWorker + `
     LEFT JOIN nodes par ON par.id=n.parent_id AND par.deleted_at IS NULL
     LEFT JOIN node_kinds pk ON pk.id=par.kind_id
     LEFT JOIN LATERAL (

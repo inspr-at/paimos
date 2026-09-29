@@ -182,6 +182,61 @@ test('the assignee cell leads with the server key, not the client tie-break', ()
   assert.equal(who(withServerLead([], { name: 'Kai', key: 's:missing' })[0]!), 'Kai')
 })
 
+test('the server lead name wins over a renamed feed at either position without mutating it', () => {
+  const renamed = agent({ session_id: 'lead', name: 'New principal', display_label: 'Zed' })
+  const other = agent({ session_id: 'other', name: 'Mia' })
+  for (const feed of [[renamed, other], [other, renamed]]) {
+    const led = withServerLead(feed, { name: 'Ada', key: 's:lead' })
+    assert.deepEqual(led.map(who), ['Ada', 'Mia'])
+    assert.equal(chipText(led).name, 'Ada')
+    assert.equal(led[0]!.session_id, 'lead')
+    assert.equal(who(renamed), 'Zed')
+  }
+})
+
+test('restricted lead keys survive independent heartbeats, state changes and renames', () => {
+  const original = agent({ session_id: undefined, principal_id: undefined, name: undefined, display_label: undefined, harness: 'grok' })
+  const key = leadWorkerKey(original)
+  assert.equal(key, ['v', 'grok', '2026-09-26T11:44:00Z'].join('\u0001'))
+  const updates: Partial<LiveAgent>[] = [
+    { heartbeat_at: ago(1) },
+    { role: 'coordinator', phase: 'yielded', activity: 'idle', state: 'waiting', activity_sequence: 42 },
+    { name: 'Renamed principal', display_label: 'Renamed session' },
+  ]
+  for (const update of updates) {
+    const fresh = { ...original, ...update }
+    assert.equal(leadWorkerKey(fresh), key)
+    const led = withServerLead([fresh], { name: 'Grok agent', key })
+    assert.equal(led.length, 1)
+    assert.deepEqual(chipText(led), { name: 'Grok agent', key: original.ticket!.key, more: 0 })
+    assert.equal(led[0]!.heartbeat_at, fresh.heartbeat_at)
+  }
+})
+
+test('restricted keys normalize live timestamp offsets and retain microseconds', () => {
+  for (const [since, canonical] of [
+    ['2026-09-29T16:07:00+02:00', '2026-09-29T14:07:00Z'],
+    ['2026-09-29T16:07:00.000+02:00', '2026-09-29T14:07:00Z'],
+    ['2026-09-29T14:07:00.120Z', '2026-09-29T14:07:00.12Z'],
+    ['2026-09-29T16:07:00.123456+02:00', '2026-09-29T14:07:00.123456Z'],
+    ['2026-09-29T09:07:00.123457-05:00', '2026-09-29T14:07:00.123457Z'],
+  ]) {
+    const live = agent({ session_id: undefined, since })
+    const key = ['v', live.harness, canonical].join('\u0001')
+    assert.equal(leadWorkerKey(live), key)
+    assert.equal(withServerLead([live], { name: 'Ada', key }).length, 1)
+  }
+})
+
+test('coincident restricted keys consume one visible match and retain other real workers', () => {
+  const ada = agent({ session_id: undefined, name: 'Ada', display_label: undefined })
+  const zed = { ...ada, name: 'Zed' }
+  assert.equal(leadWorkerKey(ada), leadWorkerKey(zed))
+  const led = withServerLead([zed, ada], { name: 'Ada', key: leadWorkerKey(ada) })
+  assert.deepEqual(led.map(who), ['Ada', 'Zed'])
+  assert.equal(chipText(led).more, 1)
+})
+
 test('shared principal keeps distinct session labels and does not invent a withheld one', () => {
   const shared = { principal_id: 'coord', name: 'aeon-coordinator' }
   const ticket = { id: 't1', key: 'AEON-233', title: 'Workers', project_id: 'p1' }

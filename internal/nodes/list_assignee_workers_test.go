@@ -127,13 +127,13 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 		}
 	}
 
-	// The worker lookup is not part of any other sort.
+	// Other sorts look up workers only after paging, in the same statement.
 	plain, _ := listSQL(listQuery{Sort: []sortKey{{Name: "updated_at", Desc: true}}, Limit: 50}, nil)
-	if strings.Contains(plain, "harness_sessions") {
-		t.Fatal("updated sort joined harness_sessions")
+	if strings.Contains(strings.Split(plain, "selected AS")[0], "harness_sessions") || !strings.Contains(plain, "harness_sessions") {
+		t.Fatal("updated sort must project workers only after paging")
 	}
 	sorted, _ := listSQL(listQuery{Sort: []sortKey{{Name: "assignee"}}, Limit: 50}, nil)
-	if !strings.Contains(sorted, "harness_sessions") || !strings.Contains(sorted, "ap.name IS NULL") {
+	if !strings.Contains(strings.Split(sorted, "selected AS")[0], "harness_sessions") || !strings.Contains(sorted, "s.lead_name,s.lead_key") {
 		t.Fatal("assignee sort missing the worker lateral")
 	}
 
@@ -461,7 +461,7 @@ func TestListLeadTieBreakIgnoresWithheldSessionIDs(t *testing.T) {
 		t.Fatalf("guest key leaked a session id: %s", guestLead.Key)
 	}
 	snap := sessionSnap(t, p.TenantID, claudeID)
-	wantKey := leadWorkerKey(false, snap.id, snap.harness, snap.created, snap.heartbeat, snap.role, snap.phase, snap.activity, snap.label, snap.name, false, false)
+	wantKey := strings.Join([]string{"v", snap.harness, snap.created.UTC().Format(time.RFC3339Nano)}, "\x01")
 	if guestLead.Key != wantKey {
 		t.Fatalf("guest key %q want %q", guestLead.Key, wantKey)
 	}
