@@ -222,7 +222,16 @@ func TestCapacityStaleManualOverrideAndSchedules(t *testing.T) {
 }
 
 func TestCapacityActiveWindowSelection(t *testing.T) {
-	now := time.Now()
+	for _, hour := range []int{3, 14} {
+		now := time.Date(2026, time.September, 29, hour, 0, 0, 0, time.UTC)
+		t.Run(now.Format("15:04Z"), func(t *testing.T) {
+			testCapacityActiveWindowSelection(t, now)
+		})
+	}
+}
+
+func testCapacityActiveWindowSelection(t *testing.T, now time.Time) {
+	t.Helper()
 	r := now.Add(-time.Minute)
 	fresh := Window{ID: "derived", StartsAt: now.Add(-time.Hour), EndsAt: now.Add(time.Hour), Unit: "percent", Allowance: 100, Used: 20, PaceModel: "unrestricted", capacityReadAt: &r, capacityAllowed: true}
 	if !allowanceHeadroom([]Window{fresh}, now) {
@@ -275,6 +284,62 @@ func TestCapacityActiveWindowSelection(t *testing.T) {
 	got := activeWindows([]Window{fresh, manual}, now)
 	if len(got) != 1 || got[0].ID != "manual" {
 		t.Fatal(got)
+	}
+}
+
+// Routing and claim validation share applyCapacityPacing. Exercise its existing
+// clock argument at both sides of the default work-hours band, including a
+// weekend, so the regression is covered even when CI runs during the day.
+func TestCapacityPacingAtNightAndDay(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "capacity-clock", "person", "Ada", []string{"admin"})
+	runner := addPrincipal(t, admin.TenantID, "agent", "runner", nil)
+	token := issueKey(t, runner, []string{"account.manage"})
+	mod := accountsMod()
+	var account Account
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"clock","harness":"codex","daemon_id":"daemon-a","label":"Clock"}`, 201, &account)
+	for _, date := range []struct {
+		month time.Month
+		day   int
+	}{{time.September, 29}, {time.October, 4}} { // Tuesday and Sunday.
+		for _, hour := range []int{3, 14} {
+			now := time.Date(2026, date.month, date.day, hour, 0, 0, 0, time.UTC)
+			t.Run(now.Format(time.RFC3339), func(t *testing.T) {
+				for _, override := range []string{"", "sprint", "hold"} {
+					t.Run("override="+override, func(t *testing.T) {
+						readAt := now.Add(-time.Minute)
+						windows := []Window{{AccountID: account.ID, StartsAt: now.Add(-4 * time.Hour), EndsAt: now.Add(time.Hour), Unit: "percent", Allowance: 100, Used: 20, PaceModel: "unrestricted", capacityReadAt: &readAt, capacityAllowed: true, capacityKind: "5h"}}
+						schedule := capacity.DefaultSchedule()
+						schedule.Override = override
+						err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+							return applyCapacityPacing(t.Context(), tx, account, windows, now, schedule)
+						})
+						if err != nil {
+							t.Fatal(err)
+						}
+						want := 0.0
+						if override == "sprint" || override == "" && hour == 14 {
+							want = 80
+						}
+						w := windows[0]
+						if w.capacityBudget == nil {
+							t.Fatal("capacity budget missing")
+						}
+						if *w.capacityBudget != want {
+							t.Fatalf("capacity budget = %v, want %v", *w.capacityBudget, want)
+						}
+						if _, ok := fits(w, now, 1); ok != (want > 0) {
+							t.Fatalf("reservation eligibility = %v with budget %v", ok, want)
+						}
+						// An explicit Sprint must still respect the vendor's denial.
+						w.capacityAllowed = false
+						if _, ok := fits(w, now, 1); ok {
+							t.Fatal("schedule bypassed reading authority")
+						}
+					})
+				}
+			})
+		}
 	}
 }
 

@@ -183,7 +183,7 @@ test('sign-in and offline pools pause with the one fixing step', () => {
   assert.equal(sourceLine(quiet.rows[0], now), 'Codex reported · 2 min ago'.replace('Codex', 'Grok'))
   const [none] = pools([acct('p', 'Pi on hsb1', 'pi')], [])
   assert.equal(plainText(poolSentence(none, now, TZ)), 'No reading yet — starts with the first run.')
-  assert.equal(sourceLine(none.rows[0], now), 'No reading yet — starts with the first run')
+  assert.equal(sourceLine(none.rows[0], now), '')
 })
 
 test('gauges show % left or % used, globally and per account', () => {

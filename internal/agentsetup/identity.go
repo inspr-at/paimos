@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,16 +20,17 @@ import (
 // CodexIdentity uses only the documented account/read RPC. It starts no
 // thread, turn, tool or model and never opens the vendor's auth/config files.
 func CodexIdentity(ctx context.Context, path, home string) (string, error) {
-	return codexIdentity(ctx, path, home, "")
+	return codexIdentity(ctx, path, home, "", "")
 }
 
-func codexIdentity(ctx context.Context, path, home, nodePath string) (string, error) {
+func codexIdentity(ctx context.Context, path, home, nodePath, dir string) (string, error) {
 	if err := harnesslaunch.Validate(path, nodePath); err != nil {
 		return "", err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "app-server", "--listen", "stdio://")
+	cmd.Dir = commandDir(dir, filepath.Dir(home))
 	cmd.Env = harnesslaunch.Environment([]string{"HOME=" + os.Getenv("HOME"), "CODEX_HOME=" + home}, nodePath)
 	input, err := cmd.StdinPipe()
 	if err != nil {

@@ -21,7 +21,7 @@ export const defaultSchedule = (): Schedule => ({
 })
 
 interface Win { kind: string; used: number; usedToday: number; budget: number; reset: string; start: string; source: string; readMin: number; finish?: string; plan?: string }
-interface Acct { id: string; label: string; harness: string; host: string; plan: string; state?: string; probe?: boolean; failure?: string; windows: Win[] }
+interface Acct { id: string; label: string; harness: string; host: string; hostLabel?: string; plan: string; state?: string; probe?: boolean; failure?: string; windows: Win[] }
 export interface CapacityOptions {
   signin?: boolean; stale?: boolean; noCursor?: boolean
   /** Grok's last check failed without a confirmed sign-out. */
@@ -30,6 +30,10 @@ export interface CapacityOptions {
   unmeasured?: boolean
   /** mbp2607's setup reports login_required (computer-wide, not per account). */
   computerLogin?: boolean
+  /** Long account labels and host names, for the accounts-card width sweep. */
+  longNames?: boolean
+  /** A Pi pool with one account and no reading yet. */
+  unread?: boolean
 }
 
 export function capacityWorld(options: CapacityOptions = {}) {
@@ -45,6 +49,22 @@ export function capacityWorld(options: CapacityOptions = {}) {
   ]
   if (options.unmeasured) accts.find(a => a.id === ACCOUNTS.studio)!.windows = []
   if (!options.noCursor) accts.push({ id: ACCOUNTS.cursor, label: 'markus', harness: 'cursor', host: 'mbp2607', plan: 'Pro', state: options.signin ? 'unavailable' : 'available', probe: !options.signin, ...(options.signin ? { failure: 'auth_failed' } : {}), windows: [{ kind: 'monthly', used: 43, usedToday: 7, budget: 6, reset: '2026-10-14T07:00:00Z', start: '2026-09-14T07:00:00Z', source: 'estimate', readMin: options.signin ? 2 * 24 * 60 : 20 }] })
+  if (options.unread) accts.push({ id: uuid(7), label: options.longNames ? 'Pi on the home server waiting for its first run' : 'Pi on hsb1', harness: 'pi', host: 'mbp2607', plan: '', windows: [] })
+  if (options.longNames) {
+    const labels: Record<string, string> = {
+      [ACCOUNTS.spare]: 'Spare workstation account for the Tuesday release train',
+      [ACCOUNTS.main]: 'Main production subscription shared by the whole studio',
+      [ACCOUNTS.studio]: 'Studio offline machine in the Graz office rack',
+      [ACCOUNTS.claude]: 'markus on the long-lived Claude Max seat',
+      [ACCOUNTS.grok]: 'markus on the studio SuperGrok Heavy seat',
+      [ACCOUNTS.cursor]: 'markus on the Cursor Business seat for reviews',
+    }
+    const hosts: Record<string, string> = { mbp2607: 'mbp2607-markus-primary', studio: 'graz-studio-rack-07' }
+    for (const a of accts) {
+      if (labels[a.id]) a.label = labels[a.id]
+      a.hostLabel = hosts[a.host] ?? a.host
+    }
+  }
 
   const schedules: { scope: string; pool?: string; account_id?: string; schedule: Schedule }[] = []
   const effective = (a: Acct): Schedule => {
@@ -90,7 +110,7 @@ export function capacityWorld(options: CapacityOptions = {}) {
     }
   })
   const agentAccounts = accts.map(a => ({
-    id: a.id, account_key: `${a.harness}-${a.label}`, harness: a.harness, daemon_id: a.host, label: a.label, plan: a.plan, host_label: a.host, registered_by_principal_id: 'me',
+    id: a.id, account_key: `${a.harness}-${a.label}`, harness: a.harness, daemon_id: a.host, label: a.label, plan: a.plan, host_label: a.hostLabel ?? a.host, registered_by_principal_id: 'me',
     state: a.state ?? 'available', max_parallel_runs: 2, last_probe_at: minutesAgo(3), last_probe_ok: a.probe ?? true, created_at: minutesAgo(60 * 24 * 30), windows: [],
   }))
   const computers = [
