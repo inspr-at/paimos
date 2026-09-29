@@ -25,7 +25,9 @@ export function capacityWaitText(wait: CapacityWait, subject = 'Agents', now = D
   switch (wait.code) {
     case 'schedule': return at ? `${subject} start at ${at}` : `${subject} wait for scheduled hours`
     case 'reserve': return at ? `Kept for you until ${at}` : 'Kept for you'
-    case 'reading': return wait.read_at ? `Waiting for a reading · last ${Math.max(0, Math.floor((now - Date.parse(wait.read_at)) / 60_000))} min ago` : 'Waiting for the first run’s reading'
+    case 'reading':
+      if (!wait.read_at && wait.timezone) return 'Waiting for the next allowed run (light by day)'
+      return wait.read_at ? `Waiting for a reading · last ${Math.max(0, Math.floor((now - Date.parse(wait.read_at)) / 60_000))} min ago` : 'Waiting for the first run’s reading'
     case 'vendor': return at ? `Vendor says stop until ${at}` : 'Waiting for the vendor to allow work again'
     case 'offline': return 'Waiting for the computer'
     case 'sign_in': return 'Sign in again on the computer'

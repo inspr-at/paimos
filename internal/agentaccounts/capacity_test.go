@@ -163,7 +163,18 @@ func TestCapacityStaleManualOverrideAndSchedules(t *testing.T) {
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Codex"}`, 201, &a)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
+	// The stale reading stays dispatchable inside the default 08:00–22:00 band.
+	// A wall clock outside that band waits on the schedule instead.
 	now := time.Now().UTC()
+	if now.Weekday() == time.Saturday || now.Weekday() == time.Sunday || now.Hour() < 8 || now.Hour() >= 22 {
+		now = time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+		if now.After(time.Now()) {
+			now = now.AddDate(0, 0, -1)
+		}
+		for now.Weekday() == time.Saturday || now.Weekday() == time.Sunday {
+			now = now.AddDate(0, 0, -1)
+		}
+	}
 	r := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 1, ResetsAt: now.Add(time.Hour), ReadAt: now.Add(-time.Hour), Source: "harness"}
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{r}}), 204, nil)
 	health := func() HarnessHealth {

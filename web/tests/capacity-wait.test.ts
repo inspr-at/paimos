@@ -9,6 +9,8 @@ test('23:10 wait uses the schedule timezone and says when Codex starts', () => {
 test('every wait has useful copy; absent times are never invented', () => {
   for (const code of WAIT_CODES) assert.ok(capacityWaitText({ code, run_now_allowed: false }).length > 5)
   assert.equal(capacityWaitText({ code: 'reading', read_at: '2026-09-29T21:00:00Z', run_now_allowed: false }, 'Agents', Date.parse('2026-09-29T21:14:00Z')), 'Waiting for a reading · last 14 min ago')
+  assert.equal(capacityWaitText({ code: 'reading', timezone: 'UTC', run_now_allowed: false }), 'Waiting for the next allowed run (light by day)')
+  assert.equal(capacityWaitText({ code: 'reading', run_now_allowed: false }), 'Waiting for the first run’s reading')
   assert.equal(capacityWaitText({ code: 'vendor', run_now_allowed: false }), 'Waiting for the vendor to allow work again')
 })
 test('catalog wait validation rejects broken and arbitrary reasons', () => {

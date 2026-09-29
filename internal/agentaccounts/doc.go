@@ -53,7 +53,7 @@
 // aging <=window/6, stale beyond, expired at reset. Aging/stale readings allow
 // one estimated 1% refresh job per observation, with no other live run. If all
 // windows reset, a provisional five-minute 1% grant permits that same single
-// refresh; expiry/release never renews it without a new measured observation. A vendor denial waits until the latest denying reset, or one hour when a blind stop names none, then one recovery run per denial and daemon generation may read again. A fresh allowing reading, or a later run that finishes without vendor_limit, clears it.
+// refresh; expiry/release never renews it without a new measured observation. A vendor denial waits until the reset of the bucket that denied, or one hour when a stop names no window, then one recovery run per denial and daemon generation may read again. A fresh allowing reading, or a later run that finishes without vendor_limit, clears it. A recovery that clears the denial without a new reading leaves one more provisional reading run, and the capacity card stays unread until that run. A spent blind recovery grant waits for the next allowed run, or for the schedule when that is what blocks.
 // Readings never approve pairing: POST {id}/capacity/approve requires a person
 // with account.manage and records the existing separate ongoing-use approval.
 // AEON-353 permits saving this approval after the person approves pairing,

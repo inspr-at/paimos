@@ -50,6 +50,8 @@ export interface AccountCapacity {
   probe_failure?: 'auth_failed' | 'unavailable'
   /** Earliest reset of the current windows, 5-hour included: where a Sprint ends. */
   limiting_reset?: string
+  /** Recovery cleared a denial and the next run still has to produce a reading. */
+  awaiting_reading?: boolean
 }
 export interface ScheduleOverride { scope: 'user' | 'pool' | 'account'; pool?: Pool; account_id?: string; schedule: CapacitySchedule | null; carry_overrides?: boolean }
 
@@ -237,6 +239,7 @@ export interface AccountRow {
   id: string; name: string; host: string; harness: string; state: AccountState
   primary: CapacityWindow | null; five: CapacityWindow | null; schedule: CapacitySchedule | null; plan: string
   limitingReset: string
+  awaitingReading: boolean
 }
 export const HARNESS_NAME: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi' }
 export const POOL_ORDER = ['codex', 'claude', 'grok', 'cursor', 'pi']
@@ -268,7 +271,7 @@ export function buildRows(accounts: AccountInput[], capacity: AccountCapacity[])
     const cap = byId.get(a.id)
     const { primary, five } = pickWindows(cap?.windows ?? [])
     const state = accountState({ ...a, probeFailure: cap?.probe_failure ?? a.probeFailure }, !!primary)
-    return { id: a.id, name: a.label, host: a.host, harness: a.harness, state, primary, five, schedule: cap?.schedule ?? null, plan: primary?.reading.plan || a.plan || '', limitingReset: cap?.limiting_reset ?? '' }
+    return { id: a.id, name: a.label, host: a.host, harness: a.harness, state, primary, five, schedule: cap?.schedule ?? null, plan: primary?.reading.plan || a.plan || '', limitingReset: cap?.limiting_reset ?? '', awaitingReading: !!cap?.awaiting_reading && !primary }
   })
 }
 export interface PoolView {
@@ -361,7 +364,7 @@ export function todayCell(row: AccountRow, plan: AccountPlan | null): TodayCell 
 export function sourceLine(row: AccountRow, now: number): string {
   const w = row.primary
   if (row.state === 'signin') return w ? `Sign-in expired · last read ${ago(w.reading.read_at, now)}` : 'Sign-in expired'
-  if (!w) return 'No reading yet — starts with the first run'
+  if (!w) return row.awaitingReading ? 'No reading yet — starts with the next run' : 'No reading yet — starts with the first run'
   const r = w.reading
   const base = r.source === 'harness' ? `${HARNESS_NAME[row.harness] ?? row.harness} reported · ${ago(r.read_at, now)}`
     : r.source === 'agentd' ? `Read on ${row.host} · ${ago(r.read_at, now)}` : 'Estimated'
@@ -401,6 +404,7 @@ export function poolSentence(pool: PoolView, now: number, timezone?: string): Se
     if (first.state === 'offline') return { segs: [b(`Waits for ${first.host} to come back online.`)] }
     if (first.state === 'unavailable') return { segs: [b(`Reading unavailable on ${first.host}.`), t(' Agents skip it until the next check succeeds.')] }
     if (first.state === 'paused') return { segs: [b('Paused.'), t(' Agents leave it alone until you resume it in Settings.')] }
+    if (first.awaitingReading) return { segs: [b('No reading yet'), t(' — starts with the next run.')] }
     return { segs: [b('No reading yet'), t(' — starts with the first run.')] }
   }
   if (pool.override === 'hold') return { segs: [b('On hold.'), t(` Agents leave ${pool.name} alone until you resume; today's share moves to the coming days.`)] }

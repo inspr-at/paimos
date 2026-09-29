@@ -2,6 +2,7 @@
 package agentaccounts
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -602,6 +603,352 @@ func TestHardLimitWaitPrecedesSchedule(t *testing.T) {
 	w := admit([]Window{five})
 	if w == nil || w.Code != "schedule" || !w.RunNowAllowed || w.Until == nil || w.Until.In(loc).Hour() != 8 {
 		t.Fatalf("schedule-only window: %+v", w)
+	}
+}
+
+func TestNamedClaudeDenialDoesNotWaitForTheOtherWindow(t *testing.T) {
+	reset(t)
+	person := makePrincipal(t, "named-window", "person", "Ada", []string{"admin"})
+	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
+	profile := codexProfile(t, person)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'named-claude','1','claude','anthropic','test','high','strong') RETURNING id::text`, person.TenantID).Scan(&profile)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	token := issueKey(t, runner, []string{"account.manage", "account.probe", "run.claim"})
+	mod := accountsMod()
+	var a Account
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": "named", "harness": "claude", "daemon_id": "daemon-a", "label": "Main", "max_parallel_runs": 2}), 201, &a)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", encoded(t, map[string]any{"daemon_id": "daemon-a", "daemon_generation": "g1", "available": true}), 200, nil)
+	s := capacity.DefaultSchedule()
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	readAt := now.Add(-20 * time.Minute)
+	fiveReset := now.Add(2 * time.Hour)
+	// The weekly window has already been open for an hour, and resets in just under seven days.
+	weeklyReset := now.Add(7*24*time.Hour - time.Hour)
+	no, yes := false, true
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{
+		{WindowKind: "5h", Bucket: "five_hour", WindowMinutes: 300, UsedPercent: 90, ReadAt: readAt, ResetsAt: fiveReset, Source: "harness", OrdinaryUsageAllowed: &no},
+		{WindowKind: "weekly", Bucket: "seven_day", WindowMinutes: 10080, UsedPercent: 10, ReadAt: readAt, ResetsAt: weeklyReset, Source: "harness", OrdinaryUsageAllowed: &yes},
+	}}), 204, nil)
+	stop := readAt.Add(-time.Minute)
+	cause := insertRun(t, person, runner, profile)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2, status='cancelled' WHERE id=$1`, cause, a.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,at) VALUES($1,$2,1,'usage','vendor_limit',$3)`, person.TenantID, cause, stop)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n := scalar(t, person, `SELECT count(*) FROM account_allowance_windows WHERE account_id=$1 AND capacity_kind='weekly' AND capacity_allowed AND NOT capacity_retired`, a.ID); n != 1 {
+		t.Fatal("weekly window fenced by the 5h denial", n)
+	}
+	admit := func(at time.Time, override string) ([]Window, *CapacityWait) {
+		t.Helper()
+		var windows []Window
+		var wait *CapacityWait
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+			loaded, err := getAccount(t.Context(), tx, a.ID)
+			if err != nil {
+				return err
+			}
+			loaded.LastProbeAt = &at
+			windows, wait, err = admission(t.Context(), tx, loaded, loaded.Windows, at, 0, runRow{Purpose: "managed", CapacityOverride: override}, false)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return windows, wait
+	}
+	if _, w := admit(now, "now"); w == nil || w.Code != "vendor" || w.RunNowAllowed || w.Until == nil || !w.Until.Equal(fiveReset) {
+		t.Fatalf("named denial: %+v", w)
+	}
+	freshRead := now.Add(-5 * time.Minute)
+	freshReset := now.Add(-time.Minute)
+	// A weekly window that resets within the hour keeps today's share available, so pacing does not turn the peer into a schedule wait.
+	weeklySoon := freshRead.Add(time.Hour)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{
+		{WindowKind: "5h", Bucket: "five_hour", WindowMinutes: 300, UsedPercent: 100, ReadAt: freshRead, ResetsAt: freshReset, Source: "harness", OrdinaryUsageAllowed: &no},
+		{WindowKind: "weekly", Bucket: "seven_day", WindowMinutes: 10080, UsedPercent: 12, ReadAt: freshRead, ResetsAt: weeklySoon, Source: "harness", OrdinaryUsageAllowed: &yes},
+	}}), 204, nil)
+	windows, w := admit(now, "")
+	if w != nil || len(windows) != 1 || windows[0].capacityKind != "weekly" {
+		t.Fatalf("weekly after the 5h reset: %+v windows=%+v", w, windows)
+	}
+	routed := insertRun(t, person, runner, profile)
+	mustRoute(t, mod, runner, token, routed, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
+	if n := scalar(t, person, `SELECT count(*) FROM account_allowance_windows WHERE account_id=$1 AND capacity_bucket LIKE 'recover:%'`, a.ID); n != 0 {
+		t.Fatal("open weekly started a recovery", n)
+	}
+}
+
+func TestRecoveryWithoutReadingResumesFirstRun(t *testing.T) {
+	reset(t)
+	person := makePrincipal(t, "reread", "person", "Ada", []string{"admin"})
+	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
+	profile := codexProfile(t, person)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'reread-claude','1','claude','anthropic','test','high','strong') RETURNING id::text`, person.TenantID).Scan(&profile)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	token := issueKey(t, runner, []string{"account.manage", "account.probe", "run.claim"})
+	mod := accountsMod()
+	var a Account
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": "reread", "harness": "claude", "daemon_id": "daemon-a", "label": "Main", "max_parallel_runs": 2}), 201, &a)
+	probe := func(g string) {
+		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", encoded(t, map[string]any{"daemon_id": "daemon-a", "daemon_generation": g, "available": true}), 200, nil)
+	}
+	probe("g1")
+	s := capacity.DefaultSchedule()
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	readAt := now.Add(-2 * time.Hour)
+	no := false
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{
+		{WindowKind: "5h", Bucket: "five_hour", WindowMinutes: 300, UsedPercent: 100, ReadAt: readAt, ResetsAt: readAt.Add(time.Hour), Source: "harness", OrdinaryUsageAllowed: &no},
+	}}), 204, nil)
+	recovery := insertRun(t, person, runner, profile)
+	mustRoute(t, mod, runner, token, recovery, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
+	started := readAt.Add(time.Minute)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='completed', started_at=$2 WHERE id=$1`, recovery, started); err != nil {
+			return err
+		}
+		return Release(t.Context(), tx, runner, recovery, "", "")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var listed []accountCapacity
+	callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/capacity", "", 200, &listed)
+	var card *accountCapacity
+	for i := range listed {
+		if listed[i].AccountID == a.ID {
+			card = &listed[i]
+		}
+	}
+	if card == nil || !card.AwaitingReading || len(card.Windows) != 0 || card.LimitingReset != nil {
+		t.Fatalf("card after recovery without a reading: %+v", card)
+	}
+	admit := func(slots int) ([]Window, *CapacityWait) {
+		t.Helper()
+		var windows []Window
+		var wait *CapacityWait
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+			loaded, err := getAccount(t.Context(), tx, a.ID)
+			if err != nil {
+				return err
+			}
+			clock := time.Now().UTC()
+			loaded.LastProbeAt = &clock
+			windows, wait, err = admission(t.Context(), tx, loaded, loaded.Windows, clock, slots, runRow{Purpose: "managed"}, false)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return windows, wait
+	}
+	if _, w := admit(1); w == nil || w.Code != "reading" || w.ReadAt != nil {
+		t.Fatalf("second slot before the reread grant: %+v", w)
+	}
+	if n := scalar(t, person, `SELECT count(*) FROM account_allowance_windows WHERE account_id=$1 AND capacity_bucket LIKE 'reread:%'`, a.ID); n != 0 {
+		t.Fatal("slot wait persisted a reread", n)
+	}
+	windows, w := admit(0)
+	if w != nil || len(windows) != 1 || !strings.HasPrefix(windows[0].capacityBucket, "reread:g1:") {
+		t.Fatalf("reread grant: %+v windows=%+v", w, windows)
+	}
+	next := insertRun(t, person, runner, profile)
+	mustRoute(t, mod, runner, token, next, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
+	if _, w := admit(0); w == nil || w.Code != "reading" || w.ReadAt != nil {
+		t.Fatalf("spent reread: %+v", w)
+	}
+	again := insertRun(t, person, runner, profile)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, again, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+	if n := scalar(t, person, `SELECT count(*) FROM account_allowance_windows WHERE account_id=$1 AND capacity_bucket LIKE 'reread:%'`, a.ID); n != 1 {
+		t.Fatal("reread duplicated", n)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		return Release(t.Context(), tx, runner, next, "", "")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, again, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+	probe("g2")
+	mustRoute(t, mod, runner, token, again, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
+	if n := scalar(t, person, `SELECT count(*) FROM account_allowance_windows WHERE account_id=$1 AND capacity_bucket LIKE 'reread:g2:%'`, a.ID); n != 1 {
+		t.Fatal("new generation did not reread", n)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='completed', started_at=$2 WHERE id=$1`, again, time.Now().UTC().Add(-time.Minute)); err != nil {
+			return err
+		}
+		return Release(t.Context(), tx, runner, again, "", "")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	yes := true
+	allowAt := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{
+		{WindowKind: "weekly", Bucket: "seven_day", WindowMinutes: 10080, UsedPercent: 10, ReadAt: allowAt, ResetsAt: allowAt.Add(48 * time.Hour), Source: "harness", OrdinaryUsageAllowed: &yes},
+	}}), 204, nil)
+	listed = nil
+	callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/capacity", "", 200, &listed)
+	card = nil
+	for i := range listed {
+		if listed[i].AccountID == a.ID {
+			card = &listed[i]
+		}
+	}
+	if card == nil || card.AwaitingReading || len(card.Windows) == 0 {
+		t.Fatalf("reading after reread: %+v", card)
+	}
+	measured := insertRun(t, person, runner, profile)
+	other := insertRun(t, person, runner, profile)
+	mustRoute(t, mod, runner, token, measured, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
+	mustRoute(t, mod, runner, token, other, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
+}
+
+func TestClaudeUnnamedStopUsesVendorBackoff(t *testing.T) {
+	reset(t)
+	person := makePrincipal(t, "unnamed-stop", "person", "Ada", []string{"admin"})
+	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
+	profile := codexProfile(t, person)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'unnamed-claude','1','claude','anthropic','test','high','strong') RETURNING id::text`, person.TenantID).Scan(&profile)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	token := issueKey(t, runner, []string{"account.manage", "account.probe", "run.claim"})
+	mod := accountsMod()
+	var a Account
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": "unnamed", "harness": "claude", "daemon_id": "daemon-a", "label": "Main", "max_parallel_runs": 2}), 201, &a)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", encoded(t, map[string]any{"daemon_id": "daemon-a", "daemon_generation": "g1", "available": true}), 200, nil)
+	s := capacity.DefaultSchedule()
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+	stop := time.Now().UTC().Add(-30 * time.Minute).Truncate(time.Microsecond)
+	cause := insertRun(t, person, runner, profile)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2, status='cancelled' WHERE id=$1`, cause, a.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,at) VALUES($1,$2,1,'usage','vendor_limit',$3)`, person.TenantID, cause, stop)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	admit := func() *CapacityWait {
+		t.Helper()
+		var wait *CapacityWait
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+			loaded, err := getAccount(t.Context(), tx, a.ID)
+			if err != nil {
+				return err
+			}
+			clock := time.Now().UTC()
+			loaded.LastProbeAt = &clock
+			_, wait, err = admission(t.Context(), tx, loaded, loaded.Windows, clock, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, false)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return wait
+	}
+	if w := admit(); w == nil || w.Code != "vendor" || w.RunNowAllowed || w.Until == nil || !w.Until.Equal(stop.Add(vendorStopBackoff)) {
+		t.Fatalf("unnamed stop: %+v", w)
+	}
+	cleared := insertRun(t, person, runner, profile)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2, status='completed', started_at=$3 WHERE id=$1`, cleared, a.ID, stop.Add(time.Minute))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if w := admit(); w != nil && w.Code == "vendor" {
+		t.Fatalf("completion left the unnamed stop: %+v", w)
+	}
+}
+
+func TestBlindSpentRecoveryDoesNotSayReading(t *testing.T) {
+	reset(t)
+	person := makePrincipal(t, "blind-spent", "person", "Ada", []string{"admin"})
+	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
+	profile := codexProfile(t, person)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'spent-cursor','1','cursor','openai','test','high','strong') RETURNING id::text`, person.TenantID).Scan(&profile)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	token := issueKey(t, runner, []string{"account.manage", "account.probe", "run.claim"})
+	mod := accountsMod()
+	var a Account
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": "spent", "harness": "cursor", "daemon_id": "daemon-a", "label": "Main", "max_parallel_runs": 2}), 201, &a)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", encoded(t, map[string]any{"daemon_id": "daemon-a", "daemon_generation": "g1", "available": true}), 200, nil)
+	s := capacity.DefaultSchedule()
+	s.Timezone = "UTC"
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+	stop := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Microsecond)
+	cause := insertRun(t, person, runner, profile)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2, status='cancelled' WHERE id=$1`, cause, a.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,at) VALUES($1,$2,1,'usage','vendor_limit',$3)`, person.TenantID, cause, stop)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	recovery := insertRun(t, person, runner, profile)
+	mustRoute(t, mod, runner, token, recovery, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		return Release(t.Context(), tx, runner, recovery, "", "")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	admit := func(at time.Time) *CapacityWait {
+		t.Helper()
+		var wait *CapacityWait
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+			loaded, err := getAccount(t.Context(), tx, a.ID)
+			if err != nil {
+				return err
+			}
+			loaded.LastProbeAt = &at
+			_, wait, err = admission(t.Context(), tx, loaded, loaded.Windows, at, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, false)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return wait
+	}
+	day := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	if w := admit(day); w == nil || w.Code != "reading" || w.ReadAt != nil || w.Timezone != "UTC" || w.RunNowAllowed {
+		t.Fatalf("daytime spent grant: %+v", w)
+	}
+	night := time.Date(2026, 9, 30, 23, 0, 0, 0, time.UTC)
+	next := s.NextStart(night.Add(time.Second), false)
+	if w := admit(night); w == nil || w.Code != "schedule" || w.RunNowAllowed || w.Until == nil || next == nil || !w.Until.Equal(*next) {
+		t.Fatalf("night spent grant: %+v next=%v", w, next)
+	}
+	held := s
+	held.Override = "hold"
+	until := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	held.OverrideUntil = &until
+	if w := blindAfterRecovery(held, day); w == nil || w.Code != "hold" || w.RunNowAllowed || w.Until == nil || !w.Until.Equal(until) {
+		t.Fatalf("hold after spent grant: %+v", w)
 	}
 }
 

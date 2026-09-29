@@ -10209,6 +10209,7 @@ components:
         ongoing_use_approved: {type: boolean, description: True for unpaired accounts or a separately approved connected pairing; readings never change this approval}
         probe_failure: {type: string, enum: [auth_failed, unavailable], description: 'Why the last probe failed; absent after a successful probe. Only auth_failed means the account needs a new sign-in.'}
         limiting_reset: {type: string, format: date-time, description: 'Earliest reset of the account''s current measured windows (including 5-hour windows); a Sprint in scope ends at the earliest of these.'}
+        awaiting_reading: {type: boolean, description: 'True after a recovery run cleared a denial and no later reading has arrived. Current windows are omitted until the next run measures capacity.'}
         schedule: {$ref: '#/components/schemas/CapacitySchedule'}
         windows:
           type: array

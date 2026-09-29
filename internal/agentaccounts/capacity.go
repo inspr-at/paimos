@@ -119,22 +119,17 @@ func ingestReadings(ctx context.Context, tx pgx.Tx, p tenant.Principal, id strin
 		if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET capacity_allowed=false, capacity_retired=true WHERE account_id=$1 AND capacity_kind=$2 AND capacity_bucket=$3`, id, v.WindowKind, v.Bucket); err != nil {
 			return err
 		}
-		// A missing authority bit is not recovery from a vendor denial,
-		// including across reset. Only a later explicit vendor allowance clears it.
+		// A missing authority bit is not recovery from a vendor denial on this
+		// window, including across its own reset. Only a later explicit
+		// allowance on the same window clears it. Another window keeps its own.
 		allowed := true
 		var authority *bool
-		err = tx.QueryRow(ctx, `SELECT ordinary_usage_allowed FROM account_capacity_readings WHERE account_id=$1 AND source<>'estimate' AND ordinary_usage_allowed IS NOT NULL ORDER BY read_at DESC, CASE source WHEN 'harness' THEN 0 ELSE 1 END, ordinary_usage_allowed ASC LIMIT 1`, id).Scan(&authority)
+		err = tx.QueryRow(ctx, `SELECT ordinary_usage_allowed FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND source<>'estimate' AND ordinary_usage_allowed IS NOT NULL ORDER BY read_at DESC, CASE source WHEN 'harness' THEN 0 ELSE 1 END, ordinary_usage_allowed ASC LIMIT 1`, id, v.WindowKind, v.Bucket).Scan(&authority)
 		if err != nil && !isNoRows(err) {
 			return err
 		}
 		if authority != nil {
 			allowed = *authority
-		}
-		if !allowed {
-			// Vendor denial also fences reservations against other windows.
-			if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET capacity_allowed=false WHERE account_id=$1 AND capacity_kind IS NOT NULL`, id); err != nil {
-				return err
-			}
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_bucket,capacity_read_at,capacity_allowed,capacity_source)
    VALUES($1,$2,$3,$4,'percent',100,$5,'unrestricted',0,$6,$7,$8,$9,$10)
@@ -238,6 +233,7 @@ type accountCapacity struct {
 	OngoingUseApproved bool              `json:"ongoing_use_approved"`
 	ProbeFailure       string            `json:"probe_failure,omitempty"`
 	LimitingReset      *time.Time        `json:"limiting_reset,omitempty"`
+	AwaitingReading    bool              `json:"awaiting_reading,omitempty"`
 	Schedule           capacity.Schedule `json:"schedule"`
 	Windows            []capacityWindow  `json:"windows"`
 }
@@ -382,6 +378,23 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *capac
 		readings, err := readCapacity(ctx, tx, a.ID, true)
 		if err != nil {
 			return nil, err
+		}
+		if _, cleared, err := recoveryClearedAt(ctx, tx, a.ID); err != nil {
+			return nil, err
+		} else if cleared {
+			open := false
+			for _, v := range readings {
+				if v.Source != "estimate" && now.Before(v.ResetsAt) && (v.OrdinaryUsageAllowed == nil || *v.OrdinaryUsageAllowed) {
+					open = true
+					break
+				}
+			}
+			if !open {
+				item.AwaitingReading = true
+				item.LimitingReset = nil
+				out = append(out, item)
+				continue
+			}
 		}
 		for _, v := range readings {
 			if budget > 0 {

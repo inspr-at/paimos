@@ -184,6 +184,9 @@ test('sign-in and offline pools pause with the one fixing step', () => {
   const [none] = pools([acct('p', 'Pi on hsb1', 'pi')], [])
   assert.equal(plainText(poolSentence(none, now, TZ)), 'No reading yet — starts with the first run.')
   assert.equal(sourceLine(none.rows[0], now), 'No reading yet — starts with the first run')
+  const [next] = pools([acct('p', 'Pi on hsb1', 'pi')], [{ ...cap('p', []), awaiting_reading: true }])
+  assert.equal(plainText(poolSentence(next, now, TZ)), 'No reading yet — starts with the next run.')
+  assert.equal(sourceLine(next.rows[0], now), 'No reading yet — starts with the next run')
 })
 
 test('gauges show % left or % used, globally and per account', () => {
