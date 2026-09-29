@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -72,6 +73,127 @@ func TestNpmAdapterProbeAndLaunch(t *testing.T) {
 				t.Fatal("start lost failure classification", err)
 			}
 		})
+	}
+}
+
+type probeLog struct {
+	*fakeAPI
+	mu     sync.Mutex
+	probes []probeCall
+}
+
+type probeCall struct {
+	id string
+	ok bool
+}
+
+func (p *probeLog) Probe(_ context.Context, id, _, _ string, ok bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.probes = append(p.probes, probeCall{id, ok})
+	return nil
+}
+
+type recordingAdapter struct {
+	fakeAdapter
+	mu      sync.Mutex
+	keys    []string
+	starts  int
+	started []string
+}
+
+func (a *recordingAdapter) Probe(ctx context.Context, key string) bool {
+	a.mu.Lock()
+	a.keys = append(a.keys, key)
+	a.mu.Unlock()
+	return a.fakeAdapter.Probe(ctx, key)
+}
+
+func (a *recordingAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
+	a.mu.Lock()
+	a.starts++
+	a.started = append(a.started, r.AccountKey)
+	a.mu.Unlock()
+	return a.fakeAdapter.Start(ctx, r, observe)
+}
+
+func TestUnpinnedAccountDoesNotBlockSibling(t *testing.T) {
+	s, api, process := testSupervisor(t)
+	rec := &recordingAdapter{fakeAdapter: fakeAdapter{proc: process}}
+	logged := &probeLog{fakeAPI: api}
+	s.mu.Lock()
+	s.api = logged
+	s.adapters[Codex] = rec
+	s.accounts = append(s.accounts, EnrolledAccount{ID: "old", Key: "old-local", Harness: Codex, DependencyBlocked: true})
+	s.blockedAccounts["old"] = true
+	if s.harnessFailed == nil {
+		s.harnessFailed = map[string]bool{}
+	}
+	s.harnessFailed["old"] = true
+	s.mu.Unlock()
+	before := s.Lifecycle("")
+	if before.Ready || before.HarnessFailed || len(before.HarnessFailedAccountIDs) != 1 || before.HarnessFailedAccountIDs[0] != "old" {
+		t.Fatalf("sibling marked failed before probe: %+v", before)
+	}
+	if err := s.PollOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	rec.mu.Lock()
+	keys, starts, started := append([]string(nil), rec.keys...), rec.starts, append([]string(nil), rec.started...)
+	rec.mu.Unlock()
+	if len(keys) != 1 || keys[0] != "local" || starts != 1 || len(started) != 1 || started[0] != "local" {
+		t.Fatalf("unpinned account was probed or launched: keys=%v starts=%d started=%v", keys, starts, started)
+	}
+	logged.mu.Lock()
+	sawBlocked := false
+	for _, call := range logged.probes {
+		if call.id == "old" {
+			sawBlocked = !call.ok
+		}
+		if call.id == "account" && !call.ok {
+			t.Fatal("healthy account reported unavailable")
+		}
+	}
+	logged.mu.Unlock()
+	if !sawBlocked || len(api.routeAccounts) != 1 || api.routeAccounts[0] != "account" || api.claims != 1 {
+		t.Fatalf("sibling starved: blocked=%v routes=%v claims=%d", sawBlocked, api.routeAccounts, api.claims)
+	}
+	status := s.Lifecycle("")
+	if !status.Ready || status.HarnessFailed || len(status.HarnessFailedAccountIDs) != 1 || status.HarnessFailedAccountIDs[0] != "old" {
+		t.Fatalf("status after a blocked sibling: %+v", status)
+	}
+	run := api.run
+	run.ID = "blocked-run"
+	run.AccountID = "old"
+	run.RequestedAccountID = "old"
+	if err := s.StartRun(t.Context(), run); err == nil || rec.starts != 1 {
+		t.Fatal("unpinned account accepted a run", err)
+	}
+}
+
+func TestBlockedEnrollmentStartsWithoutAdapters(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(root, "work")
+	state := filepath.Join(root, "state")
+	if err := os.Mkdir(workspace, 0700); err != nil || os.Mkdir(state, 0700) != nil {
+		t.Fatal(err)
+	}
+	api := &fakeAPI{}
+	s, err := NewSupervisor(t.Context(), Config{API: api, StateRoot: state, DaemonID: "daemon", Workspace: workspace, EstimatedUnits: map[string]int64{"requests": 1},
+		Accounts: []EnrolledAccount{{ID: "old", Key: "old-local", Harness: Codex, DependencyBlocked: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	status := s.Lifecycle("")
+	if status.Ready || !status.HarnessFailed || len(status.HarnessFailedAccountIDs) != 1 || status.HarnessFailedAccountIDs[0] != "old" {
+		t.Fatalf("sole unpinned enrollment did not stay blocked: %+v", status)
+	}
+	if s.accountAvailable("old") {
+		t.Fatal("sole unpinned enrollment is launchable")
 	}
 }
 

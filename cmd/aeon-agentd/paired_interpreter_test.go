@@ -48,9 +48,31 @@ func TestPairedNpmBindings(t *testing.T) {
 			t.Fatal("resume rebound interpreter")
 		}
 		c.Accounts[0].Node = harnesslaunch.Node{}
-		if _, _, err := pairedAdapters(c); err == nil {
-			t.Fatal("legacy npm account without pin accepted")
+		accounts, adapters, err := pairedAdapters(c)
+		if err != nil || len(accounts) != 1 || !accounts[0].DependencyBlocked || len(adapters) != 0 {
+			t.Fatal("legacy npm account without pin stopped the daemon or stayed launchable", err)
 		}
+	}
+	pinned := agentsetup.RuntimeConfig{Accounts: []agentsetup.RuntimeAccount{{
+		Harness: "cursor", Key: "cursor-local", AccountID: "cursor-account", Home: root, Identity: "42", Path: path, Node: node,
+	}, {
+		Harness: "codex", Key: "codex-local", AccountID: "codex-account", Home: root, Identity: "agent@example.test", Path: path,
+	}}}
+	accounts, adapters, err := pairedAdapters(pinned)
+	if err != nil || len(accounts) != 2 || len(adapters) != 1 {
+		t.Fatal("unpinned sibling stopped pairing", err)
+	}
+	if !accounts[1].DependencyBlocked || accounts[0].DependencyBlocked {
+		t.Fatal("pin block applied to the wrong account")
+	}
+	cursor, ok := adapters[0].(*agentd.CursorAdapter)
+	if !ok || cursor.Nodes["cursor-local"] != node {
+		t.Fatal("pinned cursor binding lost")
+	}
+	drifted := pinned
+	drifted.Accounts[0].Node.Version = "22.20.0"
+	if _, _, err := pairedAdapters(drifted); err == nil {
+		t.Fatal("changed pin on another account was ignored")
 	}
 	status := localStatus(agentd.LifecycleStatus{HarnessFailed: true, ProfilePermissions: true})
 	if !status.HarnessFailed || !status.ProfilePermissions || status.LoginRequired {

@@ -174,7 +174,16 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		adapters[a.Name()] = a
 	}
 	if len(adapters) == 0 {
-		return nil, errors.New("no adapters configured")
+		blockedOnly := len(c.Accounts) > 0
+		for _, account := range c.Accounts {
+			if !account.DependencyBlocked {
+				blockedOnly = false
+				break
+			}
+		}
+		if !blockedOnly {
+			return nil, errors.New("no adapters configured")
+		}
 	}
 	heartbeat := c.HeartbeatInterval
 	if heartbeat == 0 {
@@ -205,11 +214,13 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		}
 	}
 	for _, account := range c.Accounts {
-		if account.ID == "" || account.Key == "" || adapters[account.Harness] == nil {
+		if account.ID == "" || account.Key == "" || (adapters[account.Harness] == nil && !account.DependencyBlocked) {
 			return nil, errors.New("invalid local account enrollment")
 		}
-		if _, ok := adapters[account.Harness].(AccountProber); !ok {
-			return nil, errors.New("adapter has no account probe")
+		if adapters[account.Harness] != nil {
+			if _, ok := adapters[account.Harness].(AccountProber); !ok {
+				return nil, errors.New("adapter has no account probe")
+			}
 		}
 	}
 	state, err := agentsetup.OpenStore(c.StateRoot, true)
@@ -288,6 +299,15 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 			return nil, err
 		}
 	}
+	if s.harnessFailed == nil {
+		s.harnessFailed = map[string]bool{}
+	}
+	for _, account := range s.accounts {
+		if account.DependencyBlocked {
+			s.blockedAccounts[account.ID] = true
+			s.harnessFailed[account.ID] = true
+		}
+	}
 	keepLock = true
 	keepState = true
 	return s, nil
@@ -354,6 +374,12 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 		fenced, fenceErr := s.readFence(account.ID)
 		if fenced || fenceErr != nil {
+			continue
+		}
+		if account.DependencyBlocked {
+			if err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, false); err != nil {
+				failures = append(failures, errors.New("account probe unavailable"))
+			}
 			continue
 		}
 		// Account probes can start vendor executables. A refused verification

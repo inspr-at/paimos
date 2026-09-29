@@ -20,7 +20,9 @@ import (
 )
 
 func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []agentd.Adapter, error) {
-	if err := agentsetup.ValidateRuntimeDependencies(c); err != nil {
+	// An older unpinned enrollment stays enrolled and blocked. It must not
+	// veto startup for every other account on this computer.
+	if err := agentsetup.ValidateRuntimeDependencies(agentsetup.LaunchableRuntime(c)); err != nil {
 		return nil, nil, err
 	}
 	codexHomes, emails, claudeHomes, cursorIDs := map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}
@@ -32,11 +34,15 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	paths := map[string]string{}
 	accounts := []agentd.EnrolledAccount{}
 	for _, a := range c.Accounts {
+		blocked := agentsetup.UnpinnedEnrollment(a)
+		accounts = append(accounts, agentd.EnrolledAccount{ID: a.AccountID, Key: a.Key, Harness: a.Harness, DependencyBlocked: blocked})
+		if blocked {
+			continue
+		}
 		if old := paths[a.Harness]; old != "" && old != a.Path {
 			return nil, nil, errors.New("harness executable binding changed")
 		}
 		paths[a.Harness] = a.Path
-		accounts = append(accounts, agentd.EnrolledAccount{ID: a.AccountID, Key: a.Key, Harness: a.Harness})
 		switch a.Harness {
 		case agentd.Codex:
 			codexHomes[a.Key] = a.Home
@@ -173,7 +179,7 @@ func servePaired(root string) error {
 			if err == nil {
 				next, _, readErr := agentsetup.ReadRuntime(root)
 				if readErr == nil {
-					readErr = agentsetup.ValidateRuntimeDependencies(next)
+					readErr = agentsetup.ValidateRuntimeDependencies(agentsetup.LaunchableRuntime(next))
 				}
 				if readErr == nil && !reflect.DeepEqual(c, next) {
 					if next.Origin != c.Origin || next.TenantID != c.TenantID || next.PrincipalID != c.PrincipalID || next.DaemonID != c.DaemonID || next.Workspace != c.Workspace || next.ComputerID != c.ComputerID {

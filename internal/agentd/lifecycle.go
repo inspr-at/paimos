@@ -29,6 +29,7 @@ type LifecycleStatus struct {
 	HarnessFailed           bool              `json:"harness_failed,omitempty"`
 	LoginRequired           bool              `json:"login_required"`
 	VerificationUnavailable []string          `json:"verification_unavailable_account_ids"`
+	HarnessFailedAccountIDs []string          `json:"harness_failed_account_ids,omitempty"`
 	Ready                   bool              `json:"ready"`
 	DaemonID                string            `json:"daemon_id"`
 	Generation              string            `json:"generation"`
@@ -132,29 +133,44 @@ func (s *Supervisor) Drain(req DrainRequest) (LifecycleStatus, error) {
 func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	v := LifecycleStatus{DaemonID: s.daemonID, Generation: s.generation, State: "drained", ActiveRunIDs: []string{}, UnconfirmedRunIDs: []string{}, SettlementPendingRunIDs: []string{}, FencedAccountIDs: []string{}, VerificationResults: map[string]string{}}
 	s.mu.Lock()
-	v.Ready = len(s.accounts) > 0
 	v.AllFenced, _ = s.readFence("")
+	launchable, readyAccounts := 0, 0
 	for _, a := range s.accounts {
 		fenced, e := s.readFence(a.ID)
 		if fenced || e != nil {
 			v.FencedAccountIDs = append(v.FencedAccountIDs, a.ID)
-		} else {
-			if !s.probedAccounts[a.ID] || s.blockedAccounts[a.ID] {
-				v.Ready = false
-			}
-			if s.loginRequired[a.ID] {
-				v.LoginRequired = true
-			}
-			if s.profilePermissions[a.ID] {
-				v.ProfilePermissions = true
-			}
-			if s.harnessFailed[a.ID] {
-				v.HarnessFailed = true
-			}
-			if adapter, ok := s.adapters[a.Harness].(VerificationAdapter); !ok || !adapter.VerificationSupported() {
-				v.VerificationUnavailable = append(v.VerificationUnavailable, a.ID)
-			}
+			continue
 		}
+		// An old unpinned enrollment must not mark every sibling unready.
+		if a.DependencyBlocked {
+			v.HarnessFailedAccountIDs = append(v.HarnessFailedAccountIDs, a.ID)
+			continue
+		}
+		launchable++
+		if s.probedAccounts[a.ID] && !s.blockedAccounts[a.ID] {
+			readyAccounts++
+		}
+		if s.loginRequired[a.ID] {
+			v.LoginRequired = true
+		}
+		if s.profilePermissions[a.ID] {
+			v.ProfilePermissions = true
+		}
+		if s.harnessFailed[a.ID] {
+			v.HarnessFailed = true
+		}
+		if adapter, ok := s.adapters[a.Harness].(VerificationAdapter); !ok || !adapter.VerificationSupported() {
+			v.VerificationUnavailable = append(v.VerificationUnavailable, a.ID)
+		}
+	}
+	// Fenced accounts do not make a drained daemon unready.
+	if len(s.accounts) > 0 && launchable == 0 && len(v.HarnessFailedAccountIDs) == 0 {
+		v.Ready = true
+	} else {
+		v.Ready = launchable > 0 && readyAccounts == launchable
+	}
+	if launchable == 0 && len(v.HarnessFailedAccountIDs) > 0 {
+		v.HarnessFailed = true
 	}
 	entries := make([]*owned, 0, len(s.runs))
 	for _, e := range s.runs {
@@ -200,6 +216,7 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	sort.Strings(v.UnconfirmedRunIDs)
 	sort.Strings(v.SettlementPendingRunIDs)
 	sort.Strings(v.FencedAccountIDs)
+	sort.Strings(v.HarnessFailedAccountIDs)
 	return v
 }
 
@@ -241,6 +258,11 @@ func (s *Supervisor) accountAvailable(account string) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, a := range s.accounts {
+		if a.ID == account && a.DependencyBlocked {
+			return false
+		}
+	}
 	return !s.blockedAccounts[account] && !s.blockedAccounts[""]
 }
 
@@ -304,7 +326,7 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 	}
 	merged := append([]EnrolledAccount(nil), s.accounts...)
 	for _, a := range accounts {
-		if a.ID == "" || a.Key == "" || configured[a.Harness] == nil {
+		if a.ID == "" || a.Key == "" || (configured[a.Harness] == nil && !a.DependencyBlocked) {
 			return ErrScope
 		}
 		found := false
@@ -322,6 +344,19 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 		}
 		if !found {
 			merged = append(merged, a)
+		} else if a.DependencyBlocked {
+			for i := range merged {
+				if merged[i].ID == a.ID {
+					merged[i].DependencyBlocked = true
+				}
+			}
+		}
+		if a.DependencyBlocked {
+			s.blockedAccounts[a.ID] = true
+			if s.harnessFailed == nil {
+				s.harnessFailed = map[string]bool{}
+			}
+			s.harnessFailed[a.ID] = true
 		}
 	}
 	s.accounts = merged

@@ -686,9 +686,43 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 	return c, nil
 }
 
+// UnpinnedEnrollment reports an older npm Codex, Cursor or pi account whose
+// env-node launcher has no interpreter pin. A native wrapper is not unpinned.
+func UnpinnedEnrollment(a RuntimeAccount) bool {
+	switch a.Harness {
+	case "codex", "cursor", "pi":
+	default:
+		return false
+	}
+	node := a.Node
+	if a.Harness == "pi" {
+		node = a.PiNode
+	}
+	if node != (harnesslaunch.Node{}) {
+		return false
+	}
+	needed, err := harnesslaunch.NeedsNode(a.Path)
+	return err == nil && needed
+}
+
+// LaunchableRuntime removes unpinned enrollments so one old account cannot veto
+// startup. ValidateRuntimeDependencies on the original config stays fail-closed.
+func LaunchableRuntime(c RuntimeConfig) RuntimeConfig {
+	kept := make([]RuntimeAccount, 0, len(c.Accounts))
+	for _, a := range c.Accounts {
+		if !UnpinnedEnrollment(a) {
+			kept = append(kept, a)
+		}
+	}
+	c.Accounts = kept
+	return c
+}
+
 // ValidateRuntimeDependencies gates execution, never access to recovery metadata
 // or the credential needed to revoke this computer. Removed harnesses do not
 // block the remaining accounts merely because their old dependency pins remain.
+// An unpinned older enrollment fails this check; LaunchableRuntime separates it
+// so the paired daemon can block that account alone.
 func ValidateRuntimeDependencies(c RuntimeConfig) error {
 	claude := false
 	for _, a := range c.Accounts {

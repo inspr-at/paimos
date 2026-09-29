@@ -48,8 +48,9 @@ func TestPairedPiAdapterBinding(t *testing.T) {
 		t.Fatal("changed Node version accepted")
 	}
 	c.Accounts[0].PiNode = piprobe.Node{}
-	if _, _, err := pairedAdapters(c); err == nil {
-		t.Fatal("env-node entrypoint accepted without interpreter pin")
+	accounts, adapters, err = pairedAdapters(c)
+	if err != nil || len(accounts) != 1 || !accounts[0].DependencyBlocked || len(adapters) != 0 {
+		t.Fatal("env-node entrypoint without a pin stopped the daemon or stayed launchable", err)
 	}
 	status := localStatus(agentd.LifecycleStatus{HarnessFailed: true})
 	if !status.HarnessFailed || status.LoginRequired {

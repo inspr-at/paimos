@@ -272,6 +272,9 @@ type AccountMetadata struct {
 type EnrolledAccount struct {
 	ID, Key, Harness string
 	Metadata         *AccountMetadata
+	// DependencyBlocked is an older npm enrollment with no interpreter pin.
+	// It stays enrolled so the daemon can report it and refuse its launches.
+	DependencyBlocked bool
 }
 
 type ControlRequest struct {

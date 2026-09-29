@@ -64,6 +64,40 @@ func TestNpmDiscoveryPinsEveryLauncher(t *testing.T) {
 	}
 }
 
+func TestUnpinnedEnrollmentDoesNotVetoSibling(t *testing.T) {
+	root := physicalTemp(t)
+	nodePath := filepath.Join(root, "node")
+	if err := os.WriteFile(nodePath, []byte("#!/bin/sh\necho v22.19.0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	envNode := filepath.Join(root, "env-node")
+	if err := os.WriteFile(envNode, []byte("#!/usr/bin/env node\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	shell := filepath.Join(root, "shell")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	node := harnesslaunch.Node{Path: nodePath, Version: "22.19.0"}
+	pinned := RuntimeAccount{Harness: "cursor", AccountID: "new", Path: envNode, Node: node}
+	old := RuntimeAccount{Harness: "codex", AccountID: "old", Path: envNode}
+	native := RuntimeAccount{Harness: "codex", AccountID: "nix", Path: shell}
+	pi := RuntimeAccount{Harness: "pi", AccountID: "pi-old", Path: envNode}
+	if !UnpinnedEnrollment(old) || !UnpinnedEnrollment(pi) || UnpinnedEnrollment(pinned) || UnpinnedEnrollment(native) {
+		t.Fatal("unpinned classification changed")
+	}
+	full := RuntimeConfig{Accounts: []RuntimeAccount{pinned, old}}
+	if !errors.Is(ValidateRuntimeDependencies(full), harnesslaunch.ErrStart) {
+		t.Fatal("mixed config stopped failing closed")
+	}
+	if err := ValidateRuntimeDependencies(LaunchableRuntime(full)); err != nil {
+		t.Fatal("pinned sibling vetoed", err)
+	}
+	if err := ValidateRuntimeDependencies(RuntimeConfig{Accounts: []RuntimeAccount{native}}); err != nil {
+		t.Fatal("native wrapper rejected", err)
+	}
+}
+
 func TestNpmEnrollmentPersistsAndValidatesPins(t *testing.T) {
 	for _, harness := range []string{"codex", "cursor"} {
 		for _, add := range []bool{false, true} {
