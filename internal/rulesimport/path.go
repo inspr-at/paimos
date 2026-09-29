@@ -248,30 +248,59 @@ func readOpenedDoctrine(f *os.File) (string, string, int, error) {
 }
 
 func readOpenedDoctrineWith(f *os.File, read func(io.Reader) ([]byte, error)) (string, string, int, error) {
-	info, err := f.Stat()
+	raw, err := readBoundedText(f, read)
 	if err != nil {
-		return "", "", 0, fmt.Errorf("cannot inspect doctrine descriptor")
-	}
-	if !info.Mode().IsRegular() {
-		return "", "", 0, ErrNotRegular
-	}
-	if info.Size() > MaxFileBytes {
-		return "", "", 0, ErrByteBound
-	}
-	raw, err := read(io.LimitReader(f, MaxFileBytes+1))
-	if err != nil {
-		return "", "", 0, fmt.Errorf("cannot read doctrine descriptor")
-	}
-	if len(raw) > MaxFileBytes {
-		return "", "", 0, ErrByteBound
-	}
-	if bytes.ContainsRune(raw, 0) || !utf8.Valid(raw) {
-		return "", "", 0, ErrNotText
+		return "", "", 0, err
 	}
 	sum := sha256.Sum256(raw)
-	size := len(raw)
+	return NormalizeInstructionBytes(raw), hex.EncodeToString(sum[:]), len(raw), nil
+}
+
+// ReadInstructionRaw reads one allowlisted harness instruction file and
+// returns its raw bytes. Missing files return os.ErrNotExist. Symlinks are
+// refused and are not followed. A byte cap must cut these bytes before
+// NormalizeInstructionBytes; folding CR/CRLF first hides bytes past the cap.
+func ReadInstructionRaw(path string) ([]byte, error) {
+	f, err := openInstructionNoFollow(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	raw, err := readBoundedText(f, io.ReadAll)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// NormalizeInstructionBytes strips a leading UTF-8 BOM and folds CR and CRLF to LF.
+func NormalizeInstructionBytes(raw []byte) string {
 	text := bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF})
 	text = bytes.ReplaceAll(text, []byte("\r\n"), []byte("\n"))
 	text = bytes.ReplaceAll(text, []byte("\r"), []byte("\n"))
-	return string(text), hex.EncodeToString(sum[:]), size, nil
+	return string(text)
+}
+
+func readBoundedText(f *os.File, read func(io.Reader) ([]byte, error)) ([]byte, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("cannot inspect doctrine descriptor")
+	}
+	if !info.Mode().IsRegular() {
+		return nil, ErrNotRegular
+	}
+	if info.Size() > MaxFileBytes {
+		return nil, ErrByteBound
+	}
+	raw, err := read(io.LimitReader(f, MaxFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("cannot read doctrine descriptor")
+	}
+	if len(raw) > MaxFileBytes {
+		return nil, ErrByteBound
+	}
+	if bytes.ContainsRune(raw, 0) || !utf8.Valid(raw) {
+		return nil, ErrNotText
+	}
+	return raw, nil
 }

@@ -109,10 +109,8 @@ func DiffChain(chain Chain, role, projectID string, merged rules.Merged) (LiveRe
 	unresolved := 0
 	h := sha256.New()
 	for _, file := range chain.Files {
-		parsed, err := rulesimport.ParseLoaded(file.Logical, file.Text, file.SHA256, file.Bytes)
-		if errors.Is(err, rulesimport.ErrUnrecognizedFile) {
-			parsed = rulesimport.LoadedFile{Logical: file.Logical, SHA256: file.SHA256, Bytes: file.Bytes}
-		} else if err != nil {
+		parsed, err := parseChainFile(file)
+		if err != nil {
 			return LiveReport{}, err
 		}
 		files = append(files, LiveFile{Logical: file.Logical, SHA256: file.SHA256, Bytes: file.Bytes, Rules: len(parsed.Rules), Unresolved: parsed.Unresolved})
@@ -165,6 +163,34 @@ func DiffChain(chain Chain, role, projectID string, merged rules.Merged) (LiveRe
 		report.Rules = []LiveRule{}
 	}
 	return report, nil
+}
+
+// parseChainFile reads rules from one loaded instruction file. Claude follows
+// @path imports with any filename, so an unrecognized basename is still
+// instruction text. The comparison keeps the imported logical name.
+func parseChainFile(file ChainFile) (rulesimport.LoadedFile, error) {
+	parsed, err := rulesimport.ParseLoaded(file.Logical, file.Text, file.SHA256, file.Bytes)
+	if err == nil || !errors.Is(err, rulesimport.ErrUnrecognizedFile) {
+		return parsed, err
+	}
+	parsed, err = rulesimport.ParseLoaded(claudeInstructionName(file.Logical), file.Text, file.SHA256, file.Bytes)
+	if err != nil {
+		return rulesimport.LoadedFile{}, err
+	}
+	parsed.Logical = file.Logical
+	parsed.SHA256 = file.SHA256
+	parsed.Bytes = file.Bytes
+	return parsed, nil
+}
+
+// claudeInstructionName keeps the logical directory and selects the CLAUDE.md
+// parser. The stored comparison name stays the imported filename.
+func claudeInstructionName(logical string) string {
+	slash := strings.LastIndex(logical, "/")
+	if slash < 0 {
+		return "CLAUDE.md"
+	}
+	return logical[:slash+1] + "CLAUDE.md"
 }
 
 type localBind struct {

@@ -15,8 +15,10 @@ import (
 )
 
 // projectDocMaxBytes is Codex's documented default project_doc_max_bytes.
-// A file that crosses the cap contributes its prefix. The comparison does not
-// read config.toml, so fallback filenames stay unused.
+// A file that crosses the cap contributes its raw-byte prefix; CR/CRLF
+// folding happens after that cut (codex-rs agents_md.rs truncates the file
+// bytes, then decodes them). The comparison does not read config.toml, so
+// fallback filenames stay unused.
 const projectDocMaxBytes = 32768
 
 // Chain is the instruction files one harness would load for one launch
@@ -119,21 +121,30 @@ func (b *builder) gaps() []string {
 }
 
 func (b *builder) add(logical, text, sum string, size int) bool {
-	if b.harness == "codex" && b.used+size > projectDocMaxBytes {
-		b.capped = true
-		remain := projectDocMaxBytes - b.used
-		if remain <= 0 {
-			return false
+	if b.harness == "codex" {
+		// text is still the raw file. Cut that byte string first, then fold
+		// newlines; folding first lets a CRLF file keep bytes past the cap.
+		if b.used+size > projectDocMaxBytes {
+			b.capped = true
+			remain := projectDocMaxBytes - b.used
+			if remain <= 0 {
+				return false
+			}
+			text = truncateUTF8(text, remain)
+			if text == "" {
+				return false
+			}
+			text = rulesimport.NormalizeInstructionBytes([]byte(text))
+			if text == "" {
+				return false
+			}
+			sum = sha256Hex(text)
+			size = len(text)
+			b.used = projectDocMaxBytes
+			b.files = append(b.files, ChainFile{Logical: logical, SHA256: sum, Bytes: size, Text: text})
+			return true
 		}
-		text = truncateUTF8(text, remain)
-		if text == "" {
-			return false
-		}
-		sum = sha256Hex(text)
-		size = len(text)
-		b.used = projectDocMaxBytes
-		b.files = append(b.files, ChainFile{Logical: logical, SHA256: sum, Bytes: size, Text: text})
-		return true
+		text = rulesimport.NormalizeInstructionBytes([]byte(text))
 	}
 	b.used += size
 	b.files = append(b.files, ChainFile{Logical: logical, SHA256: sum, Bytes: size, Text: text})
@@ -241,7 +252,15 @@ func (b *builder) hasLogical(name string) bool {
 // take reads one candidate. skipEmpty drops a 0-byte Codex file so the other
 // name at that level can be used. A symlink or unreadable file is an error.
 func (b *builder) take(path, logical string, skipEmpty bool) (bool, error) {
-	text, sum, size, ok, err := readCandidate(path)
+	var text, sum string
+	var size int
+	var ok bool
+	var err error
+	if b.harness == "codex" {
+		text, sum, size, ok, err = readCandidateRaw(path)
+	} else {
+		text, sum, size, ok, err = readCandidate(path)
+	}
 	if err != nil || !ok {
 		return false, err
 	}
@@ -269,6 +288,19 @@ func readCandidate(path string) (text, sum string, size int, ok bool, err error)
 		return "", "", 0, false, fmt.Errorf("instruction file %s: %w", filepath.Base(path), err)
 	}
 	return text, sum, size, true, nil
+}
+
+// readCandidateRaw returns the file bytes before CR/CRLF folding. size is the
+// raw length Codex charges against project_doc_max_bytes.
+func readCandidateRaw(path string) (text, sum string, size int, ok bool, err error) {
+	raw, err := rulesimport.ReadInstructionRaw(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", "", 0, false, nil
+	}
+	if err != nil {
+		return "", "", 0, false, fmt.Errorf("instruction file %s: %w", filepath.Base(path), err)
+	}
+	return string(raw), sha256Hex(string(raw)), len(raw), true, nil
 }
 
 func logicalName(root, dir, base string) string {

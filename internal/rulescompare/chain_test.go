@@ -432,3 +432,97 @@ func TestClaudeImportBoundsDepthCountAndBytes(t *testing.T) {
 		t.Fatalf("byte bound files %d gaps %v", len(capped.Files), capped.Gaps)
 	}
 }
+
+func TestOrdinaryImportFilenamesKeepTheirRules(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "fixture")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitDir(t, repo)
+	writeFixture(t, filepath.Join(repo, "rules.md"), doc("safety", "Keep the floor.", "Synthetic."))
+	writeFixture(t, filepath.Join(repo, "notes.txt"), doc("note", "Keep the note.", "Synthetic."))
+	writeFixture(t, filepath.Join(repo, "CLAUDE.md"), "@rules.md\n@notes.txt\n")
+	chain, err := LoadChain("claude-code", "", repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(logicals(chain), ",") != "repo/CLAUDE.md,repo/rules.md,repo/notes.txt" {
+		t.Fatalf("files %v", logicals(chain))
+	}
+	if strings.Contains(strings.Join(chain.Gaps, ","), "imports_not_followed") {
+		t.Fatal(chain.Gaps)
+	}
+	merged := rules.Merged{Version: "260929120000.0.0", SHA256: strings.Repeat("ab", 32), Rules: []rules.Rule{
+		{Identity: "safety", Text: "Keep the floor.", Why: "Synthetic.", Strength: "normal", Enabled: true},
+		{Identity: "note", Text: "Keep the note.", Why: "Synthetic.", Strength: "normal", Enabled: true},
+	}}
+	report, err := DiffChain(chain, "builder", "10000000-0000-4000-8000-000000000002", merged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Counts.Both != 2 || report.Counts.OnlyMerged != 0 || report.Counts.OnlyLocal != 0 || report.Counts.Differs != 0 {
+		t.Fatalf("ordinary import dropped: %+v counts %+v", report.Rules, report.Counts)
+	}
+	if report.Local.Files[1].Logical != "repo/rules.md" || report.Local.Files[1].Rules != 1 || report.Local.Files[2].Logical != "repo/notes.txt" || report.Local.Files[2].Rules != 1 {
+		t.Fatalf("parsed files %+v", report.Local.Files)
+	}
+}
+
+func TestCodexByteCapCutsRawBytesBeforeNewlineFolding(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "fixture")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitDir(t, repo)
+	crlf := strings.ReplaceAll(doc("safety", "Keep the floor.", "Synthetic."), "\n", "\r\n")
+	var raw strings.Builder
+	raw.WriteString(crlf)
+	for raw.Len()+2 <= projectDocMaxBytes {
+		raw.WriteString("\r\n")
+	}
+	if raw.Len() < projectDocMaxBytes {
+		raw.WriteString(strings.Repeat("x", projectDocMaxBytes-raw.Len()))
+	}
+	if raw.Len() != projectDocMaxBytes {
+		t.Fatalf("raw prefix %d", raw.Len())
+	}
+	raw.WriteString("SYNTHETIC_PAST_CAP_251")
+	writeFixture(t, filepath.Join(repo, "AGENTS.md"), raw.String())
+	got, err := LoadChain("codex", "", repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := []byte(raw.String())[:projectDocMaxBytes]
+	want := rulesimport.NormalizeInstructionBytes(prefix)
+	if len(got.Files) != 1 || got.Files[0].Text != want || got.Files[0].SHA256 != sha256Hex(want) || got.Files[0].Bytes != len(want) {
+		t.Fatalf("files %d want %d normalized bytes", len(got.Files), len(want))
+	}
+	if strings.Contains(got.Files[0].Text, "SYNTHETIC_PAST_CAP_251") || !strings.Contains(got.Files[0].Text, "Keep the floor.") {
+		t.Fatal("raw cap kept bytes past the limit or dropped the in-budget rule")
+	}
+	if !strings.Contains(strings.Join(got.Gaps, ","), "codex_byte_cap") {
+		t.Fatal(got.Gaps)
+	}
+	parsed, err := rulesimport.ParseLoaded(got.Files[0].Logical, got.Files[0].Text, got.Files[0].SHA256, got.Files[0].Bytes)
+	if err != nil || len(parsed.Rules) != 1 || parsed.Rules[0].Text != "Keep the floor." {
+		t.Fatalf("prefix lost the rule: %v rules %d", err, len(parsed.Rules))
+	}
+
+	small := filepath.Join(t.TempDir(), "small")
+	if err = os.MkdirAll(small, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitDir(t, small)
+	body := "a\r\nb"
+	writeFixture(t, filepath.Join(small, "AGENTS.md"), body)
+	got, err = LoadChain("codex", "", small)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Files) != 1 || got.Files[0].Text != "a\nb" || got.Files[0].Bytes != len(body) || got.Files[0].SHA256 != sha256Hex(body) {
+		t.Fatalf("under-cap file folded before the raw hash: %q bytes %d", got.Files[0].Text, got.Files[0].Bytes)
+	}
+	if strings.Contains(strings.Join(got.Gaps, ","), "codex_byte_cap") {
+		t.Fatal(got.Gaps)
+	}
+}
