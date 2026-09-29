@@ -396,6 +396,39 @@ func TestRemoteManagedHarnessContract(t *testing.T) {
 	}
 }
 
+func TestRemoteTerminalControlCompletion(t *testing.T) {
+	for _, tc := range []struct {
+		message  string
+		terminal bool
+	}{
+		{"divergent control completion", true},
+		{"setting authorization expired", true},
+		{"control must be claimed", false},
+		{"process generation changed; setting outcome is fenced", false},
+	} {
+		t.Run(tc.message, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				raw, err := json.Marshal(map[string]string{"error": tc.message})
+				if err != nil {
+					t.Error(err)
+				}
+				_, _ = w.Write(raw)
+			}))
+			t.Cleanup(server.Close)
+			remote := NewRemote(server.URL, "scoped-key")
+			err := remote.CompleteHarnessControl(t.Context(), HarnessSession{ID: "session", ProjectID: "project", Lease: "private-worker-lease-32-characters-minimum"}, "control", "applied", "setting_applied")
+			if tc.terminal && !errors.Is(err, ErrControlTerminal) {
+				t.Fatalf("got %v", err)
+			}
+			if !tc.terminal && (err == nil || errors.Is(err, ErrControlTerminal)) {
+				t.Fatalf("got %v", err)
+			}
+		})
+	}
+}
+
 func TestRemoteDeployApprovalBinding(t *testing.T) {
 	const release = "55555555-5555-4555-8555-555555555555"
 	var bodies []map[string]any

@@ -277,8 +277,25 @@ func (r *Remote) DrainHarness(ctx context.Context, s HarnessSession) ([]HarnessD
 }
 
 func (r *Remote) CompleteHarnessControl(ctx context.Context, s HarnessSession, id, outcome, reason string) error {
-	return r.harnessWorker(ctx, s, "/controls/"+url.PathEscape(id)+"/complete",
+	err := r.harnessWorker(ctx, s, "/controls/"+url.PathEscape(id)+"/complete",
 		map[string]string{"outcome": outcome, "reason": reason}, nil)
+	var status *client.StatusError
+	if errors.As(err, &status) && status.Status == http.StatusConflict && terminalControlCompletion(status.Message) {
+		return ErrControlTerminal
+	}
+	return err
+}
+
+// These conflicts never become a successful retry of the same outcome. The
+// server has already finished the control, or it has refused the applied
+// setting for good. Wording matches completeControl.
+func terminalControlCompletion(message string) bool {
+	switch message {
+	case "divergent control completion", "setting authorization expired":
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *Remote) CompleteHarnessDelivery(ctx context.Context, s HarnessSession, d HarnessDelivery) error {

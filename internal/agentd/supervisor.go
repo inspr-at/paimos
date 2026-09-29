@@ -1172,7 +1172,11 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 					return ErrControlUnconfirmed
 				}
 			}
-			if err := s.api.CompleteHarnessControl(ctx, entry.harness, control.ID, outcome, reason); err != nil {
+			// A late setting completion is refused once the database deadline has
+			// passed, and the next yield then finishes that control with a
+			// different outcome. Retrying the same completion forever leaves
+			// every later control for this run stuck behind it.
+			if err := s.api.CompleteHarnessControl(ctx, entry.harness, control.ID, outcome, reason); err != nil && !errors.Is(err, ErrControlTerminal) {
 				if !errors.Is(err, ErrHarnessArchived) && (entry.managedPolicy || control.Kind == "force_stop" || control.Kind == "stop") {
 					return ErrControlUnconfirmed
 				}

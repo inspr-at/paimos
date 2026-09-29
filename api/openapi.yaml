@@ -3403,7 +3403,7 @@ paths:
       responses:
         '200': {description: Control outcome; inspect outcome and reason, content: {application/json: {schema: {type: object}}}}
         '403': {description: Wrong session agent or generation lease}
-        '409': {description: Divergent completion or unclaimed process control}
+        '409': {description: 'divergent control completion means the control is already finished. setting authorization expired means an applied setting missed the database deadline. Both are terminal for the worker. Other conflicts, including an unclaimed control, stay retryable.'}
   /projects/{projectId}/harness-sessions/{sessionId}/recovery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -3609,6 +3609,35 @@ paths:
         '200': {description: Updated session, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /projects/{projectId}/harness-sessions/{sessionId}/yield:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+    post:
+      security: *auth
+      operationId: yieldHarnessSession
+      description: 'Managed worker claims every pending owned control in sequence. Expired controls are settled first and omitted. expires_in_ms is the remaining authorization on the database clock, rounded down and capped at 45000. Workers anchor that budget to the monotonic start of this request and fail closed when it is missing or zero.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '200':
+          description: Session and the controls just claimed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session, controls]
+                properties:
+                  session: {$ref: '#/components/schemas/HarnessSession'}
+                  controls: {type: array, items: {$ref: '#/components/schemas/HarnessYieldedControl'}}
+        '400': {description: Invalid JSON}
+        '403': {description: Worker proof rejected}
+        '409': {description: Managed worker required}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
   /settings/inbox-delivery:
     get:
@@ -9304,6 +9333,26 @@ components:
           minimum: 0
           maximum: 45000
           description: Yield-only remaining authorization lifetime from the database clock, rounded down. Workers anchor this to the monotonic start of the yield request (deducting the full round trip), retain that deadline across queueing and retries, and fail closed if absent or zero. expires_at remains an audit timestamp, never a worker wall-clock deadline.
+        created_at: {type: string, format: date-time}
+        claimed_at: {type: [string, 'null'], format: date-time}
+        completed_at: {type: [string, 'null'], format: date-time}
+    HarnessYieldedControl:
+      type: object
+      description: 'One control claimed by yield. expires_in_ms is the only authorization lifetime a worker may use. expires_at is audit metadata.'
+      required: [id, session_id, kind, state, sequence, created_at, expires_in_ms]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        kind: {type: string, description: 'steer, interrupt, stop, rename, model, effort, force_stop, rename_request or model_request.'}
+        value: {type: string, description: Public setting value. Absent for steering and process controls.}
+        text: {type: string, description: 'Steer text for this claim only. It is not stored and is omitted for every other kind.'}
+        state: {type: string, enum: [claimed]}
+        sequence: {type: integer, format: int64}
+        outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
+        reason: {type: [string, 'null']}
+        expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+        expires_at: {type: string, format: date-time}
+        expires_in_ms: {type: integer, minimum: 0, maximum: 45000, description: 'Remaining authorization from the database clock, rounded down.'}
         created_at: {type: string, format: date-time}
         claimed_at: {type: [string, 'null'], format: date-time}
         completed_at: {type: [string, 'null'], format: date-time}
