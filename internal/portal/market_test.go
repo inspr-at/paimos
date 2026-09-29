@@ -141,7 +141,7 @@ func TestPortalMarketAndPace(t *testing.T) {
 	}
 
 	pace := decodeItem[paceAdmin](t, f.do(http.MethodGet, "/api/portal/pace", "", adminIP, &admin, nil, nil))
-	if pace.ProjectTitle != "SECRET-PROJECT-NAME" || pace.ReleaseHistory || pace.WishToLiveMedianDays == nil || *pace.WishToLiveMedianDays != 15 {
+	if pace.ProjectTitle != "SECRET-PROJECT-NAME" || pace.ReleaseHistory || pace.Revision != 1 || pace.WishToLiveMedianDays == nil || *pace.WishToLiveMedianDays != 15 {
 		t.Fatalf("admin pace %+v", pace)
 	}
 	market := decodeItem[marketAdmin](t, f.do(http.MethodGet, "/api/portal/market", "", adminIP, &admin, nil, nil))
@@ -174,12 +174,12 @@ func TestPortalMarketAndPace(t *testing.T) {
 	if rec := f.do(http.MethodPut, "/api/portal/pace", `{"project_id":null,"release_history":true}`, adminIP, &admin, nil, nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("clear and publish: %d %s", rec.Code, rec.Body)
 	}
-	opted := decodeItem[paceAdmin](t, f.do(http.MethodPut, "/api/portal/pace", `{"release_history":true}`, adminIP, &admin, nil, nil))
-	if !opted.ReleaseHistory || opted.ProjectID != project {
+	opted := decodeItem[paceAdmin](t, f.do(http.MethodPut, "/api/portal/pace", `{"release_history":true,"project_id":"`+project+`","revision":1}`, adminIP, &admin, nil, nil))
+	if !opted.ReleaseHistory || opted.ProjectID != project || opted.Revision != 2 {
 		t.Fatalf("opt-in %+v", opted)
 	}
 	kept := decodeItem[paceAdmin](t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":"`+project+`"}`, adminIP, &admin, nil, nil))
-	if !kept.ReleaseHistory || kept.ProjectTitle != "SECRET-PROJECT-NAME" {
+	if !kept.ReleaseHistory || kept.ProjectTitle != "SECRET-PROJECT-NAME" || kept.Revision != 3 {
 		t.Fatalf("same link cleared history %+v", kept)
 	}
 	published := f.do(http.MethodGet, readA, "", "203.0.113.20:1000", nil, nil, nil)
@@ -189,7 +189,7 @@ func TestPortalMarketAndPace(t *testing.T) {
 	assertPublicShape(t, published.Body.Bytes())
 	privateProject := insertNode(t, d, tenantA, "PRJ-9", "project", "SECRET-PRIVATE-PROJECT", "SECRET-PRIVATE-BODY", "open", "", "{}")
 	switched := decodeItem[paceAdmin](t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":"`+privateProject+`"}`, adminIP, &admin, nil, nil))
-	if switched.ReleaseHistory || switched.ProjectTitle != "SECRET-PRIVATE-PROJECT" {
+	if switched.ReleaseHistory || switched.ProjectTitle != "SECRET-PRIVATE-PROJECT" || switched.Revision != 4 {
 		t.Fatalf("new link kept history %+v", switched)
 	}
 	withheld := f.do(http.MethodGet, readA, "", "203.0.113.22:1000", nil, nil, nil)
@@ -197,8 +197,11 @@ func TestPortalMarketAndPace(t *testing.T) {
 		t.Fatalf("private project without opt-in: %d %s", withheld.Code, withheld.Body)
 	}
 	mustOK(t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":null}`, adminIP, &admin, nil, nil))
-	if rec := f.do(http.MethodPut, "/api/portal/pace", `{"release_history":true}`, adminIP, &admin, nil, nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Link a project first.") {
+	if rec := f.do(http.MethodPut, "/api/portal/pace", `{"release_history":true}`, adminIP, &admin, nil, nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("history without a project: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.do(http.MethodPut, "/api/portal/pace", `{"release_history":true,"project_id":"`+project+`","revision":4}`, adminIP, &admin, nil, nil); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), paceLinkConflict) {
+		t.Fatalf("history after the link was cleared: %d %s", rec.Code, rec.Body)
 	}
 	mustOK(t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":"`+project+`"}`, adminIP, &admin, nil, nil))
 	fact := findPublicCell(t, doc, "Statutory deadlines", "Northwind")

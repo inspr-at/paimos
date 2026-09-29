@@ -18,6 +18,10 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
+// paceLinkConflict is the 409 returned when a release-history write names a
+// project or link revision that is no longer current. The link is left as it is.
+const paceLinkConflict = "The linked project changed, so release history was not changed."
+
 // publicPaceMinGroup is the smallest sample a public pace figure may use.
 // Fewer than five releases hides the 30-day count and the gap, including a
 // count of zero. Fewer than five fulfilled wishes hides the wish-to-live
@@ -38,6 +42,7 @@ func (p portalPace) empty() bool {
 type paceAdmin struct {
 	ProjectID            string        `json:"project_id,omitempty"`
 	ProjectTitle         string        `json:"project_title,omitempty"`
+	Revision             int64         `json:"revision,omitempty"`
 	ReleaseHistory       bool          `json:"release_history"`
 	Releases30d          *int          `json:"releases_30d,omitempty"`
 	MedianReleaseGapDays *int          `json:"median_release_gap_days,omitempty"`
@@ -68,6 +73,29 @@ func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 			if _, err := tx.Exec(ctx, `DELETE FROM portal_pace`); err != nil {
 				return nil, err
 			}
+		case in.setHistory:
+			// Project and revision are both in this one update, so a link that
+			// moved or advanced after the admin read it cannot take the opt-in.
+			tag, err := tx.Exec(ctx, `
+				UPDATE portal_pace AS p
+				SET release_history = $1,
+				    revision = p.revision + 1
+				WHERE p.project_node_id = $2::uuid
+				  AND p.revision = $3
+				  AND EXISTS (
+					SELECT 1
+					FROM nodes n
+					JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
+					WHERE n.tenant_id = p.tenant_id AND n.id = p.project_node_id
+					  AND n.deleted_at IS NULL AND k.slug = 'project'
+				)`, in.history, in.projectID, in.revision)
+			if err != nil {
+				return nil, err
+			}
+			if tag.RowsAffected() != 1 {
+				return nil, statusError{status: http.StatusConflict, msg: paceLinkConflict}
+			}
+			history = in.history
 		case in.setProject:
 			var title string
 			err := tx.QueryRow(ctx, `
@@ -90,10 +118,7 @@ func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return nil, err
 			}
-			switch {
-			case in.setHistory:
-				history = in.history
-			case err == nil && currentProject == in.projectID:
+			if err == nil && currentProject == in.projectID {
 				history = currentHistory
 			}
 			if _, err := tx.Exec(ctx, `
@@ -101,27 +126,10 @@ func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 				VALUES (NULLIF(current_setting('aeon.tenant_id', true), '')::uuid, $1::uuid, $2)
 				ON CONFLICT (tenant_id) DO UPDATE
 				SET project_node_id = EXCLUDED.project_node_id,
-				    release_history = EXCLUDED.release_history`, in.projectID, history); err != nil {
+				    release_history = EXCLUDED.release_history,
+				    revision = portal_pace.revision + 1`, in.projectID, history); err != nil {
 				return nil, err
 			}
-		default:
-			tag, err := tx.Exec(ctx, `
-				UPDATE portal_pace AS p
-				SET release_history = $1
-				WHERE EXISTS (
-					SELECT 1
-					FROM nodes n
-					JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
-					WHERE n.tenant_id = p.tenant_id AND n.id = p.project_node_id
-					  AND n.deleted_at IS NULL AND k.slug = 'project'
-				)`, in.history)
-			if err != nil {
-				return nil, err
-			}
-			if tag.RowsAffected() != 1 {
-				return nil, statusError{status: http.StatusBadRequest, msg: "Link a project first."}
-			}
-			history = in.history
 		}
 		if _, err := events.Append(ctx, tx, p, events.Change{
 			Type:  "portal.pace_updated",
@@ -268,12 +276,13 @@ func loadPaceAdminFor(ctx context.Context, tx pgx.Tx, productID string) (paceAdm
 	out := paceAdmin{Fulfillments: []fulfillment{}}
 	var projectID, title string
 	var history bool
+	var revision int64
 	err := tx.QueryRow(ctx, `
-		SELECT p.project_node_id::text, left(n.title, 300), p.release_history
+		SELECT p.project_node_id::text, left(n.title, 300), p.release_history, p.revision
 		FROM portal_pace p
 		JOIN nodes n ON n.tenant_id = p.tenant_id AND n.id = p.project_node_id
 		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
-		WHERE n.deleted_at IS NULL AND k.slug = 'project'`).Scan(&projectID, &title, &history)
+		WHERE n.deleted_at IS NULL AND k.slug = 'project'`).Scan(&projectID, &title, &history, &revision)
 	linked := err == nil && uuidPattern.MatchString(projectID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return out, paceSample{}, err
@@ -286,6 +295,7 @@ func loadPaceAdminFor(ctx context.Context, tx pgx.Tx, productID string) (paceAdm
 	if linked {
 		out.ProjectID = projectID
 		out.ProjectTitle = publicLine(title, 300)
+		out.Revision = revision
 		out.ReleaseHistory = history
 		rows, err := tx.Query(ctx, `
 			SELECT released_at
@@ -456,11 +466,13 @@ func medianInts(values []int) (int, bool) {
 }
 
 type paceWrite struct {
-	projectID  string
-	clear      bool
-	history    bool
-	setProject bool
-	setHistory bool
+	projectID   string
+	clear       bool
+	history     bool
+	revision    int64
+	setProject  bool
+	setHistory  bool
+	setRevision bool
 }
 
 func decodePaceWrite(r *http.Request) (paceWrite, error) {
@@ -481,7 +493,7 @@ func decodePaceWrite(r *http.Request) (paceWrite, error) {
 	if err := dec.Decode(&extra); err != io.EOF {
 		return paceWrite{}, errors.New("invalid JSON")
 	}
-	if len(raw) == 0 || len(raw) > 2 {
+	if len(raw) == 0 || len(raw) > 3 {
 		return paceWrite{}, errors.New("invalid JSON")
 	}
 	var out paceWrite
@@ -501,7 +513,15 @@ func decodePaceWrite(r *http.Request) (paceWrite, error) {
 		}
 		delete(raw, "release_history")
 	}
-	if len(raw) != 0 || (!out.setProject && !out.setHistory) || (out.clear && out.setHistory) {
+	if value, ok := raw["revision"]; ok {
+		out.setRevision = true
+		if json.Unmarshal(value, &out.revision) != nil || out.revision < 1 {
+			return paceWrite{}, errors.New("invalid JSON")
+		}
+		delete(raw, "revision")
+	}
+	// History names the project and revision the admin read. It never moves the link.
+	if len(raw) != 0 || out.setRevision != out.setHistory || (out.setHistory && (out.clear || !out.setProject)) || (!out.setProject && !out.setHistory) {
 		return paceWrite{}, errors.New("invalid JSON")
 	}
 	return out, nil
