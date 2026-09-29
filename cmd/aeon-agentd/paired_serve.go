@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -108,13 +109,19 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 }
 
 func servePaired(root string, capacityInterval time.Duration) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return servePairedContext(ctx, root, capacityInterval)
+}
+
+func servePairedContext(ctx context.Context, root string, capacityInterval time.Duration) error {
 	c, err := agentsetup.ReadRuntimeConfig(root)
 	if err != nil {
 		return err
 	}
 	// The independent lifecycle proof must be usable before runtime Me. A
 	// revoked key cannot prevent cold-start tombstone discovery/fencing.
-	permitted, err := pairedPreflight(context.Background(), root, c.Origin, nil)
+	permitted, err := pairedPreflight(ctx, root, c.Origin, nil)
 	if err != nil {
 		return err
 	}
@@ -129,8 +136,6 @@ func servePaired(root string, capacityInterval time.Duration) error {
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	state := filepath.Join(root, "daemon")
 	remote := agentd.NewRemote(c.Origin, string(key))
 	s, err := agentd.NewSupervisor(ctx, agentd.Config{CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1}})
@@ -145,13 +150,15 @@ func servePaired(root string, capacityInterval time.Duration) error {
 	name := "agentd-" + s.Generation() + ".sock"
 	watches, err := pairedAttach(root, c, remote)
 	if err != nil {
-		return err
+		slog.Warn("attach disabled; restart agentd after updating agentd or Aeon to retry", "error", err)
 	}
-	defer func() {
-		op, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		watches.Close(op)
-	}()
+	if watches != nil {
+		defer func() {
+			op, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			watches.Close(op)
+		}()
+	}
 	local, err := agentd.ServeLocal(s, filepath.Join(state, name), watches)
 	if err != nil {
 		return err
@@ -189,7 +196,9 @@ func servePaired(root string, capacityInterval time.Duration) error {
 			continue
 		}
 		op, cancel := context.WithTimeout(ctx, 20*time.Second)
-		watches.Sweep(op)
+		if watches != nil {
+			watches.Sweep(op)
+		}
 		// Lifecycle reconciliation is required before every fresh dispatch;
 		// the independent tombstone proof still works after key revocation.
 		err = syncPairing(op, root, c.Origin, s)

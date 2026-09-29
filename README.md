@@ -694,8 +694,16 @@ Conversation watching shares only new turns after activation with people
 explicitly granted `harness.watch` in the project. Status-only (`snapshot.mode=lease`)
 opens no transcript, rejects conversation text and has no conversation viewer.
 The project permission remains off for all built-in roles and is never implied
-by `harness.read` or `nodes.read`. Protocol 2 registration is required in both
-modes: older daemons receive an **update agentd** error and need fresh approval.
+by `harness.read` or `nodes.read`. Both attach modes require protocol 2. An older
+daemon connecting to a newer server still registers and keeps serving work; its
+attach requests receive HTTP 409 `update_agentd` and cannot create a watch or
+lease. Older terminal helpers may show their generic attach failure instead of
+the server's update message. Update agentd, restart it and give fresh approval.
+A newer daemon connecting to an older server receives HTTP 400 on attach
+registration because that server rejects the unknown `attach_protocol` field.
+The daemon logs the server's refusal, disables attach and keeps serving work
+and local control. After updating the server, restart agentd to retry attach
+registration; there is no in-process registration retry.
 The paired computer's tenant-scoped workspace is the hard cwd allowlist; neither
 `AEON_URL` nor local request fields can override the paired origin. Same-user
 processes are not isolated by this feature.

@@ -2,6 +2,7 @@
 package agentpairing_test
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -280,17 +281,9 @@ func TestAttachLeaseTenantIsolationAndConfirmedExit(t *testing.T) {
 
 func TestAttachModesProtectionMatrix(t *testing.T) {
 	for _, mode := range []string{"", attachwatch.ModeLease} {
-		for _, protection := range []string{"missing active consent", "changed active consent", "changed activation consent", "premature local confirmation", "strict missing digest", "strict changed digest", "discovery text", "changed cwd", "changed mode", "consumed request", "stopped session", "old daemon"} {
+		for _, protection := range []string{"missing active consent", "changed active consent", "changed activation consent", "premature local confirmation", "strict missing digest", "strict changed digest", "discovery text", "changed cwd", "changed mode", "consumed request", "stopped session"} {
 			t.Run("mode="+mode+"/"+protection, func(t *testing.T) {
 				f, key, in := attachModeFixture(t, mode)
-				if protection == "old daemon" {
-					registration := attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce()}
-					w := f.call("POST", "/api/agent-pairing/attach", registration, false, key, 409)
-					if !strings.Contains(w.Body.String(), "update agentd") {
-						t.Fatal("no update agentd guidance")
-					}
-					return
-				}
 				if strings.HasPrefix(protection, "strict ") {
 					setWatchMode(f, attachwatch.ConsentLocalAuth)
 					in.Snapshot.Platform = "darwin"
@@ -303,6 +296,9 @@ func TestAttachModesProtectionMatrix(t *testing.T) {
 					in.Text = "must never publish"
 					f.call("POST", "/api/agent-pairing/attach", in, false, key, 400)
 				} else if protection == "changed activation consent" || protection == "premature local confirmation" || strings.HasPrefix(protection, "strict ") {
+					if mode == "" {
+						in.Text = "must never publish"
+					}
 					if protection == "changed activation consent" || protection == "strict changed digest" {
 						in.ConsentDigest = strings.Repeat("0", 64)
 					} else {
@@ -356,6 +352,9 @@ func TestAttachModesProtectionMatrix(t *testing.T) {
 					if protection == "stopped session" {
 						code = 410
 					}
+					if mode == "" && in.Operation == "poll" {
+						in.Text = "must never publish"
+					}
 					f.call("POST", "/api/agent-pairing/attach", in, false, key, code)
 					select {
 					case <-published:
@@ -371,6 +370,81 @@ func TestAttachModesProtectionMatrix(t *testing.T) {
 					t.Fatal("unsafe request retained authority", err)
 				}
 				in.Text, in.ConsentDigest, in.LocalConfirmed = "", v.ConsentDigest, false
+				f.call("POST", "/api/agent-pairing/attach", in, false, key, 410)
+			})
+		}
+	}
+}
+
+func TestLegacyAttachRegistrationKeepsDaemonIdentityButGrantsNoAttach(t *testing.T) {
+	for _, mode := range []string{"", attachwatch.ModeLease} {
+		for _, protocol := range []int{0, 1} {
+			t.Run(fmt.Sprintf("mode=%s/protocol=%d", mode, protocol), func(t *testing.T) {
+				f, key, in := attachModeFixture(t, mode)
+				oldPollKey := in.PollKey
+				registration := attachwatch.DeviceRequest{Operation: "register", AttachProtocol: protocol, ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce()}
+				var registered attachwatch.View
+				decodeResult(t, f.call("POST", "/api/agent-pairing/attach", registration, false, key, 200), &registered)
+				if registered.State != "registered" {
+					t.Fatal("legacy daemon would stop at registration")
+				}
+				// The long-lived daemon identity remains usable for ordinary work.
+				f.call("GET", "/api/me", nil, false, key, 200)
+				in.PollKey = registration.PollKey
+				for _, operation := range []string{"request", "poll", "detach", "exited"} {
+					in.Operation = operation
+					for _, claim := range []int{0, attachwatch.Protocol} {
+						in.AttachProtocol = claim // A later claim cannot upgrade the key.
+						var refusal struct{ Code, Error string }
+						decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 409), &refusal)
+						if refusal.Code != "update_agentd" || !strings.Contains(refusal.Error, "update agentd") {
+							t.Fatal("legacy attach lacks update guidance")
+						}
+					}
+				}
+				var count int
+				if err := f.db.Admin.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM harness_attach_requests)+(SELECT count(*) FROM harness_sessions)`).Scan(&count); err != nil || count != 0 {
+					t.Fatal("legacy daemon created attach authority", err)
+				}
+				in.PollKey = oldPollKey
+				f.call("POST", "/api/agent-pairing/attach", in, false, key, 403)
+				// A fresh protocol-2 registration is understood by this server and
+				// still needs the complete approval flow before it activates.
+				registration.AttachProtocol, registration.PollKey = attachwatch.Protocol, nonce()
+				f.call("POST", "/api/agent-pairing/attach", registration, false, key, 200)
+				in.PollKey, in.Operation = registration.PollKey, "request"
+				activateWatch(t, f, key, &in)
+			})
+		}
+	}
+}
+
+func TestAttachEarlyTextAlwaysDetaches(t *testing.T) {
+	for _, mode := range []string{"", attachwatch.ModeLease} {
+		for _, stage := range []string{"pending", "discovery", "local confirmation", "activation", "strict activation"} {
+			t.Run("mode="+mode+"/"+stage, func(t *testing.T) {
+				f, key, in := attachModeFixture(t, mode)
+				if stage == "local confirmation" || stage == "strict activation" {
+					setWatchMode(f, attachwatch.ConsentLocalAuth)
+					in.Snapshot.Platform = "darwin"
+					in.Digest = in.Snapshot.Digest()
+				}
+				v := requestWatch(t, f, key, in)
+				if stage != "pending" {
+					f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200)
+					if stage != "discovery" {
+						in.ConsentDigest = v.ConsentDigest
+					}
+				}
+				in.Operation, in.Sequence, in.Text = "poll", 1, "AEON352_EARLY_TEXT_MUST_NOT_PUBLISH"
+				in.LocalConfirmed = stage == "strict activation"
+				f.call("POST", "/api/agent-pairing/attach", in, false, key, 400)
+				var state string
+				var sessions int
+				if err := f.db.Admin.QueryRow(t.Context(), `SELECT state,(SELECT count(*) FROM harness_sessions) FROM harness_attach_requests WHERE id=$1`, in.RequestID).Scan(&state, &sessions); err != nil || state != "detached" || sessions != 0 {
+					t.Fatal("early text retained authority or activated a session", err)
+				}
+				in.Text, in.ConsentDigest = "", v.ConsentDigest
 				f.call("POST", "/api/agent-pairing/attach", in, false, key, 410)
 			})
 		}

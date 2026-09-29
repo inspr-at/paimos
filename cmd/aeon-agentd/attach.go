@@ -56,7 +56,10 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 	defer cancel()
 	var registered attachwatch.View
 	registration := map[string]any{"attach_protocol": attachwatch.Protocol, "operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey, "local_auth_capability": agentd.CurrentLocalAuthCapability()}
-	if err = pairedClient.Do(ctx, "POST", "/api/agent-pairing/attach", registration, &registered); err != nil || registered.State != "registered" {
+	if err = pairedClient.Do(ctx, "POST", "/api/agent-pairing/attach", registration, &registered); err != nil {
+		return nil, fmt.Errorf("paired instance refused attach registration: %w", err)
+	}
+	if registered.State != "registered" {
 		return nil, errors.New("paired instance refused attach registration; update agentd and Aeon")
 	}
 	return agentd.NewAttachManager(agentd.AttachConfig{Origin: c.Origin, ComputerID: c.ComputerID, Host: host, Workspace: c.Workspace, Executables: paths,

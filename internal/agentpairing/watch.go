@@ -25,11 +25,19 @@ import (
 // Serialize registration against exchanges through commit and relay publication.
 type watchPollKeys struct {
 	sync.RWMutex
-	hashes map[string]string
+	keys map[string]watchPollKey
+}
+type watchPollKey struct {
+	hash     string
+	protocol int
 }
 
 func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in attachwatch.DeviceRequest) error {
-	if in.AttachProtocol != attachwatch.Protocol {
+	protocol := in.AttachProtocol
+	if protocol == 0 {
+		protocol = 1 // Legacy daemons must keep serving, with attach disabled.
+	}
+	if protocol != 1 && protocol != attachwatch.Protocol {
 		return fail(409, "update_agentd", "update agentd to attach protocol 2; fresh approval required")
 	}
 	if !hashRE.MatchString(in.PollKey) || !hashRE.MatchString(in.DeviceProof) || in.PollKey == in.DeviceProof || in.Text != "" {
@@ -45,7 +53,7 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 	m.watchKeys.Lock()
 	defer m.watchKeys.Unlock()
 	key := p.TenantID + "/" + in.ComputerID
-	if _, exists := m.watchKeys.hashes[key]; !exists && len(m.watchKeys.hashes) >= 4096 {
+	if _, exists := m.watchKeys.keys[key]; !exists && len(m.watchKeys.keys) >= 4096 {
 		return fail(429, "rate_limited", "daemon registration capacity reached")
 	}
 	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
@@ -72,10 +80,10 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 		return nil
 	})
 	if err == nil {
-		if m.watchKeys.hashes == nil {
-			m.watchKeys.hashes = make(map[string]string)
+		if m.watchKeys.keys == nil {
+			m.watchKeys.keys = make(map[string]watchPollKey)
 		}
-		m.watchKeys.hashes[key] = digest(in.PollKey)
+		m.watchKeys.keys[key] = watchPollKey{hash: digest(in.PollKey), protocol: protocol}
 	}
 	return err
 }
@@ -197,9 +205,13 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	// readable long-lived lifecycle proof conveys no watch authority.
 	m.watchKeys.RLock()
 	defer m.watchKeys.RUnlock()
-	expected := m.watchKeys.hashes[p.TenantID+"/"+in.ComputerID]
-	if !hashRE.MatchString(in.PollKey) || expected == "" || subtle.ConstantTimeCompare([]byte(expected), []byte(digest(in.PollKey))) != 1 {
+	expected := m.watchKeys.keys[p.TenantID+"/"+in.ComputerID]
+	if !hashRE.MatchString(in.PollKey) || expected.hash == "" || subtle.ConstantTimeCompare([]byte(expected.hash), []byte(digest(in.PollKey))) != 1 {
 		WriteError(w, fail(403, "forbidden", "daemon poll key rejected"))
+		return
+	}
+	if expected.protocol != attachwatch.Protocol {
+		WriteError(w, fail(409, "update_agentd", "update agentd to attach protocol 2; fresh approval required"))
 		return
 	}
 	if !uuidRE.MatchString(in.RequestID) {
@@ -328,7 +340,8 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		}
 		if out.State == "pending" {
 			if in.Text != "" {
-				return fail(409, "conflict", "watch not active")
+				rejected = fail(400, "invalid_request", "watch not active; conversation text rejected")
+				return attachEnd(ctx, tx, &out, "detached")
 			}
 			return nil
 		}
@@ -339,7 +352,8 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 				}
 				if !in.LocalConfirmed {
 					if in.Text != "" {
-						return fail(409, "conflict", "local confirmation required before activation")
+						rejected = fail(400, "invalid_request", "local confirmation required before conversation text")
+						return attachEnd(ctx, tx, &out, "detached")
 					}
 					return nil // Keep approval pending at the daemon; no session or lease yet.
 				}
@@ -348,7 +362,8 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if in.Text != "" {
-				return fail(409, "conflict", "activation contains no transcript")
+				rejected = fail(400, "invalid_request", "activation contains no transcript")
+				return attachEnd(ctx, tx, &out, "detached")
 			}
 			secret, err := randomHex(32)
 			if err != nil {
