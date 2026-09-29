@@ -1,45 +1,93 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Node writes this tab made (AEON-326): the revisions its own saves, moves,
-// creations and bulk changes answered with, and the nodes it deleted. Live
-// views skip the events of those writes, because the code that made them
-// already shows the result. The same person's writes in another tab are not
-// here: the actor alone never proves that a change is on screen.
+// creations and bulk changes answered with, and one unmatched claim for a
+// delete (that request answers 204, with no revision). Live views skip only
+// the event of that write. A later delete, restore or update of the same
+// node — from this account in another tab, or from anyone else — is not
+// one of those events, so it is applied. The actor alone never proves it.
 import { compareRevision } from './liveUpdates.ts'
 
 const LIMIT = 1000
+const PER_NODE = 4
+
+export interface OwnChange { id: string; change: string; revision: string | null; eventId?: number }
 
 export class OwnWrites {
   // Node id → the revisions this tab's writes produced, the newest last.
   private revisions = new Map<string, string[]>()
-  private deletions = new Set<string>()
+  // Node id → event ids already recognised as this tab's write.
+  private events = new Map<string, number[]>()
+  // A delete this tab sent whose event has not arrived yet.
+  private claims = new Set<string>()
 
-  // Nodes a write of this tab answered with.
+  // Nodes a write of this tab answered with. A delete claim stays: the
+  // undo's answer can land before the delete event, and that event is still ours.
   wrote(nodes: Iterable<{ id: string; updated_at: string }>) {
     for (const node of nodes) {
       if (!node?.id || !node.updated_at) continue
-      const known = this.revisions.get(node.id) ?? []
-      this.revisions.delete(node.id)
-      this.revisions.set(node.id, [...known.slice(-3), node.updated_at])
-      this.deletions.delete(node.id)
+      this.rememberRevision(node.id, node.updated_at)
     }
     this.trim()
   }
-  // A node this tab deleted.
+
+  // A node this tab deleted. The next delete event for it is that write.
   deleted(id: string) {
-    this.deletions.delete(id)
-    this.deletions.add(id)
+    if (!id) return
+    this.claims.delete(id)
+    this.claims.add(id)
     this.trim()
   }
-  // The change is one of this tab's own writes, already on screen.
-  made(change: { id: string; change: string; revision: string | null }): boolean {
-    if (change.change === 'deleted') return this.deletions.has(change.id)
-    const revision = change.revision
-    return !!revision && !!this.revisions.get(change.id)?.some(known => compareRevision(known, revision) === 0)
+
+  // Every live change, including ones a view then ignores. Anything that is
+  // not a delete ends an unmatched claim: the node was restored or updated
+  // since this tab deleted it, so a later delete is someone else's.
+  observe(change: { id: string; change: string }) {
+    if (!change?.id || change.change === 'deleted') return
+    this.claims.delete(change.id)
   }
-  clear() { this.revisions.clear(); this.deletions.clear() }
+
+  // The change is one exact write of this tab, already on screen.
+  made(change: OwnChange): boolean {
+    if (!change?.id) return false
+    const eventId = change.eventId ?? 0
+    const knownEvent = eventId > 0 && !!this.events.get(change.id)?.includes(eventId)
+    const knownRevision = !!change.revision && !!this.revisions.get(change.id)?.some(known => compareRevision(known, change.revision) === 0)
+    if (knownEvent || knownRevision) { this.remember(change); return true }
+    if (change.change === 'deleted' && this.claims.has(change.id)) {
+      this.claims.delete(change.id)
+      this.remember(change)
+      return true
+    }
+    return false
+  }
+
+  clear() { this.revisions.clear(); this.events.clear(); this.claims.clear() }
+
+  private remember(change: OwnChange) {
+    if (change.revision) this.rememberRevision(change.id, change.revision)
+    const eventId = change.eventId ?? 0
+    if (eventId > 0) this.rememberEvent(change.id, eventId)
+    this.trim()
+  }
+
+  private rememberRevision(id: string, revision: string) {
+    const known = this.revisions.get(id) ?? []
+    if (known.some(item => compareRevision(item, revision) === 0)) return
+    this.revisions.delete(id)
+    this.revisions.set(id, [...known.slice(-(PER_NODE - 1)), revision])
+  }
+
+  private rememberEvent(id: string, eventId: number) {
+    const known = this.events.get(id) ?? []
+    if (known.includes(eventId)) return
+    this.events.delete(id)
+    this.events.set(id, [...known.slice(-(PER_NODE - 1)), eventId])
+  }
+
   private trim() {
     for (const id of this.revisions.keys()) { if (this.revisions.size <= LIMIT) break; this.revisions.delete(id) }
-    for (const id of this.deletions) { if (this.deletions.size <= LIMIT) break; this.deletions.delete(id) }
+    for (const id of this.events.keys()) { if (this.events.size <= LIMIT) break; this.events.delete(id) }
+    for (const id of this.claims) { if (this.claims.size <= LIMIT) break; this.claims.delete(id) }
   }
 }
 

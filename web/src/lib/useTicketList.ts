@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { reactive, ref, type Ref } from 'vue'
 import { APIError, bulkChange, getNode, listNodes, undoEvent, updateNode, type BulkChange, type BulkResult, type Facets, type ListItem } from './api'
+import { acceptLoadedRow } from './editorRevision'
 import { activeDimensions, apiParams, DIMENSION_BY_KEY, LIST_FACETS, rowTags, WORK_KINDS, type Dimension, type EpicOption, type ListFilters } from './ticketList'
 import { askDoneGate } from './doneGateAsk'
 import { benefitGateError, benefitRetryFields, completionFields, needsBenefitPrompt } from './doneGate'
@@ -60,7 +61,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     try {
       const page = await listNodes(apiParams(within, current, { facets: FACETS, limit: pageSize }))
       if (request !== generation) return
-      rows.value = page.items
+      rows.value = page.items.map(acceptLoadedRow)
       cursor.value = page.next_cursor
       facets.value = page.facets ?? {}
       learn(page.items)
@@ -92,7 +93,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
       const page = await listNodes(apiParams(within, filters.value, { facets: FACETS, cursor: cursor.value, limit: pageSize }))
       if (request !== generation) return
       const seen = new Set(rows.value.map(row => row.id))
-      rows.value = [...rows.value, ...page.items.filter(item => !seen.has(item.id))]
+      rows.value = [...rows.value, ...page.items.filter(item => !seen.has(item.id)).map(acceptLoadedRow)]
       cursor.value = page.next_cursor
       learn(page.items)
     } catch (e) {

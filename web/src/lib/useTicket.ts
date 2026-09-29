@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { onScopeDispose, ref, watch, type Ref } from 'vue'
 import { APIError, createNode, createRelation, deleteNode, deleteRelation, getKinds, getNode, getRelations, listNodes, lookupNodes, moveNode, updateNode, type Kind, type ListItem, type ListParent, type NodePatch, type Relation, type WorkNode } from './api'
+import { editorRevision } from './editorRevision'
 import { liveNodes, type LiveNodeStore, type LiveView, type NodeChange } from './liveNodes'
 import { compareRevision, describeFields } from './liveUpdates'
 import { ownWrites } from './ownWrites'
+import { RefreshRetry } from './refreshRetry'
 import { linkBody, linkedSentence, relationLabel, unlinkedSentence, type RelationChoice } from './relations'
 import { benefitGateError } from './doneGate'
 import { toast } from './toast'
@@ -96,42 +98,53 @@ export function useTicket(item: Ref<ListItem | null>, context: {
 
   function merge(target: ListItem, node: WorkNode) {
     const assigneeId = typeof node.fields.assignee === 'string' ? node.fields.assignee : null
+    // An open editor keeps the revision it saves against; the other fields still come in.
+    const revision = editorRevision.keep(target.id, node.updated_at)
     Object.assign(target, {
-      title: node.title, body: node.body, fields: node.fields, state: node.state, updated_at: node.updated_at, parent_id: node.parent_id, estimate: node.estimate,
+      title: node.title, body: node.body, fields: node.fields, state: node.state, updated_at: revision ?? node.updated_at, parent_id: node.parent_id, estimate: node.estimate,
       priority: typeof node.fields.priority === 'string' && node.fields.priority ? node.fields.priority : null,
       assignee: assigneeId ? (target.assignee?.id === assigneeId ? target.assignee : { id: assigneeId, name: context.names.get(assigneeId) ?? 'Someone' }) : null,
     })
   }
 
-  async function refresh() {
+  // ok: the ticket is current, or the editor is holding what this read found.
+  // failed: the read itself failed and should be tried again. stale: a newer
+  // read or a live change already answered; not a failure.
+  async function refresh(): Promise<'ok' | 'failed' | 'stale'> {
     const target = item.value
-    if (!target) return
+    if (!target) return 'stale'
     const request = ++generation
     const seen = liveSeen
     loading.value = true; error.value = ''
     try {
       const node = await getNode(target.id)
-      if (request !== generation) return
+      if (request !== generation || item.value?.id !== target.id) return 'stale'
       // A live change that landed meanwhile answers for a later state.
-      if (overtaken(seen, node)) return
+      if (overtaken(seen, node)) return 'stale'
       // An editor opened while this read ran: a newer version waits like a
       // live change, so a save still sends the revision the editor started from.
-      if (busy() && compareRevision(node.updated_at, target.updated_at) > 0) { hold(target, { ...reread(target), revision: node.updated_at }, node); return }
+      if (busy() && compareRevision(node.updated_at, target.updated_at) > 0) { hold(target, { ...reread(target), revision: node.updated_at }, node); return 'ok' }
       // Never back to an older version (a save of the viewer's landed meanwhile).
-      if (!gone.value && compareRevision(node.updated_at, target.updated_at) < 0) return
+      if (!gone.value && compareRevision(node.updated_at, target.updated_at) < 0) return 'ok'
       merge(target, node)
       gone.value = false
+      return 'ok'
     } catch (e) {
-      if (request !== generation) return
+      if (request !== generation || item.value?.id !== target.id) return 'stale'
       if (e instanceof APIError && (e.status === 404 || e.status === 410)) {
-        if (overtaken(seen, null)) return
+        if (overtaken(seen, null)) return 'stale'
         if (busy()) hold(target, { ...reread(target), change: 'deleted' }, null)
         else gone.value = true
-      } else error.value = message(e)
+        return 'ok'
+      }
+      error.value = message(e)
+      return 'failed'
     } finally {
       if (request === generation) loading.value = false
     }
   }
+  // A gap read that failed waits, then tries again, including when the stream resumes.
+  const gapRetry = new RefreshRetry(async () => (await refresh()) === 'failed')
 
   async function loadChildren() {
     const target = item.value
@@ -169,6 +182,8 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   }
 
   watch(() => item.value?.id, id => {
+    // The open ticket changed: a retry for the previous one must not land here.
+    gapRetry.clear()
     gone.value = false; error.value = ''
     if (!id) return
     void refresh(); void loadChildren(); void loadRelations()
@@ -178,13 +193,20 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     const target = item.value
     if (!target) return 'error'
     try {
-      const node = await updateNode(target.id, body, { ifUnmodifiedSince: target.updated_at })
+      // The editor's base, even when a refresh replaced the row underneath the draft.
+      const since = editorRevision.revision(target.id) ?? target.updated_at
+      const node = await updateNode(target.id, body, { ifUnmodifiedSince: since })
+      editorRevision.adopt(target.id, node.updated_at)
       merge(target, node)
       onOk?.(node)
       return 'ok'
     } catch (e) {
       if (e instanceof APIError && e.status === 412) {
-        try { merge(target, await getNode(target.id)) } catch { /* keep what we have */ }
+        try {
+          const latest = await getNode(target.id)
+          editorRevision.adopt(target.id, latest.updated_at)
+          merge(target, latest)
+        } catch { /* keep what we have */ }
         toast(`${target.key} was changed elsewhere. The newer version is shown; your draft is kept.`, { tone: 'error' })
         return 'conflict'
       }
@@ -384,6 +406,8 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   const liveView: LiveView = {
     shows: id => item.value?.id === id || children.value.some(child => child.id === id),
     changed(change, node) {
+      // Before any early return: a restore ends this tab's unmatched delete.
+      ownWrites.observe(change)
       const target = item.value
       if (!target || node === undefined) return
       if (change.id !== target.id) {
@@ -407,24 +431,40 @@ export function useTicket(item: Ref<ListItem | null>, context: {
       applyLive(target, change, node)
     },
     // After a gap nothing is known to have changed: read the ticket again,
-    // quietly, once the viewer is done editing.
+    // quietly, once the viewer is done editing. A failed read is kept and
+    // tried again, on the same schedule as the list, until one succeeds.
     resync() {
       if (!item.value) return
       if (busy()) rereadAfterEdit = true
-      else void refresh()
+      else gapRetry.request()
     },
+    resumed() { gapRetry.resume() },
   }
   onScopeDispose(store.subscribe(liveView))
-  onScopeDispose(() => clearTimeout(flashTimer))
+  onScopeDispose(() => {
+    gapRetry.clear()
+    clearTimeout(flashTimer)
+    const target = item.value
+    if (target) editorRevision.release(target.id, revision => { target.updated_at = revision })
+  })
   watch(() => busy(), now => {
     const target = item.value
-    if (now || !target) return
+    // The editor owns the revision from the moment it is busy. Releasing
+    // happens after a waited change is applied, so the row then shows the
+    // server revision that change carried.
+    if (now) { if (target) editorRevision.hold(target.id, target.updated_at); return }
+    if (!target) return
     const waiting = held, reread = rereadAfterEdit
     held = null; liveHeld.value = null; rereadAfterEdit = false
     if (waiting) applyLive(target, waiting.change, waiting.node)
-    if (reread) void refresh()
+    if (reread) gapRetry.request()
+    editorRevision.release(target.id, revision => { if (item.value?.id === target.id) target.updated_at = revision })
   })
   watch(() => item.value?.id, () => { held = null; rereadAfterEdit = false; liveHeld.value = null; liveFields.value = []; liveMessage.value = ''; liveLatest = null })
+  // A different ticket: the previous row gets back any revision a refresh withheld.
+  watch(item, (current, previous) => {
+    if (previous && previous.id !== current?.id) editorRevision.release(previous.id, revision => { previous.updated_at = revision })
+  })
   // Loads and saves tell the store which version the panel has, so the
   // event of the viewer's own save needs no refetch. A conflict reload that
   // already shows the held change settles it.

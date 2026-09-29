@@ -3,6 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, useId, watch, watchEffect } from 'vue'
 import { APIError, undoEvent, type ListItem } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
+import { editorRevision } from '../../lib/editorRevision'
 import { toast } from '../../lib/toast'
 import { useActivity } from '../../lib/useActivity'
 import { useTicket, type RelatedNode } from '../../lib/useTicket'
@@ -102,7 +103,11 @@ onMounted(() => {
   if (root.value) { sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(root.value) }
 })
 let releaseChoiceAlive = true
-onBeforeUnmount(() => { releaseChoiceAlive = false; wideQuery.removeEventListener('change', onWide); sizer?.disconnect() })
+onBeforeUnmount(() => {
+  releaseChoiceAlive = false; wideQuery.removeEventListener('change', onWide); sizer?.disconnect()
+  const current = props.item
+  if (current) editorRevision.release(current.id, revision => { current.updated_at = revision })
+})
 const contextColumn = computed(() => props.mode === 'full' ? wideScreen.value : width.value >= 860)
 
 // ---------- Edit mode: title, text and properties together, one Save ----------
@@ -151,6 +156,8 @@ function refreshBenefitNotice() {
 }
 async function startEdit(focus: 'title' | 'body' | 'benefit' = 'title') {
   if (!editable.value || !props.item || editing.value) return
+  // The revision this draft saves against, before any refresh can replace the row.
+  editorRevision.hold(props.item.id, props.item.updated_at)
   base = snapshot(); Object.assign(draft, base)
   benefitNotice.value = ''
   benefitInvalidKey.value = ''
@@ -250,6 +257,9 @@ function editKeys(event: KeyboardEvent) {
   else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); void cancelEdit() }
 }
 watch(() => props.item?.id, () => { editing.value = false })
+watch(() => props.item, (current, previous) => {
+  if (previous && previous.id !== current?.id) editorRevision.release(previous.id, revision => { previous.updated_at = revision })
+})
 watch(editing, value => { if (!value) { editMenu.value = null; benefitNotice.value = ''; benefitInvalidKey.value = '' } })
 
 // ---------- Attachments: drop anywhere on the ticket, paste a screenshot ----------
@@ -290,6 +300,14 @@ const sections = computed(() => [descSection.value, acSection.value, notesSectio
 const composer = ref<InstanceType<typeof CommentComposer>>()
 const timeline = ref<InstanceType<typeof ActivityTimeline>>()
 watchEffect(() => { liveBusy.value = editing.value || saving.value || !!title.value?.editing || sections.value.some(section => section.editing) })
+// Registered after useTicket's busy watch, so a close applies the waited
+// change first and this release then puts back the server revision it withheld.
+watch(liveBusy, (busy, was) => {
+  const current = props.item
+  if (!current) return
+  if (busy && !was) editorRevision.hold(current.id, current.updated_at)
+  else if (!busy && was) editorRevision.release(current.id, revision => { if (props.item?.id === current.id) current.updated_at = revision })
+})
 // Parts someone else just changed get a brief tint (AEON-326).
 const PROPERTY_FIELDS = ['state', 'parent_id', 'fields.priority', 'fields.assignee', 'fields.estimate', 'fields.eta', 'fields.release']
 const liveTint = computed(() => {

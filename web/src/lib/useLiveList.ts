@@ -17,13 +17,17 @@
 // values and the revision they see: a change by others waits as "Changed",
 // so an edit or a bulk change still meets it as a conflict. Show brings it
 // in, except into a row open in an editor: that one waits with the editor.
+// The revision an editor saves against is the editor's: every refresh here
+// (Show, a reload, a resync) keeps it through editorRevision.
 //
 // Only this tab's own writes are skipped as already shown; the same person's
 // changes in another tab come in like anyone else's.
 import { computed, onScopeDispose, reactive, ref, watch, type Ref } from 'vue'
 import { listNodes, type ListItem, type ListPage, type ListQuery } from './api'
+import { acceptLoadedRow, applyServerRow } from './editorRevision'
 import { liveNodes, mergeChanges, type LiveNodeStore, type LiveView, type NodeChange } from './liveNodes'
 import { ownWrites } from './ownWrites'
+import { RefreshRetry, RETRY_MS } from './refreshRetry'
 import { autoApplyDelay, classifyChange, compareRevision, describeFields, IDLE_MS, PendingUpdates, pillText, type Classification, type Structural } from './liveUpdates'
 import { apiParams, compareRows, effectiveSort, rowTags, WORK_KINDS, type ListFilters } from './ticketList'
 import { statusMeta } from './work'
@@ -65,9 +69,8 @@ export const BATCH_MS = 120
 export const FLASH_MS = 2000
 const CHECK_MS = 400
 const PAGE = 200
-// Waits before reading changed rows (or the list after a gap) again after a
-// failed read; then they wait for the next change or a resumed stream.
-export const RETRY_MS = [1_000, 3_000, 10_000, 30_000] as const
+// The same waits as every other failed refresh (list gap, list resync, open ticket).
+export { RETRY_MS }
 
 export interface LiveListBlockers { selected: number; editing: boolean; menuOpen: boolean; dialogOpen: boolean; dragging: boolean }
 export interface LiveListEnv {
@@ -141,6 +144,8 @@ export function useLiveList(options: LiveListOptions) {
   // Newer versions Show left to an open editor: they come in once it closes,
   // unless the editor already took them (or a newer one).
   const deferred = new Map<string, ListItem>()
+  // A resync is still reading these. Show must not insert one as new until that read says it is there.
+  const suspects = new Set<string>()
   const flash = ref(new Set<string>())
   const message = ref('')
   let queue = new Map<string, Queued>()
@@ -153,8 +158,6 @@ export function useLiveList(options: LiveListOptions) {
   // view for the idle time before it goes by itself.
   let markedAt = 0
   let resyncWanted = false
-  let retryTimer: ReturnType<typeof setTimeout> | undefined
-  let failures = 0
 
   const rowById = (id: string) => rows.value.find(row => row.id === id)
   const editing = (id: string) => options.editing ? options.editing(id) : !!options.holds?.(id) && options.blockers().editing
@@ -175,12 +178,14 @@ export function useLiveList(options: LiveListOptions) {
     resync() { resync() },
     // Reads that failed while the stream was away are tried again.
     resumed() {
-      failures = 0
+      flushRetry.resume()
       if (queue.size) schedule()
-      if (resyncFailed) { resyncFailures = 0; resync() }
+      resyncRetry.resume()
     },
   }
   function receive(change: NodeChange) {
+    // Before any early return: a restore ends this tab's unmatched delete.
+    ownWrites.observe(change)
     const project = projectId.value
     if (!options.active.value || !project) return
     const row = rowById(change.id)
@@ -201,23 +206,21 @@ export function useLiveList(options: LiveListOptions) {
     }
     schedule()
   }
-  // One refetch at a time: an older answer never classifies after a newer one.
-  let flushing: Promise<boolean> | null = null
+  // One refetch at a time, retried like every other failed refresh. A batch
+  // that landed with more still queued waits the usual beat; a failed one
+  // waits the shared backoff, then the next resume.
+  const flushRetry = new RefreshRetry(async () => {
+    const run = generation
+    const failed = await flush().catch(() => true)
+    if (run !== generation) return false
+    if (!failed && queue.size) schedule()
+    return failed && queue.size > 0
+  })
   function schedule() {
     if (batchTimer !== undefined) return
     batchTimer = setTimeout(() => {
       batchTimer = undefined
-      if (flushing) return
-      flushing = flush().catch(() => true)
-      void flushing.then(failed => {
-        flushing = null
-        if (!queue.size) return
-        if (!failed) schedule()
-        else if (failures < RETRY_MS.length) {
-          clearTimeout(retryTimer)
-          retryTimer = setTimeout(() => { retryTimer = undefined; schedule() }, RETRY_MS[failures++])
-        }
-      })
+      flushRetry.request()
     }, BATCH_MS)
   }
   // A change that is not read yet goes back to the queue, ahead of any newer one.
@@ -276,7 +279,6 @@ export function useLiveList(options: LiveListOptions) {
         outcome.push(settle(id, queued, matched.get(id) ?? null, present.get(id) ?? null))
       }
     }
-    if (!failed) failures = 0
     announce(outcome.filter(entry => !entry.queued.own))
     if (outcome.some(entry => entry.kind !== 'ignore' && entry.kind !== 'patch' && !entry.queued.own)) markedAt = env.now()
     // Counts follow the rows: waiting updates change them when they apply.
@@ -286,6 +288,7 @@ export function useLiveList(options: LiveListOptions) {
   }
 
   function settle(id: string, queued: Queued, fresh: ListItem | null, present: ListItem | null) {
+    suspects.delete(id)
     const { change, base } = queued
     const row = rowById(id)
     // A write of this tab whose answer landed after its event: left to the code that made it.
@@ -322,9 +325,10 @@ export function useLiveList(options: LiveListOptions) {
     return { id, kind, queued, row, newer }
   }
   // The row object stays (the panel may show it); its values become the server's.
+  // The revision an open editor saves against does not: that stays the editor's.
   function patchRow(row: ListItem, item: ListItem) {
     for (const key of OPTIONAL) if (!(key in item)) delete row[key]
-    Object.assign(row, item)
+    applyServerRow(row, item)
   }
   // A new row joins the loaded ones when it sorts among them; one that sorts
   // after the last loaded row comes with the next page.
@@ -374,8 +378,19 @@ export function useLiveList(options: LiveListOptions) {
   function apply() {
     if (!pending.count && !pending.overflow) return
     if (pending.overflow) { reset(); options.reload(); return }
-    const all = pending.take()
-    const removing = new Set([...all].filter(([, kind]) => kind === 'closed' || kind === 'no_longer_matches' || kind === 'deleted').map(([id]) => id))
+    const taken = pending.take()
+    // A resync has not yet re-read this addition. Show waits rather than insert a row the gap may have deleted.
+    const heldBack: [string, Structural][] = []
+    const all: [string, Structural][] = []
+    for (const entry of taken) {
+      if (entry[1] === 'new' && suspects.has(entry[0])) heldBack.push(entry)
+      else all.push(entry)
+    }
+    for (const [id, kind] of heldBack) {
+      for (const dropped of pending.note(id, kind)) { incoming.delete(dropped); patches.delete(dropped) }
+    }
+    if (!all.length) { watchPending(); return }
+    const removing = new Set(all.filter(([, kind]) => kind === 'closed' || kind === 'no_longer_matches' || kind === 'deleted').map(([id]) => id))
     const run = () => {
       const compare = compareRows(effectiveSort(filters.value))
       let next = rows.value.filter(row => !removing.has(row.id))
@@ -439,29 +454,13 @@ export function useLiveList(options: LiveListOptions) {
   }
 
   // ---------- After a gap: read what the person sees again ----------
-  // One resync at a time. One that failed is kept: it runs again after a
-  // growing wait, and at once when the stream resumes.
-  let resyncing = false
-  let resyncAgain = false
-  let resyncFailed = false
-  let resyncFailures = 0
-  let resyncTimer: ReturnType<typeof setTimeout> | undefined
+  // The same retry as a failed row read and the open ticket: again after a
+  // growing wait, and at once when the stream resumes, until one succeeds.
+  const resyncRetry = new RefreshRetry(() => refreshLoaded())
   function resync() {
     if (!options.active.value || !options.loadedOnce.value) return
     if (options.loading.value) { resyncWanted = true; return }
-    runResync()
-  }
-  function runResync() {
-    clearTimeout(resyncTimer); resyncTimer = undefined
-    if (resyncing) { resyncAgain = true; return }
-    resyncing = true
-    void refreshLoaded().then(failed => {
-      resyncing = false
-      resyncFailed = failed
-      if (!failed) resyncFailures = 0
-      else if (resyncFailures < RETRY_MS.length) resyncTimer = setTimeout(() => { resyncTimer = undefined; resync() }, RETRY_MS[resyncFailures++])
-      if (resyncAgain) { resyncAgain = false; resync() }
-    })
+    resyncRetry.request()
   }
   // True when the read failed.
   async function refreshLoaded(): Promise<boolean> {
@@ -470,7 +469,9 @@ export function useLiveList(options: LiveListOptions) {
     const run = generation
     // The first page again, in one request: rows that arrived meanwhile show
     // as new. Every loaded row that changed or is not in it (a later page,
-    // or gone) is read again through the queue, in batches.
+    // or gone) is read again through the queue, in batches. So is anything
+    // the pill still holds that is on neither: a pending addition deleted
+    // during the gap must not survive to Show.
     let page: ListPage
     try { page = await fetchList(apiParams(project, filters.value, { limit: Math.max(PAGE / 4, Math.min(PAGE, rows.value.length)) })) }
     catch { return run === generation }
@@ -480,12 +481,29 @@ export function useLiveList(options: LiveListOptions) {
     })
     const fresh = new Map(page.items.map(item => [item.id, item]))
     const known = new Set(rows.value.map(row => row.id))
-    for (const item of page.items) if (!known.has(item.id)) receive(synthetic(item.id, item))
+    const seen = new Set<string>()
+    for (const item of page.items) {
+      seen.add(item.id)
+      if (!known.has(item.id)) receive(synthetic(item.id, item))
+    }
     for (const row of rows.value) {
+      seen.add(row.id)
       const item = fresh.get(row.id)
       if (!item || compareRevision(item.updated_at, row.updated_at) > 0) receive(synthetic(row.id, item))
     }
+    for (const id of revalidateIds()) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      suspects.add(id)
+      if (!queue.has(id)) receive(synthetic(id))
+    }
     return false
+  }
+  // Displayed rows and the fresh page are read above. This is the rest:
+  // pending additions and updates, versions waiting on a row, and the queue.
+  function revalidateIds(): string[] {
+    const ids = new Set<string>([...incoming.keys(), ...patches.keys(), ...deferred.keys(), ...pending.ids(), ...queue.keys()])
+    return [...ids]
   }
 
   // ---------- Lifecycle ----------
@@ -493,16 +511,16 @@ export function useLiveList(options: LiveListOptions) {
     generation++
     queue.clear()
     clearTimeout(batchTimer); batchTimer = undefined
-    clearTimeout(retryTimer); retryTimer = undefined; failures = 0
-    // A load reads the list anew: a resync that failed is not needed any more.
-    clearTimeout(resyncTimer); resyncTimer = undefined; resyncAgain = false; resyncFailed = false; resyncFailures = 0
-    pending.clear(); held.clear(); incoming.clear(); patches.clear(); deferred.clear()
+    // A load reads the list anew: a refresh that failed is not needed any more.
+    flushRetry.clear(); resyncRetry.clear()
+    pending.clear(); held.clear(); incoming.clear(); patches.clear(); deferred.clear(); suspects.clear()
     watchPending()
   }
-  // A new load starts over: the rows are the server's again. Changes that
-  // arrived while it ran may be newer than what it read, so they are looked
-  // at once more, against the new rows.
+  // A new load starts over: the rows are the server's again. An open editor
+  // keeps the revision it saves against. Changes that arrived while the load
+  // ran may be newer than what it read, so they are looked at once more.
   watch(options.loads, () => {
+    for (const row of rows.value) acceptLoadedRow(row)
     const waiting = [...queue.values()]
     reset()
     for (const { change, own } of waiting) {
@@ -510,7 +528,7 @@ export function useLiveList(options: LiveListOptions) {
       if (row) held.set(row.id, layoutOf(row))
       queue.set(change.id, { change, own, base: row ? layoutOf(row) : null })
     }
-    if (resyncWanted) { resyncWanted = false; runResync() }
+    if (resyncWanted) { resyncWanted = false; resyncRetry.request() }
     else if (queue.size) schedule()
   })
   watch(options.loading, loading => { if (!loading && queue.size) schedule() })

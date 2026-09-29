@@ -5,7 +5,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref, type EffectScope } from 'vue'
 import { APIError, type ListItem, type WorkNode } from '../src/lib/api'
+import { acceptLoadedRow, editorRevision } from '../src/lib/editorRevision'
 import { LiveNodeStore, type NodeChange } from '../src/lib/liveNodes'
+import { ownWrites } from '../src/lib/ownWrites'
+import { RETRY_MS } from '../src/lib/refreshRetry'
+import { filtersFromQuery } from '../src/lib/ticketList'
 
 const api = vi.hoisted(() => ({
   getNode: vi.fn(), updateNode: vi.fn(),
@@ -16,6 +20,7 @@ const api = vi.hoisted(() => ({
 vi.mock('../src/lib/api', async original => ({ ...(await original<typeof import('../src/lib/api')>()), ...api }))
 vi.mock('../src/lib/toast', () => ({ toast: vi.fn() }))
 const { useTicket } = await import('../src/lib/useTicket')
+const { useTicketList } = await import('../src/lib/useTicketList')
 
 const PROJECT = { id: 'p-1', key: 'PRJ', title: 'Project' }
 const at = (seconds: number) => `2026-09-29T10:00:${String(seconds).padStart(2, '0')}Z`
@@ -48,7 +53,7 @@ function setup(fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>()) {
   return { ticket, store, busy, target: current.value!, fetchNode }
 }
 
-beforeEach(() => { for (const fn of Object.values(api)) fn.mockClear(); api.getNode.mockReset(); api.updateNode.mockReset() })
+beforeEach(() => { editorRevision.clear(); ownWrites.clear(); for (const fn of Object.values(api)) fn.mockClear(); api.getNode.mockReset(); api.updateNode.mockReset() })
 afterEach(() => { scope?.stop(); scope = undefined })
 
 describe('useTicket: a read that lands during an edit', () => {
@@ -229,5 +234,90 @@ describe('useTicket: deleted and restored', () => {
     await settle()
     expect(ticket.gone.value).toBe(true)
     expect(target.title).toBe('Original')
+  })
+})
+
+describe('useTicket: gap refresh retries until one succeeds', () => {
+  const views = (store: LiveNodeStore) => [...(store as unknown as { views: Set<{ resync?: (reason: string) => void; resumed?: () => void }> }).views]
+
+  it('a failed gap read refreshes the panel when the stream resumes', async () => {
+    api.getNode.mockResolvedValueOnce(node())
+    const { store, target } = setup()
+    await settle()
+    api.getNode.mockRejectedValueOnce(new Error('503'))
+    views(store).forEach(view => view.resync?.('gap'))
+    await settle()
+    expect(target.title).toBe('Original')
+    expect(api.getNode).toHaveBeenCalledTimes(2)
+    api.getNode.mockResolvedValueOnce(node({ title: 'Remote', updated_at: at(9) }))
+    views(store).forEach(view => view.resumed?.())
+    await settle()
+    expect(target.title).toBe('Remote')
+    expect(target.updated_at).toBe(at(9))
+    expect(api.getNode).toHaveBeenCalledTimes(3)
+  })
+
+  it('a failed gap read waits out the shared backoff, then a resume reads it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    try {
+      api.getNode.mockResolvedValueOnce(node())
+      const { store, target } = setup()
+      await settle()
+      api.getNode.mockRejectedValue(new Error('offline'))
+      views(store).forEach(view => view.resync?.('gap'))
+      await settle()
+      expect(api.getNode).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(RETRY_MS[0])
+      expect(api.getNode).toHaveBeenCalledTimes(3)
+      api.getNode.mockResolvedValue(node({ title: 'Remote', updated_at: at(9) }))
+      views(store).forEach(view => view.resumed?.())
+      await settle()
+      expect(target.title).toBe('Remote')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('editor revision on the panel and the list load', () => {
+  it('a reloaded row keeps the open draft base, so Save conflicts and then adopts the server revision', async () => {
+    api.getNode.mockResolvedValueOnce(node())
+    const { ticket, target } = setup()
+    await settle()
+    editorRevision.hold(target.id, target.updated_at)
+    Object.assign(target, { title: 'Remote', updated_at: at(8) })
+    acceptLoadedRow(target)
+    expect(target.title).toBe('Remote')
+    expect(target.updated_at).toBe(at(1))
+    api.updateNode.mockRejectedValueOnce(new APIError(412, 'changed'))
+    api.getNode.mockResolvedValueOnce(node({ title: 'Remote', updated_at: at(8) }))
+    expect(await ticket.setTitle('Mine')).toBe('conflict')
+    expect(api.updateNode).toHaveBeenCalledWith('n1', { title: 'Mine' }, { ifUnmodifiedSince: at(1) })
+    expect(target.updated_at).toBe(at(8))
+    expect(target.title).toBe('Remote')
+  })
+
+  it('loading a page, and the next page, keeps an open draft base revision', async () => {
+    editorRevision.hold('n1', at(1))
+    api.listNodes.mockResolvedValueOnce({ items: [item({ title: 'Remote', updated_at: at(8) })], next_cursor: 'c', facets: {} })
+    const projectId = ref('p-1')
+    const filters = ref(filtersFromQuery({}))
+    const local = effectScope()
+    try {
+      const list = local.run(() => useTicketList(projectId, filters))!
+      await list.load()
+      expect(list.rows.value[0].title).toBe('Remote')
+      expect(list.rows.value[0].updated_at).toBe(at(1))
+      editorRevision.hold('n2', at(2))
+      api.listNodes.mockResolvedValueOnce({ items: [item({ id: 'n2', key: 'PRJ-2', title: 'Next', updated_at: at(9) })], next_cursor: null, facets: {} })
+      await list.loadMore()
+      const added = list.rows.value.find(row => row.id === 'n2')!
+      expect(added.title).toBe('Next')
+      expect(added.updated_at).toBe(at(2))
+    } finally {
+      local.stop()
+      api.listNodes.mockReset()
+      api.listNodes.mockImplementation(async () => ({ items: [], next_cursor: null }))
+    }
   })
 })

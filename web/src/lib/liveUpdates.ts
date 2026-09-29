@@ -103,6 +103,8 @@ export class PendingUpdates {
   // Updates were dropped past the cap: the pill offers to reload the view instead.
   get overflow() { return this.dropped }
   kind(id: string): Structural | undefined { return this.entries.get(id) }
+  // Every id still pending: a resync revalidates these as well as the rows on screen.
+  ids(): string[] { return [...this.entries.keys()] }
   // The small label a marked row carries ("Closed", "Deleted", ...).
   label(id: string): string | null { const kind = this.entries.get(id); return kind ? LABELS[kind] : null }
   // Ids among these (a selection, say) that were deleted meanwhile.

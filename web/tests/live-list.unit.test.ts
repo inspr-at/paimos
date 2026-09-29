@@ -8,6 +8,7 @@ import { effectScope, nextTick, ref, type EffectScope } from 'vue'
 import type { ListItem, ListPage, ListQuery } from '../src/lib/api'
 import { LiveNodeStore, type NodeChange } from '../src/lib/liveNodes'
 import { PENDING_CAP } from '../src/lib/liveUpdates'
+import { acceptLoadedRow, applyServerRow, editorRevision } from '../src/lib/editorRevision'
 import { ownWrites } from '../src/lib/ownWrites'
 import { filtersFromQuery, type ListFilters } from '../src/lib/ticketList'
 import { BATCH_MS, placeKey, RETRY_MS, useLiveList, type LiveList, type LiveListBlockers, type LiveListOptions } from '../src/lib/useLiveList'
@@ -82,7 +83,7 @@ function edit(h: Harness, id: string, patch: Partial<ListItem>) {
   return node
 }
 
-beforeEach(() => { clock = 0; vi.useFakeTimers(); ownWrites.clear() })
+beforeEach(() => { clock = 0; vi.useFakeTimers(); ownWrites.clear(); editorRevision.clear() })
 afterEach(() => { scope?.stop(); scope = undefined; vi.useRealTimers() })
 
 describe('useLiveList: field changes', () => {
@@ -551,6 +552,90 @@ describe('useLiveList: loads and gaps', () => {
     expect(h.srv.calls.every(query => !query.ids || query.ids.length <= 200)).toBe(true)
   })
 
+  it('Show keeps an open draft base revision when it brings the row in', async () => {
+    const h = setup([item('n1')])
+    const row = h.rows.value![0], seen = row.updated_at
+    editorRevision.hold('n1', seen)
+    h.holding.add('n1')
+    const node = edit(h, 'n1', { title: 'Remote' })
+    h.send({ id: 'n1', fields: ['title'], revision: node.updated_at })
+    await h.settle()
+    expect(row.title).toBe('Ticket n1')
+    expect(row.updated_at).toBe(seen)
+    h.live.apply()
+    expect(row.title).toBe('Remote')
+    expect(row.updated_at).toBe(seen)
+  })
+
+  it('a reload keeps an open draft base revision', async () => {
+    const h = setup([item('n1')])
+    const seen = h.rows.value![0].updated_at
+    editorRevision.hold('n1', seen)
+    h.rows.value = [item('n1', { title: 'Remote', updated_at: at(80) })]
+    h.loads.value++
+    await nextTick()
+    expect(h.rows.value![0].title).toBe('Remote')
+    expect(h.rows.value![0].updated_at).toBe(seen)
+  })
+
+  it('Reload view after more than 200 updates keeps an open draft base revision', async () => {
+    const many = Array.from({ length: PENDING_CAP + 1 }, (_, i) => item(`n${i + 1}`))
+    const h = setup(many)
+    const seen = h.rows.value!.find(row => row.id === 'n1')!.updated_at
+    editorRevision.hold('n1', seen)
+    h.editing.add('n1')
+    for (const row of many) { edit(h, row.id, { state: 'cancelled' }); h.send({ id: row.id, fields: ['state'] }) }
+    await h.settle()
+    expect(h.live.pill.value).toBe('Many updates · Reload view')
+    h.reload.mockImplementation(() => {
+      h.rows.value = many.map(row => item(row.id, row.id === 'n1' ? { title: 'Remote', updated_at: at(80) } : { state: 'cancelled', updated_at: at(80) }))
+      h.loads.value++
+    })
+    h.live.apply()
+    await nextTick()
+    const next = h.rows.value!.find(row => row.id === 'n1')!
+    expect(next.title).toBe('Remote')
+    expect(next.updated_at).toBe(seen)
+  })
+
+  it('a resync that patches a row keeps an open draft base revision', async () => {
+    const h = setup([item('n1')])
+    const row = h.rows.value![0], seen = row.updated_at
+    editorRevision.hold('n1', seen)
+    edit(h, 'n1', { title: 'Remote' })
+    for (const view of h.views()) view.resync?.('gap')
+    await vi.advanceTimersByTimeAsync(BATCH_MS * 3)
+    await h.settle()
+    expect(row.title).toBe('Remote')
+    expect(row.updated_at).toBe(seen)
+  })
+
+  it('a pending addition deleted during a gap is not inserted on Show', async () => {
+    const fresh = item('n2', { updated_at: at(30) })
+    const h = setup([item('n1')], {}, [fresh])
+    h.send({ id: 'n2', change: 'created' })
+    await h.settle()
+    expect(h.live.pill.value).toBe('1 update · Show')
+    h.srv.nodes.splice(h.srv.nodes.findIndex(node => node.id === 'n2'), 1)
+    const plain = h.srv.fetchList.getMockImplementation()!
+    let releaseIds!: () => void
+    const gate = new Promise<void>(resolve => { releaseIds = resolve })
+    h.srv.fetchList.mockImplementation(async query => {
+      const page = await plain(query)
+      if (query.ids?.includes('n2')) await gate
+      return page
+    })
+    for (const view of h.views()) view.resync?.('gap')
+    await vi.advanceTimersByTimeAsync(BATCH_MS)
+    h.live.apply()
+    expect(h.rows.value!.map(row => row.id)).toEqual(['n1'])
+    releaseIds()
+    await h.settle()
+    h.live.apply()
+    expect(h.rows.value!.map(row => row.id)).toEqual(['n1'])
+    expect(h.live.pill.value).toBeNull()
+  })
+
   it('places a row by the order fields and the group, never by its update time', () => {
     const filters = filtersFromQuery({ group: 'priority' })
     const a = item('n1', { priority: 'high' })
@@ -558,5 +643,61 @@ describe('useLiveList: loads and gaps', () => {
     expect(placeKey({ ...a, priority: 'low' }, filters)).not.toBe(placeKey(a, filters))
     expect(placeKey({ ...a, title: 'Other' }, filters)).toBe(placeKey(a, filters))
     expect(placeKey({ ...a, title: 'Other' }, filtersFromQuery({ sort: 'title' }))).not.toBe(placeKey(a, filtersFromQuery({ sort: 'title' })))
+  })
+})
+
+describe('own writes: one mutation, not the node', () => {
+  it('the delete event of this tab is skipped, including a replay, and a later delete is not', () => {
+    ownWrites.deleted('n1')
+    expect(ownWrites.made({ id: 'n1', change: 'deleted', revision: at(4), eventId: 7 })).toBe(true)
+    expect(ownWrites.made({ id: 'n1', change: 'deleted', revision: at(4), eventId: 7 })).toBe(true)
+    expect(ownWrites.made({ id: 'n1', change: 'deleted', revision: at(8), eventId: 8 })).toBe(false)
+  })
+
+  it('a save answer does not drop the unmatched delete, and a restore event does', () => {
+    ownWrites.deleted('n1')
+    ownWrites.wrote([{ id: 'n1', updated_at: at(5) }])
+    expect(ownWrites.made({ id: 'n1', change: 'deleted', revision: at(6), eventId: 4 })).toBe(true)
+    ownWrites.deleted('n1')
+    ownWrites.observe({ id: 'n1', change: 'created' })
+    expect(ownWrites.made({ id: 'n1', change: 'deleted', revision: at(8), eventId: 9 })).toBe(false)
+  })
+
+  it('delete locally, restore elsewhere, delete again: the later delete is labelled', async () => {
+    const h = setup([item('n1')])
+    ownWrites.deleted('n1')
+    const restored = h.srv.nodes.find(node => node.id === 'n1')!
+    restored.title = 'Restored'
+    restored.updated_at = at(5)
+    h.send({ id: 'n1', actorId: ME, change: 'created', revision: at(5) })
+    await h.settle()
+    h.live.apply()
+    expect(h.rows.value!.some(row => row.id === 'n1')).toBe(true)
+    h.srv.nodes.splice(h.srv.nodes.findIndex(node => node.id === 'n1'), 1)
+    h.send({ id: 'n1', actorId: ME, change: 'deleted', revision: at(8) })
+    await h.settle()
+    expect(h.live.labels.value.get('n1')).toBe('Deleted')
+    expect(h.live.pill.value).toBe('1 update · Show')
+  })
+})
+
+describe('editor revision', () => {
+  it('a direct server patch keeps the open draft base and remembers the server revision', () => {
+    const row = item('n1')
+    editorRevision.hold(row.id, row.updated_at)
+    applyServerRow(row, item('n1', { title: 'Remote', updated_at: at(80) }))
+    expect(row.title).toBe('Remote')
+    expect(row.updated_at).toBe(at(1))
+    let caught = ''
+    editorRevision.release(row.id, revision => { caught = revision; row.updated_at = revision })
+    expect(caught).toBe(at(80))
+    expect(row.updated_at).toBe(at(80))
+  })
+
+  it('accepts a loaded row without moving an open draft base', () => {
+    const row = item('n1', { title: 'Remote', updated_at: at(80) })
+    editorRevision.hold('n1', at(1))
+    expect(acceptLoadedRow(row).updated_at).toBe(at(1))
+    expect(row.title).toBe('Remote')
   })
 })
