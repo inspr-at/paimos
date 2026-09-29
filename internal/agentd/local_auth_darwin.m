@@ -5,6 +5,8 @@
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <Security/Security.h>
 #import <Security/AuthSession.h>
+#import <mach-o/dyld.h>
+#import <stdlib.h>
 
 @interface AeonLocalConfirmation : NSObject
 @property(nonatomic, strong) LAContext *context;
@@ -13,11 +15,49 @@
 @implementation AeonLocalConfirmation
 @end
 
-// Validate this running process, not a helper or a path selected by the caller.
+// The pairing installer writes paimos-agentd. The Nix package installs
+// bin/aeon-agentd. Release artifacts keep an architecture suffix until install
+// renames them, so those filenames are not installed names.
+static BOOL aeon_installed_daemon_name(NSString *name) {
+ return [name isEqualToString:@"paimos-agentd"] || [name isEqualToString:@"aeon-agentd"];
+}
+
+static NSString *aeon_executable_name(void) {
+ char stack[4096];
+ uint32_t size = sizeof stack;
+ char *owned = NULL;
+ char *path = stack;
+ if (_NSGetExecutablePath(path, &size) != 0) {
+  if (size < 2 || size > 1024 * 1024) return nil;
+  owned = malloc(size);
+  if (!owned) return nil;
+  path = owned;
+  if (_NSGetExecutablePath(path, &size) != 0) { free(owned); return nil; }
+ }
+ NSString *name = [[NSString stringWithUTF8String:path] lastPathComponent];
+ free(owned);
+ return name.length > 0 ? name : nil;
+}
+
+int aeon_installed_daemon_name_allowed(const char *name) {
+ if (!name) return 0;
+ @autoreleasepool {
+  NSString *value = [NSString stringWithUTF8String:name];
+  return value && aeon_installed_daemon_name(value) ? 1 : 0;
+ }
+}
+
+int aeon_running_executable_name_allowed(void) {
+ @autoreleasepool {
+  return aeon_installed_daemon_name(aeon_executable_name()) ? 1 : 0;
+ }
+}
+
+// Validate this running executable, not a helper or a path selected by the caller.
 // Ad-hoc Go builds intentionally fail closed. Hardened runtime and library
 // validation are required so ordinary same-UID injection/debugging is refused.
 static BOOL aeon_signed_daemon(void) {
- if (![NSProcessInfo.processInfo.processName isEqualToString:@"aeon-agentd"]) return NO;
+ if (!aeon_installed_daemon_name(aeon_executable_name())) return NO;
  SecCodeRef code = NULL;
  SecRequirementRef requirement = NULL;
  CFDictionaryRef info = NULL;

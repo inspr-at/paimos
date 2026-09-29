@@ -11,6 +11,8 @@ int aeon_local_auth_capability(void);
 void *aeon_local_auth_start(const char *reason, int *failure);
 int aeon_local_auth_result(void *handle);
 void aeon_local_auth_close(void *handle);
+int aeon_installed_daemon_name_allowed(const char *name);
+int aeon_running_executable_name_allowed(void);
 */
 import "C"
 
@@ -22,6 +24,20 @@ import (
 
 	"github.com/inspr-at/paimos/internal/attachwatch"
 )
+
+func localAuthInstalledNameAllowed(name string) bool {
+	c := C.CString(name)
+	defer C.free(unsafe.Pointer(c))
+	return C.aeon_installed_daemon_name_allowed(c) == 1
+}
+
+func localAuthNilInstalledNameAllowed() bool {
+	return C.aeon_installed_daemon_name_allowed(nil) == 1
+}
+
+func localAuthRunningExecutableAllowed() bool {
+	return C.aeon_running_executable_name_allowed() == 1
+}
 
 func CurrentLocalAuthCapability() string {
 	switch C.aeon_local_auth_capability() {
@@ -47,7 +63,7 @@ func (systemLocalAuthenticator) Confirm(ctx context.Context, reason string) erro
 	if handle == nil {
 		switch failure {
 		case 1:
-			return errors.New("local confirmation unavailable: aeon-agentd must have a valid hardened Developer ID signature without debugging or library-validation exceptions")
+			return errors.New("local confirmation unavailable: installed paimos-agentd or aeon-agentd must have a valid hardened Developer ID signature without debugging or library-validation exceptions")
 		case 2:
 			return errors.New("local confirmation unavailable: no macOS graphical login session")
 		default:

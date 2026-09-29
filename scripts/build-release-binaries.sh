@@ -54,6 +54,9 @@ darwin_agentd() {
     echo "LocalAuthentication.framework not linked" >&2
     exit 1
   fi
+  # TODO(AEON-285): Developer ID-sign this binary and enable the hardened runtime
+  # before publish. Unsigned and ad-hoc builds fail Mac confirmation closed.
+  # Signing waits for Markus; do not add secrets or codesign steps here.
 }
 
 linux_agentd() {

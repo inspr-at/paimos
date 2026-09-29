@@ -13,5 +13,5 @@ import (
 func CurrentLocalAuthCapability() string { return attachwatch.LocalAuthUnsupported }
 
 func (systemLocalAuthenticator) Confirm(context.Context, string) error {
-	return errors.New("local confirmation unavailable: requires a signed macOS aeon-agentd build with LocalAuthentication; Linux is not supported")
+	return errors.New("local confirmation unavailable: requires a signed macOS paimos-agentd or aeon-agentd build with LocalAuthentication; Linux is not supported")
 }

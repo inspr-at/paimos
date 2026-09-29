@@ -198,8 +198,9 @@ pinned mode. Changing settings neither upgrades nor downgrades existing watches.
 Mode A retains the original snapshot digest and accepts legacy A approvals.
 
 Native Mac confirmation needs `CGO_ENABLED=1`, Apple's Foundation,
-LocalAuthentication and Security frameworks, and an executable named
-`aeon-agentd` with a valid Developer ID signature, hardened runtime and no
+LocalAuthentication and Security frameworks, and an installed executable named
+`paimos-agentd` (the pairing installer) or `aeon-agentd` (the Nix package) with
+a valid Developer ID signature, hardened runtime and no
 get-task-allow, library-validation or DYLD-environment exceptions. It validates
 the running process through `SecCodeCopySelf`/`SecCodeCheckValidity`, checks for
 a graphical login, and evaluates a fresh `LAContext` with
