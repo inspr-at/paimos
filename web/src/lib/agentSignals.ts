@@ -66,8 +66,11 @@ export interface StateEvidence {
 }
 // Stop reasons are free text. Match error words, not arbitrary nonempty reasons:
 // "user requested", "completed", "stopped", "cancelled" are normal stops.
+// heartbeat_lost is the server closing a silent session ("Lost contact"): the
+// session ended; losing reports is not evidence that it failed (AEON-291).
+export const LOST_CONTACT = 'heartbeat_lost'
 export function problemReason(reason?: string | null) {
-  return !!reason && /\b(error|errored|failed|failure|blocked|crash(?:ed)?|ownership lost|heartbeat lost|timeout|timed out)\b/i.test(reason.replace(/[_-]+/g, ' '))
+  return !!reason && reason !== LOST_CONTACT && /\b(error|errored|failed|failure|blocked|crash(?:ed)?|ownership lost|heartbeat lost|timeout|timed out)\b/i.test(reason.replace(/[_-]+/g, ' '))
 }
 export interface StateReason { code: string; detail: string; next: string }
 export interface StateAssessment { state: AgentState; label: string; reasons: StateReason[] }
@@ -90,7 +93,7 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
     if (!problems.length) problems.push({ code: 'reported', detail: 'The service reported a problem without a visible reason.', next: 'Refresh this session and check its run history or ask the session owner for the missing reason.' })
     return result('problem', problems)
   }
-  if (evidence.phase === 'stopped' || evidence.stopped_at) return result('stopped')
+  if (evidence.phase === 'stopped' || evidence.stopped_at) return result('stopped', [], evidence.stop_reason === LOST_CONTACT ? 'Lost contact' : STATE_LABEL.stopped)
   const heartbeat = heartbeatEvidence(evidence, now)
   const working = ['starting', 'working', 'stopping'].includes(evidence.phase) && !['idle', 'throttled'].includes(evidence.activity)
   const heartbeatReason: StateReason = {

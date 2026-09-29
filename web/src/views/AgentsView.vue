@@ -51,7 +51,11 @@ const showConnect = computed(() => !!session.identity && session.identity.princi
 const ticketPeek = inject(TICKET_PEEK, null)
 const ticketPeekOpen = computed(() => !!ticketPeek?.openKey.value)
 const sessionId = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : '')
-const selected = computed(() => [...agents.views, ...agents.removedViews].find(v => v.session.id === sessionId.value))
+const selected = computed(() => [...agents.views, ...agents.historyViews].find(v => v.session.id === sessionId.value))
+// A link to a session that ended more than a day ago finds it in History.
+watch([sessionId, () => agents.loaded], ([id, loaded]) => {
+  if (id && loaded && !selected.value && agents.historyState === 'idle') void agents.loadHistory()
+}, { immediate: true })
 const writable = computed(() => can('harness.control'))
 const canResolve = computed(() => session.identity?.principal.kind === 'person' && can('inbox.manage'))
 const canRevoke = computed(() => session.identity?.principal.kind === 'person' && can('approvals.revoke'))
@@ -284,9 +288,9 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
         <SessionList
           v-if="agents.loaded"
-          :groups="agents.grouped" :removed="agents.removedViews" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
+          :groups="agents.grouped" :history="agents.historyViews" :history-state="agents.historyState" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
           :loaded="agents.loaded" :controls="agents.controls" :can-control="writable" :can-start="canStart"
-          @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()"
+          @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()" @history="agents.loadHistory(true)"
         />
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
         <RunQueue v-if="agents.loaded" />
@@ -302,7 +306,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
     </div>
 
     <SessionPanel
-      v-if="sessionId && agents.loaded && !ticketPeekOpen" :view="selected" :loading="false" :now="agents.now" :can-write="writable" :control-block="controlBlock"
+      v-if="sessionId && agents.loaded && !ticketPeekOpen" :view="selected" :loading="!selected && agents.historyState === 'loading'" :now="agents.now" :can-write="writable" :control-block="controlBlock"
       @close="closePanel" @control="control" @review="review"
     />
     <StartAgentDialog ref="startDialog" />

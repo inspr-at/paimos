@@ -44,7 +44,7 @@ export const useAgents = defineStore('agents', () => {
     const cursors = new Set<string>()
     let cursor: string | undefined
     do {
-      const result = await listAllSessions({ cursor })
+      const result = await listAllSessions({ cursor, view: 'current' })
       for (const item of result.items) out.set(item.id, item)
       cursor = result.next_cursor ?? undefined
       if (cursor && cursors.has(cursor)) throw new Error('Session pagination did not advance. Please retry.')
@@ -215,6 +215,37 @@ export const useAgents = defineStore('agents', () => {
   }
   const views = computed(() => sessions.value.filter(s => !s.archived_at).map(viewOf))
   const removedViews = computed(() => sessions.value.filter(s => s.archived_at).map(viewOf))
+  // History (AEON-291): the list reads only sessions that ended in the last 24
+  // hours. Every ended or removed generation is read on demand, newest first.
+  const historySessions = ref<HarnessSession[]>([])
+  const historyState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  let historyFlight: Promise<void> | undefined
+  function loadHistory(force = false) {
+    if (historyFlight) return historyFlight
+    if (historyState.value === 'ready' && !force) return Promise.resolve()
+    historyState.value = 'loading'
+    historyFlight = (async () => {
+      try {
+        const out: HarnessSession[] = []
+        let cursor: string | undefined
+        for (let page = 0; page < 10; page++) {
+          const result = await listAllSessions({ cursor, view: 'all' })
+          out.push(...result.items.filter(item => item.stopped_at || item.archived_at))
+          cursor = result.next_cursor ?? undefined
+          if (!cursor) break
+        }
+        historySessions.value = out
+        historyState.value = 'ready'
+      } catch { historyState.value = 'error' } finally { historyFlight = undefined }
+    })()
+    return historyFlight
+  }
+  const historyViews = computed(() => {
+    const byId = new Map(historySessions.value.map(item => [item.id, item]))
+    for (const item of sessions.value) if (item.stopped_at || item.archived_at || byId.has(item.id)) byId.set(item.id, item)
+    const ended = (item: HarnessSession) => Date.parse(item.archived_at ?? item.stopped_at ?? item.created_at)
+    return [...byId.values()].filter(item => item.stopped_at || item.archived_at).sort((a, b) => ended(b) - ended(a)).map(viewOf)
+  })
   const grouped = computed(() => {
     const out: Record<SessionStatus['group'], SessionView[]> = { problem: [], unresponsive: [], needs: [], awaiting: [], throttled: [], working: [], idle: [], stopped: [] }
     for (const view of views.value) out[view.status.group].push(view)
@@ -250,6 +281,7 @@ export const useAgents = defineStore('agents', () => {
     appliedSessionRead = ++sessionReadOrder
     const known = sessions.value.some(s => s.id === removed.id)
     sessions.value = known ? sessions.value.map(s => s.id === removed.id ? { ...s, ...removed } : s) : [...sessions.value, removed]
+    historySessions.value = historySessions.value.map(s => s.id === removed.id ? { ...s, ...removed } : s)
   }
 
   // ---------- Writes ----------
@@ -301,7 +333,7 @@ export const useAgents = defineStore('agents', () => {
 
   return {
     now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, eventPulseFor,
-    loading, loaded, pending, held, needsCount, views, removedViews, recordRemoval, grouped,
+    loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, loadHistory, recordRemoval, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshSessions, refreshThread, refreshAgentRuns, tick,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount,
     invalidatePolls: () => { sessionsRead.invalidate(); approvalsRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate() },

@@ -3,7 +3,8 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { can } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
-import { removeSession, removeStaleSessions, type HarnessSession } from '../../lib/agents'
+import { removeSession, removeStaleSessions, undoRemoval, type HarnessSession } from '../../lib/agents'
+import { removalConsequence } from './sessionActions'
 import { toast } from '../../lib/toast'
 import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
@@ -27,23 +28,33 @@ export function useSessionRemoval() {
     if (router.currentRoute.value.params.sessionId === id) await router.replace('/agents')
   }
 
-  async function removeOne(session: HarnessSession, label: string) {
+  // quick: No heartbeat, Lost contact or stopped. One click, then an undo toast.
+  // A live session asks first; the process consequence is said only when true.
+  async function removeOne(session: HarnessSession, label: string, quick = false) {
     if (busy.value || !canRemove(session)) return
-    const ok = await confirmAction({
-      title: `Remove ${label} from Agents?`,
-      body: 'The process is not stopped; late heartbeats are ignored.',
-      confirmLabel: 'Remove',
-    })
-    if (!ok) return
+    if (!quick) {
+      const ok = await confirmAction({ title: `Remove ${label}?`, body: removalConsequence(session, Date.now()) || undefined, confirmLabel: 'Remove' })
+      if (!ok) return
+    }
     busy.value = true
     try {
       const result = await removeSession(session, 'Removed from Agents by a person')
       agents.recordRemoval(result.session)
       await leaveIfSelected(session.id)
-      toast(`Removed ${label}. Its process was not stopped.`)
+      const event = result.event_id
+      toast(`Removed ${label}`, event ? { timeout: 8000, action: { label: 'Undo', run: () => void undo(event, label) } } : {})
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Removal failed. Please retry.', { tone: 'error' })
     } finally { busy.value = false }
+  }
+
+  async function undo(eventId: number, label: string) {
+    try {
+      agents.recordRemoval(await undoRemoval(eventId))
+      toast(`${label} is back`)
+    } catch (error) {
+      toast(error instanceof Error ? `Could not undo: ${error.message}` : 'Could not undo the removal.', { tone: 'error' })
+    }
   }
 
   // One confirmation for every stale session the person may remove. Each

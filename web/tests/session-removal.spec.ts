@@ -22,36 +22,39 @@ async function setup(page: Page, admin = true) {
   return { data, selected, bodies }
 }
 const row = (page: Page, id: string) => page.locator(`[data-row="s:${id}"]`)
-const confirm = (page: Page) => page.getByRole('dialog', { name: 'Remove ghost-worker from Agents?' })
+const confirm = (page: Page) => page.getByRole('dialog', { name: 'Remove ghost-worker?' })
+const historyButton = (page: Page) => page.getByRole('button', { name: 'Show history: every ended or removed session' })
 const shots = process.env.REMOVAL_SCREENSHOT_DIR
-// Row removal: the quiet overflow button, then the menu item, then the one confirmation.
+// Live row removal: the quiet overflow button, then the menu item, then the one confirmation.
 async function removeFromRow(page: Page, id: string) {
   await row(page, id).hover()
   await row(page, id).getByRole('button', { name: 'Actions for ghost-worker' }).click()
-  await page.getByRole('menuitem', { name: /Remove from Agents/ }).click()
+  await page.getByRole('menuitem', { name: /^Remove/ }).click()
 }
 
-test('row overflow removes a live session; Removed preserves history and survives refresh', async ({ page }) => {
+test('row overflow removes a live session; History preserves it and survives refresh', async ({ page }) => {
   const errors = watchErrors(page)
   const { selected, bodies } = await setup(page)
   await page.goto('/agents')
   const summary = page.locator('.summary')
   await expect(summary).toContainText('live')
   const before = await summary.innerText()
-  // No loud Remove on rows or Live now chips.
-  await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0)
+  // A live row carries no bin; Live now chips carry no removal.
+  await expect(row(page, selected.id).getByRole('button', { name: /^Remove / })).toHaveCount(0)
+  await expect(page.locator('.live-now').getByRole('button', { name: /^Remove / })).toHaveCount(0)
   await removeFromRow(page, selected.id)
-  await expect(confirm(page)).toContainText('The process is not stopped; late heartbeats are ignored.')
+  // Its heartbeat is fresh, so the process consequence is true and said.
+  await expect(confirm(page)).toContainText('Its process keeps running; only the record leaves Agents.')
   await expect(confirm(page).getByRole('button')).toHaveText(['Cancel', 'Remove'])
   await confirm(page).getByRole('button', { name: 'Remove', exact: true }).click()
   await expect(row(page, selected.id)).toHaveCount(0)
   await expect(page.getByRole('button', { name: /^Open ghost-worker,/ })).toHaveCount(0)
   await expect(summary).not.toHaveText(before)
   expect(bodies).toEqual([{ reason: 'Removed from Agents by a person' }])
-  await page.getByRole('button', { name: 'Show 1 removed sessions' }).click()
-  await expect(page.getByRole('heading', { name: 'Removed sessions' })).toBeVisible()
+  await historyButton(page).click()
+  await expect(page.getByRole('heading', { name: 'History' })).toBeVisible()
   await expect(row(page, selected.id)).toBeVisible()
-  await expect(row(page, selected.id).getByRole('button', { name: /^Actions for/ })).toHaveCount(0)
+  await expect(row(page, selected.id).getByRole('button', { name: /^Remove/ })).toHaveCount(0)
   await row(page, selected.id).getByRole('link').first().click()
   await expect(page.getByRole('complementary', { name: 'Session details' })).toContainText('process state unknown')
   await page.reload()
@@ -86,25 +89,25 @@ test('overflow button is quiet until hover or focus and keeps the column width',
   await expect(more).toHaveCSS('opacity', '1')
 })
 
-test('stopped rows offer only removal in their menu', async ({ page }) => {
+test('stopped rows carry a bin; their menu offers only what works', async ({ page }) => {
   const { data } = await setup(page)
-  const stopped = data.sessions.find(s => s.phase === 'stopped')!
+  const stopped = data.sessions.find(s => s.phase === 'stopped' && s.ticket_node_id)!
   Object.assign(stopped, { display_label: 'ghost-worker' })
   await page.goto('/agents')
   await page.getByRole('button', { name: /^Stopped/ }).click()
-  await removeFromRow(page, stopped.id)
-  await expect(confirm(page)).toBeVisible()
-  await page.keyboard.press('Escape')
+  await expect(row(page, stopped.id).getByRole('button', { name: 'Remove ghost-worker' })).toBeVisible()
   await row(page, stopped.id).getByRole('button', { name: 'Actions for ghost-worker' }).click()
-  await expect(page.getByRole('menuitem')).toHaveCount(1)
+  // No Interrupt or Stop and no disabled excuses: only actions that work.
+  await expect(page.getByRole('menuitem')).toHaveText([/^Open PHAROS-12/, 'Copy session id', 'Remove'])
+  await expect(page.locator('[role="menuitem"][aria-disabled="true"], [role="menuitem"]:disabled')).toHaveCount(0)
 })
 
 test('panel Remove sits with the controls, closes the panel after confirmation, and Cancel keeps the record', async ({ page }) => {
   const { selected, bodies } = await setup(page)
   await page.goto(`/agents/${selected.id}`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
-  const remove = panel.getByRole('button', { name: 'Remove ghost-worker from Agents' })
-  await expect(remove).toHaveText('Remove')
+  const remove = panel.getByRole('button', { name: 'Remove ghost-worker' })
+  await expect(remove).toHaveText('Remove…')
   await remove.click()
   await confirm(page).getByRole('button', { name: 'Cancel' }).click()
   expect(bodies).toHaveLength(0)
@@ -121,8 +124,9 @@ test('phones show the overflow button on every row; Live now chips carry no remo
   const more = row(page, selected.id).getByRole('button', { name: 'Actions for ghost-worker' })
   await expect(more).toHaveCSS('opacity', '1')
   await expect(page.locator('.live-now').getByRole('button', { name: /Remove/ })).toHaveCount(0)
+  await expect(more).toHaveCSS('width', '44px')
   await more.click()
-  await page.getByRole('menuitem', { name: /Remove from Agents/ }).click()
+  await page.getByRole('menuitem', { name: /^Remove/ }).click()
   await confirm(page).getByRole('button', { name: 'Remove', exact: true }).click()
   await expect(row(page, selected.id)).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -131,7 +135,7 @@ test('phones show the overflow button on every row; Live now chips carry no remo
 test('project member can remove without force permissions', async ({ page }) => {
   const { selected } = await setup(page, false)
   await page.goto(`/agents/${selected.id}`)
-  await expect(page.getByRole('complementary').getByRole('button', { name: 'Remove ghost-worker from Agents' })).toBeVisible()
+  await expect(page.getByRole('complementary').getByRole('button', { name: 'Remove ghost-worker' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Recover', exact: true })).toHaveCount(0)
 })
 
@@ -143,12 +147,12 @@ test('agents never receive Remove controls', async ({ page }) => {
   await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Clear stale' })).toHaveCount(0)
   await row(page, selected.id).getByRole('button', { name: 'Actions for ghost-worker' }).click()
-  await expect(page.getByRole('menuitem', { name: /Remove from Agents/ })).toHaveCount(0)
+  await expect(page.getByRole('menuitem', { name: /^Remove/ })).toHaveCount(0)
   await page.keyboard.press('Escape')
-  // A stopped row has nothing else to offer, so an agent sees no overflow at all.
+  // A stopped row offers an agent no bin and no Remove.
   const stopped = data.sessions.find(s => s.phase === 'stopped')!
   await page.getByRole('button', { name: /^Stopped/ }).click()
-  await expect(row(page, stopped.id).getByRole('button', { name: /^Actions for/ })).toHaveCount(0)
+  await expect(row(page, stopped.id).getByRole('button', { name: /^Remove/ })).toHaveCount(0)
 })
 
 test('failed removal keeps the row and allows retry', async ({ page }) => {
@@ -185,7 +189,8 @@ test('Clear stale names the count, confirms once and repeats while the server re
   await expect(row(page, selected.id)).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Clear stale', exact: true })).toHaveCount(0)
   expect(calls.length).toBe(stale.length)
-  await expect(page.getByRole('button', { name: `Show ${stale.length} removed sessions` })).toBeVisible()
+  await historyButton(page).click()
+  await expect(row(page, selected.id)).toBeVisible()
 })
 
 for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
@@ -206,20 +211,20 @@ for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
     await row(page, selected.id).scrollIntoViewIfNeeded()
     await row(page, selected.id).hover()
     await row(page, selected.id).getByRole('button', { name: 'Actions for ghost-worker' }).click()
-    await expect(page.getByRole('menuitem', { name: /Remove from Agents/ })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: /^Remove/ })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     if (shots) await page.screenshot({ path: `${shots}/menu-${width}-${theme}.png` })
-    await page.getByRole('menuitem', { name: /Remove from Agents/ }).click()
+    await page.getByRole('menuitem', { name: /^Remove/ }).click()
     await expect(confirm(page)).toBeVisible()
     expect(await confirm(page).evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
     if (shots) await page.screenshot({ path: `${shots}/dialog-${width}-${theme}.png` })
     await page.keyboard.press('Escape')
     await row(page, selected.id).click()
-    await expect(page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Remove ghost-worker from Agents' })).toBeVisible()
+    await expect(page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Remove ghost-worker' })).toBeVisible()
     if (shots) await page.screenshot({ path: `${shots}/panel-${width}-${theme}.png` })
-    await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Remove ghost-worker from Agents' }).click()
+    await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Remove ghost-worker' }).click()
     await confirm(page).getByRole('button', { name: 'Remove', exact: true }).click()
-    await page.getByRole('button', { name: 'Show 1 removed sessions' }).click()
+    await historyButton(page).click()
     await expect(row(page, selected.id)).toBeVisible()
     if (shots) await page.locator('.sessions').screenshot({ path: `${shots}/removed-${width}-${theme}.png` })
   })
@@ -238,7 +243,7 @@ for (const width of [600, 800, 1000, 1280]) {
     expect(rect!.x + rect!.width).toBeLessThanOrEqual(width)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await button.click()
-    await page.getByRole('menuitem', { name: /Remove from Agents/ }).click()
+    await page.getByRole('menuitem', { name: /^Remove/ }).click()
     await expect(confirm(page)).toBeVisible()
   })
 }
