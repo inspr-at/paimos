@@ -130,7 +130,7 @@ test('a change during an edit waits, meets the save as a conflict and keeps the 
     await expect(wsA.getByRole('button', { name: /Status: In progress/ })).toBeVisible()
 
     // B is told, and nothing moved under the editor.
-    await expect(wsB.getByRole('status').filter({ hasText: 'Changed elsewhere while you were editing' })).toBeVisible()
+    await expect(wsB.getByRole('status').filter({ hasText: 'Changed elsewhere meanwhile' })).toBeVisible()
     await expect(draftTitle).toHaveValue('Oracle connector, my wording')
 
     // The save still sends the revision B started from: a conflict, not an overwrite.
@@ -138,7 +138,7 @@ test('a change during an edit waits, meets the save as a conflict and keeps the 
     await b.keyboard.press(`${mod}+Enter`)
     await expect(b.getByText('PHAROS-12 was changed elsewhere. The newer version is shown; your draft is kept.')).toBeVisible()
     await expect(draftTitle).toHaveValue('Oracle connector, my wording')
-    await expect(wsB.getByRole('status').filter({ hasText: 'Changed elsewhere while you were editing' })).toHaveCount(0)
+    await expect(wsB.getByRole('status').filter({ hasText: 'Changed elsewhere meanwhile' })).toHaveCount(0)
     // Saving again keeps A's status: the draft took the newer value where B did not edit.
     await b.keyboard.press(`${mod}+Enter`)
     await expect(wsB.getByRole('heading', { name: 'Oracle connector, my wording' })).toBeVisible()

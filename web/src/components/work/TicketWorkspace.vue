@@ -481,6 +481,9 @@ defineExpose({
 
       <!-- Edit mode: the whole ticket as one form, one Save -->
       <form v-else-if="editing" class="edit-form" :aria-label="`Edit ${item.key}`" @submit.prevent="saveEdit" @keydown="editKeys">
+        <p v-if="ticket.liveHeld.value" class="edit-live" role="status">
+          <AppIcon :name="ticket.liveHeld.value === 'deleted' ? 'archive' : 'refresh'" :size="13" />{{ ticket.liveHeld.value === 'deleted' ? 'Deleted elsewhere meanwhile.' : 'Changed elsewhere meanwhile: saving shows that version first and keeps your draft.' }}
+        </p>
         <label class="sr-only" for="edit-title">Title</label>
         <textarea id="edit-title" ref="titleField" v-model="draft.title" class="edit-title" :class="{ large: mode === 'full' }" rows="1" maxlength="500" placeholder="Title" @input="growTitle" @keydown.enter.exact.prevent />
         <div class="edit-props">
@@ -513,9 +516,6 @@ defineExpose({
           <MarkdownEditor v-model="draft.notes" label="Notes" bare :split="mode === 'full'" :min-rows="3" :attachment-id="attachmentId" @save="saveEdit" @cancel="cancelEdit" />
         </section>
         <TicketBenefits v-if="item.kind_slug === 'ticket'" class="edit-benefits" :fields="draft" editing :disabled="saving" :done="completedTicketState(item.state)" :notice="benefitNotice" :invalid-key="benefitInvalidKey" @change="changeBenefit" />
-        <p v-if="ticket.liveHeld.value" class="edit-live" role="status">
-          <AppIcon :name="ticket.liveHeld.value === 'deleted' ? 'archive' : 'refresh'" :size="13" />{{ ticket.liveHeld.value === 'deleted' ? 'Deleted elsewhere while you were editing.' : 'Changed elsewhere while you were editing; saving shows that version first and keeps your draft.' }}
-        </p>
         <p class="edit-hint"><KeyCap k="mod" /><KeyCap k="enter" /> save · <kbd class="keycap">esc</kbd> cancel · paste or drop images to attach them</p>
       </form>
 
