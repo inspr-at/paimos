@@ -17,18 +17,17 @@ import (
 
 const probeDetailLimit = 160
 
+const deletedCwdPrefix = "The current working directory was deleted"
+
 var probeANSI = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 var probeGenericHome = regexp.MustCompile(`(?:/Users|/home)/[^/\s"'()\[\]{}|;<>:=]+`)
-var probeBearer = regexp.MustCompile(`(?i)bearer\s+\S+`)
-var probeAssignment = regexp.MustCompile(`(?i)(?:api[ _-]?key|access[ _-]?token|refresh[ _-]?token|client[ _-]?secret|private[ _-]?key|device[ _-]?proof|lifecycle[ _-]?secret|password|passwd|authorization|secret|token)\s*[:=]\s*\S+`)
-var probeAeonKey = regexp.MustCompile(`(?i)\baeon_[A-Za-z0-9_]{4,}\b`)
-var probeSK = regexp.MustCompile(`(?i)\bsk-[A-Za-z0-9_-]{4,}\b`)
-var probeGitHub = regexp.MustCompile(`(?i)\bgh[pousr]_[A-Za-z0-9_]{4,}\b`)
-var probeAWS = regexp.MustCompile(`\bAKIA[A-Z0-9]{8,}\b`)
-var probeJWT = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b`)
-var probeURLUser = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://)[^\s/?#]*@`)
-var probeOpaque = regexp.MustCompile(`[A-Za-z0-9+/_=-]{32,}`)
-var probeResidual = regexp.MustCompile(`(?i)(bearer\s+\S+|sk-[A-Za-z0-9_-]{4,}|gh[pousr]_[A-Za-z0-9_]{4,}|aeon_[A-Za-z0-9_]{4,}|AKIA[A-Z0-9]{8,}|(?:secret|token|password|passwd|authorization|api[ _-]?key)\s*[:=]\s*\S+)`)
+var deletedCwdDetail = regexp.MustCompile(`^The current working directory was deleted(?:: ~(?:/[A-Za-z0-9._-]+)*)?$`)
+var commandNotFoundDetail = regexp.MustCompile(`(?i)^(?:[A-Za-z][A-Za-z0-9._+-]*: ){0,2}command not found(?:: [A-Za-z][A-Za-z0-9._+-]*)?$`)
+var permissionDeniedDetail = regexp.MustCompile(`(?i)^(?:[A-Za-z][A-Za-z0-9._+-]*: ){0,2}permission denied$`)
+var missingModuleDetail = regexp.MustCompile(`(?i)^(?:error: )?cannot find module ['"]((?:@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z][A-Za-z0-9._-]*)['"]$`)
+var safeProbeCommand = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,64}$`)
+var probeShapedSecret = regexp.MustCompile(`(?i)(?:\bsk-[A-Za-z0-9_-]{4,}|\baeon_[A-Za-z0-9_]{4,}|\bgh[pousr]_[A-Za-z0-9_]{4,}|\bAKIA[A-Z0-9]{8,}|\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}|[A-Za-z0-9+/_=-]{32,})`)
+var probeEmail = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`)
 
 // probeDirectory is the approved workspace, then the home directory.
 // Version and login probes use this directory as their working folder.
@@ -56,15 +55,30 @@ func usableProbeDir(dir string) (string, bool) {
 	return physical, true
 }
 
-// commandDir resolves the first usable directory. The filesystem root remains
-// available after the process folder has been removed.
+// commandDir resolves the first usable directory, then the user home. The
+// filesystem root remains only when home itself is unavailable, so a removed
+// process folder is never the working directory of a probe.
 func commandDir(candidates ...string) string {
+	candidates = append(append([]string{}, candidates...), userHome())
+	seen := map[string]bool{}
 	for _, dir := range candidates {
-		if physical, ok := usableProbeDir(dir); ok {
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		if physical, ok := usableProbeDir(dir); ok && physical != "/" {
 			return physical
 		}
 	}
 	return "/"
+}
+
+func userHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home
 }
 
 type truncBuffer struct {
@@ -119,10 +133,36 @@ func probeFailureDetail(err error, homes ...string) string {
 	if err == nil || !errors.As(err, &exit) || exit == nil {
 		return ""
 	}
-	return redactProbeLine(capturedProbeLine([]byte(exit.stderr), false), homes)
+	line := capturedProbeLine([]byte(exit.stderr), false)
+	if line == "" {
+		return ""
+	}
+	return safeProbeDetail(line, homes, exit.command)
 }
 
+func probeCommandName(path string) string {
+	base := filepath.Base(path)
+	if safeProbeCommand.MatchString(base) {
+		return base
+	}
+	return ""
+}
+
+func genericProbeDetail(cmd string) string {
+	name := "the harness"
+	if safeProbeCommand.MatchString(cmd) && !probeShapedSecret.MatchString(cmd) && !probeEmail.MatchString(cmd) {
+		name = cmd
+	}
+	return "the harness printed an error; run " + name + " --version in a terminal to see it"
+}
+
+// redactProbeLine keeps a stderr line only when the whole line is a known-safe
+// diagnostic. Anything else becomes a generic hint that does not echo the line.
 func redactProbeLine(line string, homes []string) string {
+	return safeProbeDetail(line, homes, "")
+}
+
+func safeProbeDetail(line string, homes []string, cmd string) string {
 	line = strings.TrimSpace(probeANSI.ReplaceAllString(line, ""))
 	if line == "" || !utf8.ValidString(line) || strings.Contains(line, "-----BEGIN ") {
 		return ""
@@ -132,6 +172,49 @@ func redactProbeLine(line string, homes []string) string {
 			return ""
 		}
 	}
+	line = strings.Join(strings.Fields(line), " ")
+	if safe := allowProbeLine(line, homes); safe != "" {
+		return capProbeDetail(safe)
+	}
+	return genericProbeDetail(cmd)
+}
+
+func allowProbeLine(line string, homes []string) string {
+	var safe string
+	switch {
+	case strings.HasPrefix(line, deletedCwdPrefix):
+		shortened := line
+		known := probeHomes(homes)
+		for _, home := range known {
+			shortened = replaceHome(shortened, home)
+		}
+		shortened = probeGenericHome.ReplaceAllString(shortened, "~")
+		if !deletedCwdDetail.MatchString(shortened) {
+			return ""
+		}
+		for _, home := range known {
+			if strings.Contains(shortened, home) {
+				return ""
+			}
+		}
+		if strings.Contains(shortened, "/Users/") || strings.Contains(shortened, "/home/") {
+			return ""
+		}
+		safe = shortened
+	case commandNotFoundDetail.MatchString(line) || permissionDeniedDetail.MatchString(line):
+		safe = line
+	default:
+		if m := missingModuleDetail.FindStringSubmatch(line); m != nil {
+			safe = "cannot find module " + m[1]
+		}
+	}
+	if safe == "" || probeShapedSecret.MatchString(safe) || probeEmail.MatchString(safe) {
+		return ""
+	}
+	return safe
+}
+
+func probeHomes(homes []string) []string {
 	cleaned := make([]string, 0, len(homes)+1)
 	seen := map[string]bool{}
 	for _, home := range homes {
@@ -156,33 +239,7 @@ func redactProbeLine(line string, homes []string) string {
 		}
 	}
 	sort.Slice(cleaned, func(i, j int) bool { return len(cleaned[i]) > len(cleaned[j]) })
-	for _, home := range cleaned {
-		line = replaceHome(line, home)
-	}
-	line = probeGenericHome.ReplaceAllString(line, "~")
-	for _, home := range cleaned {
-		if strings.Contains(line, home) {
-			return ""
-		}
-	}
-	if strings.Contains(line, "/Users/") || strings.Contains(line, "/home/") {
-		return ""
-	}
-	line = probeBearer.ReplaceAllString(line, "[redacted]")
-	line = probeAssignment.ReplaceAllString(line, "[redacted]")
-	line = probeAeonKey.ReplaceAllString(line, "[redacted]")
-	line = probeSK.ReplaceAllString(line, "[redacted]")
-	line = probeGitHub.ReplaceAllString(line, "[redacted]")
-	line = probeAWS.ReplaceAllString(line, "[redacted]")
-	line = probeJWT.ReplaceAllString(line, "[redacted]")
-	line = probeURLUser.ReplaceAllString(line, "${1}")
-	line = probeOpaque.ReplaceAllString(line, "[redacted]")
-	line = strings.Join(strings.Fields(line), " ")
-	check := strings.ReplaceAll(line, "[redacted]", "x")
-	if line == "" || probeResidual.MatchString(check) || probeOpaque.MatchString(check) || probeJWT.MatchString(check) || probeURLUser.MatchString(check) {
-		return ""
-	}
-	return capProbeDetail(line)
+	return cleaned
 }
 
 func replaceHome(line, home string) string {

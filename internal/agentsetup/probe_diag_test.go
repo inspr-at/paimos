@@ -17,6 +17,7 @@ func TestRedactProbeLineKeepsCauseAndDropsSecrets(t *testing.T) {
 	home := "/Users/ada"
 	secret := "sk-" + strings.Repeat("a", 24)
 	token := strings.Repeat("b", 40)
+	generic := genericProbeDetail("")
 	cases := []struct {
 		name string
 		line string
@@ -24,27 +25,49 @@ func TestRedactProbeLineKeepsCauseAndDropsSecrets(t *testing.T) {
 	}{
 		{name: "deleted folder", line: "The current working directory was deleted", want: "The current working directory was deleted"},
 		{name: "home path", line: "The current working directory was deleted: " + filepath.Join(home, "Code", "old"), want: "The current working directory was deleted: ~/Code/old"},
-		{name: "home only", line: "missing " + home, want: "missing ~"},
-		{name: "other home", line: "missing /home/other/proj", want: "missing ~/proj"},
-		{name: "longer prefix", line: "missing /Users/adaburg", want: "missing ~"},
-		{name: "token same line", line: "The current working directory was deleted " + secret, want: "The current working directory was deleted [redacted]"},
-		{name: "assignment", line: "failed token=" + token, want: "failed [redacted]"},
-		{name: "bearer", line: "Authorization: Bearer " + token, want: "[redacted]"},
-		{name: "url user", line: "dial https://user:" + token + "@example.test/path", want: "dial https://example.test/path"},
+		{name: "other home on deleted folder", line: "The current working directory was deleted: /home/other/proj", want: "The current working directory was deleted: ~/proj"},
+		{name: "longer home prefix on deleted folder", line: "The current working directory was deleted: /Users/adaburg", want: "The current working directory was deleted: ~"},
+		{name: "command not found", line: "zsh: command not found: claude", want: "zsh: command not found: claude"},
+		{name: "permission denied", line: "bash: claude: Permission denied", want: "bash: claude: Permission denied"},
+		{name: "missing module", line: "Error: Cannot find module '@scope/left-pad'", want: "cannot find module @scope/left-pad"},
+		{name: "home only", line: "missing " + home, want: generic},
+		{name: "other home", line: "missing /home/other/proj", want: generic},
+		{name: "longer prefix", line: "missing /Users/adaburg", want: generic},
+		{name: "token same line", line: "The current working directory was deleted " + secret, want: generic},
+		{name: "assignment", line: "failed token=" + token, want: generic},
+		{name: "bearer", line: "Authorization: Bearer " + token, want: generic},
+		{name: "url user", line: "dial https://user:" + token + "@example.test/path", want: generic},
+		{name: "json token", line: `startup failed {"access_token":"demoCredential_1234567890"}`, want: generic},
+		{name: "quoted password", line: `startup failed password="synthetic words remain"`, want: generic},
+		{name: "email", line: "startup failed for review-fixture@example.test", want: generic},
+		{name: "json token spaced", line: `startup failed {"access_token": "demoCredential_1234567890"}`, want: generic},
+		{name: "single quoted password", line: "startup failed password='synthetic words remain'", want: generic},
+		{name: "absolute path", line: "missing /opt/customer-a/project/config.json", want: generic},
+		{name: "path permission", line: "/opt/customer-a/project/config.json: permission denied", want: generic},
+		{name: "module path", line: "Error: Cannot find module '/opt/customer-a/project/config.json'", want: generic},
+		{name: "shaped command", line: "command not found: sk-" + strings.Repeat("a", 12), want: generic},
 		{name: "second line ignored by caller", line: "The current working directory was deleted", want: "The current working directory was deleted"},
 	}
+	hidden := []string{home, "/Users/", "/home/", secret, token, "demoCredential_1234567890", "words remain", "review-fixture@example.test", "/opt/customer-a/project/config.json"}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := redactProbeLine(tc.line, []string{home})
-			if got != tc.want || strings.Contains(got, home) || strings.Contains(got, "/Users/") || strings.Contains(got, "/home/") || strings.Contains(got, secret) || strings.Contains(got, token) {
+			if got != tc.want {
 				t.Fatalf("got %q", got)
+			}
+			if tc.want == generic {
+				for _, item := range hidden {
+					if strings.Contains(got, item) {
+						t.Fatalf("leaked %q in %q", item, got)
+					}
+				}
 			}
 		})
 	}
 	long := "The current working directory was deleted " + strings.Repeat("word ", 40)
 	capped := redactProbeLine(long, nil)
-	if len([]rune(capped)) > probeDetailLimit || !strings.HasPrefix(capped, "The current working directory was deleted") || !strings.HasSuffix(capped, "...") {
-		t.Fatalf("cap %q (%d)", capped, len([]rune(capped)))
+	if capped != generic || strings.Contains(capped, "word") || len([]rune(capped)) > probeDetailLimit {
+		t.Fatalf("unsafe tail kept %q", capped)
 	}
 	if redactProbeLine("-----BEGIN PRIVATE KEY-----\nabc", nil) != "" {
 		t.Fatal("key block kept")
@@ -111,7 +134,7 @@ func TestDiscoveryProbeDirectoryAndRedactedStartCause(t *testing.T) {
 		return nil, errors.New("unexpected")
 	})
 	_, err = d.Detect(t.Context(), "claude", "")
-	if !errors.Is(err, harnesslaunch.ErrStart) || !strings.Contains(err.Error(), "loader failed") || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "sk-") {
+	if !errors.Is(err, harnesslaunch.ErrStart) || !strings.Contains(err.Error(), genericProbeDetail("")) || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "sk-") || strings.Contains(err.Error(), "loader failed") {
 		t.Fatal(err)
 	}
 	if len(dirs) != 2 || dirs[0] != workspace || dirs[1] != workspace {
@@ -191,6 +214,55 @@ func TestVersionProbeSurvivesDeletedProcessDirectory(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestProbeDetailDropsGateLeaks(t *testing.T) {
+	cases := []struct {
+		name, line, sensitive string
+	}{
+		{name: "json_token", line: `startup failed {"access_token":"demoCredential_1234567890"}`, sensitive: "demoCredential_1234567890"},
+		{name: "quoted_password", line: `startup failed password="synthetic words remain"`, sensitive: "words remain"},
+		{name: "email", line: "startup failed for review-fixture@example.test", sensitive: "review-fixture@example.test"},
+		{name: "absolute_path", line: "missing /opt/customer-a/project/config.json", sensitive: "/opt/customer-a/project/config.json"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home, workspace := physicalTemp(t), physicalTemp(t)
+			path := filepath.Join(home, "claude")
+			body := "#!/bin/sh\nprintf '%s\\n' " + quoteShell(tc.line) + " >&2\nexit 1\n"
+			if err := os.WriteFile(path, []byte(body), 0700); err != nil {
+				t.Fatal(err)
+			}
+			d := Discovery{Home: home, Workspace: workspace, LookPath: func(string) (string, error) { return path, nil }}
+			_, err := d.Detect(t.Context(), "claude", "")
+			if !errors.Is(err, harnesslaunch.ErrStart) {
+				t.Fatal(err)
+			}
+			if strings.Contains(err.Error(), tc.sensitive) || !strings.Contains(err.Error(), genericProbeDetail("claude")) {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestRuntimeNodeCheckUsesHomeWhenWorkspaceMissing(t *testing.T) {
+	d, path, node := npmFixture(t, "codex")
+	t.Setenv("HOME", d.Home)
+	body := "#!/bin/sh\ngot=$(/bin/pwd -P) || exit 126\n[ \"$got\" = " + quoteShell(d.Home) + " ] || exit 126\necho v22.19.0\n"
+	if err := os.WriteFile(node.Path, []byte(body), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if got := commandDir(d.Workspace); got != d.Workspace {
+		t.Fatalf("workspace %q", got)
+	}
+	missing := filepath.Join(d.Workspace, "missing")
+	if got := commandDir(missing); got != d.Home {
+		t.Fatalf("fallback %q", got)
+	}
+	c := RuntimeConfig{Workspace: missing, Accounts: []RuntimeAccount{{Harness: "codex", Path: path, Node: node}}}
+	if err := ValidateHarnessRuntimeDependencies(c); err != nil {
+		t.Fatal(err)
 	}
 }
 

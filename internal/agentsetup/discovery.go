@@ -40,6 +40,7 @@ type OSExecutor struct{}
 type CommandError struct {
 	ExitCode int
 	stderr   string
+	command  string
 }
 
 func (e *CommandError) Error() string { return "local command unavailable" }
@@ -96,7 +97,7 @@ func (OSExecutor) Run(ctx context.Context, c Command) ([]byte, error) {
 	if err := cmd.Run(); err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			return nil, &CommandError{ExitCode: exit.ExitCode(), stderr: capturedProbeLine(snippet.buf.Bytes(), snippet.truncated)}
+			return nil, &CommandError{ExitCode: exit.ExitCode(), stderr: capturedProbeLine(snippet.buf.Bytes(), snippet.truncated), command: probeCommandName(c.Path)}
 		}
 		return nil, errors.New("local command unavailable")
 	}
