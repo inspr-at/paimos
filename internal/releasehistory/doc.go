@@ -59,7 +59,8 @@
 //	                   current ticket metadata, so past releases follow it
 //	                   without a migration. A features or fixes change also
 //	                   carries linked_tickets: key plus pill and benefit in
-//	                   English and German. Hidden tickets, and tickets with no
+//	                   English and German, and the ticket's own group (fixes
+//	                   for a bug, else features). Hidden tickets, and tickets with no
 //	                   pill or benefit, are omitted. The text is read when the
 //	                   history is served, so a later edit shows on past releases.
 //	changes_omitted    how many more changes there were beyond the listed ones

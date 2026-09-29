@@ -99,6 +99,39 @@ test('a backfilled snapshot tells the same blocks as linked tickets (AEON-305)',
   assert.deepEqual([typed.features.length, typed.fixes.map(line => line.key)], [0, ['AEON-9']])
 })
 
+test('each ticket is a feature or a fix of its own, also when one commit names several (AEON-305)', () => {
+  const item = (key: string, pill: string) => ({ id: key, key, pill_en: pill, pill_de: '', benefit_en: `${pill}.`, benefit_de: '' })
+  const note = (key: string, pill: string, group?: 'features' | 'fixes') => ({ key, pill_en: pill, pill_de: '', benefit_en: `${pill}.`, benefit_de: '', ...(group ? { group } : {}) })
+  const f = { q: '', features: false, fixes: true, tickets: false }
+  // Two bugs share one commit: both are fixes, on the snapshot and the current path.
+  const bugs = (group?: 'fixes') => [{ ...change('s', 'other', 'P0.x: quotes and chat recover (AEON-274, AEON-275)', ['AEON-274', 'AEON-275']), group: 'fixes' as const, linked_tickets: [note('AEON-274', 'Quotes open', group), note('AEON-275', 'Chat recovers', group)] }]
+  const notes = { source: 'database-snapshot', snapshot_sha256: 's', captured_at: null, release_revision: 1, gaps: [], hidden: 0, items: [item('AEON-274', 'Quotes open'), item('AEON-275', 'Chat recovers')] }
+  for (const group of ['fixes', undefined] as const) {
+    const current = rel('2', '2026-09-29T10:00:00Z', { changes: bugs(group) })
+    const snapshot = { ...current, notes }
+    for (const r of [current, snapshot]) {
+      const p = presentRelease(r)
+      assert.deepEqual([p.features.length, p.fixes.map(line => line.key), p.other.length], [0, ['AEON-274', 'AEON-275'], 0], `${group} ${r.notes ? 'snapshot' : 'current'}`)
+      assert.equal(matches(r, f), true)
+      assert.equal(matches(r, { ...f, fixes: false, features: true }), false)
+    }
+    // Compare reads the same blocks.
+    const c = compare([current, rel('1', '2026-09-28T10:00:00Z')], '2', '1')
+    assert.deepEqual(presentChanges(c.changes).fixes.map(line => line.key), ['AEON-274', 'AEON-275'])
+  }
+  // A bug and a feature share a commit: the server's per-ticket group places each.
+  const mixed = [{ ...change('m', 'other', 'P0.x: quotes and chat (AEON-274, AEON-273)', ['AEON-274', 'AEON-273']), group: 'fixes' as const, linked_tickets: [note('AEON-274', 'Quotes open', 'fixes'), note('AEON-273', 'Session chat', 'features')] }]
+  for (const r of [rel('3', '', { changes: mixed }), rel('3', '', { changes: mixed, notes: { ...notes, items: [item('AEON-274', 'Quotes open'), item('AEON-273', 'Session chat')] } })]) {
+    const p = presentRelease(r)
+    assert.deepEqual([p.features.map(line => line.key), p.fixes.map(line => line.key)], [['AEON-273'], ['AEON-274']])
+    assert.equal(matches(r, f), true)
+    assert.equal(matches(r, { ...f, fixes: false, features: true }), true)
+  }
+  // The ticket's own group wins over a conventional prefix on a shared commit.
+  const prefixed = presentChanges([{ ...change('p', 'feat', 'feat: quotes and chat (AEON-274, AEON-273)', ['AEON-274', 'AEON-273']), group: 'features' as const, linked_tickets: [note('AEON-274', 'Quotes open', 'fixes'), note('AEON-273', 'Session chat', 'features')] }])
+  assert.deepEqual([prefixed.features.map(line => line.key), prefixed.fixes.map(line => line.key)], [['AEON-273'], ['AEON-274']])
+})
+
 test('a server group wins over the commit type, and a version bump stays out', () => {
   const grouped = groupChanges([
     { ...change('1', 'other', 'P0.x: session chat (AEON-273)', ['AEON-273']), group: 'features' },

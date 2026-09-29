@@ -166,7 +166,7 @@ func TestServeGroups(t *testing.T) {
 	if len(rel.Changes[1].Linked) != 1 || rel.Changes[1].Linked[0].Key != "AEON-274" || rel.Changes[1].Linked[0].PillEN != "Quotes open reliably" || rel.Changes[1].Linked[0].BenefitDE != "Angebote öffnen sich." {
 		t.Fatalf("bug note %+v", rel.Changes[1].Linked)
 	}
-	if len(rel.Changes[3].Linked) != 2 || rel.Changes[3].Linked[0].Key != "AEON-274" || rel.Changes[3].Linked[1].Key != "AEON-273" {
+	if len(rel.Changes[3].Linked) != 2 || rel.Changes[3].Linked[0].Key != "AEON-274" || rel.Changes[3].Linked[1].Key != "AEON-273" || rel.Changes[3].Linked[0].Group != GroupFixes || rel.Changes[3].Linked[1].Group != GroupFeatures {
 		t.Fatalf("two notes %+v", rel.Changes[3].Linked)
 	}
 	if rel.Changes[4].Linked != nil || rel.Changes[6].Linked != nil || rel.Changes[6].Group != GroupOther {

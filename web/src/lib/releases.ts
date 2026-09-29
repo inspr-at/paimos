@@ -5,7 +5,8 @@
 import { api } from './api.ts'
 
 export type ChangeGroup = 'features' | 'fixes' | 'other'
-export interface LinkedTicket { key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string }
+// group: the ticket's own features or fixes; older servers omit it.
+export interface LinkedTicket { key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string; group?: 'features' | 'fixes' }
 export interface ReleaseChange { commit: string; subject: string; type: 'feat' | 'fix' | 'test' | 'docs' | 'release' | 'refactor' | 'chore' | 'other'; scope: string; tickets: string[]; at: string; group?: ChangeGroup; linked_tickets?: LinkedTicket[] }
 export interface ReleaseRun { name: string; url: string; status: string; conclusion: string }
 export interface ReleaseEvidence {
@@ -98,7 +99,7 @@ export function groupChanges(changes: ReleaseChange[]): Record<ChangeGroup, Rele
 }
 export interface TicketChangeLine { key: string; pill: string; benefit: string; pillLang: 'en' | 'de'; benefitLang: 'en' | 'de'; commits: ReleaseChange[] }
 export interface PresentedChanges { features: TicketChangeLine[]; fixes: TicketChangeLine[]; other: ReleaseChange[] }
-type TicketText = Pick<ReleaseNoteItem, 'key' | 'pill_en' | 'pill_de' | 'benefit_en' | 'benefit_de'>
+type TicketText = Pick<ReleaseNoteItem, 'key' | 'pill_en' | 'pill_de' | 'benefit_en' | 'benefit_de'> & { group?: string }
 // The tickets a release tells about, in order: a captured snapshot's items when
 // there is one, else each visible linked ticket as its commits first name it.
 // A ticket with neither pill nor benefit in the viewer's language is not told.
@@ -116,21 +117,27 @@ function toldTickets(changes: ReleaseChange[], locale?: string | null, items?: T
   }
   return out
 }
-// Feature or fix, per ticket (no note carries a kind): the ticket's own type
-// first, as the server's group shows it on its commits without a conventional
-// prefix (a bug makes them fixes, a ticket with a benefit features), then the
-// commits' feat and fix prefixes. A ticket with neither is a feature.
-function ticketGroup(commits: ReleaseChange[]): 'features' | 'fixes' {
-  let bug = false, notBug = false, feat = false, fix = false
+// Feature or fix, per ticket and never per commit, since a commit naming
+// several tickets carries only the strongest group: the note's own group, else
+// the server's group for this ticket on any commit, else the ticket's type as
+// its own commits show it (a commit of its own without a conventional prefix
+// carries it; a shared one grouped features holds no bug), else the commits'
+// feat and fix prefixes, else a shared commit the server made a fix (older
+// servers). A ticket with none of these is a feature.
+function ticketGroup(key: string, commits: ReleaseChange[], note?: { group?: string }): 'features' | 'fixes' {
+  const kind = (g?: string) => g === 'features' || g === 'fixes' ? g : null
+  const told = kind(note?.group) ?? commits.flatMap(c => c.linked_tickets ?? []).map(t => t.key === key ? kind(t.group) : null).find(g => g)
+  if (told) return told
+  let bug = false, notBug = false, feat = false, fix = false, sharedFix = false
   for (const c of commits) {
-    if (c.type === 'other' && c.group === 'fixes' && c.tickets.length === 1) bug = true
+    if (c.type === 'other' && c.group === 'fixes') { if (c.tickets.length === 1) bug = true; else sharedFix = true }
     if (c.type === 'other' && c.group === 'features') notBug = true
     if (c.type === 'feat') feat = true
     if (c.type === 'fix') fix = true
   }
   if (bug) return 'fixes'
   if (notBug || feat) return 'features'
-  return fix ? 'fixes' : 'features'
+  return fix || sharedFix ? 'fixes' : 'features'
 }
 // Every release reads the same (AEON-305): one block per told ticket under
 // Features or Fixes, with the pill and benefit in the viewer's language and
@@ -149,7 +156,7 @@ export function presentChanges(changes: ReleaseChange[], locale?: string | null,
     const mine = commits.filter(c => c.tickets.includes(note.key))
     for (const c of mine) claimed.add(c.commit)
     const text = localizedNote(note, locale)
-    out[ticketGroup(mine)].push({ key: note.key, pill: text.pill, benefit: text.benefit, pillLang: text.pillLang, benefitLang: text.benefitLang, commits: mine })
+    out[ticketGroup(note.key, mine, note)].push({ key: note.key, pill: text.pill, benefit: text.benefit, pillLang: text.pillLang, benefitLang: text.benefitLang, commits: mine })
   }
   out.other = commits.filter(c => !claimed.has(c.commit))
   return out

@@ -243,3 +243,52 @@ test('a German locale uses the German pill and benefit, and an empty German fiel
   await expect(sheet(page).getByRole('article', { name: 'Session chat on iPhone' })).toBeVisible()
   await expect(sheet(page).getByText('The iPhone session chat keeps its tabs, unread messages and scroll position.')).toBeVisible()
 })
+
+// AEON-305: a commit that names two bug tickets carries one group, fixes, and
+// each ticket stays a fix: in the detail, the filters and compare, whether a
+// snapshot tells the release or the linked tickets do (with or without the
+// server's per-ticket group).
+function sharedBugs(snapshot: boolean) {
+  const history = stable100(true)
+  const newest = history.releases[0] as typeof history.releases[0] & Record<string, unknown>
+  const keys = ['AEON-274', 'AEON-225']
+  newest.changes = [{
+    ...newest.changes[5], subject: 'P0.x: quotes open and session requests recover (AEON-274, AEON-225)', tickets: keys, group: 'fixes',
+    linked_tickets: keys.map(key => ({ key, ...NOTES[key], ...(snapshot ? { group: 'fixes' as const } : {}) })),
+  }]
+  if (snapshot) newest.notes = { source: 'database-snapshot', snapshot_sha256: 'd4'.repeat(32), captured_at: '2026-09-29T06:30:00Z', release_revision: 1, gaps: [], hidden: 0, items: keys.map(key => ({ id: key, key, ...NOTES[key] })) }
+  return history
+}
+
+for (const snapshot of [false, true]) {
+  test(`two bugs on one commit are both fixes, in the detail, the filters and compare (${snapshot ? 'snapshot' : 'current'})`, async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 })
+    const data = fixtures()
+    withTickets(data)
+    await mockWork(page, data)
+    await mockReleases(page, sharedBugs(snapshot))
+    await page.goto('/releases')
+    const detail = sheet(page).locator('article.detail .changes')
+    const fixes = detail.getByRole('region', { name: 'Fixes, 2' })
+    await expect(fixes.getByRole('article', { name: 'Quotes open reliably' })).toBeVisible()
+    await expect(fixes.getByRole('article', { name: 'Session requests' })).toBeVisible()
+    await expect(detail.getByRole('region', { name: /^Features,/ })).toHaveCount(0)
+    await expect(sheet(page).getByRole('option', { selected: true }).getByRole('img', { name: '2 fixes' })).toBeVisible()
+    const toggles = sheet(page).getByRole('group', { name: 'Show only releases with' })
+    await toggles.getByRole('button', { name: 'Fixes' }).click()
+    await expect(sheet(page).getByText('1 of 2')).toBeVisible()
+    await toggles.getByRole('button', { name: 'Fixes' }).click()
+    await toggles.getByRole('button', { name: 'Features' }).click()
+    await expect(sheet(page).getByText('0 of 2')).toBeVisible()
+    await toggles.getByRole('button', { name: 'Features' }).click()
+    await expect(sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')).toHaveCount(2)
+    await sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).focus()
+    await page.keyboard.press('c')
+    const compare = sheet(page).locator('.compare')
+    await expect(compare.locator('.facts')).toContainText('1 release')
+    const compared = compare.locator('.changes').getByRole('region', { name: 'Fixes, 2' })
+    await expect(compared.getByRole('article', { name: 'Quotes open reliably' })).toBeVisible()
+    await expect(compared.getByRole('article', { name: 'Session requests' })).toBeVisible()
+    await expect(compare.locator('.changes').getByRole('region', { name: /^Features,/ })).toHaveCount(0)
+  })
+}
