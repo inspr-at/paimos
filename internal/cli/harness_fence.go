@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"unicode"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
@@ -119,21 +118,15 @@ func resolveHarnessPath(kind harnessFileKind, path string) (string, bool) {
 	return abs, true
 }
 
-// fsFold maps a path component to a canonical form under which every name a
-// case- and normalization-insensitive filesystem (APFS, HFS+) treats as the
-// same, and more, compare equal: compatibility decomposition, dropping
-// combining marks and default-ignorable format characters, Unicode case
-// folding, then composition. Used only to deny; it may over-match.
+// fsFold maps a path component to the form under which APFS and HFS+, which
+// are case- and normalization-insensitive, treat two names as the same file:
+// canonical decomposition and full Unicode case folding (long s, Kelvin sign,
+// the fi ligature and final sigma fold; dotless i, fullwidth and
+// mathematical letters, zero-width and variation characters and accents do
+// not). Nothing else is folded, so distinct names such as secrets with an
+// accent or in fullwidth letters stay usable.
 func fsFold(part string) string {
-	decomposed := norm.NFKD.String(part)
-	var b strings.Builder
-	for _, r := range decomposed {
-		if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Variation_Selector, r) {
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return norm.NFKC.String(cases.Fold().String(b.String()))
+	return norm.NFD.String(cases.Fold().String(norm.NFD.String(part)))
 }
 
 // openHarnessFile is the only way the heartbeat opens a file that lives in a

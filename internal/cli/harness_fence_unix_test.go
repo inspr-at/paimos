@@ -214,11 +214,14 @@ func TestHarnessReadersUseTheFence(t *testing.T) {
 func TestFenceGuardCatchesAliases(t *testing.T) {
 	dir := t.TempDir()
 	probes := map[string]string{
-		"harness_heartbeat_alias.go": "package cli\nimport files \"os\"\nfunc probeOpen(path string) (*files.File, error) { return files.Open(path) }\n",
-		"harness_heartbeat_value.go": "package cli\nimport \"os\"\nvar open = os.Open\n",
-		"harness_heartbeat_dot.go":   "package cli\nimport . \"os\"\nfunc probeRead(p string) ([]byte, error) { return ReadFile(p) }\n",
-		"harness_heartbeat_unix2.go": "package cli\nimport \"golang.org/x/sys/unix\"\nvar openat = unix.Openat\n",
-		"harness_heartbeat_raw.go":   "package cli\nfunc probeRaw(p string) { _, _ = openNoFollow(p) }\n",
+		"harness_heartbeat_alias.go":  "package cli\nimport files \"os\"\nfunc probeOpen(path string) (*files.File, error) { return files.Open(path) }\n",
+		"harness_heartbeat_value.go":  "package cli\nimport \"os\"\nvar open = os.Open\n",
+		"harness_heartbeat_dot.go":    "package cli\nimport . \"os\"\nfunc probeRead(p string) ([]byte, error) { return ReadFile(p) }\n",
+		"harness_heartbeat_unix2.go":  "package cli\nimport \"golang.org/x/sys/unix\"\nvar openat = unix.Openat\n",
+		"harness_heartbeat_raw.go":    "package cli\nfunc probeRaw(p string) { _, _ = openNoFollow(p) }\n",
+		"harness_heartbeat_ioutil.go": "package cli\nimport \"io/ioutil\"\nvar slurp = ioutil.ReadFile\n",
+		"harness_heartbeat_iofs.go":   "package cli\nimport iofs \"io/fs\"\nfunc probeFS(f iofs.FS) ([]byte, error) { return iofs.ReadFile(f, \"auth.json\") }\n",
+		"harness_heartbeat_dirfs.go":  "package cli\nimport \"os\"\nvar tree = os.DirFS(\"/\")\n",
 	}
 	for name, body := range probes {
 		fenceWrite(t, filepath.Join(dir, name), body)
@@ -253,7 +256,13 @@ func fenceGuardViolations(t *testing.T, dir string) []string {
 		"harness_heartbeat_linux.go":  true,
 		"harness_heartbeat_darwin.go": true,
 	}
-	fileReaders := map[string]bool{"Open": true, "OpenFile": true, "ReadFile": true, "Stat": true, "Lstat": true, "ReadDir": true, "DirFS": true, "Readlink": true}
+	// File readers per package. Name listings (filepath.Glob, WalkDir) are
+	// not readers; directory checks on a harness root are exempt below.
+	readers := map[string]map[string]bool{
+		"os":        {"Open": true, "OpenFile": true, "ReadFile": true, "Stat": true, "Lstat": true, "ReadDir": true, "DirFS": true, "Readlink": true, "OpenRoot": true, "OpenInRoot": true},
+		"io/ioutil": {"ReadFile": true, "ReadDir": true},
+		"io/fs":     {"ReadFile": true, "ReadDir": true, "Stat": true},
+	}
 	var bad []string
 	for _, path := range files {
 		name := filepath.Base(path)
@@ -265,23 +274,30 @@ func fenceGuardViolations(t *testing.T, dir string) []string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		osNames := map[string]bool{}
-		dotOS := false
+		named := map[string]map[string]bool{} // local package name -> readers
+		dotted := map[string]bool{}           // readers reachable unqualified
 		for _, imp := range file.Imports {
 			p, _ := strconv.Unquote(imp.Path.Value)
 			switch p {
-			case "os":
-				switch {
-				case imp.Name == nil:
-					osNames["os"] = true
-				case imp.Name.Name == ".":
-					dotOS = true
-				default:
-					osNames[imp.Name.Name] = true
-				}
 			case "syscall", "golang.org/x/sys/unix":
 				bad = append(bad, fmt.Sprintf("%s:%d imports %s", name, fset.Position(imp.Pos()).Line, p))
+				continue
 			}
+			set, ok := readers[p]
+			if !ok {
+				continue
+			}
+			local := filepath.Base(p)
+			if imp.Name != nil {
+				local = imp.Name.Name
+			}
+			if local == "." {
+				for fn := range set {
+					dotted[fn] = true
+				}
+				continue
+			}
+			named[local] = set
 		}
 		// Directory checks on a harness root (os.Lstat(root), os.ReadDir(root))
 		// list names only; every file they lead to is opened through the fence.
@@ -294,19 +310,21 @@ func fenceGuardViolations(t *testing.T, dir string) []string {
 			sel, ok := call.Fun.(*ast.SelectorExpr)
 			arg, argOK := call.Args[0].(*ast.Ident)
 			if ok && argOK && arg.Name == "root" && (sel.Sel.Name == "Lstat" || sel.Sel.Name == "ReadDir") {
-				rootCall[sel] = true
+				if x, ok := sel.X.(*ast.Ident); ok && x.Name == "os" {
+					rootCall[sel] = true
+				}
 			}
 			return true
 		})
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch v := n.(type) {
 			case *ast.SelectorExpr:
-				if x, ok := v.X.(*ast.Ident); ok && osNames[x.Name] && fileReaders[v.Sel.Name] && !rootCall[v] {
+				if x, ok := v.X.(*ast.Ident); ok && named[x.Name][v.Sel.Name] && !rootCall[v] {
 					bad = append(bad, fmt.Sprintf("%s:%d uses %s.%s", name, fset.Position(v.Pos()).Line, x.Name, v.Sel.Name))
 				}
 			case *ast.Ident:
-				if dotOS && fileReaders[v.Name] {
-					bad = append(bad, fmt.Sprintf("%s:%d uses dot-imported os.%s", name, fset.Position(v.Pos()).Line, v.Name))
+				if dotted[v.Name] {
+					bad = append(bad, fmt.Sprintf("%s:%d uses dot-imported %s", name, fset.Position(v.Pos()).Line, v.Name))
 				}
 				if v.Name == "openNoFollow" && name != "harness_fence.go" {
 					bad = append(bad, fmt.Sprintf("%s:%d uses openNoFollow outside the fence", name, fset.Position(v.Pos()).Line))
@@ -318,42 +336,62 @@ func fenceGuardViolations(t *testing.T, dir string) []string {
 	return bad
 }
 
-// Round 3 review case: names a case- and normalization-insensitive
-// filesystem resolves to a denied name must be denied too, whatever the
-// spelling: long s, Kelvin sign, NFD, fullwidth, zero-width characters.
+// Round 3 and 4 review cases: a name APFS resolves to a denied name (case,
+// canonical normalization, full case folding) is denied; a name APFS keeps
+// distinct is a different directory and stays usable, even when it looks
+// like a denied name.
 func TestHarnessFenceFilesystemEquivalentNames(t *testing.T) {
-	denied := []string{
-		"\u017fecrets", ".\u017fsh", ".\u017f\u017fh", "auth.j\u017fon", "\u212aeychains", "\uff2beychains", "\uff21\uff35\uff34\uff28.json", "\uff53\uff45\uff43\uff52\uff45\uff54\uff53",
-		"KEYCHAINS", "kEyChAiNs", "AUTH.JSON", "CLI-CONFIG.JSON", "Key\u200bchains", "Keycha\u034fins", "Keycha\u200cins",
-		"Keychains\u200d", "Keychains\ufeff", "auth.jso\u200cn", "Cooki\u0301es", "Se\u0301crets",
+	equivalent := map[string]string{
+		"ſecrets":         "secrets",
+		".ſsh":            ".ssh",
+		".ſſh":            ".ssh",
+		"auth.jſon":       "auth.json",
+		"Keychains":       "Keychains",
+		"KEYCHAINS":       "Keychains",
+		"kEyChAiNs":       "Keychains",
+		"AUTH.JSON":       "auth.json",
+		"CLI-CONFIG.JSON": "cli-config.json",
+		"cli-conﬁg.json":  "cli-config.json",
+		"SECRETS":         "secrets",
+	}
+	distinct := []string{
+		"sécrets", "sécrets", "ｓｅｃｒｅｔｓ", "Cookíes", "id＿notes",
+		"\U0001d634\U0001d626\U0001d624\U0001d633\U0001d626\U0001d635\U0001d634", "Key​chains", "Keychaıns",
+		"secrets️", "secrets‍", "Istanbul", "İstanbul", "Straße", "ﬀolder", "Σίσυφος",
+		"José", "José", "研究", "notes‎",
 	}
 	for _, tc := range fenceKinds {
 		t.Run(tc.name, func(t *testing.T) {
 			home := fenceHome(t)
-			for _, name := range denied {
-				p := fenceWrite(t, filepath.Join(home, name, tc.rel), fenceSentinel)
+			for name, canonical := range equivalent {
+				p := fenceWrite(t, filepath.Join(home, "eq", name, tc.rel), fenceSentinel)
 				if f, err := openHarnessFile(tc.kind, p); err == nil {
 					f.Close()
-					t.Errorf("opened beneath %q", name)
+					t.Errorf("opened beneath %q, an equivalent of %q", name, canonical)
 				}
-			}
-			// Real aliases on this filesystem: whatever name the kernel maps
-			// onto a denied directory is refused.
-			for _, canonical := range []string{"Keychains", "secrets", ".ssh", "auth.json"} {
+				// Where the filesystem really aliases the name, the real
+				// credential directory is never reached through it.
 				real := fenceWrite(t, filepath.Join(home, "alias", canonical, tc.rel), fenceSentinel)
 				want, err := os.Stat(real)
 				if err != nil {
 					t.Fatal(err)
 				}
-				for _, name := range denied {
-					alias := filepath.Join(home, "alias", name, tc.rel)
-					if got, err := os.Stat(alias); err == nil && os.SameFile(want, got) {
-						if f, err := openHarnessFile(tc.kind, alias); err == nil {
-							f.Close()
-							t.Errorf("filesystem alias %q of %q opened", name, canonical)
-						}
+				alias := filepath.Join(home, "alias", name, tc.rel)
+				if got, err := os.Stat(alias); err == nil && os.SameFile(want, got) {
+					if f, err := openHarnessFile(tc.kind, alias); err == nil {
+						f.Close()
+						t.Errorf("filesystem alias %q of %q opened", name, canonical)
 					}
 				}
+			}
+			for _, name := range distinct {
+				p := fenceWrite(t, filepath.Join(fenceHome(t), name, tc.rel), fenceSentinel)
+				f, err := openHarnessFile(tc.kind, p)
+				if err != nil {
+					t.Errorf("distinct directory %q (fold %q) refused: %v", name, fsFold(name), err)
+					continue
+				}
+				f.Close()
 			}
 		})
 	}
