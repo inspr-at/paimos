@@ -7044,9 +7044,9 @@ components:
         model_sessions: {type: integer, minimum: 0, description: Sessions that registered a model; by_model covers only these.}
         done: {type: integer, minimum: 0}
         released: {type: integer, minimum: 0}
-        done_attributed: {type: integer, minimum: 0, description: Done tickets with a harness session, attributed in by_harness and by_model to the ticket's latest worker session before it was done.}
+        done_attributed: {type: integer, minimum: 0, description: "Done tickets with a harness session, attributed in by_harness and by_model to the ticket's latest worker session before it was done."}
         tickets_worked: {type: integer, minimum: 0, description: Distinct tickets with a session in the range. tickets holds at most 50 of them.}
-        tickets_done: {type: integer, minimum: 0, description: Worked tickets whose state is done, accepted or delivered now.}
+        tickets_done: {type: integer, minimum: 0, description: "Worked tickets whose state is done, accepted or delivered now."}
         days:
           type: array
           items:
@@ -7109,7 +7109,7 @@ components:
                 required: [kind, session_id, project_id, project_key, ticket_id, ticket_key, ticket_title, harness, model, label, at, sessions, agent_seconds]
                 properties:
                   kind: {type: string, enum: [stuck, failed, lost, no_result, retried]}
-                  session_id: {type: string, format: uuid, description: For retried, the newest worker session.}
+                  session_id: {type: string, format: uuid, description: "For retried, the newest worker session."}
                   project_id: {type: string, format: uuid}
                   project_key: {type: string}
                   ticket_id: {type: [string, 'null'], format: uuid}
