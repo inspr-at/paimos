@@ -78,9 +78,9 @@ func rulesReceiveError(err error) error {
 func rulesReceiveDo(api *client.Client, method, path, lease string, body, dest any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	var headers map[string]string
+	headers := map[string]string{rules.ClientMaximumHeader: strconv.Itoa(rules.MaxBytes)}
 	if lease != "" {
-		headers = map[string]string{"X-Aeon-Worker-Lease": lease}
+		headers["X-Aeon-Worker-Lease"] = lease
 	}
 	return api.DoWithHeaders(ctx, method, path, body, dest, headers)
 }

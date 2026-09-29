@@ -14,7 +14,7 @@ import (
 // harness handler has authenticated the exact managed run and worker lease.
 // Selectors come from that row, never from the agent's request. Paired keys keep
 // their existing ceiling and gain no route to other people's/project rules.
-func ForManagedSession(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, task, harness string) (Merged, error) {
+func ForManagedSession(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, task, harness string, maximum int) (Merged, error) {
 	if p.Kind != tenant.Agent {
 		return Merged{}, authz.ErrForbidden
 	}
@@ -36,14 +36,29 @@ func ForManagedSession(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 		return Merged{}, err
 	}
 	snapshots := []Snapshot{}
+	budget := &work{ctx: ctx}
 	for _, s := range sets {
 		if s.Scope.matches(c) && s.PublishedVersion != "" {
+			if budget.rules >= maxBudgetRules {
+				return Merged{}, errMergeStoreTooLarge
+			}
 			snap, e := loadVersion(ctx, tx, s.ID, s.PublishedVersion)
 			if e != nil {
+				return Merged{}, e
+			}
+			if e = budget.admit(snap); e != nil {
 				return Merged{}, e
 			}
 			snapshots = append(snapshots, snap)
 		}
 	}
-	return Merge(c, snapshots, time.Now().UTC())
+	limits, err := LoadBudget(ctx, tx)
+	if err != nil {
+		return Merged{}, err
+	}
+	merged, err := MergeForClient(c, snapshots, time.Now().UTC(), limits, maximum)
+	if err != nil {
+		return Merged{}, err
+	}
+	return merged, RecordServedManifest(ctx, tx, c, merged)
 }

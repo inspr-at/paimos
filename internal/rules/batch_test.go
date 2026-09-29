@@ -421,7 +421,7 @@ func (w *batchWorld) refusedOwn(admin tenant.Principal, label string, s Set) {
 	w.t.Helper()
 	body := w.call(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")), 422)
 	var e Error
-	if err := json.Unmarshal(body, &e); err != nil || e.Code != "rules_budget_exceeded" || e.ActualBytes <= MaxBytes || e.MaxBytes != MaxBytes {
+	if err := json.Unmarshal(body, &e); err != nil || e.Code != "rules_budget_exceeded" || e.ActualBytes <= LegacyMaxBytes || e.MaxBytes != LegacyMaxBytes {
 		w.t.Fatalf("%s: %s", label, body)
 	}
 	noContent(w.t, label, body)

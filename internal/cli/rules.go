@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -91,7 +92,7 @@ func (rt *runtime) sessionRules(project string, o rulesOptions) error {
 	var m rules.Merged
 	requestCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err = api.Do(requestCtx, http.MethodGet, "/api/rules/merged?"+q.Encode(), nil, &m)
+	err = api.DoWithHeaders(requestCtx, http.MethodGet, "/api/rules/merged?"+q.Encode(), nil, &m, map[string]string{rules.ClientMaximumHeader: strconv.Itoa(rules.MaxBytes)})
 	stale := false
 	gap := ""
 	now := time.Now().UTC()

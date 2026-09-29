@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/deploytarget"
+	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/version"
 )
 
 func TestRemoteTelemetryErrorClassification(t *testing.T) {
@@ -137,6 +139,9 @@ func TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields(t *testing.T) {
 	if err := remote.HeartbeatHarness(t.Context(), stopping, "stopping"); err != nil {
 		t.Fatal(err)
 	}
+	if registration["max_session_file_bytes"] != float64(rules.MaxBytes) || registration["rules_client_version"] != version.Version {
+		t.Fatal("registration lacks rules capability")
+	}
 	if _, ok := registration["model"]; ok {
 		t.Fatal("unknown registration model was sent")
 	}
@@ -147,6 +152,9 @@ func TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields(t *testing.T) {
 		t.Fatalf("verified metadata missing from heartbeat: %+v", beats)
 	}
 	for i, beat := range beats {
+		if beat["max_session_file_bytes"] != float64(rules.MaxBytes) || beat["rules_client_version"] != version.Version {
+			t.Fatal("heartbeat lacks rules capability")
+		}
 		if beat["activity_sequence"] != float64(i+1) {
 			t.Fatalf("heartbeat %d lost sequence: %+v", i, beat)
 		}

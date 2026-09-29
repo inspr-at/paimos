@@ -19,12 +19,10 @@ import (
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
-// MaxBytes is the always-on ceiling of one merged session file and the
-// default budget. A workspace may lower its budget to MinBudgetBytes
-// (AEON-314) but never raise it: deployed agentd/CLI binaries, managed
-// delivery and the Claude bridge all refuse larger files, so a higher ceiling
-// needs its own version-gated rollout.
-const MaxBytes = 12000
+// MaxBytes is the supported client ceiling; LegacyMaxBytes remains the default
+// and the delivery limit for clients that have not reported a capability.
+const MaxBytes = 64000
+const LegacyMaxBytes = 12000
 const MinBudgetBytes = 2000
 const MaxRules = 100
 

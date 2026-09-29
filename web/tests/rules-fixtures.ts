@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test'
+import type { RuleBudgetBlocker } from '../src/lib/rules'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 export const RULE_PROJECT = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -28,6 +29,8 @@ export interface RulesMockOptions {
   settings?: boolean
   /** AEON-314: the workspace budget the server reports. */
   budget?: { max_bytes: number; layer_max_bytes: Record<string, number> }
+  budgetCeiling?: number
+  blockingClients?: RuleBudgetBlocker[]
 }
 
 export async function mockRules(page: Page, options: RulesMockOptions = {}): Promise<RulesMock> {
@@ -180,10 +183,10 @@ export async function mockRules(page: Page, options: RulesMockOptions = {}): Pro
     }
     if (path === '/api/rules/budget') {
       if (method === 'PUT') {
-        if (body.max_bytes < 2000 || body.max_bytes > 12000) return route.fulfill({ status: 400, json: { error: 'the session file budget must be between 2000 and 12000 bytes', code: 'invalid_budget' } })
+        if (body.max_bytes < 2000 || body.max_bytes > (options.budgetCeiling ?? 12000)) return route.fulfill({ status: 400, json: { error: 'the session file budget must be between 2000 and 12000 bytes', code: 'invalid_budget' } })
         state.budget = { max_bytes: body.max_bytes, layer_max_bytes: body.layer_max_bytes ?? {} }
       }
-      return route.fulfill({ json: { ...state.budget, default_bytes: 12000, min_bytes: 2000, ceiling_bytes: 12000, min_layer_bytes: 500 } })
+      return route.fulfill({ json: { ...state.budget, default_bytes: 12000, min_bytes: 2000, ceiling_bytes: options.budgetCeiling ?? 12000, min_layer_bytes: 500, blocking_clients: options.blockingClients } })
     }
     if (path === '/api/rules/explained' && method === 'GET') {
       const harness = url.searchParams.get('harness') ?? 'claude-code'

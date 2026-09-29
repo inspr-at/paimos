@@ -56,6 +56,7 @@ import (
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/reportercontract"
+	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -479,6 +480,7 @@ func validateParent(ctx context.Context, tx pgx.Tx, projectID, parentID, childID
 }
 
 type registration struct {
+	rules.ClientReport
 	AgentPrincipalID string  `json:"agent_principal_id"`
 	RunID            *string `json:"run_id"`
 	TicketNodeID     *string `json:"ticket_node_id"`
@@ -518,6 +520,9 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		if label != "" {
 			in.DisplayLabel = &label
 		}
+	}
+	if err := in.ClientReport.Validate(); err != nil {
+		return nil, workorders.Fail(400, err.Error())
 	}
 	if err := in.sessionText.normalize(); err != nil {
 		return nil, err
@@ -586,7 +591,7 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		if subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 || existing.AgentPrincipalID != in.AgentPrincipalID || existing.Harness != in.Harness || existing.Host != in.Host || existing.Management != in.Management || existing.Role != in.Role || existing.WorkShape != in.WorkShape || !same(existing.DisplayLabel, in.DisplayLabel) || !sameRegistrationMetadata(existing, in.sessionText, metaDigest) || !same(existing.ParentID, in.ParentID) || !same(existing.TicketNodeID, in.TicketNodeID) || !same(existing.RunID, in.RunID) || !same(existing.WorkOrderID, in.WorkOrderID) || !sameCaps(existing.Capabilities, caps) {
 			return nil, workorders.Fail(409, "active generation conflicts with registration")
 		}
-		return existing, nil
+		return existing, rules.RecordClientReport(ctx, tx, existing.ID, in.ClientReport)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -606,6 +611,9 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	}
 	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, in.Model, in.ReasoningEffort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest))
 	if err != nil {
+		return nil, err
+	}
+	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
 		return nil, err
 	}
 	return s, record(ctx, tx, p, s, "registered", nil, s)
@@ -834,6 +842,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 }
 func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
+		rules.ClientReport
 		ProcessOwnership *ownedprocess.Identity `json:"process_ownership"`
 		Phase            string                 `json:"phase"`
 		Activity         string                 `json:"activity"`
@@ -880,6 +889,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			return nil, workorders.Fail(400, "activity note must be at most 120 characters")
 		}
 		in.ActivityNote = &note
+	}
+	if err := in.ClientReport.Validate(); err != nil {
+		return nil, workorders.Fail(400, err.Error())
 	}
 	if err := in.sessionText.normalize(); err != nil {
 		return nil, err
@@ -933,6 +945,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	s, err = applyEstimate(ctx, tx, p, s, in.EtaReadyAt, in.EtaLiveAt, in.ProgressPct)
 	if err != nil {
+		return nil, err
+	}
+	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
 		return nil, err
 	}
 	if err = record(ctx, tx, p, s, "heartbeat", before, s); err != nil {

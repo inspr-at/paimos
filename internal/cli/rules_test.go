@@ -129,6 +129,9 @@ func TestRulesPreviewOnlineOfflineAndRefusedCache(t *testing.T) {
 			w.WriteHeader(status)
 			return
 		}
+		if r.Header.Get(rules.ClientMaximumHeader) != "64000" {
+			t.Error("CLI did not report delivery limit")
+		}
 		if r.URL.Query().Get("person_id") != c.PersonID || r.URL.Query().Get("agent_id") != c.AgentID {
 			t.Error("lost request context")
 		}

@@ -5,6 +5,7 @@ package rules
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -39,14 +40,25 @@ func LoadBudget(ctx context.Context, tx pgx.Tx) (Budget, error) {
 // the product bounds a person may choose from.
 type BudgetView struct {
 	Budget
-	DefaultBytes  int `json:"default_bytes"`
-	MinBytes      int `json:"min_bytes"`
-	CeilingBytes  int `json:"ceiling_bytes"`
-	MinLayerBytes int `json:"min_layer_bytes"`
+	DefaultBytes    int             `json:"default_bytes"`
+	MinBytes        int             `json:"min_bytes"`
+	CeilingBytes    int             `json:"ceiling_bytes"`
+	MinLayerBytes   int             `json:"min_layer_bytes"`
+	BlockingClients []ClientBlocker `json:"blocking_clients,omitempty"`
 }
 
-func viewOf(b Budget) BudgetView {
-	return BudgetView{Budget: b, DefaultBytes: MaxBytes, MinBytes: MinBudgetBytes, CeilingBytes: MaxBytes, MinLayerBytes: MinLayerBytes}
+func budgetView(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Budget) (BudgetView, error) {
+	ceiling, blockers, err := clientCeiling(ctx, tx)
+	if err != nil {
+		return BudgetView{}, err
+	}
+	view := BudgetView{Budget: b, DefaultBytes: LegacyMaxBytes, MinBytes: MinBudgetBytes, CeilingBytes: ceiling, MinLayerBytes: MinLayerBytes}
+	// The ceiling is public to rules readers, but tenant-wide host/version
+	// inventory is workspace administration data, not project membership data.
+	if p.Kind == tenant.Person && authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{}) == nil {
+		view.BlockingClients = blockers
+	}
+	return view, nil
 }
 
 func (m *Module) getBudget(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -54,7 +66,7 @@ func (m *Module) getBudget(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err != nil {
 		return nil, err
 	}
-	return viewOf(b), nil
+	return budgetView(r.Context(), tx, p, b)
 }
 
 // putBudget changes the workspace budget. Only a person who manages workspace
@@ -75,12 +87,22 @@ func (m *Module) putBudget(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err := in.Validate(); err != nil {
 		return nil, err
 	}
+	if err := lockClientGate(ctx, tx); err != nil {
+		return nil, err
+	}
+	ceiling, _, err := clientCeiling(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if in.MaxBytes > LegacyMaxBytes && in.MaxBytes > ceiling {
+		return nil, fail(409, "rules_clients_incompatible", fmt.Sprintf("clients active in the last seven days support up to %d bytes; upgrade the blocking clients before raising the budget", ceiling))
+	}
 	before, err := LoadBudget(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	if before == in {
-		return viewOf(in), nil
+		return budgetView(ctx, tx, p, in)
 	}
 	owner, err := actorOwner(ctx, tx, p)
 	if err != nil {
@@ -114,5 +136,5 @@ func (m *Module) putBudget(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if _, err = events.Append(ctx, tx, p, events.Change{Type: "settings.rules_budget_changed", Before: before, After: in}); err != nil {
 		return nil, err
 	}
-	return viewOf(in), nil
+	return budgetView(ctx, tx, p, in)
 }

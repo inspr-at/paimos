@@ -295,7 +295,7 @@ paths:
   /rules/publish:
     post:
       operationId: "publishRuleSets"
-      description: "Batch publication under one person approval (AEON-263). rules.publish; person only, agents always 403; every set needs the same authority as its single publish (company sets need the workspace publisher). Rules writes take the tenant row lock that access changes take and decide permissions under it, so a concurrent demotion is either seen or waits. All sets are authorized, then revision and rules are checked, before any write. Atomic: one transaction, so any failure (403, 404, 409 revision or version conflict, 422 budget) writes nothing. Set ids must be canonical lowercase UUIDs, each at most once. Each set gets its own immutable snapshot and rules.published event carrying the shared batch_id. After the writes, every session file that includes one of the batch's sets is rendered with every existing contribution (projects with published project rules and a project without any; every person with person or agent rules, other owners' private layers included; each owner's named agents and tasks; every role and harness); files the batch does not touch are not judged. 422 when one exceeds 12000 bytes: with actual_bytes for a file whose every layer the caller may read now (rules.read, decided under the access lock), otherwise a generic message without size or identity. 422 budget_check_too_large when the batch touches more than 1,000 session files, or the rule store holds more than 2,000 rules or 2 MiB of rule text, for one check. The body (at most 2 MiB, 413 above) is read before any lock; lock waits, statements, the budget work and the whole transaction (server-side transaction_timeout) are bounded by the request deadline, and nothing commits after it (503 busy, nothing changed). When COMMIT was sent but its answer was lost, the server looks for this request's stored answer on a fresh connection, independent of the caller's current access: 200 with that answer if it is there, otherwise 503 outcome_unknown (the COMMIT may still land; repeating the same request is safe because an identical batch returns its stored answer). Every other rules write answers an unacknowledged COMMIT with 503 outcome_unknown and reload-first wording, without reconciliation. The complete answer is stored with the writes; an exact replay of the same request by the same person returns that stored answer after re-checking authorization and writes nothing. A new request never reuses a stored version (409). The single-set publish route is unchanged."
+      description: "Batch publication under one person approval (AEON-263). rules.publish; person only, agents always 403; every set needs the same authority as its single publish (company sets need the workspace publisher). Rules writes take the tenant row lock that access changes take and decide permissions under it, so a concurrent demotion is either seen or waits. All sets are authorized, then revision and rules are checked, before any write. Atomic: one transaction, so any failure (403, 404, 409 revision or version conflict, 422 budget) writes nothing. Set ids must be canonical lowercase UUIDs, each at most once. Each set gets its own immutable snapshot and rules.published event carrying the shared batch_id. After the writes, every session file that includes one of the batch's sets is rendered with every existing contribution (projects with published project rules and a project without any; every person with person or agent rules, other owners' private layers included; each owner's named agents and tasks; every role and harness); files the batch does not touch are not judged. 422 when one exceeds the workspace budget: with actual_bytes for a file whose every layer the caller may read now (rules.read, decided under the access lock), otherwise a generic message without size or identity. 422 budget_check_too_large when the batch touches more than 1,000 session files, or the rule store holds more than 2,000 rules or 2 MiB of rule text, for one check. The body (at most 2 MiB, 413 above) is read before any lock; lock waits, statements, the budget work and the whole transaction (server-side transaction_timeout) are bounded by the request deadline, and nothing commits after it (503 busy, nothing changed). When COMMIT was sent but its answer was lost, the server looks for this request's stored answer on a fresh connection, independent of the caller's current access: 200 with that answer if it is there, otherwise 503 outcome_unknown (the COMMIT may still land; repeating the same request is safe because an identical batch returns its stored answer). Every other rules write answers an unacknowledged COMMIT with 503 outcome_unknown and reload-first wording, without reconciliation. The complete answer is stored with the writes; an exact replay of the same request by the same person returns that stored answer after re-checking authorization and writes nothing. A new request never reuses a stored version (409). The single-set publish route is unchanged."
       responses:
         "200":
           description: "Every set published, in request order"
@@ -318,7 +318,7 @@ paths:
   /rules/merged:
     get:
       operationId: "mergeAgentRules"
-      description: "rules.read in exact project; tenant from authentication; person must be caller or agent key creator; named agent must be caller or owner controlled; role/harness are exact requested selectors, not permission grants; fails closed on ambiguous identities; no HTTP cache. The rendered file stays within the workspace budget (GET /rules/budget; default and ceiling 12000 UTF-8 bytes) and its per-layer caps. Explanations (tldr) and details are never included. Loading the snapshots for that one file stops at the same store caps as publication: 2,000 rules or 2 MiB of rule text (422 budget_check_too_large). The 1,000 session-file cap remains on batch publication."
+      description: "rules.read in exact project; tenant from authentication; person must be caller or agent key creator; named agent must be caller or owner controlled; role/harness are exact requested selectors, not permission grants; fails closed on ambiguous identities; no HTTP cache. The rendered file stays within the workspace budget (GET /rules/budget; default 12000, maximum 64000 UTF-8 bytes) and its per-layer caps. Explanations (tldr) and details are never included. Loading the snapshots for that one file stops at the same store caps as publication: 2,000 rules or 2 MiB of rule text (422 budget_check_too_large). The 1,000 session-file cap remains on batch publication."
       responses:
         "200":
           description: "Authorized rule resource"
@@ -333,6 +333,7 @@ paths:
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap, or the snapshots for this session exceed 2,000 rules or 2 MiB of rule text","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
+        - {name: X-Aeon-Max-Session-File-Bytes, in: header, required: false, schema: {type: integer, minimum: 2000, maximum: 64000}, description: "Requesting client limit; omission means 12000. Larger files get a deterministic whole-rule compatibility cut and upgrade note (also bounded for the legacy 512-KiB cache); locked rules are never omitted (422 if they cannot fit)."}
         -
           name: "project_id"
           in: "query"
@@ -464,7 +465,7 @@ paths:
   /rules/budget:
     get:
       operationId: "getRuleBudget"
-      description: "AEON-314. rules.read. The workspace's always-on budget for one merged session file (default and ceiling 12,000 bytes; it may be lowered to 2,000) and optional per-layer caps, plus the bounds."
+      description: "AEON-314. rules.read. The workspace's always-on budget for one merged session file (default 12,000 bytes; 2,000 to 64,000 subject to the seven-day client capability gate) and optional per-layer caps, plus the bounds."
       responses:
         "200":
           description: "The workspace budget"
@@ -479,7 +480,7 @@ paths:
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
     put:
       operationId: "setRuleBudget"
-      description: "AEON-314. settings.manage in the workspace; people only. Sets the total budget (2,000 to 12,000 bytes; 12,000 is the ceiling every client enforces) and optional per-layer caps (500 bytes to the total; omit or 0 for none). Refused with 422 when a session file served now would no longer fit. Publication, the merged file and its explanation use these values. The store caps (2,000 rules, 2 MiB) are separate and unchanged."
+      description: "AEON-314. settings.manage in the workspace; people only. Sets the total budget (2,000 to 64,000 bytes; values above 12,000 require every client active in the tenant in the last seven days to report support) and optional per-layer caps (500 bytes to the total; omit or 0 for none). Refused with 422 when a session file served now would no longer fit. Publication, the merged file and its explanation use these values. The store caps (2,000 rules, 2 MiB) are separate and unchanged."
       responses:
         "200":
           description: "The saved budget"
@@ -490,7 +491,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"rules_clients_incompatible: at least one recently active client cannot support this budget, or no client has reported support","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"A session file served now would exceed the new budget","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       requestBody:
@@ -2893,6 +2894,8 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
     post:
+      parameters:
+        - {name: X-Aeon-Max-Session-File-Bytes, in: header, schema: {type: integer, minimum: 2000, maximum: 64000}, description: "Omission means 12000. Delivery also respects the registered maximum; whole-rule compatibility cut with note, never dropping locked rules."}
       operationId: managedHarnessContext
       description: Bound managed worker only. ADR-004 rules merge for this exact tenant/project/key creator/agent/task; delivered in ephemeral context. No repository writes. A receipt proves received bytes, not model obedience. No caller-selectable context or broader rules access.
       requestBody:
@@ -3139,6 +3142,8 @@ paths:
               type: object
               required: [phase, activity_sequence]
               properties:
+                max_session_file_bytes: {$ref: '#/components/schemas/RulesClientMaximum'}
+                rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80}
                 process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
                 phase: {type: string, enum: [starting, working, yielded, stopping]}
                 activity: {type: string, enum: [unknown, busy, idle, throttled]}
@@ -5513,18 +5518,31 @@ components:
       type: "object"
       additionalProperties: false
       properties:
-        company: {type: integer, minimum: 0, maximum: 12000}
-        project: {type: integer, minimum: 0, maximum: 12000}
-        person: {type: integer, minimum: 0, maximum: 12000}
-        agent: {type: integer, minimum: 0, maximum: 12000}
+        company: {type: integer, minimum: 0, maximum: 64000}
+        project: {type: integer, minimum: 0, maximum: 64000}
+        person: {type: integer, minimum: 0, maximum: 64000}
+        agent: {type: integer, minimum: 0, maximum: 64000}
     RuleBudget:
       type: "object"
       additionalProperties: false
       properties:
-        max_bytes: {type: integer, minimum: 2000, maximum: 12000}
+        max_bytes: {type: integer, minimum: 2000, maximum: 64000}
         layer_max_bytes:
           "$ref": "#/components/schemas/RuleLayerBytes"
       required: ["max_bytes"]
+    RulesClientMaximum:
+      type: [integer, 'null']
+      minimum: 2000
+      maximum: 64000
+      description: "Optional report on every registration and heartbeat. Omitted/null means legacy 12000 (including after downgrade); never a permission grant. Reports affect only the budget gate and managed delivery, not session response fields."
+    RuleBudgetBlocker:
+      type: object
+      required: [host, harness, max_session_file_bytes]
+      properties:
+        host: {type: string}
+        harness: {type: string}
+        version: {type: string}
+        max_session_file_bytes: {type: integer}
     RuleBudgetView:
       type: "object"
       additionalProperties: false
@@ -5534,7 +5552,11 @@ components:
           "$ref": "#/components/schemas/RuleLayerBytes"
         default_bytes: {type: integer}
         min_bytes: {type: integer}
-        ceiling_bytes: {type: integer}
+        ceiling_bytes: {type: integer, description: "Minimum reported maximum across all sessions active in the tenant within seven days, including stopped/archived sessions; missing reports and an empty inventory keep 12000."}
+        blocking_clients:
+          type: array
+          description: "Clients below 64000, grouped by host/harness/version/limit. Only people with workspace settings.manage receive these tenant-wide details."
+          items: {$ref: '#/components/schemas/RuleBudgetBlocker'}
         min_layer_bytes: {type: integer}
       required: ["max_bytes", "layer_max_bytes", "default_bytes", "min_bytes", "ceiling_bytes", "min_layer_bytes"]
     ExplainedRules:
@@ -5898,10 +5920,10 @@ components:
           type: "string"
         body:
           type: "string"
-          description: "Exact always-on rendered bytes; within the workspace budget (default and never above 12000 UTF-8 bytes); details and explanations excluded"
+          description: "Exact always-on rendered bytes; within the workspace budget (default 12000, never above 64000 UTF-8 bytes); details and explanations excluded"
         byte_size:
           type: "integer"
-          maximum: 12000
+          maximum: 64000
         rules:
           type: "array"
           maxItems: 10000
@@ -8190,6 +8212,8 @@ components:
       type: object
       required: [agent_principal_id, harness, host, management_mode, role, harness_session_ref, worker_lease]
       properties:
+        max_session_file_bytes: {$ref: '#/components/schemas/RulesClientMaximum'}
+        rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80, description: "Aeon CLI or agentd version reporting the capability."}
         agent_principal_id: {type: string, format: uuid}
         run_id: {type: [string, 'null'], format: uuid}
         ticket_node_id: {type: [string, 'null'], format: uuid}
@@ -8521,7 +8545,7 @@ components:
         context: {$ref: '#/components/schemas/HarnessRulesReceiptContext'}
         body_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Worker-reported SHA256 of exact merged bytes, never a hash of a version label'}
         version: {type: string, maxLength: 16, pattern: '^(floor-only|[0-9]{12}\.0\.0)$', description: Worker-reported calendar version or floor-only; no assertion of publication}
-        byte_size: {type: integer, minimum: 1, maximum: 12000}
+        byte_size: {type: integer, minimum: 1, maximum: 64000}
         source: {type: string, enum: [online, cache, floor-only], description: Worker-reported source; cache/floor-only are stale fallback evidence and never fresh authority}
     HarnessRulesReceipt:
       type: object

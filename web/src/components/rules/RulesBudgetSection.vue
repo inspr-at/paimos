@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import BizIcon from '../business/BizIcon.vue'
 import { LAYER_LABEL, LAYERS, putBudget, rulesMessage, type LayerName, type RuleBudgetView } from '../../lib/rules'
 
 // The workspace budget for one session file (AEON-314): a total and optional
@@ -61,6 +62,18 @@ async function save() {
       </div>
       <button v-if="canManage && !editing" type="button" class="btn sm ghost" @click="start">Change</button>
     </div>
+    <details v-if="canManage && view.blocking_clients?.length" class="compatibility">
+      <summary><BizIcon name="chevron-right" :size="12" class="chev" /><span>Larger files need a client update <span class="opt">· {{ view.blocking_clients.length }}</span></span></summary>
+      <p>Clients active in the last seven days limit new budgets to {{ fmt(view.ceiling_bytes) }} bytes.</p>
+      <ul>
+        <li v-for="(client, index) in view.blocking_clients" :key="index">
+          <span class="client-host" :title="client.host">{{ client.host }}</span>
+          <span class="client-detail" :title="[client.harness, client.version].filter(Boolean).join(' · ')">{{ client.harness }}<template v-if="client.version"> · {{ client.version }}</template></span>
+          <span class="client-limit">{{ fmt(client.max_session_file_bytes) }} bytes</span>
+        </li>
+      </ul>
+    </details>
+    <p v-else-if="canManage && view.ceiling_bytes <= view.default_bytes" class="lede">Larger files unlock once active clients report support.</p>
     <form v-if="editing" class="form" @submit.prevent="save" @keydown.esc.prevent="editing = false">
       <label class="fld total"><span>Total <span class="opt">bytes</span></span>
         <input v-model="total" class="field" inputmode="numeric" autocomplete="off" :aria-describedby="'rules-budget-range'">
@@ -80,6 +93,22 @@ async function save() {
 
 <style scoped>
 .budget-section { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 14px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.compatibility { font-size: 12.5px; color: var(--ink-2); }
+.compatibility summary { display: flex; align-items: center; gap: 6px; cursor: pointer; width: fit-content; max-width: 100%; }
+.chev { flex: none; }
+.compatibility[open] .chev { transform: rotate(90deg); }
+.compatibility p { margin: 8px 0; color: var(--ink-3); }
+.compatibility ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.compatibility li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; }
+.client-host, .client-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.client-detail, .client-limit { color: var(--ink-3); }
+.client-limit { font-variant-numeric: tabular-nums; }
+@media (max-width: 480px) {
+  .compatibility li { grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; }
+  .client-host { grid-column: 1 / -1; }
+  .client-detail { grid-column: 1; grid-row: 2; }
+  .client-limit { grid-column: 2; grid-row: 2; }
+}
 .head { display: flex; align-items: center; gap: 12px; }
 .titles { flex: 1; min-width: 0; }
 h3 { margin: 0; font-size: 14px; font-weight: 650; }

@@ -189,7 +189,7 @@ func (l *LayerBytes) add(layer string, n int) { *l.ref(layer) += n }
 // Of returns the number for one layer.
 func (l LayerBytes) Of(layer string) int { return *l.ref(layer) }
 
-func DefaultBudget() Budget { return Budget{MaxBytes: MaxBytes} }
+func DefaultBudget() Budget { return Budget{MaxBytes: LegacyMaxBytes} }
 
 // Validate keeps a budget inside the product bounds: the total between
 // MinBudgetBytes and MaxBytes, and every layer cap between 500 bytes and
@@ -251,7 +251,7 @@ func Stub(m Merged) (string, error) {
 	}
 	text := "Register this session with Aeon and explicitly load its returned rules. If unavailable, use the verified context-bound cache marked stale. Keep this locked company floor in force:\n\n" + m.Floor
 	if len(text) > MaxBytes {
-		return "", fail(422, "rules_budget_exceeded", "stub plus company floor exceeds 12000 UTF-8 bytes")
+		return "", fail(422, "rules_budget_exceeded", "stub plus company floor exceeds 64000 UTF-8 bytes")
 	}
 	return text, nil
 }

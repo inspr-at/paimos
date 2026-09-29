@@ -426,7 +426,11 @@ func (m *Module) merged(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
-	merged, err := MergeWithin(c, snapshots, time.Now().UTC(), limits)
+	maximum, err := RequestMaximum(r)
+	if err != nil {
+		return nil, err
+	}
+	merged, err := MergeForClient(c, snapshots, time.Now().UTC(), limits, maximum)
 	if err != nil {
 		return nil, err
 	}

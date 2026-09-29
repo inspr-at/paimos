@@ -167,14 +167,14 @@ func TestGoldenContradictionsReport(t *testing.T) {
 	}
 }
 
-func TestAlwaysOnBudgetMatchesShippedCap(t *testing.T) {
-	if AlwaysOnBudget != rules.MaxBytes {
-		t.Fatalf("importer budget %d, shipped cap %d", AlwaysOnBudget, rules.MaxBytes)
+func TestAlwaysOnBudgetKeepsDefault(t *testing.T) {
+	if AlwaysOnBudget != rules.LegacyMaxBytes {
+		t.Fatalf("importer budget %d, default %d", AlwaysOnBudget, rules.LegacyMaxBytes)
 	}
 	over := mustBuild(t, Request{Context: ContextTemplate, Files: []string{
 		writeDoc(t, t.TempDir(), "AGENTS-KERNEL.md", "- "+strings.Repeat("x", AlwaysOnBudget)+"\n  Why: too long for the session file.\n"),
 	}})
-	if over.AlwaysOn.Insert || over.AlwaysOn.Budget != rules.MaxBytes || over.Adapter.Ready {
+	if over.AlwaysOn.Insert || over.AlwaysOn.Budget != rules.LegacyMaxBytes || over.Adapter.Ready {
 		t.Fatalf("over-cap proposal was acceptable: %+v ready %v", over.AlwaysOn, over.Adapter.Ready)
 	}
 	if _, err := MapDraft(over); err == nil {
