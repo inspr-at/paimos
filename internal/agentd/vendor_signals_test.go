@@ -260,6 +260,116 @@ func capacityHashCount() int {
 	return capacityBinaryCache.hashes
 }
 
+func TestExactCapacityBinaryRejectsRestoredMtime(t *testing.T) {
+	for _, rename := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rename=%t", rename), func(t *testing.T) {
+			path := filepath.Join(privateCapacityHome(t), "fixture-binary")
+			original := []byte("#!/bin/sh\nexit 88\n")
+			changed := []byte("#!/bin/sh\nexit 89\n")
+			if err := os.WriteFile(path, original, 0700); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !exactCapacityBinary(path, sha256Hex(original)) {
+				t.Fatal("original rejected")
+			}
+			before := capacityHashCount()
+			// Allow the filesystem clock to advance before the in-place rewrite.
+			time.Sleep(2 * time.Millisecond)
+			target := path
+			if rename {
+				target += ".replacement"
+			}
+			if err := os.WriteFile(target, changed, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(target, info.ModTime(), info.ModTime()); err != nil {
+				t.Fatal(err)
+			}
+			if rename {
+				if err := os.Rename(target, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			after, err := os.Stat(path)
+			if err != nil || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) {
+				t.Fatal("fixture did not preserve size and mtime")
+			}
+			if exactCapacityBinary(path, sha256Hex(original)) || !exactCapacityBinary(path, sha256Hex(changed)) {
+				t.Fatal("replacement reused the approved hash")
+			}
+			if capacityHashCount()-before != 1 {
+				t.Fatal("replacement was not hashed once and cached")
+			}
+		})
+	}
+}
+
+type statuslineConsentTestAPI struct{ API }
+
+func (statuslineConsentTestAPI) StatuslineConsent(context.Context, string) (StatuslineConsent, error) {
+	return StatuslineConsent{Enabled: false}, nil
+}
+
+func TestStatuslineOffWithoutExecutable(t *testing.T) {
+	for _, invalid := range []bool{false, true} {
+		t.Run(fmt.Sprintf("invalid-executable=%t", invalid), func(t *testing.T) {
+			s, base, _ := testSupervisor(t)
+			s.api = statuslineConsentTestAPI{base}
+			home := privateCapacityHome(t)
+			s.accounts = []EnrolledAccount{{ID: "claude", Key: "local", Harness: Claude}}
+			s.adapters[Claude] = NewClaudeAdapter("/unused", "/unused", "/unused", map[string]string{"local": home})
+			bin := t.TempDir()
+			t.Setenv("PATH", bin)
+			if invalid {
+				if err := os.WriteFile(filepath.Join(bin, "aeon"), []byte("invalid fixture"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			old := aeonStatuslineCommand("/old install/Markus's tools/aeon", s.state.Path(), "claude")
+			if err := applyClaudeStatusline(home, old, true); err != nil {
+				t.Fatal(err)
+			}
+			s.statuslineEnabled = map[string]bool{"claude": true}
+			s.syncStatuslines(t.Context(), time.Now().UTC())
+			if s.statuslineEnabled["claude"] || strings.Contains(mustRead(t, filepath.Join(home, "settings.json")), "statusLine") {
+				t.Fatal("off-switch retained the owned entry or consent")
+			}
+			foreign := aeonStatuslineCommand("/old install/aeon", s.state.Path(), "other-account")
+			if err := applyClaudeStatusline(home, foreign, true); err != nil {
+				t.Fatal(err)
+			}
+			before := mustRead(t, filepath.Join(home, "settings.json"))
+			s.syncStatuslines(t.Context(), time.Now().UTC())
+			if mustRead(t, filepath.Join(home, "settings.json")) != before {
+				t.Fatal("off-switch changed another account's entry")
+			}
+		})
+	}
+}
+
+func TestStatuslineQuotedExecutableOwnership(t *testing.T) {
+	wanted := aeonStatuslineCommand("", "/private/state dir", "account")
+	for _, binary := range []string{"/old install/aeon", "/Markus's tools/aeon", "/tools statusline --state-dir /aeon"} {
+		if !claudeStatuslineOwned(aeonStatuslineCommand(binary, "/private/state dir", "account"), wanted) {
+			t.Fatal("quoted executable not recognized")
+		}
+	}
+	for _, foreign := range []string{
+		"'other'; " + aeonStatuslineCommand("/aeon", "/private/state dir", "account"),
+		aeonStatuslineCommand("/aeon", "/other state", "account"),
+		aeonStatuslineCommand("/aeon", "/private/state dir", "other-account"),
+		aeonStatuslineCommand("/aeon", "/private/state dir", "account") + " && other-tool",
+	} {
+		if claudeStatuslineOwned(foreign, wanted) {
+			t.Fatal("foreign command treated as owned")
+		}
+	}
+}
+
 func TestCodexVendorLimitSettlesRunAndCapacity(t *testing.T) {
 	s, base, _ := testSupervisor(t)
 	api := &capacityTestAPI{API: base}
@@ -328,6 +438,71 @@ func TestCodexVendorLimitNotificationBinding(t *testing.T) {
 	}
 	if hits != 1 {
 		t.Fatal("owned limit missing")
+	}
+}
+
+func TestCodexRealMidrunLimitThroughAdapter(t *testing.T) {
+	for _, vendor := range []string{"codex_midrun_limit", "codex_midrun_foreign_thread", "codex_midrun_foreign_turn"} {
+		t.Run(vendor, func(t *testing.T) {
+			a := NewCodexAdapter(fakeVendorPath(t, vendor), map[string]string{"account": privateCapacityHome(t)})
+			a.SetExpectedEmails(map[string]string{"account": "agent@example.test"})
+			var mu sync.Mutex
+			var hits []*capacity.LimitHit
+			proc, err := a.Start(t.Context(), adapterRequest(t), func(e AdapterEvent) {
+				mu.Lock()
+				defer mu.Unlock()
+				if e.VendorLimit != nil {
+					hits = append(hits, e.VendorLimit)
+				}
+				wire, _ := json.Marshal(e)
+				if strings.Contains(string(wire), "PRIVATE_LIMIT_FIXTURE") {
+					t.Error("raw vendor error escaped")
+				}
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = proc.Stop(context.Background()) })
+			if proc.(*codexProcess).vendorLimited.Load() {
+				t.Fatal("fixture did not start a normal run")
+			}
+			if err := proc.Control(t.Context(), "steer", "fixture trigger"); err != nil {
+				t.Fatal(err)
+			}
+			err = proc.Wait()
+			limited := vendor == "codex_midrun_limit"
+			mu.Lock()
+			defer mu.Unlock()
+			if (err != nil) != limited || (len(hits) > 0) != limited || !proc.(interface{ ProcessExited() bool }).ProcessExited() {
+				t.Fatalf("mid-run binding/settlement failed: error=%v hits=%d", err, len(hits))
+			}
+			for _, hit := range hits {
+				if hit.Window != "" || hit.ResetsAt != nil || len(hit.Readings) != 0 {
+					t.Fatal("mid-run error invented window bounds")
+				}
+			}
+		})
+	}
+}
+
+func TestCodexNotificationScopesLimitsToCurrentModel(t *testing.T) {
+	hits := 0
+	p := &codexProcess{capacityModel: "model-a", wireProcess: &wireProcess{threadID: "owned", observe: func(e AdapterEvent) {
+		if e.VendorLimit != nil {
+			hits++
+		}
+	}}}
+	raw := json.RawMessage(`{"method":"account/rateLimits/updated","params":{"rateLimitsByLimitId":{"model-a":{"rateLimitReachedType":null},"model-b":{"rateLimitReachedType":"rate_limit_reached"}}}}`)
+	p.notification(raw)
+	p.notification(json.RawMessage(`{"method":"thread/settings/updated","params":{"threadId":"foreign","threadSettings":{"model":"model-b"}}}`))
+	p.notification(raw)
+	if hits != 0 {
+		t.Fatal("unrelated model stopped run")
+	}
+	p.notification(json.RawMessage(`{"method":"thread/settings/updated","params":{"threadId":"owned","threadSettings":{"model":"model-b"}}}`))
+	p.notification(raw)
+	if hits != 1 {
+		t.Fatal("current model stop missing")
 	}
 }
 

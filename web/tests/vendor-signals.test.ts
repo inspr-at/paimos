@@ -3,6 +3,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { assessAgentState } from '../src/lib/agentSignals.ts'
 
+process.env.TZ = 'UTC'
+
 test('a vendor stop stays calm and names the real reset, then becomes stopped', () => {
   const now = Date.parse('2026-09-29T12:00:00Z')
   const session = { phase: 'stopped', activity: 'throttled', stopped_at: new Date(now).toISOString(), stop_reason: 'vendor_limit', run_status: 'failed', has_problem: false, vendor_limited: true, limit_window: '5h', limit_resets_at: '2026-09-29T14:10:00Z' }

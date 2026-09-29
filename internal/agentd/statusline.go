@@ -211,6 +211,12 @@ func (s *Supervisor) syncStatuslines(ctx context.Context, now time.Time) {
 		if err != nil {
 			continue
 		}
+		if !consent.Enabled {
+			// Removal depends only on the recorded account/state signature,
+			// even if the installed executable disappeared or left PATH.
+			_ = applyClaudeStatusline(home, aeonStatuslineCommand("", s.state.Path(), a.ID), false)
+			continue
+		}
 		path, err := exec.LookPath("aeon")
 		if err != nil {
 			continue
@@ -240,11 +246,20 @@ func claudeStatuslineOwned(existing, wanted string) bool {
 	}
 	signature := func(command string) string {
 		const marker = " statusline --state-dir "
-		i := strings.Index(command, marker)
-		if i < 2 || !singleQuotedWord(command[:i]) {
-			return ""
+		// Spaces (including marker-like text) inside the quoted executable
+		// are part of one shell word, never a second command.
+		for start := 0; start < len(command); {
+			i := strings.Index(command[start:], marker)
+			if i < 0 {
+				break
+			}
+			i += start
+			if singleQuotedWord(command[:i]) {
+				return command[i:]
+			}
+			start = i + len(marker)
 		}
-		return command[i:]
+		return ""
 	}
 	owned := signature(existing)
 	return owned != "" && owned == signature(wanted)
@@ -262,9 +277,6 @@ func singleQuotedWord(s string) bool {
 			}
 			i += 4
 			continue
-		}
-		if body[i] == ' ' || body[i] == '\t' || body[i] == '\n' {
-			return false
 		}
 		i++
 	}

@@ -9,7 +9,7 @@ import { mockEffectivePermissions } from './authz-fixtures'
 test.use({ locale: 'en-GB', timezoneId: 'UTC' })
 
 const now = Date.parse('2026-09-29T12:00:00Z')
-async function setup(page: Page, theme: 'light' | 'dark') {
+async function setup(page: Page, theme: 'light' | 'dark', grants = { manage: true }) {
   await page.clock.install({ time: now })
   const work = fixtures(); work.preferences.theme = { choice: theme }
   await mockWork(page, work, { admin: true })
@@ -20,7 +20,8 @@ async function setup(page: Page, theme: 'light' | 'dark') {
   await page.route('**/api/agent-pairing/computers', route => route.fulfill({ json: { computers: [] } }))
   await page.route('**/api/me/permissions*', route => {
     const p = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
-    p.workspace.permissions.push('account.read', 'account.manage')
+    p.workspace.permissions = [...p.workspace.permissions.filter(permission => permission !== 'account.manage'), 'account.read']
+    if (grants.manage) p.workspace.permissions.push('account.manage')
     return route.fulfill({ json: p })
   })
   const changes: boolean[] = []
@@ -33,8 +34,24 @@ async function setup(page: Page, theme: 'light' | 'dark') {
     Object.assign(account, { statusline_enabled: enabled })
     await route.fulfill({ json: { enabled } })
   })
-  return { first, changes }
+  return { first, changes, account }
 }
+
+test('a computer approver loses the statusline toggle when account.manage is revoked', async ({ page }) => {
+  const grants = { manage: true }
+  const { changes, account } = await setup(page, 'light', grants)
+  await page.goto('/settings/accounts')
+  const toggle = page.getByRole('switch', { name: /Show .* in your Claude status line/ })
+  await expect(toggle).toBeVisible()
+  expect(account.statusline_opt_in).toBe('own')
+  grants.manage = false
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(toggle).toHaveCount(0)
+  expect(changes).toEqual([])
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Accounts', exact: true })).toBeVisible()
+  await expect(toggle).toHaveCount(0)
+})
 
 for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) {
   test(`vendor throttling and explicit statusline consent ${width} ${theme}`, async ({ page }) => {

@@ -127,3 +127,32 @@ func TestClaudeStatuslineProjection(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexLimitBucketScope(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name, model, raw string
+		stop             bool
+	}{
+		{"other model", "model-a", `{"rateLimitsByLimitId":{"model-b":{"limitId":"model-b","rateLimitReachedType":"rate_limit_reached"}}}`, false},
+		{"unknown model", "", `{"rateLimitsByLimitId":{"model-a":{"rateLimitReachedType":"rate_limit_reached"}}}`, false},
+		{"exact model", "model-a", `{"rateLimitsByLimitId":{"model-a":{"limitId":"model-a","rateLimitReachedType":"rate_limit_reached"}}}`, true},
+		{"default bucket", "model-a", `{"rateLimitsByLimitId":{"codex":{"rateLimitReachedType":"rate_limit_reached"}}}`, true},
+		{"unrelated denial", "model-a", `{"rateLimitsByLimitId":{"model-b":{"ordinaryUsageAllowed":false}}}`, false},
+		{"no prefix guessing", "model-a-mini", `{"rateLimitsByLimitId":{"model-a":{"rateLimitReachedType":"rate_limit_reached"}}}`, false},
+		{"mismatched inner id", "model-a", `{"rateLimitsByLimitId":{"model-a":{"limitId":"model-b","rateLimitReachedType":"rate_limit_reached"}}}`, false},
+		{"unrelated primary snapshot", "model-a", `{"rateLimits":{"limitId":"model-b","rateLimitReachedType":"rate_limit_reached"}}`, false},
+		{"global denial", "model-a", `{"ordinaryUsageAllowed":false,"rateLimitsByLimitId":{"model-b":{"rateLimitReachedType":"rate_limit_reached"}}}`, true},
+		{"mixed buckets", "model-a", `{"rateLimitsByLimitId":{"model-a":{"rateLimitReachedType":null},"model-b":{"rateLimitReachedType":"rate_limit_reached"}}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hit := CodexLimit([]byte(tc.raw), nil, now, tc.model)
+			if (hit != nil) != tc.stop {
+				t.Fatalf("stop=%t, want %t", hit != nil, tc.stop)
+			}
+			if hit != nil && (len(hit.Readings) != 0 || hit.ResetsAt != nil || hit.Window != "") {
+				t.Fatal("snapshot-level stop invented window bounds")
+			}
+		})
+	}
+}

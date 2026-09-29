@@ -173,7 +173,7 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
           </p>
         </template>
         <p v-else class="facts muted">No active allowance window</p>
-        <ClaudeStatuslineToggle v-if="account.harness === 'claude' && account.statusline_opt_in" :account="account" @changed="emit('allowance-created')" />
+        <ClaudeStatuslineToggle v-if="mayManage && account.harness === 'claude' && account.statusline_opt_in" :account="account" @changed="emit('allowance-created')" />
         <AllowanceWindowForm
           v-if="mayManage && editingId === account.id"
           :account="account" :now="now" :busy="flight !== null" :server-message="serverMessage" :uncertain="uncertain"

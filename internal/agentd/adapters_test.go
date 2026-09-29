@@ -121,6 +121,30 @@ func TestFakeVendorProcess(t *testing.T) {
 				return
 			}
 		case "turn/steer":
+			if strings.HasPrefix(vendor, "codex_midrun_") {
+				thread, turn := "thread-1", "turn-1"
+				if vendor == "codex_midrun_foreign_thread" {
+					thread = "other-thread"
+				}
+				if vendor == "codex_midrun_foreign_turn" {
+					turn = "other-turn"
+				}
+				// Codex 0.159 sends a mid-run error notification, not a
+				// turn/start RPC rejection. The error-info variant is a string.
+				errInfo := map[string]any{"message": "PRIVATE_LIMIT_FIXTURE", "codexErrorInfo": "usageLimitExceeded", "additionalDetails": nil}
+				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "error", "params": map[string]any{
+					"threadId": thread, "turnId": turn, "willRetry": false, "error": errInfo,
+				}})
+				terminal := map[string]any{"id": "turn-1", "status": "completed", "items": []any{}, "error": nil}
+				if vendor == "codex_midrun_limit" {
+					terminal["status"], terminal["error"] = "failed", errInfo
+				}
+				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "turn/completed", "params": map[string]any{
+					"threadId": "thread-1", "turn": terminal,
+				}})
+				result = map[string]string{"turnId": "turn-1"}
+				break
+			}
 			for _, total := range []int{20, 20, 19} {
 				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "thread/tokenUsage/updated", "params": map[string]any{
 					"threadId": "thread-1", "tokenUsage": map[string]any{"total": map[string]int{"inputTokens": total, "outputTokens": 4}}}})
