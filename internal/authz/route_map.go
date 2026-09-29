@@ -17,6 +17,13 @@ const PublicRoute = "public"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/me/security/session-watching":                                             "profile.read",
+	"PUT /api/me/security/session-watching":                                             "profile.write",
+	"POST /api/agent-pairing/attach":                                                    "harness.worker",
+	"POST /api/agent-pairing/attach/lookup":                                             "account.manage",
+	"POST /api/agent-pairing/attach/{requestId}/approve":                                "account.manage",
+	"POST /api/agent-pairing/attach/{requestId}/revoke":                                 "account.manage",
+	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/watch":                  "harness.watch",
 	"GET /api/rules/layers":                                                             "rules.read",
 	"POST /api/rules/layers":                                                            "rules.write",
 	"GET /api/rules/sets":                                                               "rules.read",

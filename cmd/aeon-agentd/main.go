@@ -48,7 +48,7 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|serve|control")
+		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|attach|serve|control")
 	}
 	switch args[0] {
 	case "--version", "version":
@@ -56,12 +56,14 @@ func run(args []string, out io.Writer) error {
 		return err
 	case "setup", "status", "disconnect", "add-harness":
 		return setupCommand(args[0], args[1:], out)
+	case "attach":
+		return attachCommand(args[1:], out)
 	case "serve":
 		return serve(args[1:])
 	case "control":
 		return control(args[1:], out)
 	default:
-		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|serve|control")
+		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|attach|serve|control")
 	}
 }
 

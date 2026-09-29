@@ -146,6 +146,7 @@ const RESOURCE: Record<string, string> = {
 const ACTION: Record<string, string> = { read: 'See', write: 'Edit', manage: 'Manage', delete: 'Delete', issue: 'Issue', approve: 'Approve', decide: 'Decide on', log: 'Log', run: 'Run', create: 'Create' }
 // "members.manage" -> "Manage members"; "nodes.read" -> "See work".
 export function permissionLabel(key: string): string {
+  if (key === 'harness.watch') return 'View live conversations'
   const [resource, ...rest] = key.split('.')
   const action = rest.join('.')
   const noun = RESOURCE[resource!] ?? resource!.replace(/_/g, ' ')

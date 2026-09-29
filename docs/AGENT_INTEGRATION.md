@@ -147,3 +147,128 @@ German is neutral without direct address. Hidden tickets still require benefits.
 The proposal in `proposals/ticket-benefit-writing.json` is compatible with AR1's
 rule draft shape and is not a published company rule. See `RELEASE.md` for the
 exact membership source, snapshot capture and offline release-history behavior.
+
+
+## Read-only attached watches (AEON-258)
+
+The paired daemon uses only `POST /api/agent-pairing/attach` for registration,
+requests, activation, polls and detachment. At startup it registers a fresh random
+poll key using the runtime bearer and computer lifecycle proof. The poll key lives
+only in daemon memory; the server retains only its hash in memory. It never enters
+pairing.json, a setup store, a database, local replies or logs. Watch operations
+require that key plus the snapshot digest; pairing.json alone cannot authorize
+them. Registration ends every earlier pending, approved or active watch for that
+computer: a daemon restart requires new local consent and owner approval. Server
+restart loses poll authority too; restart the daemon to register again. Registration
+is serialized with exchanges and cannot transfer an earlier approval to a new key.
+The pairing fence permits exactly this additional route.
+The nine-digit code identifies a ten-minute request;
+owner lookup accepts at most ten attempts per tenant in ten minutes. Codes and
+proofs never go in URLs.
+
+The person's **Settings → Personal → Security → Session watching** setting is
+stored server-side in `person_watch_security`, scoped to that person and tenant.
+`GET/PUT /api/me/security/session-watching` accepts only the signed-in person;
+writes require the instance’s origin. The server, never a device request, selects
+one of two modes at approval:
+
+- **Approve in Aeon** (`aeon`, default): same-origin, digest-bound person approval
+  is the consent gate. The terminal WATCH prompt is a best-effort extra factor;
+  a same-user process can emulate its PTY. The approval warns who requested it
+  and shows process, cwd and transcript before the Allow action.
+- **Also confirm on the Mac** (`local_auth`): after browser approval the daemon
+  must also complete LocalAuthentication in its own process. No helper, CLI
+  flag, local socket field or environment value can assert this result. Until
+  confirmation succeeds there is no session, lease or shared text. Cancel,
+  timeout, unavailable authentication, loss of the peer, or revocation fails
+  closed. Linux and older daemons cannot approve this mode.
+
+The separate `consent_digest` binds the request ID, snapshot digest and mode,
+using the `aeon.attach.consent.v1` domain. The browser echoes it on approval;
+a stale review is rejected after a setting change. The daemon validates it,
+then echoes it with its authenticated confirmation for strict activation.
+Only the memory-key-authenticated exchange can carry that assertion; it is a
+trusted-daemon assertion, not remote OS attestation. A replacement daemon that
+registers using stolen pairing credentials still needs fresh browser approval,
+but the server cannot verify its executable or LocalAuthentication result.
+Preventing that same-user replacement requires the separately tracked protected
+device identity/installer boundary; this mode does not claim that protection.
+Pending requests read the current setting; approved and active requests retain the
+pinned mode. Changing settings neither upgrades nor downgrades existing watches.
+Mode A retains the original snapshot digest and accepts legacy A approvals.
+
+Native Mac confirmation needs `CGO_ENABLED=1`, Apple's Foundation,
+LocalAuthentication and Security frameworks, and an executable named
+`aeon-agentd` with a valid Developer ID signature, hardened runtime and no
+get-task-allow, library-validation or DYLD-environment exceptions. It validates
+the running process through `SecCodeCopySelf`/`SecCodeCheckValidity`, checks for
+a graphical login, and evaluates a fresh `LAContext` with
+[`deviceOwnerAuthentication`](https://developer.apple.com/documentation/localauthentication/lapolicy/deviceownerauthentication).
+The OS supplies Touch ID/device-password authentication (and other OS-supported
+owner factors); the reason names the harness session PID and host. Contexts
+are never reused. The prompt is asynchronous, remains revocable during polling,
+and times out after 90 seconds. These checks do not replace installer provenance
+or same-user OS isolation. **Current CGO-disabled Nix packages, unsigned/ad-hoc
+builds, and headless contexts fail closed with a specific local error**; no
+signing identity or release pipeline is changed by this feature. A real signed
+interactive-device acceptance check belongs to release qualification.
+
+The original pairing owner reviews the immutable host, harness, kernel process
+identity, physical cwd, transcript inode, project and ticket snapshot at the
+paired origin. Approval binds its digest; activation and each poll recheck the
+snapshot, owner delegation, pairing and project/ticket binding. The paired
+workspace is the explicit tenant/computer cwd allowlist. Outside paths fail.
+A one-minute lease cannot be renewed after expiry; a fresh attach needs fresh
+approval. Detached or unreachable means the watch ended, not that the process
+exited. Attached sessions are unmanaged and receive no inbox or controls.
+
+`harness.watch` is person-only, project-grantable and excluded from every
+built-in role. A workspace owner can explicitly add it to a custom role and
+assign that role; this does not itself give the owner conversation access.
+The owner consents to the audience of people explicitly granted this permission
+in the named project. No earlier turns are uploaded. The SSE watch endpoint
+has no replay and keeps only a bounded in-flight delivery per connected viewer;
+slow readers disconnect. Every delivery and idle second rechecks the permission
+and lease. Conversation bytes never enter events, heartbeat metadata or a
+server-side journal. The relay is process-local: multi-server deployments need
+sticky routing for registration, watch operations and live delivery (there is
+deliberately no durable key store or broker).
+
+The mirror is agent-written, unverified text. Redaction cannot identify every
+form of confidential prose: owners must refuse mixed-trust-context sessions.
+Same-user hostile code is outside the current isolation boundary; file modes,
+local peer checks and owner prompts do not supply OS isolation. Installer
+signature verification and OS isolation remain separate rollout work under
+AEON-257; this implementation does not claim either.
+
+Run from a separate owner terminal, with the paired daemon running:
+
+```sh
+aeon-agentd attach --setup-root /absolute/setup-root --pid 1234 --harness codex \
+  --project-id PROJECT_UUID --ticket-id TICKET_UUID --transcript /physical/session.jsonl
+```
+
+The local helper reads consent from its controlling terminal, never stdin or a
+flag. It must belong to an existing live terminal session, cannot itself be a
+session leader, and neither its ancestry nor its session leader's ancestry may
+include the target harness. These checks repeat at confirmation and on every
+poll, including immediately before upload. Type `WATCH`, then open the paired
+instance's Agents page and choose
+**Attach session**. Review the code and snapshot, then approve. Keep the terminal
+open; Ctrl-C detaches without signalling the harness. Missing helper polls,
+identity changes, replaced/truncated transcripts, network errors or revocation
+close the watch; reconnection requires a new approval. The kernel executable
+must match the enrolled harness path. Arbitrary interpreter wrappers are not
+accepted. macOS and Linux have kernel identity adapters; other platforms fail
+closed. The helper cannot supply a different server origin or device proof.
+
+The tailer opens each path component without following links and pins an
+owner-owned regular inode with one hard link. It starts at activation-time EOF,
+bounds reads and records, and never rewinds. Plain lines and recognized
+Claude/Codex JSONL text records are supported; unknown structured/tool records
+are dropped. JSON escapes are decoded before redacting secret patterns,
+camelCase secret names, lowercase secret/token assignments, URL userinfo,
+environment assignments and private-key blocks. Lines containing Unicode
+nonspacing marks are dropped. Control/format characters are
+rejected. The browser displays text only and clears it on disconnect, permission
+change, hidden tab or navigation; it never reconnects automatically.
