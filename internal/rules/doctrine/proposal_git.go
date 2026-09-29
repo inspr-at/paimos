@@ -113,6 +113,9 @@ func (g *GitHub) preparePR(ctx context.Context, p *Proposal, files map[string]st
 		} `json:"object"`
 	}
 	branch := proposalBranch(p.ID)
+	if err := g.authorizeWrite(ctx); err != nil {
+		return err
+	}
 	err := g.request(ctx, "POST", base+"/git/refs", map[string]string{"ref": "refs/heads/" + branch, "sha": head.SHA}, &ref)
 	if err != nil {
 		var ae *apiError
@@ -137,6 +140,9 @@ func (g *GitHub) preparePR(ctx context.Context, p *Proposal, files map[string]st
 	if len(prs) == 1 {
 		pr = prs[0]
 	} else {
+		if err := g.authorizeWrite(ctx); err != nil {
+			return err
+		}
 		body := "## Proposed change\n\n" + explanation + "\n\nReview the rule and TL;DR diff. Merge requires a person in Aeon and the repository gates."
 		if err := g.request(ctx, "POST", base+"/pulls", map[string]any{"title": "Propose doctrine rule change", "head": branch, "base": "main", "body": body}, &pr); err != nil {
 			return err
@@ -228,7 +234,17 @@ func reviewFamily(s string) bool {
 	return s == "openai" || s == "anthropic" || s == "xai" || s == "google"
 }
 
+func (g *GitHub) authorizeWrite(ctx context.Context) error {
+	if g == nil || g.beforeWrite == nil {
+		return fail(503, "app_unavailable", "Doctrine writes require a fresh authorization check.")
+	}
+	return g.beforeWrite(ctx)
+}
+
 func (g *GitHub) merge(ctx context.Context, p *Proposal) error {
+	if err := g.authorizeWrite(ctx); err != nil {
+		return err
+	}
 	var out struct {
 		Merged bool   `json:"merged"`
 		SHA    string `json:"sha"`
@@ -244,6 +260,9 @@ func (g *GitHub) merge(ctx context.Context, p *Proposal) error {
 	return nil
 }
 func (g *GitHub) releaseRequest(ctx context.Context, p Proposal) error {
+	if err := g.authorizeWrite(ctx); err != nil {
+		return err
+	}
 	return g.request(ctx, "POST", repoPath(p.Repository)+"/dispatches", map[string]any{"event_type": "doctrine-release", "client_payload": map[string]string{"proposal_id": p.ID, "merge_commit": p.MergeCommit, "requested_scheme": "CalVer3"}}, nil)
 }
 

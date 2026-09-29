@@ -184,6 +184,9 @@ func editRule(s Source, files []File, in ProposalInput) (map[string]string, erro
 }
 
 // Normalize only for comparison; the proposed git bytes remain unchanged.
+// Invisible characters are removed and compatibility forms composed. Cyrillic,
+// Greek, dash and space lookalikes then fold to a Latin skeleton so a
+// homoglyph cannot hide an identity pattern or a private quotation.
 func normalizeProposalText(text string) string {
 	text = norm.NFKC.String(text)
 	text = strings.Map(func(r rune) rune {
@@ -192,51 +195,35 @@ func normalizeProposalText(text string) string {
 		if unicode.Is(unicode.Cf, r) || r == '\u034f' || r >= '\ufe00' && r <= '\ufe0f' || r >= '\U000e0100' && r <= '\U000e01ef' {
 			return -1
 		}
+		if unicode.Is(unicode.Pd, r) || r == '\u2212' {
+			return '-'
+		}
+		if unicode.Is(unicode.Zs, r) {
+			return ' '
+		}
 		return r
 	}, text)
-	return strings.Join(strings.Fields(cases.Fold().String(norm.NFKC.String(text))), " ")
+	folded := cases.Fold().String(norm.NFKC.String(text))
+	folded = strings.Map(func(r rune) rune {
+		if mapped, ok := confusableFold[r]; ok {
+			return mapped
+		}
+		return r
+	}, folded)
+	return strings.Join(strings.Fields(folded), " ")
 }
 
 func proposalWords(text string) []string {
 	return strings.FieldsFunc(normalizeProposalText(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
 }
 
-// Reject whole private entries (including short TLDRs), any eight-word run,
-// or >=60% of a private entry's unique four-word shingles with >=8 words
-// covered. The latter catches lightly edited quotes without requiring an
-// exact whole-rule match. Error messages never identify the private match.
-func guardPrivateQuotes(privateTexts []string, texts ...string) error {
-	for _, proposed := range texts {
-		words := proposalWords(proposed)
-		joined := " " + strings.Join(words, " ") + " "
-		shingles := map[string]bool{}
-		for i := 0; i+4 <= len(words); i++ {
-			shingles[strings.Join(words[i:i+4], " ")] = true
-		}
-		for _, private := range privateTexts {
-			pw := proposalWords(private)
-			if len(pw) == 0 {
-				continue
-			}
-			blocked := strings.Contains(joined, " "+strings.Join(pw, " ")+" ")
-			for i := 0; !blocked && i+8 <= len(pw); i++ {
-				blocked = strings.Contains(joined, " "+strings.Join(pw[i:i+8], " ")+" ")
-			}
-			unique := map[string]bool{}
-			matches := 0
-			for i := 0; i+4 <= len(pw); i++ {
-				key := strings.Join(pw[i:i+4], " ")
-				if !unique[key] {
-					unique[key] = true
-					if shingles[key] {
-						matches++
-					}
-				}
-			}
-			if blocked || matches >= 5 && matches*100 >= len(unique)*60 {
-				return fail(422, "private_doctrine", "This public proposal quotes private doctrine. Generalise the changed text or propose it in the private repository. Nothing was published.")
-			}
-		}
-	}
-	return nil
+// confusableFold maps lowercase Cyrillic and Greek lookalikes to Latin.
+// Case folding has already run; keys are the folded forms.
+var confusableFold = map[rune]rune{
+	'\u0430': 'a', '\u0435': 'e', '\u0451': 'e', '\u043e': 'o', '\u0440': 'p', '\u0441': 'c', '\u0443': 'y', '\u0445': 'x',
+	'\u0456': 'i', '\u0457': 'i', '\u0458': 'j', '\u0455': 's', '\u04bb': 'h', '\u0501': 'd', '\u051b': 'q', '\u051d': 'w',
+	'\u0461': 'w', '\u0475': 'v', '\u04af': 'y', '\u04b1': 'u', '\u04cf': 'l', '\u04c0': 'l', '\u043a': 'k', '\u043c': 'm',
+	'\u0442': 't', '\u0433': 'r', '\u044d': 'e', '\u0454': 'e', '\u0491': 'g', '\u0432': 'b', '\u0431': 'b', '\u04b3': 'h',
+	'\u03b1': 'a', '\u03b5': 'e', '\u03b9': 'i', '\u03ba': 'k', '\u03bf': 'o', '\u03c1': 'p', '\u03c4': 't', '\u03c5': 'u',
+	'\u03bd': 'v', '\u03c7': 'x', '\u03b3': 'y', '\u03b7': 'n', '\u03c9': 'w', '\u03b2': 'b',
 }

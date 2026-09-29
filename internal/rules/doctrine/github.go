@@ -52,6 +52,9 @@ type GitHub struct {
 	Client   *http.Client
 	botName  string
 	botEmail string
+	// beforeWrite re-checks authority in a short transaction immediately
+	// before a ref, pull, merge or dispatch. Nil refuses the write.
+	beforeWrite func(context.Context) error
 }
 
 // ErrGit is a failed read from the repository host. Its message is safe to

@@ -513,7 +513,7 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 	}); err != nil {
 		return
 	}
-	files, skipped, fetchErr := m.fetch(ctx, p.TenantID, s)
+	files, skipped, corpus, fetchErr := m.fetch(ctx, p.TenantID, s)
 	err := m.tx(ctx, p, "settings.manage", func(tx pgx.Tx) error {
 		current, err := getSource(ctx, tx, id, true)
 		if err != nil {
@@ -528,6 +528,9 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 		if err := storeIndex(ctx, tx, p.TenantID, s, files, skipped); err != nil {
 			return err
 		}
+		if err := storeGuardCorpus(ctx, tx, p.TenantID, s, corpus); err != nil {
+			return err
+		}
 		_, err = events.Append(ctx, tx, p, events.Change{Type: "doctrine.indexed", After: map[string]any{
 			"source_id": s.ID, "repository": s.Repository, "commit": s.Commit, "files": len(files), "skipped": len(skipped),
 		}})
@@ -538,14 +541,27 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 	}
 }
 
-func (m *Module) fetch(ctx context.Context, tenantID string, s Source) ([]File, []Skip, error) {
+func (m *Module) fetch(ctx context.Context, tenantID string, s Source) ([]File, []Skip, []byte, error) {
 	reader, err := m.reader(tenantID, s.Repository, s.CredentialRef)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
-	return Fetch(ctx, reader, s.Repository, s.Commit, s.Paths)
+	files, skipped, err := Fetch(ctx, reader, s.Repository, s.Commit, s.Paths)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	// The visible index follows the configured paths. The quotation guard does
+	// not: a public proposal is checked against every file at the pin.
+	if s.Repository != privateRepository || s.Visibility != "private" {
+		return files, skipped, nil, nil
+	}
+	corpus, err := readPrivateCorpus(ctx, reader, s.Repository, s.Commit)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return files, skipped, corpus, nil
 }
 
 // safeMessage is what a failed fetch records: the repository or credential

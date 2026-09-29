@@ -3,6 +3,7 @@
 package doctrine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,13 +22,13 @@ import (
 )
 
 const guardRule = "The copper observatory keeps seven violet notebooks beneath the eastern stairway for seasonal planning."
-const guardTLDR = "Copper notebooks stay hidden."
+const guardTLDR = "Copper notebooks stay hidden underground."
 
 func seedPrivateGuard(t *testing.T, f doctrineFixture, m *Module, actor tenant.Principal) SourceView {
 	t.Helper()
 	f.fake.commit(privateRepository, fixtureCommit, map[string]string{
 		"docs/AGENTS-KERNEL-PRIVATE.md":        "# Private\n\n## Planning\n<!-- aeon-rule: copper -->\n- " + guardRule + "\n  Why: The silver ledger contains nine emerald diagrams beside the northern window.\n",
-		"docs/AGENTS-KERNEL-PRIVATE.tldr.yaml": "rules:\n  copper:\n    en: " + guardTLDR + "\n    de: Kupferne Notizen bleiben verborgen.\n  unmatched:\n    en: Reserved observatory protocol.\n",
+		"docs/AGENTS-KERNEL-PRIVATE.tldr.yaml": "rules:\n  copper:\n    en: " + guardTLDR + "\n    de: Kupferne Notizen bleiben heute verborgen.\n  unmatched:\n    en: Reserved observatory protocol stays sealed.\n",
 	}, "main")
 	allowCredential(t, m.credentials.Dir, "guard-read", actor.TenantID, privateRepository)
 	if err := os.WriteFile(filepath.Join(m.credentials.Dir, "guard-read"), []byte("fixtureGuardRead319"), 0600); err != nil {
@@ -60,29 +61,38 @@ func fullwidth(s string) string {
 }
 
 func TestPrivateQuoteNormalization(t *testing.T) {
-	if guardPrivateQuotes([]string{"Café notebooks stay hidden."}, "Cafe\u200b\u0301 notebooks stay hidden.") == nil {
+	if guardPrivateQuotes(quoteCorpus("Café notebooks stay hidden today."), nil, "Cafe\u200b\u0301 notebooks stay hidden today.") == nil {
 		t.Fatal("format insertion defeated canonical composition")
 	}
-	corpus := []string{guardRule, guardTLDR}
+	corpus := quoteCorpus(guardRule, guardTLDR)
 	for _, quote := range []string{
 		guardRule, guardTLDR, "Notice: " + strings.ToUpper(guardRule),
 		strings.ReplaceAll(guardRule, "o", "o\u200b"), fullwidth(guardRule),
 		"Please keep " + strings.Join(strings.Fields(guardRule)[3:11], " ") + " safe.",
 		strings.Replace(guardRule, "beneath", "under", 1),
 	} {
-		if err := guardPrivateQuotes(corpus, quote); err == nil {
+		if err := guardPrivateQuotes(corpus, nil, quote); err == nil {
 			t.Errorf("private quotation accepted: %q", quote)
 		}
 	}
 	for _, public := range []string{"Run tests before merging.", "The observatory publishes public release notes.", "Keep credentials out of transcripts."} {
-		if err := guardPrivateQuotes(corpus, public); err != nil {
+		if err := guardPrivateQuotes(corpus, nil, public); err != nil {
 			t.Fatalf("public edit rejected: %v", err)
 		}
 	}
-	for _, text := range []string{"hsb\u200b1", "ｈｓｂ１", "barta\u200b.cm", "h\u034fsb1", "hsb\ufe0f1"} {
+	for _, text := range []string{"hsb\u200b1", "ｈｓｂ１", "barta\u200b.cm", "h\u034fsb1", "hsb\ufe0f1", "\u04bbsb1", "barta.\u0441m", "pm.b\u0430rta", "inspr\u2011doctrine\u2011private", "inspr\u2013doctrine\u2013private", "inspr\u2212doctrine\u2212private"} {
 		if guardPublic(publicRepository, text) == nil {
 			t.Errorf("normalized pattern missed: %q", text)
 		}
+	}
+	// A longer private sentence keeps the corpus non-empty. Entries under five
+	// words are not stored, so they cannot refuse an unrelated public sentence.
+	short := quoteCorpus(guardRule, "Stay hidden.", "Hidden copper notebooks stay.")
+	if guardPrivateQuotes(short, nil, "Please stay hidden today.") != nil {
+		t.Fatal("two-word private entry blocked a public sentence")
+	}
+	if guardPrivateQuotes(short, nil, "Hidden copper notebooks stay.") != nil {
+		t.Fatal("four-word private entry blocked a public sentence")
 	}
 }
 
@@ -114,11 +124,11 @@ func TestPublicProposalRequiresPrivateCorpusAndBlocksQuotes(t *testing.T) {
 		case "en":
 			bad.TLDR.EN = guardTLDR
 		case "de":
-			bad.TLDR.DE = "Kupferne Notizen bleiben verborgen."
+			bad.TLDR.DE = "Kupferne Notizen bleiben heute verborgen."
 		case "explanation":
 			bad.Explanation = strings.ReplaceAll(guardRule, "o", "o\u200b")
 		case "unmatched":
-			bad.Explanation = "Reserved observatory protocol."
+			bad.Explanation = "Reserved observatory protocol stays sealed."
 		case "continuation":
 			bad.Explanation = "The silver ledger contains nine emerald diagrams beside the northern window."
 		}
@@ -320,8 +330,173 @@ func TestTokenRevokedOnScopeErrorAndCancellation(t *testing.T) {
 	}
 }
 
+func TestPrivateGuardFullTreeAndWriteObservation(t *testing.T) {
+	const (
+		profileRule = "The profile ledger forbids printing fleet hostnames in a public proposal body."
+		proseLine   = "Operators keep the silver spare key inside the cedar drawer behind the north stair."
+		commandLine = "Never paste an age identity into a chat transcript or a public pull request."
+		reordered   = "Seasonal planning uses the silver ledger beside the northern window each week. The copper observatory keeps seven violet notebooks beneath the eastern stairway."
+	)
+	paragraph := "The copper observatory keeps seven violet notebooks beneath the eastern stairway. Seasonal planning uses the silver ledger beside the northern window each week."
+	f, forge, m, owner, in := publicProposalFixture(t)
+	f.fake.failBlob = "docs/AGENTS-PROFILE-MARKUS.md"
+	f.fake.commit(privateRepository, fixtureCommit, map[string]string{
+		"docs/AGENTS-KERNEL-PRIVATE.md":        "# Private\n\n## Copy\n\n" + in.Source + "\n\n" + proseLine + "\n\n" + paragraph + "\n",
+		"docs/AGENTS-PROFILE-MARKUS.md":        "# Profile\n\n- " + profileRule + "\n",
+		"commands/secrets.md":                  "# Secrets\n\n- " + commandLine + "\n",
+		"docs/AGENTS-KERNEL-PRIVATE.tldr.yaml": "rules:\n  copper:\n    en: " + guardTLDR + "\n",
+		"assets/blank.dat":                     string([]byte{0, 1, 2, 3}),
+	}, "main")
+	allowCredential(t, m.credentials.Dir, "guard-read", owner.TenantID, privateRepository)
+	if err := os.WriteFile(filepath.Join(m.credentials.Dir, "guard-read"), []byte("fixtureGuardRead319"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	narrow := SourceInput{Repository: privateRepository, Visibility: "private", Ref: "main", CredentialRef: "guard-read", Paths: []string{"docs/AGENTS-KERNEL-PRIVATE.md"}}
+	created := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", narrow), privateRepository)
+	if created.Error == "" || created.State == "ready" {
+		t.Fatal("unreadable private tree indexed as ready")
+	}
+	before := forge.calls
+	if got := f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 422); !strings.Contains(string(got), "private_index_unavailable") || forge.calls != before {
+		t.Fatal("unreadable private tree reached GitHub")
+	}
+	f.fake.failBlob = ""
+	ready := find(f.layer(owner, "POST", "/api/rules/doctrine/sources/"+created.ID+"/index", nil), privateRepository)
+	if ready.Error != "" || ready.State != "ready" {
+		t.Fatalf("reindex %+v", ready)
+	}
+	var published []string
+	for _, file := range ready.Files {
+		published = append(published, file.Path)
+	}
+	if strings.Join(published, ",") != "docs/AGENTS-KERNEL-PRIVATE.md" {
+		t.Fatalf("narrow paths published %v", published)
+	}
+	body := f.call(owner, "GET", "/api/rules/doctrine", nil, 200)
+	for _, secret := range []string{profileRule, commandLine, proseLine} {
+		if bytes.Contains(body, []byte(secret)) {
+			t.Fatal("private text reached the doctrine API")
+		}
+	}
+	var corpus []byte
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT corpus FROM doctrine_private_guard WHERE source_id=$1`, created.ID).Scan(&corpus); err != nil || bytes.Contains(corpus, []byte("profile ledger")) || bytes.Contains(corpus, []byte(profileRule)) {
+		t.Fatal("guard stored private plaintext")
+	}
+	if f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 200) == nil {
+		t.Fatal("unchanged public rule was refused")
+	}
+	attacks := []string{guardRule, guardTLDR, strings.ReplaceAll(guardRule, "o", "o\u200b"), fullwidth(guardRule), cyrillicize(guardRule), strings.ReplaceAll(guardRule, " ", "\n"), reordered, profileRule, proseLine, commandLine}
+	for _, attack := range attacks {
+		bad := in
+		bad.Explanation = attack
+		bad.RequestID = "31900000-0000-4000-8000-0000000000a1"
+		before = forge.writes
+		got := f.call(owner, "POST", "/api/rules/doctrine/proposals", bad, 422)
+		if !strings.Contains(string(got), "private_doctrine") || bytes.Contains(got, []byte(attack)) || forge.writes != before {
+			t.Fatal("private attack reached GitHub or was reflected")
+		}
+	}
+}
+
+func cyrillicize(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case 'a':
+			return '\u0430'
+		case 'e':
+			return '\u0435'
+		case 'o':
+			return '\u043e'
+		case 'p':
+			return '\u0440'
+		case 'c':
+			return '\u0441'
+		case 'y':
+			return '\u0443'
+		case 'x':
+			return '\u0445'
+		case 'i':
+			return '\u0456'
+		case 's':
+			return '\u0455'
+		case 'h':
+			return '\u04bb'
+		default:
+			return r
+		}
+	}, s)
+}
+
+func TestWriteReauthorizedBeforeGitHubMutation(t *testing.T) {
+	revoke := func(t *testing.T, f doctrineFixture, owner tenant.Principal) {
+		t.Helper()
+		if _, err := f.d.Admin.Exec(t.Context(), `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, owner.TenantID, owner.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("before ref", func(t *testing.T) {
+		f, forge, m, owner, in := publicProposalFixture(t)
+		seedPrivateGuard(t, f, m, owner)
+		forge.beforeRequest = func(r *http.Request) {
+			if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/branches/main") {
+				revoke(t, f, owner)
+			}
+		}
+		f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 403)
+		if len(forge.refs) != 0 || len(forge.pulls) != 0 {
+			t.Fatal("revoked authority created a ref or PR")
+		}
+	})
+	t.Run("after pull", func(t *testing.T) {
+		f, forge, m, owner, in := publicProposalFixture(t)
+		seedPrivateGuard(t, f, m, owner)
+		forge.beforeRequest = func(r *http.Request) {
+			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pulls") {
+				revoke(t, f, owner)
+			}
+		}
+		f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 403)
+		var pr, event string
+		if err := f.d.Admin.QueryRow(t.Context(), `SELECT COALESCE(data->>'pr_number',''), COALESCE((SELECT type FROM events WHERE tenant_id=$1 AND type='doctrine.proposal_observed' LIMIT 1),'') FROM doctrine_proposals WHERE id=$2`, owner.TenantID, in.RequestID).Scan(&pr, &event); err != nil || pr == "" || pr == "0" || event != "doctrine.proposal_observed" || len(forge.pulls) != 1 {
+			t.Fatalf("lost pull pr=%s event=%s pulls=%d err=%v", pr, event, len(forge.pulls), err)
+		}
+	})
+	t.Run("after merge", func(t *testing.T) {
+		f, forge, m, owner, in := publicProposalFixture(t)
+		seedPrivateGuard(t, f, m, owner)
+		f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 200)
+		forge.green()
+		forge.beforeRequest = func(r *http.Request) {
+			if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/merge") {
+				revoke(t, f, owner)
+			}
+		}
+		f.call(owner, "POST", "/api/rules/doctrine/proposals/"+in.RequestID+"/approve", map[string]string{"head_sha": nextCommit}, 403)
+		var merge, state string
+		if err := f.d.Admin.QueryRow(t.Context(), `SELECT COALESCE(data->>'merge_commit',''), COALESCE(data->>'state','') FROM doctrine_proposals WHERE id=$1`, in.RequestID).Scan(&merge, &state); err != nil || merge == "" || state != "merged" || forge.mergeCalls != 1 || forge.dispatches != 0 {
+			t.Fatalf("lost merge %s %s calls=%d err=%v", merge, state, forge.mergeCalls, err)
+		}
+	})
+	t.Run("after dispatch", func(t *testing.T) {
+		f, forge, m, owner, in := publicProposalFixture(t)
+		seedPrivateGuard(t, f, m, owner)
+		f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 200)
+		forge.green()
+		forge.beforeRequest = func(r *http.Request) {
+			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/dispatches") {
+				revoke(t, f, owner)
+			}
+		}
+		f.call(owner, "POST", "/api/rules/doctrine/proposals/"+in.RequestID+"/approve", map[string]string{"head_sha": nextCommit}, 403)
+		var requested string
+		if err := f.d.Admin.QueryRow(t.Context(), `SELECT COALESCE(data->>'release_requested','') FROM doctrine_proposals WHERE id=$1`, in.RequestID).Scan(&requested); err != nil || requested != "true" || forge.dispatches != 1 {
+			t.Fatalf("lost dispatch %s calls=%d err=%v", requested, forge.dispatches, err)
+		}
+	})
+}
+
 func TestPrivateQuoteFailureIsGeneric(t *testing.T) {
-	err := guardPrivateQuotes([]string{guardRule}, guardRule)
+	err := guardPrivateQuotes(quoteCorpus(guardRule), nil, guardRule)
 	var f *failure
 	if !errors.As(err, &f) || f.Code != "private_doctrine" || strings.Contains(err.Error(), guardRule) {
 		t.Fatal("private match reflected")

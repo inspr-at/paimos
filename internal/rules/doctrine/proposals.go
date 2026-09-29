@@ -172,7 +172,7 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	var source Source
 	var files []File
 	var existing *Proposal
-	var privateTexts []string
+	var guard *guardCorpus
 	err := m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
 		p, err := getProposal(ctx, tx, in.RequestID)
 		if err == nil {
@@ -204,7 +204,7 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 		}
 		files, err = cachedFiles(ctx, tx, source)
 		if err == nil && source.Repository == publicRepository {
-			privateTexts, err = m.privateTexts(ctx, tx, actor)
+			guard, err = m.privateGuard(ctx, tx, actor)
 		}
 		return err
 	})
@@ -218,7 +218,7 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := guardPrivateQuotes(privateTexts, in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation); err != nil {
+	if err := guardPrivateQuotes(guard, files, in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation); err != nil {
 		return nil, err
 	}
 	g, err := m.appClient(ctx, actor.TenantID, source.Repository)
@@ -226,6 +226,7 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 		return nil, err
 	}
 	defer g.revoke()
+	g.beforeWrite = func(ctx context.Context) error { return m.reauthorize(ctx, actor, "rules.write") }
 	main, err := g.main(ctx, source.Repository)
 	if err != nil {
 		return nil, err
@@ -377,7 +378,43 @@ func (m *Module) runProposal(ctx context.Context, actor tenant.Principal, permis
 		p.OperationID, p.OperationUntil = "", time.Time{}
 		return saveProposal(ctx, tx, actor, &p, event)
 	})
+	// A write that GitHub already accepted must stay visible when the final
+	// authorization check fails. Record the PR, merge or dispatch as an
+	// observation instead of dropping it.
+	if err != nil && errors.Is(err, authz.ErrForbidden) && writeLanded(before, p) {
+		if obsErr := m.recordObservation(ctx, actor, &p, observedEvent(before, p)); obsErr != nil {
+			return p, obsErr
+		}
+	}
 	return p, err
+}
+
+func writeLanded(before, p Proposal) bool {
+	return before.PRNumber == 0 && p.PRNumber > 0 || before.MergeCommit == "" && p.MergeCommit != "" || !before.ReleaseRequested && p.ReleaseRequested
+}
+
+func observedEvent(before, p Proposal) string {
+	switch {
+	case before.MergeCommit == "" && p.MergeCommit != "":
+		return "doctrine.merge_observed"
+	case !before.ReleaseRequested && p.ReleaseRequested:
+		return "doctrine.release_observed"
+	default:
+		return "doctrine.proposal_observed"
+	}
+}
+
+func (m *Module) recordObservation(ctx context.Context, actor tenant.Principal, p *Proposal, event string) error {
+	p.OperationID, p.OperationUntil = "", time.Time{}
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return db.InTenant(saveCtx, m.pool, actor.TenantID, func(tx pgx.Tx) error {
+		return saveProposal(saveCtx, tx, actor, p, event)
+	})
+}
+
+func (m *Module) reauthorize(ctx context.Context, actor tenant.Principal, permission string) error {
+	return m.tx(ctx, actor, permission, func(pgx.Tx) error { return nil })
 }
 
 func (m *Module) withProposal(r *http.Request, actor tenant.Principal, permission string, fn func(context.Context, *GitHub, *Proposal) (string, error)) (any, error) {
@@ -391,6 +428,7 @@ func (m *Module) withProposal(r *http.Request, actor tenant.Principal, permissio
 		if err != nil {
 			return "", err
 		}
+		g.beforeWrite = func(ctx context.Context) error { return m.reauthorize(ctx, actor, permission) }
 		defer g.revoke()
 		return fn(ctx, g, p)
 	})
