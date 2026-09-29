@@ -60,7 +60,7 @@ func TestCapacityFileTimestampAndSafety(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	now := time.Now().UTC().Truncate(time.Second)
+	now := instant("2026-09-28T14:00:00Z")
 	at := now.Add(-2 * time.Hour)
 	raw := fmt.Sprintf(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour","utilization":0.1,"resetsAt":%d}}`, now.Add(time.Hour).Unix())
 	path := filepath.Join(dir, "stream.jsonl")
@@ -78,7 +78,10 @@ func TestCapacityFileTimestampAndSafety(t *testing.T) {
 	if err := os.WriteFile(path, []byte(raw+"\n"+`{"type":"assistant"}`+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	got, err = ReadFile(path, "claude", time.Now())
+	if err := os.Chtimes(path, now, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err = ReadFile(path, "claude", now)
 	if err != nil || len(got) != 0 {
 		t.Fatal("old undated quota refreshed", got, err)
 	}
@@ -95,7 +98,7 @@ func TestCapacityFileTimestampAndSafety(t *testing.T) {
 }
 
 func TestSparseClaudeDenialDoesNotNeedUtilization(t *testing.T) {
-	now := time.Now().UTC()
+	now := instant("2026-09-28T14:00:00Z")
 	p := Parser{}
 	raw := fmt.Sprintf(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour","utilization":0.3,"resetsAt":%d}}`, now.Add(time.Hour).Unix())
 	if len(p.Claude([]byte(raw), now)) != 1 {
@@ -111,7 +114,7 @@ func TestSparseClaudeDenialDoesNotNeedUtilization(t *testing.T) {
 }
 
 func TestFullCodexSnapshotDropsMissingBucket(t *testing.T) {
-	now := time.Now().UTC()
+	now := instant("2026-09-28T14:00:00Z")
 	p := Parser{}
 	raw := fmt.Sprintf(`{"rateLimits":{"primary":{"usedPercent":10,"windowDurationMins":300,"resetsAt":%d},"secondary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":%d}}}`, now.Add(time.Hour).Unix(), now.Add(24*time.Hour).Unix())
 	if got := p.CodexSnapshot([]byte(raw), now); len(got) != 2 {
@@ -123,7 +126,7 @@ func TestFullCodexSnapshotDropsMissingBucket(t *testing.T) {
 	}
 }
 func TestClaudeSparseSnapshotPreservesTimesAndExpiresPeers(t *testing.T) {
-	now := time.Now().UTC()
+	now := instant("2026-09-28T14:00:00Z")
 	p := Parser{}
 	weekly := fmt.Sprintf(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"seven_day_opus","utilization":1,"resetsAt":%d}}`, now.Add(time.Minute).Unix())
 	p.Claude([]byte(weekly), now)
