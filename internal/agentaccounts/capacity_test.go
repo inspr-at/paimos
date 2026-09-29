@@ -166,6 +166,14 @@ func TestCapacityStaleManualOverrideAndSchedules(t *testing.T) {
 	now := time.Now().UTC()
 	r := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 1, ResetsAt: now.Add(time.Hour), ReadAt: now.Add(-time.Hour), Source: "harness"}
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{r}}), 204, nil)
+	// The health checks are about the refresh and the manual window, not the
+	// clock: an always-on account schedule keeps them in hours (the default
+	// 08-22 UTC band failed them after 22:00 UTC). The saves below replace it.
+	always := capacity.DefaultSchedule()
+	for i := range always.Week {
+		always.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &always, false}), 204, nil)
 	health := func() HarnessHealth {
 		t.Helper()
 		var out map[string]HarnessHealth
