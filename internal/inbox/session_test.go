@@ -293,3 +293,74 @@ func assertSessionClosureEvents(t *testing.T, w *world, messageIDs []string, exp
 		t.Fatal(err)
 	}
 }
+
+func TestSessionSettlementLeavesUnboundMessagesUntouched(t *testing.T) {
+	w, m, project, srv := messagingWorld(t)
+	session := messageTestSession(t, w, project, w.agent, "Worker")
+	for _, targeted := range []bool{false, true} {
+		for _, failed := range []bool{false, true} {
+			in := compatInput("codex:worker", fmt.Sprintf("settle-%t-%t", targeted, failed))
+			if targeted {
+				in.RecipientSessionID = &session
+			}
+			message := mustCompatSend(t, m, w.sender, project, in)
+			status, body := do(t, srv, w.sender.ID, "GET", "/api/inbox/messages/"+message.ID+"/receipt", "", nil)
+			if status != 200 {
+				t.Fatalf("receipt: %d %s", status, body)
+			}
+			before := mustJSON[Receipt](t, body)
+			err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+				var priorState, afterState string
+				if err := tx.QueryRow(t.Context(), `SELECT state FROM inbox_message_deliveries WHERE message_id=$1`, message.ID).Scan(&priorState); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE inbox_messages SET acked_at=clock_timestamp(),acked_by_principal_id=$2 WHERE id=$1`, message.ID, w.agent.ID); err != nil {
+					return err
+				}
+				var err error
+				if failed {
+					err = FailSessionMessage(t.Context(), tx, w.agent, message.ID, "outcome_unconfirmed")
+				} else {
+					err = ConfirmSessionMessage(t.Context(), tx, w.agent, message.ID)
+				}
+				if err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT state FROM inbox_message_deliveries WHERE message_id=$1`, message.ID).Scan(&afterState); err != nil {
+					return err
+				}
+				want := priorState
+				if targeted {
+					if failed {
+						want = "dead"
+					} else {
+						want = "delivered"
+					}
+				}
+				if afterState != want {
+					return fmt.Errorf("targeted=%t failed=%t delivery state=%s want=%s", targeted, failed, afterState, want)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, body = do(t, srv, w.sender.ID, "GET", "/api/inbox/messages/"+message.ID+"/receipt", "", nil)
+			if status != 200 {
+				t.Fatalf("receipt: %d %s", status, body)
+			}
+			after := mustJSON[Receipt](t, body)
+			want := before.State
+			if targeted {
+				if failed {
+					want = "failed"
+				} else {
+					want = "handed_off"
+				}
+			}
+			if after.State != want || (!targeted && after.FailureReason != before.FailureReason) {
+				t.Fatalf("targeted=%t failed=%t receipt=%+v", targeted, failed, after)
+			}
+		}
+	}
+}

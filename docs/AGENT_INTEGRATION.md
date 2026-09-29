@@ -38,8 +38,10 @@ Send to the exact recipient session. Agentd checks its leased inbox at most ever
 two seconds under healthy local/API conditions, independently of a longer
 configured heartbeat interval. Only inbox draining uses this cadence; run telemetry,
 harness heartbeats and control polling keep the configured heartbeat interval.
-Busy Codex turns receive steering; busy Claude turns steer when supported and
-otherwise queue input for the next turn.
+Busy Codex turns receive steering. Claude inbox input queues for the next turn
+under the managed tool policy or without the declared steer capability; other
+Claude sessions may steer when the SDK also supports interrupt receipts.
+Explicit managed recovery controls retain their separate authorization.
 Idle Claude sessions accept a new streamed input on the same SDK Query, and idle
 Codex workers start another turn on their existing app-server thread. Idle is
 session activity: the owning run remains running until its process actually ends.
@@ -49,7 +51,9 @@ accepts `--codex-idle-timeout` (a positive Go duration); paired runs use ten min
 Completion can then apply a previously requested, evidence-backed done action.
 Claude runs using the managed tool policy have a default cap of **16 completed
 turns**, including the initial turn and inbox wake turns; messages cannot reset
-that cap or any other budget.
+that cap or any other budget. Managed Codex does not use the Claude managed
+tool policy and currently has no 16-turn cap; its clean-turn idle timeout and
+existing wall-clock deadline still apply.
 Stopped, archived, budget-exhausted or ownership-lost workers are never relaunched
 by a message. Pairing verification stays one-shot with no inbox.
 

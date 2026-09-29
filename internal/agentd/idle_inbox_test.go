@@ -245,11 +245,20 @@ func TestCodexIdleInboxStartsTurnOnSameThreadAndBusySteers(t *testing.T) {
 }
 
 func TestClaudeBridgeIdleInboxKeepsQueryAndBusySteers(t *testing.T) {
-	for _, steer := range []bool{false, true} {
-		t.Run(fmt.Sprint(steer), func(t *testing.T) { testClaudeBridgeInbox(t, steer) })
+	for _, tc := range []struct {
+		name                    string
+		managed, steer, receipt bool
+	}{
+		{"managed-with-steer", true, true, true},
+		{"managed-without-steer", true, false, true},
+		{"unmanaged-with-steer", false, true, true},
+		{"unmanaged-without-steer", false, false, true},
+		{"queue-only-sdk", false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) { testClaudeBridgeInbox(t, tc.managed, tc.steer, tc.receipt) })
 	}
 }
-func testClaudeBridgeInbox(t *testing.T, steer bool) {
+func testClaudeBridgeInbox(t *testing.T, managed, steer, receipt bool) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("Node unavailable")
@@ -269,13 +278,18 @@ func testClaudeBridgeInbox(t *testing.T, steer bool) {
 	sdk := `let queries=0;
 export function query() {
  if (++queries!==1) throw Error('new session');
- const queue=[];let wake;let closed=false;
+ const queue=[];let wake;let closed=false;let inputs=0;let pending;let timer;
  const push=(value)=>{queue.push(value);wake?.();wake=null};
  return {
   async streamInput(input){for await (const message of input) {
-   push({type:'assistant',user_message_uuid:message.uuid,message:{content:[]}});
+   const reaction={type:'assistant',user_message_uuid:message.uuid,message:{content:[]}};
+   if (++inputs===1) push(reaction);
+   else {
+    pending=reaction;
+    timer=setTimeout(()=>{push({type:'result',subtype:'success'});push(pending);pending=null},30);
+   }
   }},
-  async interrupt(){process.stdout.write(JSON.stringify({kind:'fixture_interrupt'})+'\n');return {still_queued:[]}},
+  async interrupt(){clearTimeout(timer);if(pending){push(pending);pending=null}process.stdout.write(JSON.stringify({kind:'fixture_interrupt'})+'\n');return {still_queued:[]}},
   close(){closed=true;wake?.()},
   async *[Symbol.asyncIterator](){
    yield {type:'system',subtype:'init',session_id:'same-sdk-session',model:'fixture-model',capabilities:['interrupt_receipt_v1']};
@@ -284,11 +298,16 @@ export function query() {
   }
  }
 }`
-	if !steer {
+	if !receipt {
 		sdk = strings.ReplaceAll(sdk, "capabilities:['interrupt_receipt_v1']", "capabilities:[]")
 	}
 	if err := os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
 		t.Fatal(err)
+	}
+	for _, path := range []string{bridgePath, sdkPath} {
+		if output, err := exec.Command(node, "--check", path).CombinedOutput(); err != nil {
+			t.Fatalf("syntax: %v %s", err, output)
+		}
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -322,7 +341,7 @@ export function query() {
 			t.Fatal(err)
 		}
 	}
-	sessions, interrupts := 0, 0
+	sessions, interrupts, completed := 0, 0, 0
 	wait := func(kind string) {
 		t.Helper()
 		for {
@@ -336,6 +355,8 @@ export function query() {
 					sessions++
 				case "fixture_interrupt":
 					interrupts++
+				case "turn_completed":
+					completed++
 				case "control_failed":
 					t.Fatal("bridge rejected input", frame)
 				}
@@ -347,18 +368,26 @@ export function query() {
 			}
 		}
 	}
-	write(`{"op":"start","prompt":"initial work"}`)
+	capabilities := []string{}
+	if steer {
+		capabilities = append(capabilities, "steer")
+	}
+	start, _ := json.Marshal(map[string]any{"op": "start", "prompt": "initial work", "capabilities": capabilities})
+	write(string(start))
 	wait("turn_completed")
-	write(`{"op":"inbox","correlation_id":"idle","text":"idle wake"}`)
+	write(fmt.Sprintf(`{"op":"inbox","correlation_id":"idle","text":"idle wake","managed_policy":%t,"steer_enabled":%t}`, managed, steer))
 	wait("control_applied")
 	if sessions != 1 || interrupts != 0 {
 		t.Fatal("idle wake restarted or interrupted Query")
 	}
-	write(`{"op":"inbox","correlation_id":"busy","text":"busy steer"}`)
+	write(fmt.Sprintf(`{"op":"inbox","correlation_id":"busy","text":"busy input","managed_policy":%t,"steer_enabled":%t}`, managed, steer))
 	wait("control_applied")
 	wantInterrupts := 0
-	if steer {
+	if !managed && steer {
 		wantInterrupts = 1
+	}
+	if wantInterrupts == 0 && completed != 2 {
+		t.Fatal("queued input was acknowledged before the busy turn completed")
 	}
 	if sessions != 1 || interrupts != wantInterrupts {
 		t.Fatal("busy inbox ignored steer capability")
@@ -564,5 +593,78 @@ func TestCodexWakeCancelsPreviousIdleDeadline(t *testing.T) {
 	case <-f.proc.done:
 	case <-time.After(time.Second):
 		t.Fatal("new clean turn did not rearm completion")
+	}
+}
+
+func TestClaudeBridgeRequiresAdvertisedInterruptSupport(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	for _, capability := range []string{"steer", "interrupt"} {
+		for _, missing := range []string{"receipt", "method"} {
+			t.Run(capability+"/"+missing, func(t *testing.T) {
+				root, err := filepath.EvalSymlinks(t.TempDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+				bridge, err := claudeAssets.ReadFile("claudeassets/bridge.mjs")
+				if err != nil {
+					t.Fatal(err)
+				}
+				bridgePath, sdkPath := filepath.Join(root, "bridge.mjs"), filepath.Join(root, "sdk.mjs")
+				sdk := `export function query() { return {
+ streamInput: async () => {}, interrupt: async () => ({still_queued:[]}), close() {},
+ async *[Symbol.asyncIterator]() {
+  yield {type:'system',subtype:'init',session_id:'fixture',capabilities:['interrupt_receipt_v1']};
+ }
+}; }`
+				wantReason := "interrupt_receipt_v1_missing"
+				if missing == "receipt" {
+					sdk = strings.ReplaceAll(sdk, "['interrupt_receipt_v1']", "[]")
+				} else {
+					sdk = strings.ReplaceAll(sdk, "interrupt: async () => ({still_queued:[]}),", "")
+					wantReason = "sdk_query_capability_missing"
+				}
+				for path, data := range map[string][]byte{bridgePath: bridge, sdkPath: []byte(sdk)} {
+					if err := os.WriteFile(path, data, 0600); err != nil {
+						t.Fatal(err)
+					}
+					if output, err := exec.Command(node, "--check", path).CombinedOutput(); err != nil {
+						t.Fatalf("syntax: %v %s", err, output)
+					}
+				}
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, "/bin/true", root)
+				cmd.Stdin = strings.NewReader(fmt.Sprintf("{\"op\":\"start\",\"prompt\":\"work\",\"capabilities\":[%q]}\n", capability))
+				output, err := cmd.Output()
+				if err == nil || strings.Contains(string(output), `"kind":"session_started"`) || strings.Contains(string(output), `"kind":"turn_started"`) || !strings.Contains(string(output), wantReason) {
+					t.Fatalf("unsupported advertised control started: err=%v output=%s", err, output)
+				}
+			})
+		}
+	}
+}
+
+func TestClaudeInboxPropagatesPolicy(t *testing.T) {
+	for _, managed := range []bool{false, true} {
+		for _, steer := range []bool{false, true} {
+			p := &claudeProcess{managedPolicy: managed, steerEnabled: steer, wireProcess: &wireProcess{readDone: make(chan struct{})}, controls: map[string]chan bool{}}
+			p.stdin = managedFixtureWriter(func(data []byte) (int, error) {
+				var frame map[string]any
+				if err := json.Unmarshal(data, &frame); err != nil {
+					return 0, err
+				}
+				if frame["managed_policy"] != managed || frame["steer_enabled"] != steer {
+					t.Error("inbox policy not propagated", frame)
+				}
+				p.controls[frame["correlation_id"].(string)] <- true
+				return len(data), nil
+			})
+			if err := p.Control(t.Context(), "inbox", "follow up"); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 }

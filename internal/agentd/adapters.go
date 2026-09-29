@@ -614,6 +614,8 @@ func (*ClaudeAdapter) Name() string                                 { return Cla
 func (a *ClaudeAdapter) SetExpectedEmails(emails map[string]string) { a.Emails = emails }
 
 type claudeProcess struct {
+	managedPolicy bool
+	steerEnabled  bool
 	*wireProcess
 	assetDir  string
 	ready     chan error
@@ -643,6 +645,10 @@ func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
 	p.controlMu.Unlock()
 	defer func() { p.controlMu.Lock(); delete(p.controls, correlation); p.controlMu.Unlock() }()
 	frame := map[string]any{"op": op, "correlation_id": correlation}
+	if op == "inbox" {
+		frame["managed_policy"] = p.managedPolicy
+		frame["steer_enabled"] = p.steerEnabled
+	}
 	if isSetting(op) {
 		frame["value"] = text
 	} else {
@@ -722,7 +728,10 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	if err != nil {
 		return nil, err
 	}
-	cp := &claudeProcess{wireProcess: p, assetDir: dir, ready: make(chan error, 1), controls: map[string]chan bool{}}
+	cp := &claudeProcess{wireProcess: p, assetDir: dir, ready: make(chan error, 1), controls: map[string]chan bool{}, managedPolicy: r.ManagedPolicy}
+	for _, capability := range r.Capabilities {
+		cp.steerEnabled = cp.steerEnabled || capability == "steer"
+	}
 	var inputTokens, outputTokens, costMicros int64
 	p.setOnEvent(func(raw json.RawMessage) {
 		var frame struct {
@@ -779,7 +788,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			}
 		}
 	})
-	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens}); err != nil {
+	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens, "capabilities": append([]string{}, r.Capabilities...)}); err != nil {
 		return p.failStart(err)
 	}
 	op, cancel := operationContext(ctx)

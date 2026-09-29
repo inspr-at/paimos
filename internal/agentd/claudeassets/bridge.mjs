@@ -178,7 +178,8 @@ try {
   fail();
   process.exit(1);
 }
-if ((start?.rules !== undefined && (typeof start.rules !== "string" || Buffer.byteLength(start.rules) > 12000)) ||
+if ((start?.capabilities !== undefined && (!Array.isArray(start.capabilities) || start.capabilities.some(c => typeof c !== "string"))) ||
+    (start?.rules !== undefined && (typeof start.rules !== "string" || Buffer.byteLength(start.rules) > 12000)) ||
     (start?.max_turns !== undefined && (!Number.isSafeInteger(start.max_turns) || start.max_turns < 0)) ||
     (start?.max_tokens !== undefined && (!Number.isSafeInteger(start.max_tokens) || start.max_tokens < 0)) ||
     start?.op !== "start" || typeof start.prompt !== "string" || start.prompt.length === 0 ||
@@ -189,6 +190,10 @@ if ((start?.rules !== undefined && (typeof start.rules !== "string" || Buffer.by
   fail();
   process.exit(1);
 }
+
+// Older bridge callers required steering support for every non-verification run.
+const capabilities = start.capabilities ?? (start.purpose === "pairing_verification" ? [] : ["steer", "interrupt"]);
+const requiresInterrupt = capabilities.includes("steer") || capabilities.includes("interrupt");
 
 let queryHandle;
 let input;
@@ -316,7 +321,7 @@ try {
     options: queryOptions
   });
   if (!queryHandle || typeof queryHandle.streamInput !== "function" ||
-      typeof queryHandle.interrupt !== "function" || typeof queryHandle.close !== "function" ||
+      (requiresInterrupt && typeof queryHandle.interrupt !== "function") || typeof queryHandle.close !== "function" ||
       typeof queryHandle[Symbol.asyncIterator] !== "function") throw new Error("query capabilities");
   controlInput = new ControlStream();
   queryHandle.streamInput(controlInput).catch(() => { controlInput.abort(new Error("stream input failed")); });
@@ -380,7 +385,10 @@ const handleControlLine = (line) => {
           fail("event_stream_bound", correlationID);
           return;
         }
-        const steerActiveTurn = request.op === "steer" || (turnActive && interruptReceipt);
+        // Ordinary inbox input cannot exercise managed recovery authority.
+        const steerActiveTurn = request.op === "steer" ||
+          (turnActive && request.managed_policy === false && request.steer_enabled === true &&
+           capabilities.includes("steer") && interruptReceipt);
         const uuid = randomUUID();
         controlUUID = uuid;
         const state = addCorrelation(uuid, correlationID);
@@ -483,7 +491,8 @@ for (const buffered of bufferedLines.splice(0)) handleControlLine(buffered);
 try {
   for await (const message of queryHandle) {
     if (message?.type === "system" && message.subtype === "init") {
-      if (!validID(message.session_id) || !Array.isArray(message.capabilities)) {
+      if (!validID(message.session_id) || !Array.isArray(message.capabilities) ||
+          (requiresInterrupt && !message.capabilities.includes("interrupt_receipt_v1"))) {
         fail("app_server_protocol", "", "interrupt_receipt_v1_missing");
         queryHandle.close();
         break;

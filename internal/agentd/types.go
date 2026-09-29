@@ -183,19 +183,21 @@ type API interface {
 }
 
 type StartRequest struct {
-	InboxEnabled bool   // Keep the owned process alive between turns for leased inbox delivery.
-	Rules        string // Ephemeral ADR-004 merge, never a repository instruction file.
-	MaxTurns     int64
-	MaxTokens    int64
-	TenantID     string
-	PrincipalID  string
-	Run          Run
-	Profile      Profile
-	AccountKey   string
-	Workspace    string
-	StateRoot    string
-	Prompt       string
-	Generation   string
+	ManagedPolicy bool
+	Capabilities  []string // Exact capabilities advertised for this session.
+	InboxEnabled  bool     // Keep the owned process alive between turns for leased inbox delivery.
+	Rules         string   // Ephemeral ADR-004 merge, never a repository instruction file.
+	MaxTurns      int64
+	MaxTokens     int64
+	TenantID      string
+	PrincipalID   string
+	Run           Run
+	Profile       Profile
+	AccountKey    string
+	Workspace     string
+	StateRoot     string
+	Prompt        string
+	Generation    string
 	// Tools is a loopback MCP capability for this run; the daemon key stays in
 	// the supervisor. It expires when the owned process exits.
 	Tools *RunTools
