@@ -371,7 +371,8 @@ for (const width of [1600, 390]) {
     await page.getByRole('button', { name: 'Add feature' }).click()
     const radar = page.getByRole('listitem').filter({ hasText: 'Deadline radar' })
     await expect(radar.getByText(/Live since/)).toBeVisible()
-    await expect(radar.getByRole('img', { name: /^\d{12}\.0\.0 · 20\d\d-\d\d-\d\d \d\d:\d\d:\d\d UTC$/ })).toBeVisible()
+    // Standing alone, the version is the shared renderer's copy pill (AEON-309).
+    await expect(radar.getByRole('button', { name: /^\d{12}\.0\.0 · 20\d\d-\d\d-\d\d \d\d:\d\d:\d\d UTC — Copy version$/ })).toBeVisible()
 
     const quiet = page.getByRole('listitem').filter({ hasText: 'Quiet wish' })
     const noisy = page.getByRole('listitem').filter({ hasText: 'Noisy wish' })

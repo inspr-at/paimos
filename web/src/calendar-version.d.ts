@@ -9,3 +9,7 @@ declare module '*calendar-version-display/version.js' {
   export function parts(value: string, scheme: string): Record<'v' | 'yy' | 'mm' | 'dd' | 'hh' | 'mi' | 'ss' | 'tail', string> | null
   export function utcLabel(parts: Record<'yy' | 'mm' | 'dd' | 'hh' | 'mi' | 'ss', string>): string
 }
+declare module '*calendar-version-display/version-interaction.js' {
+  export const duration: number
+  export function hoverOpacity(weight: number): number
+}
