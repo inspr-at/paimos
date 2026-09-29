@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"math/rand/v2"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -208,7 +209,14 @@ func TestSensitiveDetectorSpeed(t *testing.T) {
 		best = min(best, time.Since(start))
 	}
 	t.Logf("64 KiB in %v", best)
-	if best > 50*time.Millisecond {
-		t.Fatalf("64 KiB took %v, want < 50ms", best)
+	// Hosted CI runners are several times slower than a workstation (62-74 ms
+	// there for release 11); the guard is against pathological backtracking,
+	// which costs seconds, so CI gets a wider budget.
+	budget := 50 * time.Millisecond
+	if os.Getenv("CI") != "" {
+		budget = 250 * time.Millisecond
+	}
+	if best > budget {
+		t.Fatalf("64 KiB took %v, want < %v", best, budget)
 	}
 }
