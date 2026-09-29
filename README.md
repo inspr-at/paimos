@@ -343,7 +343,14 @@ a tool-specific PATH and fixed locale, never the daemon environment. The termina
 allows exact CPU/page-size/memory/uname and ARM-feature sysctls for Go/Node;
 process arguments and other-process inspection are explicitly denied (the macOS
 default denial alone does not block numeric procargs queries). Self inspection
-is allowed for the macOS runtime. Terminal completion
+is allowed for the macOS runtime. The terminal qualifies toolchain libraries
+through the Nix package closure or recursive macOS
+`otool` inspection, resolving loader paths and Homebrew symlinks to exact library
+files or their containing Cellar kegs with read/map access only. The per-run cache
+rechecks executable and library mtimes and symlink targets; it never grants the
+Homebrew installation prefix. Homebrew OpenSSL's host configuration remains
+unreadable and is reported absent so Node can start with its built-in defaults.
+Terminal completion
 kills remaining group members before reaping its leader, including children that
 close or inherit stdout. Codex and Cursor cannot yet enforce the
 required inherited-tool ceiling; they, Pi and Grok do not advertise this new
