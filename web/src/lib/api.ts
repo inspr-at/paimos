@@ -17,7 +17,7 @@ export function accountEmail(identity: Identity) {
 import { learnPictures } from './avatar.ts'
 import type { TicketEta } from './eta.ts'
 import type { TicketEstimate } from './estimates.ts'
-import { ownWrites } from './ownWrites.ts'
+import { rowStore } from './rowStore.ts'
 
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
 
@@ -123,7 +123,7 @@ export class APIError extends Error {
   readonly body: Record<string, unknown>
   constructor(status: number, message: string, body: Record<string, unknown> = {}) { super(message); this.status = status; this.body = body }
 }
-async function json<T>(path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}, signal?: AbortSignal): Promise<T> {
+async function json<T>(path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}, signal?: AbortSignal, answered?: (response: Response) => void): Promise<T> {
   const response = await api(path, {
     method,
     ...(signal ? { signal } : {}),
@@ -137,6 +137,7 @@ async function json<T>(path: string, method = 'GET', body?: unknown, headers: Re
     const reason = typeof data?.error === 'string' && data.error ? data.error : typeof data?.message === 'string' && data.message ? data.message : `Request failed (${response.status})`
     throw new APIError(response.status, reason, data && typeof data === 'object' ? data : {})
   }
+  answered?.(response)
   return response.status === 204 ? undefined as T : response.json()
 }
 // The router registers what happens when a request finds the session ended.
@@ -150,18 +151,34 @@ function query(values: object): string {
   return encoded ? `?${encoded}` : ''
 }
 const idPath = (id: string) => encodeURIComponent(id)
-// Node writes of this tab: live views know their events are already on screen (AEON-326).
-const wrote = (node: WorkNode) => { ownWrites.wrote([node]); return node }
+// Node writes of this tab go to the row store with the exact revision the
+// server answered: live views know those events, and only those, as already
+// on screen (AEON-326). sent: when the request left, for causal order.
+function writing<T>(send: () => Promise<T>, record: (result: T, sent: number) => void): Promise<T> {
+  const sent = rowStore.mark()
+  return send().then(result => { record(result, sent); return result })
+}
+const wroteNode = (node: WorkNode, sent: number) => { rowStore.wrote(node, sent) }
 export const getKinds = () => json<{ items: Kind[] }>('/kinds')
 export const getNode = (id: string) => json<WorkNode>(`/nodes/${idPath(id)}`)
-export const createNode = (body: NodeCreate) => json<WorkNode>('/nodes', 'POST', body).then(wrote)
+export const createNode = (body: NodeCreate) => writing(() => json<WorkNode>('/nodes', 'POST', body), wroteNode)
 // ifUnmodifiedSince is the node's updated_at as read; a newer server copy answers 412.
 export const updateNode = (id: string, body: NodePatch, options: { ifUnmodifiedSince?: string } = {}) =>
-  json<WorkNode>(`/nodes/${idPath(id)}`, 'PATCH', body, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}).then(wrote)
+  writing(() => json<WorkNode>(`/nodes/${idPath(id)}`, 'PATCH', body, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}), wroteNode)
 // ifUnmodifiedSince: the node's updated_at as read; the move answers 412 with the current node when it changed.
 export const moveNode = (id: string, parent_id: string | null, before_id?: string | null, options: { ifUnmodifiedSince?: string } = {}) =>
-  json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}).then(wrote)
-export const deleteNode = (id: string) => json<void>(`/nodes/${idPath(id)}`, 'DELETE').then(() => { ownWrites.deleted(id) })
+  writing(() => json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}), wroteNode)
+// A delete answers the revision of its node.deleted event in the revision
+// header (null from an older server: then nothing proves the event is this
+// tab's). Header names are case-insensitive; this is the wire form.
+const REVISION_HEADER = 'aeon-revision'
+export function deleteNode(id: string): Promise<{ revision: string | null }> {
+  let revision: string | null = null
+  return writing(
+    () => json<void>(`/nodes/${idPath(id)}`, 'DELETE', undefined, {}, undefined, response => { revision = response.headers.get(REVISION_HEADER) || null }).then(() => ({ revision })),
+    (result, sent) => { rowStore.deleted(id, result.revision, sent) },
+  )
+}
 export const searchNodes = (q: string, params: { kind_id?: string; state?: string; cursor?: string; limit?: number } = {}, options: { signal?: AbortSignal } = {}) =>
   json<Page<SearchHit>>(`/search${query({ q, ...params })}`, 'GET', undefined, {}, options.signal)
 // B1 list and project-summary wire types (api/openapi.yaml NodeListItem, listProjects).
@@ -230,7 +247,7 @@ export interface BulkChange {
   if_unmodified_since?: Record<string, string>
 }
 export interface BulkResult { event_id: number | null; items: WorkNode[]; unchanged: string[]; skipped: { id: string; key?: string; reason: string; code?: string }[] }
-export const bulkChange = (body: BulkChange) => json<BulkResult>('/nodes/bulk', 'POST', body).then(result => { ownWrites.wrote(result.items ?? []); return result })
+export const bulkChange = (body: BulkChange) => writing(() => json<BulkResult>('/nodes/bulk', 'POST', body), (result, sent) => { for (const node of result.items ?? []) rowStore.wrote(node, sent) })
 export const undoEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 export const getProjects = (includeArchived = false) => json<{ items: ProjectSummary[] }>(`/projects${includeArchived ? '?include_archived=true' : ''}`)
   .then(page => { learnPictures(page.items.flatMap(project => project.people ?? [])); return page })

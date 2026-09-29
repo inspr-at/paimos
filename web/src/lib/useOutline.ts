@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch, type Ref } from 'vue'
 import { getNode, listNodes, type ListItem } from './api'
 import { childMap, epicStats, flattenOutline, missingAncestors, type EpicStats, type OutlineEntry } from './outline'
 import { compareRows, effectiveSort, hasFilters, type ListFilters } from './ticketList'
+import { rowStore } from './rowStore'
 import { asListItem, kinds } from './useTicket'
 import { serializeSort, statusMeta } from './work'
 
@@ -75,7 +76,8 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
           const item = asListItem(node, kind, null, null)
           const assignee = typeof node.fields.assignee === 'string' ? node.fields.assignee : null
           if (assignee) item.assignee = { id: assignee, name: list.names.get(assignee) ?? 'Someone' }
-          ancestors.set(node.id, item)
+          // The row store's display object when it keeps one (the panel edits that one).
+          ancestors.set(node.id, rowStore.row(node.id) ?? item)
         }
         // Parents that cannot be read would loop forever; place their children at the top.
         for (const id of missing) if (!ancestors.has(id)) ancestors.set(id, { id, key: '', title: '', parent_id: root, kind_slug: 'missing' } as unknown as ListItem)
@@ -92,10 +94,18 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     const request = generation
     block.loading = true; block.error = ''
     try {
+      const sent = rowStore.mark()
       const page = await listNodes({ ...params, sort: sortParam.value, limit: LEVEL, cursor: more ? block.cursor ?? undefined : undefined } as never)
       if (request !== generation) return
-      for (const item of page.items) lazyNodes.set(item.id, item)
-      const ids = page.items.map(item => item.id)
+      // Rows are the row store's display objects (AEON-326): the panel and the
+      // list show the same object, and a copy older than a deletion stays out.
+      const ids: string[] = []
+      for (const item of page.items) {
+        const row = rowStore.adopt(item, sent, { show: true })
+        if (!row) continue
+        lazyNodes.set(item.id, row)
+        ids.push(item.id)
+      }
       block.ids = more ? [...block.ids, ...ids.filter(id => !block.ids.includes(id))] : ids
       block.cursor = page.next_cursor
     } catch (e) {
@@ -240,7 +250,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   // Lazy mode keeps its own rows; created, moved and deleted work is placed at once.
   function insert(item: ListItem) {
     if (matchMode.value) { refreshStatsFor(item.id); return }
-    lazyNodes.set(item.id, item)
+    lazyNodes.set(item.id, rowStore.row(item.id) ?? item)
     const parent = item.parent_id ?? ''
     const block = parent === projectId.value ? (item.kind_slug === 'epic' ? epicBlock.value : looseBlock.value) : blocks.get(parent)
     if (block && !block.ids.includes(item.id)) block.ids = [item.id, ...block.ids]

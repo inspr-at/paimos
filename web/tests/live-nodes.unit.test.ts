@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkNode } from '../src/lib/api'
 import { LiveNodeStore, mergeChanges, parseNodeChanges, type LiveView, type NodeChange } from '../src/lib/liveNodes'
+import { RowStore } from '../src/lib/rowStore'
 import {
   autoApplyDelay, canAutoApply, classifyChange, compareRevision, describeFields, PendingUpdates, PENDING_CAP, pillText, type ApplyGuard,
 } from '../src/lib/liveUpdates'
@@ -243,11 +244,13 @@ function view(ids: string[]) {
 describe('LiveNodeStore', () => {
   let fetchNode: ReturnType<typeof vi.fn<(id: string) => Promise<WorkNode | null>>>
   let store: LiveNodeStore
+  let rows: RowStore
   beforeEach(() => {
     vi.useFakeTimers()
     FakeSource.all = []
     fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>()
-    store = new LiveNodeStore({ open: url => new FakeSource(url) as never, fetchNode, graceMs: 1000, retryMs: [100, 200], refetchMs: [10, 20] })
+    rows = new RowStore()
+    store = new LiveNodeStore({ open: url => new FakeSource(url) as never, fetchNode, graceMs: 1000, retryMs: [100, 200], refetchMs: [10, 20], rows })
   })
   afterEach(() => vi.useRealTimers())
 
@@ -273,7 +276,10 @@ describe('LiveNodeStore', () => {
     expect(panel.calls[0].node?.title).toBe('Renamed')
     expect(list.calls[0].node?.title).toBe('Renamed')
     expect(other.calls).toEqual([{ id: 'n1', node: undefined, change: expect.objectContaining({ id: 'n1', projectId: 'A', fields: ['title'], eventId: 41 }) }])
-    expect(store.get('n1')).toMatchObject({ revision: '2026-09-29T10:00:01Z', projectId: 'A', deleted: false })
+    // The row store learned the revision and keeps the copy.
+    expect(rows.revision('n1')).toBe('2026-09-29T10:00:01Z')
+    expect(rows.isDeleted('n1')).toBe(false)
+    expect(rows.latest('n1')?.title).toBe('Renamed')
   })
 
   it('does not refetch a node it already has at that revision (the viewer’s own save)', () => {
@@ -281,17 +287,17 @@ describe('LiveNodeStore', () => {
     store.subscribe(panel.v)
     latest().ready(40, false)
     const saved = node('n1', '2026-09-29T10:00:02Z')
-    store.put([saved])
+    rows.adoptNode(saved)
     latest().node(41, [{ id: 'n1', revision: '2026-09-29T10:00:02Z' }], 'node.updated', 'me')
     expect(fetchNode).not.toHaveBeenCalled()
-    expect(panel.calls[0].node).toBe(saved)
+    expect(panel.calls[0].node).toMatchObject({ id: 'n1', updated_at: saved.updated_at })
     expect(panel.calls[0].change.actorId).toBe('me')
   })
 
   it('ignores a replayed change older than what it knows', () => {
     const panel = view(['n1'])
     store.subscribe(panel.v)
-    store.put([node('n1', '2026-09-29T10:00:05Z')])
+    rows.adoptNode(node('n1', '2026-09-29T10:00:05Z'))
     latest().node(41, [{ id: 'n1', revision: '2026-09-29T10:00:04Z' }])
     expect(panel.calls).toEqual([])
     expect(fetchNode).not.toHaveBeenCalled()
@@ -302,7 +308,7 @@ describe('LiveNodeStore', () => {
     store.subscribe(panel.v)
     latest().node(41, [{ id: 'n1', change: 'deleted', fields: ['deleted_at'], revision: '2026-09-29T10:00:03Z' }], 'node.deleted')
     expect(panel.calls[0]).toMatchObject({ id: 'n1', node: null })
-    expect(store.get('n1')?.deleted).toBe(true)
+    expect(rows.isDeleted('n1')).toBe(true)
     fetchNode.mockResolvedValueOnce(null)
     latest().node(42, [{ id: 'n2', fields: ['project_id'], revision: '2026-09-29T10:00:04Z' }], 'node.project_moved')
     await vi.waitFor(() => expect(panel.calls).toHaveLength(2))
@@ -343,7 +349,7 @@ describe('LiveNodeStore', () => {
   it('a read that a deletion overtook never brings the node back', async () => {
     const panel = view(['n1'])
     store.subscribe(panel.v)
-    store.put([node('n1', '2026-09-29T10:00:00Z')])
+    rows.adoptNode(node('n1', '2026-09-29T10:00:00Z'))
     let release!: (n: WorkNode) => void
     fetchNode.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
     latest().node(41, [{ id: 'n1', revision: '2026-09-29T10:00:01Z' }])
@@ -352,15 +358,15 @@ describe('LiveNodeStore', () => {
     release(node('n1', '2026-09-29T10:00:01Z', { title: 'Stale' }))
     await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
     expect(panel.calls.map(c => c.node)).toEqual([null])
-    expect(store.get('n1')).toMatchObject({ deleted: true, node: null })
+    expect(rows.isDeleted('n1')).toBe(true)
     // A copy a view still holds from before does not bring it back either.
-    store.put([node('n1', '2026-09-29T10:00:01Z')])
-    expect(store.get('n1')).toMatchObject({ deleted: true, node: null })
+    expect(rows.adoptNode(node('n1', '2026-09-29T10:00:01Z'))).toBeNull()
+    expect(rows.isDeleted('n1')).toBe(true)
     // A restore does.
     fetchNode.mockResolvedValueOnce(node('n1', '2026-09-29T10:00:03Z', { title: 'Back' }))
     latest().node(43, [{ id: 'n1', change: 'created', fields: [], revision: '2026-09-29T10:00:03Z' }], 'node.updated')
     await vi.waitFor(() => expect(panel.calls.map(c => c.node?.title ?? null)).toEqual([null, 'Back']))
-    expect(store.get('n1')).toMatchObject({ deleted: false })
+    expect(rows.isDeleted('n1')).toBe(false)
   })
 
   it('a refetch that already returned the newest version needs no second request', async () => {
@@ -441,7 +447,8 @@ describe('LiveNodeStore', () => {
     source.fail(false)
     source.ready(900, false)
     expect(panel.resyncs).toEqual(['initial', 'gap'])
-    expect(store.get('n1')?.node).toBeNull()
+    // What was read before the restart is no longer trusted as current.
+    expect(rows.current('n1')).toBe(false)
   })
 
   it('reopens a stream the browser gave up on after the last event it saw', () => {
@@ -485,7 +492,7 @@ describe('LiveNodeStore', () => {
   })
 
   it('stays off where there is no EventSource', () => {
-    const offline = new LiveNodeStore({ open: () => null, fetchNode })
+    const offline = new LiveNodeStore({ open: () => null, fetchNode, rows })
     offline.subscribe(view(['n1']).v)
     expect(offline.state).toBe('off')
   })
@@ -493,6 +500,6 @@ describe('LiveNodeStore', () => {
   it('fetch() reads any node for a view and keeps it', async () => {
     fetchNode.mockResolvedValueOnce(node('n5', '2026-09-29T10:00:01Z'))
     expect((await store.fetch('n5'))?.id).toBe('n5')
-    expect(store.get('n5')?.node?.id).toBe('n5')
+    expect(rows.latest('n5')?.id).toBe('n5')
   })
 })

@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The live node store (AEON-326): one per tab, keyed by node id, fed by the
-// tenant event stream in live mode (/api/events/stream?after=latest). Events
-// name the node, its project, the changed attributes and the new revision,
-// never values: the store refetches a node a view shows through the normal
-// API (one request however many views show it) and hands the result to the
-// views. After a gap it cannot bridge (the first connection, a restart past a
-// long backlog) it asks every view to refetch what it shows.
+// The live node stream (AEON-326): one per tab, fed by the tenant event
+// stream in live mode (/api/events/stream?after=latest). Events name the
+// node, its project, the changed attributes and the new revision, never
+// values: the row store learns the revision (or the deletion) at once, and
+// this refetches a node a view shows through the normal API (one request
+// however many views show it). After a gap it cannot bridge (the first
+// connection, a restart past a long backlog) it asks every view to refetch
+// what it shows. What is known about a node lives in the row store only.
 import { APIError, getNode, type WorkNode } from './api'
 import { compareRevision, type ChangeKind } from './liveUpdates'
+import { rowStore, type RowStore } from './rowStore'
 
 export interface NodeChange {
   eventId: number; type: string; actorId: string
@@ -27,7 +29,6 @@ export interface LiveView {
   resumed?(): void
 }
 
-export interface LiveEntry { revision: string | null; projectId: string | null; deleted: boolean; node: WorkNode | null }
 export type LiveState = 'off' | 'connecting' | 'live' | 'reconnecting'
 
 interface SourceLike {
@@ -39,7 +40,6 @@ interface SourceLike {
 
 export const NODE_EVENTS = ['node.created', 'node.updated', 'node.moved', 'node.project_moved', 'node.deleted', 'node.bulk_changed'] as const
 const CLOSED = 2
-const CACHE_LIMIT = 500
 
 // The node_changes of one stream event, in client shape.
 export function parseNodeChanges(data: string): NodeChange[] {
@@ -92,13 +92,13 @@ export interface LiveOptions {
   retryMs?: readonly number[]
   // Waits before reading a node again after a failed read.
   refetchMs?: readonly number[]
+  // The causal row store the stream and its views share (the tab's by default).
+  rows?: RowStore
 }
-
-interface Reading { superseded: boolean; run: Promise<void> }
 
 export class LiveNodeStore {
   state: LiveState = 'off'
-  private entries = new Map<string, LiveEntry>()
+  readonly rows: RowStore
   private views = new Set<LiveView>()
   private source: SourceLike | null = null
   private lastEventId: number | null = null
@@ -106,14 +106,16 @@ export class LiveNodeStore {
   private closeTimer: ReturnType<typeof setTimeout> | undefined
   private retryTimer: ReturnType<typeof setTimeout> | undefined
   private retries = 0
-  private fetching = new Map<string, Reading>()
+  private fetching = new Map<string, Promise<void>>()
   // Shown nodes with a change not read yet (a read running or failed).
   private dirty = new Map<string, { change: NodeChange; attempts: number }>()
   private retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private stateListeners = new Set<(state: LiveState) => void>()
-  private readonly options: Required<LiveOptions>
+  private readonly options: Required<Omit<LiveOptions, 'rows'>>
 
   constructor(options: LiveOptions = {}) {
+    const { rows, ...rest } = options
+    this.rows = rows ?? rowStore
     this.options = {
       url: '/api/events/stream',
       open: url => typeof EventSource === 'undefined' ? null : new EventSource(url) as unknown as SourceLike,
@@ -121,7 +123,7 @@ export class LiveNodeStore {
       graceMs: 30_000,
       retryMs: [2_000, 5_000, 15_000, 30_000],
       refetchMs: [1_000, 3_000, 10_000, 30_000],
-      ...options,
+      ...rest,
     }
   }
 
@@ -139,31 +141,6 @@ export class LiveNodeStore {
   onState(listener: (state: LiveState) => void): () => void {
     this.stateListeners.add(listener)
     return () => this.stateListeners.delete(listener)
-  }
-
-  // ---------- Entries ----------
-  get(id: string): LiveEntry | undefined { return this.entries.get(id) }
-  // Nodes a view loaded or saved: the store keeps the newest version, so an
-  // event for a revision the view already has needs no refetch.
-  put(nodes: Iterable<WorkNode>) {
-    for (const node of nodes) {
-      const entry = this.entries.get(node.id)
-      if (entry?.node && compareRevision(node.updated_at, entry.node.updated_at) < 0) continue
-      // A copy from before a deletion never brings the node back.
-      if (entry?.deleted && !node.deleted_at && compareRevision(node.updated_at, entry.revision) <= 0) continue
-      this.remember(node.id, {
-        revision: entry && compareRevision(entry.revision, node.updated_at) > 0 ? entry.revision : node.updated_at,
-        projectId: entry?.projectId ?? null, deleted: !!node.deleted_at, node,
-      })
-    }
-  }
-  private remember(id: string, entry: LiveEntry) {
-    this.entries.delete(id)
-    this.entries.set(id, entry)
-    if (this.entries.size <= CACHE_LIMIT) return
-    for (const [key] of this.entries) {
-      if (![...this.views].some(view => view.shows(key))) { this.entries.delete(key); if (this.entries.size <= CACHE_LIMIT) return }
-    }
   }
 
   // ---------- Stream ----------
@@ -218,10 +195,10 @@ export class LiveNodeStore {
     this.setState('live')
     // Nothing was missed, but a read that failed meanwhile is tried again now.
     if (continued) { this.readDirty(); for (const view of [...this.views]) view.resumed?.(); return }
-    // What the views show may predate this stream: nodes they cached too.
-    // They read everything again, dirty nodes included.
+    // Anything read before this point may have missed a change: the row store
+    // stops trusting it, and the views read what they show again.
+    this.rows.gap()
     this.forgetDirty()
-    for (const entry of this.entries.values()) entry.node = null
     for (const view of [...this.views]) view.resync?.(first ? 'initial' : 'gap')
   }
   private receive(event: MessageEvent) {
@@ -231,21 +208,13 @@ export class LiveNodeStore {
   }
 
   // ---------- Changes ----------
-  // One change, from the stream or a test. Views that show the node get it
-  // refetched (or its cached version when that is at least as new); every
-  // other view learns of the change without a node.
+  // One change, from the stream or a test. The row store learns it first.
+  // Views that show the node get it refetched (or the store's copy when that
+  // is at least as new); every other view learns of the change without a node.
   apply(change: NodeChange) {
-    const entry = this.entries.get(change.id)
-    // Older than what the store already saw (a replay after a reconnect): the
+    // Older than what the store knows (a replay after a reconnect): the
     // views have that newer version or will get it with its own event.
-    if (entry && change.revision !== null && compareRevision(change.revision, entry.revision) < 0) return
-    this.remember(change.id, {
-      revision: change.revision ?? entry?.revision ?? null, projectId: change.projectId ?? entry?.projectId ?? null,
-      deleted: change.change === 'deleted', node: change.change === 'deleted' ? null : entry?.node ?? null,
-    })
-    // A read already running answers for an older state now.
-    const reading = this.fetching.get(change.id)
-    if (reading) reading.superseded = true
+    if (this.rows.note(change) === 'older') return
     const showing = this.showing(change.id)
     for (const view of [...this.views]) if (!showing.includes(view)) view.changed(change, undefined)
     if (!showing.length) { this.settled(change.id); return }
@@ -262,41 +231,46 @@ export class LiveNodeStore {
     clearTimeout(this.retryTimers.get(id)); this.retryTimers.delete(id)
   }
   // Refetch a dirty node through the normal API, one read per node at a
-  // time. An answer that a change arriving meanwhile made stale is not
-  // handed on: the node is read once more for it, and after a deletion not
-  // at all. A failed read keeps the node dirty and tries again later.
+  // time. The row store keeps the answer only when it is at least as new as
+  // what it knows; an answer that news after the request made stale (a newer
+  // revision, a deletion, a restore) is not handed on: the node is read once
+  // more, and after a deletion not at all. A failed read keeps the node dirty
+  // and tries again later.
   private read(id: string): Promise<void> {
     const running = this.fetching.get(id)
-    if (running) return running.run
-    const reading: Reading = { superseded: false, run: Promise.resolve() }
-    this.fetching.set(id, reading)
-    reading.run = this.readLoop(id, reading).finally(() => { if (this.fetching.get(id) === reading) this.fetching.delete(id) })
-    return reading.run
+    if (running) return running
+    const run = this.readLoop(id).finally(() => { if (this.fetching.get(id) === run) this.fetching.delete(id) })
+    this.fetching.set(id, run)
+    return run
   }
-  private async readLoop(id: string, reading: Reading) {
+  private async readLoop(id: string) {
     for (;;) {
       const dirty = this.dirty.get(id)
       if (!dirty) return
       const showing = this.showing(id)
       if (!showing.length) { this.settled(id); return }
-      const cached = this.entries.get(id)?.node
-      if (cached && compareRevision(cached.updated_at, dirty.change.revision) >= 0) {
+      if (this.rows.isDeleted(id)) { this.settled(id); return }
+      const cached = this.rows.latest(id)
+      if (cached && compareRevision(cached.updated_at, dirty.change.revision) >= 0 && !this.rows.newer(id, cached.updated_at)) {
         this.settled(id)
         for (const view of showing) view.changed(dirty.change, cached)
         return
       }
-      reading.superseded = false
+      const sent = this.rows.mark()
       let node: WorkNode | null
       try { node = await this.options.fetchNode(id) }
       catch { this.retry(id); return }
-      const entry = this.entries.get(id)
-      if (reading.superseded && (!node || entry?.deleted || compareRevision(node.updated_at, entry?.revision) < 0)) continue
+      // News after the request was sent (not this answer's own): the answer
+      // may speak for an older state.
+      const news = this.rows.touchedSince(id, sent)
+      if (node) this.rows.adoptNode(node, sent)
+      else this.rows.gone(id, sent)
+      if (news && (!node || this.rows.isDeleted(id) || this.rows.newer(id, node.updated_at))) continue
       const change = this.dirty.get(id)?.change
       if (!change) return
       this.settled(id)
-      if (node) this.put([node])
-      else if (entry) this.remember(id, { ...entry, deleted: true, node: null })
-      for (const view of this.showing(id)) view.changed(change, node)
+      const copy = node && !this.rows.isDeleted(id) ? this.rows.latest(id) ?? null : null
+      for (const view of this.showing(id)) view.changed(change, copy)
       return
     }
   }
@@ -324,8 +298,10 @@ export class LiveNodeStore {
   }
   // A view can ask for any node (a list checking whether a new node matches).
   async fetch(id: string): Promise<WorkNode | null> {
+    const sent = this.rows.mark()
     const node = await this.options.fetchNode(id)
-    if (node) this.put([node])
+    if (node) this.rows.adoptNode(node, sent)
+    else this.rows.gone(id, sent)
     return node
   }
 }

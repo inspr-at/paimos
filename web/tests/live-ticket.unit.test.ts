@@ -2,17 +2,17 @@
 // AEON-326: the open ticket follows changes by others, and while the viewer
 // edits nothing moves under them: a read that lands during an edit waits like
 // a live change, so a save still sends the revision the editor started from.
+// The panel and the list share the tab's row store (one object per node).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref, type EffectScope } from 'vue'
 import { APIError, type ListItem, type WorkNode } from '../src/lib/api'
-import { acceptLoadedRow, editorRevision } from '../src/lib/editorRevision'
 import { LiveNodeStore, type NodeChange } from '../src/lib/liveNodes'
-import { ownWrites } from '../src/lib/ownWrites'
 import { RETRY_MS } from '../src/lib/refreshRetry'
+import { rowStore } from '../src/lib/rowStore'
 import { filtersFromQuery } from '../src/lib/ticketList'
 
 const api = vi.hoisted(() => ({
-  getNode: vi.fn(), updateNode: vi.fn(),
+  getNode: vi.fn(), updateNode: vi.fn(), deleteNode: vi.fn(),
   listNodes: vi.fn(async () => ({ items: [], next_cursor: null })),
   getRelations: vi.fn(async () => ({ items: [] })),
   lookupNodes: vi.fn(async () => ({ items: [] })),
@@ -41,10 +41,11 @@ const change = (over: Partial<NodeChange> = {}): NodeChange =>
 const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); await nextTick() }
 
 let scope: EffectScope | undefined
-function setup(fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>()) {
-  const store = new LiveNodeStore({ open: () => null, fetchNode })
+function setup(fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>(), start: ListItem = item()) {
+  const store = new LiveNodeStore({ open: () => null, fetchNode, rows: rowStore })
   const busy = ref(false)
-  const current = ref<ListItem | null>(item())
+  // The panel shows the row store's object for the node, as the workspace resolves it.
+  const current = ref<ListItem | null>(rowStore.row(start.id) ?? rowStore.adopt(start, rowStore.mark(), { show: true }))
   scope = effectScope()
   const ticket = scope.run(() => useTicket(current, {
     names: new Map(), onRemoved: () => {}, onCreated: () => {}, onMoved: () => {},
@@ -53,7 +54,7 @@ function setup(fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>()) {
   return { ticket, store, busy, target: current.value!, fetchNode }
 }
 
-beforeEach(() => { editorRevision.clear(); ownWrites.clear(); for (const fn of Object.values(api)) fn.mockClear(); api.getNode.mockReset(); api.updateNode.mockReset() })
+beforeEach(() => { rowStore.clear(); for (const fn of Object.values(api)) fn.mockClear(); api.getNode.mockReset(); api.updateNode.mockReset() })
 afterEach(() => { scope?.stop(); scope = undefined })
 
 describe('useTicket: a read that lands during an edit', () => {
@@ -279,45 +280,132 @@ describe('useTicket: gap refresh retries until one succeeds', () => {
   })
 })
 
-describe('editor revision on the panel and the list load', () => {
-  it('a reloaded row keeps the open draft base, so Save conflicts and then adopts the server revision', async () => {
+describe('the editor base on the panel and the list load', () => {
+  function list() {
+    const local = effectScope()
+    const tickets = local.run(() => useTicketList(ref('p-1'), ref(filtersFromQuery({}))))!
+    return { tickets, stop: () => local.stop() }
+  }
+  const page = (...items: ListItem[]) => ({ items, next_cursor: null, facets: {} })
+  afterEach(() => { api.listNodes.mockReset(); api.listNodes.mockImplementation(async () => ({ items: [], next_cursor: null })) })
+
+  it('a reload leaves the pinned row to the editor, so Save conflicts and then adopts the server revision', async () => {
     api.getNode.mockResolvedValueOnce(node())
-    const { ticket, target } = setup()
+    const { ticket, busy, target } = setup()
     await settle()
-    editorRevision.hold(target.id, target.updated_at)
-    Object.assign(target, { title: 'Remote', updated_at: at(8) })
-    acceptLoadedRow(target)
-    expect(target.title).toBe('Remote')
-    expect(target.updated_at).toBe(at(1))
-    api.updateNode.mockRejectedValueOnce(new APIError(412, 'changed'))
-    api.getNode.mockResolvedValueOnce(node({ title: 'Remote', updated_at: at(8) }))
-    expect(await ticket.setTitle('Mine')).toBe('conflict')
-    expect(api.updateNode).toHaveBeenCalledWith('n1', { title: 'Mine' }, { ifUnmodifiedSince: at(1) })
-    expect(target.updated_at).toBe(at(8))
-    expect(target.title).toBe('Remote')
+    busy.value = true
+    await nextTick()
+    const { tickets, stop } = list()
+    try {
+      api.listNodes.mockResolvedValueOnce(page(item({ title: 'Remote', updated_at: at(8) })))
+      await tickets.load()
+      expect(tickets.rows.value[0]).toBe(target)
+      expect(target.title).toBe('Original')
+      expect(target.updated_at).toBe(at(1))
+      expect(rowStore.waiting('n1')).toBe(true)
+      api.updateNode.mockRejectedValueOnce(new APIError(412, 'changed'))
+      api.getNode.mockResolvedValueOnce(node({ title: 'Remote', updated_at: at(8) }))
+      expect(await ticket.setTitle('Mine')).toBe('conflict')
+      expect(api.updateNode).toHaveBeenCalledWith('n1', { title: 'Mine' }, { ifUnmodifiedSince: at(1) })
+      expect(target.updated_at).toBe(at(8))
+      expect(target.title).toBe('Remote')
+      expect(ticket.base()?.updated_at).toBe(at(8))
+    } finally { stop() }
   })
 
-  it('loading a page, and the next page, keeps an open draft base revision', async () => {
-    editorRevision.hold('n1', at(1))
-    api.listNodes.mockResolvedValueOnce({ items: [item({ title: 'Remote', updated_at: at(8) })], next_cursor: 'c', facets: {} })
-    const projectId = ref('p-1')
-    const filters = ref(filtersFromQuery({}))
-    const local = effectScope()
+  // Review 326d #1: the GET after a 412 lands after a list reload. The editor
+  // rebases onto the store's copy for the id; saving again sends only the
+  // field the viewer changed, over that copy, with its revision.
+  it('a conflict read that lands after a reload rebases the editor: saving again keeps an untouched remote field', async () => {
+    const { tickets, stop } = list()
     try {
-      const list = local.run(() => useTicketList(projectId, filters))!
-      await list.load()
-      expect(list.rows.value[0].title).toBe('Remote')
-      expect(list.rows.value[0].updated_at).toBe(at(1))
-      editorRevision.hold('n2', at(2))
-      api.listNodes.mockResolvedValueOnce({ items: [item({ id: 'n2', key: 'PRJ-2', title: 'Next', updated_at: at(9) })], next_cursor: null, facets: {} })
-      await list.loadMore()
-      const added = list.rows.value.find(row => row.id === 'n2')!
-      expect(added.title).toBe('Next')
-      expect(added.updated_at).toBe(at(2))
-    } finally {
-      local.stop()
-      api.listNodes.mockReset()
-      api.listNodes.mockImplementation(async () => ({ items: [], next_cursor: null }))
-    }
+      api.listNodes.mockResolvedValueOnce(page(item({ fields: { priority: 'low', notes: 'Old' } })))
+      await tickets.load()
+      const row = tickets.rows.value[0]
+      api.getNode.mockResolvedValueOnce(node({ fields: { priority: 'low', notes: 'Old' } }))
+      const { ticket, busy, target } = setup()
+      expect(target).toBe(row)
+      await settle()
+      busy.value = true
+      await nextTick()
+      // Save High: 412, and the read that follows is slow.
+      api.updateNode.mockRejectedValueOnce(new APIError(412, 'changed'))
+      const answer = slow()
+      const saving = ticket.patch({ fields: { priority: 'high' } })
+      await settle()
+      // Meanwhile the list reloads with Mira's newer notes.
+      api.listNodes.mockResolvedValueOnce(page(item({ fields: { priority: 'low', notes: 'Remote' }, updated_at: at(5) })))
+      await tickets.load()
+      expect(tickets.rows.value[0]).toBe(row)
+      answer(node({ fields: { priority: 'low', notes: 'Remote' }, updated_at: at(5) }))
+      expect(await saving).toBe('conflict')
+      expect(row.fields.notes).toBe('Remote')
+      expect(ticket.base()?.updated_at).toBe(at(5))
+      // Saving again: only the priority changes, on top of the newer notes.
+      api.updateNode.mockResolvedValueOnce(node({ fields: { priority: 'high', notes: 'Remote' }, updated_at: at(6) }))
+      expect(await ticket.patch({ fields: { priority: 'high' } })).toBe('ok')
+      expect(api.updateNode).toHaveBeenLastCalledWith('n1', { fields: { priority: 'high', notes: 'Remote' } }, { ifUnmodifiedSince: at(5) })
+      expect(row.fields).toEqual({ priority: 'high', notes: 'Remote' })
+    } finally { stop() }
+  })
+
+  // Review 326d #4: a list load on its way while the panel saves and its own
+  // event arrives lands older; neither the list nor the panel goes back.
+  it('a load on its way while the panel saves does not revert the panel or the list', async () => {
+    const { tickets, stop } = list()
+    try {
+      const medium = { ...item({ fields: { priority: 'medium' } }), priority: 'medium' }
+      api.listNodes.mockResolvedValueOnce(page(medium))
+      await tickets.load()
+      const row = tickets.rows.value[0]
+      api.getNode.mockResolvedValueOnce(node({ fields: { priority: 'medium' } }))
+      const { ticket, store } = setup()
+      await settle()
+      let answerLoad!: (value: unknown) => void
+      api.listNodes.mockImplementationOnce(() => new Promise(resolve => { answerLoad = resolve }))
+      const loading = tickets.load()
+      api.updateNode.mockResolvedValueOnce(node({ fields: { priority: 'high' }, updated_at: at(5) }))
+      await ticket.setPriority('high')
+      expect(row.priority).toBe('high')
+      store.apply(change({ actorId: 'me', fields: ['fields.priority'], revision: at(5) }))
+      await settle()
+      answerLoad(page(medium))
+      await loading
+      expect(tickets.rows.value[0]).toBe(row)
+      expect(row.priority).toBe('high')
+      expect(row.updated_at).toBe(at(5))
+    } finally { stop() }
+  })
+
+  it('a load and the next page never move a pinned row; the editor keeps its base', async () => {
+    const { tickets, stop } = list()
+    try {
+      api.listNodes.mockResolvedValueOnce({ items: [item()], next_cursor: 'c', facets: {} })
+      await tickets.load()
+      const editor = rowStore.edit('n1')!
+      api.listNodes.mockResolvedValueOnce({ items: [item({ title: 'Remote', updated_at: at(8) })], next_cursor: 'c', facets: {} })
+      await tickets.load()
+      expect(tickets.rows.value[0].title).toBe('Original')
+      expect(editor.revision).toBe(at(1))
+      api.listNodes.mockResolvedValueOnce(page(item({ id: 'n2', key: 'PRJ-2', title: 'Next', updated_at: at(9) })))
+      await tickets.loadMore()
+      expect(tickets.rows.value.map(row => row.title)).toEqual(['Original', 'Next'])
+      editor.end()
+      rowStore.show('n1')
+      expect(tickets.rows.value[0].title).toBe('Remote')
+    } finally { stop() }
+  })
+})
+
+describe('useTicket: this tab\'s delete', () => {
+  it('records the revision its answer names, so only that event is its own', async () => {
+    api.getNode.mockResolvedValueOnce(node())
+    const { ticket } = setup()
+    await settle()
+    api.deleteNode.mockResolvedValueOnce({ revision: at(4) })
+    expect(await ticket.remove()).toBe(true)
+    expect(rowStore.isDeleted('n1')).toBe(true)
+    expect(rowStore.isOwn('n1', at(4))).toBe(true)
+    expect(rowStore.isOwn('n1', at(5))).toBe(false)
   })
 })
