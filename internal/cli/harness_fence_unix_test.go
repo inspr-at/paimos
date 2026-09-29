@@ -227,3 +227,86 @@ func TestHarnessReadersUseTheFence(t *testing.T) {
 		}
 	}
 }
+
+// Round 3 review case: names a case- and normalization-insensitive
+// filesystem resolves to a denied name must be denied too, whatever the
+// spelling: long s, Kelvin sign, NFD, fullwidth, zero-width characters.
+func TestHarnessFenceFilesystemEquivalentNames(t *testing.T) {
+	denied := []string{
+		"\u017fecrets", ".\u017fsh", ".\u017f\u017fh", "auth.j\u017fon", "\u212aeychains", "\uff2beychains", "\uff21\uff35\uff34\uff28.json", "\uff53\uff45\uff43\uff52\uff45\uff54\uff53",
+		"KEYCHAINS", "kEyChAiNs", "AUTH.JSON", "CLI-CONFIG.JSON", "Key\u200bchains", "Keycha\u034fins", "Keycha\u200cins",
+		"Keychains\u200d", "Keychains\ufeff", "auth.jso\u200cn", "Cooki\u0301es", "Se\u0301crets",
+	}
+	for _, tc := range fenceKinds {
+		t.Run(tc.name, func(t *testing.T) {
+			home := fenceHome(t)
+			for _, name := range denied {
+				p := fenceWrite(t, filepath.Join(home, name, tc.rel), fenceSentinel)
+				if f, err := openHarnessFile(tc.kind, p); err == nil {
+					f.Close()
+					t.Errorf("opened beneath %q", name)
+				}
+			}
+			// Real aliases on this filesystem: whatever name the kernel maps
+			// onto a denied directory is refused.
+			for _, canonical := range []string{"Keychains", "secrets", ".ssh", "auth.json"} {
+				real := fenceWrite(t, filepath.Join(home, "alias", canonical, tc.rel), fenceSentinel)
+				want, err := os.Stat(real)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, name := range denied {
+					alias := filepath.Join(home, "alias", name, tc.rel)
+					if got, err := os.Stat(alias); err == nil && os.SameFile(want, got) {
+						if f, err := openHarnessFile(tc.kind, alias); err == nil {
+							f.Close()
+							t.Errorf("filesystem alias %q of %q opened", name, canonical)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// Inside the vendor shape every component is plain ASCII, so no Unicode
+// spelling can alias another name there; a non-ASCII home above the anchor
+// stays usable.
+func TestHarnessFenceShapeIsASCII(t *testing.T) {
+	for _, tc := range fenceKinds {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, home := range []string{"caf\u00e9", "cafe\u0301", "\u041aeychains-free"} {
+				p := fenceWrite(t, filepath.Join(fenceHome(t), home, tc.rel), fenceSentinel)
+				f, err := openHarnessFile(tc.kind, p)
+				if err != nil {
+					t.Fatalf("non-ASCII ancestor %q refused: %v", home, err)
+				}
+				f.Close()
+			}
+			dir, base := filepath.Split(tc.rel)
+			for _, bad := range []string{
+				filepath.Join(dir, "\uff21"+base),
+				filepath.Join(dir, strings.ReplaceAll(base, ".", "\uff0e")),
+				filepath.Join(dir, strings.Replace(base, "s", "\u017f", 1)),
+			} {
+				if bad == tc.rel {
+					continue
+				}
+				p := fenceWrite(t, filepath.Join(fenceHome(t), bad), fenceSentinel)
+				if f, err := openHarnessFile(tc.kind, p); err == nil {
+					f.Close()
+					t.Errorf("lookalike vendor name %q opened", bad)
+				}
+			}
+			if strings.Count(tc.rel, "/") >= 3 {
+				parts := strings.Split(tc.rel, "/")
+				parts[len(parts)-2] = "se\u0301ssion"
+				p := fenceWrite(t, filepath.Join(fenceHome(t), filepath.Join(parts...)), fenceSentinel)
+				if f, err := openHarnessFile(tc.kind, p); err == nil {
+					f.Close()
+					t.Errorf("non-ASCII component inside the vendor shape opened: %q", p)
+				}
+			}
+		})
+	}
+}

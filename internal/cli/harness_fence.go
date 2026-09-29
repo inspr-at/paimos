@@ -7,6 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 )
 
 // harnessFileKind names the only vendor files the heartbeat may read from a
@@ -76,33 +80,60 @@ func resolveHarnessPath(kind harnessFileKind, path string) (string, bool) {
 		return "", false
 	}
 	for _, part := range parts {
-		if credentialUsageName(part) || !printablePathPart(part) {
+		if !printablePathPart(part) || credentialUsageName(part) || credentialUsageName(fsFold(part)) {
 			return "", false
 		}
 	}
 	base := parts[len(parts)-1]
-	if !plainFileName(base) {
-		return "", false
-	}
+	depth, ok := 1, true
 	switch kind {
 	case harnessClaudeTranscript:
-		depth, ok := depthBelow(parts, "projects")
-		return abs, ok && depth >= 2 && depth <= 4 && len(base) > len(".jsonl") && strings.HasSuffix(base, ".jsonl")
+		depth, ok = depthBelow(parts, "projects")
+		ok = ok && depth >= 2 && depth <= 4 && len(base) > len(".jsonl") && strings.HasSuffix(base, ".jsonl")
 	case harnessCodexRollout:
-		depth, ok := depthBelow(parts, "sessions")
-		return abs, ok && depth >= 1 && depth <= 5 && strings.HasPrefix(base, "rollout-") && strings.HasSuffix(base, ".jsonl")
+		depth, ok = depthBelow(parts, "sessions")
+		ok = ok && depth >= 1 && depth <= 5 && strings.HasPrefix(base, "rollout-") && strings.HasSuffix(base, ".jsonl")
 	case harnessGrokUsage:
-		depth, ok := depthBelow(parts, "sessions")
-		return abs, ok && depth >= 1 && depth <= 4 && base == "usage.json"
+		depth, ok = depthBelow(parts, "sessions")
+		ok = ok && depth >= 1 && depth <= 4 && base == "usage.json"
 	case harnessCodexIndex:
-		return abs, base == "session_index.jsonl"
+		ok = base == "session_index.jsonl"
 	case harnessCursorUsage:
-		return abs, base == "cursor.jsonl"
+		ok = base == "cursor.jsonl"
 	case harnessAgentStatus:
-		return abs, base == ".agent-status.json"
+		ok = base == ".agent-status.json"
 	default:
+		ok = false
+	}
+	if !ok {
 		return "", false
 	}
+	// Every component the vendor writes below its anchor is plain ASCII
+	// (Claude slugs, dates, URL-encoded Grok paths, ids). Requiring it means
+	// no Unicode spelling can alias a different name inside the allowed shape.
+	for _, part := range parts[len(parts)-depth:] {
+		if !plainFileName(part) {
+			return "", false
+		}
+	}
+	return abs, true
+}
+
+// fsFold maps a path component to a canonical form under which every name a
+// case- and normalization-insensitive filesystem (APFS, HFS+) treats as the
+// same, and more, compare equal: compatibility decomposition, dropping
+// combining marks and default-ignorable format characters, Unicode case
+// folding, then composition. Used only to deny; it may over-match.
+func fsFold(part string) string {
+	decomposed := norm.NFKD.String(part)
+	var b strings.Builder
+	for _, r := range decomposed {
+		if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Variation_Selector, r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return norm.NFKC.String(cases.Fold().String(b.String()))
 }
 
 // openHarnessFile is the only way the heartbeat opens a file that lives in a
@@ -145,7 +176,7 @@ func plainFileName(name string) bool {
 	for i := 0; i < len(name); i++ {
 		c := name[i]
 		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '-', c == '_':
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '-', c == '_', c == '%':
 		default:
 			return false
 		}
