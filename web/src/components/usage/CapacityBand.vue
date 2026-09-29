@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { pct, poolSentence } from '../../lib/capacity'
-import { bandRows, plural, type BandRow } from '../../lib/usageWork'
+import { bandReadings, bandRows, plural, type BandRow } from '../../lib/usageWork'
 import { useAgents } from '../../stores/agents'
 import { useCapacity } from '../../stores/capacity'
 import AppIcon from '../AppIcon.vue'
@@ -18,14 +18,21 @@ const capacity = useCapacity()
 const agents = useAgents()
 const now = computed(() => agents.now)
 const rows = computed(() => bandRows(capacity.pools, now.value))
-const loading = computed(() => !capacity.loaded && capacity.state !== 'error')
+// Both reads decide the band: a failed accounts read is an error, never "No accounts yet".
+const accountsLoaded = computed(() => agents.accountsUpdatedAt !== null)
+const loading = computed(() => (!capacity.loaded && capacity.state !== 'error') || (!accountsLoaded.value && agents.accountsState !== 'error'))
+const failed = computed(() => (capacity.state === 'error' && !capacity.loaded) || (agents.accountsState === 'error' && !accountsLoaded.value))
+const retry = () => Promise.all([agents.refreshAccounts(), capacity.load()])
 
+// A pool figure from some of its accounts says so; it is never the pool's figure.
 function gaugeLabel(row: BandRow) {
   if (row.left === null) return ''
-  const base = `${row.pool.name}${row.accounts > 1 ? `, ${row.accounts} accounts` : ''}: ${Math.round(row.left)}% left`
+  const scope = bandReadings(row) ? `, ${bandReadings(row)}` : row.accounts > 1 ? `, ${row.accounts} accounts` : ''
+  const base = `${row.pool.name}${scope}: ${Math.round(row.left)}% left`
   return row.today ? `${base}, ${row.today.used} of ${row.today.share} used today` : base
 }
-const planText = (row: BandRow) => [row.accounts > 1 ? `${row.accounts} accounts` : '', row.pool.plan].filter(Boolean).join(' · ')
+const planText = (row: BandRow) => [row.accounts > 1 && !bandReadings(row) ? `${row.accounts} accounts` : '', row.pool.plan].filter(Boolean).join(' · ')
+const sentenceCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 function resetTip(row: BandRow) {
   return row.reset ? `${row.reset.kind ? `The ${row.reset.kind} window` : 'It'} resets ${row.reset.full}` : undefined
 }
@@ -42,8 +49,8 @@ function resetTip(row: BandRow) {
     <div v-if="loading" class="rows" aria-hidden="true">
       <div v-for="n in 2" :key="n" class="row skeleton-row"><span class="skeleton" /><span class="skeleton wide" /></div>
     </div>
-    <p v-else-if="capacity.state === 'error' && !capacity.loaded" class="empty">
-      Capacity could not be loaded right now. <button type="button" class="btn sm" @click="capacity.load()">Try again</button>
+    <p v-else-if="failed" class="empty" role="alert">
+      Capacity could not be loaded right now. <button type="button" class="btn sm" @click="retry()">Try again</button>
     </p>
     <p v-else-if="!rows.length" class="empty">
       No accounts yet. Sign in to a harness on a connected computer and it appears here.
@@ -61,7 +68,7 @@ function resetTip(row: BandRow) {
         <span class="reset num" :data-tip="resetTip(row)">
           <template v-if="row.reset">resets <b>{{ row.reset.label }}</b><span v-if="row.reset.window" class="win"> · {{ row.reset.window }}</span></template>
         </span>
-        <p class="sentence" :class="{ ahead: poolSentence(row.pool, now).ahead }"><PlanSentence :sentence="poolSentence(row.pool, now)" /></p>
+        <p class="sentence" :class="{ ahead: poolSentence(row.pool, now).ahead }"><span v-if="bandReadings(row)" class="partial">{{ sentenceCase(bandReadings(row)) }}. </span><PlanSentence :sentence="poolSentence(row.pool, now)" /></p>
       </li>
     </ul>
     <footer v-if="rows.some(r => r.gauge)" class="band-foot"><CapacityLegend /></footer>
@@ -98,6 +105,7 @@ function resetTip(row: BandRow) {
 .sentence :deep(b) { color: var(--ink); font-weight: 600; }
 .sentence :deep(.n) { color: var(--teal-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
 .sentence.ahead :deep(.n) { color: var(--gold-ink); }
+.partial { color: var(--ink); }
 .skeleton-row { display: flex; gap: 18px; }
 .skeleton-row .skeleton { width: 160px; }
 .skeleton-row .skeleton.wide { flex: 1; width: auto; }

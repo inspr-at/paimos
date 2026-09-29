@@ -164,6 +164,12 @@ export function bandRows(pools: PoolView[], now: number): BandRow[] {
   return rows.sort((a, b) => (a.reset ? Date.parse(a.reset.at) : Infinity) - (b.reset ? Date.parse(b.reset.at) : Infinity) || a.pool.name.localeCompare(b.pool.name))
 }
 
+// A pool figure from only some of its accounts names how many; '' when every
+// account (or none) has a reading.
+export function bandReadings(row: Pick<BandRow, 'accounts' | 'measured'>): string {
+  return row.measured > 0 && row.measured < row.accounts ? `readings from ${row.measured} of ${row.accounts} accounts` : ''
+}
+
 function soonestReset(rows: AccountRow[], now: number): BandRow['reset'] {
   let best: { at: string; kind: string } | null = null
   for (const r of rows) for (const w of [r.primary, r.five]) {

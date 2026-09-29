@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildPools, buildRows, type AccountCapacity, type AccountInput } from '../src/lib/capacity.ts'
-import { bandRows, breakdown, coverage, duration, since, sumTokens, tiles, wasteWords } from '../src/lib/usageWork.ts'
+import { bandReadings, bandRows, breakdown, coverage, duration, since, sumTokens, tiles, wasteWords } from '../src/lib/usageWork.ts'
 import { NOW, usageDashboard } from './usage-data.ts'
 
 test('durations read like a clock, never zero for a short session', () => {
@@ -118,4 +118,18 @@ test('capacity band: one pooled row per vendor, what resets first comes first', 
   assert.equal(grok!.left, null)
   assert.equal(grok!.gauge, null)
   assert.equal(grok!.reset, null)
+})
+
+test('capacity band: a pool measured by some of its accounts counts only those', () => {
+  const rows = [
+    capacityRow('a', 'codex', [{ kind: 'weekly', used: 40, reset: '2026-09-30T16:00:00Z' }]),
+    capacityRow('b', 'codex', []),
+  ]
+  const [codex] = bandRows(buildPools(buildRows(rows.map(r => r.input), rows.map(r => r.cap)), NOW), NOW)
+  assert.equal(codex!.accounts, 2)
+  assert.equal(codex!.measured, 1)
+  assert.equal(codex!.left, 60)
+  assert.equal(bandReadings(codex!), 'readings from 1 of 2 accounts')
+  assert.equal(bandReadings({ accounts: 2, measured: 2 }), '')
+  assert.equal(bandReadings({ accounts: 2, measured: 0 }), '')
 })

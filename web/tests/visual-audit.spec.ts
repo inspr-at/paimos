@@ -560,6 +560,8 @@ const shots: Shot[] = [
   { screen: 'usage', state: 'empty-range', setup: async page => { await setupUsage(page, { variant: 'empty' }) }, act: page => openUsage(page, '.quiet-line') },
   { screen: 'usage', state: 'no-capacity', setup: async page => { await setupUsage(page, { variant: 'unreported', noAccounts: true }) }, act: page => openUsage(page) },
   { screen: 'usage', state: 'no-accounts', setup: async page => { await setupUsage(page, { variant: 'unreported', noPools: true }) }, act: page => openUsage(page) },
+  { screen: 'usage', state: 'partial-pool', setup: async page => { await setupUsage(page, { variant: 'unreported', unmeasured: true }) }, act: page => openUsage(page) },
+  { screen: 'usage', state: 'accounts-error', setup: async page => { await setupUsage(page, { variant: 'unreported' }); await page.route(/\/api\/agent-accounts(\?.*)?$/, route => route.fulfill({ status: 503, json: { error: 'temporarily unavailable' } })) }, act: page => openUsage(page) },
   // 7. Agent rules editor
   { screen: 'rules', state: 'empty', setup: page => rulesSetup(page, true), act: page => openRules(page, true) },
   { screen: 'rules', state: 'populated', setup: page => rulesSetup(page, false), act: page => openRules(page, false) },

@@ -137,6 +137,34 @@ test('no accounts yet: one line and the one action that fixes it', async ({ page
   await expect(band(page).locator('.band-foot')).toHaveCount(0)
 })
 
+test('a pool measured by some of its accounts says how many, never one account as the pool', async ({ page }) => {
+  await setupUsage(page, { variant: 'unreported', unmeasured: true })
+  await open(page)
+  const codex = band(page).locator('[data-pool="codex"]')
+  await expect(codex.locator('.plan-name')).toHaveText('Pro · weekly')
+  await expect(codex.locator('.sentence')).toContainText('Readings from 2 of 3 accounts.')
+  await expect(codex.getByRole('meter')).toHaveAttribute('aria-label', /^Codex, readings from 2 of 3 accounts: \d+% left/)
+  // A fully measured pool keeps its plain account count.
+  await expect(band(page).locator('[data-pool="claude"] .sentence')).not.toContainText('Readings from')
+})
+
+test('a failed accounts read is an error with retry, never "No accounts yet"', async ({ page }) => {
+  await setupUsage(page, { variant: 'unreported' })
+  let fail = true
+  await page.route(/\/api\/agent-accounts(\?.*)?$/, async route => {
+    if (fail) return route.fulfill({ status: 503, json: { error: 'temporarily unavailable' } })
+    return route.fallback()
+  })
+  await open(page)
+  await expect(tile(page, 'done')).toContainText('41 tickets done')
+  await expect(band(page).getByRole('alert')).toHaveText('Capacity could not be loaded right now. Try again')
+  await expect(band(page)).not.toContainText('No accounts yet')
+  fail = false
+  await band(page).getByRole('button', { name: 'Try again' }).click()
+  await expect(band(page).locator('.row')).toHaveCount(4)
+  await expect(band(page).getByRole('alert')).toHaveCount(0)
+})
+
 test('a failed read says so in one line and retries', async ({ page }) => {
   await setupUsage(page, { variant: 'unreported' })
   let fail = true
