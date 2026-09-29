@@ -543,3 +543,14 @@ all built-in roles and is never implied by `harness.read` or `nodes.read`.
 The paired computer's tenant-scoped workspace is the hard cwd allowlist; neither
 `AEON_URL` nor local request fields can override the paired origin. Same-user
 processes are not isolated by this feature.
+
+Security regressions live in `internal/agentd/attach_lease_test.go` (injected
+commands, PID/executable/cwd changes, no transcript I/O and offline teardown),
+`internal/agentpairing/attach_lease_test.go` (atomic approval, isolated session
+leases, expiry/revocation, text refusal and cross-tenant RLS/404), and the
+platform-specific process tests (native macOS/Linux kernel identity and exit).
+`cmd/aeon-agentd/paired_serve_test.go` verifies the paired-origin pin against an
+alternate remote and `AEON_URL`. The reporter contract is `harness-session/1.4`:
+existing state values stay intact; optional `watch.process_state` carries a
+confirmed exit. The existing default-off permission and code-attempt-cap tests
+remain in `internal/agentpairing/watch_test.go`.
