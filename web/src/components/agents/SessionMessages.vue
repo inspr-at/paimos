@@ -5,13 +5,14 @@ import type { ProjectMessage } from '../../lib/agents'
 import { useSession } from '../../stores/session'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import { belongsToSession, collapseMessages, historicalSender } from './sessionMessages'
-import { receiptTip, type InboxReceipt } from './sessionChat'
+import type { MessageStatus } from '../../lib/agents'
+import { statusLabel, statusTip } from './sessionChat'
 import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
 
-// newFrom places the "New" divider above that message; receipts carry the hand-off
-// state of the viewer's own messages (AEON-165/267) when the server has one.
-const props = defineProps<{ messages: ProjectMessage[]; sessionId: string; principalId: string; address: string; now: number; canReply: boolean; newFrom?: string; newCount?: number; receipts?: Record<string, InboxReceipt> }>()
+// newFrom places the "New" divider above that message; statuses carry the delivery
+// progress of the viewer's own messages (AEON-280) when the server has one.
+const props = defineProps<{ messages: ProjectMessage[]; sessionId: string; principalId: string; address: string; now: number; canReply: boolean; newFrom?: string; newCount?: number; statuses?: Record<string, MessageStatus> }>()
 const emit = defineEmits<{ reply: [message: ProjectMessage] }>()
 const identity = useSession()
 const me = computed(() => identity.identity?.principal.id ?? '')
@@ -20,7 +21,7 @@ const groups = computed(() => [
   { history: false, items: collapseMessages(props.messages.filter(m => belongsToSession(m, props.sessionId))) },
   { history: true, items: collapseMessages(props.messages.filter(m => !belongsToSession(m, props.sessionId))) },
 ])
-const receiptOf = (m: ProjectMessage) => m.sender_principal_id === me.value ? props.receipts?.[m.id] : undefined
+const statusOf = (m: ProjectMessage) => m.sender_principal_id === me.value ? props.statuses?.[m.id] : undefined
 </script>
 
 <template>
@@ -43,15 +44,16 @@ const receiptOf = (m: ProjectMessage) => m.sender_principal_id === me.value ? pr
                 <span v-if="m.human_resolution_outcome" class="msg-chip">{{ m.human_resolution_outcome === 'resolved' ? 'Resolved' : 'Dismissed' }}</span>
                 <button v-if="!group.history && canReply && m.sender_principal_id === principalId" type="button" class="reply" @click="emit('reply', m)">Reply</button>
                 <time v-if="m.created_at" class="msg-time" :datetime="m.created_at" :data-tip="absoluteTime(m.created_at)">{{ relativeTime(m.created_at, { now }) }}</time>
-                <span v-if="receiptOf(m)" class="tick" :class="receiptOf(m)!.state" role="img" :aria-label="receiptTip(receiptOf(m)!, absoluteTime)" :data-tip="receiptTip(receiptOf(m)!, absoluteTime)">
-                  <AppIcon v-if="receiptOf(m)!.state === 'failed'" name="alert" :size="12" />
-                  <svg v-else width="15" height="12" viewBox="0 0 20 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <span v-if="statusOf(m) && statusOf(m)!.status !== 'not_delivered'" class="delivery" :class="statusOf(m)!.status" :data-status="statusOf(m)!.status" :data-tip="statusTip(statusOf(m)!, absoluteTime)">
+                  <svg width="15" height="12" viewBox="0 0 20 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                     <path d="m1.8 8.6 3 3 6.2-6.8" />
-                    <path v-if="receiptOf(m)!.state === 'handed_off'" d="m9.6 11.4.2.2 6.2-6.8" />
+                    <path v-if="statusOf(m)!.status !== 'sent'" d="m9.6 11.4.2.2 6.2-6.8" />
                   </svg>
+                  <span class="delivery-word">{{ statusLabel(statusOf(m)!) }}</span>
                 </span>
               </p>
               <p class="msg-body">{{ m.body }}</p>
+              <p v-if="statusOf(m)?.status === 'not_delivered'" class="undelivered" data-status="not_delivered" :data-tip="statusTip(statusOf(m)!, absoluteTime)"><AppIcon name="alert" :size="12" />{{ statusLabel(statusOf(m)!) }}</p>
             </li>
           </template>
         </ol>
@@ -75,9 +77,12 @@ summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-rad
 .msg-time { margin-left: auto; font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 .msg-chip { display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px; border-radius: 999px; font-size: 10px; background: var(--chip-bg); color: var(--ink-2); white-space: nowrap; }
 .duplicate { font: 500 11px var(--mono); color: var(--ink-2); }
-.tick { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: -2px; color: var(--ink-3); }
-.tick.handed_off { color: var(--teal-ink); }
-.tick.failed { color: var(--danger); }
+/* Sent → Delivered → Read: one quiet check becomes two, Read turns teal. Words, not colour alone. */
+.delivery { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+.delivery svg { flex: none; }
+.delivery.read { color: var(--teal-ink); }
+.undelivered { display: flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--danger); overflow-wrap: anywhere; }
+.undelivered svg { flex: none; }
 .msg-body { font-size: 13.5px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .reply { margin-left: auto; padding: 0 4px 0 0; border: 0; background: transparent; color: var(--teal-ink); font-size: 11.5px; font-weight: 650; }
 .reply:hover { text-decoration: underline; }

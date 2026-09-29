@@ -258,6 +258,14 @@ func sameSend(m Message, in sendInput) bool {
 }
 
 func enqueueWakes(ctx context.Context, tx pgx.Tx, p tenant.Principal, msg Message) error {
+	return enqueueWakesWith(ctx, tx, p.TenantID, msg, func(c events.Change) error {
+		_, err := events.Append(ctx, tx, p, c)
+		return err
+	})
+}
+
+// enqueueWakesWith lets System-authored notices append through their own path.
+func enqueueWakesWith(ctx context.Context, tx pgx.Tx, tenantID string, msg Message, appendEvent func(events.Change) error) error {
 	if msg.RecipientSessionID != nil {
 		return nil
 	} // Wake targets belong to the principal, not this generation.
@@ -284,10 +292,10 @@ func enqueueWakes(ctx context.Context, tx pgx.Tx, p tenant.Principal, msg Messag
 	rows.Close()
 	for _, targetID := range targets {
 		if _, err := tx.Exec(ctx, `INSERT INTO inbox_wakes (tenant_id, message_id, target_id)
-			VALUES ($1::uuid, $2::uuid, $3::uuid)`, p.TenantID, msg.ID, targetID); err != nil {
+			VALUES ($1::uuid, $2::uuid, $3::uuid)`, tenantID, msg.ID, targetID); err != nil {
 			return mapWrite(err)
 		}
-		if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.wake_queued", After: wakeMeta{
+		if err := appendEvent(events.Change{Type: "inbox.wake_queued", After: wakeMeta{
 			MessageID: msg.ID, TargetID: targetID, EventID: msg.SentEventID,
 		}}); err != nil {
 			return err
@@ -317,27 +325,43 @@ func (m *module) handleAck(w http.ResponseWriter, r *http.Request) {
 func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Message, error) {
 	var out Message
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		current, err := scanMessage(tx.QueryRow(ctx, `SELECT `+messageCols+`
-			FROM inbox_messages WHERE id = $1::uuid FOR UPDATE`, id))
+		// Lock order (AEON-280): the bound session first, then the message.
+		// recipient and session are immutable, so an unlocked read picks the lock.
+		var recipient, sender string
+		var session *string
+		err := tx.QueryRow(ctx, `SELECT recipient_principal_id::text,sender_principal_id::text,recipient_session_id::text FROM inbox_messages WHERE id=$1::uuid`, id).Scan(&recipient, &sender, &session)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
 		if err != nil {
 			return err
 		}
-		if current.RecipientPrincipalID != p.ID {
-			if current.SenderPrincipalID == p.ID {
+		if recipient != p.ID {
+			if sender == p.ID {
 				return errForbidden
 			}
 			return errNotFound
 		}
 		// Keep the generation live through commit, including idempotent retries.
-		if _, err := messageSession(ctx, tx, current.RecipientSessionID, p.ID, ""); err != nil {
+		if _, err := listeningSession(ctx, tx, session, p.ID, ""); err != nil {
+			return err
+		}
+		current, err := scanMessage(tx.QueryRow(ctx, `SELECT `+messageCols+`
+			FROM inbox_messages WHERE id = $1::uuid FOR UPDATE`, id))
+		if err != nil {
 			return err
 		}
 		if current.AckedAt != nil {
 			out = current
 			return nil
+		}
+		// A failed message is terminal: the sender was told it was not
+		// delivered, so it is neither acknowledged nor returned (AEON-280).
+		if failed, err := receiptFailed(ctx, tx, id); err != nil || failed {
+			if err == nil {
+				err = ErrNotDelivered
+			}
+			return err
 		}
 		before := metaFrom(current)
 		updated, err := scanMessage(tx.QueryRow(ctx, `UPDATE inbox_messages
@@ -351,20 +375,15 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 		if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.acked", Before: before, After: after}); err != nil {
 			return err
 		}
-		// A direct recipient acknowledgement is the receiver confirmation.
-		// Compat messages have a separate adapter confirmation path, and a
-		// recipient ack must not claim that adapter has handed the message off.
-		var managed bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM inbox_compat_messages WHERE inbox_message_id = $1::uuid)`, id).Scan(&managed); err != nil {
+		// A direct recipient acknowledgement is the receiver confirmation, for
+		// plain and compat messages, bound or unbound (AEON-280).
+		if err := confirmReceived(ctx, tx, p, id); err != nil {
 			return err
 		}
-		if !managed {
-			if err := advanceReceipt(ctx, tx, p, id, "handed_off", "", "", receiptTarget{}); err != nil {
+		if current.RecipientSessionID != nil {
+			if err := MarkSessionSeen(ctx, tx, *current.RecipientSessionID, SeenAck); err != nil {
 				return err
 			}
-		}
-		if err := ConfirmSessionMessage(ctx, tx, p, id); err != nil {
-			return err
 		}
 		out = updated
 		return nil

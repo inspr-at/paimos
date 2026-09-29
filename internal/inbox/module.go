@@ -50,6 +50,9 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/inbox/targets", m.handleListTargets)
 	mux.HandleFunc("POST /api/inbox/targets", m.handleCreateTarget)
 	mux.HandleFunc("DELETE /api/inbox/targets/{targetId}", m.handleDeleteTarget)
+	mux.HandleFunc("GET /api/inbox/message-status", m.handleMessageStatus)
+	mux.HandleFunc("GET /api/settings/inbox-delivery", m.handleGetDeliverySettings)
+	mux.HandleFunc("PUT /api/settings/inbox-delivery", m.handlePutDeliverySettings)
 }
 
 type httpError struct {

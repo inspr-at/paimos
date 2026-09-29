@@ -52,6 +52,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/reportercontract"
@@ -171,6 +172,11 @@ type Session struct {
 	EtaReportedAt                                  *time.Time        `json:"eta_reported_at,omitempty"`
 	EtaStale                                       bool              `json:"eta_stale,omitempty"`
 	refDigest, leaseDigest, registrationMetaDigest []byte
+
+	// AEON-280: when and how this generation last pulled its inbox. Omitted
+	// until it pulls once; clients derive Listening from the age.
+	InboxSeenAt  *time.Time `json:"inbox_seen_at,omitempty"`
+	InboxSeenVia string     `json:"inbox_seen_via,omitempty"`
 }
 
 type ActivityNote struct {
@@ -296,12 +302,12 @@ func normalizeActivityNote(raw string) (string, bool) {
 	return clean, clean != "" && utf8.RuneCountInString(clean) <= 120
 }
 
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,'')`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia)
 	if progress != nil {
 		value := int(*progress)
 		s.ProgressPct = &value
@@ -989,6 +995,12 @@ func closeGeneration(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Sessi
 		if e = record(ctx, tx, p, s, "control_completed", beforeControl, afterControl); e != nil {
 			return Session{}, e
 		}
+	}
+	// Undelivered messages bound to this generation fail now, loudly (AEON-280).
+	// This runs before the lease release below: message rows are locked before
+	// delivery rows on every inbox path.
+	if err = inbox.FailSessionMessages(ctx, tx, p.TenantID, s.ID); err != nil {
+		return Session{}, err
 	}
 	leaseRows, err := tx.Query(ctx, `SELECT id::text,message_id::text,cursor FROM harness_deliveries WHERE session_id=$1 AND completed_at IS NULL AND released_at IS NULL FOR UPDATE`, s.ID)
 	if err != nil {

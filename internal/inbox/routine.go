@@ -203,6 +203,12 @@ func (d *RoutineDispatcher) DispatchOne(ctx context.Context, tenantID string) (b
 
 func (d *RoutineDispatcher) failRoutine(ctx context.Context, actor tenant.Principal, work *DeliveryWork, reason string, terminal bool) {
 	_ = db.InTenant(ctx, d.m.base.pool, actor.TenantID, func(tx pgx.Tx) error {
+		// Message row first, then the delivery (AEON-280 lock order).
+		if work.Message != nil {
+			if _, err := tx.Exec(ctx, `SELECT 1 FROM inbox_messages WHERE id=$1::uuid FOR UPDATE`, work.Message.ID); err != nil {
+				return err
+			}
+		}
 		var attempts int
 		if err := tx.QueryRow(ctx, `SELECT attempts FROM inbox_message_deliveries WHERE id=$1::uuid AND lease_token=$2::uuid AND state='pending' FOR UPDATE`, work.ID, work.LeaseToken).Scan(&attempts); err != nil {
 			return err
@@ -215,8 +221,16 @@ func (d *RoutineDispatcher) failRoutine(ctx context.Context, actor tenant.Princi
 			return err
 		}
 		if state == "dead" && work.Message != nil {
-			if err := advanceReceipt(ctx, tx, actor, work.Message.ID, "failed", "", reason, receiptTarget{}); err != nil {
+			// Terminal: fail the receipt and tell the sender (AEON-280). A legacy
+			// message without a deadline fails its receipt as before, silently.
+			failed, err := FailMessage(ctx, tx, work.Message.ID, reason)
+			if err != nil {
 				return err
+			}
+			if !failed {
+				if err := advanceReceipt(ctx, tx, actor, work.Message.ID, "failed", "", reason, receiptTarget{}); err != nil {
+					return err
+				}
 			}
 		}
 		_, err := events.Append(ctx, tx, actor, events.Change{Type: "inbox.delivery_attempt_failed", After: map[string]any{"delivery_id": work.ID, "reason": reason, "state": state}})

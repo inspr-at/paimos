@@ -1,0 +1,5 @@
+{
+  "session_id": "vendor-session-not-aeon-id",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Continue the task."
+}

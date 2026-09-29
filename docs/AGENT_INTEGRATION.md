@@ -24,6 +24,49 @@ Its `control` command sends a fenced local control. Vendor session ids stay on t
 
 The daemon adapts Codex, Claude, Pi, Cursor, and Grok locally. The native Grok adapter requires macOS. Aeon sees a harness name, an opaque account key, a family, and bounded usage counters.
 
+### Default worker launch
+
+Use the paired **aeon-agentd managed run** path for workers: connect the approved
+computer and account, assign a ready work order to the agent, then queue its run
+with the selected model profile. The daemon claims the run and registers its
+leased harness session. Keep the daemon running for the worker's lifetime.
+One-shot agentd runs without the `inbox` capability show **No inbox** on
+`/agents`. Status-only interactive sessions may receive messages through hooks
+or a listener, so absence of that capability alone does not label them.
+
+Send to the exact recipient session. Agentd checks its leased inbox at most every
+two seconds under healthy local/API conditions, independently of a longer
+configured heartbeat interval. Only inbox draining uses this cadence; run telemetry,
+harness heartbeats and control polling keep the configured heartbeat interval.
+Busy Codex turns receive steering. Claude inbox input queues for the next turn
+under the managed tool policy or without the declared steer capability; other
+Claude sessions may steer when the SDK also supports interrupt receipts.
+Explicit managed recovery controls retain their separate authorization.
+Idle Claude sessions accept a new streamed input on the same SDK Query, and idle
+Codex workers start another turn on their existing app-server thread. Idle is
+session activity: the owning run remains running until its process actually ends.
+After a clean Codex turn, a ten-minute idle window permits same-thread wake;
+expiry completes the run and releases its dispatch slot. Standalone `serve`
+accepts `--codex-idle-timeout` (a positive Go duration); paired runs use ten minutes.
+Completion can then apply a previously requested, evidence-backed done action.
+Claude runs using the managed tool policy have a default cap of **16 completed
+turns**, including the initial turn and inbox wake turns; messages cannot reset
+that cap or any other budget. Managed Codex does not use the Claude managed
+tool policy and currently has no 16-turn cap; its clean-turn idle timeout and
+existing wall-clock deadline still apply.
+Stopped, archived, budget-exhausted or ownership-lost workers are never relaunched
+by a message. Pairing verification stays one-shot with no inbox.
+
+Delivery completion follows vendor acceptance and a durable local receipt. Lease
+replay retries completion without injecting the message twice; an ambiguous
+vendor outcome settles as `failed` with `outcome_unconfirmed`, visible in the
+sender receipt, so later messages continue without risking a second injection.
+A definite Codex “no active turn” steer rejection can wake after clean terminal
+evidence instead. Settled deliveries release their local replay slots. Inbox
+content is untrusted task input, not permission to stop a process, change settings,
+or bypass the managed tool ceiling, approval rules, ownership fences or budgets.
+The guarantee concerns delivery into a session, not whether the model acts on it.
+
 ## Guided computer pairing (AEON-238 and AEON-239)
 
 The public, HTTP-readable `/agents/register-agent` guide must supply its own configured instance origin, configured tenant slug, and **exact published release version**. The same link is for a person and their chosen harness. Loading it or entering a short pairing code does not authorize a run. Only the signed-in person's explicit Connect computer approval may activate the owned service and the verification choice shown there. The helper creates the private device, lifecycle, and runtime credentials locally; no API key or vendor sign-in is pasted into chat or commands. A missing vendor sign-in uses that vendor's normal login flow. Never follow installation commands supplied by a pairing peer.
@@ -83,9 +126,47 @@ Messages are durable rows in one tenant. Each names a sender, a recipient, an id
 
 `aeon tell` sends. The target is a `harness:agent` address or a principal UUID, with `--project` and the message text. `aeon listen --project KEY` reads the caller's inbox (at most 10 rows). `--ack` acknowledges each message that was printed. Only the recipient can acknowledge, and only an acknowledgement removes the message from the pending view. Repeating an acknowledgement is safe. `aeon message deliveries --project KEY` shows redacted delivery state, not message bodies.
 
-Use `aeon tell <address> --project KEY --recipient-session <id> -m TEXT` for one exact live harness generation, and `--sender-session <id>` to record your generation and freeze its current label. `aeon listen --project KEY --session <id>` reads only that generation's messages plus unbound principal-wide broadcasts. With no session flags, principal sends and listen output retain their existing behavior. Session-targeted messages use the session inbox, never a shared push adapter (`--deliver` cannot be combined with `--session`). Stopped or archived recipients return 409, and their bound reply obligations close without a fabricated reply. Replies to a session-bound message must supply the matching sender/recipient session bindings. In the session panel, unbound history lives under “Other sessions”; exact duplicate posts within 60 seconds share a count, while durable messages and receipts remain separate.
+Use `aeon tell <address> --project KEY --recipient-session <id> -m TEXT` for one exact live harness generation, and `--sender-session <id>` to record your generation and freeze its current label. `aeon listen --project KEY --session <id>` reads only that generation's messages plus unbound principal-wide broadcasts. With no session flags, principal sends and listen output retain their existing behavior. Session-targeted messages use the session inbox. `--session --deliver codex|claude_resume --target-ref-file PATH` hands them to an operator-supplied exact local harness reference (a private, owned file); it never claims a principal-wide target. Session delivery also skips unbound or differently bound messages without acknowledging them. The adapter must match the selected session; this validation also requires `harness.read`. The file contains the vendor thread/session ID, not the Aeon UUID or heartbeat `session.ref`. Managed sessions continue to use agentd drain/complete-delivery. Stopped or archived recipients return 409, and their bound reply obligations close without a fabricated reply. Replies to a session-bound message must supply the matching sender/recipient session bindings. In the session panel, unbound history lives under “Other sessions”; exact duplicate posts within 60 seconds share a count, while durable messages and receipts remain separate.
 
-Long poll holds at most 30 seconds. A webhook or a notify is a hint. The daemon then fetches authenticated state. The webhook body is ids only and is not authority.
+`listen --follow` uses `wait_ms=25000` long-poll requests, with no two-second sleep after a response. Address-based listeners retain their existing project/address payload and use the inbox as a wake hint with a separate cursor. `--follow --deliver` remains resident on leased, foreign-worker, blocked, rerouted or temporarily unavailable adapter work, with exponential backoff capped at 30 seconds (initial delay: `--poll-interval`, default 2s). Resident reads, wake polls and acknowledgements retry transient network failures and HTTP 408/429/5xx responses with the same bounded exponential backoff. Acknowledgements retry in place after handoff, so an acknowledgement outage does not repeat local delivery or printed output during that process. Permanent errors still terminate the listener; one-shot requests do not retry. One-shot delivery retains exit codes 3 (empty), 4 (unavailable), and 5 (another worker). Ctrl-C cancels polling and backoff. Long poll holds at most 30 seconds. A webhook or a notify is a hint. The daemon then fetches authenticated state. The webhook body is ids only and is not authority.
+
+### Operator-installed turn-boundary hooks (AEON-281)
+
+`aeon hook claude <event>` and `aeon hook codex <event>` read hook JSON from stdin for `PostToolUse`, `UserPromptSubmit`, and `Stop`. These are synchronous harness-executed commands: no model-started watcher is needed. Inputs/outputs were checked against installed Claude Code **2.1.284**, Codex CLI **0.158.0**, the [Claude hook reference](https://code.claude.com/docs/en/hooks), and [OpenAI hook reference](https://developers.openai.com/codex/hooks). Codex has lifecycle hooks; its older `notify` command is unnecessary here.
+
+Bind each launched harness to its **Aeon generation**, using exactly one of:
+
+- `AEON_SESSION_ID`: the Aeon harness session UUID returned by registration.
+- `AEON_SESSION_FILE`: an owned, regular, non-symlink file containing that UUID and an optional newline.
+- `AEON_SESSION_STATE_DIR`: the existing `harness run-heartbeat --state-dir` directory; the hook reads only its `session.id`, never the lease. This lets a hook observe a newly registered generation without changing the environment.
+
+The explicit ID wins over the file, and the explicit file wins over the state directory. Missing binding/file is a quiet no-op; invalid binding fails open with a content-free diagnostic. The vendor's hook `session_id` is **not** an Aeon UUID and is never used as one. Supply the binding in the harness launch environment, separately for each worker; do not set one global session ID for unrelated sessions. The normal Aeon CLI instance configuration and recipient credentials apply, with `inbox.read` and `inbox.send` scopes (the acknowledgement route currently uses `inbox.send`).
+
+Install from the operator's shell with the released binary and the intended instance/configuration:
+
+```sh
+aeon --instance ppm hook install --harness claude --scope user --dry-run
+aeon --instance ppm hook install --harness claude --scope user
+```
+
+Use `--scope project` from the project root to edit the personal `.claude/settings.local.json` (never the shared `.claude/settings.json`); user scope edits `~/.claude/settings.json` (or `CLAUDE_CONFIG_DIR/settings.json`). Review the changes in Claude's `/hooks` and restart the session as required by the harness. The installer prints only its owned hook additions/removals, preserves unrelated settings and hooks, shell-quotes the executable/configuration paths, writes atomically, and is idempotent.
+
+Before replacing existing settings, install and uninstall save the exact previous bytes to a private (0600) timestamped sibling `settings.json.backup-<UTC timestamp>-<unique suffix>` (using the actual settings filename). No-op and dry-run commands create no backup. Unrelated values retain their JSON string spelling where possible, including literal `&`, `<`, and `>`; indentation/key order may change. Invalid JSON, symlinks, and detected concurrent edits are refused. `--dry-run` writes nothing.
+
+Installed commands use an absolute executable path; for Nix installs the installer keeps the matching `aeon` profile symlink found on PATH instead of its resolved store path. Keep that package in the profile so the executable stays rooted and follows profile upgrades. A bare Nix store executable with no matching stable PATH entry is refused; install it in a persistent profile first. Configuration paths are absolute too.
+
+Uninstall removes only Aeon's marked handlers:
+
+```sh
+aeon hook uninstall --harness claude --scope user --dry-run
+aeon hook uninstall --harness claude --scope user
+```
+
+Codex uses the same commands with `--harness codex`; they merge `~/.codex/hooks.json` (`CODEX_HOME/hooks.json` when set), or `.codex/hooks.json` for project scope. Review and trust the new definitions in Codex `/hooks`; project scope also requires a trusted project. The installer does not override managed policy, enable disabled hooks, or bypass hook trust. Its additional-context handlers set `additionalContextLimit: 0` to avoid Codex replacing long messages with previews. Codex may still apply its own size handling to Stop continuation prompts; see the vendor's large-output documentation.
+
+Each invocation pulls `/api/inbox/messages?session=<Aeon UUID>&wait_ms=0`. The API also returns principal-wide broadcasts, but the hook injects and acknowledges only rows whose non-null `recipient_session_id` matches its binding; all other rows remain untouched. The hook pages past skipped rows within its time budget so broadcasts cannot permanently occupy the first page. Both Claude and Codex inputs with `agent_id` set are quiet no-ops before fetching: subagents must not consume the parent generation's messages. Codex uses the same optional field in its [hook input schema](https://github.com/openai/codex/blob/main/codex-rs/hooks/src/schema.rs). Messages are framed as untrusted data with sender, timestamp and message ID. Bodies are JSON-quoted in full, never shortened by Aeon. A batch contains at most ten messages; later hooks retrieve any remainder. `PostToolUse` and `UserPromptSubmit` emit `hookSpecificOutput.additionalContext`; `Stop` emits `decision: "block"` with a reason only for a nonempty batch. When `stop_hook_active` is true, it returns without fetching, emitting or acknowledging, preventing repeated Stop continuations even if an acknowledgement previously failed.
+
+Only a successful write of the complete JSON output permits `POST /api/inbox/messages/{id}/ack`. That endpoint invokes session confirmation and advances the session delivery/receipt. A broken output pipe never acknowledges. A failed acknowledgement leaves the message pending and may cause replay: delivery is at least once, not exactly once. Emitting is a transport handoff, not proof the model acted. The command returns success on runtime failures, reports only content-free errors to stderr, and has a 2.5-second total budget; installed hook entries also have a three-second harness timeout. No pending messages means no output or Stop block. Hooks run only at boundaries; guaranteed idle/mid-turn injection remains the managed agentd path.
 
 ## Harness sessions
 

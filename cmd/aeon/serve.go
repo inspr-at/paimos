@@ -228,6 +228,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	}
 	// R2: webhook wake for inbox deliveries.
 	go inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(ctx)
+	// AEON-280: delivery deadlines and the attempt cap; one runner across
+	// processes through an advisory lock.
+	go inbox.NewSweeper(pool).Run(ctx)
 	api := &httpapi.Server{
 		Pool:  pool,
 		Brand: &productBrand,

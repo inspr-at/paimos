@@ -2435,11 +2435,12 @@ paths:
     get:
       operationId: listenInbox
       summary: List or long-poll the caller's durable inbox
-      description: Only the caller's principal is readable. Cursor is an exclusive sent event ID; wait_ms=0 returns immediately. Expired messages are omitted. Unacked messages may be delivered again.
+      description: Only the caller's principal is readable. Cursor is an exclusive sent event ID; wait_ms=0 returns immediately. Expired messages are omitted. Unacked messages may be delivered again. Returned messages count as delivered to their sender (AEON-280). With session, the pull records that generation as listening (hook for wait_ms=0, long_poll when waiting).
       security: *auth
       parameters:
         - {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}
         - {name: session, in: query, description: 'Only this active session of the caller plus unbound principal broadcasts. Omit to retain the principal inbox.', schema: {type: string, format: uuid}}
+        - {name: exact_session, in: query, description: 'AEON-280. With session, true returns only messages bound to that session and leaves out unbound principal broadcasts (for turn-boundary hooks). Requires session; omitted or false keeps the default.', schema: {type: boolean, default: false}}
         - {name: wait_ms, in: query, schema: {type: integer, minimum: 0, maximum: 30000, default: 0}}
         - {$ref: '#/components/parameters/Limit'}
       responses:
@@ -2462,14 +2463,38 @@ paths:
     get:
       operationId: streamInbox
       summary: SSE of messages addressed to the caller
-      description: Last-Event-ID is the sent event ID. Replay durable messages after that ID before listening; NOTIFY is only a wake hint. Each message event has its sent event ID as id and InboxMessage JSON as data. Heartbeats carry no message.
+      description: Last-Event-ID is the sent event ID. Replay durable messages after that ID before listening; NOTIFY is only a wake hint. Each message event has its sent event ID as id and InboxMessage JSON as data. Heartbeats carry no message. With session, the stream also carries messages bound to that active generation (with their session fields) and records the session as listening via stream on connect, on every wake and on every keepalive; a stopped session answers 409 or ends the stream.
       security: *auth
       parameters:
         - {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: session, in: query, description: 'Only this active session of the caller plus unbound principal broadcasts. Omit to retain the principal inbox.', schema: {type: string, format: uuid}}
+        - {name: exact_session, in: query, description: 'AEON-280. With session, true returns only messages bound to that session and leaves out unbound principal broadcasts (for turn-boundary hooks). Requires session; omitted or false keeps the default.', schema: {type: boolean, default: false}}
         - {name: Last-Event-ID, in: header, schema: {type: integer, format: int64, minimum: 0}}
       responses:
         '200': {description: Inbox event stream, content: {text/event-stream: {schema: {type: string}}}}
         '400': {$ref: '#/components/responses/Error'}
+        '409': {description: 'session_ended — This session has ended.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
+  /inbox/message-status:
+    get:
+      operationId: getInboxMessageStatus
+      summary: Delivery progress of the caller's own sent messages
+      description: 'AEON-280. Sender only, same permission as the receipt (inbox.receipt). Unknown ids, other senders'' messages and messages without a receipt are omitted, never an error. sent = accepted; delivered = handed to the recipient by a pull, drain, stream or adapter claim; read = the recipient confirmed it (receipt handed_off); not_delivered = the receipt failed, with reason deadline, attempts, session_ended, no_listener or an adapter reason. Live changes arrive on /events/stream as inbox.message_fetched, inbox.receipt_handed_off, inbox.receipt_failed and inbox.delivery_failed.'
+      security: *auth
+      parameters:
+        - {name: ids, in: query, required: true, description: 'Comma-separated message ids, at most 100.', schema: {type: string}}
+      responses:
+        '200':
+          description: Status per visible message, in send order
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/InboxMessageStatus'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
   /inbox/messages/{messageId}/receipt:
     get:
       operationId: getInboxReceipt
@@ -2485,14 +2510,14 @@ paths:
     post:
       operationId: ackInboxMessage
       summary: Acknowledge a message addressed to the caller
-      description: Idempotent for the same recipient. Acknowledgement and inbox.acked event commit together.
+      description: Idempotent for the same recipient. Acknowledgement and inbox.acked event commit together. A message whose delivery already failed (AEON-280) answers 409 not_delivered and is neither acknowledged nor returned.
       security: *auth
       parameters: [{name: messageId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
         '200': {description: Acknowledged message, content: {application/json: {schema: {$ref: '#/components/schemas/InboxMessage'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
-        '409': {description: 'session_ended — This session has ended.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
+        '409': {description: 'session_ended — This session has ended. not_delivered — the delivery already failed.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
   /inbox/targets:
     get:
       operationId: listInboxTargets
@@ -2616,6 +2641,33 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+    post:
+      security: *auth
+      operationId: completeHarnessDelivery
+      description: Settle an exact worker lease. Omitted outcome means handed_off; failed requires a bounded reason and advances the sender receipt without reinjecting uncertain input.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [delivery_id, cursor]
+              properties:
+                delivery_id: {type: string, format: uuid}
+                cursor: {type: integer, minimum: 1}
+                effective_level: {type: string, enum: [simple], default: simple}
+                outcome: {type: string, enum: [handed_off, failed], default: handed_off}
+                failure_reason: {type: string, enum: [outcome_unconfirmed, child_unavailable]}
+      responses:
+        '200': {description: Exact leased delivery settled idempotently}
+        '400': {description: Invalid settlement}
+        '409': {description: Lease cursor mismatch or released lease}
+        '410': {description: Archived generation}
   /projects/{projectId}/harness-sessions/{sessionId}/managed-controls:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2983,6 +3035,19 @@ paths:
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /settings/inbox-delivery:
+    get:
+      operationId: getInboxDeliverySettings
+      description: 'AEON-280. Deadlines and the adapter attempt cap for inbox delivery; defaults when the workspace has not chosen (300, 1800, 8). A message to an agent not confirmed by its deadline fails with a system notice to its sender. Requires settings.read.'
+      responses:
+        '200': {description: Delivery settings, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
+    put:
+      operationId: putInboxDeliverySettings
+      description: Requires settings.manage. Applies to messages sent afterwards; queued messages keep the deadline they were accepted with.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
+      responses:
+        '200': {description: Saved settings, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
+        '400': {$ref: '#/components/responses/Error'}
   /settings/eta-interval:
     get:
       operationId: getEtaInterval
@@ -5191,7 +5256,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.2']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.3']}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
@@ -7684,6 +7749,25 @@ components:
         state: {type: string, enum: [queued, handed_off, failed]}
         handed_off_at: {type: [string, 'null'], format: date-time, description: 'RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms'}
         failure_reason: {type: string}
+    InboxMessageStatus:
+      type: object
+      additionalProperties: false
+      required: [message_id, status, delivered_at, read_at, deliver_by]
+      properties:
+        message_id: {type: string, format: uuid}
+        status: {type: string, enum: [sent, delivered, read, not_delivered]}
+        reason: {type: string, description: 'Present only for not_delivered: deadline, attempts, session_ended, no_listener or an adapter reason.'}
+        delivered_at: {type: [string, 'null'], format: date-time, description: First hand-over to the recipient.}
+        read_at: {type: [string, 'null'], format: date-time, description: Receiver confirmation (receipt handed_off_at).}
+        deliver_by: {type: [string, 'null'], format: date-time, description: The deadline; null for messages to people and for messages sent before deadlines existed.}
+    InboxDeliverySettings:
+      type: object
+      additionalProperties: false
+      required: [session_deadline_seconds, unbound_deadline_seconds, max_attempts]
+      properties:
+        session_deadline_seconds: {type: integer, minimum: 60, maximum: 86400, description: Deadline for a message bound to one session. Default 300.}
+        unbound_deadline_seconds: {type: integer, minimum: 60, maximum: 604800, description: 'Deadline for any other message to an agent (adapter target, blocked or principal inbox). Default 1800.'}
+        max_attempts: {type: integer, minimum: 1, maximum: 50, description: Adapter claims before a delivery fails with reason attempts. Default 8.}
     InboxMessage:
       allOf:
         - {$ref: '#/components/schemas/InboxSend'}
@@ -8118,6 +8202,8 @@ components:
         progress_pct: {type: integer, minimum: 0, maximum: 100, description: Percent done. Zero is reported; omission means unknown.}
         eta_reported_at: {type: string, format: date-time, description: When the session last sent an estimate.}
         eta_stale: {type: boolean, description: True when the last estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
+        inbox_seen_at: {type: string, format: date-time, description: 'AEON-280. Last time this generation pulled its inbox (a session pull, drain, stream or ack). Omitted until it first pulls. Clients derive Listening from its age.'}
+        inbox_seen_via: {type: string, enum: [hook, drain, long_poll, stream, ack], description: 'How it last pulled: hook = one-shot session pull, long_poll = waiting pull, drain = managed harness drain, stream = inbox SSE, ack = acknowledgement. Omitted with inbox_seen_at.'}
     TicketEta:
       type: object
       description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent.

@@ -1,0 +1,11 @@
+{
+  "session_id": "vendor-session-not-aeon-id",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "true"
+  },
+  "tool_response": {
+    "stdout": ""
+  }
+}

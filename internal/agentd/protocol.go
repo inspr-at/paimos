@@ -324,7 +324,21 @@ func (p *wireProcess) request(ctx context.Context, protocol, method string, para
 		Success *bool           `json:"success"`
 		Data    json.RawMessage `json:"data"`
 	}
-	if json.Unmarshal(raw, &response) != nil || len(response.Error) > 0 && string(response.Error) != "null" {
+	if json.Unmarshal(raw, &response) != nil {
+		return nil, errors.New("adapter protocol rejected request")
+	}
+	if len(response.Error) > 0 && string(response.Error) != "null" {
+		// Only this explicit rejection proves steer did not inject input.
+		// Never expose raw vendor errors or retry transport/malformed responses.
+		var rejection struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		}
+		if method == "turn/steer" && json.Unmarshal(response.Error, &rejection) == nil &&
+			(rejection.Code == -32600 || rejection.Code == -32602) &&
+			(rejection.Message == "no active turn" || strings.HasPrefix(rejection.Message, "no active turn to steer")) {
+			return nil, errCodexNoActiveTurn
+		}
 		return nil, errors.New("adapter protocol rejected request")
 	}
 	if protocol == "pi" {
