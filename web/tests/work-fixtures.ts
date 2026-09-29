@@ -2,7 +2,7 @@
 // A small in-memory list API for the Projects and project list pages. It applies
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
-import type { Page } from '@playwright/test'
+import type { Page, Route } from '@playwright/test'
 import { deriveAgentState, normalizeAgentState } from '../src/lib/agentSignals.ts'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
 import { compareServerLead, leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
@@ -51,6 +51,9 @@ export interface MockOptions {
   liveStatus?: number
   // The live answer names more sessions than it lists (AEON-233).
   liveTruncated?: boolean
+  // An answer the test holds back (a slow network, AEON-326): computed when
+  // the request arrives (writes apply then), sent once until settles.
+  hold?: (request: { path: string; method: string; query: URLSearchParams }) => { until: Promise<unknown>; computed?: () => void } | undefined
 }
 
 const STATE_ORDER = ['open', 'new', 'backlog', 'blocked', 'in_progress', 'active', 'qa', 'accepted', 'delivered', 'done', 'cancelled', 'archived']
@@ -244,8 +247,10 @@ function completionRefusal(node: MockNode, nextState: string, fields: Record<str
 export async function mockWork(page: Page, data: Fixtures, options: MockOptions = {}) {
   const calls: Call[] = []
   const started = Date.now()
-  await page.route('**/api/**', async route => {
-    const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), query = url.searchParams
+  await page.route('**/api/**', async arrived => {
+    const request = arrived.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), query = url.searchParams
+    const held = options.hold?.({ path, method, query })
+    const route = held ? heldRoute(arrived, held) : arrived
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = request.postData() }
     calls.push({ path, method, query, body, headers: request.headers() })
@@ -633,6 +638,17 @@ function loopPath(relations: { source_node_id: string; target_node_id: string; t
     frontier = next
   }
   return null
+}
+
+// A route whose answer waits: computed now, fulfilled once the hold settles.
+function heldRoute(route: Route, held: { until: Promise<unknown>; computed?: () => void }): Route {
+  return {
+    request: () => route.request(),
+    fulfill: async (answer: Parameters<Route['fulfill']>[0]) => { held.computed?.(); await held.until; return route.fulfill(answer) },
+    fallback: (options?: Parameters<Route['fallback']>[0]) => route.fallback(options),
+    continue: (options?: Parameters<Route['continue']>[0]) => route.continue(options),
+    abort: (code?: string) => route.abort(code),
+  } as unknown as Route
 }
 
 export function watchErrors(page: Page) {

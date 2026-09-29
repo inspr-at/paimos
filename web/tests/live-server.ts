@@ -45,10 +45,13 @@ export function liveServer(data: Fixtures, actor = mira) {
     }
     for (const [id, node] of now) if (!seen.has(id)) { record('node.created', null, node); seen.set(id, structuredClone(node)) }
   }
-  async function install(page: Page, name: string) {
+  // first: the page's first stream request waits for it (the stream connects late).
+  async function install(page: Page, name: string, options: { first?: Promise<unknown> } = {}) {
     let lastEventId: number | null = null
+    let waitFirst = options.first
     // Registered after mockWork, so it answers first.
-    await page.route('**/api/events/stream**', route => {
+    await page.route('**/api/events/stream**', async route => {
+      if (waitFirst) { const wait = waitFirst; waitFirst = undefined; await wait }
       const query = new URL(route.request().url()).searchParams
       scan()
       const numeric = query.get('after') !== 'latest' ? Number(query.get('after')) : null
@@ -65,6 +68,20 @@ export function liveServer(data: Fixtures, actor = mira) {
     })
   }
   return { install, requests, hold: (name: string, on = true) => { if (on) held.add(name); else held.delete(name) } }
+}
+
+// One signed-in page on url, with the live stream. hold: answers it holds back
+// (mockWork); first: its first stream request waits for this.
+export async function openOne(browser: Browser, url: string, settings: { hold?: MockOptions['hold']; first?: Promise<unknown>; data?: Fixtures } = {}) {
+  const data = settings.data ?? fixtures()
+  const live = liveServer(data)
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  const calls = await mockWork(page, data, { hold: settings.hold })
+  await live.install(page, 'a', { first: settings.first })
+  const errors = watchErrors(page)
+  await page.goto(url)
+  return { data, live, page, calls, errors, close: () => context.close() }
 }
 
 type Viewport = { width: number; height: number }

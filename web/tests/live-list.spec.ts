@@ -7,7 +7,7 @@
 // with Review, never as overwrites.
 import { expect, test, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
-import { openBoth } from './live-server'
+import { openBoth, openOne } from './live-server'
 import { me } from './work-fixtures'
 
 const shots = process.env.LIVE_SHOTS_DIR
@@ -333,4 +333,33 @@ test('screenshots of the waiting states', async ({ browser }) => {
       await a.screenshot({ path: `${shots}/list-applied__1600__${colorScheme}.png` })
     } finally { await close() }
   }
+})
+
+// Review 326f #1: the first load is answered, then a ticket is deleted, then
+// the stream connects (after that deletion, so it never says so). The old
+// answer is read again before its rows show.
+test('a first load answered before a deletion the stream never delivers is read again', async ({ browser }) => {
+  let openList!: () => void, openStream!: () => void
+  const list = new Promise<void>(resolve => { openList = resolve }), stream = new Promise<void>(resolve => { openStream = resolve })
+  let computed = false, first = true
+  const { page, data, live, errors, close } = await openOne(browser, '/p/PHAROS/tickets', {
+    first: stream,
+    hold: ({ path, method, query }) => {
+      if (!first || path !== '/api/nodes' || method !== 'GET' || query.get('limit') !== '200' || !query.has('facets') || query.has('ids')) return undefined
+      first = false
+      return { until: list, computed: () => { computed = true } }
+    },
+  })
+  try {
+    await expect.poll(() => computed).toBe(true)
+    data.nodes.splice(data.nodes.findIndex(node => node.id === 'n-4'), 1)
+    openStream()
+    // The first stream answer was taken in: the browser reconnects after it.
+    await expect.poll(() => live.requests.length).toBeGreaterThan(1)
+    openList()
+    await expect(page.locator('#row-n-1')).toBeVisible()
+    await expect(page.locator('#row-n-2')).toBeVisible()
+    await expect(page.locator('#row-n-4')).toHaveCount(0)
+    expect(errors).toEqual([])
+  } finally { await close() }
 })

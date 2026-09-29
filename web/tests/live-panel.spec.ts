@@ -4,7 +4,7 @@
 // brief tint and a polite announcement, a change during an edit waits and
 // meets the save as a conflict, and a deletion shows the ticket as gone.
 import { expect, test, type Page } from '@playwright/test'
-import { openBoth } from './live-server'
+import { openBoth, openOne } from './live-server'
 
 const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
@@ -141,6 +141,77 @@ test('a ticket deleted and restored elsewhere is here again', async ({ browser }
     await expect(wsB.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
     await expect(wsB.getByRole('alert')).toHaveCount(0)
     await expect(wsB.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
+    expect(errors).toEqual([])
+  } finally { await close() }
+})
+
+// Review 326f #2: the DELETE answer lands after the stream delivered the
+// deletion and a newer restore. The ticket stays open and listed.
+test('a DELETE answer that lands after the ticket was restored elsewhere keeps it open and listed', async ({ browser }) => {
+  let release!: () => void
+  const answer = new Promise<void>(resolve => { release = resolve })
+  let deleted = false
+  const { page, data, errors, close } = await openOne(browser, '/p/PHAROS/PHAROS-14', {
+    hold: ({ path, method }) => method === 'DELETE' && path === '/api/nodes/n-4' ? { until: answer, computed: () => { deleted = true } } : undefined,
+  })
+  try {
+    const ws = panel(page)
+    const title = ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })
+    await expect(title).toBeVisible()
+    const copy = structuredClone(data.nodes.find(n => n.id === 'n-4')!)
+    await ws.getByRole('button', { name: 'More actions' }).click()
+    await page.getByRole('menuitem', { name: 'Delete ticket…' }).click()
+    await page.getByRole('dialog', { name: 'Delete PHAROS-14?' }).getByRole('button', { name: 'Delete ticket' }).click()
+    await expect.poll(() => deleted).toBe(true)
+    await expect(ws.getByRole('alert')).toContainText('PHAROS-14 is no longer here')
+    // Restored elsewhere (undo) with a newer revision, before the answer lands.
+    data.nodes.push({ ...copy, updated_at: new Date(Date.parse(copy.updated_at) + 5 * 60_000).toISOString() })
+    await expect(ws.getByRole('alert')).toHaveCount(0)
+    await expect(title).toBeVisible()
+    const landed = page.waitForResponse(response => response.request().method() === 'DELETE')
+    release()
+    await landed
+    await page.waitForTimeout(300)
+    await expect(page).toHaveURL('/p/PHAROS/PHAROS-14')
+    await expect(title).toBeVisible()
+    await expect(page.locator('#row-n-4')).toHaveCount(1)
+    await expect(page.getByText('PHAROS-14 was deleted and has been restored since')).toBeVisible()
+    expect(errors).toEqual([])
+  } finally { await close() }
+})
+
+// Review 326f #3: this page's move lands on the server first, then someone
+// moves the ticket back out of the epic and this page reads that; the older
+// move answer arrives last. The chip stays with the newer move.
+test('a move answer that lands after a newer move elsewhere leaves the newer epic', async ({ browser }) => {
+  let release!: () => void
+  const answer = new Promise<void>(resolve => { release = resolve })
+  let moved = false
+  const { page, data, errors, close } = await openOne(browser, '/p/PHAROS/PHAROS-14', {
+    hold: ({ path, method }) => method === 'POST' && path === '/api/nodes/n-4/move' ? { until: answer, computed: () => { moved = true } } : undefined,
+  })
+  try {
+    const ws = panel(page)
+    const noEpic = ws.getByRole('button', { name: 'No epic. Choose an epic' })
+    await expect(noEpic).toBeVisible()
+    await ws.getByRole('button', { name: 'More actions' }).click()
+    await page.getByRole('menuitem', { name: 'Move to another epic…' }).click()
+    await page.getByLabel('Find an epic').fill('guarded')
+    await expect(page.getByRole('listbox', { name: 'Epics' }).getByRole('option')).toHaveCount(1)
+    await page.keyboard.press('Enter')
+    await expect.poll(() => moved).toBe(true)
+    const node = data.nodes.find(n => n.id === 'n-4')!
+    expect(node.parent_id).toBe('n-epic')
+    const read = page.waitForResponse(response => new URL(response.url()).pathname === '/api/nodes/n-4' && response.request().method() === 'GET')
+    Object.assign(node, { parent_id: 'p-pharos', updated_at: new Date(Date.parse(node.updated_at) + 60_000).toISOString() })
+    await read
+    await page.waitForTimeout(300)
+    await expect(noEpic).toBeVisible()
+    release()
+    await expect(page.getByText('PHAROS-14 moved to PHAROS-10 Guarded multi-cloud provisioning')).toBeVisible()
+    await page.waitForTimeout(300)
+    await expect(noEpic).toBeVisible()
+    await expect(ws.locator('.epic-chip')).toHaveCount(0)
     expect(errors).toEqual([])
   } finally { await close() }
 })
