@@ -87,9 +87,9 @@ func TestOldManualWindowCapsOnTopOfReadings(t *testing.T) {
 	now := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
 	resets := now.Add(48 * time.Hour)
 	// The window as pairing or the old Settings form left it: two requests,
-	// with a pace model and burst the UI no longer shows.
+	// with a burst the UI no longer shows.
 	var old Window
-	callStatus(t, mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", `{"starts_at":"`+now.Add(-time.Hour).Format(time.RFC3339)+`","ends_at":"`+now.Add(30*24*time.Hour).Format(time.RFC3339)+`","unit":"requests","allowance":2,"pace_model":"frontload","burst_ratio":0.25}`, 201, &old)
+	callStatus(t, mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", `{"starts_at":"`+now.Add(-time.Hour).Format(time.RFC3339)+`","ends_at":"`+now.Add(30*24*time.Hour).Format(time.RFC3339)+`","unit":"requests","allowance":2,"pace_model":"unrestricted","burst_ratio":0.25}`, 201, &old)
 	if !old.SetByYou {
 		t.Fatal("a window set by hand is not marked set by you")
 	}
@@ -135,7 +135,7 @@ func TestOldManualWindowCapsOnTopOfReadings(t *testing.T) {
 	}
 	// Nothing is lost: every field of the old window is still there.
 	kept := f.setByYou(t)
-	if len(kept) != 1 || kept[0].ID != old.ID || kept[0].Allowance != 2 || kept[0].Reserved != 2 || kept[0].PaceModel != "frontload" || kept[0].BurstRatio != 0.25 || !kept[0].EndsAt.Equal(old.EndsAt) {
+	if len(kept) != 1 || kept[0].ID != old.ID || kept[0].Allowance != 2 || kept[0].Reserved != 2 || kept[0].PaceModel != "unrestricted" || kept[0].BurstRatio != 0.25 || !kept[0].EndsAt.Equal(old.EndsAt) {
 		t.Fatalf("old window changed: %+v", kept)
 	}
 
@@ -143,7 +143,7 @@ func TestOldManualWindowCapsOnTopOfReadings(t *testing.T) {
 	callStatus(t, mod, &f.runner, f.token, "DELETE", "/api/agent-accounts/"+f.account.ID+"/windows/"+old.ID, "", 403, nil)
 	callStatus(t, mod, &f.admin, "", "DELETE", "/api/agent-accounts/"+f.account.ID+"/windows/"+old.ID, "", 204, nil)
 	callStatus(t, mod, &f.admin, "", "DELETE", "/api/agent-accounts/"+f.account.ID+"/windows/"+old.ID, "", 404, nil)
-	if n := scalar(t, f.admin, `SELECT count(*) FROM account_allowance_windows WHERE id=$1 AND removed_at IS NOT NULL AND allowance=2 AND reserved=2 AND pace_model='frontload'`, old.ID); n != 1 {
+	if n := scalar(t, f.admin, `SELECT count(*) FROM account_allowance_windows WHERE id=$1 AND removed_at IS NOT NULL AND allowance=2 AND reserved=2 AND burst_ratio=0.25`, old.ID); n != 1 {
 		t.Fatal("Remove lost the window's row")
 	}
 	if len(f.setByYou(t)) != 0 {
