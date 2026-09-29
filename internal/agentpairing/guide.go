@@ -51,6 +51,7 @@ func GuidePage(next http.Handler, web fs.FS, origin string, nixGuide ...*config.
 			}
 			guide += `</section>`
 		}
+		guide += `<section><h2>pi with OpenRouter</h2><p>On a paired computer run <code>aeon-agentd add-harness --harness pi --provider openrouter</code>. Enter the key at the hidden local prompt or use <code>--openrouter-env-file</code> with a private owner-selected file. For a new computer append <code>--harness pi --provider openrouter</code> to the pairing command. The key stays in a private per-account pi profile; no completion is sent by the check. Choose the model in Settings → Accounts; new runs use that choice.</p></section>`
 		guide += `<section><h2>Disconnect and uninstall</h2><p>Run <code>aeon-agentd disconnect</code> and wait for “disconnected” before uninstalling; it drains current work, revokes access and removes the service it created, keeping vendor sign-ins and project files.</p><p>Homebrew: <code>brew uninstall aeon-agentd</code>. Checksum installer: remove the aeon-agentd link in ~/.local/bin and the downloaded versions in ~/.local/lib/aeon. Nix / Home Manager: remove the package and disable the service in the owning configuration, then apply it through its review path. Retain private pairing state for cleanup and accounting recovery.</p></section>`
 		page := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect a computer</title></head><body><div id="app">` + guide + `</div></body></html>`
 		if web != nil {

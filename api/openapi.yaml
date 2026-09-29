@@ -4352,6 +4352,28 @@ paths:
         '200': {description: Cascade and defaults, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountCatalog'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/model:
+    put:
+      operationId: setPiAccountModel
+      summary: Choose the model for new pi runs
+      description: Requires a person with account.manage. Provider is fixed by local enrollment. Saves an immutable registry profile and replaces this account's profile grant; active runs retain their model. OpenRouter's public catalog is cached with a bounded timeout; unknown or unreachable slugs are saved with unknown status. No credentials are accepted.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [model]
+              properties:
+                model: {type: string, minLength: 1, maxLength: 116, description: 'Provider model ID; OpenRouter uses vendor/model[:variant].'}
+      responses:
+        '200': {description: Saved account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}/metadata:
     put:
       operationId: replaceAgentAccountMetadata
@@ -10051,7 +10073,7 @@ components:
         slug: {type: string, pattern: '^[a-z][a-z0-9_-]*$'}
         version: {type: string, minLength: 1, maxLength: 64}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
-        family: {type: string, enum: [openai, anthropic, xai, cursor]}
+        family: {type: string, enum: [openai, anthropic, xai, cursor, unknown]}
         model: {type: string, minLength: 1, maxLength: 128}
         effort: {type: string, minLength: 1, maxLength: 32}
         tier: {type: string, enum: [fast, standard, strong, frontier]}
@@ -10222,6 +10244,11 @@ components:
             created_at: {type: string, format: date-time}
             plan: {type: string}
             host_label: {type: string}
+            provider: {type: string, description: Pi provider fixed by the approved local enrollment.}
+            model: {type: string, description: Pi provider model ID for new runs.}
+            model_status: {type: string, enum: [known, unknown, unchecked]}
+            model_data_note: {type: boolean, description: Stealth or free OpenRouter model; may log prompts and outputs.}
+            openrouter_credits: {$ref: '#/components/schemas/OpenRouterCredits'}
             allowed_model_profile_ids:
               type: [array, 'null']
               description: Null preserves legacy tenant-harness catalog policy. Explicit arrays restrict model/effort pins; empty blocks new reservations.
@@ -10301,6 +10328,16 @@ components:
                     effort: {type: string}
                     model_profile_id: {type: string, format: uuid}
                     version: {type: string}
+    OpenRouterCredits:
+      type: object
+      additionalProperties: false
+      required: [observed_at]
+      description: Safe local GET /api/v1/key projection. Missing amounts are unknown; these are dollar credits, not a renewable capacity window.
+      properties:
+        observed_at: {type: string, format: date-time}
+        usage: {type: [number, 'null'], minimum: 0}
+        limit: {type: [number, 'null'], minimum: 0}
+        remaining: {type: [number, 'null'], minimum: 0}
     AccountProbe:
       type: object
       required: [daemon_id, daemon_generation, available]
@@ -10309,6 +10346,7 @@ components:
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
         available: {type: boolean}
         host_label: {type: string, maxLength: 128, description: Optional display-only host name reported by the owner daemon; fills an empty label without overwriting configured metadata.}
+        openrouter_credits: {$ref: '#/components/schemas/OpenRouterCredits'}
         failure: {type: string, enum: [auth_failed, unavailable], description: 'Only with available=false. auth_failed only when the vendor status command confirmed this account is signed out or signed in as another identity; every other failure is unavailable (the default when omitted).'}
     AllowanceWindowWrite:
       type: object

@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
@@ -437,6 +438,21 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			} else {
 				status = probeAccount(ctx, probe, account.Key)
 			}
+		}
+		if pi, ok := probe.(*PiAdapter); ok && hold == "" {
+			pi.probeMu.Lock()
+			cached := pi.probes[account.Key]
+			if status.OK {
+				status.OpenRouterCredits = cached.credits
+			}
+			if errors.Is(probeErr, openrouter.ErrKey) {
+				status.Failure = ProbeAuthFailed
+				probeErr = nil
+			} else if errors.Is(probeErr, openrouter.ErrUnavailable) {
+				status.Failure = ProbeUnavailable
+				probeErr = nil
+			}
+			pi.probeMu.Unlock()
 		}
 		available := status.OK
 		var err error

@@ -153,7 +153,7 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 		FROM model_profiles p LEFT JOIN model_role_routes r
 		  ON r.tenant_id=p.tenant_id AND r.profile_id=p.id AND r.role=$1
 		WHERE p.enabled
-		  AND ($1 <> 'review-gate' OR (p.family <> $2 AND r.profile_id IS NOT NULL))
+		  AND ($1 <> 'review-gate' OR (p.family <> $2 AND p.family <> 'unknown' AND r.profile_id IS NOT NULL))
 		  AND (r.state IS NULL OR r.state='available' OR r.valid_until <= $3)
 		ORDER BY p.harness,p.model,p.family,p.effort,p.created_at DESC,p.id`, role, authorFamily, now)
 	if err != nil {

@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
@@ -269,6 +270,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 // PiAdapter speaks Pi's JSONL RPC and verifies the effective state before
 // sending the first prompt or any steer.
 type PiAdapter struct {
+	OpenRouter openrouter.Client
 	Path       string
 	Homes      map[string]string
 	Providers  map[string]string
@@ -279,6 +281,7 @@ type PiAdapter struct {
 }
 
 type piProbeResult struct {
+	credits              *openrouter.Credits
 	path, home, provider string
 	node                 piprobe.Node
 	expires              time.Time
@@ -414,6 +417,11 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 	}
 	if a.Providers != nil && provider != a.Providers[r.AccountKey] {
 		return nil, errors.New("Pi model provider differs from the enrolled account")
+	}
+	if provider == "openrouter" {
+		if err := agentsetup.ConfigureOpenRouterModel(home, model); err != nil {
+			return nil, err
+		}
 	}
 	queue, err := openPiQueue(r)
 	if err != nil {

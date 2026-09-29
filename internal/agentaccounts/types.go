@@ -15,26 +15,32 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Account is an opaque local enrollment. AccountKey is not a vendor credential.
 type Account struct {
-	ID                string     `json:"id"`
-	AccountKey        string     `json:"account_key"`
-	Harness           string     `json:"harness"`
-	DaemonID          string     `json:"daemon_id"`
-	Label             string     `json:"label"`
-	Plan              string     `json:"plan"`
-	HostLabel         string     `json:"host_label"`
-	AllowedProfileIDs []string   `json:"allowed_model_profile_ids"`
-	MaxParallel       int        `json:"max_parallel_runs"`
-	RegisteredBy      string     `json:"registered_by_principal_id"`
-	State             string     `json:"state"`
-	LastProbeAt       *time.Time `json:"last_probe_at"`
-	LastProbeOK       *bool      `json:"last_probe_ok"`
-	CreatedAt         time.Time  `json:"created_at"`
-	Windows           []Window   `json:"windows"`
+	Provider          string              `json:"provider,omitempty"`
+	Model             string              `json:"model,omitempty"`
+	ModelStatus       string              `json:"model_status,omitempty"`
+	ModelDataNote     bool                `json:"model_data_note,omitempty"`
+	OpenRouterCredits *openrouter.Credits `json:"openrouter_credits,omitempty"`
+	ID                string              `json:"id"`
+	AccountKey        string              `json:"account_key"`
+	Harness           string              `json:"harness"`
+	DaemonID          string              `json:"daemon_id"`
+	Label             string              `json:"label"`
+	Plan              string              `json:"plan"`
+	HostLabel         string              `json:"host_label"`
+	AllowedProfileIDs []string            `json:"allowed_model_profile_ids"`
+	MaxParallel       int                 `json:"max_parallel_runs"`
+	RegisteredBy      string              `json:"registered_by_principal_id"`
+	State             string              `json:"state"`
+	LastProbeAt       *time.Time          `json:"last_probe_at"`
+	LastProbeOK       *bool               `json:"last_probe_ok"`
+	CreatedAt         time.Time           `json:"created_at"`
+	Windows           []Window            `json:"windows"`
 	daemonGeneration  *string
 }
 

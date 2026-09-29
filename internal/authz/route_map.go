@@ -88,6 +88,7 @@ var RoutePermissions = map[string]string{
 	"DELETE /api/views/{viewId}":                                             "views.write",
 	"GET /api/agent-accounts":                                                "account.read",
 	"GET /api/agent-accounts/catalog":                                        "account.read",
+	"PUT /api/agent-accounts/{accountId}/model":                              "account.manage",
 	"PUT /api/agent-accounts/{accountId}/metadata":                           "account.manage",
 	"GET /api/agent-keys":                                                    "keys.read",
 	"GET /api/approvals":                                                     "approvals.read",

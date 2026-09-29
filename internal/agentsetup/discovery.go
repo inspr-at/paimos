@@ -138,6 +138,7 @@ func (c Candidate) Interpreter() harnesslaunch.Node {
 }
 
 type Discovery struct {
+	PiHome        string // Explicit private per-account pi profile; never uploaded.
 	Executor      Executor
 	LookPath      func(string) (string, error)
 	Home          string
@@ -183,6 +184,9 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		return d.detectGrok(ctx, accountContext)
 	case "pi":
 		c.Home = filepath.Join(d.Home, ".pi", "agent")
+		if d.PiHome != "" {
+			c.Home = d.PiHome
+		}
 	default:
 		return c, errors.New("unsupported guided harness")
 	}

@@ -180,7 +180,7 @@ func validateProfile(in profileWrite) error {
 	if in.Version == "" || len(in.Version) > 64 || strings.ContainsAny(in.Version, "\x00\r\n") {
 		return fail(http.StatusBadRequest, "invalid version")
 	}
-	if !validHarness(in.Harness) || !validFamily(in.Family) || !validTier(in.Tier) {
+	if !validHarness(in.Harness) || (!validFamily(in.Family) && !(in.Harness == "pi" && in.Family == "unknown")) || !validTier(in.Tier) {
 		return fail(http.StatusBadRequest, "invalid harness, family or tier")
 	}
 	if len(in.Model) > 128 || !modelRE.MatchString(in.Model) {
