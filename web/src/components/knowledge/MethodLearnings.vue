@@ -6,7 +6,9 @@ import {
   KnowledgeError, acceptLearning, dismissLearning, draftLearning, listLearnings, undoKnowledge,
   type KnowledgeEntry, type KnowledgeItem, type MethodLearning,
 } from '../../lib/knowledge'
-import { listLayers, listSets, ROLE_LABEL, type RuleLayer, type RuleSet, type RoleName } from '../../lib/rules'
+import { can } from '../../lib/authz'
+import { listLayers, listSets, ROLE_LABEL, writeBlock, type Caller, type RuleLayer, type RuleSet, type RoleName } from '../../lib/rules'
+import { useSession } from '../../stores/session'
 import { toast } from '../../lib/toast'
 import { relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
@@ -100,9 +102,17 @@ function layerOption(layer: RuleLayer): string {
   if (scope.layer === 'agent' && scope.role) return `Agent role · ${ROLE_LABEL[scope.role as RoleName] ?? scope.role}`
   return ''
 }
+// Only layers this person may write, by the same rule the rules page uses,
+// so the dialog never offers a set that would answer 403.
+const session = useSession()
+const caller = computed<Caller | null>(() => {
+  const identity = session.identity
+  if (!identity) return null
+  return { id: identity.principal.id, kind: identity.principal.kind === 'agent' ? 'agent' : 'person', allows: (permission, project) => can(permission, project) }
+})
 const draftLayers = computed(() => layers.value.flatMap(layer => {
   const label = layerOption(layer)
-  return label ? [{ id: layer.id, label }] : []
+  return label && !writeBlock(caller.value, layer.scope) ? [{ id: layer.id, label }] : []
 }))
 
 async function loadSets() {

@@ -8,6 +8,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { test, expect, type Browser, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors, me } from './work-fixtures'
 import { knowledgeWorld, mockKnowledge, type MockLearning } from './knowledge-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 function learnings(now = Date.now()): MockLearning[] {
   return [
@@ -24,7 +25,7 @@ function learnings(now = Date.now()): MockLearning[] {
   ]
 }
 
-async function open(page: Page, options: { readOnly?: boolean; agent?: boolean; learnings?: MockLearning[]; inbox?: boolean } = {}) {
+async function open(page: Page, options: { readOnly?: boolean; agent?: boolean; learnings?: MockLearning[]; inbox?: boolean; rules?: string[] } = {}) {
   await mockWork(page, fixtures(), { readOnly: options.readOnly })
   if (options.agent) {
     await page.route('**/api/me', route => route.fulfill({
@@ -34,6 +35,16 @@ async function open(page: Page, options: { readOnly?: boolean; agent?: boolean; 
   const world = knowledgeWorld()
   world.learnings = options.learnings ?? learnings()
   const calls = await mockKnowledge(page, world, { readOnly: options.readOnly })
+  const extra = options.rules
+  if (extra) {
+    // The member fixture has no rules permissions; a test names the ones it needs.
+    await page.route('**/api/me/permissions*', route => {
+      const found = mockEffectivePermissions('member', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+      found.workspace.permissions = [...found.workspace.permissions, ...extra]
+      if (found.project) found.project.permissions = [...found.project.permissions, ...extra]
+      return route.fulfill({ json: found })
+    })
+  }
   await page.goto('/p/PHAROS/knowledge')
   const heading = page.getByRole('heading', { name: 'Method learnings' })
   if (options.inbox === false) await expect(heading).toHaveCount(0)
@@ -175,50 +186,55 @@ test('an empty inbox leaves the knowledge tab in place', async ({ page }) => {
   expect(await overflow(page)).toBeLessThanOrEqual(1)
 })
 
+const ids = {
+  projectLayer: '11111111-1111-4111-8111-111111111111',
+  foreignLayer: '22222222-2222-4222-8222-222222222222',
+  personLayer: '33333333-3333-4333-8333-333333333333',
+  companyLayer: '44444444-4444-4444-8444-444444444444',
+  roleLayer: '55555555-5555-4555-8555-555555555555',
+  namedLayer: '66666666-6666-4666-8666-666666666666',
+  namedAgent: '77777777-7777-4777-8777-777777777777',
+  foreignProject: '99999999-9999-4999-8999-999999999999',
+  projectSet: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+  personSet: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2',
+  companySet: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3',
+  roleSet: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4',
+}
+const setFor: Record<string, { id: string; name: string }> = {
+  [ids.projectLayer]: { id: ids.projectSet, name: 'Safety' },
+  [ids.personLayer]: { id: ids.personSet, name: 'Personal' },
+  [ids.companyLayer]: { id: ids.companySet, name: 'Floor' },
+  [ids.roleLayer]: { id: ids.roleSet, name: 'Builder rules' },
+}
+
+async function mockRuleLayers(page: Page) {
+  await page.route('**/api/rules/**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/rules/layers')) {
+      await route.fulfill({ json: { layers: [
+        { id: ids.foreignLayer, scope: { layer: 'project', project_id: ids.foreignProject } },
+        { id: ids.projectLayer, scope: { layer: 'project', project_id: 'p-pharos' } },
+        { id: ids.namedLayer, scope: { layer: 'agent', owner_id: me.id, agent_id: ids.namedAgent } },
+        { id: ids.personLayer, scope: { layer: 'person', owner_id: me.id } },
+        { id: ids.companyLayer, scope: { layer: 'company' } },
+        { id: ids.roleLayer, scope: { layer: 'agent', role: 'builder' } },
+      ] } })
+      return
+    }
+    if (url.pathname.endsWith('/rules/sets')) {
+      const found = setFor[url.searchParams.get('layer_id') ?? '']
+      await route.fulfill({ json: { sets: found ? [{ id: found.id, layer_id: url.searchParams.get('layer_id'), scope: { layer: 'company' }, name: found.name, revision: 1, rules: [], published_version: '' }] : [] } })
+      return
+    }
+    await route.fulfill({ status: 404, json: { error: 'missing' } })
+  })
+}
+
 test('a person can save a learning as a rule draft', async ({ page }) => {
-  const ids = {
-    projectLayer: '11111111-1111-4111-8111-111111111111',
-    foreignLayer: '22222222-2222-4222-8222-222222222222',
-    personLayer: '33333333-3333-4333-8333-333333333333',
-    companyLayer: '44444444-4444-4444-8444-444444444444',
-    roleLayer: '55555555-5555-4555-8555-555555555555',
-    namedLayer: '66666666-6666-4666-8666-666666666666',
-    namedAgent: '77777777-7777-4777-8777-777777777777',
-    foreignProject: '99999999-9999-4999-8999-999999999999',
-    projectSet: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
-    personSet: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2',
-    companySet: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3',
-    roleSet: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4',
-  }
-  const setFor: Record<string, { id: string; name: string }> = {
-    [ids.projectLayer]: { id: ids.projectSet, name: 'Safety' },
-    [ids.personLayer]: { id: ids.personSet, name: 'Personal' },
-    [ids.companyLayer]: { id: ids.companySet, name: 'Floor' },
-    [ids.roleLayer]: { id: ids.roleSet, name: 'Builder rules' },
-  }
   for (const width of [1600, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-    const { calls } = await open(page)
-    await page.route('**/api/rules/**', async route => {
-      const url = new URL(route.request().url())
-      if (url.pathname.endsWith('/rules/layers')) {
-        await route.fulfill({ json: { layers: [
-          { id: ids.foreignLayer, scope: { layer: 'project', project_id: ids.foreignProject } },
-          { id: ids.projectLayer, scope: { layer: 'project', project_id: 'p-pharos' } },
-          { id: ids.namedLayer, scope: { layer: 'agent', owner_id: me.id, agent_id: ids.namedAgent } },
-          { id: ids.personLayer, scope: { layer: 'person', owner_id: me.id } },
-          { id: ids.companyLayer, scope: { layer: 'company' } },
-          { id: ids.roleLayer, scope: { layer: 'agent', role: 'builder' } },
-        ] } })
-        return
-      }
-      if (url.pathname.endsWith('/rules/sets')) {
-        const found = setFor[url.searchParams.get('layer_id') ?? '']
-        await route.fulfill({ json: { sets: found ? [{ id: found.id, layer_id: url.searchParams.get('layer_id'), scope: { layer: 'company' }, name: found.name, revision: 1, rules: [], published_version: '' }] : [] } })
-        return
-      }
-      await route.fulfill({ status: 404, json: { error: 'missing' } })
-    })
+    const { calls } = await open(page, { rules: ['rules.write', 'rules.publish'] })
+    await mockRuleLayers(page)
     await card(page, 'Write the release note in the same turn').getByRole('button', { name: /^Accept PHAROS-11:/ }).click()
     const changelog = page.getByRole('dialog', { name: 'Add to a changelog' })
     await expect(changelog.getByRole('button', { name: 'Add to changelog' })).toBeVisible()
@@ -245,6 +261,17 @@ test('a person can save a learning as a rule draft', async ({ page }) => {
     expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/draft')).at(-1)?.body).toEqual({ layer_id: ids.projectLayer, set_id: ids.projectSet })
     await expect(page.getByText('Saved as a rule draft.')).toBeVisible()
   }
+})
+
+test('the draft dialog offers only layers the person can write', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, { rules: ['rules.write'] })
+  await mockRuleLayers(page)
+  await card(page, 'Renumber at integration').getByRole('button', { name: /^Accept PHAROS-12:/ }).click()
+  await page.getByRole('dialog', { name: 'Add to a changelog' }).getByRole('radio', { name: 'Rule draft' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Save a rule draft' })
+  // Company, project and role sets need rules.publish, as on the server.
+  await expect(dialog.getByLabel('Layer').locator('option')).toHaveText(['Your rules'])
 })
 
 test('the inbox has no axe violations', async ({ page }) => {
