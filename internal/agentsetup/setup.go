@@ -69,32 +69,35 @@ type RuntimeConfig struct {
 	Accounts      []RuntimeAccount `json:"accounts"`
 	NodePath      string           `json:"node_path,omitempty"`
 	ClaudeSDKPath string           `json:"claude_sdk_path,omitempty"`
+	ClaudeRepinID string           `json:"claude_repin_id,omitempty"`
 }
 
 type snapshot struct {
-	BoundComputer      string           `json:"bound_computer_id,omitempty"`
-	BoundDaemon        string           `json:"bound_daemon_id,omitempty"`
-	BoundPrincipal     string           `json:"bound_principal_id,omitempty"`
-	Schema             string           `json:"schema"`
-	Origin             string           `json:"origin"`
-	Request            DeviceRequest    `json:"request"`
-	Device             secret           `json:"device_secret"`
-	Runtime            secret           `json:"runtime_secret"`
-	Lifecycle          secret           `json:"lifecycle_secret"`
-	LifecycleRequestID string           `json:"lifecycle_request_id"`
-	Response           DeviceResponse   `json:"response"`
-	View               View             `json:"view"`
-	Candidates         []LocalCandidate `json:"candidates"`
-	StartService       bool             `json:"start_service"`
-	Service            *ServiceReceipt  `json:"service,omitempty"`
-	NodePath           string           `json:"node_path,omitempty"`
-	ClaudeSDKPath      string           `json:"claude_sdk_path,omitempty"`
-	Phase              string           `json:"phase"`
-	DisconnectAll      bool             `json:"disconnect_all"`
-	Removed            map[string]bool  `json:"removed"`
-	Cleaned            []string         `json:"cleaned"`
-	ComputerCleaned    bool             `json:"computer_cleaned"`
-	NextPoll           time.Time        `json:"next_poll"`
+	BoundComputer      string                `json:"bound_computer_id,omitempty"`
+	BoundDaemon        string                `json:"bound_daemon_id,omitempty"`
+	BoundPrincipal     string                `json:"bound_principal_id,omitempty"`
+	Schema             string                `json:"schema"`
+	Origin             string                `json:"origin"`
+	Request            DeviceRequest         `json:"request"`
+	Device             secret                `json:"device_secret"`
+	Runtime            secret                `json:"runtime_secret"`
+	Lifecycle          secret                `json:"lifecycle_secret"`
+	LifecycleRequestID string                `json:"lifecycle_request_id"`
+	Response           DeviceResponse        `json:"response"`
+	View               View                  `json:"view"`
+	Candidates         []LocalCandidate      `json:"candidates"`
+	StartService       bool                  `json:"start_service"`
+	Service            *ServiceReceipt       `json:"service,omitempty"`
+	NodePath           string                `json:"node_path,omitempty"`
+	ClaudeSDKPath      string                `json:"claude_sdk_path,omitempty"`
+	ClaudeRepinID      string                `json:"claude_repin_id,omitempty"`
+	ClaudePinInfo      *ClaudeDependencyInfo `json:"claude_pin_info,omitempty"`
+	Phase              string                `json:"phase"`
+	DisconnectAll      bool                  `json:"disconnect_all"`
+	Removed            map[string]bool       `json:"removed"`
+	Cleaned            []string              `json:"cleaned"`
+	ComputerCleaned    bool                  `json:"computer_cleaned"`
+	NextPoll           time.Time             `json:"next_poll"`
 }
 
 // Only Progress is printable. The snapshot and HTTP request bodies contain
@@ -386,22 +389,22 @@ func (e *Engine) checkSavedClaudeDependencies(s *snapshot, requested ClaudeDepen
 		return nil
 	}
 	if s.NodePath == "" || s.ClaudeSDKPath == "" {
-		return errors.New("saved Claude dependencies are incomplete; no enrollment was changed")
+		return errors.New("Claude dependencies changed: run aeon-agentd repin --harness claude; saved dependencies are incomplete")
 	}
-	valid, err := (Discovery{}).ResolveClaudeDependencies(ClaudeDependencies{NodePath: s.NodePath, SDKPath: s.ClaudeSDKPath}, s.Request.Workspace)
+	valid, err := ResolveClaudeRuntime(ClaudeDependencies{NodePath: s.NodePath, SDKPath: s.ClaudeSDKPath}, s.Request.Workspace)
 	if err != nil {
-		return errors.New("saved Claude dependencies are unavailable or unsafe; restore the pinned installation before resuming")
+		return errors.New("Claude dependencies changed: run aeon-agentd repin --harness claude; saved dependencies are unavailable or unsafe")
 	}
 	if requested.NodePath != "" {
 		p, err := pinnedRegular(requested.NodePath, s.Request.Workspace, true)
 		if err != nil || p != valid.NodePath {
-			return errors.New("--node-path conflicts with saved Claude dependency; no enrollment was changed")
+			return errors.New("--node-path conflicts with saved Claude dependency; dependencies changed: run aeon-agentd repin --harness claude; no enrollment was changed")
 		}
 	}
 	if requested.SDKPath != "" {
 		p, err := pinnedRegular(requested.SDKPath, s.Request.Workspace, false)
 		if err != nil || p != valid.SDKPath {
-			return errors.New("--claude-sdk-path conflicts with saved Claude dependency; no enrollment was changed")
+			return errors.New("--claude-sdk-path conflicts with saved Claude dependency; dependencies changed: run aeon-agentd repin --harness claude; no enrollment was changed")
 		}
 	}
 	return nil
@@ -577,7 +580,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 	if err := e.save(s, false); err != nil {
 		return e.progress(s), err
 	}
-	config := RuntimeConfig{Schema: "aeon.agent-runtime.v1", Origin: s.Origin, TenantID: s.View.TenantID, PrincipalID: s.View.PrincipalID, DaemonID: s.View.DaemonID, ComputerID: s.View.ComputerID, Workspace: s.Request.Workspace, NodePath: s.NodePath, ClaudeSDKPath: s.ClaudeSDKPath, Accounts: []RuntimeAccount{}}
+	config := RuntimeConfig{Schema: "aeon.agent-runtime.v1", Origin: s.Origin, TenantID: s.View.TenantID, PrincipalID: s.View.PrincipalID, DaemonID: s.View.DaemonID, ComputerID: s.View.ComputerID, Workspace: s.Request.Workspace, NodePath: s.NodePath, ClaudeSDKPath: s.ClaudeSDKPath, ClaudeRepinID: s.ClaudeRepinID, Accounts: []RuntimeAccount{}}
 	seen := map[string]bool{}
 	for _, a := range s.View.Enrollments {
 		if a.State != "connected" || s.Removed[a.AccountID] {
@@ -685,9 +688,8 @@ func ValidateRuntimeDependencies(c RuntimeConfig) error {
 		claude = claude || a.Harness == "claude"
 	}
 	if claude {
-		valid, err := (Discovery{}).ResolveClaudeDependencies(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace)
-		if err != nil || valid.NodePath != c.NodePath || valid.SDKPath != c.ClaudeSDKPath {
-			return errors.New("pinned Claude runtime dependencies are unavailable or unsafe")
+		if _, err := ResolveClaudeRuntime(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace); err != nil {
+			return errors.New("Claude dependencies changed: run aeon-agentd repin --harness claude; runtime dependencies are unavailable or unsafe")
 		}
 	}
 	return nil

@@ -168,6 +168,11 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		if a == nil || a.Name() == "" || adapters[a.Name()] != nil {
 			return nil, errors.New("duplicate or invalid adapter")
 		}
+		if claude, ok := a.(*ClaudeAdapter); ok {
+			bound := *claude
+			bound.Workspace = c.Workspace
+			a = &bound
+		}
 		adapters[a.Name()] = a
 	}
 	if len(adapters) == 0 {

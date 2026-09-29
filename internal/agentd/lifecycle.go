@@ -320,3 +320,43 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 	s.adapters = configured
 	return nil
 }
+
+// RestartClaude replaces only the idle Claude adapter. Dispatch cannot race the
+// idle check; running/uncertain processes retain their ownership and adapter.
+func (s *Supervisor) RestartClaude(ctx context.Context, adapter *ClaudeAdapter) error {
+	if adapter == nil {
+		return ErrScope
+	}
+	s.settlePending(ctx)
+	s.dispatchMu.Lock()
+	defer s.dispatchMu.Unlock()
+	s.mu.Lock()
+	accounts := append([]EnrolledAccount(nil), s.accounts...)
+	s.mu.Unlock()
+	for _, account := range accounts {
+		if account.Harness != Claude {
+			continue
+		}
+		status := s.Lifecycle(account.ID)
+		if len(status.ActiveRunIDs)+len(status.UnconfirmedRunIDs)+len(status.SettlementPendingRunIDs) != 0 {
+			return ErrDraining
+		}
+	}
+	adapter.Workspace = s.workspace
+	if _, err := adapter.resolved(s.workspace); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closing || s.adapters[Claude] == nil {
+		return ErrScope
+	}
+	s.adapters[Claude] = adapter
+	for _, account := range accounts {
+		if account.Harness == Claude {
+			delete(s.probedAccounts, account.ID)
+			delete(s.loginRequired, account.ID)
+		}
+	}
+	return nil
+}

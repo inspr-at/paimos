@@ -95,6 +95,11 @@ func (a *CursorAdapter) Probe(ctx context.Context, key string) bool {
 }
 
 func (a *ClaudeAdapter) Probe(ctx context.Context, key string) bool {
+	resolved, err := a.resolved("")
+	return err == nil && resolved.probeResolved(ctx, key)
+}
+
+func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) bool {
 	home, err := localHome(a.Homes, key)
 	if err != nil {
 		return false

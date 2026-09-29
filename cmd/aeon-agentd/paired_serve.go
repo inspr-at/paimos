@@ -58,6 +58,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	}
 	if p := paths[agentd.Claude]; p != "" {
 		a := agentd.NewClaudeAdapter(c.NodePath, c.ClaudeSDKPath, p, claudeHomes)
+		a.Workspace = c.Workspace
 		a.SetExpectedEmails(claudeEmails)
 		adapters = append(adapters, a)
 	}
@@ -173,12 +174,19 @@ func servePaired(root string) error {
 						var ad []agentd.Adapter
 						ac, ad, readErr = pairedAdapters(next)
 						if readErr == nil {
-							readErr = s.RefreshAccounts(ac, ad)
+							if next.ClaudeRepinID != c.ClaudeRepinID {
+								readErr = restartPairedClaude(op, s, c, next, ad)
+							} else {
+								readErr = s.RefreshAccounts(ac, ad)
+							}
 							if readErr == nil {
 								c = next
 							}
 						}
 					}
+				}
+				if readErr == nil {
+					readErr = acknowledgePairedClaude(op, s, root, c)
 				}
 				if readErr == nil {
 					_ = s.PollOnce(op)
@@ -198,6 +206,49 @@ func servePaired(root string) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+func restartPairedClaude(ctx context.Context, s *agentd.Supervisor, old, next agentsetup.RuntimeConfig, adapters []agentd.Adapter) error {
+	// Repin is not an account-enrollment or authority-change mechanism.
+	unchanged := next
+	unchanged.NodePath, unchanged.ClaudeSDKPath, unchanged.ClaudeRepinID = old.NodePath, old.ClaudeSDKPath, old.ClaudeRepinID
+	if next.ClaudeRepinID == "" || !reflect.DeepEqual(old, unchanged) {
+		return errors.New("repin changed more than Claude dependencies")
+	}
+	for _, adapter := range adapters {
+		if claude, ok := adapter.(*agentd.ClaudeAdapter); ok {
+			return s.RestartClaude(ctx, claude)
+		}
+	}
+	return errors.New("repin has no approved Claude adapter")
+}
+
+func acknowledgePairedClaude(ctx context.Context, s *agentd.Supervisor, root string, c agentsetup.RuntimeConfig) error {
+	if c.ClaudeRepinID == "" {
+		return nil
+	}
+	store, err := agentsetup.OpenStore(root, false)
+	if err != nil {
+		return err
+	}
+	applied, err := agentsetup.ClaudeRepinApplied(store, c.ClaudeRepinID)
+	store.Close()
+	if err != nil || applied {
+		return err
+	}
+	_, adapters, err := pairedAdapters(c)
+	if err != nil {
+		return err
+	}
+	for _, adapter := range adapters {
+		if claude, ok := adapter.(*agentd.ClaudeAdapter); ok {
+			if err := s.RestartClaude(ctx, claude); err != nil {
+				return err
+			}
+			return agentsetup.AcknowledgeClaudeRepin(root, c)
+		}
+	}
+	return errors.New("repin has no approved Claude adapter")
 }
 
 func syncPairing(ctx context.Context, root, origin string, s *agentd.Supervisor) error {

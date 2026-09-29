@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
@@ -38,21 +39,6 @@ func localHome(homes map[string]string, key string) (string, error) {
 		return "", errors.New("local account home is not private")
 	}
 	return home, nil
-}
-
-func pinnedFile(path string) error {
-	if path == "" || !filepath.IsAbs(path) {
-		return errors.New("adapter file must be absolute")
-	}
-	physical, err := filepath.EvalSymlinks(path)
-	if err != nil || physical != path {
-		return errors.New("adapter file is not pinned")
-	}
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
-		return errors.New("adapter file unavailable")
-	}
-	return nil
 }
 
 func withEnv(name, value string) []string {
@@ -603,6 +589,7 @@ var claudeAssets embed.FS
 
 type ClaudeAdapter struct {
 	NodePath, SDKPath, ClaudePath string
+	Workspace                     string
 	Homes                         map[string]string
 	Emails                        map[string]string
 }
@@ -612,6 +599,36 @@ func NewClaudeAdapter(nodePath, sdkPath, claudePath string, homes map[string]str
 }
 func (*ClaudeAdapter) Name() string                                 { return Claude }
 func (a *ClaudeAdapter) SetExpectedEmails(emails map[string]string) { a.Emails = emails }
+
+func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
+	var configured *ClaudeAdapter
+	if a.Workspace != "" && workspace != a.Workspace {
+		bound := *a
+		bound.Workspace = ""
+		var err error
+		configured, err = bound.resolved(a.Workspace)
+		if err != nil {
+			return nil, err
+		}
+		if workspace == "" {
+			return configured, nil
+		}
+	}
+	deps, err := agentsetup.ResolveClaudeRuntime(agentsetup.ClaudeDependencies{NodePath: a.NodePath, SDKPath: a.SDKPath}, workspace)
+	if err != nil {
+		return nil, err
+	}
+	cli, err := agentsetup.ResolveClaudeExecutable(a.ClaudePath, workspace)
+	if err != nil {
+		return nil, err
+	}
+	if configured != nil && (configured.NodePath != deps.NodePath || configured.SDKPath != deps.SDKPath || configured.ClaudePath != cli) {
+		return nil, errors.New("Claude dependency links changed during launch validation")
+	}
+	resolved := *a
+	resolved.NodePath, resolved.SDKPath, resolved.ClaudePath = deps.NodePath, deps.SDKPath, cli
+	return &resolved, nil
+}
 
 type claudeProcess struct {
 	managedPolicy bool
@@ -686,19 +703,17 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		return nil, err
 	}
 
-	if !a.Probe(ctx, r.AccountKey) {
+	// Resolve once for this start, then use only the checked physical paths in
+	// the probe, sanitized PATH and child arguments. The saved links stay intact.
+	resolved, err := a.resolved(r.Workspace)
+	if err != nil {
+		return nil, err
+	}
+	if !resolved.probeResolved(ctx, r.AccountKey) {
 		return nil, errors.New("Claude account probe unavailable")
 	}
 	home, err := localHome(a.Homes, r.AccountKey)
 	if err != nil {
-		return nil, err
-	}
-	for _, path := range []string{a.NodePath, a.ClaudePath} {
-		if _, err := pinnedExecutable(path); err != nil {
-			return nil, err
-		}
-	}
-	if err := pinnedFile(a.SDKPath); err != nil {
 		return nil, err
 	}
 	dir, err := os.MkdirTemp("", "aeon-claude-bridge-")
@@ -724,7 +739,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			return nil, e
 		}
 	}
-	p, err := launchWire(a.NodePath, []string{filepath.Join(dir, "bridge.mjs"), a.SDKPath, a.ClaudePath, r.Workspace}, r.Workspace, claudeEnvironment(home, a.NodePath, a.ClaudePath), "bridge", observe)
+	p, err := launchWire(resolved.NodePath, []string{filepath.Join(dir, "bridge.mjs"), resolved.SDKPath, resolved.ClaudePath, r.Workspace}, r.Workspace, claudeEnvironment(home, resolved.NodePath, resolved.ClaudePath), "bridge", observe)
 	if err != nil {
 		return nil, err
 	}

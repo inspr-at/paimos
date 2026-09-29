@@ -96,7 +96,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	f.SetOutput(io.Discard)
 	var root, origin, tenantID, tenantSlug, workspace, computer, account, contextLabel, nodePath, sdkPath string
 	var harnesses stringsFlag
-	var jsonOutput, startService, once bool
+	var jsonOutput, startService, once, yes bool
 	f.StringVar(&root, "state-root", "", "private pairing state directory")
 	f.StringVar(&origin, "url", "", "HTTPS Aeon instance origin")
 	f.StringVar(&tenantID, "tenant-id", "", "tenant UUID")
@@ -111,8 +111,27 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	f.BoolVar(&jsonOutput, "json", false, "safe progress as JSON")
 	f.BoolVar(&startService, "start-service", false, "request user service installation after authenticated Connect approval")
 	f.BoolVar(&once, "once", false, "perform one resumable step")
+	f.BoolVar(&yes, "yes", false, "confirm Claude dependency repin without prompting")
 	if f.Parse(args) != nil || len(f.Args()) != 0 {
 		return errors.New("invalid setup arguments")
+	}
+	if command == "repin" {
+		if len(harnesses) != 1 || harnesses[0] != "claude" {
+			return errors.New("repin requires --harness claude")
+		}
+		valid := true
+		f.Visit(func(v *flag.Flag) {
+			switch v.Name {
+			case "state-root", "harness", "node-path", "claude-sdk-path", "yes", "json":
+			default:
+				valid = false
+			}
+		})
+		if !valid {
+			return errors.New("repin accepts only --state-root, --harness claude, dependency paths, --yes and --json")
+		}
+	} else if yes {
+		return errors.New("--yes is only supported for repin")
 	}
 	prompt := setupPrompt{in: bufio.NewReader(in), out: out, json: jsonOutput}
 	home, err := os.UserHomeDir()
@@ -211,6 +230,9 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	engine.API = agentsetup.HTTPClient{Origin: origin}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if command == "repin" {
+		return repinClaude(ctx, engine, agentsetup.Discovery{Home: home}, agentsetup.ClaudeDependencies{NodePath: nodePath, SDKPath: sdkPath}, prompt, yes)
+	}
 	var candidates []agentsetup.Candidate
 	if savedErr != nil || command == "add-harness" {
 		d := agentsetup.Discovery{Home: home}
