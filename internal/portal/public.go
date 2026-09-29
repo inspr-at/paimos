@@ -53,11 +53,12 @@ type portalWish struct {
 }
 
 type portalDocument struct {
-	Product    *portalProduct        `json:"product"`
-	Catalog    []portalFeature       `json:"catalog"`
-	Wishes     []portalWish          `json:"wishes"`
-	Comparison []portalComparisonRow `json:"comparison,omitempty"`
-	Pace       *portalPace           `json:"pace,omitempty"`
+	Product        *portalProduct        `json:"product"`
+	Catalog        []portalFeature       `json:"catalog"`
+	Wishes         []portalWish          `json:"wishes"`
+	Comparison     []portalComparisonRow `json:"comparison,omitempty"`
+	Pace           *portalPace           `json:"pace,omitempty"`
+	ReleaseHistory bool                  `json:"release_history,omitempty"`
 }
 
 type voteResult struct {
@@ -131,7 +132,7 @@ func (m *Module) servePublic(w http.ResponseWriter, r *http.Request, kind string
 			return loadErr
 		}
 		doc = loaded
-		if kind == publicCatalog || doc.Product == nil {
+		if kind == publicCatalog || doc.Product == nil || !doc.ReleaseHistory {
 			return nil
 		}
 		releases, loadErr = loadPublicReleases(r.Context(), tx)
@@ -271,6 +272,11 @@ func loadPortal(ctx context.Context, tx pgx.Tx) (portalDocument, error) {
 	if err := attachPace(ctx, tx, id, &doc); err != nil {
 		return doc, err
 	}
+	on, err := portalPublishesReleases(ctx, tx)
+	if err != nil {
+		return doc, err
+	}
+	doc.ReleaseHistory = on
 	return doc, nil
 }
 

@@ -98,6 +98,10 @@ func TestPublicReleaseHistoryWhitelist(t *testing.T) {
 	insertUnfrozenSnapshot(t, d, harbour, project, relCold, "SECRET-UNFROZEN")
 	publishExisting(t, d, harbour, relCold, -1*24*time.Hour)
 
+	relEmpty := insertNode(t, d, harbour, "REL-12", "release", "SECRET-EMPTY-TITLE", "", "open", project, "{}")
+	tktEmpty := insertNode(t, d, harbour, "TKT-12", "ticket", "SECRET-EMPTY-TICKET", "", "open", project, `{"pill_en":"SECRET-EMPTY-RELEASE","pill_de":"SECRET-EMPTY-RELEASE","benefit_en":"SECRET-EMPTY-RELEASE","benefit_de":"SECRET-EMPTY-RELEASE","hide_from_release_notes":true}`)
+	publishRelease(t, d, harbour, project, relEmpty, 12, "released", "260912120000.0.0", -6*24*time.Hour, []string{tktEmpty})
+
 	relGone := insertNode(t, d, harbour, "REL-11", "release", "SECRET-DELETED-TITLE", "", "open", project, "{}")
 	tktGone := insertNode(t, d, harbour, "TKT-11", "ticket", "SECRET-DELETED-TICKET", "", "open", project, `{"pill_en":"Deleted stays hidden","pill_de":"Gelöscht bleibt verborgen","benefit_en":"SECRET-DELETED-RELEASE","benefit_de":"SECRET-DELETED-RELEASE","hide_from_release_notes":false}`)
 	publishRelease(t, d, harbour, project, relGone, 11, "released", "260905120000.0.0", -4*24*time.Hour, []string{tktGone})
@@ -123,6 +127,29 @@ func TestPublicReleaseHistoryWhitelist(t *testing.T) {
 		missIP = "203.0.113.81:1801"
 	)
 	releasesURL := "/api/public/portal/harbour/releases"
+	withheld := f.do(http.MethodGet, releasesURL, "", readIP, nil, nil, map[string]string{"Host": "secret.example"})
+	var withheldDoc publicReleasesDocument
+	if withheld.Code != http.StatusOK || json.Unmarshal(withheld.Body.Bytes(), &withheldDoc) != nil || withheldDoc.Product == nil || withheldDoc.Product.Title != "Harbour catalog" || len(withheldDoc.Releases) != 0 {
+		t.Fatalf("existing link published notes: %d %s", withheld.Code, withheld.Body)
+	}
+	if strings.Contains(withheld.Body.String(), "You can see what shipped") || strings.Contains(withheld.Body.String(), "SECRET-") || strings.Contains(withheld.Body.String(), "260926120000.0.0") {
+		t.Fatalf("existing link leaked notes: %s", withheld.Body)
+	}
+	withheldLlms := f.do(http.MethodGet, "/api/public/portal/harbour/llms.txt", "", readIP, nil, nil, nil)
+	if withheldLlms.Code != http.StatusOK || strings.Contains(withheldLlms.Body.String(), "Morning remains clear") || strings.Contains(withheldLlms.Body.String(), "Release history") || strings.Contains(withheldLlms.Body.String(), "SECRET-") {
+		t.Fatalf("existing link leaked llms: %d %s", withheldLlms.Code, withheldLlms.Body)
+	}
+	withheldCatalog := f.do(http.MethodGet, "/api/public/portal/harbour", "", readIP, nil, nil, nil)
+	if withheldCatalog.Code != http.StatusOK || strings.Contains(withheldCatalog.Body.String(), "release_history") || strings.Contains(withheldCatalog.Body.String(), "You can see what shipped") {
+		t.Fatalf("existing link advertised history: %d %s", withheldCatalog.Code, withheldCatalog.Body)
+	}
+	privateRec := f.do(http.MethodGet, "/api/public/portal/other-yard/releases", "", readIP, nil, nil, nil)
+	var privateDoc publicReleasesDocument
+	if privateRec.Code != http.StatusOK || json.Unmarshal(privateRec.Body.Bytes(), &privateDoc) != nil || privateDoc.Product == nil || len(privateDoc.Releases) != 0 || strings.Contains(privateRec.Body.String(), "SECRET-OTHER-TENANT") || strings.Contains(privateRec.Body.String(), "Other tenant hidden") {
+		t.Fatalf("private project without opt-in: %d %s", privateRec.Code, privateRec.Body)
+	}
+	setReleaseHistory(t, d, harbour, true)
+
 	rec := f.do(http.MethodGet, releasesURL, "", readIP, nil, nil, map[string]string{"Host": "secret.example"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("releases: %d %s", rec.Code, rec.Body)
@@ -169,7 +196,8 @@ func TestPublicReleaseHistoryWhitelist(t *testing.T) {
 		"SECRET-TICKET-TITLE", "SECRET-INTERNAL", "SECRET-HIDDEN-BENEFIT", "SECRET-GAP-NOTE",
 		"SECRET-EDITED-LATER", "SECRET-MISMATCH", "SECRET-FUTURE", "SECRET-PLANNING-NOTE",
 		"SECRET-CANDIDATE", "SECRET-OTHER-RELEASE", "SECRET-UNFROZEN", "SECRET-DELETED-RELEASE",
-		"SECRET-OTHER-TENANT", "SECRET-FEATURE", "TKT-91", "TKT-1", "TKT-2", "PRJ-1", "REL-1",
+		"SECRET-OTHER-TENANT", "SECRET-FEATURE", "SECRET-EMPTY-RELEASE", "260912120000.0.0",
+		"TKT-91", "TKT-1", "TKT-2", "PRJ-1", "REL-1",
 		"superseded", "planning", "candidate", "hide_from_release_notes", "unavailable", "project_node_id",
 		"release_node_id", "tenant_id", harbour, project, relCurrent, tktLatest,
 	} {
@@ -206,7 +234,7 @@ func TestPublicReleaseHistoryWhitelist(t *testing.T) {
 
 	catalog := f.do(http.MethodGet, "/api/public/portal/harbour", "", readIP, nil, nil, nil)
 	file := f.do(http.MethodGet, "/api/public/portal/harbour/catalog.json", "", readIP, nil, nil, nil)
-	if catalog.Code != http.StatusOK || file.Body.String() != catalog.Body.String() {
+	if catalog.Code != http.StatusOK || file.Body.String() != catalog.Body.String() || !strings.Contains(catalog.Body.String(), `"release_history":true`) || strings.Contains(catalog.Body.String(), "You can see what shipped") {
 		t.Fatalf("catalog file: %d %d\n%s\n%s", catalog.Code, file.Code, catalog.Body, file.Body)
 	}
 
@@ -374,6 +402,26 @@ func TestPublicFilesStayOffTheSPA(t *testing.T) {
 	headBody, _ := io.ReadAll(headRes.Body)
 	if headRes.StatusCode != http.StatusOK || len(headBody) != 0 || !strings.HasPrefix(headRes.Header.Get("Content-Type"), "text/plain") {
 		t.Fatalf("head: %d %q %s", headRes.StatusCode, headBody, headRes.Header.Get("Content-Type"))
+	}
+}
+
+func setReleaseHistory(t *testing.T, d *dbtest.DB, tenantID string, on bool) {
+	t.Helper()
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.portal_moderation','on',true)`); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(t.Context(), `UPDATE portal_pace SET release_history=$1`, on)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return fmt.Errorf("updated %d pace rows", tag.RowsAffected())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

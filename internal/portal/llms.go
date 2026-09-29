@@ -12,6 +12,9 @@ import (
 const llmsTextLimit = 200 * 1024
 
 func renderLlms(slug string, doc portalDocument, releases []publicRelease) string {
+	if !doc.ReleaseHistory {
+		releases = nil
+	}
 	page, catalog, history, historyJSON := portalFileLinks(slug)
 	var b strings.Builder
 	title := "Product portal"
@@ -35,7 +38,10 @@ func renderLlms(slug string, doc portalDocument, releases []publicRelease) strin
 		writeLlmsReleases(&b, history, releases)
 	}
 	body := b.String()
-	footer := fmt.Sprintf("## Machine-readable\n\n- [Catalog JSON](%s)\n- [Release history](%s)\n- [Release history JSON](%s)\n", catalog, history, historyJSON)
+	footer := fmt.Sprintf("## Machine-readable\n\n- [Catalog JSON](%s)\n", catalog)
+	if doc.ReleaseHistory {
+		footer += fmt.Sprintf("- [Release history](%s)\n- [Release history JSON](%s)\n", history, historyJSON)
+	}
 	if len(body)+len(footer) > llmsTextLimit {
 		room := llmsTextLimit - len(footer)
 		if room < 1 {

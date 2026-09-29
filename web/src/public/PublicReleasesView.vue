@@ -23,12 +23,30 @@ interface ReleasesDocument {
   releases: PublicRelease[]
 }
 
+const langKey = 'aeon.portal.releases.lang'
+
 const loading = ref(true)
 const missing = ref(false)
 const error = ref('')
 const doc = ref<ReleasesDocument | null>(null)
+const lang = ref<'en' | 'de'>(storedLang())
 
-const title = computed(() => doc.value?.product?.title || 'Nothing published yet')
+function storedLang(): 'en' | 'de' {
+  try {
+    return localStorage.getItem(langKey) === 'de' ? 'de' : 'en'
+  } catch {
+    return 'en'
+  }
+}
+
+function setLang(next: 'en' | 'de') {
+  lang.value = next
+  try {
+    localStorage.setItem(langKey, next)
+  } catch {
+    // Private mode keeps the choice for this view only.
+  }
+}
 
 function releasedOn(iso: string) {
   const parsed = new Date(iso)
@@ -36,16 +54,29 @@ function releasedOn(iso: string) {
   return parsed.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 }
 
-function heading(release: PublicRelease) {
-  return release.version || releasedOn(release.released_at)
+function validTime(iso: string) {
+  return !Number.isNaN(new Date(iso).getTime())
 }
 
-function showsGerman(note: PublicNote) {
-  const pill = note.pill_de.trim()
-  const benefit = note.benefit_de.trim()
-  if (!pill && !benefit) return false
-  return pill !== note.pill_en.trim() || benefit !== note.benefit_en.trim()
+function line(note: PublicNote, field: 'pill' | 'benefit') {
+  const en = (field === 'pill' ? note.pill_en : note.benefit_en)?.trim() ?? ''
+  const de = (field === 'pill' ? note.pill_de : note.benefit_de)?.trim() ?? ''
+  if (lang.value === 'de' && de) return { value: de, de: true }
+  if (en) return { value: en, de: false }
+  if (de) return { value: de, de: true }
+  return { value: '', de: false }
 }
+
+function noteHasText(note: PublicNote) {
+  return [note.pill_en, note.pill_de, note.benefit_en, note.benefit_de].some(value => (value ?? '').trim() !== '')
+}
+
+function noteHasGerman(note: PublicNote) {
+  return (note.pill_de ?? '').trim() !== '' || (note.benefit_de ?? '').trim() !== ''
+}
+
+const visibleReleases = computed(() => (doc.value?.releases ?? []).filter(release => release.notes.some(noteHasText)))
+const hasGerman = computed(() => visibleReleases.value.some(release => release.notes.some(noteHasGerman)))
 
 async function load() {
   loading.value = true
@@ -65,7 +96,7 @@ async function load() {
     }
     if (!response.ok) throw new Error('unavailable')
     doc.value = await response.json() as ReleasesDocument
-    setPageTitle(doc.value.product?.title || 'Nothing published yet')
+    setPageTitle(doc.value.product ? 'Releases' : 'Nothing published yet')
   } catch {
     error.value = 'Releases could not be loaded.'
     doc.value = null
@@ -101,27 +132,30 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
       <template v-else>
         <nav class="jumps" aria-label="Portal">
           <router-link class="jump" :to="`/portal/${tenantSlug}`"><AppIcon name="arrow-left" :size="16" />Catalog</router-link>
-          <a class="jump" :href="`/portal/${tenantSlug}/llms.txt`">llms.txt</a>
         </nav>
         <p class="eyebrow">Product portal</p>
-        <h1>{{ title }}</h1>
-        <p class="lead">What shipped, in the words saved when it shipped.</p>
-        <p v-if="!doc.releases.length" class="quiet">No published releases yet.</p>
+        <h1>Releases</h1>
+        <div v-if="hasGerman" class="lang" role="group" aria-label="Language">
+          <button type="button" :aria-pressed="lang === 'en'" @click="setLang('en')">English</button>
+          <button type="button" lang="de" :aria-pressed="lang === 'de'" @click="setLang('de')">Deutsch</button>
+        </div>
+        <p v-if="!visibleReleases.length" class="quiet">No published releases yet.</p>
         <ol v-else class="releases">
-          <li v-for="(release, index) in doc.releases" :key="`${release.released_at}-${index}`" class="release">
-            <h2 class="version" :title="heading(release)">{{ heading(release) }}</h2>
-            <p v-if="release.version" class="when">{{ releasedOn(release.released_at) }}</p>
+          <li v-for="(release, index) in visibleReleases" :key="`${release.released_at}-${index}`" class="release">
+            <h2>
+              <time v-if="validTime(release.released_at)" :datetime="release.released_at">{{ releasedOn(release.released_at) }}</time>
+              <template v-else>{{ releasedOn(release.released_at) }}</template>
+            </h2>
+            <p v-if="release.version" class="version" :title="release.version">{{ release.version }}</p>
             <article v-for="(note, noteIndex) in release.notes" :key="noteIndex" class="note">
-              <p v-if="note.pill_en" class="pill">{{ note.pill_en }}</p>
-              <p v-if="note.benefit_en" class="benefit">{{ note.benefit_en }}</p>
-              <details v-if="showsGerman(note)">
-                <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Deutsch</summary>
-                <p v-if="note.pill_de" class="pill">{{ note.pill_de }}</p>
-                <p v-if="note.benefit_de" class="benefit">{{ note.benefit_de }}</p>
-              </details>
+              <p v-if="line(note, 'pill').value" class="pill" :lang="line(note, 'pill').de ? 'de' : undefined">{{ line(note, 'pill').value }}</p>
+              <p v-if="line(note, 'benefit').value" class="benefit" :lang="line(note, 'benefit').de ? 'de' : undefined">{{ line(note, 'benefit').value }}</p>
             </article>
           </li>
         </ol>
+        <footer class="colophon">
+          <a class="colophon-link" :href="`/portal/${tenantSlug}/llms.txt`">llms.txt</a>
+        </footer>
       </template>
     </div>
   </div>
@@ -164,7 +198,24 @@ h1 {
   text-decoration: none;
 }
 .jump:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 8px; }
-.releases { list-style: none; margin: 28px 0 0; padding: 0; display: grid; gap: 12px; }
+.lang { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 16px; }
+.lang button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-3);
+  font: 600 14px/1 var(--font);
+  cursor: pointer;
+}
+.lang button[aria-pressed="true"] {
+  background: var(--chip-bg);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+}
+.lang button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.releases { list-style: none; margin: 22px 0 0; padding: 0; display: grid; gap: 12px; }
 .release {
   min-width: 0;
   padding: 18px;
@@ -172,27 +223,36 @@ h1 {
   background: var(--surface-raised);
   box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(20, 40, 40, 0.04);
 }
-.version {
+.release h2 {
   margin: 0;
+  font: 650 22px/1.25 var(--serif);
+  letter-spacing: -0.02em;
+}
+.release h2 time { font: inherit; color: inherit; }
+.version {
+  margin: 4px 0 0;
   overflow: hidden;
-  font: 600 15px/1.35 var(--mono);
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.when { margin: 6px 0 0; color: var(--ink-3); font-size: 13.5px; }
 .note { margin-top: 14px; }
 .note:first-of-type { margin-top: 12px; }
 .pill { margin: 0; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
 .benefit { margin: 6px 0 0; color: var(--ink-2); font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
-details { margin-top: 4px; }
-summary {
+.colophon { margin-top: 48px; }
+.colophon-link {
   display: inline-flex;
   align-items: center;
-  width: fit-content;
   min-height: 44px;
-  color: var(--ink-2);
-  cursor: pointer;
+  color: var(--ink-3);
+  font: 500 12.5px/1 var(--font);
+  text-decoration: none;
 }
+.colophon-link:hover { color: var(--ink-2); }
+.colophon-link:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 8px; }
 .again {
   display: inline-flex;
   align-items: center;
@@ -213,5 +273,10 @@ summary {
 @media (max-width: 560px) {
   .sheet { padding: 24px 16px 56px; }
 }
-main:has(> .page-flow > .portal) { background: var(--surface); }
+:global(main:has(> .page-flow > .portal)) {
+  scrollbar-gutter: auto;
+  background:
+    radial-gradient(900px 420px at 0% -10%, var(--wash-1), transparent 70%),
+    var(--surface);
+}
 </style>

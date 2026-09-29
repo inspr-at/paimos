@@ -27,6 +27,7 @@ const portal = {
     { key: 'PWS-1', title: 'Owner assembly on a phone', summary: 'Join without installing an app.', votes: 3 },
   ],
   pace: { releases_30d: 4, median_release_gap_days: 21, wish_to_live_median_days: 18 },
+  release_history: true,
   comparison: [{
     aspect: 'Statutory deadlines',
     cells: [
@@ -67,6 +68,17 @@ async function install(page: Page, missing = false) {
 
 async function expectFits(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  const seam = await page.evaluate(() => {
+    const main = document.querySelector('main')
+    const portal = document.querySelector<HTMLElement>('.portal')
+    if (!main || !portal) return 'missing'
+    const mainStyle = getComputedStyle(main)
+    const portalStyle = getComputedStyle(portal)
+    if (mainStyle.backgroundColor !== portalStyle.backgroundColor) return `color ${mainStyle.backgroundColor} vs ${portalStyle.backgroundColor}`
+    if (!mainStyle.backgroundImage.includes('radial-gradient')) return 'main has no wash'
+    return ''
+  })
+  expect(seam).toBe('')
   const edged = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.portal *')].filter(el => {
     const style = getComputedStyle(el)
     const left = parseFloat(style.borderLeftWidth)
@@ -85,6 +97,7 @@ for (const width of [1600, 390]) {
     await page.goto('/portal/harbour')
     await expect(page.getByRole('heading', { level: 1, name: 'Harbour office' })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Releases' })).toHaveAttribute('href', '/portal/harbour/releases')
+    await expect(page.getByRole('navigation', { name: 'Portal' }).getByRole('link', { name: 'llms.txt' })).toHaveCount(0)
     await expect(page.getByRole('link', { name: 'llms.txt' })).toHaveAttribute('href', '/portal/harbour/llms.txt')
     await expect(page.getByRole('group', { name: 'Feature status' })).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'Deadline radar' })).toBeVisible()
@@ -194,6 +207,28 @@ test('a correction sends the statement and no name', async ({ page }) => {
     source_url: 'https://northwind.example/correction',
     website: '',
   })
+  await expectFits(page)
+})
+
+test('a catalog without release history hides the releases link', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.route('**/api/**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/api/me') {
+      await route.fulfill({ status: 401, contentType: 'application/json', body: '{}' })
+      return
+    }
+    if (url.pathname.startsWith('/api/public/portal/')) {
+      const { release_history: _ignored, ...quiet } = portal
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(quiet) })
+      return
+    }
+    await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' })
+  })
+  await page.goto('/portal/harbour')
+  await expect(page.getByRole('heading', { level: 1, name: 'Harbour office' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Releases' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'llms.txt' })).toHaveAttribute('href', '/portal/harbour/llms.txt')
   await expectFits(page)
 })
 

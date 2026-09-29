@@ -38,6 +38,7 @@ func (p portalPace) empty() bool {
 type paceAdmin struct {
 	ProjectID            string        `json:"project_id,omitempty"`
 	ProjectTitle         string        `json:"project_title,omitempty"`
+	ReleaseHistory       bool          `json:"release_history"`
 	Releases30d          *int          `json:"releases_30d,omitempty"`
 	MedianReleaseGapDays *int          `json:"median_release_gap_days,omitempty"`
 	WishToLiveMedianDays *int          `json:"wish_to_live_median_days,omitempty"`
@@ -57,21 +58,23 @@ func (m *Module) readPace(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
-		projectID, clear, err := decodeOptionalID(r, "project_id")
+		in, err := decodePaceWrite(r)
 		if err != nil {
 			return nil, statusError{status: http.StatusBadRequest, msg: "invalid pace"}
 		}
-		if clear {
+		history := false
+		switch {
+		case in.clear:
 			if _, err := tx.Exec(ctx, `DELETE FROM portal_pace`); err != nil {
 				return nil, err
 			}
-		} else {
+		case in.setProject:
 			var title string
 			err := tx.QueryRow(ctx, `
 				SELECT left(n.title, 300)
 				FROM nodes n
 				JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
-				WHERE n.id = $1::uuid AND n.deleted_at IS NULL AND k.slug = 'project'`, projectID).Scan(&title)
+				WHERE n.id = $1::uuid AND n.deleted_at IS NULL AND k.slug = 'project'`, in.projectID).Scan(&title)
 			if errors.Is(err, pgx.ErrNoRows) || title == "" {
 				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 					return nil, err
@@ -81,16 +84,48 @@ func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return nil, err
 			}
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO portal_pace(tenant_id, project_node_id)
-				VALUES (NULLIF(current_setting('aeon.tenant_id', true), '')::uuid, $1::uuid)
-				ON CONFLICT (tenant_id) DO UPDATE SET project_node_id = EXCLUDED.project_node_id`, projectID); err != nil {
+			var currentProject string
+			var currentHistory bool
+			err = tx.QueryRow(ctx, `SELECT project_node_id::text, release_history FROM portal_pace`).Scan(&currentProject, &currentHistory)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return nil, err
 			}
+			switch {
+			case in.setHistory:
+				history = in.history
+			case err == nil && currentProject == in.projectID:
+				history = currentHistory
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO portal_pace(tenant_id, project_node_id, release_history)
+				VALUES (NULLIF(current_setting('aeon.tenant_id', true), '')::uuid, $1::uuid, $2)
+				ON CONFLICT (tenant_id) DO UPDATE
+				SET project_node_id = EXCLUDED.project_node_id,
+				    release_history = EXCLUDED.release_history`, in.projectID, history); err != nil {
+				return nil, err
+			}
+		default:
+			tag, err := tx.Exec(ctx, `
+				UPDATE portal_pace AS p
+				SET release_history = $1
+				WHERE EXISTS (
+					SELECT 1
+					FROM nodes n
+					JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
+					WHERE n.tenant_id = p.tenant_id AND n.id = p.project_node_id
+					  AND n.deleted_at IS NULL AND k.slug = 'project'
+				)`, in.history)
+			if err != nil {
+				return nil, err
+			}
+			if tag.RowsAffected() != 1 {
+				return nil, statusError{status: http.StatusBadRequest, msg: "Link a project first."}
+			}
+			history = in.history
 		}
 		if _, err := events.Append(ctx, tx, p, events.Change{
 			Type:  "portal.pace_updated",
-			After: map[string]any{"linked": !clear},
+			After: map[string]any{"linked": !in.clear, "release_history": history},
 		}); err != nil {
 			return nil, err
 		}
@@ -232,12 +267,13 @@ func (s paceSample) forPublic(raw portalPace) portalPace {
 func loadPaceAdminFor(ctx context.Context, tx pgx.Tx, productID string) (paceAdmin, paceSample, error) {
 	out := paceAdmin{Fulfillments: []fulfillment{}}
 	var projectID, title string
+	var history bool
 	err := tx.QueryRow(ctx, `
-		SELECT p.project_node_id::text, left(n.title, 300)
+		SELECT p.project_node_id::text, left(n.title, 300), p.release_history
 		FROM portal_pace p
 		JOIN nodes n ON n.tenant_id = p.tenant_id AND n.id = p.project_node_id
 		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
-		WHERE n.deleted_at IS NULL AND k.slug = 'project'`).Scan(&projectID, &title)
+		WHERE n.deleted_at IS NULL AND k.slug = 'project'`).Scan(&projectID, &title, &history)
 	linked := err == nil && uuidPattern.MatchString(projectID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return out, paceSample{}, err
@@ -250,6 +286,7 @@ func loadPaceAdminFor(ctx context.Context, tx pgx.Tx, productID string) (paceAdm
 	if linked {
 		out.ProjectID = projectID
 		out.ProjectTitle = publicLine(title, 300)
+		out.ReleaseHistory = history
 		rows, err := tx.Query(ctx, `
 			SELECT released_at
 			FROM journey_releases
@@ -416,6 +453,58 @@ func medianInts(values []int) (int, bool) {
 		return (sum + 1) / 2, true
 	}
 	return (sum - 1) / 2, true
+}
+
+type paceWrite struct {
+	projectID  string
+	clear      bool
+	history    bool
+	setProject bool
+	setHistory bool
+}
+
+func decodePaceWrite(r *http.Request) (paceWrite, error) {
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		return paceWrite{}, errors.New("invalid JSON")
+	}
+	buf, err := io.ReadAll(io.LimitReader(r.Body, portalEditLimit+1))
+	if err != nil || len(buf) == 0 || len(buf) > portalEditLimit {
+		return paceWrite{}, errors.New("invalid JSON")
+	}
+	dec := json.NewDecoder(strings.NewReader(string(buf)))
+	dec.DisallowUnknownFields()
+	var raw map[string]json.RawMessage
+	if err := dec.Decode(&raw); err != nil {
+		return paceWrite{}, errors.New("invalid JSON")
+	}
+	var extra struct{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		return paceWrite{}, errors.New("invalid JSON")
+	}
+	if len(raw) == 0 || len(raw) > 2 {
+		return paceWrite{}, errors.New("invalid JSON")
+	}
+	var out paceWrite
+	if value, ok := raw["project_id"]; ok {
+		out.setProject = true
+		if strings.TrimSpace(string(value)) == "null" {
+			out.clear = true
+		} else if json.Unmarshal(value, &out.projectID) != nil || !uuidPattern.MatchString(out.projectID) {
+			return paceWrite{}, errors.New("invalid JSON")
+		}
+		delete(raw, "project_id")
+	}
+	if value, ok := raw["release_history"]; ok {
+		out.setHistory = true
+		if json.Unmarshal(value, &out.history) != nil {
+			return paceWrite{}, errors.New("invalid JSON")
+		}
+		delete(raw, "release_history")
+	}
+	if len(raw) != 0 || (!out.setProject && !out.setHistory) || (out.clear && out.setHistory) {
+		return paceWrite{}, errors.New("invalid JSON")
+	}
+	return out, nil
 }
 
 func decodeOptionalID(r *http.Request, key string) (id string, clear bool, err error) {

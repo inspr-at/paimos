@@ -56,6 +56,11 @@ func TestProjectPublicReleaseWhitelist(t *testing.T) {
 	if !ok || rel.Version != "" || len(rel.Notes) != 1 || rel.Notes[0].PillEN != "Quiet dated notes" {
 		t.Fatalf("unversioned: ok=%v %+v", ok, rel)
 	}
+	hiddenOnly := []byte(`{"schema":"aeon.release-note-snapshot.v1","version":"260912120000.0.0","frozen":true,"tickets":[{"unavailable":"","fields":{"pill_en":"SECRET-EMPTY-RELEASE","pill_de":"SECRET-EMPTY-RELEASE","benefit_en":"SECRET-EMPTY-RELEASE","benefit_de":"SECRET-EMPTY-RELEASE","hide_from_release_notes":true}}]}`)
+	hiddenVersion := "260912120000.0.0"
+	if _, ok := projectPublicRelease(&hiddenVersion, at, hiddenOnly); ok {
+		t.Fatal("a release with no public note was published")
+	}
 }
 
 func TestLlmsTextIsPublicAndBounded(t *testing.T) {
@@ -64,7 +69,8 @@ func TestLlmsTextIsPublicAndBounded(t *testing.T) {
 		Catalog: []portalFeature{{
 			Key: "PCF-1", Title: "Deadline [radar]", Summary: "Public summary.", Status: "live", LiveSince: "260926120000.0.0",
 		}},
-		Wishes: []portalWish{{Key: "PWS-1", Title: "A public wish", Summary: "Join without an account.", Votes: 1}},
+		Wishes:         []portalWish{{Key: "PWS-1", Title: "A public wish", Summary: "Join without an account.", Votes: 1}},
+		ReleaseHistory: true,
 	}
 	releases := []publicRelease{{
 		ReleasedAt: "2026-09-26T12:00:00Z",
@@ -93,6 +99,14 @@ func TestLlmsTextIsPublicAndBounded(t *testing.T) {
 	}
 	if !strings.HasSuffix(text, "\n") {
 		t.Fatal("llms.txt must end with a newline")
+	}
+	doc.ReleaseHistory = false
+	silent := renderLlms("harbour", doc, releases)
+	if strings.Contains(silent, "Clear morning notes") || strings.Contains(silent, "Release history") || strings.Contains(silent, "You can see what shipped") {
+		t.Fatalf("llms published notes without the opt-in\n%s", silent)
+	}
+	if !strings.Contains(silent, "- [Catalog JSON](/portal/harbour/catalog.json)\n") {
+		t.Fatalf("llms dropped the catalog link\n%s", silent)
 	}
 
 	unsafe := portalDocument{Product: &portalProduct{Title: "Bad <script>", Summary: "still here"}, Catalog: []portalFeature{}, Wishes: []portalWish{}}

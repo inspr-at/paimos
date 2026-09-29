@@ -4480,7 +4480,7 @@ paths:
     get:
       operationId: readPublicPortalReleases
       summary: Read published release notes for the portal product
-      description: Anonymous. Notes are the frozen snapshot taken when a release shipped, for the one project linked on the portal pace screen. The project name is omitted. Only released and superseded releases with a frozen snapshot are included. A published release without a frozen snapshot is omitted. Hidden tickets and incomplete benefit text are omitted. Ticket keys, node ids and later edits of ticket fields are not part of this document. A disabled portal and an unknown tenant both answer 404. An open portal with no published product returns product null and an empty releases list. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved. The public page is /portal/{tenantSlug}/releases.
+      description: Anonymous. Notes are the frozen snapshot taken when a release shipped, for the one project linked on the portal pace screen, and only after that link turns release history on. A pace link alone returns an empty releases list. The project name is omitted. Only released and superseded releases with a frozen snapshot and at least one public note are included. A published release without a frozen snapshot, or with no public note, is omitted. Hidden tickets and incomplete benefit text are omitted. Ticket keys, node ids and later edits of ticket fields are not part of this document. A disabled portal and an unknown tenant both answer 404. An open portal with no published product returns product null and an empty releases list. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved. The public page is /portal/{tenantSlug}/releases.
       security: []
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
@@ -4624,7 +4624,8 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
     put:
       operationId: writePortalPace
-      summary: Link one project whose release dates become the public count, or clear it
+      summary: Link one project whose release dates become the public count, clear it, or choose whether its frozen notes are public
+      description: settings.manage, people only. Sending project_id alone keeps release history when the project stays the same and turns it off when the project changes. Sending release_history alone needs a project that is already linked. Clearing the link and setting release history in one body is refused.
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPaceWrite'}}}}
       responses:
@@ -6752,6 +6753,7 @@ components:
           description: Present only when at least one competitor is published and at least one row exists
           items: {$ref: '#/components/schemas/PortalPublicComparison'}
         pace: {$ref: '#/components/schemas/PortalPublicPace'}
+        release_history: {type: boolean, description: True only when the linked project publishes release notes. Omitted otherwise. Notes themselves stay on the releases document.}
     PortalPublicRelease:
       type: object
       additionalProperties: false
@@ -6951,6 +6953,7 @@ components:
       properties:
         project_id: {type: string, format: uuid}
         project_title: {type: string, description: Admin only. Never copied onto the public document.}
+        release_history: {type: boolean, default: false, description: Admin only. Frozen notes are public only when this is true. A new or existing link stays false until set.}
         releases_30d: {type: integer, minimum: 0}
         median_release_gap_days: {type: integer, minimum: 0}
         wish_to_live_median_days: {type: integer, minimum: 0}
@@ -6958,9 +6961,10 @@ components:
     PortalPaceWrite:
       type: object
       additionalProperties: false
-      required: [project_id]
+      minProperties: 1
       properties:
         project_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}]}
+        release_history: {type: boolean, description: Publish frozen notes for the linked project. Absent leaves the current choice when the project stays, and leaves a different project off.}
     PortalFulfillmentWrite:
       type: object
       additionalProperties: false

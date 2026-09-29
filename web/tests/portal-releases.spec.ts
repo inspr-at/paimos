@@ -42,6 +42,7 @@ const catalog = {
   product: releases.product,
   catalog: [],
   wishes: [],
+  release_history: true,
 }
 
 async function install(page: Page, body: 'releases' | 'empty' | 'missing') {
@@ -70,6 +71,17 @@ async function install(page: Page, body: 'releases' | 'empty' | 'missing') {
 
 async function expectFits(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  const seam = await page.evaluate(() => {
+    const main = document.querySelector('main')
+    const portal = document.querySelector<HTMLElement>('.portal')
+    if (!main || !portal) return 'missing'
+    const mainStyle = getComputedStyle(main)
+    const portalStyle = getComputedStyle(portal)
+    if (mainStyle.backgroundColor !== portalStyle.backgroundColor) return `color ${mainStyle.backgroundColor} vs ${portalStyle.backgroundColor}`
+    if (!mainStyle.backgroundImage.includes('radial-gradient')) return 'main has no wash'
+    return ''
+  })
+  expect(seam).toBe('')
   const edged = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.portal *')].filter(el => {
     const style = getComputedStyle(el)
     const left = parseFloat(style.borderLeftWidth)
@@ -86,29 +98,40 @@ for (const width of [1600, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await install(page, 'releases')
     await page.goto('/portal/harbour/releases')
-    await expect(page.getByRole('heading', { level: 1, name: 'Harbour office' })).toBeVisible()
-    await expect(page.getByText('What shipped, in the words saved when it shipped.')).toBeVisible()
-    const version = page.getByRole('heading', { level: 2, name: '260926120000.0.0' })
+    await expect(page.getByRole('heading', { level: 1, name: 'Releases' })).toBeVisible()
+    await expect(page).toHaveTitle(/Releases/)
+    await expect(page.getByText('What shipped, in the words saved when it shipped.')).toHaveCount(0)
+    await expect(page.getByRole('heading', { level: 2, name: '260926120000.0.0' })).toHaveCount(0)
+    const version = page.getByText('260926120000.0.0')
     await expect(version).toBeVisible()
     await expect(version).toHaveAttribute('title', '260926120000.0.0')
+    await expect(page.locator('time[datetime="2026-09-26T12:00:00Z"]')).toHaveText(/26 Sept? 2026/)
+    await expect(page.getByRole('heading', { level: 2, name: /26 Sept? 2026/ })).toBeVisible()
     await expect(page.getByText('Clear morning notes')).toBeVisible()
     await expect(page.getByText(benefit)).toBeVisible()
-    await expect(page.getByText(/26 Sept? 2026/)).toBeVisible()
     await expect(page.getByRole('heading', { level: 2, name: /10 Sept? 2026/ })).toBeVisible()
+    await expect(page.locator('time[datetime="2026-09-10T08:00:00Z"]')).toBeVisible()
     await expect(page.getByText('SECRET-NOTE')).toHaveCount(0)
     await expect(page.getByText('TKT-91')).toHaveCount(0)
-    const deutsch = page.getByText('Deutsch', { exact: true })
-    await expect(deutsch).toBeVisible()
+    const deutsch = page.getByRole('button', { name: 'Deutsch' })
+    await expect(deutsch).toHaveCount(1)
     await expect(page.getByText('Klare Morgennotizen')).toBeHidden()
     await deutsch.click()
-    await expect(page.getByText('Klare Morgennotizen')).toBeVisible()
-    await expect(page.getByText('Sichtbar, was geliefert wurde.')).toBeVisible()
+    await expect(page.locator('[lang="de"]').filter({ hasText: 'Klare Morgennotizen' })).toBeVisible()
+    await expect(page.locator('[lang="de"]').filter({ hasText: 'Sichtbar, was geliefert wurde.' })).toBeVisible()
+    await expect(page.getByText('Clear morning notes')).toBeHidden()
+    await page.reload()
+    await expect(page.locator('[lang="de"]').filter({ hasText: 'Klare Morgennotizen' })).toBeVisible()
+    await page.getByRole('button', { name: 'English' }).click()
+    await expect(page.getByText('Clear morning notes')).toBeVisible()
+    await expect(page.getByRole('navigation', { name: 'Portal' }).getByRole('link', { name: 'llms.txt' })).toHaveCount(0)
     await expect(page.getByRole('link', { name: 'Catalog' })).toHaveAttribute('href', '/portal/harbour')
     await expect(page.getByRole('link', { name: 'llms.txt' })).toHaveAttribute('href', '/portal/harbour/llms.txt')
     await expectFits(page)
     await page.emulateMedia({ colorScheme: 'light' })
     await capture(page, `public-releases-${width}-light.png`)
     await page.emulateMedia({ colorScheme: 'dark' })
+    await expectFits(page)
     await capture(page, `public-releases-${width}-dark.png`)
     await page.emulateMedia({ colorScheme: 'light' })
     await page.getByRole('link', { name: 'Catalog' }).click()

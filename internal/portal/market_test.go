@@ -141,7 +141,7 @@ func TestPortalMarketAndPace(t *testing.T) {
 	}
 
 	pace := decodeItem[paceAdmin](t, f.do(http.MethodGet, "/api/portal/pace", "", adminIP, &admin, nil, nil))
-	if pace.ProjectTitle != "SECRET-PROJECT-NAME" || pace.WishToLiveMedianDays == nil || *pace.WishToLiveMedianDays != 15 {
+	if pace.ProjectTitle != "SECRET-PROJECT-NAME" || pace.ReleaseHistory || pace.WishToLiveMedianDays == nil || *pace.WishToLiveMedianDays != 15 {
 		t.Fatalf("admin pace %+v", pace)
 	}
 	market := decodeItem[marketAdmin](t, f.do(http.MethodGet, "/api/portal/market", "", adminIP, &admin, nil, nil))
@@ -162,6 +162,45 @@ func TestPortalMarketAndPace(t *testing.T) {
 	if doc.Pace != nil {
 		t.Fatalf("public pace from two wishes and three releases %+v", doc.Pace)
 	}
+	if doc.ReleaseHistory || strings.Contains(body.Body.String(), "release_history") {
+		t.Fatalf("existing link advertised release history: %s", body.Body)
+	}
+	if rec := f.do(http.MethodPut, "/api/portal/pace", `{"release_history":true}`, adminIP, &member, nil, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("member history: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.do(http.MethodPut, "/api/portal/pace", `{"release_history":"yes"}`, adminIP, &admin, nil, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad history: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.do(http.MethodPut, "/api/portal/pace", `{"project_id":null,"release_history":true}`, adminIP, &admin, nil, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("clear and publish: %d %s", rec.Code, rec.Body)
+	}
+	opted := decodeItem[paceAdmin](t, f.do(http.MethodPut, "/api/portal/pace", `{"release_history":true}`, adminIP, &admin, nil, nil))
+	if !opted.ReleaseHistory || opted.ProjectID != project {
+		t.Fatalf("opt-in %+v", opted)
+	}
+	kept := decodeItem[paceAdmin](t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":"`+project+`"}`, adminIP, &admin, nil, nil))
+	if !kept.ReleaseHistory || kept.ProjectTitle != "SECRET-PROJECT-NAME" {
+		t.Fatalf("same link cleared history %+v", kept)
+	}
+	published := f.do(http.MethodGet, readA, "", "203.0.113.20:1000", nil, nil, nil)
+	if published.Code != http.StatusOK || !strings.Contains(published.Body.String(), `"release_history":true`) || strings.Contains(published.Body.String(), "SECRET-PROJECT-NAME") {
+		t.Fatalf("public opt-in: %d %s", published.Code, published.Body)
+	}
+	assertPublicShape(t, published.Body.Bytes())
+	privateProject := insertNode(t, d, tenantA, "PRJ-9", "project", "SECRET-PRIVATE-PROJECT", "SECRET-PRIVATE-BODY", "open", "", "{}")
+	switched := decodeItem[paceAdmin](t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":"`+privateProject+`"}`, adminIP, &admin, nil, nil))
+	if switched.ReleaseHistory || switched.ProjectTitle != "SECRET-PRIVATE-PROJECT" {
+		t.Fatalf("new link kept history %+v", switched)
+	}
+	withheld := f.do(http.MethodGet, readA, "", "203.0.113.22:1000", nil, nil, nil)
+	if withheld.Code != http.StatusOK || strings.Contains(withheld.Body.String(), "release_history") || strings.Contains(withheld.Body.String(), "SECRET-PRIVATE") {
+		t.Fatalf("private project without opt-in: %d %s", withheld.Code, withheld.Body)
+	}
+	mustOK(t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":null}`, adminIP, &admin, nil, nil))
+	if rec := f.do(http.MethodPut, "/api/portal/pace", `{"release_history":true}`, adminIP, &admin, nil, nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Link a project first.") {
+		t.Fatalf("history without a project: %d %s", rec.Code, rec.Body)
+	}
+	mustOK(t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":"`+project+`"}`, adminIP, &admin, nil, nil))
 	fact := findPublicCell(t, doc, "Statutory deadlines", "Northwind")
 	if fact.Stance != "yes" || fact.Quote != "QUOTED-FACT-ALPHA on the public help page." || fact.Stale || fact.SourceURL != "https://northwind.example/deadlines" {
 		t.Fatalf("fresh cell %+v", fact)
@@ -288,6 +327,7 @@ type publicMarketDoc struct {
 		MedianReleaseGapDays *int `json:"median_release_gap_days"`
 		WishToLiveMedianDays *int `json:"wish_to_live_median_days"`
 	} `json:"pace"`
+	ReleaseHistory bool `json:"release_history"`
 }
 
 func bytesRepeat() []byte {
@@ -368,6 +408,7 @@ func assertPublicShape(t *testing.T, body []byte) {
 		"comparison": true, "aspect": true, "cells": true, "competitor": true, "stance": true,
 		"quote": true, "source_url": true, "retrieved_on": true, "stale": true, "pace": true,
 		"releases_30d": true, "median_release_gap_days": true, "wish_to_live_median_days": true,
+		"release_history": true,
 	}
 	var walk func(any)
 	walk = func(v any) {

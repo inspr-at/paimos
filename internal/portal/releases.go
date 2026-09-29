@@ -5,6 +5,7 @@ package portal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -35,9 +36,28 @@ type publicReleasesDocument struct {
 	Releases []publicRelease `json:"releases"`
 }
 
-// loadPublicReleases reads frozen notes for the project linked on portal_pace.
-// The project title is not selected. A missing link or a deleted project
+// portalPublishesReleases reports whether the linked project has turned
+// release history on and still exists. A pace link without that choice, or a
+// deleted project, publishes nothing.
+func portalPublishesReleases(ctx context.Context, tx pgx.Tx) (bool, error) {
+	var on bool
+	err := tx.QueryRow(ctx, `
+		SELECT true
+		FROM portal_pace p
+		JOIN nodes proj ON proj.tenant_id = p.tenant_id AND proj.id = p.project_node_id AND proj.deleted_at IS NULL
+		JOIN node_kinds pk ON pk.tenant_id = proj.tenant_id AND pk.id = proj.kind_id AND pk.slug = 'project'
+		WHERE p.release_history`).Scan(&on)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return on, err
+}
+
+// loadPublicReleases reads frozen notes for the project linked on portal_pace
+// once that link has turned release history on. The project title is not
+// selected. A missing link, a link that has not opted in, or a deleted project
 // yields an empty list. Planning and unpublished releases are not queried.
+// A release with no public note is omitted.
 func loadPublicReleases(ctx context.Context, tx pgx.Tx) ([]publicRelease, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT r.version, r.released_at, s.snapshot
@@ -51,7 +71,8 @@ func loadPublicReleases(ctx context.Context, tx pgx.Tx) ([]publicRelease, error)
 		  ON s.tenant_id = r.tenant_id AND s.release_node_id = r.release_node_id
 		 AND s.snapshot->>'schema' = 'aeon.release-note-snapshot.v1'
 		 AND s.snapshot->>'frozen' = 'true'
-		WHERE r.state IN ('released', 'superseded')
+		WHERE p.release_history
+		  AND r.state IN ('released', 'superseded')
 		  AND r.released_at IS NOT NULL
 		  AND r.released_at <= clock_timestamp()
 		ORDER BY r.released_at DESC, r.number DESC
@@ -145,6 +166,9 @@ func projectPublicRelease(version *string, at time.Time, raw []byte) (publicRele
 			continue
 		}
 		rel.Notes = append(rel.Notes, note)
+	}
+	if len(rel.Notes) == 0 {
+		return publicRelease{}, false
 	}
 	return rel, true
 }

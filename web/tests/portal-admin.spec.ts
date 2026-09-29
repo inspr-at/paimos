@@ -60,10 +60,11 @@ async function install(page: Page) {
   const pace: {
     project_id?: string
     project_title?: string
+    release_history?: boolean
     releases_30d?: number
     median_release_gap_days?: number
     fulfillments: { wish_id: string; feature_id: string }[]
-  } = { fulfillments: [] }
+  } = { fulfillments: [], release_history: false }
   const add = (partial: Pick<PortalNode, 'kind_id' | 'kind_slug' | 'kind_label' | 'title' | 'body' | 'state' | 'parent_id'> & { fields?: Record<string, string> }) => {
     const kind = kinds.find(item => item.id === partial.kind_id)!
     const node: PortalNode = {
@@ -258,17 +259,25 @@ async function install(page: Page) {
       return
     }
     if (path === '/api/portal/pace' && method === 'PUT') {
-      const input = request.postDataJSON() as { project_id?: string | null }
-      if (!input.project_id) {
-        pace.project_id = undefined
-        pace.project_title = undefined
-        pace.releases_30d = undefined
-        pace.median_release_gap_days = undefined
-      } else {
-        pace.project_id = input.project_id
-        pace.project_title = input.project_id === 'p-pharos' ? 'Pharos' : 'Project'
-        pace.releases_30d = 4
-        pace.median_release_gap_days = 21
+      const input = request.postDataJSON() as { project_id?: string | null; release_history?: boolean }
+      if ('project_id' in input) {
+        if (!input.project_id) {
+          pace.project_id = undefined
+          pace.project_title = undefined
+          pace.releases_30d = undefined
+          pace.median_release_gap_days = undefined
+          pace.release_history = false
+        } else {
+          const changed = pace.project_id !== input.project_id
+          pace.project_id = input.project_id
+          pace.project_title = input.project_id === 'p-pharos' ? 'Pharos' : 'Project'
+          pace.releases_30d = 4
+          pace.median_release_gap_days = 21
+          if (changed) pace.release_history = false
+          if (typeof input.release_history === 'boolean') pace.release_history = input.release_history
+        }
+      } else if (typeof input.release_history === 'boolean') {
+        pace.release_history = input.release_history
       }
       await route.fulfill({ json: pace })
       return
@@ -366,6 +375,11 @@ for (const width of [1600, 390]) {
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
     await expect(page.getByText('Approved.')).toBeVisible()
     await page.getByLabel('Releases from').selectOption({ label: 'Pharos' })
+    const history = page.getByRole('checkbox', { name: 'Publish release history' })
+    await expect(history).toBeEnabled()
+    await expect(history).not.toBeChecked()
+    await history.check()
+    await expect(history).toBeChecked()
     await expect(page.getByText('releases in 30 days')).toBeVisible()
     await expect(page.getByText('4', { exact: true }).first()).toBeVisible()
     await expectFits(page)

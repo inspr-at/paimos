@@ -47,6 +47,7 @@ interface PortalDocument {
   wishes: PortalWish[]
   comparison?: PortalComparison[]
   pace?: PortalPace
+  release_history?: boolean
 }
 
 const statusLabel: Record<string, string> = {
@@ -292,9 +293,8 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
         <p class="eyebrow">Product portal</p>
         <h1>{{ doc.product.title }}</h1>
         <p v-if="doc.product.summary" class="lead">{{ doc.product.summary }}</p>
-        <nav class="jumps" aria-label="Portal">
+        <nav v-if="doc.release_history" class="jumps" aria-label="Portal">
           <router-link class="jump" :to="`/portal/${tenantSlug}/releases`">Releases</router-link>
-          <a class="jump" :href="`/portal/${tenantSlug}/llms.txt`">llms.txt</a>
         </nav>
 
         <section v-if="paceFigures.length" class="block" aria-labelledby="pace-heading">
@@ -397,6 +397,9 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
           </form>
           <p v-else class="quiet" role="status">Sent.</p>
         </section>
+        <footer class="colophon">
+          <a class="colophon-link" :href="`/portal/${tenantSlug}/llms.txt`">llms.txt</a>
+        </footer>
       </template>
     </div>
   </div>
@@ -539,11 +542,27 @@ h3 { margin: 0; font-size: 17px; line-height: 1.3; font-weight: 650; overflow-wr
 }
 .vote:disabled { cursor: default; color: var(--ink-2); background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }
 .vote:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.colophon { margin-top: 48px; }
+.colophon-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ink-3);
+  font: 500 12.5px/1 var(--font);
+  text-decoration: none;
+}
+.colophon-link:hover { color: var(--ink-2); }
+.colophon-link:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 8px; }
 @media (hover: hover) { .vote:not(:disabled):hover { background: var(--btn-bg-hover); } }
 @media (max-width: 560px) {
   .sheet { padding: 24px 16px 56px; }
   .card-top, .wish { flex-direction: column; align-items: stretch; }
   .vote { width: 100%; }
 }
-main:has(> .page-flow > .portal) { background: var(--surface); }
+:global(main:has(> .page-flow > .portal)) {
+  scrollbar-gutter: auto;
+  background:
+    radial-gradient(900px 420px at 0% -10%, var(--wash-1), transparent 70%),
+    var(--surface);
+}
 </style>
