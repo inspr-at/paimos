@@ -112,7 +112,7 @@ func TestKeyScopeEditorAndOriginalCreatorIntersection(t *testing.T) {
 			return err
 		}
 		var role string
-		if err := tx.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'key-editor','Key editor') RETURNING id::text`, owner.TenantID).Scan(&role); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'key_editor','Key editor') RETURNING id::text`, owner.TenantID).Scan(&role); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1::uuid,$2::uuid,unnest(ARRAY['keys.manage','nodes.read'])`, owner.TenantID, role); err != nil {

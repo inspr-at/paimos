@@ -26,7 +26,9 @@ test('edits scopes on the same key and records the change', async ({ page }) => 
   const world = await open(page)
   const count = world.keys.length
   await edit(page)
+  await sheet(page).getByRole('button', { name: 'Show unavailable scopes' }).click()
   await expect(sheet(page).getByRole('checkbox', { name: /nodes\.write/ })).toBeDisabled()
+  await sheet(page).getByRole('button', { name: 'Hide unavailable scopes' }).click()
   await expect(sheet(page).getByRole('checkbox', { name: /keys\.manage/ })).toHaveCount(0)
   await expect(sheet(page).getByRole('button', { name: 'Save scopes' })).toBeDisabled()
   await sheet(page).getByRole('checkbox', { name: /knowledge\.read/ }).check()

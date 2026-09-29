@@ -19,13 +19,14 @@ const loaded = ref(false)
 const busy = ref(false)
 const error = ref('')
 const term = ref('')
+const showUnavailable = ref(false)
 const allowed = computed(() => can('keys.manage'))
 const groups = computed(() => {
   const needle = term.value.trim().toLowerCase()
   // Keep obsolete or newly restricted scopes visible so they can be removed.
   const scopes = access.registry.filter(p => p.agent_grantable || original.value.includes(p.key))
   for (const key of original.value) if (!scopes.some(p => p.key === key)) scopes.push({ key, group: 'Other', description: key, risk: 'low', grantable_at: [], agent_grantable: false })
-  return groupPermissions(scopes.filter(p => !needle || `${permissionLabel(p.key)} ${p.key} ${p.group}`.toLowerCase().includes(needle)))
+  return groupPermissions(scopes.filter(p => needle ? `${permissionLabel(p.key)} ${p.key} ${p.group}`.toLowerCase().includes(needle) : showUnavailable.value || grantable.value.has(p.key) || original.value.includes(p.key)))
 })
 const added = computed(() => [...selected.value].filter(k => !original.value.includes(k)))
 const removed = computed(() => original.value.filter(k => !selected.value.has(k)))
@@ -82,8 +83,9 @@ onMounted(load)
               <span class="scope-text"><span>{{ permissionLabel(scope.key) }}</span><span class="mono detail">{{ scope.key }}</span><span v-if="!grantable.has(scope.key)" class="detail">{{ selected.has(scope.key) ? 'Remove: outside current permissions' : 'Outside current permissions' }}</span></span>
             </label>
           </div>
-          <p v-if="!groups.length" class="note">No matching scopes.</p>
+          <p v-if="!groups.length" class="note">{{ term ? 'No matching scopes.' : 'No scopes are available within current permissions.' }}</p>
         </fieldset>
+        <button v-if="!term" type="button" class="btn sm ghost scope-toggle" :aria-expanded="showUnavailable" @click="showUnavailable = !showUnavailable">{{ showUnavailable ? 'Hide unavailable scopes' : 'Show unavailable scopes' }}</button>
         <p v-if="!selected.size" class="note">This key will have no access.</p>
         <p v-else-if="invalid" class="note" role="alert">Remove scopes outside current permissions before saving.</p>
         <p v-if="selected.size > MAX_KEY_SCOPES" class="note" role="alert">Choose at most {{ MAX_KEY_SCOPES }} scopes.</p>
@@ -112,6 +114,6 @@ onMounted(load)
 .scope-row input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--teal); }
 .scope-text { display: grid; gap: 2px; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
 .detail { font-size: 11px; color: var(--ink-3); }
-.failure .btn { justify-self: start; }
+.failure .btn, .scope-toggle { justify-self: start; }
 @media (max-width: 600px) { .scope-group { grid-template-columns: minmax(0, 1fr); } .scope-row { min-height: 44px; align-items: center; } }
 </style>
