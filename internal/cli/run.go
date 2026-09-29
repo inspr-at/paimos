@@ -140,6 +140,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdProject(),
 		rt.cmdRelation(),
 		rt.cmdRulesImport(),
+		rt.cmdRulesTLDR(),
 		rt.cmdRulesCompare(),
 		rt.cmdRules(),
 		rt.cmdTag(),

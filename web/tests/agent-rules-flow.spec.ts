@@ -109,7 +109,7 @@ test('a refused batch says truthfully that nothing was published', async ({ page
   const dialog = page.getByRole('dialog', { name: 'Review and publish' })
   await dialog.getByRole('button', { name: 'Publish 12 sets' }).click()
   await expect(dialog.getByRole('alert')).toContainText('Nothing was published.')
-  await expect(dialog.getByRole('alert')).toContainText('12345 bytes')
+  await expect(dialog.getByRole('alert')).toContainText('12,345 bytes')
   await expect(page.getByText('12 waiting to publish')).toBeVisible()
 })
 

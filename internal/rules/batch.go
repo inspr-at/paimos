@@ -141,7 +141,11 @@ func (m *Module) publishBatch(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 		}
 		out.Versions[i] = snap
 	}
-	if out.MaxBytes, err = budgetCheck(ctx, tx, p, owner, sets, now); err != nil {
+	limits, err := LoadBudget(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if out.MaxBytes, err = budgetCheck(ctx, tx, p, owner, sets, now, limits); err != nil {
 		return nil, err
 	}
 	raw, err := json.Marshal(out)
@@ -317,7 +321,7 @@ func (w *work) load(s Snapshot) error {
 // own only when the caller holds rules.read, now (under the access lock), on
 // every layer in it; sizes are reported only for such files, and any other
 // file yields a generic refusal without size or identity.
-func budgetCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, caller string, batch []Set, now time.Time) (int, error) {
+func budgetCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, caller string, batch []Set, now time.Time, limits Budget) (int, error) {
 	w := &work{ctx: ctx}
 	shared, owners, projects, err := gatherBudget(w, tx)
 	if err != nil {
@@ -362,7 +366,7 @@ func budgetCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, caller stri
 			readable[key] = err == nil
 		}
 	}
-	check := budget{work: w, tenant: p.TenantID, batch: batch, now: now, shared: sortSnapshots(shared), projects: projects, readable: readable}
+	check := budget{work: w, tenant: p.TenantID, batch: batch, now: now, shared: sortSnapshots(shared), projects: projects, readable: readable, limits: limits}
 	if err = check.person(noPerson, nil); err != nil {
 		return 0, err
 	}
@@ -371,8 +375,11 @@ func budgetCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, caller stri
 			return 0, err
 		}
 	}
-	if check.ownOver > 0 {
-		return 0, &Error{Status: 422, Code: "rules_budget_exceeded", Message: fmt.Sprintf("after this publication one of your session files would need %d UTF-8 bytes (limit %d); shorten always-on text or move it to details", check.ownOver, MaxBytes), ActualBytes: check.ownOver, MaxBytes: MaxBytes}
+	if o := check.ownOver; o != nil {
+		if o.Layer != "" {
+			return 0, &Error{Status: 422, Code: "rules_budget_exceeded", Message: fmt.Sprintf("after this publication %s rules in one of your session files would need %d UTF-8 bytes (their cap is %d); shorten always-on text or move it to details", o.Layer, o.ActualBytes, o.MaxBytes), ActualBytes: o.ActualBytes, MaxBytes: o.MaxBytes, Layer: o.Layer}
+		}
+		return 0, &Error{Status: 422, Code: "rules_budget_exceeded", Message: fmt.Sprintf("after this publication one of your session files would need %d UTF-8 bytes (limit %d); shorten always-on text or move it to details", o.ActualBytes, o.MaxBytes), ActualBytes: o.ActualBytes, MaxBytes: o.MaxBytes}
 	}
 	if check.hiddenOver {
 		return 0, errHiddenBudget
@@ -454,9 +461,10 @@ type budget struct {
 	shared     []Snapshot
 	projects   []string
 	readable   map[string]bool
+	limits     Budget
 	rendered   int
 	ownMax     int
-	ownOver    int
+	ownOver    *Error
 	hiddenOver bool
 }
 
@@ -522,17 +530,20 @@ func (b *budget) person(person string, owned []Snapshot) error {
 							break
 						}
 					}
-					m, err := merge(c, snapshots, b.now, true, stop)
+					m, err := merge(c, snapshots, b.now, true, stop, b.limits)
 					if errors.Is(err, errStopped) {
 						return err
 					}
 					var e *Error
 					over := errors.As(err, &e) && e.Code == "rules_budget_exceeded"
 					// A missing floor or an ambiguity does not concern the budget;
-					// session start reports those on its own.
+					// session start reports those on its own. The worst own file is
+					// reported: the largest excess over its limit.
 					switch {
 					case over && own:
-						b.ownOver = max(b.ownOver, m.ByteSize)
+						if b.ownOver == nil || e.ActualBytes-e.MaxBytes > b.ownOver.ActualBytes-b.ownOver.MaxBytes {
+							b.ownOver = e
+						}
 					case over:
 						b.hiddenOver = true
 					case own:

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { RequestFailure } from '../src/lib/api.ts'
 import {
-  IMPORT_MAX_BYTES, RulesError, applyEnabled, blankRule, calendarVersion, copyName, diffRules, duplicateRule, groupState, groupsState, hasMovable, heldIdentities,
+  IMPORT_MAX_BYTES, RulesError, applyEnabled, blankRule, calendarVersion, copyName, diffRules, diffSet, duplicateRule, groupState, groupsState, hasMovable, heldIdentities,
   identityFromText, layerInColumn, mergeQuery, parseDraftImport, publishBlock, replyUncertain, resetAvailability, resetRule, rulePayload, rulesEqual, tickTarget,
   runDraftImport, ruleSwitchLabel, scopeFor, touchRule, validVersion, validateDraft, validateRule, writeBlock, importWrites, draftImportProjects,
   setState, projectedRules, projectedBytes, largestProjected,
@@ -513,13 +513,105 @@ test('publish diff lists added, changed and removed rules', () => {
   assert.deepEqual(changes.map(change => change.kind), ['changed', 'added', 'removed'])
 })
 
+test('the approval lists TL;DR changes on their own, never as a rename or an unchanged rule', () => {
+  const tldr = (en: string, extra: Record<string, unknown> = {}) => ({ en, basis: '0123456789abcdef', ...extra })
+  const live = { name: 'Secrets', tldr: tldr('Keeps secrets out.'), rules: [
+    rule({ identity: 'env', text: 'Never print the environment.', tldr: tldr('Dumps leak.') }),
+    rule({ identity: 'src', text: 'Record the source.' }),
+    rule({ identity: 'fit', text: 'Keep it short.', tldr: tldr('Short lines.') }),
+  ] }
+  const draft = { name: 'Secrets', tldr: tldr('No credential reaches a transcript.', { de: 'Keine Zugangsdaten.' }), rules: [
+    rule({ identity: 'env', text: 'Never print the environment.' }),
+    rule({ identity: 'src', text: 'Record the source.', tldr: tldr('Names its ticket.') }),
+    rule({ identity: 'fit', text: 'Keep it short.', tldr: tldr('Short lines.', { basis: 'fedcba9876543210' }) }),
+  ] }
+  assert.deepEqual(diffSet(live, draft), [
+    { kind: 'changed', label: 'No credential reaches a transcript.', about: 'set-tldr', de: 'Keine Zugangsdaten.' },
+    { kind: 'removed', label: 'Dumps leak.', about: 'tldr', rule: 'Never print the environment.' },
+    { kind: 'added', label: 'Names its ticket.', about: 'tldr', rule: 'Record the source.' },
+    { kind: 'changed', label: 'Short lines.', about: 'tldr', rule: 'Keep it short.', confirmed: true },
+  ])
+  assert.deepEqual(diffSet({ ...live, tldr: null }, { ...live, name: 'Credentials' }).map(change => [change.kind, change.about]), [['changed', 'name'], ['added', 'set-tldr']])
+  assert.deepEqual(diffSet(live, { ...live, tldr: null }), [{ kind: 'removed', label: 'Keeps secrets out.', about: 'set-tldr' }])
+  const reworded = diffSet(live, { ...live, rules: [rule({ identity: 'env', text: 'Never dump the environment.', tldr: tldr('Dumps leak.') }), ...live.rules.slice(1)] })
+  assert.deepEqual(reworded, [{ kind: 'changed', label: 'Never dump the environment.' }])
+})
+
 test('budget refusals keep another person’s size private in the message', async () => {
   const { rulesMessage } = await import('../src/lib/rules.ts')
-  assert.equal(rulesMessage(new RulesError(422, 'rules_budget_exceeded', 'x', 12345, 12000)), 'The merged file is 12345 bytes. The limit is 12000.')
+  assert.equal(rulesMessage(new RulesError(422, 'rules_budget_exceeded', 'x', 12345, 12000)), 'The merged file is 12,345 bytes. The limit is 12,000.')
   assert.equal(rulesMessage(new RulesError(422, 'rules_budget_exceeded', 'A session file for another person or agent would exceed the limit.')), 'A session file for another person or agent would exceed the limit.')
   assert.match(rulesMessage(new RulesError(503, 'busy', 'busy')), /Nothing was changed/)
   assert.equal(replyUncertain(new RulesError(503, 'busy', 'busy')), false)
   assert.equal(replyUncertain(new RulesError(503, 'outcome_unknown', 'unknown')), true)
   assert.equal(rulesMessage(new RulesError(503, 'outcome_unknown', 'The set may have been created. Reload and check before creating it again.')), 'The set may have been created. Reload and check before creating it again.')
   assert.doesNotMatch(rulesMessage(new RulesError(503, 'outcome_unknown', '')), /safe/)
+})
+
+// ---------- AEON-314: explanations and the configurable budget ----------
+const PROJECT = '33333333-3333-4333-8333-333333333333'
+const ME = '11111111-1111-4111-8111-111111111111'
+test('explanations travel with the draft without the derived check mark', async () => {
+  const { rulePayload, rulesEqual, normalizeRule, setState, tldrEqual } = await import('../src/lib/rules.ts')
+  const explained = rule({ tldr: { en: ' Keeps main safe. ', de: 'Schützt main.', basis: '0123456789abcdef', check: true } })
+  const payload = rulePayload(normalizeRule(explained))
+  assert.deepEqual(payload.tldr, { en: 'Keeps main safe.', de: 'Schützt main.', basis: '0123456789abcdef' })
+  assert.equal(rulePayload(rule({ tldr: { en: '  ' } })).tldr, undefined)
+  assert.equal(rulesEqual([rule()], [explained]), false)
+  assert.equal(tldrEqual({ en: 'a', check: true }, { en: 'a' }), true)
+  const live = { name: 'Git', rules: [rule()], tldr: null }
+  const set = { name: 'Git', rules: [rule()], published_version: '260929100000.0.0', tldr: null }
+  assert.equal(setState(set, live), 'live')
+  assert.equal(setState({ ...set, tldr: { en: 'Git hygiene.' } }, live), 'changed')
+  assert.equal(setState({ ...set, rules: [explained] }, live), 'changed')
+})
+
+test('an explanation is one short English line, German optional', async () => {
+  const { validateTLDR, validateRule } = await import('../src/lib/rules.ts')
+  assert.equal(validateTLDR('Short.', true), null)
+  assert.match(validateTLDR('', true) ?? '', /Write a short explanation/)
+  assert.equal(validateTLDR('', false), null)
+  assert.match(validateTLDR('x'.repeat(301), true) ?? '', /300 bytes/)
+  assert.match(validateTLDR('two\nlines', true) ?? '', /one line/)
+  assert.match(validateRule(rule({ tldr: { en: '', de: 'Nur Deutsch.' } }), new Set()) ?? '', /Explanation/)
+  assert.equal(validateRule(rule({ tldr: { en: 'Fine.' } }), new Set()), null)
+})
+
+test('the projected file counts each layer and finds the file furthest over a limit', async () => {
+  const { projectedUsage, budgetExcess, largestProjected, budgetParts, budgetLine, overBudget, MERGE_HEADING_BYTES, DEFAULT_BUDGET } = await import('../src/lib/rules.ts')
+  const company = { id: 'a', scope: { layer: 'company' as const }, rules: [rule({ identity: 'floor', text: 'Keep the floor.', strength: 'locked', roles: [], harnesses: [] })] }
+  const project = { id: 'b', scope: { layer: 'project' as const, project_id: PROJECT }, rules: [rule({ identity: 'style', text: 'Use style.', roles: [], harnesses: [] }), rule({ identity: 'codex', text: 'Codex only rule.', roles: [], harnesses: ['codex'] })] }
+  const ctx = { projectId: PROJECT, personId: ME, role: 'builder' as const, harness: 'claude-code' as const }
+  const { bytes, usage } = projectedUsage([company, project], ctx)
+  assert.equal(usage.company, '- [floor] Keep the floor.\n'.length)
+  assert.equal(usage.project, '- [style] Use style.\n'.length)
+  assert.equal(bytes, MERGE_HEADING_BYTES + usage.company! + usage.project!)
+  const tight = { max_bytes: 12000, layer_max_bytes: { project: 30 } }
+  assert.equal(budgetExcess(bytes, usage, tight), 0)
+  const worst = largestProjected([company, project], PROJECT, ME, new Date(), tight)
+  assert.equal(worst.harness, 'codex')
+  assert.ok(budgetExcess(worst.bytes, worst.usage, tight) > 0)
+  assert.ok(overBudget(worst.usage, worst.bytes, tight))
+  assert.equal(overBudget(usage, bytes, DEFAULT_BUDGET), false)
+  const parts = budgetParts({ company: 7100, project: 2300 }, 9422, { max_bytes: 12000, layer_max_bytes: { company: 8000 } })
+  assert.deepEqual(parts.map(part => part.label), ['Company 7.1 of 8 kB', 'Project 2.3 kB', 'total 9.4 of 12 kB'])
+  assert.equal(budgetLine({ company: 8100 }, 8200, { max_bytes: 12000, layer_max_bytes: { company: 8000 } }), 'Company 8.1 of 8 kB · total 8.2 of 12 kB')
+  assert.equal(budgetParts({ company: 8100 }, 8200, { max_bytes: 12000, layer_max_bytes: { company: 8000 } })[0]!.over, true)
+})
+
+test('a layer cap refusal names the layer', async () => {
+  const { rulesMessage } = await import('../src/lib/rules.ts')
+  assert.equal(rulesMessage(new RulesError(422, 'rules_budget_exceeded', 'x', 8123, 8000, 'company')), 'Company rules would take 8,123 bytes of the session file. Their cap is 8,000.')
+})
+
+test('an import keeps the explanations of the rules it updates', async () => {
+  const { annotateImport } = await import('../src/lib/rules.ts')
+  const scope = { layer: 'company' as const }
+  const stored = [rule({ identity: 'git', text: 'Old.', tldr: { en: 'Explained.', basis: '0123456789abcdef' } }), rule({ identity: 'same', tldr: { en: 'Kept.' } })]
+  const plan = annotateImport({ tenantId: 't', layers: [{ scope, sets: [{ name: 'Git', rules: [rule({ identity: 'git', text: 'New.' }), rule({ identity: 'same' })] }] }] }, [{ scope, sets: [{ id: 's', name: 'Git', revision: 3, rules: stored }] }])
+  const set = plan.layers[0]!.sets[0]!
+  assert.equal(set.rules[0]!.tldr?.en, 'Explained.')
+  assert.equal(set.rules[0]!.tldr?.basis, '0123456789abcdef')
+  assert.equal(set.counts?.unchanged, 1)
+  assert.equal(set.counts?.changed, 1)
 })
