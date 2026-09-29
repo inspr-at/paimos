@@ -333,6 +333,11 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 				return p, nil
 			}
 			observed := observedProgress(v, local)
+			if local.ProfilePermissions {
+				p.Stage = "blocked"
+				p.Action = "The pi local profile must be a private directory. Review its permissions, then resume setup."
+				return p, nil
+			}
 			if local.HarnessFailed {
 				p.Stage = "blocked"
 				p.Action = "An approved harness failed to start. Restore its pinned installation and interpreter, then resume setup."
@@ -441,8 +446,8 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 			return e.progress(s), errors.New("invalid Add harness account choice")
 		}
 		selected[c.Harness] = true
-		if c.Harness == "pi" {
-			if err := validatePiNode(c.Path, s.Request.Workspace, c.PiNode); err != nil {
+		if c.Harness != "grok" {
+			if err := validateNode(c.Path, s.Request.Workspace, c.Interpreter()); err != nil {
 				return Progress{Stage: "blocked", Action: err.Error()}, err
 			}
 		}

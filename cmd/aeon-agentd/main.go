@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentdwire"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/version"
 )
 
@@ -205,23 +206,48 @@ func serve(args []string) error {
 			return errors.New("account registry harness unsupported")
 		}
 	}
+	// Manual serve also resolves once at startup, never in a run's workspace.
+	resolveNodes := func(path string, keys map[string]string) (map[string]harnesslaunch.Node, error) {
+		node, err := (agentsetup.Discovery{NodePath: nodePath, Workspace: workspace}).ResolveNode(context.Background(), path)
+		if err != nil {
+			return nil, err
+		}
+		nodes := map[string]harnesslaunch.Node{}
+		for key := range keys {
+			nodes[key] = node
+		}
+		return nodes, nil
+	}
 	adapters := []agentd.Adapter{}
 	if codexPath != "" {
 		codex := agentd.NewCodexAdapter(codexPath, codexHomes)
 		codex.IdleTimeout = codexIdleTimeout
 		codex.SetExpectedEmails(codexEmails)
+		codex.Nodes, err = resolveNodes(codexPath, codexHomes)
+		if err != nil {
+			return err
+		}
 		adapters = append(adapters, codex)
 	}
 	if claudePath != "" {
 		adapters = append(adapters, agentd.NewClaudeAdapter(nodePath, sdkPath, claudePath, claudeHomes))
 	}
 	if piPath != "" {
-		adapters = append(adapters, agentd.NewPiAdapter(piPath, piHomes))
+		a := agentd.NewPiAdapter(piPath, piHomes)
+		a.Nodes, err = resolveNodes(piPath, piHomes)
+		if err != nil {
+			return err
+		}
+		adapters = append(adapters, a)
 	}
 	if cursorPath != "" {
 		cursor := agentd.NewCursorAdapter(cursorPath, cursorIDs)
 		if len(cursorHomes) > 0 {
 			cursor.Homes = cursorHomes
+		}
+		cursor.Nodes, err = resolveNodes(cursorPath, cursorIDs)
+		if err != nil {
+			return err
 		}
 		adapters = append(adapters, cursor)
 	}

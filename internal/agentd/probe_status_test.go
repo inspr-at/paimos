@@ -22,12 +22,16 @@ func fakeStatus(t *testing.T, out string, code int) string {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "vendor")
-	script := "#!/bin/sh\ncat <<'EOF'\n" + out + "\nEOF\nexit " + string(rune('0'+code)) + "\n"
+	// Vendor CLIs answer --version before any sign-in check (AEON-341 launcher readiness).
+	script := "#!/bin/sh\n" + versionAnswer + "cat <<'EOF'\n" + out + "\nEOF\nexit " + string(rune('0'+code)) + "\n"
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path
 }
+
+// versionAnswer lets a stand-in pass the launcher readiness check.
+const versionAnswer = "if [ \"$1\" = --version ]; then echo 1.0.0; exit 0; fi\n"
 
 // fakeScript writes a vendor stand-in running the given shell body.
 func fakeScript(t *testing.T, body string) string {
@@ -37,7 +41,7 @@ func fakeScript(t *testing.T, body string) string {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "vendor")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+versionAnswer+body+"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path

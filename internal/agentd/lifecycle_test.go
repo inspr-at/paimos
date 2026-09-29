@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 func TestDrainCloseNeverStopsOwnedChild(t *testing.T) {
@@ -133,10 +135,16 @@ func TestProbeStartupFailureIsNotLoginRequired(t *testing.T) {
 	if !status.HarnessFailed || status.LoginRequired || status.Ready || api.claims != 0 {
 		t.Fatal("startup failure reported as login required or allowed work")
 	}
+	adapter.err = piprobe.ErrPrivateProfile
+	_ = s.PollOnce(t.Context())
+	status = s.Lifecycle("")
+	if !status.ProfilePermissions || !status.HarnessFailed || status.LoginRequired {
+		t.Fatal("permissions classification lost")
+	}
 	adapter.err = nil
 	_ = s.PollOnce(t.Context())
 	status = s.Lifecycle("")
-	if status.HarnessFailed || !status.LoginRequired || status.Ready || api.claims != 0 {
+	if status.ProfilePermissions || status.HarnessFailed || !status.LoginRequired || status.Ready || api.claims != 0 {
 		t.Fatal("missing login not distinguished from startup failure")
 	}
 }

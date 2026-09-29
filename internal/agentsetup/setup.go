@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/grokprobe"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -33,16 +34,18 @@ func (c LocalCandidate) MarshalJSON() ([]byte, error) {
 	type plain LocalCandidate
 	return json.Marshal(struct {
 		plain
-		Grok   grokprobe.Binding `json:"grok,omitempty"`
-		PiNode piprobe.Node      `json:"pi_node,omitempty"`
-	}{plain(c), c.Candidate.Grok, c.Candidate.PiNode})
+		Grok   grokprobe.Binding  `json:"grok,omitempty"`
+		PiNode piprobe.Node       `json:"pi_node,omitempty"`
+		Node   harnesslaunch.Node `json:"node,omitempty"`
+	}{plain(c), c.Candidate.Grok, c.Candidate.PiNode, c.Candidate.Node})
 }
 func (c *LocalCandidate) UnmarshalJSON(raw []byte) error {
 	type plain LocalCandidate
 	var v struct {
 		plain
-		Grok   grokprobe.Binding `json:"grok"`
-		PiNode piprobe.Node      `json:"pi_node"`
+		Grok   grokprobe.Binding  `json:"grok"`
+		PiNode piprobe.Node       `json:"pi_node"`
+		Node   harnesslaunch.Node `json:"node"`
 	}
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return err
@@ -50,18 +53,20 @@ func (c *LocalCandidate) UnmarshalJSON(raw []byte) error {
 	*c = LocalCandidate(v.plain)
 	c.Candidate.Grok = v.Grok
 	c.Candidate.PiNode = v.PiNode
+	c.Candidate.Node = v.Node
 	return nil
 }
 
 type RuntimeAccount struct {
-	Harness   string            `json:"harness"`
-	Key       string            `json:"key"`
-	AccountID string            `json:"account_id"`
-	Home      string            `json:"home,omitempty"`
-	Identity  string            `json:"identity,omitempty"`
-	Path      string            `json:"path"`
-	Grok      grokprobe.Binding `json:"grok,omitempty"`
-	PiNode    piprobe.Node      `json:"pi_node,omitempty"`
+	Harness   string             `json:"harness"`
+	Key       string             `json:"key"`
+	AccountID string             `json:"account_id"`
+	Home      string             `json:"home,omitempty"`
+	Identity  string             `json:"identity,omitempty"`
+	Path      string             `json:"path"`
+	Grok      grokprobe.Binding  `json:"grok,omitempty"`
+	PiNode    piprobe.Node       `json:"pi_node,omitempty"`
+	Node      harnesslaunch.Node `json:"node,omitempty"`
 }
 type RuntimeConfig struct {
 	Schema        string           `json:"schema"`
@@ -124,6 +129,7 @@ type Progress struct {
 }
 type LocalStatus struct {
 	HarnessErrors                          map[string]string
+	ProfilePermissions                     bool
 	HarnessFailed                          bool
 	LoginRequired                          bool
 	VerificationUnavailable                []string
@@ -257,8 +263,8 @@ func validateOptions(o Options) error {
 		if c.Harness == "claude" && (!filepath.IsAbs(o.NodePath) || !filepath.IsAbs(o.ClaudeSDKPath)) {
 			return errors.New("Claude requires pinned Node and Agent SDK paths")
 		}
-		if c.Harness == "pi" {
-			if err := validatePiNode(c.Path, o.Workspace, c.PiNode); err != nil {
+		if c.Harness != "grok" {
+			if err := validateNode(c.Path, o.Workspace, c.Interpreter()); err != nil {
 				return err
 			}
 		}
@@ -618,7 +624,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 						return e.progress(s), err
 					}
 				}
-				config.Accounts = append(config.Accounts, RuntimeAccount{a.Harness, a.AccountKey, a.AccountID, c.Home, c.Identity, c.Path, c.Candidate.Grok, c.Candidate.PiNode})
+				config.Accounts = append(config.Accounts, RuntimeAccount{a.Harness, a.AccountKey, a.AccountID, c.Home, c.Identity, c.Path, c.Candidate.Grok, c.Candidate.PiNode, c.Candidate.Node})
 				found = true
 				break
 			}
@@ -708,21 +714,26 @@ func ValidateRuntimeDependencies(c RuntimeConfig) error {
 }
 
 // ValidateHarnessRuntimeDependencies checks the pinned interpreters of every
-// harness except Claude (AEON-334). A failure still stops execution on this
-// computer; Claude's dependencies are checked on their own so that a Claude
-// repin or repair holds only Claude (AEON-342).
+// npm-launched harness except Claude (AEON-334, AEON-341). A failure still
+// stops execution on this computer; Claude's dependencies are checked on their
+// own so that a Claude repin or repair holds only Claude (AEON-342).
 func ValidateHarnessRuntimeDependencies(c RuntimeConfig) error {
 	for _, a := range c.Accounts {
+		if a.Harness == "grok" || a.Harness == "claude" {
+			continue
+		}
+		node := a.Node
 		if a.Harness == "pi" {
-			if err := validatePiNode(a.Path, c.Workspace, a.PiNode); err != nil {
-				return err
-			}
-			if a.PiNode.Path != "" {
-				raw, err := (OSExecutor{}).Run(context.Background(), Command{Path: a.PiNode.Path, Args: []string{"--version"}, Env: piprobe.Environment(a.Home, a.PiNode.Path)})
-				match := safeVersion.FindSubmatch(raw)
-				if err != nil || len(match) != 2 || string(match[1]) != a.PiNode.Version {
-					return piprobe.ErrStart
-				}
+			node = a.PiNode
+		}
+		if err := validateNode(a.Path, c.Workspace, node); err != nil {
+			return err
+		}
+		if node.Path != "" {
+			raw, err := (OSExecutor{}).Run(context.Background(), Command{Path: node.Path, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, node.Path)})
+			match := safeVersion.FindSubmatch(raw)
+			if err != nil || len(match) != 2 || string(match[1]) != node.Version {
+				return piprobe.ErrStart
 			}
 		}
 	}
@@ -730,20 +741,32 @@ func ValidateHarnessRuntimeDependencies(c RuntimeConfig) error {
 }
 
 // ValidateClaudeRuntimeDependencies checks the approved Claude CLI and its
-// pinned Node/SDK links (AEON-342).
+// pinned Node/SDK links (AEON-342). An npm-launched Claude CLI runs on Claude's
+// own pinned Node (AEON-341), which after a repin is the repinned one, so it is
+// checked against the resolved Claude Node rather than a saved copy.
 func ValidateClaudeRuntimeDependencies(c RuntimeConfig) error {
 	claude := false
 	for _, a := range c.Accounts {
-		claude = claude || a.Harness == "claude"
-		if a.Harness == "claude" {
-			if _, err := ResolveClaudeExecutable(a.Path, c.Workspace); err != nil {
-				return err
-			}
+		if a.Harness != "claude" {
+			continue
+		}
+		claude = true
+		if _, err := ResolveClaudeExecutable(a.Path, c.Workspace); err != nil {
+			return err
 		}
 	}
-	if claude {
-		if _, err := ResolveClaudeRuntime(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace); err != nil {
-			return errors.New("Claude dependencies changed: run aeon-agentd repin --harness claude; runtime dependencies are unavailable or unsafe")
+	if !claude {
+		return nil
+	}
+	deps, err := ResolveClaudeRuntime(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace)
+	if err != nil {
+		return errors.New("Claude dependencies changed: run aeon-agentd repin --harness claude; runtime dependencies are unavailable or unsafe")
+	}
+	for _, a := range c.Accounts {
+		if a.Harness == "claude" && a.Node != (harnesslaunch.Node{}) {
+			if err := harnesslaunch.Validate(a.Path, deps.NodePath); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

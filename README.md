@@ -481,6 +481,18 @@ sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 
 Licence: AGPL-3.0-only.
 
+### Harness interpreter pins
+
+Guided setup pins Node's physical path and version privately for npm-launched
+Codex, Cursor, Claude and pi. `--node-path` selects an installed Node outside the
+workspace, including for shell wrappers. Setup checks the launcher using the
+service PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) with the pinned Node directory first;
+interactive shell paths and Node injection variables cannot mask missing runtime
+dependencies. The same pin is used for account probes and run launches. Unsafe,
+missing or changed pins block startup rather than reporting a signed-out account.
+Existing npm enrollments without a pin need fresh guided setup; native launchers
+and saved pi bindings remain supported. Paths and interpreter versions stay local.
+
 ### Pi guided setup
 
 `paimos-agentd setup --harness pi` and `add-harness --harness pi` use the same

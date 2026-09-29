@@ -24,6 +24,7 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 type Config struct {
@@ -125,6 +126,7 @@ type Supervisor struct {
 	capacityAttempt     map[string]time.Time
 	capacityCapturing   bool
 	maxTokens, maxTurns int64
+	profilePermissions  map[string]bool
 
 	dispatchMu        sync.Mutex
 	state             *agentsetup.Store
@@ -413,6 +415,12 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 				ProbeAccountStatus(context.Context, string) (ProbeStatus, error)
 			}); ok {
 				status, dependencyErr = detailed.ProbeAccountStatus(ctx, account.Key)
+			} else if launcher, ok := probe.(interface {
+				ProbeHarness(context.Context, string) (ProbeStatus, error)
+			}); ok {
+				// AEON-341: Codex and Cursor check their launcher and pinned
+				// Node before sign-in; a start failure is a harness failure.
+				status, probeErr = launcher.ProbeHarness(ctx, account.Key)
 			} else if started, ok := probe.(interface {
 				ProbeStatus(context.Context, string) (bool, error)
 			}); ok {
@@ -455,6 +463,10 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			s.harnessFailed = map[string]bool{}
 		}
 		s.harnessFailed[account.ID] = probeErr != nil
+		if s.profilePermissions == nil {
+			s.profilePermissions = map[string]bool{}
+		}
+		s.profilePermissions[account.ID] = errors.Is(probeErr, piprobe.ErrPrivateProfile)
 		s.mu.Unlock()
 		if probeErr != nil {
 			failures = append(failures, errors.New("harness failed to start"))

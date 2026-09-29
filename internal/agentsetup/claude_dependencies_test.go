@@ -167,7 +167,7 @@ func TestDisconnectRemainsAvailableAfterClaudeDependencyBreaks(t *testing.T) {
 	if p, err := e.Disconnect(t.Context(), ""); err != nil || p.Stage != "disconnected" || !a.computerCleaned {
 		t.Fatalf("broken vendor dependency prevented owned disconnect: %s %v", p.Stage, err)
 	}
-	if err := ValidateRuntimeDependencies(RuntimeConfig{NodePath: node, ClaudeSDKPath: sdk, Accounts: []RuntimeAccount{{Harness: "cursor"}}}); err != nil {
+	if err := ValidateRuntimeDependencies(RuntimeConfig{NodePath: node, ClaudeSDKPath: sdk, Accounts: []RuntimeAccount{{Harness: "cursor", Path: o.Candidates[0].Path}}}); err != nil {
 		t.Fatal("unused Claude pins blocked another harness", err)
 	}
 }
