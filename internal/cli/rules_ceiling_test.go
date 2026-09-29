@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -25,8 +26,8 @@ func TestRulesClientReceivesAndRendersByteCeiling(t *testing.T) {
 		sum := sha256.Sum256([]byte(body))
 		m := rules.Merged{Context: c, Body: body, Floor: floor, ByteSize: len(body), SHA256: hex.EncodeToString(sum[:]), Version: "260929120000.0.0", Versions: []rules.VersionRef{{SetID: "10000000-0000-4000-8000-000000000005", Version: "260929120000.0.0", SHA256: strings.Repeat("a", 64)}}, Rules: []rules.Rule{}}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Header.Get(rules.ClientMaximumHeader) != "64000" {
-				t.Error("receive omitted client maximum")
+			if r.Header.Get(rules.ClientMaximumHeader) != strconv.Itoa(rules.SessionFileLimit(c.Harness)) {
+				t.Error("receive omitted the harness read limit")
 			}
 			json.NewEncoder(w).Encode(m)
 		}))

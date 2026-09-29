@@ -14,6 +14,7 @@ const error = ref('')
 const total = ref('')
 const caps = ref<Record<LayerName, string>>({ company: '', project: '', person: '', agent: '' })
 const fmt = (n: number) => n.toLocaleString('en-US')
+const blockingCount = computed(() => (props.view.blocking_clients?.length ?? 0) + (props.view.blocking_clients_more ?? 0))
 
 const line = computed(() => {
   const parts = [`${fmt(props.view.max_bytes)} bytes per session file`]
@@ -63,7 +64,7 @@ async function save() {
       <button v-if="canManage && !editing" type="button" class="btn sm ghost" @click="start">Change</button>
     </div>
     <details v-if="canManage && view.blocking_clients?.length" class="compatibility">
-      <summary><BizIcon name="chevron-right" :size="12" class="chev" /><span>Larger files need a client update <span class="opt">· {{ view.blocking_clients.length }}</span></span></summary>
+      <summary><BizIcon name="chevron-right" :size="12" class="chev" /><span>Larger files need a client update <span class="opt">· {{ blockingCount }}</span></span></summary>
       <p>Clients active in the last seven days limit new budgets to {{ fmt(view.ceiling_bytes) }} bytes.</p>
       <ul>
         <li v-for="(client, index) in view.blocking_clients" :key="index">
@@ -71,6 +72,7 @@ async function save() {
           <span class="client-detail" :title="[client.harness, client.version].filter(Boolean).join(' · ')">{{ client.harness }}<template v-if="client.version"> · {{ client.version }}</template></span>
           <span class="client-limit">{{ fmt(client.max_session_file_bytes) }} bytes</span>
         </li>
+        <li v-if="view.blocking_clients_more" class="more">and {{ fmt(view.blocking_clients_more) }} more</li>
       </ul>
     </details>
     <p v-else-if="canManage && view.ceiling_bytes <= view.default_bytes" class="lede">Larger files unlock once active clients report support.</p>
@@ -100,6 +102,7 @@ async function save() {
 .compatibility p { margin: 8px 0; color: var(--ink-3); }
 .compatibility ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
 .compatibility li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; }
+.compatibility li.more { display: block; color: var(--ink-3); }
 .client-host, .client-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .client-detail, .client-limit { color: var(--ink-3); }
 .client-limit { font-variant-numeric: tabular-nums; }

@@ -21,6 +21,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/rules"
 )
 
 type hbCall struct {
@@ -266,6 +268,32 @@ func TestRunHeartbeatCLIOwnerExit(t *testing.T) {
 	}
 	if _, ok := reg[0].body["account_label"]; ok {
 		t.Fatal("registration sent an unknown account label")
+	}
+}
+
+func TestCodexHeartbeatReportsProjectDocLimit(t *testing.T) {
+	var calls []hbCall
+	srv := heartbeatFixture(t, &calls, "", "")
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(t.TempDir())
+	opts.Harness = "codex"
+	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		label: func() (string, bool) { return "worker", true },
+		wait:  func(context.Context, int, time.Duration) error { return errOwnerExited },
+	})
+	if err != nil {
+		t.Fatalf("run: %v stderr %s", err, stderr.String())
+	}
+	want := float64(rules.SessionFileLimit("codex"))
+	if want != 32768 {
+		t.Fatalf("Codex default project_doc_max_bytes changed: %v", want)
+	}
+	reg := hbWhere(calls, http.MethodPost, "/harness-sessions")
+	beats := hbWhere(calls, http.MethodPost, "/heartbeat")
+	if len(reg) != 1 || reg[0].body["max_session_file_bytes"] != want || len(beats) != 1 || beats[0].body["max_session_file_bytes"] != want {
+		t.Fatalf("codex capability register %#v beats %#v", reg, beats)
 	}
 }
 

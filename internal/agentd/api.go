@@ -191,7 +191,7 @@ func harnessPath(s HarnessSession) string {
 func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID, runID, orderID, harness, host string, caps []string) (HarnessSession, error) {
 	var result HarnessSession
 	body := map[string]any{
-		"max_session_file_bytes": rules.MaxBytes, "rules_client_version": version.Version,
+		"max_session_file_bytes": rules.SessionFileLimit(harness), "rules_client_version": version.Version,
 		"agent_principal_id": agentID, "run_id": runID, "ticket_node_id": orderID,
 		"work_order_id": orderID, "harness": harness, "host": host,
 		"management_mode": "managed", "role": "worker", "work_shape": "ship",
@@ -212,12 +212,13 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 		return HarnessSession{}, errors.New("harness registration binding mismatch")
 	}
 	result.Lease = s.Lease
+	result.Harness = harness
 	return result, nil
 }
 
 func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix string, body, dest any) error {
 	err := r.Client.DoWithHeaders(ctx, "POST", harnessPath(s)+suffix, body, dest,
-		map[string]string{"X-Aeon-Worker-Lease": s.Lease, rules.ClientMaximumHeader: strconv.Itoa(rules.MaxBytes)})
+		map[string]string{"X-Aeon-Worker-Lease": s.Lease, rules.ClientMaximumHeader: strconv.Itoa(rules.SessionFileLimit(s.Harness))})
 	var status *client.StatusError
 	if errors.As(err, &status) && status.Status == 410 && status.Message == "harness generation archived" {
 		return ErrHarnessArchived
@@ -238,7 +239,7 @@ func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase s
 		activity = "idle"
 	}
 	body := map[string]any{
-		"max_session_file_bytes": rules.MaxBytes, "rules_client_version": version.Version,
+		"max_session_file_bytes": rules.SessionFileLimit(s.Harness), "rules_client_version": version.Version,
 		"phase": phase, "activity": activity, "activity_sequence": sequence, "process_ownership": s.Ownership,
 	}
 	if s.Model != "" {

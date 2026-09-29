@@ -4,9 +4,11 @@ package rules
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Every snapshot is valid, including metadata that expands sixfold in JSON.
@@ -179,6 +182,133 @@ func TestFullSizeCompanyFloorCanBePinned(t *testing.T) {
 	}
 	if _, err := VerifyFloor([]byte(m.Floor), digest([]byte(m.Floor))); err != nil {
 		t.Fatal("valid 64 KB online file cannot be pinned", err)
+	}
+}
+
+func TestSessionFileLimitMatchesHarnessDefaults(t *testing.T) {
+	if SessionFileLimit("codex") != CodexProjectDocMaxBytes || CodexProjectDocMaxBytes != 32*1024 {
+		t.Fatalf("codex limit %d", SessionFileLimit("codex"))
+	}
+	if CodexProjectDocMaxBytes < LegacyMaxBytes || CodexProjectDocMaxBytes > MaxBytes {
+		t.Fatal("codex limit is outside the reported range")
+	}
+	for _, harness := range []string{"claude", "claude-code", "cursor", "grok", "pi", ""} {
+		if SessionFileLimit(harness) != MaxBytes {
+			t.Fatalf("%s limit %d", harness, SessionFileLimit(harness))
+		}
+	}
+}
+
+func TestClientGateFloorAndBlockerCap(t *testing.T) {
+	w := newBatchWorld(t, "rules-client-floor")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	member := w.principal(tenant.Person, "member", "member")
+	agent := w.principal(tenant.Agent, "worker", "admin")
+	insert := func(host string, maximum int) {
+		t.Helper()
+		_, err := w.d.Admin.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,max_session_file_bytes,rules_client_version) VALUES($1,$2,$3,'codex',$4,'unmanaged','worker',convert_to($4,'UTF8'),convert_to($4,'UTF8'),$5,'fixture-version')`, w.tid, w.project, agent.ID, host, maximum)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func(p tenant.Principal) BudgetView {
+		t.Helper()
+		var b BudgetView
+		if err := json.Unmarshal(w.call(p, "GET", "/api/rules/budget", nil, 200), &b); err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	insert("low-client", 8000)
+	if b := read(admin); b.CeilingBytes != LegacyMaxBytes || len(b.BlockingClients) != 1 || b.BlockingClients[0].Maximum != 8000 || b.BlockingClientsMore != 0 {
+		t.Fatalf("low report pulled the ceiling: %+v", b)
+	}
+	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: LegacyMaxBytes}, 200)
+	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBytes}, 409)
+	for i := 0; i <= maxBlockingClients; i++ {
+		insert(fmt.Sprintf("b-%03d", i), LegacyMaxBytes)
+	}
+	b := read(admin)
+	if b.CeilingBytes != LegacyMaxBytes || len(b.BlockingClients) != maxBlockingClients || b.BlockingClientsMore != 2 || b.BlockingClients[0].Host != "b-000" || b.BlockingClients[maxBlockingClients-1].Host != "b-049" {
+		t.Fatalf("blocker cap: ceiling %d listed %d more %d first %q", b.CeilingBytes, len(b.BlockingClients), b.BlockingClientsMore, b.BlockingClients[0].Host)
+	}
+	for _, client := range b.BlockingClients {
+		if client.Host == "b-050" {
+			t.Fatal("listed the omitted client")
+		}
+	}
+	if hidden := read(member); len(hidden.BlockingClients) != 0 || hidden.BlockingClientsMore != 0 {
+		t.Fatal("capped inventory leaked")
+	}
+}
+
+func TestClientReportsDoNotBlockEachOther(t *testing.T) {
+	w := newBatchWorld(t, "rules-client-lock")
+	agent := w.principal(tenant.Agent, "worker", "admin")
+	ids := [2]string{}
+	for i := range ids {
+		host := fmt.Sprintf("lock-%d", i)
+		err := w.d.Admin.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,max_session_file_bytes) VALUES($1,$2,$3,'claude',$4,'unmanaged','worker',convert_to($4,'UTF8'),convert_to($4,'UTF8'),12000) RETURNING id::text`, w.tid, w.project, agent.ID, host).Scan(&ids[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	report := func(n int) ClientReport {
+		return ClientReport{MaxSessionFileBytes: &n}
+	}
+	held := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	stop := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(stop)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- db.InTenant(dbtest.Seed(context.Background()), w.d.App, w.tid, func(tx pgx.Tx) error {
+			n := 32000
+			if err := RecordClientReport(context.Background(), tx, ids[0], report(n)); err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case <-held:
+	case err := <-errCh:
+		t.Fatal(err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("first report did not acquire the shared lock")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	err := db.InTenant(dbtest.Seed(ctx), w.d.App, w.tid, func(tx pgx.Tx) error {
+		n := 48000
+		return RecordClientReport(ctx, tx, ids[1], report(n))
+	})
+	if err != nil {
+		stop()
+		t.Fatal("shared report blocked on the other heartbeat", err)
+	}
+	err = db.InTenant(dbtest.Seed(context.Background()), w.d.App, w.tid, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(context.Background(), `SET LOCAL lock_timeout = '250ms'`); err != nil {
+			return err
+		}
+		return lockClientGate(context.Background(), tx)
+	})
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+		stop()
+		t.Fatalf("budget admission did not take the exclusive lock: %v", err)
+	}
+	stop()
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	var got [2]*int
+	err = w.d.Admin.QueryRow(t.Context(), `SELECT (SELECT max_session_file_bytes FROM harness_sessions WHERE id=$1), (SELECT max_session_file_bytes FROM harness_sessions WHERE id=$2)`, ids[0], ids[1]).Scan(&got[0], &got[1])
+	if err != nil || got[0] == nil || *got[0] != 32000 || got[1] == nil || *got[1] != 48000 {
+		t.Fatalf("reports: %+v %v", got, err)
 	}
 }
 

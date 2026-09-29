@@ -40,11 +40,12 @@ func LoadBudget(ctx context.Context, tx pgx.Tx) (Budget, error) {
 // the product bounds a person may choose from.
 type BudgetView struct {
 	Budget
-	DefaultBytes    int             `json:"default_bytes"`
-	MinBytes        int             `json:"min_bytes"`
-	CeilingBytes    int             `json:"ceiling_bytes"`
-	MinLayerBytes   int             `json:"min_layer_bytes"`
-	BlockingClients []ClientBlocker `json:"blocking_clients,omitempty"`
+	DefaultBytes        int             `json:"default_bytes"`
+	MinBytes            int             `json:"min_bytes"`
+	CeilingBytes        int             `json:"ceiling_bytes"`
+	MinLayerBytes       int             `json:"min_layer_bytes"`
+	BlockingClients     []ClientBlocker `json:"blocking_clients,omitempty"`
+	BlockingClientsMore int             `json:"blocking_clients_more,omitempty"`
 }
 
 func budgetView(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Budget) (BudgetView, error) {
@@ -56,7 +57,7 @@ func budgetView(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Budget) (B
 	// The ceiling is public to rules readers, but tenant-wide host/version
 	// inventory is workspace administration data, not project membership data.
 	if p.Kind == tenant.Person && authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{}) == nil {
-		view.BlockingClients = blockers
+		view.BlockingClients, view.BlockingClientsMore = listedBlockers(blockers)
 	}
 	return view, nil
 }

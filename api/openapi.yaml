@@ -5552,11 +5552,13 @@ components:
           "$ref": "#/components/schemas/RuleLayerBytes"
         default_bytes: {type: integer}
         min_bytes: {type: integer}
-        ceiling_bytes: {type: integer, description: "Minimum reported maximum across all sessions active in the tenant within seven days, including stopped/archived sessions; missing reports and an empty inventory keep 12000."}
+        ceiling_bytes: {type: integer, description: "Minimum reported maximum across all sessions active in the tenant within seven days, including stopped/archived sessions, and never below 12000. Missing reports, reports under 12000, and an empty inventory keep 12000."}
         blocking_clients:
           type: array
-          description: "Clients below 64000, grouped by host/harness/version/limit. Only people with workspace settings.manage receive these tenant-wide details."
+          description: "Clients below 64000, grouped by host/harness/version/limit, at most 50. Only people with workspace settings.manage receive these tenant-wide details."
+          maxItems: 50
           items: {$ref: '#/components/schemas/RuleBudgetBlocker'}
+        blocking_clients_more: {type: integer, minimum: 0, description: "Additional blocking clients omitted after the first 50. Present only together with blocking_clients, and only for settings.manage."}
         min_layer_bytes: {type: integer}
       required: ["max_bytes", "layer_max_bytes", "default_bytes", "min_bytes", "ceiling_bytes", "min_layer_bytes"]
     ExplainedRules:

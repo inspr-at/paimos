@@ -92,7 +92,7 @@ func (rt *runtime) sessionRules(project string, o rulesOptions) error {
 	var m rules.Merged
 	requestCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err = api.DoWithHeaders(requestCtx, http.MethodGet, "/api/rules/merged?"+q.Encode(), nil, &m, map[string]string{rules.ClientMaximumHeader: strconv.Itoa(rules.MaxBytes)})
+	err = api.DoWithHeaders(requestCtx, http.MethodGet, "/api/rules/merged?"+q.Encode(), nil, &m, map[string]string{rules.ClientMaximumHeader: strconv.Itoa(rules.SessionFileLimit(o.Harness))})
 	stale := false
 	gap := ""
 	now := time.Now().UTC()

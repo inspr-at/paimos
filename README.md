@@ -147,11 +147,14 @@ checked on every request. The complete rendered body must fit the workspace
 budget (12,000 UTF-8 bytes by default); publication over that budget returns 422.
 Admins can set up to 64,000 bytes in the rules budget editor once all clients
 active in the tenant over the last seven days report support. Missing reports,
-stopped/archived older generations and an empty inventory retain the 12,000-byte
-ceiling. The editor identifies blocking hosts, harnesses and reported versions.
+reports under 12,000, stopped/archived older generations and an empty inventory
+retain the 12,000-byte ceiling. The editor lists up to 50 blocking hosts,
+harnesses and reported versions, and counts any further clients.
 CLI and agentd send optional `max_session_file_bytes` and `rules_client_version`
-on registration and every heartbeat; omission resets support to the legacy
-limit, so rolling a client back closes the gate. These are request-only fields;
+on registration and every heartbeat. The number is that harness's default read
+limit: Codex stops at `project_doc_max_bytes` (32,768 bytes of combined
+`AGENTS.md`); the other harnesses report 64,000. Omission resets support to the
+legacy limit, so rolling a client back closes the gate. These are request-only fields;
 PHAROS/JANUS reporter response contracts and pins are unchanged.
 
 Rules requests report `X-Aeon-Max-Session-File-Bytes` (2,000–64,000; omission

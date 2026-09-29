@@ -128,18 +128,18 @@ func TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields(t *testing.T) {
 		{Model: "model-b"},
 		{Activity: "idle"},
 	} {
-		update.ID, update.ProjectID, update.Lease = session.ID, session.ProjectID, session.Lease
+		update.ID, update.ProjectID, update.Lease, update.Harness = session.ID, session.ProjectID, session.Lease, session.Harness
 		update.ActivitySequence = int64(i + 1)
 		if err := remote.HeartbeatHarness(t.Context(), update, "working"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	stopping := HarnessSession{ID: session.ID, ProjectID: session.ProjectID, Lease: session.Lease,
+	stopping := HarnessSession{ID: session.ID, ProjectID: session.ProjectID, Lease: session.Lease, Harness: session.Harness,
 		ActivitySequence: 4, Model: "model-final", ReasoningEffort: "xhigh"}
 	if err := remote.HeartbeatHarness(t.Context(), stopping, "stopping"); err != nil {
 		t.Fatal(err)
 	}
-	if registration["max_session_file_bytes"] != float64(rules.MaxBytes) || registration["rules_client_version"] != version.Version {
+	if session.Harness != Codex || registration["max_session_file_bytes"] != float64(rules.SessionFileLimit(Codex)) || registration["rules_client_version"] != version.Version {
 		t.Fatal("registration lacks rules capability")
 	}
 	if _, ok := registration["model"]; ok {
@@ -152,7 +152,7 @@ func TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields(t *testing.T) {
 		t.Fatalf("verified metadata missing from heartbeat: %+v", beats)
 	}
 	for i, beat := range beats {
-		if beat["max_session_file_bytes"] != float64(rules.MaxBytes) || beat["rules_client_version"] != version.Version {
+		if beat["max_session_file_bytes"] != float64(rules.SessionFileLimit(Codex)) || beat["rules_client_version"] != version.Version {
 			t.Fatal("heartbeat lacks rules capability")
 		}
 		if beat["activity_sequence"] != float64(i+1) {

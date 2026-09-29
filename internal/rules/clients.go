@@ -40,10 +40,25 @@ func (c ClientReport) Validate() error {
 	return nil
 }
 
-// lockClientGate orders reports against budget admission independently of the
-// tenant access/project-move lock. Budget admission never locks session rows.
+// Reports share one per-tenant advisory lock so heartbeats do not serialize
+// on each other. Budget admission takes the same key exclusively: it waits
+// for in-flight reports, and new reports wait until that admission commits.
+// The key is independent of the tenant access/project-move lock. Budget
+// admission never locks session rows.
+func lockClientReports(ctx context.Context, tx pgx.Tx) error {
+	return lockClientGateMode(ctx, tx, true)
+}
+
 func lockClientGate(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon.rules.clients:' || current_setting('aeon.tenant_id',true),0))`)
+	return lockClientGateMode(ctx, tx, false)
+}
+
+func lockClientGateMode(ctx context.Context, tx pgx.Tx, shared bool) error {
+	fn := "pg_advisory_xact_lock"
+	if shared {
+		fn = "pg_advisory_xact_lock_shared"
+	}
+	_, err := tx.Exec(ctx, `SELECT `+fn+`(hashtextextended('aeon.rules.clients:' || current_setting('aeon.tenant_id',true),0))`)
 	return err
 }
 
@@ -53,7 +68,7 @@ func RecordClientReport(ctx context.Context, tx pgx.Tx, session string, c Client
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	if err := lockClientGate(ctx, tx); err != nil {
+	if err := lockClientReports(ctx, tx); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE harness_sessions SET max_session_file_bytes=$2,rules_client_version=$3,rules_client_seen_at=clock_timestamp() WHERE id=$1`, session, c.MaxSessionFileBytes, c.RulesClientVersion)
@@ -65,6 +80,17 @@ type ClientBlocker struct {
 	Harness string `json:"harness"`
 	Version string `json:"version,omitempty"`
 	Maximum int    `json:"max_session_file_bytes"`
+}
+
+// maxBlockingClients bounds the admin inventory. The rest is a count, not a
+// second page: the ceiling is still the minimum across every matching session.
+const maxBlockingClients = 50
+
+func listedBlockers(all []ClientBlocker) ([]ClientBlocker, int) {
+	if len(all) <= maxBlockingClients {
+		return all, 0
+	}
+	return all[:maxBlockingClients], len(all) - maxBlockingClients
 }
 
 // clientCeiling runs inside the tenant's rules visibility envelope. Include
@@ -90,7 +116,9 @@ func clientCeiling(ctx context.Context, tx pgx.Tx) (int, []ClientBlocker, error)
 			blockers = append(blockers, b)
 		}
 	}
-	if count == 0 {
+	// A report under the legacy default must not make the editor refuse 12,000.
+	// putBudget already accepts that default; the published ceiling matches it.
+	if count == 0 || ceiling < LegacyMaxBytes {
 		ceiling = LegacyMaxBytes
 	}
 	return ceiling, blockers, rows.Err()

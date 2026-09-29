@@ -147,6 +147,25 @@ func (rt *runtime) harnessDo(method, path, lease string, body, dest any) error {
 	return rt.harnessDoCtx(context.Background(), method, path, lease, body, dest)
 }
 
+// reportedSessionFileLimit reads the registered harness and reports what that
+// harness reads by default. A fixture with no harness field keeps the product
+// ceiling; a real session always carries one.
+func (rt *runtime) reportedSessionFileLimit(projectID, sessionID string) (int, error) {
+	var known struct {
+		Harness string `json:"harness"`
+	}
+	if err := rt.harnessDo(http.MethodGet, harnessPath(projectID, sessionID), "", nil, &known); err != nil {
+		return 0, err
+	}
+	if known.Harness == "" {
+		return rules.MaxBytes, nil
+	}
+	if !modelHarnesses[known.Harness] {
+		return 0, usagef("unsupported session harness %q", known.Harness)
+	}
+	return rules.SessionFileLimit(known.Harness), nil
+}
+
 // harnessDoCtx is harnessDo bound to ctx so a heartbeat can abort on shutdown.
 func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string, body, dest any) error {
 	if ctx == nil {
@@ -383,7 +402,7 @@ func (rt *runtime) harnessRegister() *Command {
 			order = &orderID
 		}
 		var out any
-		err = rt.harnessDo(http.MethodPost, harnessPath(projectID, ""), "", map[string]any{"max_session_file_bytes": rules.MaxBytes, "rules_client_version": version.Version, "agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "display_label": label, "model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersion, "brief": brief, "worktree": worktree, "branch": branch, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}, &out)
+		err = rt.harnessDo(http.MethodPost, harnessPath(projectID, ""), "", map[string]any{"max_session_file_bytes": rules.SessionFileLimit(harness), "rules_client_version": version.Version, "agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "display_label": label, "model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersion, "brief": brief, "worktree": worktree, "branch": branch, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}, &out)
 		if err != nil {
 			return err
 		}
@@ -540,7 +559,11 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 					return usagef("unknown activity kind %q", activityKind)
 				}
 			}
-			body = map[string]any{"max_session_file_bytes": rules.MaxBytes, "rules_client_version": version.Version, "phase": phase, "activity": activity, "activity_sequence": sequence}
+			limit, err := rt.reportedSessionFileLimit(id, session)
+			if err != nil {
+				return err
+			}
+			body = map[string]any{"max_session_file_bytes": limit, "rules_client_version": version.Version, "phase": phase, "activity": activity, "activity_sequence": sequence}
 			if label != omittedLabel {
 				body["display_label"] = label
 			}

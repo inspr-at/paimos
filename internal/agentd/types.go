@@ -80,6 +80,7 @@ type HarnessSession struct {
 	ID               string                 `json:"id"`
 	ProjectID        string                 `json:"project_id"`
 	Lease            string                 `json:"-"`
+	Harness          string                 `json:"-"`
 	Model            string                 `json:"model,omitempty"`
 	ReasoningEffort  string                 `json:"reasoning_effort,omitempty"`
 	AccountLabel     string                 `json:"account_label,omitempty"`

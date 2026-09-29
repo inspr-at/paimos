@@ -24,6 +24,22 @@ import (
 const MaxBytes = 64000
 const LegacyMaxBytes = 12000
 const MinBudgetBytes = 2000
+
+// CodexProjectDocMaxBytes is OpenAI Codex's default project_doc_max_bytes.
+// Codex stops adding AGENTS.md content once the combined instruction chain
+// reaches 32 KiB, so a larger installed file can drop rules at the end.
+const CodexProjectDocMaxBytes = 32 * 1024
+
+// SessionFileLimit is the session file a harness reads by default. Codex is
+// bound by project_doc_max_bytes. Claude Code, Cursor, Grok and Pi have no
+// documented cap below MaxBytes, so they report the product ceiling.
+func SessionFileLimit(harness string) int {
+	if harness == "codex" {
+		return CodexProjectDocMaxBytes
+	}
+	return MaxBytes
+}
+
 const MaxRules = 100
 
 // MaxTLDRBytes bounds one explanation line in one language.

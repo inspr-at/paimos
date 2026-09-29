@@ -628,7 +628,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	}
 	label, haveLabel := resolveHeartbeatLabel(ctx, o, dep, true)
 	body := map[string]any{
-		"max_session_file_bytes": rules.MaxBytes, "rules_client_version": version.Version,
+		"max_session_file_bytes": rules.SessionFileLimit(o.Harness), "rules_client_version": version.Version,
 		"agent_principal_id":      me.Principal.ID,
 		"harness":                 o.Harness,
 		"host":                    heartbeatText(o.Host, 200),
@@ -761,7 +761,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	session.disk.ProjectID = projectID
 	session.disk.Sequence++
 	body := map[string]any{
-		"max_session_file_bytes": rules.MaxBytes, "rules_client_version": version.Version,
+		"max_session_file_bytes": rules.SessionFileLimit(o.Harness), "rules_client_version": version.Version,
 		"phase":             o.Phase,
 		"activity_sequence": session.disk.Sequence,
 	}
