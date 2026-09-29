@@ -3,9 +3,11 @@
 package agentd
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -176,7 +178,7 @@ func TestUnknownDefaultBranchIsNotHEAD(t *testing.T) {
 }
 
 // Review case: an unrelated upstream merge synced into the worker branch is
-// on the default branch, but the worker's own change is not.
+// not the run's work; the worker's own change stays off the default branch.
 func TestUpstreamMergeLeavesWorkerChangeOffDefault(t *testing.T) {
 	dir, git := evidenceRepo(t)
 	git(dir, "init", "-b", "main")
@@ -190,17 +192,111 @@ func TestUpstreamMergeLeavesWorkerChangeOffDefault(t *testing.T) {
 	git(dir, "merge", "--no-ff", "upstream", "-m", "upstream merge")
 	git(dir, "checkout", "feature")
 	git(dir, "merge", "--no-ff", "main", "-m", "sync main")
-	var worker, upstream bool
+	got := subjects(commitsSince(t.Context(), dir, start))
+	if got != "worker change:off,sync main:off" {
+		t.Fatalf("own commits: %s", got)
+	}
+}
+
+func subjects(commits []GitCommit) string {
+	var parts []string
+	for _, c := range commits {
+		state := "off"
+		if c.OnDefaultBranch {
+			state = "on"
+		}
+		parts = append(parts, c.Subject+":"+state)
+	}
+	return strings.Join(parts, ",")
+}
+
+// Round 3 review case: the run authored nothing and only fast-forwarded to
+// an upstream merge. It has no own commits.
+func TestUpstreamOnlySyncHasNoOwnCommits(t *testing.T) {
+	dir, git := evidenceRepo(t)
+	git(dir, "init", "-b", "main")
+	git(dir, "commit", "--allow-empty", "-m", "base")
+	start := workspaceHEAD(t.Context(), dir)
+	git(dir, "checkout", "-b", "worker")
+	git(dir, "checkout", "-b", "upstream")
+	git(dir, "commit", "--allow-empty", "-m", "unrelated upstream change")
+	git(dir, "checkout", "main")
+	git(dir, "merge", "--no-ff", "upstream", "-m", "unrelated upstream merge")
+	git(dir, "checkout", "worker")
+	git(dir, "merge", "--ff-only", "main")
+	if got := commitsSince(t.Context(), dir, start); len(got) != 0 {
+		t.Fatalf("upstream sync reported as the run's commits: %+v", got)
+	}
+}
+
+// Round 3 review case: one unmerged worker commit behind 22 upstream commits
+// and a sync merge is still reported, off the default branch.
+func TestManyUpstreamCommitsDoNotHideOwnCommit(t *testing.T) {
+	dir, git := evidenceRepo(t)
+	git(dir, "init", "-b", "main")
+	git(dir, "commit", "--allow-empty", "-m", "base")
+	start := workspaceHEAD(t.Context(), dir)
+	git(dir, "checkout", "-b", "worker")
+	git(dir, "commit", "--allow-empty", "-m", "OWN UNMERGED")
+	git(dir, "checkout", "-b", "upstream", start)
+	for i := 0; i < 22; i++ {
+		git(dir, "commit", "--allow-empty", "-m", fmt.Sprint("unrelated ", i))
+	}
+	git(dir, "checkout", "main")
+	git(dir, "merge", "--no-ff", "upstream", "-m", "upstream merge")
+	git(dir, "checkout", "worker")
+	git(dir, "merge", "--no-ff", "main", "-m", "sync main")
+	if got := subjects(commitsSince(t.Context(), dir, start)); got != "OWN UNMERGED:off,sync main:off" {
+		t.Fatalf("own commits: %s", got)
+	}
+}
+
+// More own commits than the wire cap: an unmerged one is always included.
+// Hitting the evidence bound reports nothing as on the default branch.
+func TestOwnCommitCapAndEvidenceBound(t *testing.T) {
+	dir, git := evidenceRepo(t)
+	git(dir, "init", "-b", "main")
+	git(dir, "commit", "--allow-empty", "-m", "base")
+	start := workspaceHEAD(t.Context(), dir)
+	git(dir, "checkout", "-b", "worker")
+	for i := 0; i < 25; i++ {
+		git(dir, "commit", "--allow-empty", "-m", fmt.Sprint("own ", i))
+	}
+	git(dir, "branch", "-f", "main", "worker^")
+	got := commitsSince(t.Context(), dir, start)
+	if len(got) != 20 || got[0].Subject != "own 24" || got[0].OnDefaultBranch || !got[1].OnDefaultBranch {
+		t.Fatalf("unmerged own commit not listed first: %s", subjects(got))
+	}
+	git(dir, "branch", "-f", "main", "worker")
 	for _, c := range commitsSince(t.Context(), dir, start) {
-		switch c.Subject {
-		case "worker change":
-			worker = !c.OnDefaultBranch
-		case "upstream merge":
-			upstream = c.OnDefaultBranch && c.Parents >= 2
+		if !c.OnDefaultBranch {
+			t.Fatalf("merged own commit off default: %+v", c)
 		}
 	}
-	if !worker || !upstream {
-		t.Fatalf("fixture: worker off default=%t upstream merge on default=%t", worker, upstream)
+	bounded := commitsSinceBounded(t.Context(), dir, start, 10)
+	if len(bounded) == 0 {
+		t.Fatal("bounded evidence dropped the run's commits")
+	}
+	for _, c := range bounded {
+		if c.OnDefaultBranch {
+			t.Fatalf("incomplete evidence reported on default: %s", subjects(bounded))
+		}
+	}
+}
+
+// A run that merges its feature into the default branch it ends on owns the
+// commits that merge brought in.
+func TestRunMergingIntoDefaultOwnsMergedCommits(t *testing.T) {
+	dir, git := evidenceRepo(t)
+	git(dir, "init", "-b", "main")
+	git(dir, "commit", "--allow-empty", "-m", "base")
+	start := workspaceHEAD(t.Context(), dir)
+	git(dir, "checkout", "-b", "feature")
+	git(dir, "commit", "--allow-empty", "-m", "feature work")
+	git(dir, "checkout", "main")
+	git(dir, "merge", "--no-ff", "feature", "-m", "Merge feature")
+	if got := subjects(commitsSince(t.Context(), dir, start)); got != "Merge feature:on,feature work:on" {
+		t.Fatalf("own commits: %s", got)
 	}
 }
 
