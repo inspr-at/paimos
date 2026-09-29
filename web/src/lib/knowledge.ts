@@ -51,17 +51,28 @@ export const STATUSES: readonly { status: KnowledgeStatus; label: string; hint: 
 export const statusLabel = (status: KnowledgeStatus) => STATUSES.find(s => s.status === status)?.label ?? 'Active'
 
 // ---------- Calls ----------
+// A suspected credential in a method learning, as code point offsets.
+export interface SensitiveRange { field: 'text' | 'title'; start: number; end: number }
 export class KnowledgeError extends Error {
   readonly status: number
   readonly code: string
   readonly entry: KnowledgeEntry | null
   readonly conflict: KnowledgeItem | null
-  constructor(status: number, code: string, message: string, entry: KnowledgeEntry | null = null, conflict: KnowledgeItem | null = null) {
-    super(message); this.status = status; this.code = code; this.entry = entry; this.conflict = conflict
+  readonly ranges: SensitiveRange[]
+  constructor(status: number, code: string, message: string, entry: KnowledgeEntry | null = null, conflict: KnowledgeItem | null = null, ranges: SensitiveRange[] = []) {
+    super(message); this.status = status; this.code = code; this.entry = entry; this.conflict = conflict; this.ranges = ranges
   }
 }
 // What went wrong, as people say it.
 export function plainError(status: number, code: string, message: string): string {
+  if (code === 'person_required') return 'Only a person can accept or dismiss a method learning.'
+  if (code === 'learning_sensitive') return 'This looks like a credential — remove it, or confirm it is not one.'
+  if (code === 'learning_closed') return 'This learning is no longer open.'
+  if (code === 'already_decided') return 'This learning was already accepted or dismissed.'
+  if (code === 'rule_unavailable') return 'That rule set is not available.'
+  if (code === 'rule_forbidden') return 'You cannot draft rules in that set.'
+  if (code === 'already_in_set') return 'This learning is already a rule in that set.'
+  if (code === 'revision_conflict') return 'That rule set changed. Open it and try again.'
   if (status === 403) return 'You can read knowledge here but not change it.'
   if (status === 404) return 'This entry no longer exists.'
   if (code === 'slug_taken') return message.replace(/^another/, 'Another')
@@ -78,9 +89,9 @@ async function send<T>(path: string, init: { method?: string; body?: unknown; he
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   })
   if (!response.ok) {
-    const data = await response.json().catch(() => ({})) as { error?: string; code?: string; entry?: KnowledgeEntry; conflict?: KnowledgeItem }
+    const data = await response.json().catch(() => ({})) as { error?: string; code?: string; entry?: KnowledgeEntry; conflict?: KnowledgeItem; ranges?: SensitiveRange[] }
     const code = typeof data.code === 'string' ? data.code : ''
-    throw new KnowledgeError(response.status, code, plainError(response.status, code, typeof data.error === 'string' ? data.error : ''), data.entry ?? null, data.conflict ?? null)
+    throw new KnowledgeError(response.status, code, plainError(response.status, code, typeof data.error === 'string' ? data.error : ''), data.entry ?? null, data.conflict ?? null, Array.isArray(data.ranges) ? data.ranges : [])
   }
   return await response.json() as T
 }
@@ -104,6 +115,30 @@ export const updateKnowledge = (id: string, patch: KnowledgePatch, ifUnmodifiedS
   send<KnowledgeEntry>(`/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch, headers: ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {} })
 export const deleteKnowledge = (id: string, ifUnmodifiedSince?: string) =>
   send<{ id: string; event_id: number }>(`/${encodeURIComponent(id)}`, { method: 'DELETE', headers: ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {} })
+
+// ---------- Method learnings (AEON-275) ----------
+export interface MethodLearning {
+  id: string; source: 'ticket' | 'comment'; node_id: string; key: string; title: string; text: string
+  comment_id?: string; at: string; author: KnowledgePerson | null; href: string
+}
+export interface MethodLearningPage { items: MethodLearning[]; truncated: boolean }
+export interface MethodLearningDecision {
+  id: string; decision: 'accepted' | 'dismissed' | 'drafted'; event_id: number
+  knowledge_id?: string; heading?: string; line?: string; entry?: KnowledgeEntry
+  rule_set_id?: string; rule_layer_id?: string; rule_identity?: string
+}
+export const listLearnings = (projectId: string, signal?: AbortSignal) =>
+  send<MethodLearningPage>(`/learnings${query({ project_id: projectId })}`, { signal })
+// confirmNotSensitive: a person confirms that text flagged as a credential is not one.
+export const acceptLearning = (id: string, knowledgeId: string, ifUnmodifiedSince?: string, confirmNotSensitive = false) =>
+  send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/accept`, {
+    method: 'POST', body: confirmNotSensitive ? { knowledge_id: knowledgeId, confirm_not_sensitive: true } : { knowledge_id: knowledgeId },
+    headers: ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {},
+  })
+export const dismissLearning = (id: string) =>
+  send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/dismiss`, { method: 'POST', body: {} })
+export const draftLearning = (id: string, body: { layer_id: string; set_id: string; confirm_not_sensitive?: true }) =>
+  send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/draft`, { method: 'POST', body })
 // Undo one knowledge write through the event log.
 export async function undoKnowledge(eventId: number): Promise<void> {
   const response = await api(`/events/${eventId}/undo`, { method: 'POST' })

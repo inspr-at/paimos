@@ -75,7 +75,7 @@ export function fixtures(options: MockOptions = {}) {
   for (let index = 0; index < (options.bigProject ?? 0); index++) {
     add({ id: `n-big-${index}`, key: `AEON-${100 + index}`, kind_slug: 'ticket', title: `Generated ticket ${index + 1}`, state: 'backlog', project: 'p-aeon', fields: { priority: 'medium' }, updated_at: ago(index + 1) })
   }
-  const activity: Record<string, { id: string; at: string; type: 'comment' | 'change' | 'created'; author: { id: string | null; name: string }; body_markdown?: string; changes?: { field: string; from: string | null; to: string | null }[] }[]> = {
+  const activity: Record<string, { id: string; at: string; type: 'comment' | 'change' | 'created'; author: { id: string | null; name: string; automatic?: boolean; job?: string; reason?: string }; body_markdown?: string; changes?: { field: string; from: string | null; to: string | null }[] }[]> = {
     // Newest first, like the API.
     'n-1': [
       { id: '9', at: ago(0.5), type: 'comment', author: { id: mira.id, name: mira.name }, body_markdown: 'Token rotation is **done**; cleanup next.' },

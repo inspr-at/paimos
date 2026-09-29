@@ -49,18 +49,21 @@ export function buildTimeline(items: ActivityItem[], windowMs = COLLAPSE_MS): Ti
   return out
 }
 
-const FIELD_LABEL: Record<ActivityChange['field'], string> = { status: 'status', priority: 'priority', assignee: 'assignee', title: 'title', parent: 'parent' }
+const FIELD_LABEL: Record<ActivityChange['field'], string> = { status: 'status', priority: 'priority', assignee: 'assignee', title: 'title', parent: 'parent', tags: 'labels' }
 export function changeValue(field: ActivityChange['field'], value: string | null): string {
   if (field === 'status') return value ? statusMeta(value).label : '—'
   if (field === 'priority') return priorityLabel(value)
   if (field === 'assignee') return value || 'nobody'
   if (field === 'title') return value ? `“${value.length > 60 ? `${value.slice(0, 57)}…` : value}”` : '—'
+  if (field === 'tags') return value || 'no labels'
   return value ?? '—'
 }
 export function describeChange(change: ActivityChange): { label: string; from?: string; to?: string } {
   if (change.field === 'parent') return { label: 'moved it to another parent' }
   if (change.field === 'assignee' && !change.from) return { label: 'assigned it to', to: changeValue('assignee', change.to) }
   if (change.field === 'assignee' && !change.to) return { label: 'unassigned', from: changeValue('assignee', change.from) }
+  if (change.field === 'tags' && !change.from) return { label: 'added the label', to: change.to ?? '—' }
+  if (change.field === 'tags' && !change.to) return { label: 'cleared the labels', from: changeValue('tags', change.from) }
   return { label: `changed ${FIELD_LABEL[change.field]}`, from: changeValue(change.field, change.from), to: changeValue(change.field, change.to) }
 }
 

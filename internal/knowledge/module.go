@@ -26,9 +26,12 @@ import (
 )
 
 const (
-	evCreated = "knowledge.created"
-	evUpdated = "knowledge.updated"
-	evDeleted = "knowledge.deleted"
+	evCreated           = "knowledge.created"
+	evUpdated           = "knowledge.updated"
+	evDeleted           = "knowledge.deleted"
+	evLearningAccepted  = "knowledge.learning_accepted"
+	evLearningDismissed = "knowledge.learning_dismissed"
+	evLearningDrafted   = "knowledge.learning_drafted"
 )
 
 type module struct{ pool *pgxpool.Pool }
@@ -41,6 +44,10 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/knowledge", m.handleCreate)
 	mux.HandleFunc("GET /api/knowledge/resolve", m.handleResolve)
 	mux.HandleFunc("GET /api/knowledge/graph", m.handleGraph)
+	mux.HandleFunc("GET /api/knowledge/learnings", m.handleListLearnings)
+	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/accept", m.handleAcceptLearning)
+	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/dismiss", m.handleDismissLearning)
+	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/draft", m.handleDraftLearning)
 	mux.HandleFunc("GET /api/knowledge/{id}", m.handleGet)
 	mux.HandleFunc("PATCH /api/knowledge/{id}", m.handleUpdate)
 	mux.HandleFunc("DELETE /api/knowledge/{id}", m.handleDelete)
@@ -54,6 +61,7 @@ type apiError struct {
 	msg      string
 	entry    *Entry
 	conflict *Item
+	ranges   []SensitiveRange
 }
 
 func (e *apiError) Error() string { return e.msg }
@@ -73,6 +81,9 @@ func writeErr(w http.ResponseWriter, err error) {
 		}
 		if ae.conflict != nil {
 			body["conflict"] = ae.conflict
+		}
+		if ae.ranges != nil {
+			body["ranges"] = ae.ranges
 		}
 		writeJSON(w, ae.status, body)
 	case errors.Is(err, errNotFound), errors.Is(err, pgx.ErrNoRows):
@@ -128,6 +139,19 @@ func stringField(raw map[string]json.RawMessage, key string) (string, bool, erro
 		return "", true, fail(http.StatusBadRequest, "invalid_request", key+" must be text")
 	}
 	return s, true, nil
+}
+
+// confirmField reads confirm_not_sensitive; absent is false.
+func confirmField(raw map[string]json.RawMessage) (bool, error) {
+	v, ok := raw["confirm_not_sensitive"]
+	if !ok {
+		return false, nil
+	}
+	var b bool
+	if err := json.Unmarshal(v, &b); err != nil {
+		return false, fail(http.StatusBadRequest, "invalid_request", "confirm_not_sensitive must be true or false")
+	}
+	return b, nil
 }
 
 func metadataField(raw map[string]json.RawMessage) (map[string]any, bool, error) {

@@ -2072,7 +2072,7 @@ paths:
     get:
       operationId: listNodeActivity
       summary: Merged comment and visible field-change timeline
-      description: Reverse chronological by (at, event ID). The opaque cursor binds tenant, node and event watermark. Imported snapshots with no visible changes are omitted; the first snapshot is a baseline. Comments retain their creation position after edits; deleted comments are omitted. Imported comments are read-only.
+      description: Reverse chronological by (at, event ID). The opaque cursor binds tenant, node and event watermark. Imported snapshots with no visible changes are omitted; the first snapshot is a baseline. Comments retain their creation position after edits; deleted comments are omitted. Imported comments are read-only. Native updates also show a labels change (field tags).
       security: *auth
       parameters:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
@@ -2440,6 +2440,141 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /knowledge/learnings:
+    get:
+      operationId: listMethodLearnings
+      description: |
+        Open method learnings for one project (AEON-275, AEON-288). A learning is
+        a live ticket, task or epic in that project whose tags include
+        process-learning, a comment on a node in the project whose current text
+        contains that tag as its own word (an optional leading # is allowed),
+        or a nomination from the daily tagger that is still open. A
+        nomination's line is re-derived from its live source; its stored
+        excerpt is shown only while that source is unchanged, and a source
+        that now looks like it holds a credential hides it. A review verdict
+        shows only in the project it was recorded in, while the ticket is
+        still there, to people who can read that verdict. Accepted, dismissed
+        and drafted items are omitted. At most 50, newest first.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Open method learnings
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningPage'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /knowledge/learnings/{learningId}/accept:
+    post:
+      operationId: acceptMethodLearning
+      description: |
+        A person with knowledge.write appends one dated line to the chosen
+        entry's changelog (the last heading whose text contains "changelog",
+        or a new Changelog section), links the source, and records
+        knowledge.learning_accepted. The entry must be in the same project.
+        If-Unmodified-Since is the entry's updated_at; a stale value returns
+        412 with the current entry and writes nothing. Agents cannot accept.
+        Text that looks like it holds a credential is not copied: 409
+        learning_sensitive with the matched ranges (positions only). A person
+        may repeat the request with confirm_not_sensitive; the event records
+        confirmed_not_sensitive. An agent cannot confirm (403).
+      parameters:
+        - {name: learningId, in: path, required: true, schema: {type: string}}
+        - {name: If-Unmodified-Since, in: header, schema: {type: string}}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MethodLearningAccept'}
+      responses:
+        '200':
+          description: Accepted; entry is the updated knowledge entry
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningDecision'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: already_decided, or learning_sensitive with the suspected credential ranges
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningProblem'}
+        '412':
+          description: The entry changed since it was read
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeProblem'}
+  /knowledge/learnings/{learningId}/dismiss:
+    post:
+      operationId: dismissMethodLearning
+      description: |
+        A person with knowledge.write dismisses one open method learning.
+        Records knowledge.learning_dismissed and does not change a knowledge
+        entry. Agents cannot dismiss.
+      parameters:
+        - {name: learningId, in: path, required: true, schema: {type: string}}
+      security: *auth
+      responses:
+        '200':
+          description: Dismissed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningDecision'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /knowledge/learnings/{learningId}/draft:
+    post:
+      operationId: draftMethodLearning
+      description: |
+        A person with knowledge.write turns one open method learning into a
+        single rule in the chosen draft (AEON-288). The rule's text is the
+        learning line. Its source records the learning id and the node.
+        Publishing stays a separate person approval and is not performed.
+        Agents cannot draft. A second decision on the same learning is 409.
+        Text or a title that looks like it holds a credential is not copied:
+        409 learning_sensitive with the matched ranges (positions only). A
+        person may repeat the request with confirm_not_sensitive; the event
+        records confirmed_not_sensitive. An agent cannot confirm (403).
+      parameters:
+        - {name: learningId, in: path, required: true, schema: {type: string}}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MethodLearningDraft'}
+      responses:
+        '200':
+          description: Drafted into the chosen rule set
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningDecision'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: already_decided, or learning_sensitive with the suspected credential ranges
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningProblem'}
   /knowledge/resolve:
     get:
       operationId: resolveKnowledge
@@ -9542,6 +9677,78 @@ components:
           properties:
             type: {type: object, additionalProperties: {type: integer}}
             status: {type: object, additionalProperties: {type: integer}}
+    MethodLearning:
+      type: object
+      required: [id, source, node_id, key, title, text, at, author, href]
+      properties:
+        id: {type: string, description: "n- plus the node id, or c- plus the node id and comment event id"}
+        source: {type: string, enum: [ticket, comment]}
+        node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        text: {type: string, description: One line for the changelog. Comment text has the tag removed.}
+        comment_id: {type: string}
+        at: {type: string, format: date-time}
+        author:
+          oneOf: [{type: 'null'}, {$ref: '#/components/schemas/KnowledgePerson'}]
+        href: {type: string}
+    MethodLearningPage:
+      type: object
+      required: [items, truncated]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/MethodLearning'}}
+        truncated: {type: boolean}
+    MethodLearningAccept:
+      type: object
+      required: [knowledge_id]
+      additionalProperties: false
+      properties:
+        knowledge_id: {type: string, format: uuid}
+        confirm_not_sensitive:
+          type: boolean
+          description: A person confirms that text flagged as a credential is not one. Agents cannot confirm.
+    MethodLearningDraft:
+      type: object
+      required: [layer_id, set_id]
+      additionalProperties: false
+      properties:
+        layer_id: {type: string, format: uuid}
+        set_id: {type: string, format: uuid}
+        confirm_not_sensitive:
+          type: boolean
+          description: A person confirms that text flagged as a credential is not one. Agents cannot confirm.
+    MethodLearningProblem:
+      type: object
+      required: [error, code]
+      properties:
+        error: {type: string}
+        code: {type: string}
+        ranges:
+          type: array
+          description: With learning_sensitive, the suspected credentials as Unicode code point offsets into the learning's text or title. The text itself is never returned.
+          items: {$ref: '#/components/schemas/SensitiveRange'}
+    SensitiveRange:
+      type: object
+      required: [field, start, end]
+      additionalProperties: false
+      properties:
+        field: {type: string, enum: [text, title]}
+        start: {type: integer, minimum: 0}
+        end: {type: integer, minimum: 0}
+    MethodLearningDecision:
+      type: object
+      required: [id, decision, event_id]
+      properties:
+        id: {type: string}
+        decision: {type: string, enum: [accepted, dismissed, drafted]}
+        event_id: {type: integer, format: int64}
+        knowledge_id: {type: string, format: uuid}
+        heading: {type: string}
+        line: {type: string}
+        entry: {$ref: '#/components/schemas/KnowledgeEntry'}
+        rule_set_id: {type: string, format: uuid}
+        rule_layer_id: {type: string, format: uuid}
+        rule_identity: {type: string}
     KnowledgeCreate:
       type: object
       required: [project_id, type, slug, title]
@@ -9668,6 +9875,9 @@ components:
             id: {type: [string, 'null'], format: uuid, description: Null if no imported principal mapping exists}
             name: {type: string}
             has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}
+            automatic: {type: boolean, description: 'True when the tenant System principal wrote the event. Clients show that actor as the product short name followed by (automatic). Omitted for people and ordinary agents, including a person named System.'}
+            job: {type: string, description: 'Background job recorded on the event, when one was.'}
+            reason: {type: string, description: 'Why that job wrote the event, when a reason was recorded.'}
         body_markdown: {type: string, description: Present for comments only}
         changes:
           type: array
@@ -9676,7 +9886,7 @@ components:
             type: object
             required: [field, from, to]
             properties:
-              field: {type: string, enum: [status, priority, assignee, title, parent]}
+              field: {type: string, description: "tags is the native label list, names in stored order joined by a comma and a space.", enum: [status, priority, assignee, title, parent, tags]}
               from: {type: [string, 'null']}
               to: {type: [string, 'null']}
     Attachment:

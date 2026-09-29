@@ -503,7 +503,15 @@ onBeforeUnmount(() => {
   scrollListener?.removeEventListener('scroll', scrolledToEnd)
   poll.stop(); spy?.disconnect()
 })
-defineExpose({ isDirty: () => !skipGuard && dirty.value, startEdit, editing, entryId: () => entry.value?.id ?? null })
+function applyServer(next: KnowledgeEntry) {
+  if (editing.value || next.type !== props.type || next.slug !== props.slug) return
+  entry.value = next
+}
+async function reload() {
+  if (editing.value) return
+  await load()
+}
+defineExpose({ isDirty: () => !skipGuard && dirty.value, startEdit, editing, entryId: () => entry.value?.id ?? null, applyServer, reload })
 const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.value?.updated_by ? `by ${entry.value.updated_by.name}` : '')
 </script>
 
