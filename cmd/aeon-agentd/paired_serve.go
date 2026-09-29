@@ -151,66 +151,61 @@ func servePaired(root string, capacityInterval time.Duration) error {
 	defer ticker.Stop()
 	stopping := false
 	for {
-		if stopping {
+		if stopping || ctx.Err() != nil {
+			stopping = true
 			stopCapture()
 			<-captureDone
-			op, cancel := context.WithTimeout(context.Background(), time.Second)
+			op, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			err = s.Close(op)
 			cancel()
 			if err == nil {
 				return nil
 			}
+			awaitDrainRetry()
+			continue
 		}
-		op, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		op, cancel := context.WithTimeout(ctx, 20*time.Second)
 		watches.Sweep(op)
-		if !stopping {
-			// Lifecycle reconciliation is required before every fresh dispatch;
-			// the independent tombstone proof still works after key revocation.
-			err = syncPairing(op, root, c.Origin, s)
-			if err == nil {
-				next, _, readErr := agentsetup.ReadRuntime(root)
-				if readErr == nil {
-					readErr = agentsetup.ValidateRuntimeDependencies(next)
-				}
-				if readErr == nil && !reflect.DeepEqual(c, next) {
-					if next.Origin != c.Origin || next.TenantID != c.TenantID || next.PrincipalID != c.PrincipalID || next.DaemonID != c.DaemonID || next.Workspace != c.Workspace || next.ComputerID != c.ComputerID {
-						readErr = errors.New("pairing configuration identity changed")
-					} else {
-						for _, nextAccount := range next.Accounts {
-							for _, oldAccount := range c.Accounts {
-								if oldAccount.AccountID == nextAccount.AccountID && oldAccount != nextAccount {
-									readErr = errors.New("approved account binding changed")
-								}
-							}
-						}
-						if readErr != nil {
-							stopping = true
-							cancel()
-							continue
-						}
-						var ac []agentd.EnrolledAccount
-						var ad []agentd.Adapter
-						ac, ad, readErr = pairedAdapters(next)
-						if readErr == nil {
-							readErr = s.RefreshAccounts(ac, ad)
-							if readErr == nil {
-								c = next
+		// Lifecycle reconciliation is required before every fresh dispatch;
+		// the independent tombstone proof still works after key revocation.
+		err = syncPairing(op, root, c.Origin, s)
+		if err == nil {
+			next, _, readErr := agentsetup.ReadRuntime(root)
+			if readErr == nil {
+				readErr = agentsetup.ValidateRuntimeDependencies(next)
+			}
+			if readErr == nil && !reflect.DeepEqual(c, next) {
+				if next.Origin != c.Origin || next.TenantID != c.TenantID || next.PrincipalID != c.PrincipalID || next.DaemonID != c.DaemonID || next.Workspace != c.Workspace || next.ComputerID != c.ComputerID {
+					readErr = errors.New("pairing configuration identity changed")
+				} else {
+					for _, nextAccount := range next.Accounts {
+						for _, oldAccount := range c.Accounts {
+							if oldAccount.AccountID == nextAccount.AccountID && oldAccount != nextAccount {
+								readErr = errors.New("approved account binding changed")
 							}
 						}
 					}
-				}
-				if readErr == nil {
-					_ = s.PollOnce(op)
+					if readErr != nil {
+						stopping = true
+						cancel()
+						continue
+					}
+					var ac []agentd.EnrolledAccount
+					var ad []agentd.Adapter
+					ac, ad, readErr = pairedAdapters(next)
+					if readErr == nil {
+						readErr = s.RefreshAccounts(ac, ad)
+						if readErr == nil {
+							c = next
+						}
+					}
 				}
 			}
-		} else {
-			_ = s.PollOnce(op)
+			if readErr == nil {
+				_ = s.PollOnce(op)
+			}
 		}
 		cancel()
-		if stopping {
-			<-ticker.C
-			continue
-		}
 		select {
 		case <-ctx.Done():
 			stopping = true

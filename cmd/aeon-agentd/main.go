@@ -251,7 +251,8 @@ func serve(args []string) error {
 	defer ticker.Stop()
 	stopping := false
 	for {
-		if stopping {
+		if stopping || ctx.Err() != nil {
+			stopping = true
 			stopCapture()
 			<-captureDone
 			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -260,16 +261,16 @@ func serve(args []string) error {
 			if closeErr == nil {
 				return nil
 			}
+			// The serve context already cancelled a clean Codex idle wait.
+			// Retry without the steady-state poll interval or the idle window.
+			awaitDrainRetry()
+			continue
 		}
-		pollCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		pollCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		err := s.PollOnce(pollCtx)
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			fmt.Fprintln(os.Stderr, "agentd poll failed; inspect AEON availability and account bindings")
-		}
-		if stopping {
-			<-ticker.C
-			continue
 		}
 		select {
 		case <-ctx.Done():
@@ -277,6 +278,12 @@ func serve(args []string) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// awaitDrainRetry is the pause between Close attempts after SIGTERM.
+// Busy turns are left to finish. Idle Codex waits are not.
+func awaitDrainRetry() {
+	time.Sleep(200 * time.Millisecond)
 }
 
 func control(args []string, out io.Writer) error {

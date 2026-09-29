@@ -97,6 +97,19 @@ func TestFakeVendorProcess(t *testing.T) {
 				}
 			}
 			result = map[string]any{"turn": map[string]string{"id": "turn-1", "status": "inProgress"}}
+			if vendor == "codex_idle" {
+				if write.Encode(map[string]any{"jsonrpc": "2.0", "id": frame.ID, "result": result}) != nil {
+					os.Exit(2)
+				}
+				if write.Encode(map[string]any{"jsonrpc": "2.0", "method": "turn/completed", "params": map[string]any{
+					"threadId": "thread-1", "turn": map[string]string{"id": "turn-1", "status": "completed"},
+				}}) != nil {
+					os.Exit(2)
+				}
+				for read.Scan() {
+				}
+				return
+			}
 		case "turn/steer":
 			for _, total := range []int{20, 20, 19} {
 				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "thread/tokenUsage/updated", "params": map[string]any{
