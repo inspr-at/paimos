@@ -4,7 +4,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
-import { businessData, mockBusiness, type BusinessMockOptions } from './business-fixtures'
+import { businessData, mockBusiness, NOW, type BusinessMockOptions } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 
 const places = (page: Page) => page.getByRole('navigation', { name: 'Places' })
@@ -73,9 +73,9 @@ test('g then b crosses the release menu g opened; another menu, a stale arm or a
   await page.keyboard.press('p')
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
   await expect(status).toBeVisible()
-  // The business fixture freezes the clock, so the arm expires only when that
-  // clock moves. g inside Status must not re-arm, so p still stays put.
-  await page.clock.fastForward(1_600)
+  // setFixedTime freezes the business clock; only another setFixedTime moves
+  // it. Past the 1.5s window, g inside Status must not re-arm, so p stays put.
+  await page.clock.setFixedTime(NOW.getTime() + 1_600)
   await page.keyboard.press('g')
   await page.keyboard.press('p')
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
