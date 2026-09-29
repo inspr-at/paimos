@@ -28,7 +28,7 @@ import (
 // cmdHarnessV2 is the complete P5.3 harness command tree.
 func (rt *runtime) cmdHarnessV2() *Command {
 	return &Command{Name: "harness", Short: "Manage durable harness generations", Use: "harness <command>", subs: []*Command{
-		rt.harnessRegister(), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessProvenance(),
+		rt.harnessRegister(), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessProvenance(),
 	}}
 }
 
@@ -142,6 +142,14 @@ func (rt *runtime) harnessRegistration(path string) (string, string, error) {
 // harnessDo refuses redirects, so a private registration reference or worker
 // lease cannot follow a server redirect to another origin.
 func (rt *runtime) harnessDo(method, path, lease string, body, dest any) error {
+	return rt.harnessDoCtx(context.Background(), method, path, lease, body, dest)
+}
+
+// harnessDoCtx is harnessDo bound to ctx so a heartbeat can abort on shutdown.
+func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string, body, dest any) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	c, err := rt.api()
 	if err != nil {
 		return err
@@ -154,7 +162,7 @@ func (rt *runtime) harnessDo(method, path, lease string, body, dest any) error {
 		}
 		reader = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), method, c.BaseURL+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, reader)
 	if err != nil {
 		return rt.fail(err, "")
 	}
@@ -196,10 +204,19 @@ func (rt *runtime) harnessDo(method, path, lease string, body, dest any) error {
 	return nil
 }
 func (rt *runtime) harnessProject(ref string) (string, error) {
+	return rt.harnessProjectCtx(context.Background(), ref)
+}
+
+// harnessProjectCtx resolves a project key on ctx. Heartbeat beats use it so a
+// shutdown deadline cancels the lookup instead of waiting out the client timeout.
+func (rt *runtime) harnessProjectCtx(ctx context.Context, ref string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(ref) == "" {
 		return "", usagef("--project is required")
 	}
-	n, err := rt.projectNode(ref)
+	n, err := rt.projectNodeCtx(ctx, ref)
 	return n.ID, err
 }
 func (rt *runtime) printHarness(v any) error {

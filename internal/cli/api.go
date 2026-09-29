@@ -71,23 +71,41 @@ func (rt *runtime) do(method, path string, body, dest any) error {
 	return rt.doHeaders(method, path, body, dest, nil)
 }
 
+func (rt *runtime) doCtx(ctx context.Context, method, path string, body, dest any) error {
+	return rt.doHeadersCtx(ctx, method, path, body, dest, nil)
+}
+
 func (rt *runtime) doHeaders(method, path string, body, dest any, headers map[string]string) error {
+	return rt.doHeadersCtx(context.Background(), method, path, body, dest, headers)
+}
+
+func (rt *runtime) doHeadersCtx(ctx context.Context, method, path string, body, dest any, headers map[string]string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	c, err := rt.api()
 	if err != nil {
 		return err
 	}
-	if err := c.DoWithHeaders(context.Background(), method, path, body, dest, headers); err != nil {
+	if err := c.DoWithHeaders(ctx, method, path, body, dest, headers); err != nil {
 		return rt.fail(err, c.Token)
 	}
 	return nil
 }
 
 func (rt *runtime) loadKinds() (kindTable, error) {
+	return rt.loadKindsCtx(context.Background())
+}
+
+func (rt *runtime) loadKindsCtx(ctx context.Context) (kindTable, error) {
+	if err := ctx.Err(); err != nil {
+		return kindTable{}, err
+	}
 	if rt.kinds != nil {
 		return *rt.kinds, nil
 	}
 	var page kindPage
-	if err := rt.do(http.MethodGet, "/api/kinds", nil, &page); err != nil {
+	if err := rt.doCtx(ctx, http.MethodGet, "/api/kinds", nil, &page); err != nil {
 		return kindTable{}, err
 	}
 	table := kindTable{bySlug: map[string]apiKind{}, byID: map[string]apiKind{}}
@@ -100,7 +118,11 @@ func (rt *runtime) loadKinds() (kindTable, error) {
 }
 
 func (rt *runtime) kind(slug string) (apiKind, error) {
-	table, err := rt.loadKinds()
+	return rt.kindCtx(context.Background(), slug)
+}
+
+func (rt *runtime) kindCtx(ctx context.Context, slug string) (apiKind, error) {
+	table, err := rt.loadKindsCtx(ctx)
 	if err != nil {
 		return apiKind{}, err
 	}
@@ -120,18 +142,25 @@ func cloneValues(q url.Values) url.Values {
 }
 
 func (rt *runtime) walkNodes(q url.Values, stop func(apiNode) bool) ([]apiNode, error) {
+	return rt.walkNodesCtx(context.Background(), q, stop)
+}
+
+func (rt *runtime) walkNodesCtx(ctx context.Context, q url.Values, stop func(apiNode) bool) ([]apiNode, error) {
 	q = cloneValues(q)
 	if q.Get("limit") == "" {
 		q.Set("limit", "200")
 	}
 	var all []apiNode
 	for page := 0; page < 50; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		path := "/api/nodes"
 		if enc := q.Encode(); enc != "" {
 			path += "?" + enc
 		}
 		var body nodePage
-		if err := rt.do(http.MethodGet, path, nil, &body); err != nil {
+		if err := rt.doCtx(ctx, http.MethodGet, path, nil, &body); err != nil {
 			return nil, err
 		}
 		for _, n := range body.Items {
@@ -182,12 +211,19 @@ func keyPrefix(key string) string {
 }
 
 func (rt *runtime) projectNode(ref string) (apiNode, error) {
+	return rt.projectNodeCtx(context.Background(), ref)
+}
+
+func (rt *runtime) projectNodeCtx(ctx context.Context, ref string) (apiNode, error) {
+	if err := ctx.Err(); err != nil {
+		return apiNode{}, err
+	}
 	ref = strings.TrimSpace(ref)
-	kind, err := rt.kind("project")
+	kind, err := rt.kindCtx(ctx, "project")
 	if err != nil {
 		return apiNode{}, err
 	}
-	nodes, err := rt.walkNodes(url.Values{"kind_id": {kind.ID}}, nil)
+	nodes, err := rt.walkNodesCtx(ctx, url.Values{"kind_id": {kind.ID}}, nil)
 	if err != nil {
 		return apiNode{}, err
 	}
