@@ -85,8 +85,16 @@ func TestReleaseSignsDarwinAgentdBeforeChecksums(t *testing.T) {
 			t.Fatalf("cleanup step missing %s", needle)
 		}
 	}
-	if guard, rm := strings.Index(cleanup.Run, "RUNNER_TEMP:?"), strings.Index(cleanup.Run, "rm -rf"); guard > strings.Index(cleanup.Run, "security delete-keychain") || guard > rm {
-		t.Fatal("cleanup must validate RUNNER_TEMP before any filesystem operation")
+	del, rm := strings.Index(cleanup.Run, "security delete-keychain"), strings.Index(cleanup.Run, "rm -rf")
+	for _, guard := range []string{"RUNNER_TEMP:?", `[ "$rt" -ef / ]`} {
+		if at := strings.Index(cleanup.Run, guard); at < 0 || at > del || at > rm {
+			t.Fatalf("cleanup must check %s before any filesystem operation", guard)
+		}
+	}
+	for _, needle := range []string{"could not read the keychain search list", "could not verify the keychain search list"} {
+		if !strings.Contains(cleanup.Run, needle) {
+			t.Fatalf("cleanup must fail when a keychain search-list query fails (%s)", needle)
+		}
 	}
 	entries, err := os.ReadDir("../../.github/workflows")
 	if err != nil {

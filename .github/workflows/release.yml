@@ -90,20 +90,31 @@ jobs:
             [ -e "$kc" ] || continue
             security delete-keychain "$kc" || { echo "::error::could not delete $kc"; failed=1; }
           done
-          kept=()
-          while IFS= read -r k; do
-            k="${k#"${k%%[![:space:]]*}"}"; k="${k#\"}"; k="${k%\"}"
-            case "$k" in ""|*/signing.keychain-db) ;; *) kept+=("$k") ;; esac
-          done < <(security list-keychains -d user)
-          [ ${#kept[@]} -gt 0 ] || kept=("$HOME/Library/Keychains/login.keychain-db")
-          security list-keychains -d user -s "${kept[@]}" || { echo "::error::could not restore the keychain search list"; failed=1; }
+          # Without a readable search list the restore is skipped rather than
+          # guessed; delete-keychain above already unlisted what it removed.
+          if current="$(security list-keychains -d user)"; then
+            kept=()
+            while IFS= read -r k; do
+              k="${k#"${k%%[![:space:]]*}"}"; k="${k#\"}"; k="${k%\"}"
+              case "$k" in ""|*/signing.keychain-db) ;; *) kept+=("$k") ;; esac
+            done <<<"$current"
+            [ ${#kept[@]} -gt 0 ] || kept=("$HOME/Library/Keychains/login.keychain-db")
+            security list-keychains -d user -s "${kept[@]}" || { echo "::error::could not restore the keychain search list"; failed=1; }
+          else
+            echo "::error::could not read the keychain search list"
+            failed=1
+          fi
           rm -rf "$rt"/sign.* || failed=1
           if compgen -G "$rt/sign.*" >/dev/null; then
             echo "::error::signing temp files remain"
             failed=1
           fi
-          list="$(security list-keychains -d user)"
-          case "$list" in *signing.keychain-db*) echo "::error::signing keychain is still on the search list"; failed=1 ;; esac
+          if list="$(security list-keychains -d user)"; then
+            case "$list" in *signing.keychain-db*) echo "::error::signing keychain is still on the search list"; failed=1 ;; esac
+          else
+            echo "::error::could not verify the keychain search list"
+            failed=1
+          fi
           [ "$failed" = 0 ] || exit 1
           echo "signing keychain and temp files removed"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
