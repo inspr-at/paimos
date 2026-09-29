@@ -110,7 +110,18 @@ export function knowledgeWorld(options: { empty?: boolean } = {}) {
     add({ id: 'k-aeon-cutover', key: 'AEON-61', type: 'guideline', slug: 'no-cutover-without-approval', title: 'No cutover without explicit approval', project: 'p-aeon', updated_at: ago(24 * 2),
       metadata: { rule: 'The classic app stays untouched until its owner approves a cutover.' }, body: 'Imports read from the classic app through its API only.' })
   }
-  return { entries, events: [] as { id: number; node_id: string; type: string; before: MockEntry | null; after: MockEntry; undo_of: number | null }[], renames: { 'deploy-flow': 'k-deploy' } as Record<string, string>, counter: { next: 90, event: 500, clock: 0 } }
+  return {
+    entries,
+    events: [] as { id: number; node_id: string; type: string; before: MockEntry | null; after: MockEntry; undo_of: number | null }[],
+    renames: { 'deploy-flow': 'k-deploy' } as Record<string, string>,
+    counter: { next: 90, event: 500, clock: 0 },
+    learnings: [] as MockLearning[],
+    decisions: [] as { event_id: number; item: MockLearning }[],
+  }
+}
+export interface MockLearning {
+  id: string; source: 'ticket' | 'comment'; node_id: string; key: string; title: string; text: string
+  comment_id?: string; at: string; author: { id: string; name: string } | null; href: string
 }
 export type KnowledgeWorld = ReturnType<typeof knowledgeWorld>
 export interface KnowledgeMockOptions {
@@ -178,6 +189,38 @@ export async function mockKnowledge(page: Page, world: KnowledgeWorld, options: 
     try { body = request.postDataJSON() } catch { body = null }
     calls.push({ path: url.pathname, method, query, body, headers: request.headers() })
     const parts = url.pathname.replace(/^\/api\/knowledge\/?/, '').split('/').filter(Boolean)
+    if (parts[0] === 'learnings') {
+      if (method === 'GET') return json(route, 200, { items: world.learnings, truncated: false })
+      const id = decodeURIComponent(parts[1] ?? '')
+      const found = world.learnings.find(item => item.id === id)
+      if (!found) return json(route, 404, { error: 'This learning is no longer open.', code: 'learning_closed' })
+      if (options.readOnly) return json(route, 403, { error: 'you can read knowledge but not change it', code: 'forbidden' })
+      if (parts[2] === 'dismiss' && method === 'POST') {
+        const eventId = ++world.counter.event
+        world.decisions.push({ event_id: eventId, item: found })
+        world.learnings = world.learnings.filter(item => item.id !== id)
+        return json(route, 200, { id, decision: 'dismissed', event_id: eventId })
+      }
+      if (parts[2] === 'accept' && method === 'POST') {
+        const input = body as { knowledge_id?: string }
+        const entry = world.entries.find(candidate => candidate.id === input.knowledge_id && !candidate.deleted)
+        if (!entry) return json(route, 404, { error: 'knowledge entry not found', code: 'not_found' })
+        const expected = request.headers()['if-unmodified-since']
+        if (expected && expected !== entry.updated_at) return json(route, 412, { error: 'the entry changed since you opened it', code: 'stale', entry: full(entry) })
+        const before = structuredClone(entry)
+        const date = new Date().toISOString().slice(0, 10)
+        const line = `- ${date}: ${found.text}. Source: [${found.key}](${found.href}).`
+        entry.body = `${entry.body.replace(/\s*$/, '')}\n\n${line}\n`
+        entry.updated_at = tick()
+        entry.updated_by = me
+        entry.imported = false
+        const eventId = record('knowledge.learning_accepted', before, entry)
+        world.decisions.push({ event_id: eventId, item: found })
+        world.learnings = world.learnings.filter(item => item.id !== id)
+        return json(route, 200, { id, decision: 'accepted', event_id: eventId, knowledge_id: entry.id, heading: 'Changelog', line, entry: full(entry, { event_id: eventId }) })
+      }
+      return json(route, 400, { error: 'invalid request', code: 'invalid_request' })
+    }
     if (!parts.length && method === 'GET') {
       if (options.failList) return json(route, 503, { error: 'knowledge is resting', code: 'internal' })
       if (options.delayList) await new Promise(resolve => setTimeout(resolve, options.delayList))
@@ -239,7 +282,16 @@ export async function mockKnowledge(page: Page, world: KnowledgeWorld, options: 
   })
   await page.route('**/api/events/*/undo', async route => {
     const id = Number(new URL(route.request().url()).pathname.split('/')[3])
+    const decision = world.decisions.find(candidate => candidate.event_id === id)
+    if (decision) {
+      world.learnings = [decision.item, ...world.learnings.filter(item => item.id !== decision.item.id)]
+      world.decisions = world.decisions.filter(candidate => candidate.event_id !== id)
+    }
     const event = world.events.find(candidate => candidate.id === id)
+    if (!event) {
+      if (decision) return json(route, 201, { id: ++world.counter.event })
+      return route.fallback()
+    }
     if (!event) return route.fallback()
     if (world.events.some(candidate => candidate.undo_of === id)) return json(route, 409, { error: 'conflict' })
     const entry = world.entries.find(candidate => candidate.id === event.node_id)!

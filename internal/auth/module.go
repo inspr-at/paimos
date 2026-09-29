@@ -378,6 +378,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "views", "preferences", "project-groups":
 		return scope("views")
 	case "knowledge":
+		// Listing candidates is ordinary knowledge read. Accept and dismiss stay
+		// with a person: an agent key has no authority on those two routes, and
+		// the handler refuses every agent again.
+		if r.Method == http.MethodPost && len(parts) == 4 && parts[1] == "learnings" && (parts[3] == "accept" || parts[3] == "dismiss") {
+			return "", false
+		}
 		return scope("knowledge")
 	case "approvals":
 		if len(parts) == 1 {

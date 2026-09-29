@@ -2056,6 +2056,90 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /knowledge/learnings:
+    get:
+      operationId: listMethodLearnings
+      description: |
+        Open method learnings for one project (AEON-275). A learning is a live
+        ticket, task or epic in that project whose tags include process-learning,
+        or a comment on a node in the project whose current text contains that
+        tag as its own word (an optional leading # is allowed). Accepted and
+        dismissed items are omitted. At most 50, newest first.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Open method learnings
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningPage'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /knowledge/learnings/{learningId}/accept:
+    post:
+      operationId: acceptMethodLearning
+      description: |
+        A person with knowledge.write appends one dated line to the chosen
+        entry's changelog (the last heading whose text contains "changelog",
+        or a new Changelog section), links the source, and records
+        knowledge.learning_accepted. The entry must be in the same project.
+        If-Unmodified-Since is the entry's updated_at; a stale value returns
+        412 with the current entry and writes nothing. Agents cannot accept.
+      parameters:
+        - {name: learningId, in: path, required: true, schema: {type: string}}
+        - {name: If-Unmodified-Since, in: header, schema: {type: string}}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MethodLearningAccept'}
+      responses:
+        '200':
+          description: Accepted; entry is the updated knowledge entry
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningDecision'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '412':
+          description: The entry changed since it was read
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeProblem'}
+  /knowledge/learnings/{learningId}/dismiss:
+    post:
+      operationId: dismissMethodLearning
+      description: |
+        A person with knowledge.write dismisses one open method learning.
+        Records knowledge.learning_dismissed and does not change a knowledge
+        entry. Agents cannot dismiss.
+      parameters:
+        - {name: learningId, in: path, required: true, schema: {type: string}}
+      security: *auth
+      responses:
+        '200':
+          description: Dismissed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningDecision'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
   /knowledge/resolve:
     get:
       operationId: resolveKnowledge
@@ -8245,6 +8329,44 @@ components:
           properties:
             type: {type: object, additionalProperties: {type: integer}}
             status: {type: object, additionalProperties: {type: integer}}
+    MethodLearning:
+      type: object
+      required: [id, source, node_id, key, title, text, at, author, href]
+      properties:
+        id: {type: string, description: n- plus the node id, or c- plus the node id and comment event id}
+        source: {type: string, enum: [ticket, comment]}
+        node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        text: {type: string, description: One line for the changelog. Comment text has the tag removed.}
+        comment_id: {type: string}
+        at: {type: string, format: date-time}
+        author:
+          oneOf: [{type: 'null'}, {$ref: '#/components/schemas/KnowledgePerson'}]
+        href: {type: string}
+    MethodLearningPage:
+      type: object
+      required: [items, truncated]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/MethodLearning'}}
+        truncated: {type: boolean}
+    MethodLearningAccept:
+      type: object
+      required: [knowledge_id]
+      additionalProperties: false
+      properties:
+        knowledge_id: {type: string, format: uuid}
+    MethodLearningDecision:
+      type: object
+      required: [id, decision, event_id]
+      properties:
+        id: {type: string}
+        decision: {type: string, enum: [accepted, dismissed]}
+        event_id: {type: integer, format: int64}
+        knowledge_id: {type: string, format: uuid}
+        heading: {type: string}
+        line: {type: string}
+        entry: {$ref: '#/components/schemas/KnowledgeEntry'}
     KnowledgeCreate:
       type: object
       required: [project_id, type, slug, title]

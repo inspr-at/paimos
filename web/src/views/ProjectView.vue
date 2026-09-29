@@ -46,7 +46,7 @@ import JourneyChip from '../components/journey/JourneyChip.vue'
 import HeaderGlimpse from '../components/work/HeaderGlimpse.vue'
 import type KnowledgeEntryPageType from '../components/knowledge/KnowledgeEntryPage.vue'
 import type KnowledgeTabType from '../components/knowledge/KnowledgeTab.vue'
-import { DOCK_LIST_RESERVE, DOCK_MEDIA, entryPath, isKnowledgeType, parseEntryParam, type KnowledgeType } from '../lib/knowledge'
+import { DOCK_LIST_RESERVE, DOCK_MEDIA, entryPath, isKnowledgeType, parseEntryParam, type KnowledgeEntry, type KnowledgeType } from '../lib/knowledge'
 import { filtersFromQuery as knowledgeFiltersFrom, filtersToQuery as knowledgeQuery, useKnowledge, type KnowledgeFilters } from '../lib/useKnowledge'
 import type { Stage } from '../lib/journey'
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
@@ -700,6 +700,14 @@ watch(project, current => { if (current) remember({ type: 'project', key: curren
 // One write at a time. A later filter reads the address after the earlier one has
 // landed, and a replace that lost to another navigation is sent once more.
 let knowledgeWrite: Promise<unknown> = Promise.resolve()
+function learningAccepted(entry: KnowledgeEntry) {
+  knowledge.upsert(entry)
+  knowledgeEntry.value?.applyServer(entry)
+}
+function learningReverted() {
+  void knowledge.load()
+  void knowledgeEntry.value?.reload()
+}
 function updateKnowledge(patch: Partial<KnowledgeFilters>) {
   knowledgeWrite = knowledgeWrite.catch(() => undefined).then(async () => {
     const go = () => {
@@ -1332,7 +1340,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
-        :filters="knowledgeFilters" :can-write="knowledgeWritable" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge"
+        :filters="knowledgeFilters" :can-write="knowledgeWritable" :person="session.identity?.principal.kind === 'person'" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge" @accepted="learningAccepted" @reverted="learningReverted"
       />
       <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
         :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />
