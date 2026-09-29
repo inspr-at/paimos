@@ -59,7 +59,8 @@ for (const pass of [1, 2]) for (const theme of ['light', 'dark'] as const) for (
     const resultBox = (await result.boundingBox())!
     expect(resultBox.x).toBeGreaterThanOrEqual(0)
     expect(resultBox.x + resultBox.width).toBeLessThanOrEqual(width + 1)
-    if (width === 390) expect(await result.evaluate(el => el.scrollWidth > el.clientWidth + 1)).toBe(true)
+    // Phones wrap a long result to two lines and clamp it there (AEON-304); either way it is cut, never spilled.
+    if (width === 390) expect(await result.evaluate(el => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)).toBe(true)
     await quietRow.locator('.agent-link').focus()
     await expect(quietRow.locator('.agent-link')).toBeFocused()
     await expect(page.locator('.accounts-disclosure')).not.toHaveAttribute('open', '')

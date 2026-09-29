@@ -249,6 +249,7 @@ function rowClick(event: MouseEvent, id: string) {
                 <span class="session-context">
                   <span class="session-name" :title="context">{{ context }}</span>
                   <span v-if="view.session.role === 'coordinator'" class="role" data-tip="Coordinates other sessions">Lead</span>
+                  <time v-if="view.session.heartbeat_at" class="ctx-beat" :datetime="view.session.heartbeat_at">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time>
                 </span>
               </span>
             </RouterLink>
@@ -270,7 +271,7 @@ function rowClick(event: MouseEvent, id: string) {
             <span class="exec-icon"><ProviderMark :provider="exec.provider" /></span>
             <span class="exec-copy">
               <span v-if="exec.model" class="exec-model" :title="exec.modelLine">{{ exec.modelLine }}</span>
-              <span class="exec-account" :title="exec.accountLine">{{ exec.accountLine }}</span>
+              <span class="exec-account" :title="exec.accountLine"><span v-if="view.harness" class="exec-harness">{{ view.harness }}</span><span v-if="exec.account" class="exec-acct"><template v-if="view.harness"> · </template>{{ exec.account }}</span></span>
             </span>
           </span>
           <span role="cell" class="right c-beat">
@@ -396,6 +397,8 @@ function rowClick(event: MouseEvent, id: string) {
 .result { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-context { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-3); font-size: 12px; font-weight: 450; }
 .session-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The heartbeat has its own column on wide rows; phones say it inline here. */
+.ctx-beat { display: none; flex: none; white-space: nowrap; }
 .row:hover .result { color: var(--teal-ink); }
 .role { flex: none; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--gold-wash); color: var(--gold-ink); font: 600 9px/16px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .c-exec { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
@@ -464,25 +467,51 @@ function rowClick(event: MouseEvent, id: string) {
 @media (max-width: 720px) { .menu-item { min-height: 44px; align-items: center; } .menu-item > svg { margin-top: 0; } }
 /* Phones: identity, execution and state stack; actions stay in the overflow menu. */
 @container sessions (max-width: 560px) {
-  .table { --tree-step: 20px; display: block; }
+  /* One text column beside the avatar column: title (two lines at most) with
+     the heartbeat inline under it, one execution line, one state line, then a
+     lead's worker toggles. The avatar column stays free for the tree lines. */
+  .table { --tree-step: 28px; --title-line: 18px; display: block; }
   .thead { display: none; }
   .group-row { display: block; margin: 12px 8px 2px; padding: 0 8px; }
-  .row { --tree-joint: 32px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; grid-template-areas: "agent agent beat actions" "exec exec exec actions" "state ticket ticket actions"; row-gap: 4px; column-gap: 8px; align-items: center; min-height: 72px; margin: 0 6px; padding: 10px 4px 10px calc(10px + var(--depth) * var(--tree-step)); }
+  .row { --tree-joint: 25px; display: grid; grid-template-columns: 30px auto minmax(0, 1fr) 44px; grid-template-rows: auto auto auto auto; grid-template-areas: ". . . actions" ". . . actions" ". . . actions" ". . . actions"; column-gap: 8px; row-gap: 0; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span { padding: 0; }
-  .c-agent { grid-area: agent; min-width: 0; }
+  .row > .c-agent { grid-column: 1 / 4; grid-row: 1 / 5; display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid; align-items: start; padding-block: 0; }
   .row.worker .c-agent { padding-left: 0; }
+  .agent-link { grid-column: 1 / -1; grid-row: 1; display: grid; grid-template-columns: subgrid; align-items: start; }
+  .who { grid-column: 2 / -1; line-height: 1.3; }
+  .result { font-size: 14px; line-height: var(--title-line); white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+  .session-context { margin-top: 2px; }
+  .ctx-beat { display: inline; }
+  .ctx-beat::before { content: '·'; margin-right: 6px; }
   .row > .tree-lines { left: 25px; }
-  .worker-toggle { min-height: 36px; padding-inline: 6px; }
-  .worker-tools { flex-wrap: nowrap; white-space: nowrap; }
+  .worker-tools { grid-column: 2 / -1; grid-row: 4; flex-wrap: nowrap; white-space: nowrap; margin: 0 0 0 -6px; padding: 0; }
+  /* The 44 px toggle line closes a lead's row by itself. */
+  .row:has(> .c-agent > .worker-tools) { padding-bottom: 0; }
+  .worker-toggle { min-height: 44px; padding-inline: 6px; }
   .worker-tools .idle-count, .worker-tools > span[aria-hidden]:has(+ .idle-count) { display: none; }
-  .c-state { grid-area: state; min-width: 0; }
-  .c-ticket { grid-area: ticket; justify-self: start; min-width: 0; overflow: hidden; }
+  .c-exec { grid-column: 2 / 4; grid-row: 2; min-width: 0; margin-top: 6px; gap: 6px; }
+  .exec-icon { width: 18px; justify-items: start; }
+  .exec-icon :deep(svg) { max-width: 18px; max-height: 13px; }
+  /* One line: harness · model · effort. The account stays in the tooltip and the detail panel. */
+  .exec-copy { display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); }
+  .exec-account { display: contents; }
+  .exec-acct { display: none; }
+  .exec-harness { order: -1; flex: none; font-size: 12px; color: var(--ink-2); }
+  .exec-model { flex: 0 1 auto; min-width: 0; font-size: 12px; }
+  .exec-harness ~ .exec-model::before, .exec-copy:has(.exec-harness) .exec-model::before { content: '·'; margin: 0 .4em; color: var(--ink-3); }
+  .c-state { grid-column: 2; grid-row: 3; min-width: 0; margin-top: 4px; min-height: 22px; }
+  .c-ticket { grid-column: 3; grid-row: 3; justify-self: start; min-width: 0; overflow: hidden; margin-top: 4px; min-height: 22px; }
   .row > .c-ticket { padding-block: 0; }
-  .c-exec { grid-area: exec; min-width: 0; }
-  .c-beat { display: block; grid-area: beat; }
+  .c-beat { display: none; }
   .c-elapsed { display: none; }
   .row > .c-actions { grid-area: actions; grid-row: 1 / span 3; align-self: center; flex-direction: column; justify-content: center; gap: 0; padding: 0; }
   .act { display: none; }
   .c-actions .icon-btn:is(.more, .bin) { width: 44px; height: 44px; opacity: 1; }
+}
+/* AEON-304: the overflow sits top-right, its icon centred on the title's first line. */
+@container sessions (max-width: 560px) {
+  .row > .c-actions { align-self: start; margin-top: calc(var(--title-line) / 2 - 22px); }
+  .card-head { align-items: center; padding: 6px 10px 2px 18px; }
+  .head-tools .btn { min-height: 44px; }
 }
 </style>
