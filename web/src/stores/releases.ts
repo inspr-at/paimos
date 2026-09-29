@@ -3,11 +3,10 @@ import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 import { api } from '../lib/api'
 import { usePreference } from '../lib/preferences'
-import { getReleases, newSince, type ReleaseHistory } from '../lib/releases'
+import { getReleases, isCalendarVersion, newSince, type ReleaseHistory } from '../lib/releases'
 import { useVersion } from './version'
 
-const CALENDAR = /^\d{12}\.\d+\.\d+$/
-export const isCalendar = (value: string | null | undefined): value is string => !!value && CALENDAR.test(value)
+export const isCalendar = isCalendarVersion
 
 // The release history, what is new since the person last looked, and whether the
 // server now runs a newer version than this page.

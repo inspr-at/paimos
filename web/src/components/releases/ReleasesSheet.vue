@@ -3,11 +3,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { groupByDay, matches, presentRelease, railLine, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
+import { groupByDay, liveServer, matches, presentRelease, railLine, releasedAt, releaseNotice, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
 import { useProfile } from '../../stores/profile'
 import { normalKey } from '../../lib/ticketLinks'
 import { relativeTime } from '../../lib/work'
-import { isCalendar, useReleases } from '../../stores/releases'
+import { useReleases } from '../../stores/releases'
 import { useVersion } from '../../stores/version'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
@@ -57,15 +57,24 @@ const indexOf = computed(() => new Map(order.value.map((r, i) => [r.version, i])
 const byVersion = computed(() => new Map(releases.value.map(r => [r.version, r])))
 const selected = computed(() => cursor.value ? byVersion.value.get(cursor.value) ?? null : null)
 const current = computed(() => history.value?.current ?? '')
+// The version this page loaded with. The history's current is the server, which
+// can already be newer while this page is still the old build.
+const pageRuns = computed(() => version.value?.version ?? '')
+const runningHere = computed(() => pageRuns.value || current.value)
+// live_since belongs to the server version. It does not describe an older page.
+const runningSince = computed(() => runningHere.value === current.value ? history.value?.live_since ?? null : null)
 const currentKnown = computed(() => byVersion.value.has(current.value))
-// The published release before the one running here: where a rollback would go.
+// The published release before the one the server runs: where a rollback would go.
 const rollbackTarget = computed(() => currentKnown.value ? releases.value.find(r => r.state === 'published' && r.version < current.value)?.version ?? null : null)
 const stats = computed(() => statsOf(releases.value, now.value))
 const filtering = computed(() => !!filter.q.trim() || filter.features || filter.fixes || filter.tickets)
 const reservedCount = computed(() => releases.value.filter(r => r.state === 'reserved').length)
 const compareTo = computed(() => mode.value === 'compare' && cursor.value && cursor.value !== compareFrom.value ? cursor.value : null)
-// This page still runs an older build than the server: say so, with a reload.
-const stale = computed(() => isCalendar(version.value?.version) && isCalendar(current.value) && current.value > version.value.version)
+// One notice. An outdated page says a newer version is live; it does not also
+// warn that this build's history lacks that version. The server is the newer of
+// the cached history and the version the update poll already saw.
+const server = computed(() => liveServer(current.value, store.available))
+const notice = computed(() => releaseNotice(pageRuns.value, current.value, missing.value, store.available))
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
 
 // ---------- Selection ----------
@@ -73,7 +82,9 @@ function initialSelection() {
   if (cursor.value && byVersion.value.has(cursor.value)) return
   const wanted = props.target && props.target !== 'all' ? props.target.replace(/^v/, '') : ''
   if (wanted && byVersion.value.has(wanted)) { cursor.value = wanted; if (phone.value) showDetail.value = true; return }
-  if (wanted) missing.value = wanted
+  // A version this build does not have cannot open as detail. Stay on the list,
+  // where the one notice explains it.
+  if (wanted) { missing.value = wanted; showDetail.value = false }
   cursor.value = currentKnown.value ? current.value : releases.value[0]?.version ?? null
 }
 watch(() => props.target, target => {
@@ -283,24 +294,24 @@ const KINDS = [
           <button type="button" class="icon-btn flat help-btn" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" :aria-expanded="help" @click="help = !help"><AppIcon name="keyboard" :size="15" /></button>
           <button type="button" class="icon-btn close-btn" aria-label="Close release history" aria-keyshortcuts="Escape" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
         </div>
-        <p v-if="stale" class="notice" role="status">
+        <p v-if="notice === 'update'" class="notice" role="status">
           <AppIcon name="info" :size="14" />
-          <span>This page still runs {{ version.value?.version }}; the server runs {{ current }}.</span>
+          <span>A newer version is live: this page still runs <CalendarVersion v-if="pageRuns" :value="pageRuns" class="notice-version" />, and the server runs <CalendarVersion v-if="server" :value="server" class="notice-version" />.</span>
           <button type="button" class="btn sm" @click="reload"><AppIcon name="refresh" :size="12" />Reload</button>
         </p>
-        <p v-if="missing" class="notice" role="status">
+        <p v-else-if="notice === 'missing'" class="notice" role="status">
           <AppIcon name="info" :size="14" />
-          <span>{{ missing }} is not in this build’s release history.</span>
+          <span><CalendarVersion :value="missing" class="notice-version" /> is not in this build’s release history.</span>
           <button type="button" class="icon-btn flat sm" aria-label="Dismiss" @click="missing = ''"><AppIcon name="close" :size="12" /></button>
         </p>
-        <ReleaseStats v-if="releases.length && !phone" class="stats" :stats="stats" :current="current" :live-since="history?.live_since ?? null" :now="now" />
+        <ReleaseStats v-if="releases.length && !phone" class="stats" :stats="stats" :current="runningHere" :live-since="runningSince" :now="now" />
         <div v-else-if="!phone && !history && !store.error" class="stats-placeholder skeleton-body" aria-hidden="true"><span v-for="i in 6" :key="i" class="skeleton" /></div>
       </header>
 
       <div class="body">
         <section class="list-pane" aria-label="Releases" :inert="covered">
           <!-- Phones: the stats scroll away with the list, inside the gutter. -->
-          <ReleaseStats v-if="releases.length && phone" compact class="stats" :stats="stats" :current="current" :live-since="history?.live_since ?? null" :now="now" />
+          <ReleaseStats v-if="releases.length && phone" compact class="stats" :stats="stats" :current="runningHere" :live-since="runningSince" :now="now" />
           <div class="filters">
             <div class="toggles" role="group" aria-label="Show only releases with">
               <button type="button" class="toggle" :aria-pressed="filter.features" @click="filter.features = !filter.features"><AppIcon name="sparkle" :size="13" />Features</button>
@@ -449,7 +460,9 @@ const KINDS = [
 .compare-btn .keycap { margin-right: -5px; }
 .icon-btn { width: 36px; height: 36px; }
 .notice { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; border-radius: 12px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 1px var(--line); color: var(--ink); font-size: 13px; }
-.notice > span { flex: 1; min-width: 0; }
+.notice > span { flex: 1; min-width: 0; line-height: 1.45; }
+.notice-version { font-size: inherit; vertical-align: baseline; }
+.notice .btn, .notice .icon-btn { flex: none; }
 .notice svg { color: var(--teal-ink); }
 .stats-placeholder { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; height: 110px; }
 .stats-placeholder .skeleton { border-radius: 14px; }
@@ -578,6 +591,8 @@ const KINDS = [
   .titles h1 { font-size: 21px; }
   .spacer { display: none; }
   .close-btn { order: 1; width: 44px; height: 44px; }
+  .notice .btn, .notice .icon-btn { height: 44px; }
+  .notice .icon-btn { width: 44px; }
   .search { order: 2; flex: 1 1 calc(100% - 54px); width: auto; }
   .search .field { height: 44px; }
   .slash, .help-btn, .compare-btn .btn-text, .compare-btn .keycap { display: none; }

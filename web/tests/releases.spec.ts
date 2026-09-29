@@ -270,7 +270,10 @@ test('a newer version on the server: a toast offers what is new and a reload', a
   await expect(sheet(page)).toBeVisible()
   await expect(page).toHaveURL(`/?releases=${history.current}`)
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
-  await expect(sheet(page).getByRole('status').filter({ hasText: `This page still runs ${history.releases[1].version}` })).toBeVisible()
+  const update = sheet(page).getByRole('status').filter({ hasText: 'this page still runs' })
+  await expect(update).toBeVisible()
+  await expect(update.locator('.calendar-version').first()).toHaveAttribute('aria-label', history.releases[1].version)
+  await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
 })
 
 test('the palette and the account menu open the history too', async ({ page }) => {
