@@ -419,7 +419,7 @@ export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => numb
       const x = value(a, key.field), y = value(b, key.field)
       if (x !== y) return (x < y ? -1 : 1) * (key.desc ? -1 : 1)
     }
-    return a.id < b.id ? -1 : 1
+    return a.id === b.id ? 0 : a.id < b.id ? -1 : 1
   }
 }
 

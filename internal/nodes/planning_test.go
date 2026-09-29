@@ -331,18 +331,19 @@ func TestListPlanningColumns(t *testing.T) {
 	if got := keys(w.admin, "model"); strings.Join(got[:5], ",") != "PLN-4,PLN-8,PLN-6,PLN-2,PLN-7" {
 		t.Fatalf("model sort: %v", got)
 	}
-	if got := keys(w.admin, "-tokens"); strings.Join(got[:3], ",") != "PLN-5,PLN-1,PLN-2" && strings.Join(got[:3], ",") != "PLN-5,PLN-2,PLN-1" {
+	if got := keys(w.admin, "-tokens"); strings.Join(got[:4], ",") != "PLN-5,PLN-4,PLN-1,PLN-2" && strings.Join(got[:4], ",") != "PLN-5,PLN-4,PLN-2,PLN-1" {
 		t.Fatalf("tokens sort: %v", got)
 	}
 	if got := keys(w.admin, "-paid"); got[0] != "PLN-5" || slices.Index(got, "PLN-9") < 3 {
 		t.Fatalf("paid sort: %v", got)
 	}
-	// Without harness.read every cost ties, so a cost sort orders by estimate only.
-	if got, want := keys(w.viewer, "-list_cost"), keys(w.viewer, "-estimate"); strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("list cost sort leaked the order: %v vs %v", got, want)
-	}
-	if got, want := keys(w.viewer, "paid"), keys(w.viewer, "estimate"); strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("paid sort leaked the order: %v vs %v", got, want)
+	// Without harness.read every cost ties, leaving only the node ID.
+	hidden := listPage(t, w.viewer, "/api/nodes?within="+w.root.ID+"&kind=ticket,epic&sort=paid").Items
+	for _, sort := range []string{"paid", "-paid", "list_cost", "-list_cost"} {
+		got := listPage(t, w.viewer, "/api/nodes?within="+w.root.ID+"&kind=ticket,epic&sort="+sort).Items
+		if !slices.IsSortedFunc(got, func(a, b listItem) int { return strings.Compare(a.ID, b.ID) }) || len(got) != len(hidden) {
+			t.Fatalf("hidden cost sort %s must tie by ID: %+v", sort, got)
+		}
 	}
 
 	// A registry change updates every row: build moves to Codex sol.

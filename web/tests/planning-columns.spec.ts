@@ -98,7 +98,7 @@ test('planning columns show the route, spent / estimated, list price and paid, w
   await expect.poll(() => asked('tokens')).toBe(true)
   await page.getByRole('columnheader', { name: 'Tokens' }).getByRole('button', { name: 'Tokens' }).click()
   await expect.poll(() => asked('-tokens')).toBe(true)
-  await expect.poll(async () => (await keys(page)).slice(0, 3)).toEqual(['PHAROS-10', 'PHAROS-12', 'PHAROS-11'])
+  await expect.poll(async () => (await keys(page)).slice(0, 4)).toEqual(['PHAROS-10', 'PHAROS-12', 'PHAROS-13', 'PHAROS-11'])
   await page.getByRole('columnheader', { name: 'Model' }).getByRole('button', { name: 'Model' }).click()
   await expect.poll(() => asked('model')).toBe(true)
   await expect.poll(async () => (await keys(page)).slice(0, 4)).toEqual(['PHAROS-13', 'PHAROS-12', 'PHAROS-11', 'PHAROS-14'])
@@ -129,6 +129,39 @@ test('cost stays with people who may see usage; tokens and model do not need it'
   expect(names).toContain('Tokens')
   expect(names).not.toContain('≈ Cost')
   expect(names).not.toContain('Paid')
+})
+
+test('keyboard focus exposes calibration, subscription and partial-data descriptions', async ({ page }) => {
+  const data = world()
+  chooseAll(data)
+  const built = data.nodes.find(n => n.key === 'PHAROS-11')!.planning!
+  built.tokens.unreported = 1
+  built.cost!.list_unpriced = true
+  const subscription = data.nodes.find(n => n.key === 'PHAROS-12')!.planning!
+  subscription.cost!.paid_unknown = true
+  await mockWork(page, data)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/p/PHAROS?sort=key')
+  for (const [key, column, description] of [
+    ['PHAROS-11', '.plan-model', /Model registry, revision/],
+    ['PHAROS-11', '.c-tokens .plan-figure', /1 session has no usage report yet.*default 5M\/h/s],
+    ['PHAROS-11', '.c-list-cost .plan-figure', /lower bound/],
+    ['PHAROS-12', '.c-paid .plan-figure', /Max 20x.*no billing on record/s],
+  ] as const) {
+    const trigger = row(page, key).locator(column)
+    await expect(trigger).toHaveAttribute('tabindex', '0')
+    await expect(trigger).toHaveAccessibleDescription(description)
+    // Traverse back onto the trigger with a real Tab, exercising TooltipHost.
+    await trigger.focus()
+    await page.keyboard.press('Shift+Tab')
+    await page.keyboard.press('Tab')
+    await expect(trigger).toBeFocused()
+    await expect(page.locator('.tooltip')).toBeVisible()
+    await expect(page.locator('.tooltip')).toHaveText(description)
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.tooltip')).toHaveCount(0)
+    await expect(trigger).toHaveAccessibleDescription(description)
+  }
 })
 
 test('empty planning columns stay hidden, chosen or automatic', async ({ page }) => {

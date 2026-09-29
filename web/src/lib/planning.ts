@@ -188,8 +188,8 @@ const ROLE_RANK: Record<string, number> = { scout: 0, mechanical: 1, build: 2, '
 export function planningSortValue(row: PlanningRow, field: PlanningColumn): number | string | null {
   switch (field) {
     case 'model': { const rank = ROLE_RANK[roleOf(row)]; return rank === undefined ? null : `${rank}:${areaOf(row) || '~'}` }
-    case 'tokens': return row.planning?.tokens.spent ?? null
-    case 'list_cost': return num(row.planning?.cost?.list_spent)
-    case 'paid': return num(row.planning?.cost?.paid_spent)
+    case 'tokens': return row.planning?.tokens.spent ?? row.planning?.tokens.estimated ?? null
+    case 'list_cost': return num(row.planning?.cost?.list_spent) ?? num(row.planning?.cost?.list_estimated)
+    case 'paid': return num(row.planning?.cost?.paid_spent) ?? num(row.planning?.cost?.paid_estimated)
   }
 }

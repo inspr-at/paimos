@@ -3,6 +3,7 @@ package nodes
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"math/big"
@@ -30,11 +31,9 @@ import (
 const (
 	// Tokens per hour is the median over the last calibrationWindow finished
 	// tickets whose main session ran on the route, once calibrationMinimum
-	// exist. Only the calibrationScan most recently finished tickets with
-	// sessions are read per request.
+	// exist. Eligibility and route matching happen before the window limit.
 	calibrationWindow  = 30
 	calibrationMinimum = 5
-	calibrationScan    = 400
 	// defaultTokensPerHour applies below calibrationMinimum: about 60 agent
 	// turns an hour on an 80k-token context, the usual shape of a coding
 	// session in which cached context dominates.
@@ -144,46 +143,82 @@ const planningUsageFrom = `
     JOIN harness_sessions s ON s.tenant_id=current_setting('aeon.tenant_id')::uuid AND s.ticket_node_id=t.id
         AND ((SELECT aeon_visible_all()) OR s.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))
     LEFT JOIN harness_session_usage u ON u.tenant_id=s.tenant_id AND u.session_id=s.id
-    LEFT JOIN LATERAL (
-        SELECT mp.input_usd_per_million, mp.output_usd_per_million, mp.cached_input_usd_per_million
-        FROM model_prices mp WHERE mp.tenant_id=u.tenant_id AND mp.model=u.model
-        ORDER BY mp.version DESC LIMIT 1
-    ) price ON u.model IS NOT NULL`
+    LEFT JOIN plan_prices price ON price.model=u.model`
 
-// planningListCostSQL is one usage row at list price: the stored estimate for
-// api billing (priced when reported), otherwise the tokens at the latest list
-// price. Null when the model has no price or the counters are incomplete.
-const planningListCostSQL = `coalesce(CASE WHEN u.billing_mode='api' THEN u.estimated_cost_usd END,
-    ((u.input_tokens-u.cached_input_tokens)*price.input_usd_per_million + u.output_tokens*price.output_usd_per_million
-     + u.cached_input_tokens*price.cached_input_usd_per_million)/1000000)`
-
-// planningSortJoin adds plan.tokens, plan.list_usd and plan.paid_usd for
-// filtered row f. Costs are null unless the caller holds harness.read on the
-// row's project, so a sort never orders by a figure the caller is not shown.
-func planningSortJoin(harnessAll, projects string) string {
-	visible := harnessAll + ` OR f.project_id = ANY(` + projects + `::uuid[])`
-	return ` LEFT JOIN LATERAL (
-    SELECT sum(u.input_tokens+u.output_tokens) AS tokens,
-        CASE WHEN ` + visible + ` THEN sum(` + planningListCostSQL + `) END AS list_usd,
-        CASE WHEN ` + visible + ` THEN sum(CASE u.billing_mode WHEN 'api' THEN u.estimated_cost_usd WHEN 'subscription' THEN 0 END) END AS paid_usd
-    FROM (` + planningSubtreeSQL(`SELECT f.id AS root`) + `) t` + planningUsageFrom + `
-) plan ON true
- LEFT JOIN LATERAL (
-    SELECT CASE rn.fields->>'route_role' WHEN 'scout' THEN 0 WHEN 'mechanical' THEN 1 WHEN 'build' THEN 2 WHEN 'build-hard' THEN 3 WHEN 'review-gate' THEN 4 END AS rank,
-        nullif(rn.fields->>'area','') AS area
-    FROM nodes rn WHERE rn.tenant_id=current_setting('aeon.tenant_id')::uuid AND rn.id=f.id
-) route ON true`
+// Materialize once: RLS checks and latest-version selection must not be
+// repeated for each session's usage row.
+func planningPricesCTE() string {
+	return `plan_prices AS MATERIALIZED (
+        SELECT DISTINCT ON (mp.model) mp.model, mp.input_usd_per_million, mp.output_usd_per_million, mp.cached_input_usd_per_million
+        FROM model_prices mp WHERE mp.tenant_id=current_setting('aeon.tenant_id')::uuid
+        ORDER BY mp.model, mp.version DESC
+    )`
 }
 
-var planningSorts = map[string]bool{"model": true, "tokens": true, "list_cost": true, "paid": true}
-
-func sortsByPlanning(q listQuery) bool {
-	for _, key := range q.Sort {
-		if planningSorts[key.Name] {
-			return true
-		}
+// Numeric sorts consume exactly the projected figures, including calibration,
+// epic rollups and permission checks. Loading all filtered roots in one batch
+// avoids a correlated usage scan per row. The selected page reuses these views.
+func loadPlanningOrder(ctx context.Context, tx pgx.Tx, q *listQuery) (map[string]*planningView, error) {
+	prefix, args := listFilterSQL(*q, false)
+	rows, err := tx.Query(ctx, prefix+` SELECT id::text, kind_slug, project_id::text FROM filtered WHERE kind_slug IN ('ticket','task','epic')`, args...)
+	if err != nil {
+		return nil, err
 	}
-	return false
+	var items []listItem
+	for rows.Next() {
+		var item listItem
+		var project *string
+		if err := rows.Scan(&item.ID, &item.KindSlug, &project); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if project != nil {
+			item.Project = &listProject{ID: *project}
+		}
+		items = append(items, item)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	views, err := loadPlanning(ctx, tx, items, q.seen)
+	if err != nil {
+		return nil, err
+	}
+	type value struct {
+		ID     string  `json:"id"`
+		Tokens *int64  `json:"tokens"`
+		List   *string `json:"list_usd"`
+		Paid   *string `json:"paid_usd"`
+	}
+	values := make([]value, 0, len(views))
+	for id, view := range views {
+		v := value{ID: id, Tokens: view.Tokens.Spent}
+		if v.Tokens == nil {
+			v.Tokens = view.Tokens.Estimated
+		}
+		if c := view.Cost; c != nil {
+			v.List, v.Paid = c.ListSpent, c.PaidSpent
+			if v.List == nil {
+				v.List = c.ListEstimated
+			}
+			if v.Paid == nil {
+				v.Paid = c.PaidEstimated
+			}
+		}
+		values = append(values, v)
+	}
+	q.planningOrder, err = json.Marshal(values)
+	return views, err
+}
+
+func (s assigneeSeen) costVisible(project string) bool {
+	return s.harnessAll || slices.Contains(s.projects, project)
+}
+
+func sortsByPlanningValue(q listQuery) bool {
+	return sortsBy(q, "tokens") || sortsBy(q, "list_cost") || sortsBy(q, "paid")
 }
 
 // planRow is one page row, or one open or done child of a page epic.
@@ -644,8 +679,9 @@ func planCost(used *planUsage, e planEstimate) *planningCost {
 }
 
 // loadPlanning computes the planning view for the page's tickets, tasks and
-// epics. cost reports whether the caller may see usage cost on a project.
-func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, cost func(projectID string) bool) (map[string]*planningView, error) {
+// epics. The audience gates usage costs on both the row and source projects.
+func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigneeSeen) (map[string]*planningView, error) {
+	cost := seen.costVisible
 	var ids []string
 	for _, item := range items {
 		if item.KindSlug == "ticket" || item.KindSlug == "task" || item.KindSlug == "epic" {
@@ -660,7 +696,7 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, cost func(pr
 	if err != nil {
 		return nil, err
 	}
-	usage, err := loadPlanUsage(ctx, tx, ids)
+	usage, err := loadPlanUsage(ctx, tx, ids, cost)
 	if err != nil {
 		return nil, err
 	}
@@ -669,13 +705,13 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, cost func(pr
 		return nil, err
 	}
 	if slices.ContainsFunc(rows, func(r planRow) bool { return r.hours != nil }) {
-		if pl.samples, err = loadCalibrationSamples(ctx, tx); err != nil {
+		if pl.samples, err = loadCalibrationSamples(ctx, tx, pl.routes, cost); err != nil {
 			return nil, err
 		}
 	}
 	visible := func(item listItem) bool { return item.Project != nil && cost(item.Project.ID) }
 	if len(pl.routes) > 0 && slices.ContainsFunc(items, visible) {
-		if pl.billing, err = loadPlanBilling(ctx, tx, pl.routes); err != nil {
+		if pl.billing, err = loadPlanBilling(ctx, tx, pl.routes, seen); err != nil {
 			return nil, err
 		}
 	}
@@ -740,27 +776,41 @@ const usageLineColumns = `s.id::text, s.harness, coalesce(s.model,''), coalesce(
     price.input_usd_per_million::text, price.output_usd_per_million::text, price.cached_input_usd_per_million::text`
 
 // loadPlanUsage sums the usage of each root's subtree.
-func loadPlanUsage(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*planUsage, error) {
-	rows, err := tx.Query(ctx, `WITH `+planningStatesCTE()+`
-    SELECT t.root::text, `+usageLineColumns+`
-    FROM (`+planningSubtreeSQL(`SELECT unnest($1::uuid[]) AS root`)+`) t`+planningUsageFrom, ids)
+func loadPlanUsage(ctx context.Context, tx pgx.Tx, ids []string, cost func(string) bool) (map[string]*planUsage, error) {
+	rows, err := tx.Query(ctx, planUsageSQL(), ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := map[string]*planUsage{}
 	for rows.Next() {
-		var root string
-		l, err := scanUsageLine(rows, &root)
+		var root, project string
+		l, err := scanUsageLine(rows, &root, &project)
 		if err != nil {
 			return nil, err
 		}
 		if out[root] == nil {
 			out[root] = newPlanUsage()
 		}
+		if !cost(project) {
+			l.hideCost()
+		}
 		out[root].add(l)
 	}
 	return out, rows.Err()
+}
+
+// planUsageSQL scans the roots' usage together; Go groups each root in one pass.
+func planUsageSQL() string {
+	return `WITH ` + planningStatesCTE() + `, ` + planningPricesCTE() + `
+    SELECT t.root::text, s.project_id::text, ` + usageLineColumns + `
+    FROM (` + planningSubtreeSQL(`SELECT unnest($1::uuid[]) AS root`) + `) t` + planningUsageFrom
+}
+
+// Hidden source costs cannot enter either spent figures or calibration rates.
+func (l *usageLine) hideCost() {
+	l.billing, l.plan, l.cost = nil, nil, nil
+	l.rateIn, l.rateOut, l.rateCached = nil, nil, nil
 }
 
 // resolvePlanRoutes resolves each role once through the model registry.
@@ -804,53 +854,76 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 	return out, nil
 }
 
-// loadCalibrationSamples reads the most recently finished tickets and tasks
-// that have sessions, newest first.
-func loadCalibrationSamples(ctx context.Context, tx pgx.Tx) ([]calibrationSample, error) {
-	rows, err := tx.Query(ctx, `WITH `+planningStatesCTE()+`, finished AS (
+// loadCalibrationSamples streams finished tickets newest first. Validate the
+// whole ticket, then match its main route, then take at most 30 per needed route.
+// Unreported sessions and unrelated routes never exhaust the sampling window.
+func loadCalibrationSamples(ctx context.Context, tx pgx.Tx, routes map[string]*planRoute, cost func(string) bool) ([]calibrationSample, error) {
+	rows, err := tx.Query(ctx, `WITH `+planningStatesCTE()+`, `+planningPricesCTE()+`, finished AS (
         SELECT n.id, n.updated_at FROM nodes n`+planningOpenChild("n")+`
         WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.deleted_at IS NULL
             AND `+workCountBucketSQL("n.state", "ns")+`='done'
-            AND EXISTS (SELECT 1 FROM harness_sessions hs WHERE hs.tenant_id=n.tenant_id AND hs.ticket_node_id=n.id)
-        ORDER BY n.updated_at DESC, n.id LIMIT $1
     )
-    SELECT t.id::text, CASE WHEN s.stopped_at IS NULL THEN -1 ELSE EXTRACT(EPOCH FROM (s.stopped_at-s.created_at))::float8 END, `+usageLineColumns+`
-    FROM (SELECT f.id, f.id AS root, row_number() OVER (ORDER BY f.updated_at DESC, f.id) AS rn FROM finished f) t`+planningUsageFrom+`
-    ORDER BY t.rn, s.id, u.model`, calibrationScan)
+    SELECT t.id::text, s.project_id::text, CASE WHEN s.stopped_at IS NULL THEN -1 ELSE EXTRACT(EPOCH FROM (s.stopped_at-s.created_at))::float8 END, `+usageLineColumns+`
+    FROM finished t`+planningUsageFrom+`
+    ORDER BY t.updated_at DESC, t.id, s.id, u.model`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	type ticket struct {
-		lines   []usageLine
-		seconds map[string]float64
+	windows := map[routeKey]int{{}: 0}
+	for _, route := range routes {
+		if route.view != nil {
+			windows[route.key] = 0
+		}
 	}
-	var order []string
-	tickets := map[string]*ticket{}
+	var out []calibrationSample
+	var lines []usageLine
+	seconds := map[string]float64{}
+	current := ""
+	finish := func() bool {
+		if sample, ok := sampleOf(lines, seconds); ok {
+			include := false
+			for key, count := range windows {
+				if count < calibrationWindow && key.matches(sample) {
+					windows[key]++
+					include = true
+				}
+			}
+			if include {
+				out = append(out, sample)
+			}
+		}
+		for _, count := range windows {
+			if count < calibrationWindow {
+				return false
+			}
+		}
+		return true
+	}
 	for rows.Next() {
-		var id string
-		var seconds float64
-		l, err := scanUsageLine(rows, &id, &seconds)
+		var id, project string
+		var duration float64
+		l, err := scanUsageLine(rows, &id, &project, &duration)
 		if err != nil {
 			return nil, err
 		}
-		t := tickets[id]
-		if t == nil {
-			t = &ticket{seconds: map[string]float64{}}
-			tickets[id] = t
-			order = append(order, id)
+		if id != current {
+			if current != "" && finish() {
+				return out, nil
+			}
+			current, lines, seconds = id, nil, map[string]float64{}
 		}
-		t.seconds[l.session] = seconds
-		t.lines = append(t.lines, l)
+		if !cost(project) {
+			l.hideCost()
+		}
+		lines = append(lines, l)
+		seconds[l.session] = duration
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	var out []calibrationSample
-	for _, id := range order {
-		if s, ok := sampleOf(tickets[id].lines, tickets[id].seconds); ok {
-			out = append(out, s)
-		}
+	if current != "" {
+		finish()
 	}
 	return out, nil
 }
@@ -858,7 +931,7 @@ func loadCalibrationSamples(ctx context.Context, tx pgx.Tx) ([]calibrationSample
 // loadPlanBilling reads how each routed harness was billed most recently:
 // the account routing the paid estimate follows. A subscription pool
 // estimates 0 paid and names its plan.
-func loadPlanBilling(ctx context.Context, tx pgx.Tx, routes map[string]*planRoute) (map[string]planBilling, error) {
+func loadPlanBilling(ctx context.Context, tx pgx.Tx, routes map[string]*planRoute, seen assigneeSeen) (map[string]planBilling, error) {
 	var harnesses []string
 	for _, route := range routes {
 		if route.view != nil {
@@ -875,7 +948,8 @@ func loadPlanBilling(ctx context.Context, tx pgx.Tx, routes map[string]*planRout
         JOIN harness_sessions s ON s.tenant_id=u.tenant_id AND s.id=u.session_id
         LEFT JOIN agent_accounts a ON a.tenant_id=u.tenant_id AND a.id=u.account_id
         WHERE u.tenant_id=current_setting('aeon.tenant_id')::uuid AND u.billing_mode<>'unknown' AND s.harness=ANY($1::text[])
-        ORDER BY s.harness, u.reported_at DESC`, harnesses)
+        AND ($2::bool OR s.project_id=ANY($3::uuid[]))
+        ORDER BY s.harness, u.reported_at DESC, s.id, u.model`, harnesses, seen.harnessAll, seen.projects)
 	if err != nil {
 		return nil, err
 	}

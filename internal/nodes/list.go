@@ -12,7 +12,6 @@ import (
 	"math"
 	"net/http"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -133,9 +132,10 @@ type listQuery struct {
 	DateTo    *time.Time `json:"date_to,omitempty"`
 	// seen and the lead thresholds are filled by listNodes. They are not
 	// request input and stay out of the cursor fingerprint (unexported).
-	seen       assigneeSeen
-	leadYellow int
-	leadRed    int
+	seen          assigneeSeen
+	leadYellow    int
+	leadRed       int
+	planningOrder json.RawMessage
 }
 type listCursor struct {
 	Hash string `json:"hash"`
@@ -457,6 +457,14 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			}
 			q.leadYellow, q.leadRed = yellow, red
 		}
+		var planning map[string]*planningView
+		if sortsByPlanningValue(q) {
+			var err error
+			planning, err = loadPlanningOrder(ctx, tx, &q)
+			if err != nil {
+				return dbErr("planning sort", err)
+			}
+		}
 		sql, args := listSQL(q, anchor)
 		rows, err := tx.Query(ctx, sql, args...)
 		if err != nil {
@@ -543,12 +551,11 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			for i := range page.Items {
 				page.Items[i].Estimate = estimates[page.Items[i].ID]
 			}
-			seen := q.seen
-			planning, err := loadPlanning(ctx, tx, page.Items, func(projectID string) bool {
-				return seen.harnessAll || slices.Contains(seen.projects, projectID)
-			})
-			if err != nil {
-				return dbErr("list planning", err)
+			if planning == nil {
+				planning, err = loadPlanning(ctx, tx, page.Items, q.seen)
+				if err != nil {
+					return dbErr("list planning", err)
+				}
 			}
 			for i := range page.Items {
 				page.Items[i].Planning = planning[page.Items[i].ID]
@@ -1066,9 +1073,9 @@ func listOrder(q listQuery) string {
 			// The role's rung on the ladder, then the area; rows without a role last.
 			parts = append(parts, "route.rank IS NULL ASC", "route.rank "+dir, "route.area IS NULL ASC", "route.area "+dir)
 		case "tokens", "list_cost", "paid":
-			// Spent first; work nothing was spent on yet follows by its estimate.
+			// The same numeric value as the cell: spent, else estimated.
 			value := map[string]string{"tokens": "plan.tokens", "list_cost": "plan.list_usd", "paid": "plan.paid_usd"}[key.Name]
-			parts = append(parts, value+" IS NULL ASC", value+" "+dir, "est.hours IS NULL ASC", "est.hours "+dir)
+			parts = append(parts, value+" IS NULL ASC", value+" "+dir)
 		default:
 			parts = append(parts, "f."+key.Name+" "+dir)
 		}
@@ -1113,11 +1120,25 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta(f.id) eta ON true`
 	}
 	estimateJoin, planningCTE, planningJoin := "", "", ""
-	if sortsByPlanning(q) {
-		planningCTE = ", " + planningStatesCTE()
-		planningJoin = planningSortJoin(harnessAll, projectArg)
+	if sortsBy(q, "model") {
+		planningJoin = ` LEFT JOIN LATERAL (
+            SELECT CASE rn.fields->>'route_role' WHEN 'scout' THEN 0 WHEN 'mechanical' THEN 1 WHEN 'build' THEN 2 WHEN 'build-hard' THEN 3 WHEN 'review-gate' THEN 4 END AS rank,
+                nullif(rn.fields->>'area','') AS area
+            FROM nodes rn WHERE rn.tenant_id=current_setting('aeon.tenant_id')::uuid AND rn.id=f.id
+        ) route ON true`
 	}
-	if sortsBy(q, "estimate") || sortsBy(q, "tokens") || sortsBy(q, "list_cost") || sortsBy(q, "paid") {
+	if sortsByPlanningValue(q) {
+		values := q.planningOrder
+		if len(values) == 0 {
+			values = json.RawMessage(`[]`)
+		}
+		args = append(args, string(values))
+		planningCTE = fmt.Sprintf(`, planning_values AS MATERIALIZED (
+            SELECT * FROM jsonb_to_recordset($%d::jsonb) AS v(id uuid, tokens bigint, list_usd numeric, paid_usd numeric)
+        )`, len(args))
+		planningJoin += ` LEFT JOIN planning_values plan ON plan.id=f.id`
+	}
+	if sortsBy(q, "estimate") {
 		estimateJoin = ` LEFT JOIN LATERAL (` + estimateSQL(`SELECT n.id,n.fields,f.kind_slug FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=f.id`) + `) est ON true`
 	}
 	sql := prefix + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),

@@ -9703,7 +9703,7 @@ components:
         inbox_seen_at: {type: string, format: date-time, description: 'AEON-280. Last time this generation pulled its inbox (a session pull, drain, stream or ack). Omitted until it first pulls. Clients derive Listening from its age.'}
         inbox_seen_via: {type: string, enum: [hook, drain, long_poll, stream, ack], description: 'How it last pulled: hook = one-shot session pull, long_poll = waiting pull, drain = managed harness drain, stream = inbox SSE, ack = acknowledgement when nothing has pulled yet. A later acknowledgement keeps the pull path and only refreshes inbox_seen_at. Omitted with inbox_seen_at.'}
     TicketPlanning:
-      description: 'Planning figures for a ticket, task or epic in the list (AEON-329). Absent when there is nothing to show. Model names come from the model registry at read time and are never stored on the ticket.'
+      description: 'Planning figures for a ticket, task or epic in the list (AEON-329). Absent when there is nothing to show. Model names come from the model registry at read time and are never stored on the ticket. Numeric planning sorts use spent when present, otherwise estimated, with missing values last and the node ID as tiebreaker.'
       type: object
       required: [route, tokens]
       properties:
@@ -9738,12 +9738,12 @@ components:
               type: object
               required: [basis, tickets, tokens_per_hour]
               properties:
-                basis: {type: string, enum: [median, default], description: 'median of the last 30 finished tickets whose main session ran on the route (any route when none resolved), once 5 exist; otherwise the documented default of 5,000,000 tokens per hour.'}
+                basis: {type: string, enum: [median, default], description: 'median of the last 30 eligible finished tickets (all sessions stopped and fully reported, at least one minute of session time) whose main session ran on the route (any route when none resolved), once 5 exist; otherwise the documented default of 5,000,000 tokens per hour.'}
                 tickets: {type: integer, minimum: 0}
                 tokens_per_hour: {type: integer, minimum: 0}
                 any_route: {type: boolean}
         cost:
-          description: USD decimal strings. Present only when the caller holds harness.read on the row's project.
+          description: USD decimal strings. Present only when the caller holds harness.read on the row's project. Billing and calibration costs also require harness.read on each source project.
           type: object
           required: [list_spent, list_estimated, list_unpriced, paid_spent, paid_estimated, paid_unknown, plans]
           properties:
@@ -9751,7 +9751,7 @@ components:
             list_estimated: {type: [string, 'null'], description: 'The estimate at list prices: the route''s median list price per hour, or its tokens priced with a 90% cached, 8% input, 2% output mix.'}
             list_unpriced: {type: boolean, description: Some usage or the route's model has no list price.}
             paid_spent: {type: [string, 'null'], description: Pay-per-use charges; subscription usage counts 0.}
-            paid_estimated: {type: [string, 'null'], description: 'Follows how the route''s harness was billed most recently: 0 for a subscription pool, the list estimate for pay-per-use.'}
+            paid_estimated: {type: [string, 'null'], description: 'Follows how the route''s harness was billed most recently in a source project the caller may read: 0 for a subscription pool, the list estimate for pay-per-use.'}
             paid_unknown: {type: boolean, description: Some usage or the route's harness has no billing on record.}
             plans: {type: array, items: {type: string}, description: Subscription plans that covered the spend or cover the estimate.}
         children:

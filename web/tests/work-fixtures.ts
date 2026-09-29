@@ -548,8 +548,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
           const etaMissing = (n: MockNode) => field === 'estimate' ? (n.kind_slug === 'epic' ? n.estimate?.hours == null : typeof n.fields.estimate_hours !== 'number' || n.fields.estimate_hours <= 0) : field === 'eta_ready' ? !n.eta?.eta_ready_at : field === 'progress' ? typeof n.eta?.progress_pct !== 'number' : false
           if ((field === 'estimate' || field === 'eta_ready' || field === 'progress') && etaMissing(a) !== etaMissing(b)) return etaMissing(a) ? 1 : -1
           if (field === 'model' || field === 'tokens' || field === 'list_cost' || field === 'paid') {
-            // Spent (or the role's rung), unknown last; costs are unknown without harness.read.
-            const plan = (n: MockNode) => options.readOnly && field !== 'model' && field !== 'tokens' ? null : planningSortValue({ kind_slug: n.kind_slug, fields: n.fields, planning: n.planning }, field as PlanningColumn)
+            // Spent, else estimated (or the role rung); missing values sort last.
+            const plan = (n: MockNode) => (options.readOnly || options.liveStatus === 403) && field !== 'model' && field !== 'tokens' ? null : planningSortValue({ kind_slug: n.kind_slug, fields: n.fields, planning: n.planning }, field as PlanningColumn)
             const x = plan(a), y = plan(b)
             if ((x === null) !== (y === null)) return x === null ? 1 : -1
             if (x !== null && y !== null && x !== y) return (x < y ? -1 : 1) * (desc ? -1 : 1)

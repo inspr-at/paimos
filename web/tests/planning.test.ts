@@ -2,6 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { formatDollars, formatTokenCount, listCostCell, modelCell, paidCell, planningPresent, planningSortValue, tokensCell, type PlanningRow, type TicketPlanning } from '../src/lib/planning.ts'
+import { compareRows } from '../src/lib/ticketList.ts'
+import type { ListItem } from '../src/lib/api.ts'
 
 const route = { label: 'Codex astra · xhigh', profile: 'codex-astra-xhigh', harness: 'codex', model: 'gpt-6-astra', effort: 'xhigh', revision: '3f9a1c2b' }
 function row(planning: Partial<TicketPlanning> | undefined, fields: Record<string, unknown> = { route_role: 'build-hard', area: 'backend' }, kind = 'ticket'): PlanningRow {
@@ -86,4 +88,20 @@ test('presence and sort values follow the list API', () => {
   assert.equal(planningSortValue(rows[0]!, 'tokens'), 5)
   assert.equal(planningSortValue(rows[0]!, 'list_cost'), 1)
   assert.equal(planningSortValue(rows[0]!, 'paid'), null)
+})
+
+test('numeric planning sorts use spent else estimated, null last and ID ties', () => {
+  const high = { ...row({ tokens: tokens(null, 100_000_000), cost: cost({ list_estimated: '100', paid_estimated: '100' }) }), id: 'a' } as ListItem
+  const low = { ...row({ tokens: tokens(null, 10_000_000), cost: cost({ list_estimated: '10', paid_estimated: '10' }) }), id: 'c' } as ListItem
+  const tie = { ...low, id: 'b' }
+  const zero = { ...row({ tokens: tokens(0, 200_000_000), cost: cost({ list_spent: '0', list_estimated: '200', paid_spent: '0', paid_estimated: '200' }) }), id: 'd' } as ListItem
+  const empty = { ...row(undefined), id: 'e' } as ListItem
+  for (const field of ['tokens', 'list_cost', 'paid'] as const) {
+    const rows = [high, low, empty, zero, tie]
+    const asc = compareRows([{ field, desc: false }])
+    const desc = compareRows([{ field, desc: true }])
+    assert.deepEqual([...rows].sort(asc).map(r => r.id), ['d', 'b', 'c', 'a', 'e'])
+    assert.deepEqual([...rows].sort(desc).map(r => r.id), ['a', 'b', 'c', 'd', 'e'])
+    assert.equal(asc(low, low), 0)
+  }
 })
