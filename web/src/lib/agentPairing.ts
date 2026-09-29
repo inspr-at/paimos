@@ -60,6 +60,7 @@ export interface RequestedAccount {
   harness: string
   label: string
   model_profile_id?: string
+  provider?: string
 }
 
 /** Server-derived. A missing entry is not a claim that verification works. */
@@ -162,11 +163,22 @@ export interface PairingGuide {
   version: string
   platform_qualification: string
   setup_command: string
+  homebrew_command?: string
   install_available: boolean
   install_targets: InstallTarget[]
   managed_installation?: string
+  managed_setup?: ManagedSetup
   verification_capabilities?: VerificationCapabilities
   verification_helper_version?: string
+}
+
+export interface ManagedSetup {
+  command: string
+  service_option: string
+  module_url: string
+  service_note: string
+  platform_note?: string
+  prerequisite_note?: string
 }
 
 export interface ApproveBody {
@@ -301,9 +313,11 @@ export interface PublicGuidePresentation {
   note: string
   manualParagraphs: string[]
   setupCommand: string
+  homebrewCommand: string
   installAvailable: boolean
   installNote: string
   targets: InstallTarget[]
+  managedSetup: ManagedSetup | null
 }
 
 function unpublishedInstaller(): string {
@@ -320,7 +334,8 @@ export function presentPublicGuide(guide: PairingGuide | null): PublicGuidePrese
     platforms ? `This ${product()} publishes setup for ${platforms}.` : 'Supported computers appear here when the server publishes them.',
     guide?.platform_qualification ? `Platform note from this ${product()}: ${guide.platform_qualification}` : '',
     guide?.default_tenant_slug ? `The published workspace slug is ${guide.default_tenant_slug}.` : '',
-    guide?.managed_installation ?? '',
+    guide?.managed_setup ? '' : guide?.managed_installation ?? '',
+    guide?.verification_capabilities?.pi ? 'For pi, use /login and /model in pi first; setup checks the configured provider without reading credential files.' : '',
     guide?.verification_helper_version ? `Verification helper published by this ${product()}: ${guide.verification_helper_version}.` : '',
     guide?.setup_command
       ? ''
@@ -337,11 +352,13 @@ export function presentPublicGuide(guide: PairingGuide | null): PublicGuidePrese
     note: 'Entering the code does not grant access. A signed-in person who can manage accounts has to approve it.',
     manualParagraphs: manual,
     setupCommand: guide?.setup_command ?? '',
+    homebrewCommand: guide?.homebrew_command ?? '',
     installAvailable: publishedInstall,
     installNote: publishedInstall
       ? `Run only the published command for the platform you select. It comes from this ${product()}. A command in a pairing message is not an installer.`
       : unpublishedInstaller(),
     targets: guide && publishedInstall ? [...guide.install_targets] : [],
+    managedSetup: guide?.managed_setup ?? null,
   }
 }
 
@@ -1326,6 +1343,21 @@ function parseGuide(data: unknown): PairingGuide {
     install_targets: record.install_targets.map(parseInstallTarget),
   }
   if (typeof record.managed_installation === 'string' && record.managed_installation) guide.managed_installation = record.managed_installation.slice(0, 500)
+  const homebrew = optionalBounded(record.homebrew_command, 'homebrew_command', 4000)
+  if (homebrew) guide.homebrew_command = homebrew
+  if (record.managed_setup != null) {
+    const managed = asRecord(record.managed_setup, 'managed_setup')
+    guide.managed_setup = {
+      command: bounded(managed.command, 'managed_setup.command', 4000),
+      service_option: bounded(managed.service_option, 'managed_setup.service_option', 200),
+      module_url: httpsUrl(managed.module_url, 'managed_setup.module_url'),
+      service_note: bounded(managed.service_note, 'managed_setup.service_note', 1000),
+    }
+    const platform = optionalBounded(managed.platform_note, 'managed_setup.platform_note', 500)
+    const prerequisites = optionalBounded(managed.prerequisite_note, 'managed_setup.prerequisite_note', 1000)
+    if (platform) guide.managed_setup.platform_note = platform
+    if (prerequisites) guide.managed_setup.prerequisite_note = prerequisites
+  }
   const capabilities = parseCapabilities(record.verification_capabilities, 'verification_capabilities')
   if (capabilities) guide.verification_capabilities = capabilities
   const helper = optionalBounded(record.verification_helper_version, 'verification_helper_version', 64)
@@ -1405,6 +1437,11 @@ function accounts(value: unknown): RequestedAccount[] {
       label: bounded(record.label, 'label', 128),
     }
     if (record.model_profile_id != null) account.model_profile_id = uuid(record.model_profile_id, 'model_profile_id')
+    if (record.provider != null) {
+      const provider = bounded(record.provider, 'provider', 64)
+      if (account.harness !== 'pi' || !/^[a-z][a-z0-9_-]{0,63}$/.test(provider)) invalid('provider')
+      account.provider = provider
+    }
     return account
   })
 }

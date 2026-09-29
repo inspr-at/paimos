@@ -568,7 +568,8 @@ func TestUsageAllowlistRefusesSecretFilesAndSymlinkParents(t *testing.T) {
 
 func openUsageSession(t *testing.T, rt *runtime, opts heartbeatOptions) *heartbeatSession {
 	t.Helper()
-	session, _, err := rt.openHeartbeatSession(context.Background(), opts, heartbeatDeps{})
+	// AEON-343: the owner is proved alive before registration.
+	session, _, err := rt.openHeartbeatSession(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return true }})
 	if err != nil {
 		t.Fatal(err)
 	}

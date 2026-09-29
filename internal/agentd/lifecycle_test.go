@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 func TestDrainCloseNeverStopsOwnedChild(t *testing.T) {
@@ -112,6 +114,38 @@ func TestRevokedProbeDoesNotStarveOtherAccount(t *testing.T) {
 	_ = s.PollOnce(t.Context())
 	if len(api.probed) != 2 || a.claims != 1 || len(a.routeAccounts) != 1 || a.routeAccounts[0] != "account" {
 		t.Fatal("unavailable enrollment starved healthy enrollment")
+	}
+}
+
+type detailedProbeAdapter struct {
+	fakeAdapter
+	err error
+}
+
+func (a *detailedProbeAdapter) ProbeStatus(context.Context, string) (bool, error) {
+	return false, a.err
+}
+
+func TestProbeStartupFailureIsNotLoginRequired(t *testing.T) {
+	s, api, process := testSupervisor(t)
+	adapter := &detailedProbeAdapter{fakeAdapter: fakeAdapter{proc: process}, err: errors.New("synthetic startup failure")}
+	s.adapters[Codex] = adapter
+	_ = s.PollOnce(t.Context())
+	status := s.Lifecycle("")
+	if !status.HarnessFailed || status.LoginRequired || status.Ready || api.claims != 0 {
+		t.Fatal("startup failure reported as login required or allowed work")
+	}
+	adapter.err = piprobe.ErrPrivateProfile
+	_ = s.PollOnce(t.Context())
+	status = s.Lifecycle("")
+	if !status.ProfilePermissions || !status.HarnessFailed || status.LoginRequired {
+		t.Fatal("permissions classification lost")
+	}
+	adapter.err = nil
+	_ = s.PollOnce(t.Context())
+	status = s.Lifecycle("")
+	if status.ProfilePermissions || status.HarnessFailed || !status.LoginRequired || status.Ready || api.claims != 0 {
+		t.Fatal("missing login not distinguished from startup failure")
 	}
 }
 

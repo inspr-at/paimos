@@ -23,13 +23,18 @@ const (
 )
 
 var (
-	ErrScope                = errors.New("run control scope mismatch")
-	ErrGeneration           = errors.New("run generation mismatch")
-	ErrReplay               = errors.New("control correlation replay conflict")
-	ErrNotOwned             = errors.New("run is not owned by this daemon generation")
-	ErrUnsupported          = errors.New("adapter operation unsupported")
-	ErrHarnessArchived      = errors.New("harness generation archived; detach without signaling")
-	ErrControlUnconfirmed   = errors.New("control outcome unconfirmed; reporting failure does not authorize termination")
+	ErrScope              = errors.New("run control scope mismatch")
+	ErrGeneration         = errors.New("run generation mismatch")
+	ErrReplay             = errors.New("control correlation replay conflict")
+	ErrNotOwned           = errors.New("run is not owned by this daemon generation")
+	ErrUnsupported        = errors.New("adapter operation unsupported")
+	ErrHarnessArchived    = errors.New("harness generation archived; detach without signaling")
+	ErrControlUnconfirmed = errors.New("control outcome unconfirmed; reporting failure does not authorize termination")
+	// ErrControlTerminal means this completion cannot be recorded. The server
+	// already finished the control, or it refused an applied setting because the
+	// database deadline passed. The daemon drops that control from the queue head.
+	// Other conflicts stay retryable.
+	ErrControlTerminal      = errors.New("control completion is terminal")
 	ErrForceExitUnconfirmed = errors.New("owned group signalled; root exit unconfirmed")
 )
 
@@ -81,12 +86,16 @@ type HarnessSession struct {
 	ID               string                 `json:"id"`
 	ProjectID        string                 `json:"project_id"`
 	Lease            string                 `json:"-"`
+	Harness          string                 `json:"-"`
 	Model            string                 `json:"model,omitempty"`
 	ReasoningEffort  string                 `json:"reasoning_effort,omitempty"`
 	AccountLabel     string                 `json:"account_label,omitempty"`
 }
 
 type HarnessControl struct {
+	// deadline is local, monotonic, and never serialized or persisted.
+	deadline          time.Time
+	ExpiresInMS       int64                  `json:"expires_in_ms"`
 	Value             string                 `json:"value,omitempty"`
 	Text              string                 `json:"text,omitempty"`
 	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
@@ -320,6 +329,8 @@ type EnrolledAccount struct {
 }
 
 type ControlRequest struct {
+	// Only the authenticated yield transport supplies a monotonic deadline.
+	deadline          time.Time
 	Value             string                 `json:"value,omitempty"`
 	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
 	ExpectedOwnership *ownedprocess.Identity `json:"expected_ownership,omitempty"`

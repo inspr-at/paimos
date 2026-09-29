@@ -173,6 +173,58 @@ func TestMigrationsApplyAndReapply(t *testing.T) {
 	}
 }
 
+// Session thread walks filter sender_session_id and join reply_to_id under the
+// caller's row-level security (AEON-345). recipient_session_id already had an index.
+func TestSessionThreadLookupIndexes(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx := t.Context()
+	var tenantID string
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('thread-idx','Thread indexes') RETURNING id::text`).Scan(&tenantID); err != nil {
+		t.Fatal(err)
+	}
+	err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SET LOCAL enable_seqscan=off`); err != nil {
+			return err
+		}
+		project := "00000000-0000-4000-8000-000000000001"
+		session := "00000000-0000-4000-8000-000000000002"
+		checks := []struct {
+			name  string
+			query string
+			args  []any
+		}{
+			{"inbox_compat_sender_session", `EXPLAIN SELECT id FROM inbox_compat_messages WHERE project_id=$1 AND sender_session_id=$2`, []any{project, session}},
+			{"inbox_compat_reply", `EXPLAIN SELECT id FROM inbox_compat_messages WHERE project_id=$1 AND reply_to_id=$2`, []any{project, session}},
+		}
+		for _, check := range checks {
+			rows, err := tx.Query(ctx, check.query, check.args...)
+			if err != nil {
+				return err
+			}
+			plan := ""
+			for rows.Next() {
+				var line string
+				if err := rows.Scan(&line); err != nil {
+					rows.Close()
+					return err
+				}
+				plan += line + "\n"
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			if !strings.Contains(plan, "Index Scan using "+check.name) && !strings.Contains(plan, "Bitmap Index Scan on "+check.name) {
+				return fmt.Errorf("%s lookup does not use its index:\n%s", check.name, plan)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEnsureTenant(t *testing.T) {
 	ctx := context.Background()
 	if err := db.EnsureTenant(ctx, nil, "", "Name"); err == nil {

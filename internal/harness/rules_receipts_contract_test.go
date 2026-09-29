@@ -37,6 +37,12 @@ func TestRulesReceiptOpenAPIAndRoutePermissionsAgree(t *testing.T) {
 		if want == nil || !reflect.DeepEqual(want, got) {
 			t.Fatalf("schema %s diverges", name)
 		}
+		if name == "HarnessRulesReceiptWrite" {
+			properties := want.(map[string]any)["properties"].(map[string]any)
+			if maximum := properties["byte_size"].(map[string]any)["maximum"]; maximum != 64000 {
+				t.Fatalf("receipt contract ceiling: %v", maximum)
+			}
+		}
 	}
 	for method, permission := range map[string]string{"GET": "harness.read", "POST": "harness.worker"} {
 		if got, ok := authz.PermissionForPattern(method + " /api" + path); !ok || got != permission {

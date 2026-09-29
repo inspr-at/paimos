@@ -65,6 +65,10 @@ func MessagingPlugin() (plugins.Plugin, error) {
 type messaging struct {
 	base *module
 	aead cipher.AEAD
+	// databaseClock replaces clock_timestamp() for lease decisions. Production
+	// leaves it nil. Tests set it to simulate an API host ahead of or behind
+	// the database.
+	databaseClock func(context.Context, pgx.Tx) (time.Time, error)
 }
 
 func (m *messaging) Mount(mux *http.ServeMux) {

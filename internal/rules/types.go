@@ -19,13 +19,27 @@ import (
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
-// MaxBytes is the always-on ceiling of one merged session file and the
-// default budget. A workspace may lower its budget to MinBudgetBytes
-// (AEON-314) but never raise it: deployed agentd/CLI binaries, managed
-// delivery and the Claude bridge all refuse larger files, so a higher ceiling
-// needs its own version-gated rollout.
-const MaxBytes = 12000
+// MaxBytes is the supported client ceiling; LegacyMaxBytes remains the default
+// and the delivery limit for clients that have not reported a capability.
+const MaxBytes = 64000
+const LegacyMaxBytes = 12000
 const MinBudgetBytes = 2000
+
+// CodexProjectDocMaxBytes is OpenAI Codex's default project_doc_max_bytes.
+// Codex stops adding AGENTS.md content once the combined instruction chain
+// reaches 32 KiB, so a larger installed file can drop rules at the end.
+const CodexProjectDocMaxBytes = 32 * 1024
+
+// SessionFileLimit is the session file a harness reads by default. Codex is
+// bound by project_doc_max_bytes. Claude Code, Cursor, Grok and Pi have no
+// documented cap below MaxBytes, so they report the product ceiling.
+func SessionFileLimit(harness string) int {
+	if harness == "codex" {
+		return CodexProjectDocMaxBytes
+	}
+	return MaxBytes
+}
+
 const MaxRules = 100
 
 // MaxTLDRBytes bounds one explanation line in one language.
@@ -216,7 +230,9 @@ type Error struct {
 	Layer string `json:"layer,omitempty"`
 }
 
-func (e *Error) Error() string { return e.Message }
+func (e *Error) Error() string     { return e.Message }
+func (e *Error) HTTPStatus() int   { return e.Status }
+func (e *Error) ErrorCode() string { return e.Code }
 func fail(status int, code, message string) error {
 	return &Error{Status: status, Code: code, Message: message}
 }

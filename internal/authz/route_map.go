@@ -36,6 +36,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/rules/sets/{setId}/versions":                                              "rules.read",
 	"GET /api/rules/sets/{setId}/versions/{version}":                                    "rules.read",
 	"GET /api/rules/merged":                                                             "rules.read",
+	"GET /api/rules/channels":                                                           "rules.read",
 	"GET /api/rules/comparisons":                                                        "rules.read",
 	"POST /api/rules/comparisons":                                                       "rules.write",
 	"GET /api/rules/explained":                                                          "rules.read",
@@ -43,6 +44,11 @@ var RoutePermissions = map[string]string{
 	"GET /api/rules/budget":                                                             "rules.read",
 	"PUT /api/rules/budget":                                                             "settings.manage",
 	"POST /api/rules/publish":                                                           "rules.publish",
+	"GET /api/rules/doctrine":                                                           "rules.read",
+	"POST /api/rules/doctrine/sources":                                                  "settings.manage",
+	"PUT /api/rules/doctrine/sources/{sourceId}":                                        "settings.manage",
+	"DELETE /api/rules/doctrine/sources/{sourceId}":                                     "settings.manage",
+	"POST /api/rules/doctrine/sources/{sourceId}/index":                                 "settings.manage",
 	"GET /api/agent-pairing/guide":                                                      "public",
 	"POST /api/agent-pairing/device":                                                    "public",
 	"POST /api/agent-pairing/redeem":                                                    "public",
@@ -57,6 +63,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/agent-pairing/self":                                                       "run.claim",
 	"POST /api/agent-pairing/self/disconnect":                                           "run.claim",
 
+	"GET /api/agent-keys/{id}/scopes":                                        "keys.manage",
+	"PATCH /api/agent-keys/{id}/scopes":                                      "keys.manage",
 	"DELETE /api/agent-keys/{id}":                                            "keys.manage",
 	"DELETE /api/members/invites/{id}":                                       "members.manage",
 	"DELETE /api/members/{principal_id}/aliases/{from_principal_id}":         "members.manage",
@@ -151,6 +159,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/harness-sessions":                         "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/orchestrator":            "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}":             "harness.read",
+	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/lookup":      "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker": "harness.read",
 	"GET /api/inbox/message-status":                                          "inbox.receipt",
 	"POST /api/agent-accounts/{accountId}/capacity/approve":                  "account.manage",
@@ -271,6 +280,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/agent-accounts/{accountId}/probe":                                                "account.probe",
 	"POST /api/agent-accounts/{accountId}/windows":                                              "account.manage",
 	"POST /api/agent-keys":                                                                      "keys.manage",
+	"POST /api/members/agents":                                                                  "keys.manage",
 	"POST /api/members/invites":                                                                 "members.manage",
 	"POST /api/members/invites/{id}/provision":                                                  "members.manage",
 	"POST /api/members/{principal_id}/aliases":                                                  "members.manage",
@@ -430,6 +440,7 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	if declaration == PublicRoute {
 		return nil
 	}
+	var denialErr error = ErrForbidden
 	for _, permission := range strings.Split(declaration, "|") {
 		err := Require(ctx, permission, scope)
 		if err == nil {
@@ -438,6 +449,12 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 		if !errors.Is(err, ErrForbidden) {
 			return err
 		}
+		// Prefer a missing key scope only after this route alternative's role
+		// authority passed; otherwise keep the first denial.
+		var d *denial
+		if denialErr == ErrForbidden || errors.As(err, &d) && d.reason == "missing_key_scope" {
+			denialErr = err
+		}
 	}
-	return ErrForbidden
+	return denialErr
 }

@@ -81,16 +81,16 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			if err != nil {
 				return err
 			}
-			explicitSenderSession := senderSession != ""
-			if !explicitSenderSession {
-				senderSession, err = rt.ambientSenderSession(context.Background(), p.ID)
-				if err != nil {
-					return rt.fail(err, "")
-				}
-			}
 			me, err := rt.caller()
 			if err != nil {
 				return err
+			}
+			explicitSenderSession := senderSession != ""
+			if !explicitSenderSession {
+				senderSession, err = rt.ambientSenderSession(context.Background(), p.ID, me.Principal.ID)
+				if err != nil {
+					return rt.fail(err, "")
+				}
 			}
 			if key == "" {
 				key, err = newUUIDv4()

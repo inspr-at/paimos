@@ -249,6 +249,10 @@ func (p *wireProcess) read(src io.Reader) {
 }
 
 func (p *wireProcess) send(v any) error {
+	return p.sendContext(context.Background(), v)
+}
+
+func (p *wireProcess) sendContext(ctx context.Context, v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -258,6 +262,12 @@ func (p *wireProcess) send(v any) error {
 	}
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= 0 {
+		return context.DeadlineExceeded
+	}
 	_, err = p.stdin.Write(append(data, '\n'))
 	if err != nil {
 		return errors.New("adapter input unavailable")

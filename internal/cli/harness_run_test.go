@@ -126,7 +126,10 @@ func TestCoordinatorHeartbeatUsesNativeReference(t *testing.T) {
 		o.Role = "coordinator"
 		o.SourceSession = transcriptSessionID
 		o.Succeeds = transcriptEntryID
-		if err := rt.runHeartbeat(context.Background(), o, heartbeatDeps{alive: func(int) bool { return false }}); err != nil {
+		if err := rt.runHeartbeat(context.Background(), o, heartbeatDeps{
+			alive: func(int) bool { return true },
+			wait:  func(context.Context, int, time.Duration) error { return errOwnerExited },
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}

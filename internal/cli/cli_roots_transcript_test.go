@@ -19,6 +19,11 @@ const rootAttachmentID = "44444444-4444-4444-8444-444444444444"
 
 func TestCLIAdditionalRootTranscripts(t *testing.T) {
 	isolate(t)
+	// Doctor reads the home directory for the session hook. Keep that off this
+	// machine's real harness files.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("CODEX_HOME", "")
 	type transcript struct {
 		name    string
 		argv    []string

@@ -9,7 +9,7 @@ paths:
   /rules/layers:
     get:
       operationId: "listRuleLayers"
-      description: "rules.read; only authorized project/owner layers"
+      description: "rules.read; only authorized project/owner layers. Coordinator keys require live coordinator role grants and effective node access on a project, capped by their human creator's node and rules access. After permission checks, rules reads refuse operator-created keys without a human creator with 403 rules_owner_required; create the key as a signed-in person to retain scoped ownership."
       responses:
         "200":
           description: "Authorized rule resource"
@@ -171,8 +171,9 @@ paths:
   /rules/sets/{setId}/publish:
     post:
       operationId: "publishRuleSet"
-      description: "rules.publish; person only; company requires workspace publisher; exact replay of the same version and note returns the original snapshot"
+      description: "rules.publish; person only; company requires workspace publisher; exact replay of the same version and note returns the original snapshot. A rule that copies a git-backed doctrine rule is refused (409 doctrine_duplicate) and names Propose a change."
       responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Authorized rule resource"
           content:
@@ -182,7 +183,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or a rule that copies git-backed doctrine (doctrine_duplicate; Propose a change)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
@@ -202,8 +203,9 @@ paths:
   /rules/sets/{setId}/restore:
     post:
       operationId: "restoreRuleSet"
-      description: "rules.publish; person only; publishes previous rules at a NEW version; optional note applies only to that new version"
+      description: "rules.publish; person only; publishes previous rules at a NEW version; optional note applies only to that new version. Restoring a copy of a git-backed doctrine rule is refused (409 doctrine_duplicate) and names Propose a change."
       responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Authorized rule resource"
           content:
@@ -213,7 +215,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or a rule that copies git-backed doctrine (doctrine_duplicate; Propose a change)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
@@ -295,8 +297,9 @@ paths:
   /rules/publish:
     post:
       operationId: "publishRuleSets"
-      description: "Batch publication under one person approval (AEON-263). rules.publish; person only, agents always 403; every set needs the same authority as its single publish (company sets need the workspace publisher). Rules writes take the tenant row lock that access changes take and decide permissions under it, so a concurrent demotion is either seen or waits. All sets are authorized, then revision and rules are checked, before any write. Atomic: one transaction, so any failure (403, 404, 409 revision or version conflict, 422 budget) writes nothing. Set ids must be canonical lowercase UUIDs, each at most once. Each set gets its own immutable snapshot and rules.published event carrying the shared batch_id. After the writes, every session file that includes one of the batch's sets is rendered with every existing contribution (projects with published project rules and a project without any; every person with person or agent rules, other owners' private layers included; each owner's named agents and tasks; every role and harness); files the batch does not touch are not judged. 422 when one exceeds 12000 bytes: with actual_bytes for a file whose every layer the caller may read now (rules.read, decided under the access lock), otherwise a generic message without size or identity. 422 budget_check_too_large when the batch touches more than 1,000 session files, or the rule store holds more than 2,000 rules or 2 MiB of rule text, for one check. The body (at most 2 MiB, 413 above) is read before any lock; lock waits, statements, the budget work and the whole transaction (server-side transaction_timeout) are bounded by the request deadline, and nothing commits after it (503 busy, nothing changed). When COMMIT was sent but its answer was lost, the server looks for this request's stored answer on a fresh connection, independent of the caller's current access: 200 with that answer if it is there, otherwise 503 outcome_unknown (the COMMIT may still land; repeating the same request is safe because an identical batch returns its stored answer). Every other rules write answers an unacknowledged COMMIT with 503 outcome_unknown and reload-first wording, without reconciliation. The complete answer is stored with the writes; an exact replay of the same request by the same person returns that stored answer after re-checking authorization and writes nothing. A new request never reuses a stored version (409). The single-set publish route is unchanged."
+      description: "Batch publication under one person approval (AEON-263). rules.publish; person only, agents always 403; every set needs the same authority as its single publish (company sets need the workspace publisher). Rules writes take the tenant row lock that access changes take and decide permissions under it, so a concurrent demotion is either seen or waits. All sets are authorized, then revision and rules are checked, before any write. Atomic: one transaction, so any failure (403, 404, 409 revision or version conflict, 422 budget) writes nothing. Set ids must be canonical lowercase UUIDs, each at most once. Each set gets its own immutable snapshot and rules.published event carrying the shared batch_id. After the writes, every session file that includes one of the batch's sets is rendered with every existing contribution (projects with published project rules and a project without any; every person with person or agent rules, other owners' private layers included; each owner's named agents and tasks; every role and harness); files the batch does not touch are not judged. 422 when one exceeds the workspace budget: with actual_bytes for a file whose every layer the caller may read now (rules.read, decided under the access lock), otherwise a generic message without size or identity. 422 budget_check_too_large when the batch touches more than 1,000 session files, or the rule store holds more than 2,000 rules or 2 MiB of rule text, for one check. The body (at most 2 MiB, 413 above) is read before any lock; lock waits, statements, the budget work and the whole transaction (server-side transaction_timeout) are bounded by the request deadline, and nothing commits after it (503 busy, nothing changed). When COMMIT was sent but its answer was lost, the server looks for this request's stored answer on a fresh connection, independent of the caller's current access: 200 with that answer if it is there, otherwise 503 outcome_unknown (the COMMIT may still land; repeating the same request is safe because an identical batch returns its stored answer). Every other rules write answers an unacknowledged COMMIT with 503 outcome_unknown and reload-first wording, without reconciliation. The complete answer is stored with the writes; an exact replay of the same request by the same person returns that stored answer after re-checking authorization and writes nothing. A new request never reuses a stored version (409). The single-set publish route is unchanged. A rule that copies a git-backed doctrine rule is 409 doctrine_duplicate and names Propose a change; the batch writes nothing."
       responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Every set published, in request order"
           content:
@@ -306,7 +309,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or a rule that copies git-backed doctrine (doctrine_duplicate; Propose a change)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       requestBody:
@@ -318,8 +321,9 @@ paths:
   /rules/merged:
     get:
       operationId: "mergeAgentRules"
-      description: "rules.read in exact project; tenant from authentication; person must be caller or agent key creator; named agent must be caller or owner controlled; role/harness are exact requested selectors, not permission grants; fails closed on ambiguous identities; no HTTP cache. The rendered file stays within the workspace budget (GET /rules/budget; default and ceiling 12000 UTF-8 bytes) and its per-layer caps. Explanations (tldr) and details are never included. Loading the snapshots for that one file stops at the same store caps as publication: 2,000 rules or 2 MiB of rule text (422 budget_check_too_large). The 1,000 session-file cap remains on batch publication."
+      description: "rules.read in exact project; tenant from authentication; person must be caller or agent key creator; named agent must be caller or owner controlled; role/harness are exact requested selectors, not permission grants; fails closed on ambiguous identities; no HTTP cache. The rendered file stays within the workspace budget (GET /rules/budget; default 12000, maximum 64000 UTF-8 bytes) and its per-layer caps. Explanations (tldr) and details are never included. Git-backed doctrine rules are omitted from that file; when a doctrine release is pinned, body names the release and does not repeat its text. The budget counts this session file only, separate from the harness doctrine. Loading the snapshots for that one file stops at the same store caps as publication: 2,000 rules or 2 MiB of rule text (422 budget_check_too_large). The 1,000 session-file cap remains on batch publication."
       responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Authorized rule resource"
           content:
@@ -333,6 +337,7 @@ paths:
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap, or the snapshots for this session exceed 2,000 rules or 2 MiB of rule text","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
+        - {name: X-Aeon-Max-Session-File-Bytes, in: header, required: false, schema: {type: integer, minimum: 2000, maximum: 64000}, description: "Requesting client limit; omission means 12000. Larger files get a deterministic whole-rule compatibility cut and upgrade note (also bounded for the legacy 512-KiB cache); locked rules are never omitted (422 if they cannot fit)."}
         -
           name: "project_id"
           in: "query"
@@ -424,6 +429,7 @@ paths:
       operationId: "explainAgentRules"
       description: "AEON-314. The session file for the same selectors and authorization as /rules/merged, explained for people: every served rule with its set, layer and explanation (TL;DR), per-layer bytes against the workspace budget, and the exact file. Never sent to agents and records no served manifest. A budget or floor problem is reported in problem instead of failing, so people can see what to fix."
       responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "The explained session file"
           content:
@@ -510,7 +516,7 @@ paths:
   /rules/budget:
     get:
       operationId: "getRuleBudget"
-      description: "AEON-314. rules.read. The workspace's always-on budget for one merged session file (default and ceiling 12,000 bytes; it may be lowered to 2,000) and optional per-layer caps, plus the bounds."
+      description: "AEON-314. rules.read. The workspace's always-on budget for one merged session file (default 12,000 bytes; 2,000 to 64,000 subject to the seven-day client capability gate) and optional per-layer caps, plus the bounds."
       responses:
         "200":
           description: "The workspace budget"
@@ -525,7 +531,7 @@ paths:
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
     put:
       operationId: "setRuleBudget"
-      description: "AEON-314. settings.manage in the workspace; people only. Sets the total budget (2,000 to 12,000 bytes; 12,000 is the ceiling every client enforces) and optional per-layer caps (500 bytes to the total; omit or 0 for none). Refused with 422 when a session file served now would no longer fit. Publication, the merged file and its explanation use these values. The store caps (2,000 rules, 2 MiB) are separate and unchanged."
+      description: "AEON-314. settings.manage in the workspace; people only. Sets the total budget (2,000 to 64,000 bytes; values above 12,000 require every client active in the tenant in the last seven days to report support) and optional per-layer caps (500 bytes to the total; omit or 0 for none). Refused with 422 when a session file served now would no longer fit. Publication, the merged file and its explanation use these values. The store caps (2,000 rules, 2 MiB) are separate and unchanged."
       responses:
         "200":
           description: "The saved budget"
@@ -536,7 +542,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"rules_clients_incompatible: at least one recently active client cannot support this budget, or no client has reported support","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"A session file served now would exceed the new budget","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       requestBody:
@@ -545,6 +551,101 @@ paths:
           "application/json":
             schema:
               "$ref": "#/components/schemas/RuleBudget"
+  /rules/channels:
+    get:
+      operationId: getRuleChannels
+      description: "rules.read. Delivery channels for rules (AEON-320). releases names each pinned doctrine repository (repository, ref, commit) and carries no doctrine text. duplicates lists only published Aeon rules whose set scope the caller may read (rules.read and scoped ownership), including the exact project. A copy matches a git-backed rule by: the same trimmed text, or a source identity or reference equal to that rule's identity (repository/path#anchor, AEON-318). The session file omits those rules and states the pin as a pointer. At most 100 duplicates, ordered by Aeon identity."
+      responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "200":
+          description: Doctrine pins and published copies
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/RuleChannels"}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine:
+    get:
+      operationId: getDoctrineLayer
+      description: "rules.read (person or agent key). The INSPR doctrine as a git-backed, read-only rule layer (AEON-318): every repository this workspace indexes, at its pinned commit. Git is the source of truth. Each rule's identity is its repository, file and heading anchor; source is the exact bytes of its lines at the pinned commit, and url opens those lines. TL;DRs come from a .tldr.yaml sidecar in git and are only displayed. Aeon holds no doctrine text beyond a cache keyed by the pinned commit. There is no route that edits doctrine. Credential-backed sources require an operator-provisioned tenant/repository grant even when reading cached files; unavailable grants show the source as failed with a generic credential error and no cached files."
+      responses:
+        "200":
+          description: The doctrine layer
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine/sources:
+    post:
+      operationId: addDoctrineSource
+      description: "settings.manage; person only. Adds a repository to the doctrine layer, pinned to a commit. The server resolves ref (or checks commit) on GitHub before anything is stored, then indexes the pinned commit; a failed index is recorded on the source (state failed, error), the pin stays. A private repository names a credential reference; the server requires an operator-owned tenant/repository grant in credential_ref.allowlist.json beside the token before reading it at fetch time and never stores, logs or returns it. Tenant owners cannot grant credential access. GitHub reads use only https://api.github.com and never follow redirects. At most 8 repositories per workspace."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/DoctrineSourceInput"}
+      responses:
+        "200":
+          description: The doctrine layer after the change
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "400": {"description":"Invalid repository, ref, commit, paths or credential reference","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied; agent keys never configure doctrine","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"The repository is already configured, the limit is reached, or ref does not name commit (code ref_mismatch)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"GitHub or the credential could not be used (code git_unavailable); nothing was stored","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine/sources/{sourceId}:
+    parameters:
+      - {name: sourceId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: pinDoctrineSource
+      description: "settings.manage; person only. Replaces a source's pin and selection. The repository cannot change. A new commit restarts pinned_at, drops the cached bytes of the old commit and indexes the new one. Responses as for addDoctrineSource; 404 when the source is not in this workspace."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/DoctrineSourceInput"}
+      responses:
+        "200":
+          description: The doctrine layer after the change
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "400": {"description":"Invalid input","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Source unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"ref does not name commit (code ref_mismatch)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"GitHub or the credential could not be used; nothing changed","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+    delete:
+      operationId: removeDoctrineSource
+      description: "settings.manage; person only. Stops indexing a repository and deletes its cached bytes. Git is not touched."
+      responses:
+        "200":
+          description: The doctrine layer after the change
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Source unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine/sources/{sourceId}/index:
+    parameters:
+      - {name: sourceId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: indexDoctrineSource
+      description: "settings.manage; person only. Reads the source again at its pinned commit and replaces the cache. A failure keeps the files of the last successful index at this commit and sets error. An unavailable credential grant prevents fetching and hides cached files until the operator authorizes this workspace/repository again."
+      responses:
+        "200":
+          description: The doctrine layer after the attempt
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Source unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
   /agent-pairing/guide:
     get:
       operationId: pairingGuide
@@ -889,6 +990,39 @@ paths:
       operationId: listMembers
       responses:
         '200': {description: 'Workspace people, agents, invites and imported identities', content: {application/json: {schema: {$ref: '#/components/schemas/MemberDirectory'}}}}
+  /members/agents:
+    post:
+      operationId: createAgent
+      summary: Create an agent with a role ceiling and project access, before issuing its first key
+      description: People with keys.manage only. Role grants must be held by the creator. Agent, description, bindings and audit events commit atomically. New names are checked against all existing principals within the workspace (case-insensitive). Choose a workspace role or project roles; project-only agents never acquire workspace access when keys are issued.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 200}
+                description: {type: string, maxLength: 1000}
+                workspace_role_id: {type: string, format: uuid}
+                project_roles:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [project_id, role_id]
+                    properties:
+                      project_id: {type: string, format: uuid}
+                      role_id: {type: string, format: uuid}
+      responses:
+        '201': {description: Agent ready for its first key, content: {application/json: {schema: {$ref: '#/components/schemas/AgentMember'}}}}
+        '400': {description: 'Invalid name, description or role selection'}
+        '403': {description: Requires a person with keys.manage and authority to grant the requested roles}
+        '404': {description: Role or project not found in this workspace}
+        '409': {description: Name already used in this workspace}
   /members/{principal_id}/workspace-role:
     put:
       operationId: setWorkspaceRole
@@ -1464,6 +1598,56 @@ paths:
           description: Agent or rotation key not found in this tenant
         "409":
           description: Rotation key was already revoked or rotated
+  /agent-keys/{id}/scopes:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getAgentKeyScopes
+      summary: Load a key and the scopes a person may grant it
+      description: Requires a person with keys.manage. The grantable set intersects agent-grantable permissions, the agent's existing workspace role, the editor's permissions and the original key creator's live ceiling. No role is expanded and no secret is returned.
+      security: [{session: []}]
+      responses:
+        '200':
+          description: Key metadata and current scope ceiling
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key, grantable_scopes]
+                properties:
+                  key: {$ref: '#/components/schemas/AgentKey'}
+                  grantable_scopes: {type: array, items: {type: string}}
+        '401': {description: Not signed in}
+        '403': {description: Person with keys.manage required}
+        '404': {description: Key not found in this tenant}
+        '409': {description: Key is revoked or expired}
+    patch:
+      operationId: changeAgentKeyScopes
+      summary: Add or remove scopes without rotating the key
+      description: Requires a person with keys.manage. Applies add/remove atomically to the latest scopes; overlapping deltas are invalid. The resulting set must fit the existing agent role, editor permissions and original creator ceiling. Empty scopes grant nothing. Colon notation is normalized. The same key takes effect on its next request. Records agent_key.scopes_changed with actor and before/after in the same transaction; no-op requests create no audit event. No secret is returned or changed.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                add: {type: array, maxItems: 32, items: {type: string}}
+                remove: {type: array, maxItems: 32, items: {type: string}}
+      responses:
+        '200':
+          description: Updated key metadata without a secret
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentKey'}
+        '400': {description: Invalid scopes or more than 32 resulting scopes}
+        '401': {description: Not signed in}
+        '403': {description: Person with keys.manage required or resulting scopes exceed a ceiling}
+        '404': {description: Key not found in this tenant}
+        '409': {description: Key is revoked or expired}
   /agent-keys/{id}:
     delete:
       operationId: revokeAgentKey
@@ -2066,7 +2250,7 @@ paths:
     get:
       operationId: listNodeActivity
       summary: Merged comment and visible field-change timeline
-      description: Reverse chronological by (at, event ID). The opaque cursor binds tenant, node and event watermark. Imported snapshots with no visible changes are omitted; the first snapshot is a baseline. Comments retain their creation position after edits; deleted comments are omitted. Imported comments are read-only.
+      description: Reverse chronological by (at, event ID). The opaque cursor binds tenant, node and event watermark. Imported snapshots with no visible changes are omitted; the first snapshot is a baseline. Comments retain their creation position after edits; deleted comments are omitted. Imported comments are read-only. Native updates also show a labels change (field tags).
       security: *auth
       parameters:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
@@ -3049,7 +3233,7 @@ paths:
         '200': {description: Public generations, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/HarnessSessionHierarchy'}}}}}
     post:
       operationId: registerHarnessSession
-      description: Registers a generation or returns an exact active replay. A restarted coordinator with the same principal, harness and native reference adopts live children from its stopped or heartbeat-lost predecessor atomically. succeeds_session_id selects a same-principal predecessor with a different native reference. A healthy predecessor is never replaced. Emits harness.adopted per child and harness.handed_over on the predecessor, with public lineage fields. Emits harness.registered on the existing events stream after commit; stopping emits harness.stopped. Labels are public display metadata, never identity or authority.
+      description: Agent callers must also hold harness.worker in the target project and on their key, so every registered generation can heartbeat and stop. Registers a generation or returns an exact active replay. A restarted coordinator with the same principal, harness and native reference adopts live children from its stopped or heartbeat-lost predecessor atomically. succeeds_session_id selects a same-principal predecessor with a different native reference. A healthy predecessor is never replaced. Emits harness.adopted per child and harness.handed_over on the predecessor, with public lineage fields. Emits harness.registered on the existing events stream after commit; stopping emits harness.stopped. Labels are public display metadata, never identity or authority.
       requestBody:
         required: true
         content:
@@ -3105,6 +3289,22 @@ paths:
         '403': {description: Person must own both registrations or administer the project}
         '404': {description: Session or destination not visible in this project}
         '409': {description: 'Stale revision, ended session or invalid hierarchy'}
+  /projects/{projectId}/harness-sessions/{sessionId}/lookup:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: lookupHarnessSession
+      description: Active-generation check for the caller's own ambient sender session. One row, no lock, and no activity, history, or controls. A session owned by another principal is not found.
+      responses:
+        '200':
+          description: Session identity and end times
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessSessionLookup'}
+        '400': {description: Invalid id}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {description: No such session for this caller}
   /projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -3231,6 +3431,8 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
     post:
+      parameters:
+        - {name: X-Aeon-Max-Session-File-Bytes, in: header, schema: {type: integer, minimum: 2000, maximum: 64000}, description: "Omission means 12000. Delivery also respects the registered maximum; whole-rule compatibility cut with note, never dropping locked rules."}
       operationId: managedHarnessContext
       description: Bound managed worker only. ADR-004 rules merge for this exact tenant/project/key creator/agent/task; delivered in ephemeral context. No repository writes. A receipt proves received bytes, not model obedience. No caller-selectable context or broader rules access.
       requestBody:
@@ -3239,6 +3441,7 @@ paths:
           application/json:
             schema: {type: object, additionalProperties: false}
       responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         '200': {description: ADR-004 merged rules envelope}
         '403': {description: Invalid worker lease or owner}
         '409': {description: Managed run required}
@@ -3294,7 +3497,7 @@ paths:
       responses:
         '200': {description: Control outcome; inspect outcome and reason, content: {application/json: {schema: {type: object}}}}
         '403': {description: Wrong session agent or generation lease}
-        '409': {description: Divergent completion or unclaimed process control}
+        '409': {description: 'divergent control completion means the control is already finished. setting authorization expired means an applied setting missed the database deadline. Both are terminal for the worker. Other conflicts, including an unclaimed control, stay retryable.'}
   /projects/{projectId}/harness-sessions/{sessionId}/recovery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -3477,6 +3680,8 @@ paths:
               type: object
               required: [phase, activity_sequence]
               properties:
+                max_session_file_bytes: {$ref: '#/components/schemas/RulesClientMaximum'}
+                rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80}
                 process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
                 phase: {type: string, enum: [starting, working, yielded, stopping]}
                 activity: {type: string, enum: [unknown, busy, idle, throttled]}
@@ -3498,6 +3703,35 @@ paths:
         '200': {description: Updated session, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /projects/{projectId}/harness-sessions/{sessionId}/yield:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+    post:
+      security: *auth
+      operationId: yieldHarnessSession
+      description: 'Managed worker claims every pending owned control in sequence. Expired controls are settled first and omitted. expires_in_ms is the remaining authorization on the database clock, rounded down and capped at 45000. Workers anchor that budget to the monotonic start of this request and fail closed when it is missing or zero.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '200':
+          description: Session and the controls just claimed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session, controls]
+                properties:
+                  session: {$ref: '#/components/schemas/HarnessSession'}
+                  controls: {type: array, items: {$ref: '#/components/schemas/HarnessYieldedControl'}}
+        '400': {description: Invalid JSON}
+        '403': {description: Worker proof rejected}
+        '409': {description: Managed worker required}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
   /settings/inbox-delivery:
     get:
@@ -3794,7 +4028,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [from, to, generated_at, attribution, trend_basis, list_price_currency, truncated, totals, by_project, by_model, by_harness, by_subscription, trend, tickets, tickets_cost_unknown, allowance, ratings]
+                required: [from, to, generated_at, attribution, trend_basis, list_price_currency, truncated, totals, by_project, by_model, by_harness, by_subscription, trend, tickets, tickets_cost_unknown, allowance, ratings, work]
                 properties:
                   from: {type: string, format: date-time}
                   to: {type: string, format: date-time}
@@ -3813,6 +4047,7 @@ paths:
                   tickets_cost_unknown: {type: integer, minimum: 0, description: Visible tickets whose list estimate is entirely unknown. They are not ranked.}
                   allowance: {$ref: '#/components/schemas/UsageAllowance'}
                   ratings: {$ref: '#/components/schemas/DeliveryRatingSummary'}
+                  work: {$ref: '#/components/schemas/UsageWork'}
         '400': {description: Invalid range or project}
         '401': {description: Authentication required}
         '403': {description: Permission denied}
@@ -6036,18 +6271,31 @@ components:
       type: "object"
       additionalProperties: false
       properties:
-        company: {type: integer, minimum: 0, maximum: 12000}
-        project: {type: integer, minimum: 0, maximum: 12000}
-        person: {type: integer, minimum: 0, maximum: 12000}
-        agent: {type: integer, minimum: 0, maximum: 12000}
+        company: {type: integer, minimum: 0, maximum: 64000}
+        project: {type: integer, minimum: 0, maximum: 64000}
+        person: {type: integer, minimum: 0, maximum: 64000}
+        agent: {type: integer, minimum: 0, maximum: 64000}
     RuleBudget:
       type: "object"
       additionalProperties: false
       properties:
-        max_bytes: {type: integer, minimum: 2000, maximum: 12000}
+        max_bytes: {type: integer, minimum: 2000, maximum: 64000}
         layer_max_bytes:
           "$ref": "#/components/schemas/RuleLayerBytes"
       required: ["max_bytes"]
+    RulesClientMaximum:
+      type: [integer, 'null']
+      minimum: 2000
+      maximum: 64000
+      description: "Optional report on every registration and heartbeat. Omitted/null means legacy 12000 (including after downgrade); never a permission grant. Reports affect only the budget gate and managed delivery, not session response fields."
+    RuleBudgetBlocker:
+      type: object
+      required: [host, harness, max_session_file_bytes]
+      properties:
+        host: {type: string}
+        harness: {type: string}
+        version: {type: string}
+        max_session_file_bytes: {type: integer}
     RuleBudgetView:
       type: "object"
       additionalProperties: false
@@ -6057,7 +6305,13 @@ components:
           "$ref": "#/components/schemas/RuleLayerBytes"
         default_bytes: {type: integer}
         min_bytes: {type: integer}
-        ceiling_bytes: {type: integer}
+        ceiling_bytes: {type: integer, description: "Minimum reported maximum across all sessions active in the tenant within seven days, including stopped/archived sessions, and never below 12000. Missing reports, reports under 12000, and an empty inventory keep 12000."}
+        blocking_clients:
+          type: array
+          description: "Clients below 64000, grouped by host/harness/version/limit, at most 50. Only people with workspace settings.manage receive these tenant-wide details."
+          maxItems: 50
+          items: {$ref: '#/components/schemas/RuleBudgetBlocker'}
+        blocking_clients_more: {type: integer, minimum: 0, description: "Additional blocking clients omitted after the first 50. Present only together with blocking_clients, and only for settings.manage."}
         min_layer_bytes: {type: integer}
       required: ["max_bytes", "layer_max_bytes", "default_bytes", "min_bytes", "ceiling_bytes", "min_layer_bytes"]
     ExplainedRules:
@@ -6421,10 +6675,10 @@ components:
           type: "string"
         body:
           type: "string"
-          description: "Exact always-on rendered bytes; within the workspace budget (default and never above 12000 UTF-8 bytes); details and explanations excluded"
+          description: "Exact always-on rendered bytes; within the workspace budget (default 12000, never above 64000 UTF-8 bytes); details and explanations excluded"
         byte_size:
           type: "integer"
-          maximum: 12000
+          maximum: 64000
         rules:
           type: "array"
           maxItems: 10000
@@ -6432,6 +6686,7 @@ components:
             "$ref": "#/components/schemas/AgentRule"
         floor:
           type: "string"
+          description: "Locked company floor lines present in body. A floor rule delivered through doctrine is represented by its identity and immutable commit, never repeated text. Changing the independently retained floor pin requires explicit review."
         valid_until:
           type: ["string", "null"]
           format: "date-time"
@@ -6520,6 +6775,139 @@ components:
           maxItems: 16
           description: "Comparison limits. Tokens only; no paths or instruction text."
           items: {type: string, pattern: "^[a-z][a-z0-9_]{0,63}$"}
+    DoctrineTLDR:
+      type: object
+      additionalProperties: false
+      required: [en]
+      description: "An explanation for people, read from git (AEON-314 shape). check is true when the sidecar's basis no longer matches the text."
+      properties:
+        en: {type: string, maxLength: 300}
+        de: {type: string, maxLength: 300}
+        check: {type: boolean}
+    DoctrineRule:
+      type: object
+      additionalProperties: false
+      required: [key, identity, set, heading_path, anchor, start_line, end_line, source, sha256, text, strength, url]
+      properties:
+        key: {type: string, description: "The rule's aeon-rule id, or its text key (t-…) without one; TL;DR sidecars refer to it"}
+        identity: {type: string, description: "repository/path#anchor"}
+        set: {type: string}
+        heading_path: {type: string}
+        anchor: {type: string, description: "GitHub anchor of the heading the rule sits under"}
+        start_line: {type: integer, minimum: 1}
+        end_line: {type: integer, minimum: 1}
+        source: {type: string, description: "The exact bytes of lines start_line..end_line at the pinned commit"}
+        sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        text: {type: string, description: "The rule line as the importer reads it"}
+        strength: {type: string, enum: [normal, locked]}
+        url: {type: string, format: uri, description: "The file at the pinned commit, opened at these lines"}
+        tldr: {"$ref": "#/components/schemas/DoctrineTLDR"}
+    DoctrineSet:
+      type: object
+      additionalProperties: false
+      required: [set, title, anchor]
+      properties:
+        set: {type: string}
+        title: {type: string}
+        anchor: {type: string}
+        tldr: {"$ref": "#/components/schemas/DoctrineTLDR"}
+    DoctrineFile:
+      type: object
+      additionalProperties: false
+      required: [path, blob_sha, sha256, bytes, kind, layer, url, sets, rules]
+      properties:
+        path: {type: string}
+        blob_sha: {type: string, pattern: "^[0-9a-f]{40}$"}
+        sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        bytes: {type: integer, minimum: 0}
+        kind: {type: string}
+        layer: {type: string}
+        url: {type: string, format: uri}
+        tldr: {"$ref": "#/components/schemas/DoctrineTLDR"}
+        sets: {type: array, items: {"$ref": "#/components/schemas/DoctrineSet"}}
+        rules: {type: array, items: {"$ref": "#/components/schemas/DoctrineRule"}}
+        sidecar:
+          type: object
+          additionalProperties: false
+          required: [path, url]
+          properties:
+            path: {type: string}
+            url: {type: string, format: uri}
+            problem: {type: string}
+            unmatched: {type: array, maxItems: 50, items: {type: string}}
+        problem: {type: string, description: "Set when the file could not be indexed"}
+    DoctrineSkip:
+      type: object
+      additionalProperties: false
+      required: [path, reason]
+      properties:
+        path: {type: string}
+        reason: {type: string}
+    DoctrineSource:
+      type: object
+      additionalProperties: false
+      required: [id, repository, visibility, commit, pinned_at, paths, url, state, files, skipped]
+      properties:
+        id: {type: string, format: uuid}
+        repository: {type: string, description: "owner/name on GitHub"}
+        visibility: {type: string, enum: [public, private]}
+        ref: {type: string, description: "The release tag the pin was set from"}
+        commit: {type: string, pattern: "^[0-9a-f]{40}$"}
+        committed_at: {type: string, format: date-time}
+        pinned_at: {type: string, format: date-time, description: "When this commit was pinned in Aeon"}
+        paths: {type: array, minItems: 1, maxItems: 20, items: {type: string}}
+        credential_ref: {type: string, description: "Name of the read-only credential; never the credential"}
+        url: {type: string, format: uri}
+        state: {type: string, enum: [ready, not_indexed, failed]}
+        error: {type: string, maxLength: 300}
+        indexed_at: {type: string, format: date-time}
+        files: {type: array, items: {"$ref": "#/components/schemas/DoctrineFile"}}
+        skipped: {type: array, maxItems: 50, items: {"$ref": "#/components/schemas/DoctrineSkip"}}
+    DoctrineLayer:
+      type: object
+      additionalProperties: false
+      required: [sources]
+      properties:
+        sources: {type: array, maxItems: 8, items: {"$ref": "#/components/schemas/DoctrineSource"}}
+    RuleChannels:
+      type: object
+      additionalProperties: false
+      required: [releases, duplicates]
+      description: "Doctrine pins and published Aeon rules that copy them (AEON-320). No doctrine text."
+      properties:
+        releases:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            additionalProperties: false
+            required: [repository, commit]
+            properties:
+              repository: {type: string}
+              ref: {type: string}
+              commit: {type: string, pattern: "^[0-9a-f]{40}$"}
+        duplicates:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [identity, doctrine]
+            properties:
+              identity: {type: string, maxLength: 96, description: "Aeon rule identity"}
+              doctrine: {type: string, maxLength: 300, description: "repository/path#anchor from the doctrine index"}
+    DoctrineSourceInput:
+      type: object
+      additionalProperties: false
+      required: [visibility]
+      description: "Commit is the pin. ref names the release tag; alone it is resolved to the commit it names now, with commit it must name that commit. paths default to docs/AGENTS-*.md; a wildcard never selects AGENTS-PROFILE*.md. repository is required when adding and must match when pinning."
+      properties:
+        repository: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$"}
+        visibility: {type: string, enum: [public, private]}
+        ref: {type: string, maxLength: 128}
+        commit: {type: string, pattern: "^[0-9a-f]{40}$"}
+        paths: {type: array, maxItems: 20, items: {type: string, maxLength: 200}}
+        credential_ref: {type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$", description: "Required for a private repository. Names a token file in the server's AEON_DOCTRINE_CREDENTIALS_DIR, with an operator-owned credential_ref.allowlist.json granting this tenant/repository pair"}
     PairingVerificationCapabilities:
       type: object
       description: Server-owned qualification of its matching helper release; a client cannot widen this map. Unsupported choices require explicit connect_only or exclusion.
@@ -6542,8 +6930,20 @@ components:
         default_tenant_slug: {type: string}
         platforms: {type: array, items: {type: string}}
         platform_qualification: {type: string, description: Candidate builds require exact-release service qualification evidence}
-        setup_command: {type: string, description: CLI template with explicit approved folder and private state directory placeholders}
+        setup_command: {type: string, description: Instance-bound pair command; defaults are confirmed locally before requesting person approval}
+        homebrew_command: {type: string, description: macOS Homebrew installation followed by the instance-bound pair command}
         managed_installation: {type: string}
+        managed_setup:
+          type: object
+          description: Optional deployment-admin-configured Nix/Home Manager guide; omitted when the instance has no reviewed module configuration. Commands remain bound to the server origin and never install or change a managed service.
+          required: [command, service_option, module_url, service_note]
+          properties:
+            command: {type: string}
+            service_option: {type: string}
+            module_url: {type: string, format: uri}
+            service_note: {type: string}
+            platform_note: {type: string, description: 'Platforms supported by the configured module, independent of the helper build targets'}
+            prerequisite_note: {type: string, description: Reviewed package pin and PATH requirements before using the pair command}
         install_available: {type: boolean}
         install_targets:
           type: array
@@ -6558,12 +6958,12 @@ components:
               artifact_url: {type: string, format: uri}
               checksums_url: {type: string, format: uri}
               command: {type: string}
-    PairingAccountChoice: {"type": "object", "additionalProperties": false, "required": ["account_key", "harness", "label"], "properties": {"account_key": {"type": "string", "minLength": 1, "maxLength": 128}, "harness": {"type": "string", "enum": ["claude", "codex", "cursor", "grok"]}, "label": {"type": "string", "minLength": 1, "maxLength": 128}, "model_profile_id": {"type": "string", "format": "uuid"}}}
-    PairingDeviceRequest: {"type": "object", "additionalProperties": false, "required": ["request_id", "device_hash", "runtime_hash", "lifecycle_hash", "computer_name", "platform", "arch", "workspace_path", "capabilities", "accounts"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "tenant_slug": {"type": "string"}, "device_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "runtime_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "computer_name": {"type": "string", "minLength": 1, "maxLength": 128}, "platform": {"type": "string", "enum": ["darwin", "linux"]}, "arch": {"type": "string", "enum": ["arm64", "amd64"]}, "workspace_path": {"type": "string", "maxLength": 1024}, "capabilities": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "managed_runs"}}, "accounts": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "existing_computer_id": {"type": "string", "format": "uuid"}, "existing_lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "oneOf": [{"required": ["tenant_id"], "not": {"required": ["tenant_slug"]}}, {"required": ["tenant_slug"], "not": {"required": ["tenant_id"]}}], "dependentRequired": {"existing_computer_id": ["existing_lifecycle_secret"], "existing_lifecycle_secret": ["existing_computer_id"]}}
+    PairingAccountChoice: {"type": "object", "additionalProperties": false, "required": ["account_key", "harness", "label"], "properties": {"account_key": {"type": "string", "minLength": 1, "maxLength": 128}, "harness": {"type": "string", "enum": ["claude", "codex", "cursor", "grok", "pi"]}, "provider": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$", "description": "Optional pi configured-provider binding; restricts the selected model profile, never a person identity or credential."}, "label": {"type": "string", "minLength": 1, "maxLength": 128}, "model_profile_id": {"type": "string", "format": "uuid"}}}
+    PairingDeviceRequest: {"type": "object", "additionalProperties": false, "required": ["request_id", "device_hash", "runtime_hash", "lifecycle_hash", "computer_name", "platform", "arch", "workspace_path", "capabilities", "accounts"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "tenant_slug": {"type": "string"}, "device_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "runtime_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "computer_name": {"type": "string", "minLength": 1, "maxLength": 128}, "platform": {"type": "string", "enum": ["darwin", "linux"]}, "arch": {"type": "string", "enum": ["arm64", "amd64"]}, "workspace_path": {"type": "string", "maxLength": 1024}, "capabilities": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "managed_runs"}}, "accounts": {"type": "array", "minItems": 1, "maxItems": 5, "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "existing_computer_id": {"type": "string", "format": "uuid"}, "existing_lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "oneOf": [{"required": ["tenant_id"], "not": {"required": ["tenant_slug"]}}, {"required": ["tenant_slug"], "not": {"required": ["tenant_id"]}}], "dependentRequired": {"existing_computer_id": ["existing_lifecycle_secret"], "existing_lifecycle_secret": ["existing_computer_id"]}}
     PairingRedeemRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "device_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "device_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
     PairingReconcileRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "lifecycle_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "cleanup_confirmed_account_ids": {"type": "array", "maxItems": 256, "items": {"type": "string", "format": "uuid"}}, "computer_cleanup_confirmed": {"type": "boolean"}, "progress": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string", "enum": ["provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "error_code": {"type": "string", "enum": ["", "login_required", "service_conflict", "unsupported_platform", "managed_installation", "connectivity_failed", "private_storage_failed", "installation_failed", "verification_unavailable"]}}}}}
     PairingLookup: {"type": "object", "additionalProperties": false, "required": ["user_code"], "properties": {"user_code": {"type": "string"}}}
-    PairingApproval: {"type": "object", "additionalProperties": false, "required": ["request_digest", "verification", "selected_account_keys"], "properties": {"request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verification": {"type": "string", "enum": ["one_per_harness", "connect_only"]}, "selected_account_keys": {"type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}}}}
+    PairingApproval: {"type": "object", "additionalProperties": false, "required": ["request_digest", "verification", "selected_account_keys"], "properties": {"request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verification": {"type": "string", "enum": ["one_per_harness", "connect_only"]}, "selected_account_keys": {"type": "array", "minItems": 1, "maxItems": 5, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}}}}
     PairingSelfDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "account_id": {"type": "string", "format": "uuid"}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
     PairingDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode", "expected_revision"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
     PairingError: {"type": "object", "additionalProperties": false, "required": ["error", "code"], "properties": {"error": {"type": "string"}, "code": {"type": "string"}}}
@@ -6630,6 +7030,137 @@ components:
           properties:
             project_id: {type: string, format: uuid}
             project_key: {type: string}
+    UsageWork:
+      type: object
+      description: >-
+        What agents got done and where the time went (AEON-301). Sessions are the visible sessions that started in
+        [from, to), the same set as the usage totals. done and released count distinct visible tickets whose ticket_done or
+        released outcome event was recorded in [from, to) with an agent session; a ticket done by a person alone is not
+        counted. Agent time runs from a session's start to its last heartbeat, or to its stop when that came within 15
+        minutes of it, clipped to the range end; a session with no heartbeat that was not stopped within 15 minutes of
+        registering has no known time and is left out of agent_seconds, never counted as zero. Tokens are the known input
+        plus output of reported usage rows; null when no session in the group reported any. Token coverage is per
+        component (UsageWorkTokenParts), so a partial report never reads as complete. Every day of the range is
+        present in days, as UTC days; zero there is a known zero.
+      allOf:
+        - {$ref: '#/components/schemas/UsageWorkTokenParts'}
+      required: [basis, sessions, worker_sessions, timed_sessions, agent_seconds, usage_reported_sessions, model_sessions, done, released, done_attributed, tickets_worked, tickets_done, days, tickets, by_harness, by_model, by_project, waste]
+      properties:
+        basis: {type: string, enum: [sessions_started_in_range]}
+        sessions: {type: integer, minimum: 0}
+        worker_sessions: {type: integer, minimum: 0}
+        timed_sessions: {type: integer, minimum: 0, description: Sessions whose agent time is known.}
+        agent_seconds: {type: integer, format: int64, minimum: 0, description: Sum over timed_sessions.}
+        usage_reported_sessions: {type: integer, minimum: 0, description: 'Sessions that reported both input and output tokens; a usage report without them does not count. Per-component coverage is in UsageWorkTokenParts.'}
+        model_sessions: {type: integer, minimum: 0, description: Sessions that registered a model; by_model covers only these.}
+        done: {type: integer, minimum: 0}
+        released: {type: integer, minimum: 0}
+        done_attributed: {type: integer, minimum: 0, description: "Done tickets with a harness session, attributed in by_harness and by_model to the ticket's latest worker session before it was done."}
+        tickets_worked: {type: integer, minimum: 0, description: Distinct tickets with a session in the range. tickets holds at most 50 of them.}
+        tickets_done: {type: integer, minimum: 0, description: "Worked tickets whose state is done, accepted or delivered now."}
+        days:
+          type: array
+          items:
+            type: object
+            required: [day, done, sessions, agent_seconds]
+            properties:
+              day: {type: string, format: date}
+              done: {type: integer, minimum: 0}
+              sessions: {type: integer, minimum: 0, description: Sessions that started on this day.}
+              agent_seconds: {type: integer, format: int64, minimum: 0}
+        tickets:
+          type: array
+          maxItems: 50
+          description: Worked tickets, most agent time first.
+          items:
+            type: object
+            allOf:
+              - {$ref: '#/components/schemas/UsageWorkTokenParts'}
+            required: [id, key, title, project_id, project_key, state, done_in_range, released, sessions, timed_sessions, agent_seconds, tokens, usage_reported_sessions, last_active_at]
+            properties:
+              id: {type: string, format: uuid}
+              key: {type: string}
+              title: {type: string}
+              project_id: {type: string, format: uuid}
+              project_key: {type: string}
+              state: {type: string}
+              done_in_range: {type: boolean}
+              released: {type: boolean, description: The ticket has a released outcome event.}
+              sessions: {type: integer, minimum: 0}
+              timed_sessions: {type: integer, minimum: 0}
+              agent_seconds: {type: integer, format: int64, minimum: 0}
+              tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
+              usage_reported_sessions: {type: integer, minimum: 0}
+              last_active_at: {type: string, format: date-time}
+        by_harness: {type: array, items: {$ref: '#/components/schemas/UsageWorkGroup'}}
+        by_model: {type: array, items: {$ref: '#/components/schemas/UsageWorkGroup'}}
+        by_project: {type: array, items: {$ref: '#/components/schemas/UsageWorkGroup'}}
+        waste:
+          type: object
+          description: >-
+            stuck is an open session that is not idle or throttled and has not sent a heartbeat for over 10 minutes.
+            The other kinds are stopped worker sessions on a ticket that is not done: failed (run failed or lost
+            ownership, or an error stop reason), lost (the server closed it for silence and it left no commit), and
+            no_result (it had a worktree to report commits from, or a managed run, and left no commit). A ticket that is
+            not done after three or more worker sessions is one retried row holding them all. total counts every row;
+            rows holds the ten with the most agent time.
+          required: [total, stuck, failed, lost, no_result, retried, rows]
+          properties:
+            total: {type: integer, minimum: 0}
+            stuck: {type: integer, minimum: 0}
+            failed: {type: integer, minimum: 0}
+            lost: {type: integer, minimum: 0}
+            no_result: {type: integer, minimum: 0}
+            retried: {type: integer, minimum: 0}
+            rows:
+              type: array
+              maxItems: 10
+              items:
+                type: object
+                required: [kind, session_id, project_id, project_key, ticket_id, ticket_key, ticket_title, harness, model, label, at, sessions, agent_seconds]
+                properties:
+                  kind: {type: string, enum: [stuck, failed, lost, no_result, retried]}
+                  session_id: {type: string, format: uuid, description: "For retried, the newest worker session."}
+                  project_id: {type: string, format: uuid}
+                  project_key: {type: string}
+                  ticket_id: {type: [string, 'null'], format: uuid}
+                  ticket_key: {type: [string, 'null']}
+                  ticket_title: {type: [string, 'null']}
+                  harness: {type: string}
+                  model: {type: [string, 'null']}
+                  label: {type: [string, 'null'], description: The session's display label.}
+                  at: {type: string, format: date-time, description: Last sign of life.}
+                  sessions: {type: integer, minimum: 1}
+                  agent_seconds: {type: [integer, 'null'], format: int64, description: Null when unknown.}
+    UsageWorkGroup:
+      type: object
+      allOf:
+        - {$ref: '#/components/schemas/UsageWorkTokenParts'}
+      required: [key, label, sessions, timed_sessions, agent_seconds, done, tokens, usage_reported_sessions]
+      properties:
+        key: {type: string, description: 'Harness, registered session model, or project ID.'}
+        label: {type: string}
+        sessions: {type: integer, minimum: 0}
+        timed_sessions: {type: integer, minimum: 0}
+        agent_seconds: {type: integer, format: int64, minimum: 0}
+        done: {type: integer, minimum: 0}
+        tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
+        usage_reported_sessions: {type: integer, minimum: 0}
+    UsageWorkTokenParts:
+      type: object
+      description: >-
+        Tokens by component (AEON-301), each with the sessions that reported it. A session counts for a component only
+        when every one of its usage rows carries it; a missing component is left out of the sum, never added as zero,
+        and a null sum means no session reported that component. Cached input is part of input and not added to tokens.
+      required: [input_tokens, output_tokens, cached_input_tokens, input_reported_sessions, output_reported_sessions, cached_input_reported_sessions, usage_provisional_sessions]
+      properties:
+        input_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
+        output_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
+        cached_input_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
+        input_reported_sessions: {type: integer, minimum: 0}
+        output_reported_sessions: {type: integer, minimum: 0}
+        cached_input_reported_sessions: {type: integer, minimum: 0}
+        usage_provisional_sessions: {type: integer, minimum: 0, description: Sessions with a provisional usage report; their figures may still change.}
     UsageAllowance:
       type: object
       description: Declared allowance, explicit reservations and schedule capacity stay numbers. Used, headroom and hard remaining are null while a window is provisional, including mixed settled evidence. Null and overflow are never zero.
@@ -6823,6 +7354,27 @@ components:
         subject: {oneOf: [{$ref: '#/components/schemas/PrincipalRef'}, {type: 'null'}]}
         project: {oneOf: [{type: object, required: [id, key], properties: {id: {type: string, format: uuid}, key: {type: string}}}, {type: 'null'}]}
         data: {type: object}
+    AgentMember:
+      type: object
+      required: [principal_id, name, has_avatar, workspace_role, key_count, last_seen_at, service]
+      properties:
+        principal_id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string}
+        has_avatar: {type: boolean}
+        workspace_role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
+        project_roles: {type: array, items: {$ref: '#/components/schemas/ProjectRole'}}
+        key_count: {type: integer}
+        last_seen_at: {type: [string, 'null'], format: date-time}
+        service: {type: boolean}
+        preview:
+          description: Whether this caller may preview the agent's session file (members directory). creator_name is present only for workspace owners and admins, and only when another person holds a current key.
+          type: object
+          required: [allowed]
+          properties:
+            allowed: {type: boolean}
+            reason: {type: string, enum: [not_key_creator, key_revoked, key_expired, agent_inactive]}
+            creator_name: {type: string}
     MemberDirectory:
       type: object
       required: [people, agents, invites, imported, owner_count, provisioner]
@@ -6831,24 +7383,7 @@ components:
         agents:
           type: array
           items:
-            type: object
-            required: [principal_id, name, has_avatar, workspace_role, key_count, last_seen_at, service]
-            properties:
-              principal_id: {type: string, format: uuid}
-              name: {type: string}
-              has_avatar: {type: boolean}
-              workspace_role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
-              key_count: {type: integer}
-              last_seen_at: {type: [string, 'null'], format: date-time}
-              service: {type: boolean}
-              preview:
-                description: Whether this caller may preview the agent's session file. creator_name is present only for workspace owners and admins, and only when another person holds a current key.
-                type: object
-                required: [allowed]
-                properties:
-                  allowed: {type: boolean}
-                  reason: {type: string, enum: [not_key_creator, key_revoked, key_expired, agent_inactive]}
-                  creator_name: {type: string}
+            $ref: '#/components/schemas/AgentMember'
         invites: {type: array, items: {$ref: '#/components/schemas/Invite'}}
         imported: {type: array, items: {type: object}}
         owner_count: {type: integer}
@@ -8857,6 +9392,8 @@ components:
       required: [agent_principal_id, harness, host, management_mode, role, harness_session_ref, worker_lease]
       properties:
         succeeds_session_id: {type: [string, 'null'], format: uuid, description: Explicit stopped or heartbeat-lost coordinator predecessor owned by the same principal in this project.}
+        max_session_file_bytes: {$ref: '#/components/schemas/RulesClientMaximum'}
+        rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80, description: "Aeon CLI or agentd version reporting the capability."}
         agent_principal_id: {type: string, format: uuid}
         run_id: {type: [string, 'null'], format: uuid}
         ticket_node_id: {type: [string, 'null'], format: uuid}
@@ -8912,6 +9449,31 @@ components:
         reason: {type: [string, 'null'], description: Content-free outcome. authorization_expired means expired before claim; outcome_unconfirmed means no safe retry. queued_next_turn acknowledges queued input rather than model obedience.}
         expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
         expires_at: {type: string, format: date-time}
+        expires_in_ms:
+          type: integer
+          minimum: 0
+          maximum: 45000
+          description: Yield-only remaining authorization lifetime from the database clock, rounded down. Workers anchor this to the monotonic start of the yield request (deducting the full round trip), retain that deadline across queueing and retries, and fail closed if absent or zero. expires_at remains an audit timestamp, never a worker wall-clock deadline.
+        created_at: {type: string, format: date-time}
+        claimed_at: {type: [string, 'null'], format: date-time}
+        completed_at: {type: [string, 'null'], format: date-time}
+    HarnessYieldedControl:
+      type: object
+      description: 'One control claimed by yield. expires_in_ms is the only authorization lifetime a worker may use. expires_at is audit metadata.'
+      required: [id, session_id, kind, state, sequence, created_at, expires_in_ms]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        kind: {type: string, description: 'steer, interrupt, stop, rename, model, effort, force_stop, rename_request or model_request.'}
+        value: {type: string, description: Public setting value. Absent for steering and process controls.}
+        text: {type: string, description: 'Steer text for this claim only. It is not stored and is omitted for every other kind.'}
+        state: {type: string, enum: [claimed]}
+        sequence: {type: integer, format: int64}
+        outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
+        reason: {type: [string, 'null']}
+        expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+        expires_at: {type: string, format: date-time}
+        expires_in_ms: {type: integer, minimum: 0, maximum: 45000, description: 'Remaining authorization from the database clock, rounded down.'}
         created_at: {type: string, format: date-time}
         claimed_at: {type: [string, 'null'], format: date-time}
         completed_at: {type: [string, 'null'], format: date-time}
@@ -8952,6 +9514,11 @@ components:
         reason: {type: [string, 'null'], description: Applied requires owned_group_signalled_root_exited; queued alone never proves exit.}
         expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
         expires_at: {type: string, format: date-time}
+        expires_in_ms:
+          type: integer
+          minimum: 0
+          maximum: 45000
+          description: Yield-only database-derived remaining authorization lifetime. Workers deduct the full round trip and use the resulting local monotonic deadline through the final process signal lock. Missing or zero lifetime cannot authorize a signal.
         created_at: {type: string, format: date-time}
         claimed_at: {type: [string, 'null'], format: date-time}
         completed_at: {type: [string, 'null'], format: date-time}
@@ -9085,6 +9652,16 @@ components:
         count: {type: integer, minimum: 1}
         blocking: {type: boolean}
         location: {type: string, enum: [approvals, messages, session]}
+    HarnessSessionLookup:
+      type: object
+      description: Enough to decide whether an ambient tell may name this generation. Returned only for the caller's own session. Null end times mean it is still active.
+      required: [id, project_id, agent_principal_id, stopped_at, archived_at]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        agent_principal_id: {type: string, format: uuid}
+        stopped_at: {type: [string, 'null'], format: date-time}
+        archived_at: {type: [string, 'null'], format: date-time}
     HarnessSession:
       type: object
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
@@ -9198,7 +9775,7 @@ components:
         context: {$ref: '#/components/schemas/HarnessRulesReceiptContext'}
         body_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Worker-reported SHA256 of exact merged bytes, never a hash of a version label'}
         version: {type: string, maxLength: 16, pattern: '^(floor-only|[0-9]{12}\.0\.0)$', description: Worker-reported calendar version or floor-only; no assertion of publication}
-        byte_size: {type: integer, minimum: 1, maximum: 12000}
+        byte_size: {type: integer, minimum: 1, maximum: 64000}
         source: {type: string, enum: [online, cache, floor-only], description: Worker-reported source; cache/floor-only are stale fallback evidence and never fresh authority}
     HarnessRulesReceipt:
       type: object
@@ -9869,6 +10446,15 @@ components:
       properties:
         error:
           type: string
+        code: {type: string, description: Existing top-level error code; forbidden for permission denials}
+        reason: {type: string, description: Safe human-readable explanation}
+        reason_code:
+          type: string
+          enum: [missing_role_permission, missing_key_scope, missing_project_access]
+          description: Optional denial layer based on the authenticated caller's own access. If resolving a target's project still leaves the request forbidden, the denial from before resolution is retained so diagnostics do not disclose whether the target exists. Absent for generic denials.
+        scope:
+          type: string
+          description: Present only for missing_key_scope after role and project authority have passed in the reported check. A failed target-project retry retains the pre-resolution denial instead. Never includes resource or principal data.
     NodeError:
       type: object
       required: [error]
@@ -10340,6 +10926,9 @@ components:
             id: {type: [string, 'null'], format: uuid, description: Null if no imported principal mapping exists}
             name: {type: string}
             has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}
+            automatic: {type: boolean, description: 'True when the tenant System principal wrote the event. Clients show that actor as the product short name followed by (automatic). Omitted for people and ordinary agents, including a person named System.'}
+            job: {type: string, description: 'Background job recorded on the event, when one was.'}
+            reason: {type: string, description: 'Why that job wrote the event, when a reason was recorded.'}
         body_markdown: {type: string, description: Present for comments only}
         changes:
           type: array
@@ -10348,7 +10937,7 @@ components:
             type: object
             required: [field, from, to]
             properties:
-              field: {type: string, enum: [status, priority, assignee, title, parent]}
+              field: {type: string, description: "tags is the native label list, names in stored order joined by a comma and a space.", enum: [status, priority, assignee, title, parent, tags]}
               from: {type: [string, 'null']}
               to: {type: [string, 'null']}
     Attachment:
@@ -10394,7 +10983,7 @@ components:
           description: "Non-blocking ticket benefit guidance. An agent creating a ticket or task without estimate_hours is told to set that field. Header X-Aeon-Client set to cli names the --estimate flag instead, and changes only that sentence."
         fields:
           type: object
-          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
+          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields is the route_role and area classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
         state:
           type: string
         parent_id:
@@ -10443,6 +11032,19 @@ components:
         benefit_en: {type: string, description: "English benefit, one or two plain-language sentences"}
         benefit_de: {type: string, description: "German benefit, one or two plain-language sentences, neutral without direct address"}
         hide_from_release_notes: {type: boolean, default: false, description: Omit from public notes; does not waive completion requirements}
+    TicketRouteFields:
+      type: object
+      additionalProperties: true
+      description: Classification of who should build a ticket or task. route_role is scout, mechanical, build, build-hard, or review-gate. area is backend, frontend, full-stack, infra, design, or docs. The server derives source from the authenticated principal (person or agent) and sets by and at. A supplied source must match the caller. by and at cannot impersonate another principal. Null clears one field and its provenance; an unchanged value keeps its provenance. Model names are not stored. Display resolves the pair through the model registry, and a missing route is null.
+      properties:
+        route_role: {type: [string, 'null'], enum: [scout, mechanical, build, build-hard, review-gate, null]}
+        route_role_source: {type: [string, 'null'], enum: [agent, person, null]}
+        route_role_by: {type: [string, 'null'], format: uuid, readOnly: true}
+        route_role_at: {type: [string, 'null'], format: date-time, readOnly: true}
+        area: {type: [string, 'null'], enum: [backend, frontend, full-stack, infra, design, docs, null]}
+        area_source: {type: [string, 'null'], enum: [agent, person, null]}
+        area_by: {type: [string, 'null'], format: uuid, readOnly: true}
+        area_at: {type: [string, 'null'], format: date-time, readOnly: true}
     NodeCreate:
       type: object
       required: [kind_id, title]
@@ -10464,7 +11066,7 @@ components:
           default: ''
         fields:
           type: object
-          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
+          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields is the route_role and area classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
           default: {}
         state:
           type: string
@@ -10487,7 +11089,7 @@ components:
           type: string
         fields:
           type: object
-          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
+          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields is the route_role and area classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
         state:
           type: string
     TagPatch:

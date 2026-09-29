@@ -135,7 +135,7 @@ func (m ServiceManager) Preflight(ctx context.Context, root string, receipt *Ser
 	if err != nil {
 		return err
 	}
-	if ManagedPath(m.Executable) || ManagedPath(dir) || ManagedPath(filepath.Join(dir, name)) {
+	if m.managedExecutable() || ManagedPath(dir) || ManagedPath(filepath.Join(dir, name)) {
 		return ErrDeclarative
 	}
 	if m.Platform.OS == "linux" && !filepath.IsAbs(m.Systemctl) {
@@ -164,6 +164,7 @@ func (m ServiceManager) Preflight(ctx context.Context, root string, receipt *Ser
 		if e != nil {
 			return errors.New("daemon ownership discovery unavailable")
 		}
+		physical, _ := filepath.EvalSymlinks(m.Executable)
 		for _, line := range strings.Split(string(raw), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) < 2 {
@@ -171,7 +172,7 @@ func (m ServiceManager) Preflight(ctx context.Context, root string, receipt *Ser
 			}
 			pid, parseErr := strconv.Atoi(fields[0])
 			executable := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), fields[0]))
-			if parseErr == nil && pid != os.Getpid() && executable == m.Executable {
+			if parseErr == nil && pid != os.Getpid() && (executable == m.Executable || executable == physical) {
 				return ErrServiceConflict
 			}
 		}

@@ -75,12 +75,15 @@ func rulesReceiveError(err error) error {
 	return errors.New("rules request unavailable or invalid; no receipt confirmed")
 }
 
-func rulesReceiveDo(api *client.Client, method, path, lease string, body, dest any) error {
+func rulesReceiveDo(api *client.Client, method, path, lease string, maximum int, body, dest any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	var headers map[string]string
+	if maximum <= 0 {
+		maximum = rules.MaxBytes
+	}
+	headers := map[string]string{rules.ClientMaximumHeader: strconv.Itoa(maximum)}
 	if lease != "" {
-		headers = map[string]string{"X-Aeon-Worker-Lease": lease}
+		headers["X-Aeon-Worker-Lease"] = lease
 	}
 	return api.DoWithHeaders(ctx, method, path, body, dest, headers)
 }
@@ -100,7 +103,7 @@ func rulesReceiveFetch(api *client.Client, c rules.Context, o rulesOptions, floo
 		q.Set("task_id", c.TaskID)
 	}
 	var m rules.Merged
-	err := rulesReceiveDo(api, http.MethodGet, "/api/rules/merged?"+q.Encode(), "", nil, &m)
+	err := rulesReceiveDo(api, http.MethodGet, "/api/rules/merged?"+q.Encode(), "", rules.SessionFileLimit(c.Harness), nil, &m)
 	now := time.Now().UTC()
 	if err != nil {
 		if !networkUnavailable(err) {
@@ -137,14 +140,14 @@ func rulesReceiveFetch(api *client.Client, c rules.Context, o rulesOptions, floo
 
 func rulesReceiveGeneration(api *client.Client, c rules.Context, session, agent string) error {
 	var me client.Me
-	if err := rulesReceiveDo(api, http.MethodGet, "/api/me", "", nil, &me); err != nil {
+	if err := rulesReceiveDo(api, http.MethodGet, "/api/me", "", 0, nil, &me); err != nil {
 		return rulesReceiveError(err)
 	}
 	if me.Principal.ID != c.AgentID || me.Principal.Name != agent || me.Principal.Kind != "agent" || me.Tenant.ID != c.TenantID {
 		return errors.New("rules receiving caller context rejected")
 	}
 	var s harness.Session
-	if err := rulesReceiveDo(api, http.MethodGet, harnessPath(c.ProjectID, session), "", nil, &s); err != nil {
+	if err := rulesReceiveDo(api, http.MethodGet, harnessPath(c.ProjectID, session), "", 0, nil, &s); err != nil {
 		return rulesReceiveError(err)
 	}
 	h := s.Harness
@@ -225,7 +228,7 @@ func (rt *runtime) sessionRulesReceive(project, agent string, o rulesOptions, r 
 			q.Set("task_id", c.TaskID)
 		}
 		var current rules.Merged
-		if err = rulesReceiveDo(api, http.MethodGet, "/api/rules/merged?"+q.Encode(), "", nil, &current); err != nil {
+		if err = rulesReceiveDo(api, http.MethodGet, "/api/rules/merged?"+q.Encode(), "", rules.SessionFileLimit(c.Harness), nil, &current); err != nil {
 			return rulesReceiveError(err)
 		}
 		if err = rules.ValidateMerged(current, c, time.Now().UTC()); err != nil {
@@ -298,7 +301,7 @@ func (rt *runtime) sessionRulesReceive(project, agent string, o rulesOptions, r 
 	}
 	err = rules.ValidateMerged(state.Bundle, c, time.Now().UTC())
 	if err == nil {
-		err = rulesReceiveDo(api, http.MethodPost, harnessPath(c.ProjectID, r.Session)+"/rules-receipts", lease, state.Request, &recorded)
+		err = rulesReceiveDo(api, http.MethodPost, harnessPath(c.ProjectID, r.Session)+"/rules-receipts", lease, 0, state.Request, &recorded)
 	}
 	if err == nil {
 		a := recorded.Receipt

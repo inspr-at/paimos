@@ -11,6 +11,8 @@ import { useAgents } from '../../stores/agents'
 import { useCapacity } from '../../stores/capacity'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import CapacityGauge from './CapacityGauge.vue'
+import CapacityLegend from './CapacityLegend.vue'
 import HarnessMark from './HarnessMark.vue'
 import PlanSentence from './PlanSentence.vue'
 import ScheduleEditor from './ScheduleEditor.vue'
@@ -255,18 +257,10 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
             <span v-if="row.host" class="chip host">{{ row.host }}</span>
           </div>
           <div class="gauge-cell">
-            <div
-              v-if="row.primary" class="gauge" :class="{ frozen: gaugeOf(row, planOf(row)).frozen, used: modeOf(row) === 'used' }" role="meter" aria-valuemin="0" aria-valuemax="100"
-              :aria-valuenow="Math.round(figure(row))" :aria-label="gaugeLabel(row)" :data-tip="gaugeLabel(row)"
-            >
-              <div class="track">
-                <i class="g-later" :style="{ left: '0', width: `${gaugeOf(row, planOf(row)).later}%` }" />
-                <i class="g-today" :style="{ left: `${gaugeOf(row, planOf(row)).later}%`, width: `${gaugeOf(row, planOf(row)).today}%` }" />
-                <i class="g-spent" :style="{ left: `${row.primary.remaining_percent}%`, width: `${gaugeOf(row, planOf(row)).spent}%` }" />
-              </div>
-              <b v-if="gaugeOf(row, planOf(row)).tick !== null" class="g-tick" :style="{ left: `${gaugeOf(row, planOf(row)).tick}%` }" />
-            </div>
-            <div v-else class="gauge empty"><div class="track" /></div>
+            <CapacityGauge
+              :gauge="row.primary ? gaugeOf(row, planOf(row)) : null" :left="row.primary?.remaining_percent" :value="figure(row)" :used="modeOf(row) === 'used'"
+              :label="gaugeLabel(row)" :ahead="!!planOf(row)?.ahead" :dim="row.state !== 'live' && row.state !== 'unread'"
+            />
             <div v-if="row.five" class="win5">5-hour window <b>{{ Math.round(modeOf(row) === 'used' ? 100 - row.five.remaining_percent : row.five.remaining_percent) }}% {{ modeOf(row) }}</b> · resets {{ when(row.five.reading.resets_at, now) }}</div>
           </div>
           <button
@@ -291,10 +285,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
     </div>
 
     <div v-if="pools.length" class="cap-foot">
-      <span class="legend"><span class="sw"><i class="g-today" /></span>today's share</span>
-      <span class="legend"><span class="sw"><i class="g-later" /></span>later days</span>
-      <span class="legend"><span class="sw"><i class="g-spent" /></span>used today</span>
-      <span class="legend"><span class="sw tick" />stop here tonight</span>
+      <CapacityLegend />
       <span class="fine">Your own use counts toward today's share too. Each account ends at 0% at its reset.</span>
       <span class="gauge-mode">
         <span id="gauge-mode-lbl" class="sr-only">Gauges show</span>
@@ -406,26 +397,8 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
 .win5 { margin-top: 5px; color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .win5 b { color: var(--ink-2); font-weight: 600; }
 
-/* The gauge: what is left, today's share at its end, the stop tick, and today's spend as a hatch.
-   "% used" mirrors it, so the empty part on the left is what has been used. */
-.gauge { position: relative; height: 14px; min-width: 0; }
-.gauge.used { transform: scaleX(-1); }
-.track { position: absolute; inset: 3px 0; border-radius: 999px; background: var(--track); overflow: hidden; box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); }
-.track i { position: absolute; top: 0; bottom: 0; }
-.g-later { background: color-mix(in srgb, var(--teal) 32%, transparent); }
-.g-today { background: linear-gradient(90deg, color-mix(in srgb, var(--teal) 88%, var(--aqua)), var(--teal)); }
-.g-spent { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--teal) 55%, transparent) 0 1.5px, transparent 1.5px 4.5px); }
-.acct.ahead .g-spent { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--gold) 75%, transparent) 0 1.5px, transparent 1.5px 4.5px); }
-.g-tick { position: absolute; top: 0; width: 2px; height: 14px; margin-left: -1px; border-radius: 2px; background: var(--ink); box-shadow: 0 0 0 1.5px var(--surface-raised); }
-.acct.ahead .g-tick { background: var(--gold-ink); }
-.acct.dim .g-later, .gauge.frozen .g-later { background: color-mix(in srgb, var(--ink-3) 30%, transparent); }
-.gauge.frozen { opacity: .6; }
-
+/* The gauge itself is CapacityGauge, shared with the Usage page. */
 .cap-foot { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 11px 20px 13px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 12px; }
-.legend { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
-.sw { position: relative; display: inline-block; width: 18px; height: 8px; border-radius: 999px; overflow: hidden; background: var(--track); }
-.sw i { position: absolute; inset: 0; }
-.sw.tick { width: 2px; height: 12px; border-radius: 2px; background: var(--ink); overflow: visible; }
 .fine { margin-left: auto; }
 .gauge-mode .seg button { height: 24px; min-width: 0; padding: 0 9px; font-size: 11.5px; }
 

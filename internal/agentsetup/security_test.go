@@ -18,6 +18,48 @@ type executorFunc func(context.Context, Command) ([]byte, error)
 
 func (f executorFunc) Run(c context.Context, v Command) ([]byte, error) { return f(c, v) }
 
+func TestDiscoveryOffersOnlyInstalledSignedInHarnesses(t *testing.T) {
+	home := physicalTemp(t)
+	bin := filepath.Join(home, ".nix-profile", "bin")
+	if err := os.MkdirAll(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"claude", "codex", "cursor-agent"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("fixture"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := Discovery{Home: home, LookPath: func(name string) (string, error) {
+		if name == "claude" || name == "codex" || name == "cursor-agent" {
+			return filepath.Join(bin, name), nil
+		}
+		return "", os.ErrNotExist
+	}, Executor: executorFunc(func(_ context.Context, c Command) ([]byte, error) {
+		if strings.Join(c.Args, " ") == "--version" {
+			return []byte("1.2.3"), nil
+		}
+		switch filepath.Base(c.Path) {
+		case "claude":
+			return []byte(`{"loggedIn":true,"email":"fixture@example.test","authMethod":"oauth"}`), nil
+		case "cursor-agent":
+			return []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":"fixture","email":"cursor@example.test"}}`), nil
+		case "codex":
+			return nil, errors.New("not signed in")
+		}
+		t.Fatal("unexpected command")
+		return nil, errors.New("unexpected")
+	})}
+	candidates := d.Available(t.Context(), "")
+	if len(candidates) != 2 || candidates[0].Harness != "claude" || candidates[1].Harness != "cursor" {
+		t.Fatalf("offered unexpected harnesses: %d", len(candidates))
+	}
+	for _, c := range candidates {
+		if !c.Managed || c.Login != "signed_in" || !filepath.IsAbs(c.Path) {
+			t.Fatal("Nix candidate not pinned and identified")
+		}
+	}
+}
+
 func TestDiscoveryNeverUsesCredentialFilesAndChecksIdentity(t *testing.T) {
 	home := physicalTemp(t)
 	path := filepath.Join(home, "fake-vendor")
@@ -264,6 +306,19 @@ func TestTypedProgressDistinguishesMissingLoginAndUnsafeVerification(t *testing.
 	if err != nil || p.Stage != "login_required" {
 		t.Fatal("missing login hidden")
 	}
+	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", HarnessFailed: true, LoginRequired: true}
+	p, err = e.Status(t.Context())
+	if err != nil || p.Stage != "blocked" || !strings.Contains(p.Action, "harness failed to start") {
+		t.Fatal("startup failure presented as login required", err)
+	}
+	if err = e.SyncFences(t.Context()); err != nil || a.progress == nil || a.progress.State != "setup_failed" || a.progress.ErrorCode != "installation_failed" {
+		t.Fatal("startup failure lost during reconciliation", err)
+	}
+	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", HarnessFailed: true, ProfilePermissions: true}
+	p, err = e.Status(t.Context())
+	if err != nil || p.Stage != "blocked" || !strings.Contains(p.Action, "permissions") || strings.Contains(p.Action, "installation") {
+		t.Fatal("profile permissions got installation hint", err)
+	}
 	a.view.Enrollments[0].VerificationRunID = otherAccount
 	a.view.Enrollments[0].VerificationState = "queued"
 	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", Ready: true, VerificationUnavailable: []string{testAccount}}
@@ -289,5 +344,21 @@ func TestTypedProgressDistinguishesMissingLoginAndUnsafeVerification(t *testing.
 	p, err = e.Status(t.Context())
 	if err != nil || p.Stage != "verification_unavailable" {
 		t.Fatal("server-reported unavailable verification was hidden")
+	}
+}
+
+func TestStatusSurfacesClaudeDependencyAndRepinFailures(t *testing.T) {
+	for _, issue := range []string{"Claude dependencies changed/invalid: run aeon-agentd repin --harness claude", "Claude repin pending: waiting for active Claude runs to exit", "Claude CLI executable changed or unavailable; restore the approved physical executable, then retry"} {
+		e, a, l, o, _ := engineFixture(t)
+		approveFixture(t, e, a, o)
+		l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "unconfirmed", HarnessErrors: map[string]string{"claude": issue}}
+		p, err := e.Status(t.Context())
+		if err != nil || p.Stage != "blocked" || p.Action != issue || p.LocalProcesses != "unconfirmed" {
+			t.Fatal("specific Claude failure was hidden", p, err)
+		}
+		progress := observedProgress(a.view, l.states[""])
+		if progress.State != "setup_failed" || progress.ErrorCode != "installation_failed" {
+			t.Fatal("dependency failure reported as sign-in or ready")
+		}
 	}
 }
