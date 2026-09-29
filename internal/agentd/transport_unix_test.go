@@ -22,6 +22,10 @@ func TestLocalSocketAuthAndBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(short)
+	short, err = filepath.EvalSymlinks(short)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chmod(short, 0700); err != nil {
 		t.Fatal(err)
 	}

@@ -487,6 +487,26 @@ sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 
 Licence: AGPL-3.0-only.
 
+### Paired daemon socket paths
+
+Paired mode uses `<setup-root>/daemon/agentd.sock`. If that exceeds the
+platform's socket path budget (100 bytes on macOS, 104 on Linux, allowing for
+`sun_path` overhead), it uses `~/.aeon/run/<state-hash>.sock`, with 16 hex
+characters identifying the daemon state directory. Both fallback directories
+are owned by the user and mode 0700; symlinks and unsafe existing directories
+are rejected. The selected socket is recorded privately in `daemon/control.json`.
+Attach, setup/status and capacity clients read that reference; local control
+can do the same with `control --setup-root PATH` (exclusive with `--socket`).
+Existing generation-specific socket references remain readable while their
+listener exists. No pairing data migration is required.
+
+`pair`, `setup` and paired `serve` reject an unrepresentable path before
+creating pairing state or contacting the instance. Choose a shorter setup
+root (`--state-root` for pair/setup, `--setup-root` for serve). A lifetime lock
+protects the stable listener. Crash recovery removes only the socket and token
+inodes recorded for that setup and daemon; unrelated files are left untouched.
+The private token and local control authorization rules remain unchanged.
+
 ### Harness interpreter pins
 
 Guided setup pins Node's physical path and version privately for npm-launched
