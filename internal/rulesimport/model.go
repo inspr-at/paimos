@@ -93,7 +93,8 @@ type SourceFile struct {
 // SourceRef identifies normalized parsing lines (BOM removed, CR/CRLF to LF).
 // FileSHA256 always identifies the exact raw file bytes, including BOM/newlines.
 // HeadingPath is the heading titles from the document title down to the rule's
-// section, joined with " / ".
+// section, joined with " / ". A rule directly under the document title keeps
+// the separator and an empty section, so a retitle still lines up.
 type SourceRef struct {
 	Path        string `json:"path"`
 	HeadingPath string `json:"heading_path"`

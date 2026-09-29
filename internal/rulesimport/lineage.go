@@ -286,14 +286,25 @@ func betterEdge(a, b lineageEdge) bool {
 }
 
 // headingsAlign compares the section path under the document title. A retitle
-// keeps that path and must not look like a brand-new rule.
+// keeps that path and must not look like a brand-new rule. The path below the
+// title is empty when the rule sits directly under the title; those rules still
+// align. A path with no separator is a section in a document that has no title
+// and matches only when the whole path is unchanged.
 func headingsAlign(left, right string) bool {
 	if left == right {
 		return true
 	}
-	_, lRest, lok := strings.Cut(left, " / ")
-	_, rRest, rok := strings.Cut(right, " / ")
-	return lok && rok && lRest != "" && lRest == rRest
+	lRest, lok := sectionBelowTitle(left)
+	rRest, rok := sectionBelowTitle(right)
+	return lok && rok && lRest == rRest
+}
+
+func sectionBelowTitle(path string) (string, bool) {
+	_, rest, ok := strings.Cut(path, " / ")
+	if !ok {
+		return "", false
+	}
+	return rest, true
 }
 
 func lineageAligned(a, b draftLineage) (aligned, samePos bool) {

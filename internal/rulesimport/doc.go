@@ -18,8 +18,8 @@
 // source revision. A rule marked edited here, or whose stored content diverged
 // from that baseline, is left in place and reported as a conflict. Unannotated
 // rules whose text changed are matched by source path, the heading path below
-// the document title, and position or similarity; an ambiguous replacement is
-// reported and not written. Unrelated existing draft rules are preserved.
+// the document title (empty when the rule sits directly under that title), and
+// position or similarity; an ambiguous replacement is reported and not written. Unrelated existing draft rules are preserved.
 // Publication is never requested.
 //
 // AR1 has no on-demand placement field. Packs are attached as draft details and

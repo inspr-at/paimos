@@ -230,6 +230,48 @@ func TestBaselineCoversIdentityAndSourceRevision(t *testing.T) {
 	}
 }
 
+func TestRetitleDirectlyUnderDocumentTitleUpdatesRule(t *testing.T) {
+	dir := t.TempDir()
+	path := writeDoc(t, dir, "AGENTS.md", "# Repo rules\n\n- Never force-push.\n  Why: shared history.\n")
+	first := mustBuild(t, Request{Context: ContextProject, Files: []string{path}})
+	if len(first.Rules) != 1 || first.Rules[0].Sources[0].HeadingPath != "Repo rules / " {
+		t.Fatalf("heading under title %+v", first.Rules)
+	}
+	mapped, err := MapDraft(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := &DraftSet{
+		ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Name: "Imported", Revision: 4,
+		Scope: DraftScope{Layer: LayerProject}, Rules: mapped,
+	}
+	var puts int
+	api := serveDraft(t, current, &puts)
+	if err := os.WriteFile(path, []byte("# Updated repo rules\n\n- Never force-push the default branch.\n  Why: shared history.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second := mustBuild(t, Request{Context: ContextProject, Files: []string{path}})
+	if len(second.Rules) != 1 || second.Rules[0].Sources[0].HeadingPath != "Updated repo rules / " {
+		t.Fatalf("retitled heading %+v", second.Rules)
+	}
+	result, err := ApplyDraft(context.Background(), api, second, Target{SetID: current.ID, Revision: current.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Added != 0 || result.Updated != 1 || result.Unchanged != 0 || puts != 1 || len(current.Rules) != 1 || current.Rules[0].Text != "Never force-push the default branch." {
+		t.Fatalf("retitle under the title appended the changed rule: %+v rules=%+v", result, current.Rules)
+	}
+}
+
+func TestHeadingsAlignIncludesEmptySection(t *testing.T) {
+	if !headingsAlign("Old title / ", "New title / ") || !headingsAlign("Old title / Git", "New title / Git") {
+		t.Fatal("retitle lost the section below the title")
+	}
+	if headingsAlign("Old title / ", "New title / Git") || headingsAlign("Git", "Review") || headingsAlign("Git / Safety", "Review") {
+		t.Fatal("unrelated heading paths aligned")
+	}
+}
+
 func TestRetitleMatchesHeadingBelowDocumentTitle(t *testing.T) {
 	dir := t.TempDir()
 	path := writeDoc(t, dir, "AGENTS.md", "# Repo rules\n\n## Git\n- Never force-push.\n  Why: shared history.\n")

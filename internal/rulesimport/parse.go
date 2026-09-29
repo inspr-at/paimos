@@ -13,7 +13,6 @@ import (
 )
 
 var (
-	headingRE       = regexp.MustCompile(`^(#{1,6})\s+(.*?)\s*$`)
 	listRE          = regexp.MustCompile(`^(\s*)([-*]|\d+\.)\s+(.*)$`)
 	explicitIDRE    = regexp.MustCompile(`^<!--\s*aeon-rule:\s*([a-z0-9][a-z0-9._-]{0,63})\s*-->$`)
 	looseIDRE       = regexp.MustCompile(`^<!--\s*aeon-rule:`)
@@ -76,6 +75,7 @@ type parser struct {
 	file    SourceFile
 	section string
 
+	headings   map[int]mdHeading
 	stack      []headingFrame
 	h1         string
 	setSlug    string
@@ -104,6 +104,7 @@ type parser struct {
 func parseDocument(file SourceFile, text, section string) (fileParse, error) {
 	p := &parser{
 		lines:    splitLines(text),
+		headings: indexATXHeadings(text),
 		file:     file,
 		section:  section,
 		setSlug:  "preamble",
@@ -143,8 +144,8 @@ func (p *parser) scan() {
 			p.noteID(n, id, trim)
 			continue
 		}
-		if headingRE.MatchString(line) && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
-			p.heading(n, line)
+		if h, ok := p.headings[n]; ok && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			p.heading(n, h.level, h.title)
 			continue
 		}
 		if m := listRE.FindStringSubmatch(strings.ReplaceAll(line, "\t", "  ")); m != nil {
@@ -233,12 +234,10 @@ func explicitID(trim string) (string, bool) {
 	return "", false
 }
 
-func (p *parser) heading(n int, line string) {
+func (p *parser) heading(n, level int, title string) {
 	p.flush(n - 1)
 	p.dropPending(n)
-	m := headingRE.FindStringSubmatch(line)
-	level := len(m[1])
-	title := strings.TrimSpace(m[2])
+	title = strings.TrimSpace(title)
 	if level == 1 {
 		p.stack = nil
 		p.h1 = title
@@ -560,7 +559,9 @@ func (p *parser) headingPath() string {
 		return p.setTitle
 	}
 	if len(p.stack) == 0 {
-		return p.h1
+		// The separator stays so the empty section below the title is visible
+		// to lineage matching after the title itself changes.
+		return p.h1 + " / "
 	}
 	return p.h1 + " / " + p.setTitle
 }
