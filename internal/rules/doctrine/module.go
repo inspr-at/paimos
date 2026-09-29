@@ -32,10 +32,9 @@ import (
 )
 
 // Options configure the server side. CredentialsDir is
-// AEON_DOCTRINE_CREDENTIALS_DIR; GitHubAPI and Client are for tests.
+// AEON_DOCTRINE_CREDENTIALS_DIR; Client allows test transport injection.
 type Options struct {
 	CredentialsDir string
-	GitHubAPI      string
 	Client         *http.Client
 }
 
@@ -43,14 +42,13 @@ type Options struct {
 type Module struct {
 	pool        *pgxpool.Pool
 	credentials Credentials
-	api         string
 	client      *http.Client
 }
 
 var _ httpapi.Module = (*Module)(nil)
 
 func New(pool *pgxpool.Pool, opts Options) *Module {
-	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, api: opts.GitHubAPI, client: opts.Client}
+	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client}
 }
 
 // fetchTimeout bounds one resolve or index against the repository host.
@@ -143,7 +141,7 @@ type Layer struct {
 
 // SourceView is one repository at its pin. State is ready (indexed at the
 // pinned commit), not_indexed (never fetched at this pin) or failed (the last
-// fetch at this pin failed; Error says why).
+// fetch at this pin failed or its credential grant is unavailable; Error says why).
 type SourceView struct {
 	ID            string     `json:"id"`
 	Repository    string     `json:"repository"`
@@ -219,6 +217,16 @@ func (m *Module) load(ctx context.Context, p tenant.Principal, permission string
 			return err
 		}
 		for _, s := range sources {
+			if s.CredentialRef != "" {
+				if err := m.credentials.authorize(s.CredentialRef, p.TenantID, s.Repository); err != nil {
+					// A revoked grant also hides cached bytes without preventing
+					// the owner from managing the source or reading other sources.
+					s.IndexError, s.IndexedAt = ErrCredential.Error(), nil
+					s.Skipped = nil
+					all = append(all, loaded{source: s})
+					continue
+				}
+			}
 			files, err := cachedFiles(ctx, tx, s)
 			if err != nil {
 				return err
@@ -284,20 +292,20 @@ func (in SourceInput) validate() error {
 // reader builds the repository reader for one fetch, with the token the
 // source's credential reference resolves to (none for a public source
 // without a reference).
-func (m *Module) reader(credentialRef string) (Reader, error) {
+func (m *Module) reader(tenantID, repository, credentialRef string) (Reader, error) {
 	token := ""
 	if credentialRef != "" {
 		var err error
-		if token, err = m.credentials.Token(credentialRef); err != nil {
+		if token, err = m.credentials.Token(credentialRef, tenantID, repository); err != nil {
 			return nil, err
 		}
 	}
-	return &GitHub{API: m.api, Token: token, Client: m.client}, nil
+	return &GitHub{Token: token, Client: m.client}, nil
 }
 
 // pin resolves the input to a commit on the repository host.
-func (m *Module) pin(ctx context.Context, in SourceInput) (Commit, error) {
-	reader, err := m.reader(in.CredentialRef)
+func (m *Module) pin(ctx context.Context, tenantID string, in SourceInput) (Commit, error) {
+	reader, err := m.reader(tenantID, in.Repository, in.CredentialRef)
 	if err != nil {
 		return Commit{}, err
 	}
@@ -336,7 +344,7 @@ func (m *Module) create(r *http.Request, p tenant.Principal) (any, error) {
 	if err := m.tx(ctx, p, "settings.manage", func(tx pgx.Tx) error { return nil }); err != nil {
 		return nil, err
 	}
-	commit, err := m.pin(ctx, in)
+	commit, err := m.pin(ctx, p.TenantID, in)
 	if err != nil {
 		return nil, err
 	}
@@ -396,7 +404,7 @@ func (m *Module) update(r *http.Request, p tenant.Principal) (any, error) {
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
-	commit, err := m.pin(ctx, in)
+	commit, err := m.pin(ctx, p.TenantID, in)
 	if err != nil {
 		return nil, err
 	}
@@ -477,7 +485,7 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 	}); err != nil {
 		return
 	}
-	files, skipped, fetchErr := m.fetch(ctx, s)
+	files, skipped, fetchErr := m.fetch(ctx, p.TenantID, s)
 	err := m.tx(ctx, p, "settings.manage", func(tx pgx.Tx) error {
 		current, err := getSource(ctx, tx, id, true)
 		if err != nil {
@@ -502,8 +510,8 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 	}
 }
 
-func (m *Module) fetch(ctx context.Context, s Source) ([]File, []Skip, error) {
-	reader, err := m.reader(s.CredentialRef)
+func (m *Module) fetch(ctx context.Context, tenantID string, s Source) ([]File, []Skip, error) {
+	reader, err := m.reader(tenantID, s.Repository, s.CredentialRef)
 	if err != nil {
 		return nil, nil, err
 	}

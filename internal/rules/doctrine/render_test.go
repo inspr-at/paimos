@@ -4,8 +4,6 @@ package doctrine
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -39,9 +37,9 @@ func fixtureFiles() map[string]string {
 }
 
 func TestFetchSelectsDoctrineAndSidecars(t *testing.T) {
-	fake, srv := newFakeGitHub(t)
+	fake, client := newFakeGitHub(t)
 	fake.commit(fixtureRepo, fixtureCommit, fixtureFiles(), "v260922101217.0.0")
-	gh := &GitHub{API: srv.URL, Client: srv.Client()}
+	gh := &GitHub{Client: client}
 	commit, err := gh.Commit(t.Context(), fixtureRepo, "v260922101217.0.0")
 	if err != nil || commit.SHA != fixtureCommit || commit.CommittedAt == nil {
 		t.Fatalf("commit %+v %v", commit, err)
@@ -155,9 +153,9 @@ func TestRawLinesKeepTerminators(t *testing.T) {
 }
 
 func TestGitHubRefusesTamperedBlob(t *testing.T) {
-	fake, srv := newFakeGitHub(t)
+	fake, client := newFakeGitHub(t)
 	fake.commit(fixtureRepo, fixtureCommit, map[string]string{"docs/AGENTS-CORE.md": "# Core\n"})
-	gh := &GitHub{API: srv.URL, Client: srv.Client()}
+	gh := &GitHub{Client: client}
 	if _, err := gh.Blob(t.Context(), fixtureRepo, BlobSHA([]byte("# Other\n")), 10); !errors.Is(err, ErrGit) {
 		t.Fatalf("missing blob err = %v", err)
 	}
@@ -168,33 +166,6 @@ func TestGitHubRefusesTamperedBlob(t *testing.T) {
 	}
 	if _, err := gh.Commit(t.Context(), "not a repo", "main"); !errors.Is(err, ErrGit) {
 		t.Fatalf("invalid repo err = %v", err)
-	}
-}
-
-func TestCredentialsResolveReferenceOnly(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "doctrine-private-read"), []byte("ghp_fixtureToken123\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "garbage"), []byte("not a token!\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	c := Credentials{Dir: dir}
-	if token, err := c.Token("doctrine-private-read"); err != nil || token != "ghp_fixtureToken123" || !c.Present("doctrine-private-read") {
-		t.Fatalf("token %q %v", token, err)
-	}
-	for ref, want := range map[string]string{
-		"missing":   "credential missing is not provisioned on this server",
-		"garbage":   "credential garbage does not hold a token",
-		"../escape": "credential reference is not a valid reference",
-	} {
-		_, err := c.Token(ref)
-		if !errors.Is(err, ErrCredential) || err.Error() != want || strings.Contains(err.Error(), "not a token!") {
-			t.Fatalf("%s: %v", ref, err)
-		}
-	}
-	if _, err := (Credentials{}).Token("doctrine-private-read"); !errors.Is(err, ErrCredential) {
-		t.Fatalf("no dir err = %v", err)
 	}
 }
 

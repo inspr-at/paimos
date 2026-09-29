@@ -3,12 +3,16 @@
 package doctrine
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 var (
@@ -16,66 +20,89 @@ var (
 	tokenPattern         = regexp.MustCompile(`^[A-Za-z0-9_.-]{8,255}$`)
 )
 
-// ErrCredential is a credential reference that cannot be used. Its message
-// names the reference only, never a file's content.
+// ErrCredential does not disclose whether a reference exists or why it was denied.
 var ErrCredential = errors.New("credential unavailable")
 
 // Credentials resolves a credential reference to a read-only token. Aeon
 // stores only the reference (a name such as doctrine-private-read). The token
 // is a host-provisioned file named after it in Dir, the server's
 // AEON_DOCTRINE_CREDENTIALS_DIR, read at fetch time and held for that fetch.
+// The operator must also provision <ref>.allowlist.json with explicit grants
+// pairing tenant_id and repository. Tenant configuration never grants access.
 type Credentials struct{ Dir string }
 
-// Token reads the token for ref. The first line of the file is the token.
-func (c Credentials) Token(ref string) (string, error) {
+// Token authorizes the tenant/repository pair before reading the token for ref.
+func (c Credentials) Token(ref, tenantID, repository string) (string, error) {
+	if err := c.authorize(ref, tenantID, repository); err != nil {
+		return "", err
+	}
 	file, err := c.file(ref)
 	if err != nil {
 		return "", err
 	}
 	f, err := os.Open(file)
 	if err != nil {
-		return "", credentialFail(ref, "is not provisioned on this server")
+		return "", ErrCredential
 	}
 	defer f.Close()
 	raw, err := io.ReadAll(io.LimitReader(f, 4097))
 	if err != nil || len(raw) > 4096 {
-		return "", credentialFail(ref, "cannot be read")
+		return "", ErrCredential
 	}
 	token := strings.TrimSpace(strings.SplitN(string(raw), "\n", 2)[0])
 	if !tokenPattern.MatchString(token) {
-		return "", credentialFail(ref, "does not hold a token")
+		return "", ErrCredential
 	}
 	return token, nil
 }
 
-// Present reports whether ref names a readable file, without reading it.
-func (c Credentials) Present(ref string) bool {
+// authorize also protects cached doctrine when the operator revokes a grant.
+func (c Credentials) authorize(ref, tenantID, repository string) error {
 	file, err := c.file(ref)
-	if err != nil {
-		return false
+	if err != nil || !workorders.UUID(tenantID) || !repositoryPattern.MatchString(repository) {
+		return ErrCredential
 	}
-	info, err := os.Stat(file)
-	return err == nil && info.Mode().IsRegular()
+	f, err := os.Open(file + ".allowlist.json")
+	if err != nil {
+		return ErrCredential
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, (64<<10)+1))
+	if err != nil || len(raw) > 64<<10 {
+		return ErrCredential
+	}
+	var policy struct {
+		Grants []struct {
+			TenantID   string `json:"tenant_id"`
+			Repository string `json:"repository"`
+		} `json:"grants"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&policy); err != nil || dec.Decode(new(any)) != io.EOF {
+		return ErrCredential
+	}
+	allowed := false
+	for _, grant := range policy.Grants {
+		if !workorders.UUID(grant.TenantID) || !repositoryPattern.MatchString(grant.Repository) {
+			return ErrCredential
+		}
+		if strings.EqualFold(grant.TenantID, tenantID) && strings.EqualFold(grant.Repository, repository) {
+			allowed = true
+		}
+	}
+	if !allowed {
+		return ErrCredential
+	}
+	return nil
 }
 
 func (c Credentials) file(ref string) (string, error) {
 	if !credentialRefPattern.MatchString(ref) {
-		return "", credentialFail(ref, "is not a valid reference")
+		return "", ErrCredential
 	}
 	if c.Dir == "" || !filepath.IsAbs(c.Dir) {
-		return "", credentialFail(ref, "cannot be resolved: this server has no credential directory")
+		return "", ErrCredential
 	}
 	return filepath.Join(c.Dir, ref), nil
-}
-
-type credentialError struct{ msg string }
-
-func (e *credentialError) Error() string { return e.msg }
-func (e *credentialError) Unwrap() error { return ErrCredential }
-
-func credentialFail(ref, why string) error {
-	if !credentialRefPattern.MatchString(ref) {
-		ref = "reference"
-	}
-	return &credentialError{msg: "credential " + ref + " " + why}
 }

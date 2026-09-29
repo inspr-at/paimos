@@ -32,7 +32,7 @@ type Config struct {
 	// FilesDir is the attachment store root (AEON_FILES_DIR, default data/files).
 	FilesDir string
 	// DoctrineCredentialsDir holds host-provisioned read-only tokens for private
-	// doctrine repositories, one file per credential reference
+	// doctrine repositories, one token file and <ref>.allowlist.json per reference
 	// (AEON_DOCTRINE_CREDENTIALS_DIR, AEON-318). Aeon stores only the names.
 	DoctrineCredentialsDir string
 }

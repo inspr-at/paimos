@@ -45,10 +45,9 @@ type Reader interface {
 }
 
 // GitHub reads through the GitHub REST API. Token is a read-only credential
-// resolved from a reference for this one fetch; it is sent only to API and
+// resolved from a reference for this one fetch; it is sent only to api.github.com and
 // never logged, stored or put into an error.
 type GitHub struct {
-	API    string // default https://api.github.com
 	Token  string
 	Client *http.Client
 }
@@ -70,15 +69,16 @@ const (
 )
 
 func (g *GitHub) get(ctx context.Context, path, what string, limit int64, into any) error {
-	base := g.API
-	if base == "" {
-		base = "https://api.github.com"
+	// The only allowed origin is fixed. Tests inject a transport, never an origin.
+	const base = "https://api.github.com"
+	client := http.Client{Timeout: 20 * time.Second}
+	if g.Client != nil {
+		client = *g.Client
 	}
-	client := g.Client
-	if client == nil {
-		client = &http.Client{Timeout: 20 * time.Second}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+path, nil)
+	// Copy the client so a supplied client's policy cannot weaken this boundary,
+	// and shared clients are not mutated. Redirect bodies/locations are not used.
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
 	if err != nil {
 		return gitFail("the %s request could not be built", what)
 	}

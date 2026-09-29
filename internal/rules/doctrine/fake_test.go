@@ -26,11 +26,17 @@ type fakeGitHub struct {
 	down    bool
 }
 
-func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
+func newFakeGitHub(t *testing.T) (*fakeGitHub, *http.Client) {
 	f := &fakeGitHub{commits: map[string]map[string]string{}, refs: map[string]string{}, private: map[string]bool{}}
-	srv := httptest.NewServer(f)
-	t.Cleanup(srv.Close)
-	return f, srv
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Scheme != "https" || r.URL.Host != "api.github.com" {
+			t.Fatal("request left the fixed GitHub origin")
+		}
+		w := httptest.NewRecorder()
+		f.ServeHTTP(w, r)
+		return w.Result(), nil
+	})}
+	return f, client
 }
 
 func (f *fakeGitHub) commit(repo, sha string, files map[string]string, refs ...string) {

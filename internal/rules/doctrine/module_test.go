@@ -94,7 +94,7 @@ func find(l Layer, repo string) *SourceView {
 
 func TestDoctrineLayerEndToEnd(t *testing.T) {
 	d := dbtest.Open(t)
-	fake, srv := newFakeGitHub(t)
+	fake, client := newFakeGitHub(t)
 	fake.commit(fixtureRepo, fixtureCommit, fixtureFiles(), "v260922101217.0.0")
 	next := fixtureFiles()
 	next["docs/AGENTS-KERNEL.md"] = strings.Replace(fixtureKernel, "Small commits.", "Small, reviewed commits.", 1)
@@ -107,10 +107,11 @@ func TestDoctrineLayerEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	New(d.App, Options{CredentialsDir: creds, GitHubAPI: srv.URL, Client: srv.Client()}).Mount(mux)
+	New(d.App, Options{CredentialsDir: creds, Client: client}).Mount(mux)
 	f := doctrineFixture{t: t, d: d, mux: mux, fake: fake}
 
 	tid := f.tenant("doctrine-a")
+	allowCredential(t, creds, "doctrine-private-read", tid, privateRepo)
 	owner := f.principal(tid, "person", "owner", "admin", nil, "")
 	member := f.principal(tid, "person", "member", "member", nil, "")
 	viewer := f.principal(tid, "person", "viewer", "viewer", nil, "")
@@ -155,7 +156,7 @@ func TestDoctrineLayerEndToEnd(t *testing.T) {
 	private := map[string]any{"repository": privateRepo, "visibility": "private", "ref": "v1"}
 	f.call(owner, "POST", "/api/rules/doctrine/sources", private, 400)
 	private["credential_ref"] = "not-provisioned"
-	if body := f.call(owner, "POST", "/api/rules/doctrine/sources", private, 422); !strings.Contains(string(body), "credential not-provisioned is not provisioned") {
+	if body := f.call(owner, "POST", "/api/rules/doctrine/sources", private, 422); !strings.Contains(string(body), "credential unavailable") {
 		t.Fatalf("%s", body)
 	}
 	private["credential_ref"] = "doctrine-private-read"
@@ -206,9 +207,23 @@ func TestDoctrineLayerEndToEnd(t *testing.T) {
 		t.Fatalf("retry %+v", again)
 	}
 
+	// The same tenant cannot use the reference for a different repository,
+	// including public sources and updates (visibility is not an auth bypass).
+	calls := fake.calls
+	wrongRepo := map[string]any{"repository": fixtureRepo, "visibility": "public", "ref": "v260929100000.0.0", "credential_ref": "doctrine-private-read"}
+	f.call(owner, "POST", "/api/rules/doctrine/sources", wrongRepo, 422)
+	f.call(owner, "PUT", "/api/rules/doctrine/sources/"+src.ID, wrongRepo, 422)
+	if fake.calls != calls {
+		t.Fatal("a credential reached a repository outside its grant")
+	}
+
 	// Another workspace sees and changes nothing of this one.
 	other := f.tenant("doctrine-b")
 	outsider := f.principal(other, "person", "outsider", "owner", nil, "")
+	body := f.call(outsider, "POST", "/api/rules/doctrine/sources", private, 422)
+	if !strings.Contains(string(body), "credential unavailable") || strings.Contains(string(body), privateProse) || fake.calls != calls {
+		t.Fatal("another tenant's owner reused the credential reference")
+	}
 	if got := f.layer(outsider, "GET", "/api/rules/doctrine", nil); len(got.Sources) != 0 {
 		t.Fatalf("tenant B sees %+v", got)
 	}
@@ -241,6 +256,28 @@ func TestDoctrineLayerEndToEnd(t *testing.T) {
 	if got := strings.Join(types, ","); got != "doctrine.source_added,doctrine.indexed,doctrine.source_added,doctrine.indexed,doctrine.pinned,doctrine.indexed,doctrine.indexed" {
 		t.Fatalf("events %s", got)
 	}
+
+	// Revocation is checked again for updates, reindexing and cached reads.
+	allowCredential(t, creds, "doctrine-private-read", other, privateRepo)
+	calls = fake.calls
+	f.call(owner, "PUT", "/api/rules/doctrine/sources/"+ps.ID, private, 422)
+	for _, layer := range []Layer{
+		f.layer(owner, "POST", "/api/rules/doctrine/sources/"+ps.ID+"/index", nil),
+		f.layer(owner, "GET", "/api/rules/doctrine", nil),
+		f.layer(reader, "GET", "/api/rules/doctrine", nil),
+	} {
+		s := find(layer, privateRepo)
+		if s == nil || s.State != "failed" || s.Error != "credential unavailable" || len(s.Files) != 0 || len(s.Skipped) != 0 {
+			t.Fatal("revoked grant exposed cached doctrine")
+		}
+		if s := find(layer, fixtureRepo); s == nil || s.State != "ready" || len(s.Files) != 2 {
+			t.Fatal("revoking one source hid the public doctrine")
+		}
+	}
+	if fake.calls != calls {
+		t.Fatal("revoked grant reached the repository host")
+	}
+	allowCredential(t, creds, "doctrine-private-read", tid, privateRepo)
 
 	// Removing a source removes its cached bytes.
 	after := f.layer(owner, "DELETE", "/api/rules/doctrine/sources/"+ps.ID, nil)
