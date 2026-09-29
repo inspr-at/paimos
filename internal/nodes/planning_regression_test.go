@@ -263,6 +263,9 @@ func TestPlanningBulkUsagePerformance(t *testing.T) {
 			return err
 		}
 		order, args := listSQL(q, nil)
+		if _, err := tx.Exec(t.Context(), `SET LOCAL enable_nestloop = off`); err != nil {
+			return err
+		}
 		var raw string
 		if err := tx.QueryRow(t.Context(), "EXPLAIN (FORMAT JSON) "+order, args...).Scan(&raw); err != nil {
 			return err

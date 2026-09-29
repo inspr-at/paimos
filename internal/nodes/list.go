@@ -461,6 +461,12 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			if err := preparePlanningSort(ctx, tx, &q); err != nil {
 				return dbErr("planning sort", err)
 			}
+			// Nested loops from the filtered tickets into usage become a
+			// per-row visibility probe once that table holds other tenants.
+			// Hash the usage read instead; later statements want nested loops.
+			if _, err := tx.Exec(ctx, `SET LOCAL enable_nestloop = off`); err != nil {
+				return dbErr("planning sort", err)
+			}
 		}
 		sql, args := listSQL(q, anchor)
 		rows, err := tx.Query(ctx, sql, args...)
@@ -501,6 +507,11 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 		rows.Close()
 		if err != nil {
 			return err
+		}
+		if sortsByPlanningValue(q) {
+			if _, err := tx.Exec(ctx, `SET LOCAL enable_nestloop = on`); err != nil {
+				return err
+			}
 		}
 		if len(page.Items) > q.Limit {
 			last := page.Items[q.Limit-1]
