@@ -155,8 +155,8 @@ func TestRulesReceiveRegisteredGenerationEndToEnd(t *testing.T) {
 	if err = clientAPI.Do(t.Context(), "GET", path+"/provenance", nil, &after); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(before, after) {
-		t.Fatal("real instruction provenance changed")
+	if bytes.Equal(before, after) || !bytes.Contains(after, []byte("AGENTS.md")) || !bytes.Contains(after, []byte("merged-rules")) || bytes.Contains(after, []byte("Preserve safety.")) || bytes.Contains(after, []byte(receiveLease)) {
+		t.Fatal("receipt did not keep file provenance or leaked rule text")
 	}
 	// A changed credential still fails before replay, with no new receipt.
 	os.WriteFile(leaseFile, []byte("wrong-but-long-synthetic-generation-lease"), 0600)

@@ -479,7 +479,14 @@ func (m *Module) merged(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		}
 		snapshots = append(snapshots, snap)
 	}
-	return Merge(c, snapshots, time.Now().UTC())
+	merged, err := Merge(c, snapshots, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	if err = RecordServedManifest(r.Context(), tx, c, merged); err != nil {
+		return nil, err
+	}
+	return merged, nil
 }
 
 // fields is the storage envelope on ordinary Aeon nodes. Scope is copied onto

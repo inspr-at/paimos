@@ -9,7 +9,7 @@ import { absoluteTime, relativeTime } from '../../lib/work'
 const props = defineProps<{ projectId: string; sessionId: string; now?: number }>()
 
 interface ProvenanceItem {
-  kind: 'agents' | 'claude' | 'skill' | 'prompt_template'
+  kind: 'agents' | 'claude' | 'skill' | 'prompt_template' | 'rules_merged' | 'rules_set'
   logical_name: string
   hash_kind: 'content' | 'absent'
   content_sha256?: string | null
@@ -33,6 +33,18 @@ const labels: Record<ProvenanceItem['kind'], string> = {
   claude: 'Claude',
   skill: 'Skill',
   prompt_template: 'Prompt template',
+  rules_merged: 'Rules',
+  rules_set: 'Rule set',
+}
+
+function itemName(item: ProvenanceItem) {
+  if (item.kind === 'rules_merged') return 'Merged rules'
+  if (item.kind === 'rules_set') return 'Published set'
+  return item.logical_name
+}
+
+function itemTip(item: ProvenanceItem) {
+  return item.kind === 'rules_set' ? item.logical_name : undefined
 }
 
 watch(() => [props.projectId, props.sessionId], async () => {
@@ -68,7 +80,7 @@ function shortHash(value: string) {
         <ul class="items">
           <li v-for="item in rev.items" :key="`${rev.id}-${item.logical_name}`">
             <span class="kind">{{ labels[item.kind] || item.kind }}</span>
-            <span class="name">{{ item.logical_name }}</span>
+            <span class="name" :data-tip="itemTip(item)">{{ itemName(item) }}</span>
             <code v-if="item.hash_kind === 'content' && item.content_sha256" class="hash" :data-tip="item.content_sha256">{{ shortHash(item.content_sha256) }}</code>
             <span v-else class="absent">No content digest</span>
             <span v-if="item.version" class="version">{{ item.version }}</span>

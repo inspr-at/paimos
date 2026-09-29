@@ -29,8 +29,10 @@
 // --brief, --worktree and --branch to paimos harness register|heartbeat,
 // plus repeated --commit SHA:subject on heartbeat. The coordinator can pass
 // these flags from worker scripts without changing server wiring.
-// PV1/AEON-219 records instruction provenance on its own route. Registration
-// and heartbeat schemas are unchanged. Writes use the existing worker lease.
+// PV1/AEON-219 records instruction provenance on its own route. A rules receipt
+// appends merged-rule and rule-set identities in that same transaction.
+// Heartbeat registration may post AGENTS.md and CLAUDE.md hashes. Registration
+// and heartbeat request schemas are unchanged. Writes use the existing worker lease.
 package harness
 
 import (
@@ -91,6 +93,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"PUT /api/nodes/{nodeId}/live-eta", "harness.worker", true, 200, m.setLiveEta},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.read", false, 200, m.readProvenance},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.worker", true, 200, m.recordProvenance},
+		{"GET /api/projects/{projectId}/instruction-provenance", "harness.read", false, 200, m.queryInstructionSources},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.read", false, 200, m.readRulesReceipts},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.worker", true, 200, m.recordRulesReceipt},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
