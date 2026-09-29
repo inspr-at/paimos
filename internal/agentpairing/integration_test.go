@@ -774,7 +774,7 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 	if guide.HelperVersion != version.Version || !guide.Capabilities["claude"].Supported || guide.Capabilities["codex"].Supported || guide.Capabilities["cursor"].Supported || guide.Capabilities["grok"].Supported || guide.Instance != origin || guide.Tenant != "reviewed-tenant" || len(guide.Targets) != 4 || !strings.Contains(guide.Command, " pair --url '") || !strings.Contains(guide.Qualification, "candidate") {
 		t.Fatalf("guide release contract mismatch: %s", w.Body.String())
 	}
-	if guide.Managed.Command != "aeon-agentd pair --url '"+origin+"'" || guide.Managed.ServiceOption != "services.aeon.enable" || guide.Managed.ModuleURL != nixGuideFixture().ModuleURL || strings.Contains(guide.Managed.Command, "attacker.invalid") {
+	if guide.Managed.Command != `"$HOME/.nix-profile/bin/aeon-agentd" pair --url '`+origin+`'` || guide.Managed.ServiceOption != "services.aeon.enable" || guide.Managed.ModuleURL != nixGuideFixture().ModuleURL || strings.Contains(guide.Managed.Command, "attacker.invalid") {
 		t.Fatal("Nix guide is not bound to the server origin and owning module")
 	}
 	for _, target := range guide.Targets {

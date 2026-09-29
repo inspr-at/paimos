@@ -237,6 +237,10 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	go inbox.NewSweeper(pool).Run(ctx)
 	// AEON-288: one daily pass nominates method learnings. It never accepts them.
 	go knowledge.NewTagger(pool).Run(ctx)
+	pairingMod := agentpairing.New(pool, cfg.PublicURL, cfg.BootstrapTenantSlug, cfg.PairingNixGuide)
+	homebrewFormula := agentpairing.NewHomebrewFormula(agentpairing.HomebrewFormulaConfig{})
+	pairingMod.SetHomebrewFormula(homebrewFormula)
+	go homebrewFormula.Watch(ctx)
 	api := &httpapi.Server{
 		Pool:  pool,
 		Brand: &productBrand,
@@ -274,7 +278,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			approvals.New(pool),
 			modelregistry.New(pool),
 			agentaccounts.New(pool),
-			agentpairing.New(pool, cfg.PublicURL, cfg.BootstrapTenantSlug, cfg.PairingNixGuide),
+			pairingMod,
 			// R3: journey
 			journey.New(pool),
 			requirements.New(pool),
@@ -308,7 +312,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		ln = listened
 	}
 	srv := &http.Server{
-		Handler:           agentpairing.GuidePage(api.Handler(), webFS, cfg.PublicURL, cfg.PairingNixGuide),
+		Handler:           agentpairing.GuidePageWithFormula(api.Handler(), webFS, cfg.PublicURL, homebrewFormula, cfg.PairingNixGuide),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       time.Minute,
 	}

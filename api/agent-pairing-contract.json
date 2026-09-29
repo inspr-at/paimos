@@ -133,8 +133,10 @@
         "install_available": "boolean",
         "platform_qualification": "candidate; consult exact release service qualification evidence",
         "setup_command": "verified absolute binary path pair --url configured origin; confirms current folder and detected signed-in harnesses, creates default private state, waits for person approval; default tenant slug from guide",
+        "homebrew_command": "present only when homebrew_formula_current is true: brew install inspr-at/tap/aeon-agentd, then \"$(brew --prefix)/bin/aeon-agentd\" pair --url configured origin",
+        "homebrew_formula_current": "true when the tap formula version matches this server, false when the formula was read and differs, null when the tap could not be read; clients then use the direct download and do not call GitHub",
         "managed_setup": {
-          "command": "aeon-agentd pair --url configured origin",
+          "command": "\"$HOME/.nix-profile/bin/aeon-agentd\" pair --url configured origin",
           "service_option": "actual owning Home Manager option",
           "module_url": "HTTPS link to owning module",
           "service_note": "current paired-service support or explicit owning dependency; no implied service activation"

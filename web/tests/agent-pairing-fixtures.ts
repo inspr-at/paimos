@@ -10,7 +10,9 @@ const MODEL = '66666666-6666-4666-8666-666666666666'
 const DIGEST = 'ab'.repeat(32)
 
 export const SETUP_COMMAND = `aeon-agentd pair --url 'https://aeon.example'`
-export const NIX_PAIR_COMMAND = "aeon-agentd pair --url 'https://aeon.example'"
+export const BREW_PAIR = `"$(brew --prefix)/bin/aeon-agentd" pair --url 'https://aeon.example'`
+export const HOMEBREW_COMMAND = `brew install inspr-at/tap/aeon-agentd\n${BREW_PAIR}`
+export const NIX_PAIR_COMMAND = `"$HOME/.nix-profile/bin/aeon-agentd" pair --url 'https://aeon.example'`
 
 export function pairingGuide() {
   return {
@@ -21,7 +23,8 @@ export function pairingGuide() {
     version: '260927181849.0.0',
     platform_qualification: 'candidate; consult the exact release service qualification evidence',
     setup_command: SETUP_COMMAND,
-    homebrew_command: `brew install inspr-at/tap/aeon-agentd\n${SETUP_COMMAND}`,
+    homebrew_command: HOMEBREW_COMMAND,
+    homebrew_formula_current: true,
     verification_capabilities: { pi: { supported: false, policy: 'unavailable', reason: 'pi verification has no qualified no-tools policy for extensions and provider configuration.' } },
     install_available: false,
     install_targets: [],
@@ -32,9 +35,23 @@ export function pairingGuide() {
       module_url: 'https://example.test/instance/module.nix',
       service_note: 'The current Home Manager module needs a paired-service update before this computer can connect.',
       platform_note: 'Service module: macOS only.',
-      prerequisite_note: 'Use aeon-agentd on PATH from a reviewed release pin with pair; a service module alone does not ensure this.',
+      prerequisite_note: 'Run "$HOME/.nix-profile/bin/aeon-agentd" from a reviewed release pin with pair. A service module alone does not put it on PATH.',
     },
   }
+}
+
+export async function mockFormulaGuide(page: Page, current: boolean | null, withDownload = false) {
+  await mockAnonymousGuide(page)
+  const guide: Record<string, unknown> = { ...pairingGuide(), homebrew_formula_current: current }
+  if (withDownload) {
+    guide.install_available = true
+    guide.install_targets = [{
+      platform: 'darwin', arch: 'arm64', service: 'launchd-user', qualification: 'candidate',
+      artifact_url: 'https://release.example/darwin/arm64', checksums_url: 'https://release.example/SHA256SUMS',
+      command: '# checksum installer for darwin/arm64\ninstall-verified-release',
+    }]
+  }
+  await page.route('**/api/agent-pairing/guide', route => route.fulfill({ json: guide }))
 }
 
 export async function mockChecksumGuide(page: Page) {

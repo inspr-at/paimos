@@ -223,8 +223,12 @@ func setupCommand(origin string) string {
 	return "aeon-agentd pair --url " + shellQuote(origin)
 }
 
+func nixPairCommand(origin string) string {
+	return `"$HOME/.nix-profile/bin/aeon-agentd" pair --url ` + shellQuote(origin)
+}
+
 func homebrewCommand(origin string) string {
-	return "brew install inspr-at/tap/aeon-agentd\n" + setupCommand(origin)
+	return "brew install inspr-at/tap/aeon-agentd\n" + `"$(brew --prefix)/bin/aeon-agentd" pair --url ` + shellQuote(origin)
 }
 
 type ManagedSetup struct {
@@ -249,11 +253,11 @@ func managedSetup(origin string, guides ...*config.PairingNixGuide) *ManagedSetu
 		}
 	}
 	return &ManagedSetup{
-		Command:          "aeon-agentd pair --url " + shellQuote(origin),
+		Command:          nixPairCommand(origin),
 		ServiceOption:    g.ServiceOption,
 		ModuleURL:        g.ModuleURL,
 		ServiceNote:      g.ServiceNote,
 		PlatformNote:     platform,
-		PrerequisiteNote: "Use aeon-agentd on PATH from a reviewed release pin with pair; a service module alone does not ensure this.",
+		PrerequisiteNote: `Run "$HOME/.nix-profile/bin/aeon-agentd" from a reviewed release pin with pair. A service module alone does not put it on PATH.`,
 	}
 }

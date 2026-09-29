@@ -159,7 +159,7 @@ func TestServeShutdownAndBootstrap(t *testing.T) {
 		t.Fatalf("public pairing metadata: %d", metadata.StatusCode)
 	}
 	for _, body := range [][]byte{guideBody, metadataBody} {
-		for _, want := range []string{cfg.PairingNixGuide.ModuleURL, cfg.PairingNixGuide.ServiceOption, cfg.PairingNixGuide.ServiceNote, "Service module: macOS only.", "on PATH from a reviewed release pin"} {
+		for _, want := range []string{cfg.PairingNixGuide.ModuleURL, cfg.PairingNixGuide.ServiceOption, cfg.PairingNixGuide.ServiceNote, "Service module: macOS only.", "from a reviewed release pin with pair"} {
 			if !bytes.Contains(body, []byte(want)) {
 				t.Fatalf("server did not publish configured Nix guidance: missing %s", want)
 			}
