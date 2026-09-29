@@ -4454,6 +4454,39 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/catalog.json:
+    get:
+      operationId: readPublicPortalCatalogFile
+      summary: Read the published catalog as a file
+      description: Anonymous. The body is the same document as readPublicPortal. The site also serves this file at /portal/{tenantSlug}/catalog.json, outside this API. A disabled portal and an unknown tenant both answer 404 with the same JSON error. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/llms.txt:
+    get:
+      operationId: readPublicPortalLlms
+      summary: Read a plain-text index of the public catalog
+      description: Anonymous. Public titles and summaries only. The site also serves this file at /portal/{tenantSlug}/llms.txt. A disabled portal and an unknown tenant both answer 404 with the same JSON error. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Plain-text index, headers: {Cache-Control: {schema: {type: string}}}, content: {text/plain: {schema: {type: string}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/releases:
+    get:
+      operationId: readPublicPortalReleases
+      summary: Read published release notes for the portal product
+      description: Anonymous. Notes are the frozen snapshot taken when a release shipped, for the one project linked on the portal pace screen. The project name is omitted. Only released and superseded releases with a frozen snapshot are included. A published release without a frozen snapshot is omitted. Hidden tickets and incomplete benefit text are omitted. Ticket keys, node ids and later edits of ticket fields are not part of this document. A disabled portal and an unknown tenant both answer 404. An open portal with no published product returns product null and an empty releases list. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved. The public page is /portal/{tenantSlug}/releases.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Published release notes, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicReleases'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /portal/market:
     get:
       operationId: readPortalMarket
@@ -6719,6 +6752,31 @@ components:
           description: Present only when at least one competitor is published and at least one row exists
           items: {$ref: '#/components/schemas/PortalPublicComparison'}
         pace: {$ref: '#/components/schemas/PortalPublicPace'}
+    PortalPublicRelease:
+      type: object
+      additionalProperties: false
+      required: [released_at, notes]
+      properties:
+        released_at: {type: string, format: date-time}
+        version: {type: string, description: Present only when the frozen version is an inspr-calendar-v2 coordinate}
+        notes:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [pill_en, pill_de, benefit_en, benefit_de]
+            properties:
+              pill_en: {type: string}
+              pill_de: {type: string}
+              benefit_en: {type: string}
+              benefit_de: {type: string}
+    PortalPublicReleases:
+      type: object
+      additionalProperties: false
+      required: [product, releases]
+      properties:
+        product: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/PortalProduct'}]}
+        releases: {type: array, items: {$ref: '#/components/schemas/PortalPublicRelease'}}
     PortalVote:
       type: object
       additionalProperties: false

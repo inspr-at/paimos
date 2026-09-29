@@ -292,6 +292,10 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
         <p class="eyebrow">Product portal</p>
         <h1>{{ doc.product.title }}</h1>
         <p v-if="doc.product.summary" class="lead">{{ doc.product.summary }}</p>
+        <nav class="jumps" aria-label="Portal">
+          <router-link class="jump" :to="`/portal/${tenantSlug}/releases`">Releases</router-link>
+          <a class="jump" :href="`/portal/${tenantSlug}/llms.txt`">llms.txt</a>
+        </nav>
 
         <section v-if="paceFigures.length" class="block" aria-labelledby="pace-heading">
           <h2 id="pace-heading">Pace</h2>
@@ -423,6 +427,16 @@ h1 {
   overflow-wrap: anywhere;
 }
 .lead { max-width: 38rem; margin: 14px 0 0; font-size: 18px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
+.jumps { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 16px 0 0; }
+.jump {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ink-2);
+  font: 600 14px/1 var(--font);
+  text-decoration: none;
+}
+.jump:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 8px; }
 .block { margin-top: 40px; }
 h2 { margin: 0 0 8px; font: 650 22px/1.2 var(--serif); letter-spacing: -0.02em; }
 .quiet { margin: 0 0 14px; color: var(--ink-2); line-height: 1.45; }

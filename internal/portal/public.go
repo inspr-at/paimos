@@ -84,7 +84,29 @@ func (m *Module) resolveTenant(ctx context.Context, slug string) (string, error)
 	return id, nil
 }
 
+const (
+	publicCatalog      = "catalog"
+	publicReleasesKind = "releases"
+	publicLlms         = "llms"
+)
+
 func (m *Module) read(w http.ResponseWriter, r *http.Request) {
+	m.servePublic(w, r, publicCatalog)
+}
+
+func (m *Module) catalogFile(w http.ResponseWriter, r *http.Request) {
+	m.servePublic(w, r, publicCatalog)
+}
+
+func (m *Module) releases(w http.ResponseWriter, r *http.Request) {
+	m.servePublic(w, r, publicReleasesKind)
+}
+
+func (m *Module) llms(w http.ResponseWriter, r *http.Request) {
+	m.servePublic(w, r, publicLlms)
+}
+
+func (m *Module) servePublic(w http.ResponseWriter, r *http.Request, kind string) {
 	publicHeaders(w)
 	if m.pool == nil {
 		fail(w, http.StatusServiceUnavailable, "portal unavailable")
@@ -102,9 +124,17 @@ func (m *Module) read(w http.ResponseWriter, r *http.Request) {
 	// Unknown slugs use the zero tenant and still run this read, so a closed
 	// portal and a missing slug do the same work and return the same 404.
 	var doc portalDocument
+	var releases []publicRelease
 	err = db.InTenant(db.AllProjects(r.Context(), "public portal read"), m.pool, tenantID, func(tx pgx.Tx) error {
-		var loadErr error
-		doc, loadErr = loadPortal(r.Context(), tx)
+		loaded, loadErr := loadPortal(r.Context(), tx)
+		if loadErr != nil {
+			return loadErr
+		}
+		doc = loaded
+		if kind == publicCatalog || doc.Product == nil {
+			return nil
+		}
+		releases, loadErr = loadPublicReleases(r.Context(), tx)
 		return loadErr
 	})
 	if errors.Is(err, errClosed) {
@@ -116,7 +146,23 @@ func (m *Module) read(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "portal unavailable")
 		return
 	}
-	write(w, http.StatusOK, doc)
+	if releases == nil {
+		releases = []publicRelease{}
+	}
+	switch kind {
+	case publicReleasesKind:
+		write(w, http.StatusOK, publicReleasesDocument{Product: doc.Product, Releases: releases})
+	case publicLlms:
+		slug := r.PathValue("tenantSlug")
+		if !slugPattern.MatchString(slug) {
+			fail(w, http.StatusNotFound, "not found")
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, renderLlms(slug, doc, releases))
+	default:
+		write(w, http.StatusOK, doc)
+	}
 }
 
 func loadPortal(ctx context.Context, tx pgx.Tx) (portalDocument, error) {

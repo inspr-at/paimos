@@ -13,5 +13,7 @@
 // public page omits a figure until five releases or five fulfilled wishes
 // support it, and a smaller sample is absent rather than zero. The
 // tenant setting defaults off, and a closed portal answers the same 404 as an
-// unknown address.
+// unknown address. Published release notes are the frozen snapshot for the
+// one project linked on the pace screen. llms.txt and catalog.json repeat
+// only that public document.
 package portal

@@ -104,7 +104,7 @@ async function chooseFeature(wishId: string, featureId: string) {
 
 <template>
   <SettingsCard title="Pace" icon="gauge" anchor="pace">
-    <template #lead>Release count from one project, and days from a wish to the feature that went live.</template>
+    <template #lead>Release count and public history from one project, and days from a wish to the feature that went live.</template>
     <div v-if="loading" class="set-skeleton" role="status" aria-label="Loading pace"><span class="skeleton" /></div>
     <template v-else>
       <p v-if="error" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>

@@ -21,6 +21,12 @@ type Module interface {
 	Mount(mux *http.ServeMux)
 }
 
+// PublicModule mounts exact site-root files that must not fall through to the SPA.
+// API modules keep using Module and Mount.
+type PublicModule interface {
+	MountPublic(mux *http.ServeMux)
+}
+
 // Server holds what every module needs.
 type Server struct {
 	Mux        *http.ServeMux
@@ -94,6 +100,15 @@ func (s *Server) build() {
 	api = routePatternMiddleware(s.Mux, api)
 	api = commonMiddleware(api)
 
+	publicMux := http.NewServeMux()
+	publicMounted := false
+	for _, m := range s.Modules {
+		if pub, ok := m.(PublicModule); ok {
+			pub.MountPublic(publicMux)
+			publicMounted = true
+		}
+	}
+
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
 	root.Handle("/api", api)
@@ -101,6 +116,11 @@ func (s *Server) build() {
 	// flow.inspr.at/paimos land here (AEON-175). They moved for good: answer
 	// every method with 410 and the new location, without auth and without data.
 	root.Handle("/from-classic/api/", commonMiddleware(http.HandlerFunc(handleClassicAPIGone)))
+	// Exact files only. A /portal/ subtree would take the Vue catalog page off the SPA.
+	if publicMounted {
+		root.Handle("GET /portal/{tenantSlug}/llms.txt", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/catalog.json", commonMiddleware(publicMux))
+	}
 	root.Handle("/", commonMiddleware(spaHandler(s.Web, s.brand())))
 	s.handler = root
 }

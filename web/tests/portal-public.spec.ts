@@ -84,6 +84,8 @@ for (const width of [1600, 390]) {
     const posted = await install(page)
     await page.goto('/portal/harbour')
     await expect(page.getByRole('heading', { level: 1, name: 'Harbour office' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Releases' })).toHaveAttribute('href', '/portal/harbour/releases')
+    await expect(page.getByRole('link', { name: 'llms.txt' })).toHaveAttribute('href', '/portal/harbour/llms.txt')
     await expect(page.getByRole('group', { name: 'Feature status' })).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'Deadline radar' })).toBeVisible()
     await expect(page.getByText('Live', { exact: true })).toBeVisible()
