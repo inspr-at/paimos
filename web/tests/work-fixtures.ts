@@ -3,7 +3,9 @@
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page } from '@playwright/test'
+import { deriveAgentState, normalizeAgentState } from '../src/lib/agentSignals.ts'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
+import { compareServerLead, leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
@@ -143,6 +145,7 @@ function item(node: MockNode, data: Fixtures) {
   // the payload reads like an older server's.
   const person = typeof node.fields.assignee === 'string' ? data.people.find(p => p.id === node.fields.assignee) : undefined
   const assignee = person ? { id: person.id, name: person.name, ...(person.has_avatar === undefined ? {} : { has_avatar: person.has_avatar }) } : null
+  const lead = leadOf(data, node)
   return {
     id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
@@ -154,6 +157,7 @@ function item(node: MockNode, data: Fixtures) {
     epic: epicAbove(node, data),
     ...(node.eta ? { eta: node.eta } : {}),
     ...(node.estimate ? { estimate: node.estimate } : {}),
+    ...(lead ? { lead_worker: { name: who(lead), key: leadWorkerKey(lead) } } : {}),
   }
 }
 // The nearest epic above a node, like the server's list projection.
@@ -205,6 +209,28 @@ function costUnit(node: MockNode): string {
 }
 const release = (node: MockNode) => labelOf(node.fields.release)
 const personName = (data: Fixtures, id: unknown) => typeof id === 'string' ? data.people.find(p => p.id === id)?.name ?? '' : ''
+// Live workers on one ticket, in the server's lead order (attention at the
+// viewer's thresholds, then start, heartbeat and public facts — not a session id).
+function liveOn(data: Fixtures, node: MockNode): LiveAgent[] {
+  const preferences = normalizeAgentState(data.preferences['agent-state'])
+  return data.live.flatMap(agent => {
+    const ticket = agent.ticket
+    if (!ticket || ticket.id !== node.id || agent.project_id !== node.project || ticket.project_id !== node.project) return []
+    if (agent.phase === 'stopped' || agent.stopped_at) return []
+    if (/archived/i.test(agent.stop_reason ?? '')) return []
+    const live: LiveAgent = { ...agent, ticket }
+    return [{ ...live, state: deriveAgentState(live, now, preferences) }]
+  }).sort(compareServerLead)
+}
+function leadOf(data: Fixtures, node: MockNode) { return liveOn(data, node)[0] }
+// The name an assignee sort uses: the stored person, else the lead live worker.
+// Empty is last in both directions.
+function shownAssignee(data: Fixtures, node: MockNode): string {
+  const stored = personName(data, node.fields.assignee).trim()
+  if (stored) return stored.toLowerCase()
+  const lead = leadOf(data, node)
+  return lead ? who(lead).trim().toLowerCase() : ''
+}
 
 function completionRefusal(node: MockNode, nextState: string, fields: Record<string, unknown>): { error: string; code: string } | null {
   if (node.kind_slug !== 'ticket' || completedTicketState(node.state) || !completedTicketState(nextState)) return null
@@ -489,12 +515,18 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       rows = [...rows].sort((a, b) => {
         for (const raw of sort) {
           const desc = raw.startsWith('-'), field = desc ? raw.slice(1) : raw
+          if (field === 'assignee') {
+            const x = shownAssignee(data, a), y = shownAssignee(data, b)
+            if (!x !== !y) return x ? -1 : 1
+            if (x !== y) return (x < y ? -1 : 1) * (desc ? -1 : 1)
+            continue
+          }
           const etaMissing = (n: MockNode) => field === 'estimate' ? (n.kind_slug === 'epic' ? n.estimate?.hours == null : typeof n.fields.estimate_hours !== 'number' || n.fields.estimate_hours <= 0) : field === 'eta_ready' ? !n.eta?.eta_ready_at : field === 'progress' ? typeof n.eta?.progress_pct !== 'number' : false
           if ((field === 'estimate' || field === 'eta_ready' || field === 'progress') && etaMissing(a) !== etaMissing(b)) return etaMissing(a) ? 1 : -1
           const value = (n: MockNode): string | number => field === 'estimate' ? (n.kind_slug === 'epic' ? n.estimate?.hours ?? 0 : Number(n.fields.estimate_hours ?? 0)) : field === 'state' ? (STATE_ORDER.indexOf(normal(n.state)) + 1 || 99)
             : field === 'priority' ? PRIORITY_ORDER.indexOf(typeof n.fields.priority === 'string' ? n.fields.priority : 'none')
             : field === 'updated_at' ? Date.parse(n.updated_at) : field === 'created_at' ? Date.parse(n.created_at) : field === 'key' ? Number(n.key.split('-')[1]) : field === 'title' ? n.title
-            : field === 'kind' ? n.kind_slug : field === 'assignee' ? (personName(data, n.fields.assignee) || '\uffff')
+            : field === 'kind' ? n.kind_slug
             : field === 'eta_ready' ? Date.parse(String(n.eta?.eta_ready_at ?? '')) || 0
             : field === 'progress' ? (typeof n.eta?.progress_pct === 'number' ? n.eta.progress_pct : 0) : 0
           const x = value(a), y = value(b)

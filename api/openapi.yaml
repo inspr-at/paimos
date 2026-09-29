@@ -10537,6 +10537,13 @@ components:
             eta:
               description: Ready and live estimates when an active agent has reported one. Absent when unknown.
               $ref: '#/components/schemas/TicketEta'
+            lead_worker:
+              description: The live worker the Assignee cell leads with, when one is bound. name is the authoritative permission-projected label (session label, principal name, or harness label). key is a stable matching token. It carries a session id only when the caller may already open the session; otherwise it uses only the public harness and session start, which may coincide for indistinguishable sessions. Heartbeats, state and names never change the key. Absent when no live worker is bound. The assignee sort and this projection use the same query snapshot.
+              type: object
+              required: [name, key]
+              properties:
+                name: {type: string}
+                key: {type: string}
     TreeEntry:
       type: object
       required: [node, depth]
@@ -10846,7 +10853,7 @@ components:
       in: query
       schema:
         type: string
-        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (by name, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, epic open-child sum, empty last in both directions).'
+        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, epic open-child sum, empty last in both directions).'
         default: position
     Direction:
       name: direction
