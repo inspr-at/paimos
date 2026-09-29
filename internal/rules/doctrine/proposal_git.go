@@ -150,6 +150,9 @@ func (g *GitHub) preparePR(ctx context.Context, p *Proposal, files map[string]st
 		if err := g.request(ctx, "POST", base+"/pulls", map[string]any{"title": "Propose doctrine rule change", "head": branch, "base": "main", "body": body, "draft": p.Automatic}, &pr); err != nil {
 			return err
 		}
+		if p.Automatic && !pr.Draft {
+			return gitFail("the new automatic pull request was not confirmed as a draft")
+		}
 	}
 	p.PRNumber = pr.Number
 	if pr.Number < 1 || !validPull(*p, pr) {
@@ -160,14 +163,16 @@ func (g *GitHub) preparePR(ctx context.Context, p *Proposal, files map[string]st
 	if p.Automatic {
 		// Replays may observe a draft that a person already made ready; never
 		// toggle that state, approve, merge or dispatch a release from the job.
-		if err := g.authorizeWrite(ctx); err != nil {
-			return err
-		}
-		if err := g.request(ctx, "POST", fmt.Sprintf("%s/issues/%d/labels", base, p.PRNumber), map[string]any{"labels": []string{"aeon-proposal"}}, nil); err != nil {
-			return err
-		}
+		return g.labelOutcomeProposal(ctx, *p)
 	}
 	return nil
+}
+
+func (g *GitHub) labelOutcomeProposal(ctx context.Context, p Proposal) error {
+	if err := g.authorizeWrite(ctx); err != nil {
+		return err
+	}
+	return g.request(ctx, "POST", fmt.Sprintf("%s/issues/%d/labels", repoPath(p.Repository), p.PRNumber), map[string]any{"labels": []string{"aeon-proposal"}}, nil)
 }
 
 type gateReview struct {

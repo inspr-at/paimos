@@ -101,7 +101,7 @@ func (m *Module) analyzeOnce(parent context.Context, now time.Time) error {
 	// but never made ready, approved, merged, released or reverted by the job.
 	var first error
 	for _, f := range existing {
-		if f.Status == "draft" {
+		if f.Status == "draft" || f.Status == "awaiting_use" {
 			err = m.observeFinding(ctx, actor, &f, samples, now)
 		} else {
 			err = m.attemptFinding(ctx, actor, &f, layer, day)
@@ -364,6 +364,14 @@ func (m *Module) observeFinding(ctx context.Context, actor tenant.Principal, f *
 	}
 	if proposal.MergeCommit == "" {
 		return nil
+	}
+	// A merged change no longer consumes an open-draft slot. Keep following
+	// its provenance separately until a meaningful comparison is possible.
+	if f.Status != "awaiting_use" {
+		f.Status = "awaiting_use"
+		if err := m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error { return saveFinding(ctx, tx, actor, *f, "doctrine.finding_awaiting_use") }); err != nil {
+			return err
+		}
 	}
 	metric := afterMeasurement(samples, *f, now, m.analysis.defaults().WindowDays, m.analysis.defaults().MinOccurrences)
 	if metric == nil {

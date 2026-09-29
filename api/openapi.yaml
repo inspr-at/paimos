@@ -6275,7 +6275,7 @@ components:
         rules_version: {type: string}
         harness: {type: string}
         ticket_kind: {type: string}
-        status: {type: string, enum: [pending, draft, internal_note, observed, closed]}
+        status: {type: string, enum: [pending, draft, awaiting_use, internal_note, observed, closed]}
         reason: {type: string, description: Value-free reason for an internal note or pending retry}
         proposal_id: {type: string, format: uuid}
         pr_url: {type: string}

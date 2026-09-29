@@ -148,7 +148,7 @@ func loadAnalysisSamples(ctx context.Context, tx pgx.Tx, tid string, from, until
 }
 
 func readFindings(ctx context.Context, tx pgx.Tx, activeOnly bool) ([]findingData, error) {
-	rows, err := tx.Query(ctx, `SELECT id::text,coalesce(source_id::text,''),path,rule_key,coalesce(proposal_id::text,''),status,data,created_at FROM doctrine_findings WHERE (NOT $1 OR status IN ('pending','draft')) ORDER BY created_at DESC,id LIMIT 100`, activeOnly)
+	rows, err := tx.Query(ctx, `SELECT id::text,coalesce(source_id::text,''),path,rule_key,coalesce(proposal_id::text,''),status,data,created_at FROM doctrine_findings WHERE (NOT $1 OR status IN ('pending','draft','awaiting_use')) ORDER BY created_at DESC,id LIMIT 100`, activeOnly)
 	if err != nil {
 		return nil, err
 	}

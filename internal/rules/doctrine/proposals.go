@@ -236,6 +236,19 @@ func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, i
 		return nil, err
 	}
 	if existing != nil && existing.PRNumber > 0 {
+		if in.automatic {
+			// A PR may have landed before its label response or authority was
+			// lost. Reapplying one label is idempotent and completes that retry.
+			g, err := m.appClient(ctx, actor.TenantID, existing.Repository)
+			if err != nil {
+				return nil, err
+			}
+			defer g.revoke()
+			g.beforeWrite = func(ctx context.Context) error { return m.reauthorize(ctx, actor, "rules.write") }
+			if err := g.labelOutcomeProposal(ctx, *existing); err != nil {
+				return nil, err
+			}
+		}
 		return *existing, nil
 	}
 	changed, err := editRule(source, files, in)

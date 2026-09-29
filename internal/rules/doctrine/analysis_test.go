@@ -143,7 +143,7 @@ func seedAnalysisOutcomes(t *testing.T, f doctrineFixture, p tenant.Principal, p
 				return err
 			}
 			ids = append(ids, ticket)
-			if err := tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,ticket_node_id,work_shape,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,created_at) VALUES($1,$2,$3,'ship',$4,'codex','fixture','unmanaged','worker',decode(md5($3::text),'hex'),decode(md5('fixture'),'hex'),$5) RETURNING id::text`, p.TenantID, project, ticket, p.ID, at.Add(-time.Hour)).Scan(&session); err != nil {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,ticket_node_id,work_shape,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,created_at) VALUES($1,$2,$3::uuid,'ship',$4,'codex','fixture','unmanaged','worker',decode(md5($3::uuid::text),'hex'),decode(md5('fixture'),'hex'),$5) RETURNING id::text`, p.TenantID, project, ticket, p.ID, at.Add(-time.Hour)).Scan(&session); err != nil {
 				return err
 			}
 			if err := tx.QueryRow(t.Context(), `INSERT INTO harness_instruction_provenance(tenant_id,session_id,revision,set_digest,recorded_by,created_at) VALUES($1,$2,1,decode(repeat('a',64),'hex'),$3,$4) RETURNING id::text`, p.TenantID, session, p.ID, at.Add(-time.Minute)).Scan(&provenance); err != nil {
@@ -180,8 +180,14 @@ func TestAnalysisDraftJobAndBeforeAfter(t *testing.T) {
 	f, forge, m, owner := setupAnalysis(t)
 	now := time.Now().UTC().Add(time.Minute)
 	tickets := seedAnalysisOutcomes(t, f, owner, "BEFORE", "v1", "Missing regression test", "changes", strings.Repeat("c", 64), now.Add(-time.Hour))
-	if err := m.analyzeOnce(t.Context(), now); err != nil {
-		t.Fatal(err)
+	concurrent := make(chan error, 2)
+	for range 2 {
+		go func() { concurrent <- m.analyzeOnce(t.Context(), now) }()
+	}
+	for range 2 {
+		if err := <-concurrent; err != nil {
+			t.Fatal(err)
+		}
 	}
 	got := readAnalysis(t, f, owner)
 	if len(got) != 1 || got[0].Status != "draft" || got[0].Count != 3 || got[0].Before.Value != 1 || len(got[0].Evidence) != 3 {
@@ -225,6 +231,14 @@ func TestAnalysisDraftJobAndBeforeAfter(t *testing.T) {
 		forge.pulls[key] = p
 	}
 	next := now.Add(24 * time.Hour)
+	if err := m.analyzeOnce(t.Context(), next); err != nil {
+		t.Fatal(err)
+	}
+	got = readAnalysis(t, f, owner)
+	if got[0].Status != "awaiting_use" || got[0].After != nil {
+		t.Fatal("merged pin was treated as used instruction bytes")
+	}
+	next = next.Add(24 * time.Hour)
 	seedAnalysisOutcomes(t, f, owner, "AFTER", "v2", "Checks passed", "ok", hashText(forge.treeFiles[analysisFixturePath]), next.Add(-time.Hour))
 	if err := m.analyzeOnce(t.Context(), next); err != nil {
 		t.Fatal(err)
@@ -251,6 +265,28 @@ func TestAnalysisDraftJobAndBeforeAfter(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAnalysisRecoversDroppedDraftResponse(t *testing.T) {
+	f, forge, m, owner := setupAnalysis(t)
+	now := time.Now().UTC().Add(time.Minute)
+	seedAnalysisOutcomes(t, f, owner, "RETRY", "v1", "Missing regression test", "changes", strings.Repeat("c", 64), now.Add(-time.Hour))
+	forge.dropPR = true
+	if err := m.analyzeOnce(t.Context(), now); err == nil {
+		t.Fatal("expected uncertain response")
+	}
+	got := readAnalysis(t, f, owner)
+	if len(got) != 1 || got[0].Status != "pending" || len(forge.pulls) != 1 {
+		t.Fatal("uncertain write lost its reservation")
+	}
+	id := got[0].ID
+	if err := m.analyzeOnce(t.Context(), now.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	got = readAnalysis(t, f, owner)
+	if len(got) != 1 || got[0].ID != id || got[0].Status != "draft" || len(forge.pulls) != 1 || forge.labels != 1 {
+		t.Fatal("retry duplicated or did not label the draft")
 	}
 }
 
