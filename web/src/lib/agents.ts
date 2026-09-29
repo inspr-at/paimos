@@ -50,7 +50,7 @@ export interface SessionControl {
   outcome: 'applied' | 'rejected' | null; reason: string | null; created_at: string; claimed_at: string | null; completed_at: string | null
 }
 export interface AllowanceWrite {
-  starts_at: string; ends_at: string; unit: 'requests' | 'tokens' | 'cost_micros'
+  starts_at: string; ends_at: string; unit: 'requests' | 'tokens' | 'cost_micros' | 'percent'
   allowance: number; pace_model: 'steady' | 'frontload' | 'unrestricted'; burst_ratio: number
 }
 export interface AllowanceWindow extends AllowanceWrite {

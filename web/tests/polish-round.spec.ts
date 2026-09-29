@@ -118,7 +118,7 @@ for (const scenario of scenarios) for (const theme of ['light', 'dark'] as const
         const box = (await button.boundingBox())!
         expect(box.x + box.width).toBeLessThanOrEqual(queue.x + queue.width)
       }
-      const contrast = await new AxeBuilder({ page }).include('.accounts').withRules(['color-contrast']).analyze()
+      const contrast = await new AxeBuilder({ page }).include('.cap').withRules(['color-contrast']).analyze()
       expect(contrast.violations).toEqual([])
     }
     if (scenario.name === 'tickets-empty') {

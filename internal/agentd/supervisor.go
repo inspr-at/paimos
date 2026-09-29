@@ -21,6 +21,7 @@ import (
 	"unicode"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
@@ -37,6 +38,7 @@ type Config struct {
 	Accounts          []EnrolledAccount
 	HeartbeatInterval time.Duration
 	MaxRunDuration    time.Duration
+	CapacityInterval  time.Duration
 }
 
 type replay struct {
@@ -91,6 +93,7 @@ type owned struct {
 	metadataSeq     uint64
 	metadataPending []harnessMetadata
 	usage           *sessionUsageReporter
+	capacityPending map[string]capacity.Reading
 	inboxCapable    bool
 	pending         []HarnessControl
 	process         Process
@@ -112,6 +115,11 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	capacityInterval    time.Duration
+	capacityLast        map[string]time.Time
+	capacitySaved       map[string]time.Time
+	capacityAttempt     map[string]time.Time
+	capacityCapturing   bool
 	maxTokens, maxTurns int64
 
 	dispatchMu        sync.Mutex
@@ -172,6 +180,12 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	if len(adapters) == 0 {
 		return nil, errors.New("no adapters configured")
+	}
+	if c.CapacityInterval == 0 {
+		c.CapacityInterval = 5 * time.Minute
+	}
+	if c.CapacityInterval < time.Second {
+		return nil, errors.New("invalid capacity interval")
 	}
 	heartbeat := c.HeartbeatInterval
 	if heartbeat == 0 {
@@ -256,9 +270,12 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID}
+	if err := s.loadCapacityCaptures(); err != nil {
+		return nil, err
+	}
 	for _, rec := range j.Snapshot() {
 		// A persisted PID is never proof of ownership after a restart.
 		if !noLocalProcess(rec) && rec.State != "ownership_lost" {
@@ -363,15 +380,24 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			}
 		}
 		if probeBlocked {
+			s.mu.Lock()
+			s.probedAccounts[account.ID] = false
+			s.mu.Unlock()
 			continue
 		}
-		probe := adapters[account.Harness].(AccountProber)
-		available := probe.Probe(ctx, account.Key)
-		err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
+		status := probeAccount(ctx, adapters[account.Harness].(AccountProber), account.Key)
+		available := status.OK
+		var err error
+		if reporter, ok := s.api.(ProbeStatusReporter); ok {
+			err = reporter.ProbeStatus(ctx, account.ID, s.daemonID, s.generation, status)
+		} else {
+			err = s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
+		}
 		s.mu.Lock()
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
-		s.loginRequired[account.ID] = !available
+		// Only a confirmed sign-out asks the person to sign in again.
+		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed
 		s.mu.Unlock()
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
@@ -392,6 +418,12 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
+	s.mu.Lock()
+	capturing := s.capacityCapturing
+	s.mu.Unlock()
+	if capturing {
+		return ErrDraining
+	}
 	if !s.dispatchAllowed(run.requestedAccount()) {
 		return ErrDraining
 	}
@@ -798,6 +830,7 @@ func (s *Supervisor) heartbeat(entry *owned) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		var err error
 		if beat {
+			s.flushCapacity(ctx, entry)
 			err = s.update(ctx, entry, Telemetry{Kind: "heartbeat"})
 		}
 		serviceErr := s.serviceHarnessCycle(ctx, entry, beat)
@@ -833,6 +866,9 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 		entry.mu.Lock()
 		entry.harness.Activity = ev.Activity
 		entry.mu.Unlock()
+	}
+	if len(ev.Capacity) > 0 {
+		s.observeCapacity(entry, ev.Capacity)
 	}
 	if ev.SessionUsage != nil {
 		entry.usage.submit(*ev.SessionUsage)
@@ -999,6 +1035,10 @@ func (s *Supervisor) monitor(entry *owned) {
 
 func (s *Supervisor) finishSessionUsage(entry *owned) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s.flushCapacity(ctx, entry)
+	cancel()
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := entry.usage.finish(ctx); err != nil && !errors.Is(err, ErrHarnessArchived) {
 		// No server errors, vendor fields, lease or account context in diagnostics.
@@ -1428,7 +1468,11 @@ func (s *Supervisor) Close(ctx context.Context) error {
 	defer s.dispatchMu.Unlock()
 	s.mu.Lock()
 	s.closing = true
+	capturing := s.capacityCapturing
 	s.mu.Unlock()
+	if capturing {
+		return ErrDraining
+	}
 	status := s.Lifecycle("")
 	if len(status.ActiveRunIDs) > 0 {
 		return ErrDraining

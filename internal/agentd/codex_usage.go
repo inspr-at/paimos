@@ -21,6 +21,10 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 		return
 	}
 	method, _, model := eventProbe(raw)
+	if method == "account/rateLimits/updated" || method == "rateLimits/updated" {
+		p.emitCapacity(raw, "update")
+		return
+	}
 	if method == "thread/settings/updated" {
 		var frame struct {
 			Params struct {

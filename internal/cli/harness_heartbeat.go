@@ -63,6 +63,7 @@ type heartbeatDeps struct {
 }
 
 type heartbeatOptions struct {
+	Capacity       heartbeatCapacity
 	OwnerPID       int
 	Interval       int
 	StateDir       string
@@ -107,6 +108,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 		Short: "Heartbeat while an owner process lives, then mark the session stopped",
 		Use:   "harness run-heartbeat --owner-pid PID --state-dir DIR --project KEY --agent NAME --harness KIND",
 		addFlags: func(fs *flagSet) {
+			o.Capacity.flags(fs)
 			fs.int(&o.OwnerPID, "owner-pid", "process id whose exit stops the session")
 			fs.int(&o.Interval, "interval", "seconds between beats (default 50)")
 			fs.string(&o.StateDir, "state-dir", 0, "private directory for registration and resume")
@@ -136,6 +138,9 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.bool(&o.PrintControls, "print-controls", 0, "print request JSON records and pending control/message lines; --json emits NDJSON")
 		},
 		run: func([]string) error {
+			if err := o.Capacity.validate(); err != nil {
+				return err
+			}
 			if err := o.prepare(); err != nil {
 				return err
 			}
@@ -370,6 +375,15 @@ func (rt *runtime) finishHeartbeat(o heartbeatOptions, session *heartbeatSession
 		usageCtx, cancel := context.WithTimeout(context.Background(), heartbeatUsageFlushTimeout)
 		rt.drainHeartbeatUsage(usageCtx, o, session)
 		cancel()
+		capacityCtx, capacityCancel := context.WithTimeout(context.Background(), heartbeatUsageFlushTimeout)
+		finalCapacity := o.Capacity
+		if finalCapacity.File != "" {
+			finalCapacity.Phase = "end"
+		}
+		if err := rt.reportHeartbeatCapacity(capacityCtx, finalCapacity); err != nil {
+			fmt.Fprintln(rt.stderr, "heartbeat: final capacity flush failed")
+		}
+		capacityCancel()
 	}
 	if session.disk.Terminal {
 		_ = saveHeartbeatSession(session)
@@ -855,6 +869,15 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 			}
 			fmt.Fprintf(rt.stderr, "heartbeat: usage report failed\n")
 		}
+	}
+	capacityOptions := o.Capacity
+	if capacityOptions.File != "" && capacityOptions.Phase == "" && !session.disk.CapacityStarted {
+		capacityOptions.Phase = "start"
+	}
+	if reported, err := rt.reportCapacityReading(ctx, capacityOptions); err != nil {
+		fmt.Fprintln(rt.stderr, "heartbeat: capacity report failed")
+	} else if reported {
+		session.disk.CapacityStarted = true
 	}
 	if o.PrintControls {
 		rt.printHeartbeatControls(ctx, session.id, o.Harness, controls)

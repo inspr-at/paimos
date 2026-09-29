@@ -531,8 +531,7 @@ const shots: Shot[] = [
     await page.getByRole('button', { name: /^Stopped/ }).first().click()
     const history = page.locator(`[data-row="s:${LEAD}"] .history-toggle`)
     if (await history.isEnabled()) await history.click()
-    await page.getByText('Accounts and pacing', { exact: true }).first().click()
-    await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Accounts' })).toBeVisible()
   } },
   { screen: 'agents', state: 'eta', setup: page => agentsSetup(page, 'eta'), act: async page => { await openAgents(page); await visible(page, '.eta-cell') } },
   { screen: 'session-panel', state: 'eta', setup: page => agentsSetup(page, 'eta'), act: async page => {
@@ -578,8 +577,7 @@ const shots: Shot[] = [
     await expect(startDialog(page).getByText('Account is draining', { exact: true })).toBeVisible()
   } },
   { screen: 'start-agent', state: 'accounts-card', setup: async page => { await mockStartAgent(page, { catalog: 'two-hosts' }) }, act: async page => {
-    await page.goto('/agents')
-    await page.getByText('Accounts and pacing', { exact: true }).first().click()
+    await page.goto('/settings/accounts')
     await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('5-hour')
   } },
   // 5. Connected computers and pairing

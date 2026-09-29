@@ -83,6 +83,17 @@ func fits(w Window, now time.Time, estimate int64) (int64, bool) {
 	if !ok || projected > w.Allowance {
 		return 0, false
 	}
+	if w.capacityReadAt != nil {
+		if !w.capacityAllowed || w.capacityRetired {
+			return 0, false
+		}
+		if (w.capacityKind == "refresh" || now.Sub(*w.capacityReadAt) > 10*time.Minute) && (w.capacityRefreshRun != nil || w.Reserved > 0 || estimate > 1) {
+			return 0, false
+		}
+		if w.capacityBudget != nil && float64(w.Reserved+estimate) > *w.capacityBudget {
+			return 0, false
+		}
+	}
 	fraction := paceFraction(w.PaceModel, elapsedFraction(now, w.StartsAt, w.EndsAt), w.BurstRatio)
 	if projected > allowedUnits(w.Allowance, fraction) {
 		return 0, false

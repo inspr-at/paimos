@@ -13,6 +13,7 @@ import PortalSection from '../components/settings/PortalSection.vue'
 import WorkspaceSection from '../components/settings/WorkspaceSection.vue'
 import AccessSection from '../components/access/AccessSection.vue'
 import AgentRulesSection from '../components/rules/AgentRulesSection.vue'
+import AccountsSection from '../components/settings/AccountsSection.vue'
 import { SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId } from '../lib/settings'
 import { useSession } from '../stores/session'
 
@@ -38,8 +39,8 @@ const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
 // Which sections show depends on my permissions: the layout waits for them, so
 // the nav never re-flows under the pointer (usually a few milliseconds).
 void refreshPermissions()
-const VIEW: Record<SectionId, Component> = { personal: PersonalSection, 'agent-rules': AgentRulesSection, workspace: WorkspaceSection, access: AccessSection, business: BusinessSection, projects: ProjectsSection, portal: PortalSection }
-const ICON: Record<SectionId, BizIconName> = { personal: 'user', 'agent-rules': 'book', workspace: 'folder', access: 'users', business: 'briefcase', projects: 'layers', portal: 'globe' }
+const VIEW: Record<SectionId, Component> = { personal: PersonalSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, workspace: WorkspaceSection, access: AccessSection, business: BusinessSection, projects: ProjectsSection, portal: PortalSection }
+const ICON: Record<SectionId, BizIconName> = { personal: 'user', 'agent-rules': 'book', accounts: 'gauge', workspace: 'folder', access: 'users', business: 'briefcase', projects: 'layers', portal: 'globe' }
 
 // A deep link scrolls to its card once the section has rendered it.
 let arrival: ReturnType<typeof setTimeout> | undefined
