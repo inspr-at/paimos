@@ -171,3 +171,97 @@ func TestProjectCountsWorkKindsAndStateGroups(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectStatusBuckets(t *testing.T) {
+	if normaliseWorkState(" QA ") != "qa" || normaliseWorkState("in-progress") != "in_progress" || normaliseWorkState("in progress") != "in_progress" {
+		t.Fatalf("state spelling: %q %q %q", normaliseWorkState(" QA "), normaliseWorkState("in-progress"), normaliseWorkState("in progress"))
+	}
+	p := newPrincipal(t, "status-buckets")
+	create := func(kind, state, parent string) {
+		t.Helper()
+		k := kindBySlug(t, p, kind)
+		body := map[string]any{"kind_id": k.ID, "title": kind + " " + state, "state": state, "parent_id": parent}
+		if kind == "ticket" {
+			body["fields"] = json.RawMessage(benefitFields)
+		}
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustNode(t, p, string(raw))
+	}
+	root := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "project").ID+`","title":"Buckets","state":"active"}`)
+	folder := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "release").ID+`","title":"Folder","state":"done","parent_id":"`+root.ID+`"}`)
+	// Every stored spelling, plus one unknown state. A non-work node must not count.
+	for _, state := range []string{
+		"new", "backlog", "open", "blocked", "mystery",
+		"in_progress", "in-progress", "in progress", "inprogress", "active", "qa", " QA ",
+		"accepted", "delivered", "done", "cancelled", "canceled", "archived",
+	} {
+		create("ticket", state, folder.ID)
+	}
+	create("task", "open", folder.ID)
+	create("epic", "blocked", folder.ID)
+	create("memory", "done", root.ID)
+
+	assertBuckets := func(open, progress, done, cancelled, total int) projectSummary {
+		t.Helper()
+		status, body := call(t, &p, "GET", "/api/projects", "")
+		projects := decode[projectPage](t, status, body, 200)
+		if len(projects.Items) != 1 {
+			t.Fatalf("projects: %s", body)
+		}
+		got := projects.Items[0]
+		if got.Open != open || got.InProgress != progress || got.Done != done || got.Cancelled != cancelled || got.Total != total {
+			t.Fatalf("buckets open=%d progress=%d done=%d cancelled=%d total=%d, got %+v", open, progress, done, cancelled, total, got)
+		}
+		return got
+	}
+	// open: new, backlog, open, blocked, mystery, task open, epic blocked.
+	// in progress: four spellings, active, qa, " QA ".
+	// done: accepted, delivered, done. cancelled: cancelled, canceled. archived is total only.
+	assertBuckets(7, 7, 3, 2, 20)
+
+	ticketKind := kindBySlug(t, p, "ticket")
+	var schema map[string]any
+	if err := json.Unmarshal(ticketKind.FieldSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	schema["states"] = []any{
+		map[string]string{"state": "mystery", "category": "done"},
+		map[string]string{"state": "blocked", "category": "doing"},
+		map[string]string{"state": "qa", "category": "open"},
+		map[string]string{"state": "QA", "category": "done"},
+	}
+	raw, err := json.Marshal(map[string]any{"field_schema": schema})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, body := call(t, &p, "PATCH", "/api/kinds/"+ticketKind.ID, string(raw)); status != 400 {
+		t.Fatalf("duplicate state accepted: %d %s", status, body)
+	}
+	schema["states"] = []any{map[string]string{"state": "mystery", "category": "nope"}}
+	raw, _ = json.Marshal(map[string]any{"field_schema": schema})
+	if status, body := call(t, &p, "PATCH", "/api/kinds/"+ticketKind.ID, string(raw)); status != 400 {
+		t.Fatalf("unknown category accepted: %d %s", status, body)
+	}
+	schema["states"] = []any{
+		map[string]string{"state": "mystery", "category": "done"},
+		map[string]string{"state": "blocked", "category": "doing"},
+		map[string]string{"state": "qa", "category": "open"},
+	}
+	raw, _ = json.Marshal(map[string]any{"field_schema": schema})
+	status, body := call(t, &p, "PATCH", "/api/kinds/"+ticketKind.ID, string(raw))
+	updated := decode[kindJSON](t, status, body, 200)
+	var stored map[string]any
+	if err := json.Unmarshal(updated.FieldSchema, &stored); err != nil {
+		t.Fatal(err)
+	}
+	props, _ := stored["properties"].(map[string]any)
+	if _, ok := props["pill_en"]; !ok {
+		t.Fatalf("state catalog replaced field properties: %s", updated.FieldSchema)
+	}
+	// Ticket catalog only: mystery is done, blocked is in progress, both qa spellings are open.
+	// The epic's blocked state keeps the fixed mapping.
+	assertBuckets(7, 6, 4, 2, 20)
+}

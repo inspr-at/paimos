@@ -1062,17 +1062,22 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
                 SELECT s.project_id,c.id,c.parent_id,c.state,c.updated_at,c.kind_id,s.depth+1
                 FROM subtree s JOIN nodes c ON c.tenant_id=current_setting('aeon.tenant_id')::uuid
                     AND c.parent_id=s.node_id AND c.deleted_at IS NULL
-            ), summary AS (
-                SELECT p.id,p.key,p.title,p.state,
-                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('new','backlog'))::int AS open,
-                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('in_progress','qa'))::int AS in_progress,
-                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('accepted','delivered','done'))::int AS done,
-                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state='cancelled')::int AS cancelled,
-                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic'))::int AS total,
-                    max(s.updated_at) AS last_activity
+            ), `+workStateCategoryCTE()+`, counted AS (
+                SELECT p.id,p.key,p.title,p.state,s.depth,k.slug,s.updated_at,
+                    `+workCountBucketSQL("s.state", "c")+` AS bucket
                 FROM projects p JOIN subtree s ON s.project_id=p.id
                 JOIN node_kinds k ON k.id=s.kind_id AND k.tenant_id=current_setting('aeon.tenant_id')::uuid
-                GROUP BY p.id,p.key,p.title,p.state
+                LEFT JOIN configured c ON c.kind_id=s.kind_id AND c.norm=`+workStateNormSQL("s.state")+`
+            ), summary AS (
+                SELECT id,key,title,state,
+                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='open')::int AS open,
+                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='in_progress')::int AS in_progress,
+                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='done')::int AS done,
+                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='cancelled')::int AS cancelled,
+                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic'))::int AS total,
+                    max(updated_at) AS last_activity
+                FROM counted
+                GROUP BY id,key,title,state
             ), recent AS (
                 SELECT e.node_id,e.actor_principal_id,e.at FROM events e
                 WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.node_id IS NOT NULL AND e.at > now() - interval '90 days'

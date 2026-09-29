@@ -1379,7 +1379,7 @@ paths:
         - {name: include_archived, in: query, schema: {type: boolean, default: false}}
       responses:
         '200':
-          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. Open counts new/backlog, in_progress counts in_progress/qa, done counts done/delivered/accepted, and cancelled is separate. Total includes all work states.
+          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. A category on that kind's field_schema.states wins (open, doing or in_progress, done, cancelled, archived). Otherwise open is every state that is not in progress, done, cancelled or archived, including open, blocked and unknown states; in_progress is in_progress, active and qa; done is done, delivered and accepted; cancelled is cancelled. Archived work is in total only. The response fields are unchanged.
           content:
             application/json:
               schema:
