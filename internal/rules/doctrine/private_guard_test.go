@@ -6,12 +6,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/inspr-at/paimos/internal/rulesimport"
 )
@@ -95,7 +97,7 @@ func TestReadPrivateCorpusFullTreeFailClosed(t *testing.T) {
 		"docs/AGENTS-PROFILE-MARKUS.md":        []byte("# Profile\n\n- " + profile + "\n"),
 		"commands/secrets.md":                  []byte("# Secrets\n\n- " + command + "\n"),
 		"docs/AGENTS-KERNEL-PRIVATE.tldr.yaml": []byte("rules:\n  copper:\n    en: " + guardTLDR + "\n"),
-		"assets/blank.dat":                     {0, 1, 2, 3},
+		"assets/blank.png":                     append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 0, 1, 2, 3),
 		"notes/blank.md":                       []byte("   \n"),
 	}
 	ctx := context.Background()
@@ -152,6 +154,75 @@ func TestReadPrivateCorpusFullTreeFailClosed(t *testing.T) {
 	if utf16Text([]byte{0, 1, 2, 3}) {
 		t.Fatal("binary fixture classified as UTF-16")
 	}
+}
+
+func TestNulBlobFailsClosedUnlessKnownBinary(t *testing.T) {
+	base := map[string][]byte{"docs/OK.md": []byte(guardRule)}
+	quietPNG := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 0, 1, 2, 3)
+	readable := []byte("The copper observatory keeps seven violet notebooks beneath the eastern stairway.")
+	utf16Mixed := utf16LEString("Hello \u2192 the private line must not be skipped as binary text.")
+	cases := []struct {
+		name string
+		raw  []byte
+		path string
+		fail bool
+	}{
+		{"leading nul", append([]byte{0}, readable...), "notes/lead.bin", true},
+		{"bare nul", []byte{0, 1, 2, 3}, "assets/blank.dat", true},
+		{"utf16 no bom", utf16Mixed, "notes/wide.bin", true},
+		{"utf16 be", utf16BEString("Hello \u2192 the private line must not be skipped as binary text."), "notes/be.bin", true},
+		{"utf32", utf32LEString("The private line must not be skipped as binary text today."), "notes/u32.bin", true},
+		{"png tail", append(append([]byte{}, quietPNG...), readable...), "assets/logo.png", true},
+		{"quiet png", quietPNG, "assets/logo.png", false},
+		{"png extension of utf8", readable, "assets/logo.png", false},
+	}
+	for _, tc := range cases {
+		docs := map[string][]byte{"docs/OK.md": base["docs/OK.md"], tc.path: tc.raw}
+		_, err := readPrivateCorpus(context.Background(), memReader{files: docs}, privateRepository, fixtureCommit, testGuardMaster())
+		if tc.fail && err == nil {
+			t.Fatalf("%s was skipped or indexed", tc.name)
+		}
+		if !tc.fail && err != nil {
+			t.Fatalf("%s rejected a known binary or plain text: %v", tc.name, err)
+		}
+	}
+	docs := map[string][]byte{"docs/OK.md": []byte(guardRule), "assets/logo.png": quietPNG}
+	raw, err := readPrivateCorpus(context.Background(), memReader{files: docs}, privateRepository, fixtureCommit, testGuardMaster())
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := unmarshalGuard(raw, testGuardMaster())
+	if err != nil || guardPrivateQuotes(corpus, nil, guardRule) == nil {
+		t.Fatal("quiet png dropped the rest of the tree")
+	}
+}
+
+func utf16LEString(s string) []byte {
+	units := utf16.Encode([]rune(s))
+	out := make([]byte, len(units)*2)
+	for i, u := range units {
+		out[i*2] = byte(u)
+		out[i*2+1] = byte(u >> 8)
+	}
+	return out
+}
+
+func utf16BEString(s string) []byte {
+	units := utf16.Encode([]rune(s))
+	out := make([]byte, len(units)*2)
+	for i, u := range units {
+		out[i*2] = byte(u >> 8)
+		out[i*2+1] = byte(u)
+	}
+	return out
+}
+
+func utf32LEString(s string) []byte {
+	out := make([]byte, 0, len(s)*4)
+	for _, r := range s {
+		out = append(out, byte(r), byte(r>>8), byte(r>>16), byte(r>>24))
+	}
+	return out
 }
 
 func utf16LE(s string) []byte {
@@ -349,7 +420,7 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 			if rule.TLDR != nil {
 				texts = append(texts, rule.TLDR.EN, rule.TLDR.DE)
 			}
-			if guardPrivateQuotes(corpus, public, texts...) == nil {
+			if !corpus.quotes(allow, texts...) {
 				continue
 			}
 			refused++
@@ -419,6 +490,92 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 	if refused != 0 || privateOnlyAllowed != 0 {
 		t.Fatalf("guard counts public_refused=%d private_only_allowed=%d", refused, privateOnlyAllowed)
 	}
+	if checked != 381 {
+		t.Fatalf("public rules=%d, want 381", checked)
+	}
+	identity, nonLatin := 0, 0
+	for _, view := range views {
+		for _, rule := range view.Rules {
+			err := guardPublic(publicRepository, rule.Source)
+			if err == nil {
+				continue
+			}
+			var got *failure
+			if !errors.As(err, &got) {
+				t.Fatalf("public rule %s %s refused without a code", view.Path, rule.Key)
+			}
+			switch got.Code {
+			case "public_identity":
+				identity++
+			case "non_latin":
+				nonLatin++
+				t.Errorf("public rule became non_latin %s %s", view.Path, rule.Key)
+			default:
+				t.Errorf("public rule refused %s %s code=%s", view.Path, rule.Key, got.Code)
+			}
+		}
+	}
+	if identity != 6 || nonLatin != 0 {
+		t.Fatalf("public guardPublic identity=%d non_latin=%d, want 6 and 0", identity, nonLatin)
+	}
+	var privateFiles []File
+	for path, text := range privDocs {
+		privateFiles = append(privateFiles, File{Path: path, Content: []byte(text)})
+	}
+	privateViews := Render(privateRepository, fixtureCommit, true, privateFiles)
+	attacks := []struct {
+		name string
+		fn   func(string) string
+	}{
+		{"latin-diacritic-e", func(s string) string { return strings.ReplaceAll(s, "e", "é") }},
+		{"latin-diacritic-a", func(s string) string { return strings.ReplaceAll(s, "a", "à") }},
+		{"one-accent", func(s string) string {
+			w := strings.Fields(s)
+			for i := range w {
+				w[i] = strings.Replace(w[i], "e", "é", 1)
+			}
+			return strings.Join(w, " ")
+		}},
+		{"combining-acute", func(s string) string { return strings.ReplaceAll(s, "e", "e\u0301") }},
+		{"combining-dot-below", func(s string) string { return strings.ReplaceAll(s, "e", "e\u0323") }},
+		{"combining-low-line", func(s string) string { return strings.ReplaceAll(s, "o", "o\u0332") }},
+		{"latin-alpha", func(s string) string { return strings.ReplaceAll(s, "a", "ɑ") }},
+		{"latin-script-g", func(s string) string { return strings.ReplaceAll(s, "g", "ɡ") }},
+		{"latin-iota", func(s string) string { return strings.ReplaceAll(s, "i", "ɩ") }},
+		{"small-cap-o", func(s string) string { return strings.ReplaceAll(s, "o", "ᴏ") }},
+		{"small-cap-c", func(s string) string { return strings.ReplaceAll(s, "c", "ᴄ") }},
+		{"dotted-i", func(s string) string { return strings.ReplaceAll(s, "I", "İ") }},
+		{"latin-small-s", func(s string) string { return strings.ReplaceAll(s, "s", "ꜱ") }},
+	}
+	for _, attack := range attacks {
+		n, pass := 0, 0
+		for _, view := range privateViews {
+			for _, rule := range view.Rules {
+				if !privateOnlyWindow(allow, rule.Text) {
+					continue
+				}
+				n++
+				text := attack.fn(rule.Text)
+				if guardPublic(publicRepository, text) == nil && !corpus.quotes(allow, text) {
+					pass++
+				}
+			}
+		}
+		t.Logf("latin %s rules=%d passed=%d", attack.name, n, pass)
+		if n != 412 || pass != 0 {
+			t.Fatalf("latin lookalike %s passed %d of %d", attack.name, pass, n)
+		}
+	}
+}
+
+func privateOnlyWindow(allow publicAllow, text string) bool {
+	words := proposalWords(text)
+	for i := 0; i+quoteRunWords <= len(words); i++ {
+		if _, ok := allow.runs[hashWords(allow.key, words[i:i+quoteRunWords])]; !ok {
+			return true
+		}
+	}
+	return false
 }
 
 func indexedDoctrineFiles(docs map[string]string) []File {
@@ -472,14 +629,11 @@ func gitTexts(t *testing.T, dir string) map[string]string {
 		if err != nil {
 			t.Fatalf("unreadable %s", path)
 		}
-		if utf16Text(raw) || (doctrineTextPath(path) && (bytes.Contains(raw, []byte{0}) || !utf8Valid(raw))) || (!bytes.Contains(raw, []byte{0}) && !utf8Valid(raw)) {
+		switch classifyPrivateBlob(path, raw) {
+		case blobSkip:
+			continue
+		case blobReject:
 			textFail++
-			continue
-		}
-		if bytes.Contains(raw, []byte{0}) {
-			continue
-		}
-		if len(bytes.TrimSpace(raw)) == 0 {
 			continue
 		}
 		docs[path] = string(raw)

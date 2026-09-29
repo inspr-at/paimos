@@ -225,6 +225,15 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Quote-check the pin before minting a token or reading GitHub. A refusal
+	// costs no GitHub call. When the pin is not main, check again against
+	// main's tree before any write so a side pin cannot launder private text.
+	quoteTexts := []string{in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation}
+	if err := withGuardSlot(ctx, func() error {
+		return guardPrivateQuotes(guard, files, quoteTexts...)
+	}); err != nil {
+		return nil, err
+	}
 	g, err := m.appClient(ctx, actor.TenantID, source.Repository)
 	if err != nil {
 		return nil, err
@@ -247,8 +256,13 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	}
 	// Exempt only blobs that are on main right now. The configured pin, a
 	// proposal branch and an unmerged SHA are not a public-text exemption.
-	if err := guardPrivateQuotes(guard, mainMatchingFiles(files, tree), in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation); err != nil {
-		return nil, err
+	matched := mainMatchingFiles(files, tree)
+	if !pinIsMain(files, matched) {
+		if err := withGuardSlot(ctx, func() error {
+			return guardPrivateQuotes(guard, matched, quoteTexts...)
+		}); err != nil {
+			return nil, err
+		}
 	}
 	cached := map[string]string{}
 	for _, f := range files {
