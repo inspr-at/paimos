@@ -6,12 +6,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestTwoSessionsAndReplyAfterAck(t *testing.T) {
@@ -91,4 +93,83 @@ func TestTwoSessionsAndReplyAfterAck(t *testing.T) {
 	if out, err := m.commitMessage(t.Context(), w.agent, project, matched); err != nil || out.SenderSessionID == nil || *out.SenderSessionID != first {
 		t.Fatalf("explicit match %v %+v", err, out)
 	}
+}
+
+func TestReplyToHeldParentStaysInvisible(t *testing.T) {
+	w, m, project, srv := messagingWorld(t)
+	session := messageTestSession(t, w, project, w.agent, "Held generation")
+	path := "/api/projects/" + project + "/messages"
+	heldIn := compatInput("codex:worker", "held-parent")
+	heldIn.RecipientSessionID = &session
+	heldIn.ActionRequest = true
+	heldIn.ExpectsReply = true
+	held := mustCompatSend(t, m, w.sender, project, heldIn)
+	status, body := do(t, srv, w.agent.ID, "GET", path+"/listen?to=codex:worker&session="+session, "", nil)
+	if status != 200 || bytes.Contains(body, []byte(held.ID)) {
+		t.Fatalf("held parent visible on read %d %s", status, body)
+	}
+	token := insertKey(t, w.db, w.agent, []string{"inbox.send"}, "reply-held")
+	missing := "00000000-0000-4000-8000-0000000000aa"
+	absent := compatInput(w.sender.ID, "reply-to-missing")
+	absent.ReplyTo = &missing
+	statusAbsent, absentBody := compatPostAuth(t, srv, w.agent, path, absent, token)
+	for _, key := range []string{"reply-to-held", "reply-to-held-again"} {
+		reply := compatInput(w.sender.ID, key)
+		reply.ReplyTo = &held.ID
+		status, hidden := compatPostAuth(t, srv, w.agent, path, reply, token)
+		if status != 404 || statusAbsent != 404 || !bytes.Equal(hidden, absentBody) || bytes.Contains(hidden, []byte(held.ID)) || bytes.Contains(hidden, []byte("thread_id")) {
+			t.Fatalf("omitted session %s: %d %s absent %d %s", key, status, hidden, statusAbsent, absentBody)
+		}
+	}
+	matched := compatInput(w.sender.ID, "reply-to-held-matched")
+	matched.SenderSessionID = &session
+	matched.ReplyTo = &held.ID
+	status, hidden := compatPostAuth(t, srv, w.agent, path, matched, token)
+	if status != 404 || !bytes.Equal(hidden, absentBody) || bytes.Contains(hidden, []byte(held.ID)) || bytes.Contains(hidden, []byte("thread_id")) {
+		t.Fatalf("matched generation %d %s", status, hidden)
+	}
+	err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+		var n int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM inbox_compat_messages WHERE reply_to_id=$1::uuid`, held.ID).Scan(&n); err != nil {
+			return err
+		}
+		if n != 0 {
+			return fmt.Errorf("held parent gained %d replies", n)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	visibleIn := compatInput("codex:worker", "acked-parent")
+	visibleIn.RecipientSessionID = &session
+	visibleIn.ExpectsReply = true
+	visible := mustCompatSend(t, m, w.sender, project, visibleIn)
+	status, body = do(t, srv, w.agent.ID, "GET", "/api/inbox/messages?wait_ms=0&exact_session=true&session="+session, "", nil)
+	if status != 200 || !bytes.Contains(body, []byte(visible.ID)) {
+		t.Fatalf("acked parent not visible before ack %d %s", status, body)
+	}
+	status, body = do(t, srv, w.agent.ID, "POST", "/api/inbox/messages/"+visible.ID+"/ack", "", nil)
+	if status != 200 {
+		t.Fatalf("ack %d %s", status, body)
+	}
+	acked := compatInput(w.sender.ID, "reply-to-acked")
+	acked.ReplyTo = &visible.ID
+	status, body = compatPostAuth(t, srv, w.agent, path, acked, token)
+	if status != 201 {
+		t.Fatalf("acked reply %d %s", status, body)
+	}
+	sent := mustJSON[CompatMessage](t, body)
+	if sent.ReplyTo == nil || *sent.ReplyTo != visible.ID || sent.ThreadID != visible.ThreadID || sent.Hop != visible.Hop+1 {
+		t.Fatalf("acked reply metadata: %+v", sent)
+	}
+}
+
+func compatPostAuth(t *testing.T, srv *httptest.Server, p tenant.Principal, path string, v any, token string) (int, []byte) {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return do(t, srv, p.ID, "POST", path, string(b), headerAuth(token))
 }

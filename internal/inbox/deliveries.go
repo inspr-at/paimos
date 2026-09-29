@@ -202,7 +202,9 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 			var parentThread string
 			var parentHop int
 			var parentSenderSession, parentRecipientSession *string
-			err := tx.QueryRow(ctx, `SELECT thread_id,hop,sender_session_id::text,recipient_session_id::text FROM inbox_compat_messages WHERE project_id=$1::uuid AND id=$2::uuid AND sender_principal_id=$3::uuid AND recipient_principal_id=$4::uuid`, project, *in.ReplyTo, recipient, p.ID).Scan(&parentThread, &parentHop, &parentSenderSession, &parentRecipientSession)
+			// Held action requests never reach the recipient read path. Missing
+			// them here keeps a hidden parent indistinguishable from none.
+			err := tx.QueryRow(ctx, `SELECT thread_id,hop,sender_session_id::text,recipient_session_id::text FROM inbox_compat_messages WHERE project_id=$1::uuid AND id=$2::uuid AND sender_principal_id=$3::uuid AND recipient_principal_id=$4::uuid AND NOT is_action_request`, project, *in.ReplyTo, recipient, p.ID).Scan(&parentThread, &parentHop, &parentSenderSession, &parentRecipientSession)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return errNotFound
 			}
