@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { can } from '../../lib/authz'
 import {
   accountPlan, daysLabel, gauge as gaugeOf, gaugeModeFor, nightLabel, pct, poolSentence, setGlobalMode, sourceLine, todayCell, toggleAccountMode, when, whenFull,
@@ -39,6 +39,7 @@ const DOT_TIP: Record<AccountRow['state'], (row: AccountRow) => string> = {
   live: () => 'Live: signed in, computer online, fresh reading',
   offline: row => `${row.host} is offline`,
   signin: () => 'Sign-in expired',
+  unavailable: row => `Could not check this account on ${row.host}; agents skip it until the next check`,
   paused: () => 'Paused in Settings, under Accounts',
   unread: () => 'Signed in; no reading yet',
 }
@@ -139,12 +140,9 @@ function closeMenu(focus = false) {
   menu.value = null
   if (focus && id) card.value?.querySelector<HTMLElement>(`[data-menu="${id}"]`)?.focus()
 }
-function soonestReset(pool: PoolView) {
-  const resets = pool.rows.filter(r => r.state === 'live' && r.primary).map(r => r.primary!.reading.resets_at).sort()
-  return resets[0] ?? ''
-}
 function menuItems(pool: PoolView) {
-  const reset = soonestReset(pool)
+  // The server ends a Sprint at the pool's earliest limiting reset (5-hour windows included).
+  const reset = pool.sprintEnd
   const items: { value: Override; icon: 'play' | 'bolt' | 'pause'; title: string; desc: string }[] = []
   if (pool.override) items.push({ value: '', icon: 'play', title: 'Back to the plan', desc: 'Pace by your work week again.' })
   if (pool.override !== 'sprint') items.push({ value: 'sprint', icon: 'bolt', title: 'Sprint until reset', desc: reset ? `Agents may use everything left until ${when(reset, now.value)}.` : 'Agents may use everything left until the next reset.' })
@@ -165,6 +163,27 @@ function setOverride(pool: PoolView, value: Override) {
   const done = value === 'sprint' ? `Sprint: agents may use everything left on ${pool.name} until it resets.` : value === 'hold' ? `Holding ${pool.name}. Running steps finish.` : `${pool.name} follows your work week again.`
   void run(() => capacity.setPoolOverride(id, value), done).then(() => nextTick(() => card.value?.querySelector<HTMLElement>(`[data-menu="${id}"]`)?.focus({ preventScroll: true })))
 }
+
+// ---------- Phone sheet: the page behind it is inert ----------
+const inerted: { el: HTMLElement; inert: boolean; hidden: string | null }[] = []
+function setBackground(off: boolean) {
+  if (off) {
+    const host = document.querySelector('.sheet-host')
+    for (const el of [...document.body.children] as HTMLElement[]) {
+      if (host && el.contains(host)) continue
+      inerted.push({ el, inert: el.inert, hidden: el.getAttribute('aria-hidden') })
+      el.inert = true
+      el.setAttribute('aria-hidden', 'true')
+    }
+  } else {
+    for (const { el, inert, hidden } of inerted.splice(0)) {
+      el.inert = inert
+      if (hidden === null) el.removeAttribute('aria-hidden'); else el.setAttribute('aria-hidden', hidden)
+    }
+  }
+}
+watch(() => !!editor.value && sheet.value, async open => { await nextTick(); setBackground(false); if (open) setBackground(true) })
+onBeforeUnmount(() => setBackground(false))
 
 // ---------- Outside clicks ----------
 function outside(event: MouseEvent) {
@@ -368,7 +387,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .host { flex: none; }
 .dot { position: relative; flex: none; width: 8px; height: 8px; border-radius: 50%; }
 .dot.live, .dot.unread { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
-.dot.offline, .dot.paused { background: transparent; box-shadow: inset 0 0 0 1.6px var(--ink-3); }
+.dot.offline, .dot.paused, .dot.unavailable { background: transparent; box-shadow: inset 0 0 0 1.6px var(--ink-3); }
 .dot.signin { background: var(--gold); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 22%, transparent); }
 .left { justify-self: end; padding: 2px 4px; margin: -2px -4px; border: 0; border-radius: 6px; background: transparent; text-align: right; white-space: nowrap; }
 button.left { cursor: pointer; }

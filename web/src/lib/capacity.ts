@@ -44,8 +44,14 @@ export interface CapacityWindow {
   reading: CapacityReading; starts_at: string; allowance: number; remaining_percent: number
   freshness: 'fresh' | 'aging' | 'stale' | 'expired'; usage_today_known?: boolean; pacing: CapacityPacing
 }
-export interface AccountCapacity { account_id: string; ongoing_use_approved?: boolean; schedule: CapacitySchedule; windows: CapacityWindow[] }
-export interface ScheduleOverride { scope: 'user' | 'pool' | 'account'; pool?: Pool; account_id?: string; schedule: CapacitySchedule | null }
+export interface AccountCapacity {
+  account_id: string; ongoing_use_approved?: boolean; schedule: CapacitySchedule; windows: CapacityWindow[]
+  /** Why the last probe failed; only auth_failed is a confirmed sign-out. */
+  probe_failure?: 'auth_failed' | 'unavailable'
+  /** Earliest reset of the current windows, 5-hour included: where a Sprint ends. */
+  limiting_reset?: string
+}
+export interface ScheduleOverride { scope: 'user' | 'pool' | 'account'; pool?: Pool; account_id?: string; schedule: CapacitySchedule | null; carry_overrides?: boolean }
 
 // ---------- HTTP ----------
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -78,8 +84,11 @@ export function stripOverride(s: CapacitySchedule): CapacitySchedule {
   const { override: _o, override_until: _u, ...rest } = s
   return rest
 }
-/** Same schedule apart from Sprint/Hold: a pool entry that only carries an override. */
-export const sameShape = (a: CapacitySchedule, b: CapacitySchedule) => JSON.stringify(stripOverride(a)) === JSON.stringify(stripOverride(b))
+/** Same schedule apart from Sprint/Hold and zone (the server's rule): a pool entry that only carries an override. */
+export function sameShape(a: CapacitySchedule, b: CapacitySchedule) {
+  const norm = (s: CapacitySchedule) => { const { timezone: _t, ...rest } = stripOverride(s); return JSON.stringify(rest) }
+  return norm(a) === norm(b)
+}
 
 export function presetOf(week: CapacityDay[]): 5 | 6 | 7 | null {
   for (const n of [5, 6, 7] as const) if (week.every((d, i) => d.on === i < n && (!d.on || (d.start === 8 && d.end === 22)))) return n
@@ -204,16 +213,19 @@ export const weekdayIn = (iso: string, timezone: string) => (parts(Date.parse(is
 export const pct = (v: number) => (v > 0 && v < 1 ? '<1%' : `${Math.round(v)}%`)
 
 // ---------- Accounts and pools ----------
-export type AccountState = 'live' | 'offline' | 'signin' | 'paused' | 'unread'
+export type AccountState = 'live' | 'offline' | 'signin' | 'unavailable' | 'paused' | 'unread'
 export interface AccountInput {
   id: string; label: string; harness: string; host: string
   state: 'available' | 'draining' | 'unavailable'; last_probe_ok?: boolean | null; plan?: string
   /** From the pairing projection of the account's computer, when it has one. */
-  connectivity?: 'online' | 'offline' | 'unknown'; loginRequired?: boolean
+  connectivity?: 'online' | 'offline' | 'unknown'
+  /** From the capacity projection: why this account's last probe failed. */
+  probeFailure?: 'auth_failed' | 'unavailable'
 }
 export interface AccountRow {
   id: string; name: string; host: string; harness: string; state: AccountState
   primary: CapacityWindow | null; five: CapacityWindow | null; schedule: CapacitySchedule | null; plan: string
+  limitingReset: string
 }
 export const HARNESS_NAME: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi' }
 export const POOL_ORDER = ['codex', 'claude', 'grok', 'cursor', 'pi']
@@ -231,9 +243,11 @@ export function pickWindows(windows: CapacityWindow[]): { primary: CapacityWindo
   return { primary, five }
 }
 export function accountState(a: AccountInput, hasReading: boolean): AccountState {
-  // agentd's probe is the vendor's own login status check, so a failed probe means sign in again.
-  if (a.loginRequired || a.last_probe_ok === false) return 'signin'
-  if (a.connectivity === 'offline' || a.state === 'unavailable') return 'offline'
+  // Only a sign-out the vendor's status command confirmed for this account asks
+  // for a sign-in; any other failed check is a quiet "reading unavailable".
+  if (a.last_probe_ok === false && a.probeFailure === 'auth_failed') return 'signin'
+  if (a.connectivity === 'offline') return 'offline'
+  if (a.last_probe_ok === false || a.state === 'unavailable') return 'unavailable'
   if (a.state === 'draining') return 'paused'
   return hasReading ? 'live' : 'unread'
 }
@@ -242,10 +256,15 @@ export function buildRows(accounts: AccountInput[], capacity: AccountCapacity[])
   return accounts.map(a => {
     const cap = byId.get(a.id)
     const { primary, five } = pickWindows(cap?.windows ?? [])
-    return { id: a.id, name: a.label, host: a.host, harness: a.harness, state: accountState(a, !!primary), primary, five, schedule: cap?.schedule ?? null, plan: primary?.reading.plan || a.plan || '' }
+    const state = accountState({ ...a, probeFailure: cap?.probe_failure ?? a.probeFailure }, !!primary)
+    return { id: a.id, name: a.label, host: a.host, harness: a.harness, state, primary, five, schedule: cap?.schedule ?? null, plan: primary?.reading.plan || a.plan || '', limitingReset: cap?.limiting_reset ?? '' }
   })
 }
-export interface PoolView { id: string; name: string; plan: string; rows: AccountRow[]; override: Override; overrideUntil: string }
+export interface PoolView {
+  id: string; name: string; plan: string; rows: AccountRow[]; override: Override; overrideUntil: string
+  /** Where a Sprint on this pool would end: the server's earliest limiting reset in the pool. */
+  sprintEnd: string
+}
 /** The override in force now: a Sprint ends at its reset. */
 export function activeOverride(s: CapacitySchedule | null, now: number): Override {
   if (!s?.override) return ''
@@ -269,7 +288,8 @@ export function buildPools(rows: AccountRow[], now: number): PoolView[] {
     const plans = [...new Set(sorted.map(r => r.plan).filter(Boolean))]
     const plan = [plans.length === 1 ? plans[0] : '', windowWords(sorted)].filter(Boolean).join(' · ')
     const schedule = sorted.find(r => r.schedule)?.schedule ?? null
-    return { id, name: HARNESS_NAME[id] ?? id, plan, rows: sorted, override: activeOverride(schedule, now), overrideUntil: schedule?.override_until ?? '' }
+    const limits = sorted.map(r => r.limitingReset).filter(Boolean).sort((x, y) => Date.parse(x) - Date.parse(y))
+    return { id, name: HARNESS_NAME[id] ?? id, plan, rows: sorted, override: activeOverride(schedule, now), overrideUntil: schedule?.override_until ?? '', sprintEnd: limits[0] ?? '' }
   })
 }
 
@@ -317,6 +337,7 @@ export function todayCell(row: AccountRow, plan: AccountPlan | null): TodayCell 
   if (row.state === 'offline') return { kind: 'quiet', text: `waits for ${row.host}` }
   if (row.state === 'signin') return { kind: 'signin', command: LOGIN_COMMAND[row.harness] ?? '' }
   if (row.state === 'paused') return { kind: 'quiet', text: 'paused' }
+  if (row.state === 'unavailable') return { kind: 'quiet', text: 'reading unavailable' }
   if (!plan) return { kind: 'quiet', text: 'no reading yet' }
   if (plan.override === 'hold') return { kind: 'quiet', text: 'on hold' }
   if (plan.override === 'sprint') return { kind: 'sprint', text: `all ${pct(plan.left)}` }
@@ -367,6 +388,7 @@ export function poolSentence(pool: PoolView, now: number, timezone?: string): Se
       return { segs: [b(`Paused until you sign in again on ${first.host}.`), t(tail)] }
     }
     if (first.state === 'offline') return { segs: [b(`Waits for ${first.host} to come back online.`)] }
+    if (first.state === 'unavailable') return { segs: [b(`Reading unavailable on ${first.host}.`), t(' Agents skip it until the next check succeeds.')] }
     if (first.state === 'paused') return { segs: [b('Paused.'), t(' Agents leave it alone until you resume it in Settings.')] }
     return { segs: [b('No reading yet'), t(' — starts with the first run.')] }
   }

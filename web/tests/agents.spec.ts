@@ -449,7 +449,7 @@ test('an empty workspace explains how an agent connects', async ({ page }) => {
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'No agent has connected yet' })).toBeVisible()
   await expect(page.locator('.connect .lead')).toHaveText('Start an agent to queue a run; its daemon connects when an account is ready.')
-  // Only the account that needs a new sign-in waits; no request does.
+  // No request waits (a failed check is not a sign-in prompt).
   await expect(queue(page).locator('.item:not(.signin)')).toHaveCount(0)
   // The empty state says it once; the header adds no second sentence.
   await expect(page.getByRole('group', { name: 'Live sessions' })).toHaveText('')

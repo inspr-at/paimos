@@ -72,6 +72,9 @@ test('schedule validation and pace steps match the server', () => {
   assert.equal(scheduleProblem(schedule({ nights: true, model: 'shifts' }), 'night'), '')
   assert.deepEqual([0, 0.04, 0.05, 0.5, 0.94, 1].map(clampRate), [0, 0.1, 0.1, 0.5, 0.9, 1])
   assert.ok(sameShape({ ...schedule(), override: 'sprint', override_until: periodEnd }, schedule()))
+  // The zone does not make a Hold carrier a deliberate schedule (server rule).
+  assert.ok(sameShape({ ...schedule(), timezone: 'UTC', override: 'hold' }, schedule()))
+  assert.ok(!sameShape({ ...schedule(), week: presetWeek(3) }, schedule()))
 })
 
 test('times read as a clock: today, tomorrow, weekday, date', () => {
@@ -89,11 +92,14 @@ test('the long window is the bar and the 5-hour window the small line', () => {
   assert.deepEqual(pickWindows([five]), { primary: five, five: null })
 })
 
-test('account states: sign-in, offline, paused, no reading, live', () => {
-  assert.equal(accountState(acct('a', 'x', 'codex', { loginRequired: true }), true), 'signin')
-  assert.equal(accountState(acct('a', 'x', 'codex', { state: 'unavailable', last_probe_ok: false }), true), 'signin')
-  // The probe is the vendor's login status, so a failed probe asks for a sign-in on any state.
-  assert.equal(accountState(acct('a', 'x', 'codex', { last_probe_ok: false }), true), 'signin')
+test('account states: sign-in only on a confirmed sign-out; other failed checks are quiet', () => {
+  assert.equal(accountState(acct('a', 'x', 'codex', { last_probe_ok: false, probeFailure: 'auth_failed' }), true), 'signin')
+  // AEON-299 review: timeouts, missing binaries and unreadable output are not a sign-out.
+  assert.equal(accountState(acct('a', 'x', 'codex', { last_probe_ok: false }), true), 'unavailable')
+  assert.equal(accountState(acct('a', 'x', 'codex', { last_probe_ok: false, probeFailure: 'unavailable' }), true), 'unavailable')
+  assert.equal(accountState(acct('a', 'x', 'codex', { state: 'unavailable', last_probe_ok: false }), true), 'unavailable')
+  // A stale auth_failed after a later successful probe is not a sign-in.
+  assert.equal(accountState(acct('a', 'x', 'codex', { last_probe_ok: true, probeFailure: 'auth_failed' }), true), 'live')
   assert.equal(accountState(acct('a', 'x', 'codex', { last_probe_ok: null }), true), 'live')
   assert.equal(accountState(acct('a', 'x', 'codex', { connectivity: 'offline' }), true), 'offline')
   assert.equal(accountState(acct('a', 'x', 'codex', { state: 'draining' }), true), 'paused')
@@ -166,10 +172,14 @@ test('days off: rest, would expire, and unused capacity', () => {
 })
 
 test('sign-in and offline pools pause with the one fixing step', () => {
-  const [cursor] = pools([acct('u', 'markus', 'cursor', { loginRequired: true })], [cap('u', [win({ kind: 'monthly', used: 43, budget: 6, reset: '2026-10-14T07:00:00Z', readMin: 2 * 24 * 60 })])])
+  const [cursor] = pools([acct('u', 'markus', 'cursor', { last_probe_ok: false })], [{ ...cap('u', [win({ kind: 'monthly', used: 43, budget: 6, reset: '2026-10-14T07:00:00Z', readMin: 2 * 24 * 60 })]), probe_failure: 'auth_failed' }])
   assert.equal(plainText(poolSentence(cursor, now, TZ)), 'Paused until you sign in again on mbp2607. 57% left, resets Wed 14 Oct.')
   assert.deepEqual(todayCell(cursor.rows[0], null), { kind: 'signin', command: 'cursor-agent login' })
   assert.equal(sourceLine(cursor.rows[0], now), 'Sign-in expired · last read 2 d ago')
+  const [quiet] = pools([acct('g', 'markus', 'grok', { last_probe_ok: false })], [{ ...cap('g', [win({ used: 10, budget: 12, reset: '2026-10-06T11:10:00Z' })]), probe_failure: 'unavailable' }])
+  assert.equal(plainText(poolSentence(quiet, now, TZ)), 'Reading unavailable on mbp2607. Agents skip it until the next check succeeds.')
+  assert.deepEqual(todayCell(quiet.rows[0], accountPlan(quiet.rows[0], now)), { kind: 'quiet', text: 'reading unavailable' })
+  assert.equal(sourceLine(quiet.rows[0], now), 'Codex reported · 2 min ago'.replace('Codex', 'Grok'))
   const [none] = pools([acct('p', 'Pi on hsb1', 'pi')], [])
   assert.equal(plainText(poolSentence(none, now, TZ)), 'No reading yet — starts with the first run.')
   assert.equal(sourceLine(none.rows[0], now), 'No reading yet — starts with the first run')
@@ -185,4 +195,16 @@ test('gauges show % left or % used, globally and per account', () => {
   const global = setGlobalMode(used, 'used')
   assert.deepEqual(global, { mode: 'used', accounts: {} })
   assert.deepEqual(toggleAccountMode(global, 'b'), { mode: 'used', accounts: { b: 'left' } })
+})
+
+test('a Sprint ends at the pool\'s earliest limiting reset, 5-hour windows included', () => {
+  const weekly = win({ used: 63, budget: 10, reset: '2026-10-04T09:00:00Z' })
+  const [claude] = pools([acct('c', 'markus', 'claude')], [{ ...cap('c', [weekly]), limiting_reset: '2026-09-29T14:40:00Z' }])
+  assert.equal(claude.sprintEnd, '2026-09-29T14:40:00Z')
+  assert.equal(when(claude.sprintEnd, now, TZ), '16:40')
+  const [codex] = pools([acct('a', 'Spare', 'codex'), acct('b', 'Main', 'codex')], [
+    { ...cap('a', [win({ used: 91, budget: 9, reset: '2026-09-30T16:02:00Z' })]), limiting_reset: '2026-09-30T16:02:00Z' },
+    { ...cap('b', [win({ used: 58, budget: 42, reset: '2026-10-02T07:14:00Z' })]), limiting_reset: '2026-09-29T13:00:00Z' },
+  ])
+  assert.equal(codex.sprintEnd, '2026-09-29T13:00:00Z')
 })

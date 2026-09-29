@@ -21,8 +21,14 @@ export const defaultSchedule = (): Schedule => ({
 })
 
 interface Win { kind: string; used: number; usedToday: number; budget: number; reset: string; start: string; source: string; readMin: number; finish?: string; plan?: string }
-interface Acct { id: string; label: string; harness: string; host: string; plan: string; state?: string; probe?: boolean; windows: Win[] }
-export interface CapacityOptions { signin?: boolean; stale?: boolean; noCursor?: boolean }
+interface Acct { id: string; label: string; harness: string; host: string; plan: string; state?: string; probe?: boolean; failure?: string; windows: Win[] }
+export interface CapacityOptions {
+  signin?: boolean; stale?: boolean; noCursor?: boolean
+  /** Grok's last check failed without a confirmed sign-out. */
+  unavailable?: boolean
+  /** mbp2607's setup reports login_required (computer-wide, not per account). */
+  computerLogin?: boolean
+}
 
 export function capacityWorld(options: CapacityOptions = {}) {
   const accts: Acct[] = [
@@ -33,9 +39,9 @@ export function capacityWorld(options: CapacityOptions = {}) {
       { kind: 'weekly', used: 63, usedToday: 4, budget: 10, reset: '2026-10-04T09:00:00Z', start: '2026-09-27T09:00:00Z', source: 'harness', readMin: 6, finish: '2026-10-02T20:00:00Z', plan: 'Max' },
       { kind: '5h', used: 40, usedToday: 0, budget: 60, reset: '2026-09-29T14:40:00Z', start: '2026-09-29T09:40:00Z', source: 'harness', readMin: 6, plan: 'Max' },
     ] },
-    { id: ACCOUNTS.grok, label: 'markus', harness: 'grok', host: 'mbp2607', plan: 'SuperGrok Heavy', windows: [{ kind: 'weekly', used: 0, usedToday: 0, budget: 13, reset: '2026-10-06T11:10:00Z', start: '2026-09-29T11:10:00Z', source: 'agentd', readMin: options.stale ? 400 : 12, finish: '2026-10-06T11:10:00Z' }] },
+    { id: ACCOUNTS.grok, label: 'markus', harness: 'grok', host: 'mbp2607', plan: 'SuperGrok Heavy', ...(options.unavailable ? { probe: false, failure: 'unavailable' } : {}), windows: [{ kind: 'weekly', used: 0, usedToday: 0, budget: 13, reset: '2026-10-06T11:10:00Z', start: '2026-09-29T11:10:00Z', source: 'agentd', readMin: options.stale ? 400 : 12, finish: '2026-10-06T11:10:00Z' }] },
   ]
-  if (!options.noCursor) accts.push({ id: ACCOUNTS.cursor, label: 'markus', harness: 'cursor', host: 'mbp2607', plan: 'Pro', state: options.signin ? 'unavailable' : 'available', probe: !options.signin, windows: [{ kind: 'monthly', used: 43, usedToday: 7, budget: 6, reset: '2026-10-14T07:00:00Z', start: '2026-09-14T07:00:00Z', source: 'estimate', readMin: options.signin ? 2 * 24 * 60 : 20 }] })
+  if (!options.noCursor) accts.push({ id: ACCOUNTS.cursor, label: 'markus', harness: 'cursor', host: 'mbp2607', plan: 'Pro', state: options.signin ? 'unavailable' : 'available', probe: !options.signin, ...(options.signin ? { failure: 'auth_failed' } : {}), windows: [{ kind: 'monthly', used: 43, usedToday: 7, budget: 6, reset: '2026-10-14T07:00:00Z', start: '2026-09-14T07:00:00Z', source: 'estimate', readMin: options.signin ? 2 * 24 * 60 : 20 }] })
 
   const schedules: { scope: string; pool?: string; account_id?: string; schedule: Schedule }[] = []
   const effective = (a: Acct): Schedule => {
@@ -69,8 +75,11 @@ export function capacityWorld(options: CapacityOptions = {}) {
   const project = (draft?: Schedule) => accts.map(a => {
     const saved = effective(a)
     const s = draft ? { ...draft, override: saved.override, override_until: saved.override_until } : saved
+    const resets = a.windows.map(w => Date.parse(w.reset)).filter(t => t > NOW)
     return {
       account_id: a.id, ongoing_use_approved: true, schedule: s,
+      ...(a.failure ? { probe_failure: a.failure } : {}),
+      ...(resets.length ? { limiting_reset: new Date(Math.min(...resets)).toISOString() } : {}),
       windows: a.windows.map(w => ({
         reading: { window_kind: w.kind, bucket: '', window_minutes: w.kind === '5h' ? 300 : w.kind === 'monthly' ? 43200 : 10080, used_percent: w.used, resets_at: iso(w.reset), plan: w.plan ?? '', source: w.source, read_at: minutesAgo(w.readMin) },
         starts_at: iso(w.start), allowance: 100, remaining_percent: 100 - w.used, freshness: freshness(w), usage_today_known: true, pacing: pace(w, s),
@@ -82,7 +91,7 @@ export function capacityWorld(options: CapacityOptions = {}) {
     state: a.state ?? 'available', max_parallel_runs: 2, last_probe_at: minutesAgo(3), last_probe_ok: a.probe ?? true, created_at: minutesAgo(60 * 24 * 30), windows: [],
   }))
   const computers = [
-    pairingView({ state: 'redeemed', computer_id: MBP, computer_name: 'mbp2607', computer_state: 'connected', setup_state: 'connected', connectivity: 'online', last_seen_at: minutesAgo(0.2),
+    pairingView({ state: 'redeemed', computer_id: MBP, computer_name: 'mbp2607', computer_state: 'connected', setup_state: options.computerLogin ? 'login_required' : 'connected', connectivity: 'online', last_seen_at: minutesAgo(0.2),
       enrollments: accts.filter(a => a.host === 'mbp2607').map(a => pairingEnrollment(a.id, `${a.harness}-${a.label}`, a.harness, a.label)) }),
     pairingView({ state: 'redeemed', request_id: 'e0000000-0000-4000-8000-000000000002', computer_id: STUDIO, computer_name: 'studio', computer_state: 'connected', setup_state: 'connected', connectivity: 'offline', last_seen_at: minutesAgo(180),
       enrollments: accts.filter(a => a.host === 'studio').map(a => pairingEnrollment(a.id, `${a.harness}-${a.label}`, a.harness, a.label)) }),
@@ -95,7 +104,18 @@ export function capacityWorld(options: CapacityOptions = {}) {
     if (path === '/api/agent-accounts/capacity/schedule' && method === 'GET') return { json: schedules }
     if (path === '/api/agent-accounts/capacity/schedule' && method === 'PUT') {
       puts.push(body)
-      const input = body as { scope: string; pool?: string; account_id?: string; schedule: Schedule | null }
+      const input = body as { scope: string; pool?: string; account_id?: string; schedule: Schedule | null; carry_overrides?: boolean }
+      if (input.carry_overrides && input.scope === 'user' && input.schedule) {
+        // The server rule (carryDraft): entries that only carry Sprint/Hold follow the new schedule.
+        const shape = (x: Schedule) => { const { override: _o, override_until: _u, timezone: _t, ...rest } = x; return JSON.stringify(rest) }
+        const previous = schedules.find(e => e.scope === 'user')?.schedule ?? defaultSchedule()
+        for (const e of [...schedules]) {
+          if (e.scope === 'user' || shape(e.schedule) !== shape(previous)) continue
+          const active = e.schedule.override && !(e.schedule.override === 'sprint' && e.schedule.override_until && Date.parse(e.schedule.override_until) <= NOW)
+          if (active) e.schedule = { ...input.schedule, override: e.schedule.override, ...(e.schedule.override_until ? { override_until: e.schedule.override_until } : {}) }
+          else schedules.splice(schedules.indexOf(e), 1)
+        }
+      }
       const at = schedules.findIndex(e => e.scope === input.scope && e.pool === input.pool && e.account_id === input.account_id)
       if (at >= 0) schedules.splice(at, 1)
       if (input.schedule) {

@@ -104,6 +104,8 @@ test('work days and nights: presets save the schedule at once', async ({ page })
   await days.getByRole('radio', { name: '6' }).click()
   await expect(cap(page).locator('.setting.days .cap-hint')).toHaveText('Mon–Sat')
   await expect.poll(() => capacity.puts.length).toBe(1)
+  // One atomic request: the server carries Sprint/Hold entries in the same transaction.
+  expect(capacity.puts[0]).toMatchObject({ scope: 'user', carry_overrides: true })
   expect((capacity.puts[0] as { scope: string; schedule: { week: { on: boolean }[] } }).schedule.week.filter(d => d.on)).toHaveLength(6)
   const nights = cap(page).getByRole('switch', { name: 'Agents at night' })
   await expect(nights).toHaveAttribute('aria-checked', 'false')
@@ -203,6 +205,63 @@ test('Sprint and Hold from the pool menu, and back to the plan', async ({ page }
   expect(capacity.schedules.find(e => e.pool === 'grok')?.schedule.override).toBe('hold')
 })
 
+// AEON-299 review 1: a save that fails says so, keeps the editor open, and the
+// page shows what the server still has; nothing reads "Saved".
+test('a failed schedule save keeps the editor open and changes nothing', async ({ page }) => {
+  const { capacity } = await setup(page)
+  await open(page)
+  await pool(page, 'grok').getByRole('button', { name: 'Grok: sprint or hold' }).click()
+  await page.getByRole('menu').getByRole('menuitem', { name: /Hold/ }).click()
+  await expect(pool(page, 'grok').locator('.override')).toBeVisible()
+  let failures = 0
+  await page.route('**/api/agent-accounts/capacity/schedule', route => {
+    if (route.request().method() === 'PUT' && failures++ === 0) return route.fulfill({ status: 500, json: { error: 'database unavailable' } })
+    return route.fallback()
+  })
+  await cap(page).getByRole('button', { name: 'Customize work week' }).click()
+  const editor = page.getByRole('dialog', { name: 'Work week' })
+  await editor.getByRole('switch', { name: 'Saturday' }).click()
+  await editor.getByRole('switch', { name: 'Sunday' }).click()
+  await editor.getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText(/Nothing was saved: database unavailable/)).toBeVisible()
+  await expect(page.getByText("Saved. Today's plan follows the new schedule.")).toHaveCount(0)
+  await expect(editor).toBeVisible()
+  await expect(cap(page).locator('.setting.days .cap-hint')).toHaveText('Mon–Fri')
+  expect(capacity.schedules.find(e => e.pool === 'grok')?.schedule.week.filter(d => d.on)).toHaveLength(5)
+  // Trying again saves the week and the Hold follows it, in one request.
+  await editor.getByRole('button', { name: 'Save' }).click()
+  await expect(editor).toHaveCount(0)
+  await expect(cap(page).locator('.setting.days .cap-hint')).toHaveText('every day')
+  expect(capacity.schedules.find(e => e.pool === 'grok')?.schedule).toMatchObject({ override: 'hold' })
+  expect(capacity.schedules.find(e => e.pool === 'grok')?.schedule.week.filter(d => d.on)).toHaveLength(7)
+})
+
+// AEON-299 review 2: a computer-wide login flag or a check that could not run
+// is not a sign-in prompt; only a confirmed sign-out for that account is.
+test('sign-in prompts only for a confirmed sign-out of that account', async ({ page }) => {
+  await setup(page, { computerLogin: true, unavailable: true })
+  await open(page)
+  await expect(page.getByRole('region', { name: 'Needs you' })).toHaveCount(0)
+  await expect(page.locator('.cap .dot.signin')).toHaveCount(0)
+  const grok = page.locator(`[data-account="${ACCOUNTS.grok}"]`)
+  await expect(grok.locator('.today')).toHaveText('reading unavailable')
+  await expect(grok.locator('.source')).toHaveText('Read on mbp2607 · 12 min ago')
+  await expect(pool(page, 'grok').locator('.plan')).toHaveText('Reading unavailable on mbp2607. Agents skip it until the next check succeeds.')
+  await expect(page.locator(`[data-account="${ACCOUNTS.spare}"] .dot`)).toHaveClass(/live/)
+})
+
+// AEON-299 review 4: Sprint promises the server's end, the 5-hour reset included.
+test('Sprint promises the limiting reset, including the 5-hour window', async ({ page }) => {
+  const { capacity } = await setup(page)
+  await open(page)
+  await pool(page, 'claude').getByRole('button', { name: 'Claude: sprint or hold' }).click()
+  const sprint = page.getByRole('menu').getByRole('menuitem', { name: /Sprint until reset/ })
+  await expect(sprint).toContainText('Agents may use everything left until 16:40.')
+  await sprint.click()
+  await expect(pool(page, 'claude').locator('.plan')).toContainText('until 16:40.')
+  expect(capacity.schedules.find(e => e.pool === 'claude')?.schedule.override_until).toBe(new Date(Date.parse('2026-09-29T14:40:00Z')).toISOString())
+})
+
 test('stale readings, % used per account and globally, and Manage accounts', async ({ page }) => {
   await setup(page, { stale: true })
   await open(page)
@@ -249,6 +308,23 @@ test.describe('phone', () => {
     await page.locator('.scrim').click({ position: { x: 20, y: 20 } })
     await expect(page.getByRole('dialog')).toHaveCount(0)
     expect(await noScroll(page)).toBe(true)
+    // AEON-299 review 5: with a toast in the background, focus never leaves the
+    // sheet, from the heading or anywhere else, and the page behind is inert.
+    await pool(page, 'codex').getByRole('button', { name: 'Codex: sprint or hold' }).click()
+    await page.getByRole('menuitem', { name: /Hold/ }).click()
+    await expect(page.locator('.toast').first()).toBeVisible()
+    await cap(page).getByRole('button', { name: 'Customize work week' }).click()
+    const trap = page.getByRole('dialog', { name: 'Work week' })
+    await expect(trap.getByRole('heading', { name: 'Work week' })).toBeFocused()
+    await expect(page.locator('#app')).toHaveAttribute('inert', '')
+    const inside = () => page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))
+    await page.keyboard.press('Shift+Tab')
+    expect(await inside()).toBe(true)
+    for (let i = 0; i < 40; i++) { await page.keyboard.press('Tab'); expect(await inside()).toBe(true) }
+    for (let i = 0; i < 40; i++) { await page.keyboard.press('Shift+Tab'); expect(await inside()).toBe(true) }
+    await page.keyboard.press('Escape')
+    await expect(trap).toHaveCount(0)
+    await expect(page.locator('#app')).not.toHaveAttribute('inert', '')
     // The pool menu opens under its button, in view, with focus on the first choice.
     await pool(page, 'claude').getByRole('button', { name: 'Claude: sprint or hold' }).click()
     const menu = page.getByRole('menu')
@@ -264,6 +340,7 @@ const SHOT_STATES: Shot[] = [
   { name: 'quiet' },
   { name: 'needs-signin', options: { needs: true, signin: true } },
   { name: 'stale', options: { stale: true } },
+  { name: 'unavailable', options: { unavailable: true, computerLogin: true } },
   { name: 'nights-on', act: async page => { await cap(page).getByRole('switch', { name: 'Agents at night' }).click(); await expect(pool(page, 'claude').locator('.plan')).toContainText('by day and') } },
   { name: 'sprint-hold', act: async page => {
     await pool(page, 'codex').getByRole('button', { name: 'Codex: sprint or hold' }).click(); await page.getByRole('menuitem', { name: /Sprint/ }).click()

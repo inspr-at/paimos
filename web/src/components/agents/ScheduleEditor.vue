@@ -158,15 +158,26 @@ const preview = computed(() => currentSentences.value.map(({ id, sentence }) => 
 function save() { if (!problem.value && !props.saving) emit('save', clone(draft.value)) }
 function keydown(event: KeyboardEvent) {
   if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); emit('close'); return }
-  if (props.sheet && event.key === 'Tab' && root.value) {
-    const focusable = [...root.value.querySelectorAll<HTMLElement>('button:not(:disabled), input, select, [tabindex="0"]')].filter(x => x.offsetParent)
-    if (!focusable.length) return
-    if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable[focusable.length - 1].focus() }
-    else if (!event.shiftKey && document.activeElement === focusable[focusable.length - 1]) { event.preventDefault(); focusable[0].focus() }
-  }
+  if (props.sheet && event.key === 'Tab') trapTab(event)
 }
-onMounted(() => { title.value?.focus({ preventScroll: true }); window.addEventListener('pointerup', paintUp); window.addEventListener('pointermove', paintMove) })
-onBeforeUnmount(() => { clearTimeout(previewTimer); window.removeEventListener('pointerup', paintUp); window.removeEventListener('pointermove', paintMove) })
+// The sheet is modal: Tab and Shift+Tab cycle inside it, including from the
+// heading (focused on open) or anything else that is not a tab stop.
+function focusables() {
+  return [...(root.value?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]') ?? [])].filter(x => x.offsetParent !== null)
+}
+function trapTab(event: KeyboardEvent) {
+  const list = focusables()
+  if (!list.length) return
+  const i = list.indexOf(document.activeElement as HTMLElement)
+  const next = event.shiftKey ? (i <= 0 ? list[list.length - 1] : null) : (i === -1 || i === list.length - 1 ? list[0] : null)
+  if (next) { event.preventDefault(); next.focus() }
+}
+// Focus that lands outside the open sheet (a click through, a script) comes back.
+function holdFocus(event: FocusEvent) {
+  if (props.sheet && root.value && event.target instanceof Node && !root.value.contains(event.target)) (focusables()[0] ?? title.value)?.focus({ preventScroll: true })
+}
+onMounted(() => { title.value?.focus({ preventScroll: true }); window.addEventListener('pointerup', paintUp); window.addEventListener('pointermove', paintMove); document.addEventListener('focusin', holdFocus) })
+onBeforeUnmount(() => { clearTimeout(previewTimer); window.removeEventListener('pointerup', paintUp); window.removeEventListener('pointermove', paintMove); document.removeEventListener('focusin', holdFocus) })
 const titleText = computed(() => (props.kind === 'week' ? 'Work week' : 'Agents outside your hours'))
 const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone !== props.timezone ? `Times in ${props.timezone}.` : '' } catch { return '' } })
 </script>

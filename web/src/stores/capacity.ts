@@ -8,7 +8,7 @@ import { defineStore } from 'pinia'
 import { computed } from 'vue'
 import { listPairingComputers, type PairingView } from '../lib/agentPairing'
 import {
-  activeOverride, buildPools, buildRows, clone, defaultSchedule, listCapacity, listSchedules, putSchedule, sameShape, stripOverride,
+  buildPools, buildRows, clone, defaultSchedule, listCapacity, listSchedules, putSchedule, sameShape, stripOverride,
   type AccountCapacity, type AccountInput, type CapacitySchedule, type GaugePreference, type Override, type Pool, type ScheduleOverride,
 } from '../lib/capacity'
 import { usePreference } from '../lib/preferences'
@@ -41,7 +41,8 @@ export const useCapacity = defineStore('capacity', () => {
     const computer = computerOf.value.get(a.id)
     return {
       id: a.id, label: a.label, harness: a.harness, host: a.host_label || computer?.computer_name || a.daemon_id, state: a.state, last_probe_ok: a.last_probe_ok, plan: a.plan,
-      connectivity: computer?.connectivity, loginRequired: computer?.setup_state === 'login_required',
+      // The computer's setup flag is computer-wide; sign-ins are judged per account (probe_failure).
+      connectivity: computer?.connectivity,
     }
   }))
   const rows = computed(() => buildRows(inputs.value, capacityRead.data.value))
@@ -63,19 +64,19 @@ export const useCapacity = defineStore('capacity', () => {
   const poolEntry = (pool: string) => entries.value.find(e => e.scope === 'pool' && e.pool === pool)
 
   function local(next: ScheduleOverride[]) { schedulesRead.invalidate(); schedulesRead.data.value = next }
+  // One request: the server saves the schedule and carries every entry that only
+  // holds Sprint/Hold in the same transaction, so a save is all or nothing. A
+  // failure propagates to the caller (the editor stays open, no "Saved"), and the
+  // refresh puts the screen back to what the server has.
   async function saveSchedule(next: CapacitySchedule) {
-    const previous = schedule.value
     const body = stripOverride(clone(next))
-    local([...entries.value.filter(e => e.scope !== 'user'), { scope: 'user', schedule: body }])
+    const before = entries.value
+    local([...before.filter(e => e.scope !== 'user'), { scope: 'user', schedule: body }])
     try {
-      await putSchedule({ scope: 'user', schedule: body })
-      // Pool and account entries that only carry Sprint/Hold follow the new schedule.
-      for (const e of entries.value) {
-        if (e.scope === 'user' || !e.schedule || !sameShape(e.schedule, previous)) continue
-        const keep = activeOverride(e.schedule, Date.now())
-        const target = e.scope === 'pool' ? { scope: e.scope, pool: e.pool } : { scope: e.scope, account_id: e.account_id }
-        await putSchedule({ ...target, schedule: keep ? { ...body, override: keep } : null }).catch(() => undefined)
-      }
+      await putSchedule({ scope: 'user', schedule: body, carry_overrides: true })
+    } catch (e) {
+      local(before)
+      throw new Error(`Nothing was saved: ${e instanceof Error ? e.message : 'the server did not accept the schedule'}.`)
     } finally {
       await Promise.all([schedulesRead.refresh(), capacityRead.refresh()])
     }
