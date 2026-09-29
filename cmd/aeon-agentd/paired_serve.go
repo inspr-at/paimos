@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -26,6 +27,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	claudeEmails := map[string]string{}
 	piHomes, piProviders := map[string]string{}, map[string]string{}
 	piNodes := map[string]piprobe.Node{}
+	codexNodes, cursorNodes := map[string]harnesslaunch.Node{}, map[string]harnesslaunch.Node{}
 	grokBindings := map[string]agentd.GrokBinding{}
 	paths := map[string]string{}
 	accounts := []agentd.EnrolledAccount{}
@@ -38,12 +40,14 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 		switch a.Harness {
 		case agentd.Codex:
 			codexHomes[a.Key] = a.Home
+			codexNodes[a.Key] = a.Node
 			emails[a.Key] = a.Identity
 		case agentd.Claude:
 			claudeHomes[a.Key] = a.Home
 			claudeEmails[a.Key] = a.Identity
 		case agentd.Cursor:
 			cursorIDs[a.Key] = a.Identity
+			cursorNodes[a.Key] = a.Node
 		case agentd.Pi:
 			if !piprobe.ValidProvider(a.Identity) || !filepath.IsAbs(a.Home) {
 				return nil, nil, errors.New("pi private provider binding unavailable")
@@ -63,6 +67,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	if p := paths[agentd.Codex]; p != "" {
 		a := agentd.NewCodexAdapter(p, codexHomes)
 		a.SetExpectedEmails(emails)
+		a.Nodes = codexNodes
 		adapters = append(adapters, a)
 	}
 	if p := paths[agentd.Claude]; p != "" {
@@ -71,7 +76,9 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 		adapters = append(adapters, a)
 	}
 	if p := paths[agentd.Cursor]; p != "" {
-		adapters = append(adapters, agentd.NewCursorAdapter(p, cursorIDs))
+		a := agentd.NewCursorAdapter(p, cursorIDs)
+		a.Nodes = cursorNodes
+		adapters = append(adapters, a)
 	}
 	if p := paths[agentd.Pi]; p != "" {
 		a := agentd.NewPiAdapter(p, piHomes)

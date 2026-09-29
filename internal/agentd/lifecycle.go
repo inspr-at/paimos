@@ -25,6 +25,7 @@ type DrainRequest struct {
 // LifecycleStatus does not conflate telemetry acceptance with observed exit.
 // Only a drained status permits removing a pairing-owned service or credential.
 type LifecycleStatus struct {
+	ProfilePermissions      bool              `json:"profile_permissions,omitempty"`
 	HarnessFailed           bool              `json:"harness_failed,omitempty"`
 	LoginRequired           bool              `json:"login_required"`
 	VerificationUnavailable []string          `json:"verification_unavailable_account_ids"`
@@ -143,6 +144,9 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 			}
 			if s.loginRequired[a.ID] {
 				v.LoginRequired = true
+			}
+			if s.profilePermissions[a.ID] {
+				v.ProfilePermissions = true
 			}
 			if s.harnessFailed[a.ID] {
 				v.HarnessFailed = true

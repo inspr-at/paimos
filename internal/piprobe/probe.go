@@ -14,66 +14,28 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 )
 
 var providerID = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 var ErrPrivateProfile = errors.New("pi local profile must be a private directory; review its permissions, then resume setup")
-var ErrStart = errors.New("pi harness failed to start; restore the pinned pi and Node installation, then resume setup")
+var ErrStart = harnesslaunch.ErrStart
 var ErrProviderUnavailable = errors.New("pi provider configuration unavailable; use pi /login and /model normally, then resume setup")
 
-// Node is a private interpreter binding, never part of a pairing request.
-type Node struct {
-	Path    string `json:"path,omitempty"`
-	Version string `json:"version,omitempty"`
-}
+// Keep the existing private pi binding and error identity backward compatible.
+type Node = harnesslaunch.Node
 
-// NeedsNode inspects only the bounded entrypoint header. Unknown env launchers
-// must not silently select an unpinned interpreter from the service PATH.
-func NeedsNode(path string) (bool, error) {
-	physical, err := filepath.EvalSymlinks(path)
-	if err != nil || !filepath.IsAbs(path) || physical != path {
-		return false, ErrStart
-	}
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
-		return false, ErrStart
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return false, ErrStart
-	}
-	defer f.Close()
-	raw, err := io.ReadAll(io.LimitReader(f, 256))
-	if err != nil {
-		return false, ErrStart
-	}
-	line, _, _ := strings.Cut(string(raw), "\n")
-	if !strings.HasPrefix(line, "#!") {
-		return false, nil
-	}
-	fields := strings.Fields(strings.TrimPrefix(line, "#!"))
-	if len(fields) == 0 || filepath.Base(fields[0]) != "env" {
-		return false, nil
-	}
-	if len(fields) == 2 && fields[1] == "node" || len(fields) == 3 && fields[1] == "-S" && fields[2] == "node" {
-		return true, nil
-	}
-	return false, ErrStart
-}
+func NeedsNode(path string) (bool, error) { return harnesslaunch.NeedsNode(path) }
 
 func ValidProvider(provider string) bool { return providerID.MatchString(provider) }
 
 // Environment excludes inherited provider keys and runtime injection variables.
 // The daemon uses the same local profile that was inspected during pairing.
 func Environment(home, nodePath string) []string {
-	path := os.Getenv("PATH")
-	if nodePath != "" {
-		path = filepath.Dir(nodePath) + string(os.PathListSeparator) + path
-	}
-	return []string{"PATH=" + path, "HOME=" + os.Getenv("HOME"), "PI_CODING_AGENT_DIR=" + home, "PI_OFFLINE=1", "PI_SKIP_VERSION_CHECK=1"}
+	return harnesslaunch.Environment([]string{"HOME=" + os.Getenv("HOME"), "PI_CODING_AGENT_DIR=" + home, "PI_OFFLINE=1", "PI_SKIP_VERSION_CHECK=1"}, nodePath)
 }
 
 // Provider checks pi's configured authentication, not remote token validity or

@@ -37,7 +37,7 @@ func (l localPairing) client() (agentdwire.Client, error) {
 	return agentdwire.OpenClient(filepath.Join(l.root, "daemon"))
 }
 func localStatus(s agentd.LifecycleStatus) agentsetup.LocalStatus {
-	return agentsetup.LocalStatus{HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults}
+	return agentsetup.LocalStatus{ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults}
 }
 func (l localPairing) Status(ctx context.Context, account string) (agentsetup.LocalStatus, error) {
 	if l.supervisor != nil {
@@ -98,7 +98,7 @@ func setupCommand(command string, args []string, out io.Writer) error {
 	f.Var(&harnesses, "harness", "selected harness; repeat for another harness")
 	f.StringVar(&contextLabel, "account-context", "", "Expected account identity (pi: configured provider ID)")
 	f.StringVar(&account, "account-id", "", "remove only this enrolled account")
-	f.StringVar(&nodePath, "node-path", "", "pinned Node executable for Claude or pi")
+	f.StringVar(&nodePath, "node-path", "", "pinned Node executable for npm harness launchers")
 	f.StringVar(&sdkPath, "claude-sdk-path", "", "pinned Claude Agent SDK module")
 	f.BoolVar(&jsonOutput, "json", false, "safe progress as JSON")
 	f.BoolVar(&startService, "start-service", false, "request user service installation after authenticated Connect approval")
@@ -187,7 +187,7 @@ func setupCommand(command string, args []string, out io.Writer) error {
 			}
 		}
 	}
-	// The shared Node/SDK options belong to Claude. Pi retains its own private
+	// The shared Node/SDK options belong to Claude. Other launchers retain a private
 	// per-account interpreter binding even when --node-path was supplied.
 	if nodePath, err = claudeNodeOption(nodePath, candidates, saved.Candidates); err != nil {
 		return err
@@ -251,22 +251,29 @@ func claudeNodeOption(requested string, discovered, saved []agentsetup.Candidate
 	if len(choices) == 0 {
 		choices = saved
 	}
-	var pi *agentsetup.Candidate
-	for i := range choices {
-		if choices[i].Harness == "claude" {
+	for _, c := range choices {
+		if c.Harness == "claude" {
 			return requested, nil
 		}
-		if choices[i].Harness == "pi" {
-			pi = &choices[i]
-		}
 	}
-	if pi == nil {
+	if len(choices) == 0 {
 		return requested, nil
 	}
 	if len(discovered) == 0 && requested != "" {
 		physical, err := filepath.EvalSymlinks(requested)
-		if err != nil || physical != pi.PiNode.Path {
-			return "", errors.New("--node-path conflicts with saved pi interpreter; no enrollment was changed")
+		matched := false
+		for _, c := range choices {
+			node := c.Interpreter()
+			if node.Path == "" {
+				continue
+			}
+			if err != nil || physical != node.Path {
+				return "", errors.New("--node-path conflicts with saved interpreter; no enrollment was changed")
+			}
+			matched = true
+		}
+		if !matched {
+			return "", errors.New("--node-path conflicts with saved interpreter; no enrollment was changed")
 		}
 	}
 	return "", nil

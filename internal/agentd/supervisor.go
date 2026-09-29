@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 type Config struct {
@@ -113,6 +114,7 @@ type harnessMetadata struct {
 
 type Supervisor struct {
 	maxTokens, maxTurns int64
+	profilePermissions  map[string]bool
 
 	dispatchMu        sync.Mutex
 	state             *agentsetup.Store
@@ -385,6 +387,10 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			s.harnessFailed = map[string]bool{}
 		}
 		s.harnessFailed[account.ID] = probeErr != nil
+		if s.profilePermissions == nil {
+			s.profilePermissions = map[string]bool{}
+		}
+		s.profilePermissions[account.ID] = errors.Is(probeErr, piprobe.ErrPrivateProfile)
 		s.mu.Unlock()
 		if probeErr != nil {
 			failures = append(failures, errors.New("harness failed to start"))

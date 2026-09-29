@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/sessionusage"
@@ -100,6 +101,7 @@ type CodexAdapter struct {
 	Path        string
 	Homes       map[string]string
 	Emails      map[string]string
+	Nodes       map[string]harnesslaunch.Node
 }
 
 func NewCodexAdapter(path string, homes map[string]string) *CodexAdapter {
@@ -193,14 +195,16 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		return nil, err
 	}
 
-	if !a.Probe(ctx, r.AccountKey) {
+	if available, err := a.ProbeStatus(ctx, r.AccountKey); err != nil {
+		return nil, err
+	} else if !available {
 		return nil, errors.New("Codex account probe unavailable")
 	}
 	home, err := localHome(a.Homes, r.AccountKey)
 	if err != nil {
 		return nil, err
 	}
-	p, err := launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, r.Workspace, withEnv("CODEX_HOME", home), "jsonrpc", observe)
+	p, err := launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, r.Workspace, harnesslaunch.Environment(withEnv("CODEX_HOME", home), a.Nodes[r.AccountKey].Path), "jsonrpc", observe)
 	if err != nil {
 		return nil, err
 	}
@@ -267,12 +271,13 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 // PiAdapter speaks Pi's JSONL RPC and verifies the effective state before
 // sending the first prompt or any steer.
 type PiAdapter struct {
-	Path      string
-	Homes     map[string]string
-	Providers map[string]string
-	Nodes     map[string]piprobe.Node
-	probeMu   sync.Mutex
-	probes    map[string]piProbeResult
+	Path       string
+	Homes      map[string]string
+	Providers  map[string]string
+	Nodes      map[string]piprobe.Node
+	probeMu    sync.Mutex
+	probes     map[string]piProbeResult
+	probeLocks map[string]*sync.Mutex
 }
 
 type piProbeResult struct {
@@ -419,7 +424,7 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 	if len(queue.Snapshot()) != 0 {
 		return nil, errors.New("Pi held queue requires explicit operator reconciliation")
 	}
-	childEnv := withEnv("PI_CODING_AGENT_DIR", home)
+	childEnv := harnesslaunch.Environment(withEnv("PI_CODING_AGENT_DIR", home), a.Nodes[r.AccountKey].Path)
 	if a.Providers != nil {
 		childEnv = piprobe.Environment(home, a.Nodes[r.AccountKey].Path)
 	}
@@ -459,6 +464,7 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 type CursorAdapter struct {
 	Path       string
 	Identities map[string]string
+	Nodes      map[string]harnesslaunch.Node
 }
 
 func NewCursorAdapter(path string, identities map[string]string) *CursorAdapter {
@@ -517,7 +523,9 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		return nil, err
 	}
 
-	if !a.Probe(ctx, r.AccountKey) {
+	if available, err := a.ProbeStatus(ctx, r.AccountKey); err != nil {
+		return nil, err
+	} else if !available {
 		return nil, errors.New("Cursor account identity unavailable")
 	}
 	path, err := pinnedExecutable(a.Path)
@@ -527,7 +535,7 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	op, cancel := operationContext(ctx)
 	defer cancel()
 	args := []string{"--trust", "--model", r.Profile.Model, "acp"}
-	p, err := launchWire(path, args, r.Workspace, nil, "jsonrpc", observe)
+	p, err := launchWire(path, args, r.Workspace, harnesslaunch.Environment(os.Environ(), a.Nodes[r.AccountKey].Path), "jsonrpc", observe)
 	if err != nil {
 		return nil, err
 	}
