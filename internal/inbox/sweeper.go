@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -29,10 +31,13 @@ const sweepBatch = 100
 type Sweeper struct {
 	pool     *pgxpool.Pool
 	interval time.Duration
+	mu       sync.Mutex
+	// Tenants whose pre-AEON-280 receipts are healed; a one-time bounded job.
+	legacyHealed map[string]bool
 }
 
 func NewSweeper(pool *pgxpool.Pool) *Sweeper {
-	return &Sweeper{pool: pool, interval: SweepInterval}
+	return &Sweeper{pool: pool, interval: SweepInterval, legacyHealed: map[string]bool{}}
 }
 
 // Run sweeps now and then every interval until ctx ends.
@@ -139,6 +144,8 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
  LEFT JOIN inbox_compat_messages c ON c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id
  LEFT JOIN inbox_message_deliveries d ON d.tenant_id=c.tenant_id AND d.message_id=c.id
  WHERE r.state='queued' AND r.deliver_by IS NOT NULL AND m.acked_at IS NULL
+   AND NOT coalesce(d.state='pending' AND d.lease_until>clock_timestamp(),false)
+   AND NOT EXISTS(SELECT 1 FROM harness_deliveries h WHERE h.message_id=m.id AND h.completed_at IS NULL AND h.released_at IS NULL AND h.leased_at>clock_timestamp()-interval '2 minutes')
    AND (r.deliver_by<=clock_timestamp()
         OR (rs.id IS NOT NULL AND (rs.stopped_at IS NOT NULL OR rs.archived_at IS NOT NULL))
         OR (d.state='pending' AND d.attempts>=$1 AND (d.lease_until IS NULL OR d.lease_until<=clock_timestamp())))
@@ -168,7 +175,8 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
 		var done bool
 		err := db.InTenant(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
 			var e error
-			done, e = failMessage(ctx, tx, tenantID, c.id, c.reason)
+			// A live adapter or drain lease wins: the lease expiry is the deadline.
+			done, e = failMessage(ctx, tx, c.id, c.reason, true)
 			return e
 		})
 		if err != nil {
@@ -185,41 +193,70 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
 }
 
 // heal moves a queued receipt whose message was acknowledged anyway to
-// handed_off. Paths that forgot to confirm (an acked unbound compat message
-// before AEON-280) leave these; the sender deserves the real state.
+// handed_off. Every confirm path does this now; the periodic pass is a safety
+// net over open deadlines only (the partial index of 0928). Receipts from
+// before AEON-280 (no deadline) are healed once per process, in bounded
+// batches, until none is left: never a rescan of history every tick.
 func (s *Sweeper) heal(ctx context.Context, tenantID string) error {
-	return db.InTenant(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT m.id::text,m.recipient_principal_id::text FROM inbox_receipts r JOIN inbox_messages m ON m.tenant_id=r.tenant_id AND m.id=r.message_id
- WHERE r.state='queued' AND m.acked_at IS NOT NULL ORDER BY m.sent_event_id LIMIT $1`, sweepBatch)
+	if _, err := s.healBatch(ctx, tenantID, `r.deliver_by IS NOT NULL`); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	done := s.legacyHealed[tenantID]
+	s.mu.Unlock()
+	if done {
+		return nil
+	}
+	n, err := s.healBatch(ctx, tenantID, `r.deliver_by IS NULL`)
+	if err != nil {
+		return err
+	}
+	if n < sweepBatch {
+		s.mu.Lock()
+		s.legacyHealed[tenantID] = true
+		s.mu.Unlock()
+	}
+	return nil
+}
+
+func (s *Sweeper) healBatch(ctx context.Context, tenantID, scope string) (int, error) {
+	n := 0
+	err := db.InTenant(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
+		n = 0
+		rows, err := tx.Query(ctx, `SELECT m.id::text FROM inbox_receipts r JOIN inbox_messages m ON m.tenant_id=r.tenant_id AND m.id=r.message_id
+ WHERE r.state='queued' AND `+scope+` AND m.acked_at IS NOT NULL LIMIT $1`, sweepBatch)
 		if err != nil {
 			return err
 		}
-		type acked struct{ id, recipient string }
-		var items []acked
+		var ids []string
 		for rows.Next() {
-			var a acked
-			if err := rows.Scan(&a.id, &a.recipient); err != nil {
+			var id string
+			if err := rows.Scan(&id); err != nil {
 				rows.Close()
 				return err
 			}
-			items = append(items, a)
+			ids = append(ids, id)
 		}
 		rows.Close()
-		if err := rows.Err(); err != nil {
+		if err := rows.Err(); err != nil || len(ids) == 0 {
 			return err
 		}
-		if len(items) == 0 {
-			return nil
-		}
-		sys, err := systemPrincipal(ctx, tx, tenantID)
+		n = len(ids)
+		sys, err := systemActor(ctx, tx, tenantID)
 		if err != nil {
 			return err
 		}
-		for _, a := range items {
-			if err := confirmReceived(ctx, tx, sys, a.id); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		sort.Strings(ids)
+		for _, id := range ids {
+			// Message row first (AEON-280 lock order), then confirm.
+			if _, err := tx.Exec(ctx, `SELECT 1 FROM inbox_messages WHERE id=$1::uuid FOR UPDATE`, id); err != nil {
+				return err
+			}
+			if err := confirmReceived(ctx, tx, sys, id); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return err
 			}
 		}
 		return nil
 	})
+	return n, err
 }

@@ -122,8 +122,11 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		var requested, priorFallback, messageID string
 		var attempts int
 		var leaseUntil *time.Time
-		// A dead delivery was already reported to its sender; it never blocks the queue.
-		err = tx.QueryRow(ctx, `SELECT d.id::text,COALESCE(d.effective_target_id,d.target_id)::text,d.fallback_target_id::text,d.state,c.sent_event_id,d.lease_until,c.delivery_level,d.fallback_reason,d.attempts,c.id::text
+		// A dead delivery was already reported to its sender; it never blocks the
+		// queue. Lock order (AEON-280): find the head without locks, lock its
+		// message row, then re-read the delivery with FOR UPDATE. A head that
+		// changed in between (the sweeper failed it) yields no work this round.
+		const head = `SELECT d.id::text,COALESCE(d.effective_target_id,d.target_id)::text,d.fallback_target_id::text,d.state,c.sent_event_id,d.lease_until,c.delivery_level,d.fallback_reason,d.attempts,c.id::text
 		 FROM inbox_message_deliveries d
 		 JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id
 		 JOIN inbox_messages i ON i.tenant_id=c.tenant_id AND i.id=c.inbox_message_id
@@ -131,8 +134,20 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		 AND i.acked_at IS NULL AND NOT c.is_action_request AND c.recipient_session_id IS NULL AND d.state<>'dead'
 		 AND c.sent_event_id > COALESCE((SELECT last_event_id FROM inbox_message_cursors
 		 WHERE project_id=$1::uuid AND principal_id=$2::uuid AND address=$3 AND adapter=$4),0)
-		 ORDER BY c.sent_event_id LIMIT 1 FOR UPDATE OF d`, project, p.ID, in.To, in.Adapter).Scan(&id, &targetID, &fallbackID, &state, &cursor, &leaseUntil, &requested, &priorFallback, &attempts, &messageID)
+		 ORDER BY c.sent_event_id LIMIT 1`
+		err = tx.QueryRow(ctx, head, project, p.ID, in.To, in.Adapter).Scan(&id, &targetID, &fallbackID, &state, &cursor, &leaseUntil, &requested, &priorFallback, &attempts, &messageID)
 		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM inbox_messages WHERE id=$1::uuid FOR UPDATE`, messageID); err != nil {
+			return err
+		}
+		locked := id
+		err = tx.QueryRow(ctx, head+` FOR UPDATE OF d`, project, p.ID, in.To, in.Adapter).Scan(&id, &targetID, &fallbackID, &state, &cursor, &leaseUntil, &requested, &priorFallback, &attempts, &messageID)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && id != locked) {
 			return nil
 		}
 		if err != nil {
@@ -155,10 +170,13 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		if err != nil {
 			return err
 		}
+		// A legacy message without a deadline keeps its old retry behaviour.
 		if attempts >= settings.MaxAttempts {
-			work = nil
-			_, err := failMessage(ctx, tx, p.TenantID, messageID, ReasonAttempts)
-			return err
+			failed, err := FailMessage(ctx, tx, messageID, ReasonAttempts)
+			if err != nil || failed {
+				work = nil
+				return err
+			}
 		}
 		var adapter, kind, maximum string
 		var sealed []byte
@@ -271,6 +289,9 @@ func (m *messaging) complete(ctx context.Context, p tenant.Principal, project st
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
 		}
+		if err := lockDeliveryMessage(ctx, tx, in.ID, project, p.ID); err != nil {
+			return err
+		}
 		var messageID, address, adapter, state, effective, fallback, requested, maximum string
 		var token *string
 		var cursor int64
@@ -373,6 +394,9 @@ func (m *messaging) unavailableDelivery(w http.ResponseWriter, r *http.Request) 
 		if err := messagingProject(r.Context(), tx, project); err != nil {
 			return err
 		}
+		if err := lockDeliveryMessage(r.Context(), tx, in.ID, project, p.ID); err != nil {
+			return err
+		}
 		var target, fallback, token *string
 		var state string
 		var leaseUntil *time.Time
@@ -401,4 +425,12 @@ func (m *messaging) unavailableDelivery(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"delivery_id": in.ID, "rerouted": true})
+}
+
+// lockDeliveryMessage takes the message row lock before a delivery row lock,
+// the one order every inbox path follows (AEON-280).
+func lockDeliveryMessage(ctx context.Context, tx pgx.Tx, deliveryID, project, recipient string) error {
+	_, err := tx.Exec(ctx, `SELECT 1 FROM inbox_messages i WHERE i.id=(SELECT c.inbox_message_id FROM inbox_message_deliveries d JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id
+ WHERE d.id=$1::uuid AND c.project_id=$2::uuid AND c.recipient_principal_id=$3::uuid) FOR UPDATE`, deliveryID, project, recipient)
+	return err
 }

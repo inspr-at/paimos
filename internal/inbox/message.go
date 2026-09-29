@@ -258,6 +258,14 @@ func sameSend(m Message, in sendInput) bool {
 }
 
 func enqueueWakes(ctx context.Context, tx pgx.Tx, p tenant.Principal, msg Message) error {
+	return enqueueWakesWith(ctx, tx, p.TenantID, msg, func(c events.Change) error {
+		_, err := events.Append(ctx, tx, p, c)
+		return err
+	})
+}
+
+// enqueueWakesWith lets System-authored notices append through their own path.
+func enqueueWakesWith(ctx context.Context, tx pgx.Tx, tenantID string, msg Message, appendEvent func(events.Change) error) error {
 	if msg.RecipientSessionID != nil {
 		return nil
 	} // Wake targets belong to the principal, not this generation.
@@ -284,10 +292,10 @@ func enqueueWakes(ctx context.Context, tx pgx.Tx, p tenant.Principal, msg Messag
 	rows.Close()
 	for _, targetID := range targets {
 		if _, err := tx.Exec(ctx, `INSERT INTO inbox_wakes (tenant_id, message_id, target_id)
-			VALUES ($1::uuid, $2::uuid, $3::uuid)`, p.TenantID, msg.ID, targetID); err != nil {
+			VALUES ($1::uuid, $2::uuid, $3::uuid)`, tenantID, msg.ID, targetID); err != nil {
 			return mapWrite(err)
 		}
-		if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.wake_queued", After: wakeMeta{
+		if err := appendEvent(events.Change{Type: "inbox.wake_queued", After: wakeMeta{
 			MessageID: msg.ID, TargetID: targetID, EventID: msg.SentEventID,
 		}}); err != nil {
 			return err
@@ -338,6 +346,14 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 		if current.AckedAt != nil {
 			out = current
 			return nil
+		}
+		// A failed message is terminal: the sender was told it was not
+		// delivered, so it is neither acknowledged nor returned (AEON-280).
+		if failed, err := receiptFailed(ctx, tx, id); err != nil || failed {
+			if err == nil {
+				err = ErrNotDelivered
+			}
+			return err
 		}
 		before := metaFrom(current)
 		updated, err := scanMessage(tx.QueryRow(ctx, `UPDATE inbox_messages

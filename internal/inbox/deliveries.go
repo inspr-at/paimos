@@ -512,9 +512,17 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 		for _, v := range page.Items {
 			ids = append(ids, v.ID)
 		}
-		if err := MarkFetched(r.Context(), tx, p, SeenHook, ids...); err != nil {
+		alive, err := handOver(r.Context(), tx, p, SeenHook, ids)
+		if err != nil {
 			return err
 		}
+		kept := page.Items[:0]
+		for _, v := range page.Items {
+			if alive[v.ID] {
+				kept = append(kept, v)
+			}
+		}
+		page.Items = kept
 		if sessionID != nil {
 			return MarkSessionSeen(r.Context(), tx, *sessionID, SeenHook)
 		}

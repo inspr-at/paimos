@@ -42,7 +42,7 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	// Existing uncompleted lease must be replayed before taking later work.
 	var d Delivery
-	err = tx.QueryRow(ctx, `SELECT d.id::text,m.id::text,d.cursor,m.sender_principal_id::text,m.body,d.leased_at FROM harness_deliveries d JOIN inbox_messages m ON m.tenant_id=d.tenant_id AND m.id=d.message_id WHERE d.session_id=$1 AND d.completed_at IS NULL AND d.released_at IS NULL ORDER BY d.cursor LIMIT 1`, s.ID).Scan(&d.ID, &d.MessageID, &d.Cursor, &d.SenderPrincipalID, &d.Body, &d.LeasedAt)
+	err = tx.QueryRow(ctx, `SELECT d.id::text,m.id::text,d.cursor,m.sender_principal_id::text,m.body,d.leased_at FROM harness_deliveries d JOIN inbox_messages m ON m.tenant_id=d.tenant_id AND m.id=d.message_id WHERE d.session_id=$1 AND d.completed_at IS NULL AND d.released_at IS NULL AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) ORDER BY d.cursor LIMIT 1 FOR UPDATE OF m`, s.ID).Scan(&d.ID, &d.MessageID, &d.Cursor, &d.SenderPrincipalID, &d.Body, &d.LeasedAt)
 	if err == nil {
 		return []Delivery{d}, nil
 	}
@@ -106,6 +106,10 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 	var messageID string
 	var cursor int64
 	var completed, released *time.Time
+	// Message row first, then the drain lease (AEON-280 lock order).
+	if _, err = tx.Exec(ctx, `SELECT 1 FROM inbox_messages WHERE id=(SELECT message_id FROM harness_deliveries WHERE session_id=$1 AND id=$2) FOR UPDATE`, s.ID, in.DeliveryID); err != nil {
+		return nil, err
+	}
 	err = tx.QueryRow(ctx, `SELECT message_id::text,cursor,completed_at,released_at FROM harness_deliveries WHERE session_id=$1 AND id=$2 FOR UPDATE`, s.ID, in.DeliveryID).Scan(&messageID, &cursor, &completed, &released)
 	if err != nil {
 		return nil, err
@@ -118,6 +122,12 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 	}
 	if completed != nil {
 		return map[string]any{"delivery_id": in.DeliveryID, "cursor": cursor, "completed_at": completed}, nil
+	}
+	if failed, err := inbox.MessageNotDelivered(ctx, tx, messageID); err != nil || failed {
+		if err == nil {
+			err = workorders.Fail(409, "message was not delivered")
+		}
+		return nil, err
 	}
 	var acked *time.Time
 	err = tx.QueryRow(ctx, `UPDATE inbox_messages SET acked_at=clock_timestamp(),acked_by_principal_id=$2 WHERE id=$1 AND recipient_principal_id=$2 AND acked_at IS NULL RETURNING acked_at`, messageID, s.AgentPrincipalID).Scan(&acked)

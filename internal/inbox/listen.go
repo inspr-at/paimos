@@ -127,14 +127,13 @@ func parseListenQuery(r *http.Request) (after int64, waitMS int, limit int, err 
 }
 
 func (m *module) page(ctx context.Context, p tenant.Principal, after int64, limit int, session *string, exact bool, via string) (Page, error) {
-	items, err := m.pendingVia(ctx, p, after, limit+1, session, exact, via)
+	// Exactly the returned rows are handed over (stamped Delivered), never a
+	// look-ahead row.
+	items, err := m.pendingVia(ctx, p, after, limit, session, exact, via)
 	if err != nil {
 		return Page{}, err
 	}
 	page := Page{Items: items, NextAfter: after}
-	if len(items) > limit {
-		page.Items = items[:limit]
-	}
 	if len(page.Items) == 0 {
 		page.Items = []Message{}
 	} else {
@@ -197,9 +196,19 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
 		for i := range items {
 			ids[i] = items[i].ID
 		}
-		if err := MarkFetched(ctx, tx, p, via, ids...); err != nil {
+		// Lock and re-check before handing over: a row the sweeper failed after
+		// this read selected it is dropped, never returned.
+		alive, err := handOver(ctx, tx, p, via, ids)
+		if err != nil {
 			return err
 		}
+		kept := items[:0]
+		for _, msg := range items {
+			if alive[msg.ID] {
+				kept = append(kept, msg)
+			}
+		}
+		items = kept
 		if sessionID != nil {
 			return MarkSessionSeen(ctx, tx, *sessionID, via)
 		}

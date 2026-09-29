@@ -3,8 +3,11 @@ package harness_test
 
 import (
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/inbox"
 )
 
 func TestHarnessSessionMessagesNeverMoveToAnotherGeneration(t *testing.T) {
@@ -134,4 +137,71 @@ func TestDrainMarksListeningAndStopFailsBoundMessages(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// AEON-280 review: a live drain lease holds off the deadline, so a managed
+// session that already injected the message still completes it; once the
+// lease is stale the message fails and a late completion is refused.
+func TestDrainLeaseHoldsOffTheSweeper(t *testing.T) {
+	f := fixture(t)
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	lease := "delivery-guarantee-lease-sweeper-race"
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test", "harness_session_ref": "ref-" + lease, "worker_lease": lease, "management_mode": "managed", "role": "worker", "advertised_capabilities": []string{"inbox"}}, "")
+	expect(t, w, 201)
+	id := decode(t, w)["id"].(string)
+	bound := func() string {
+		compat, message := attentionMessage(t, f, f.project, f.person.ID, f.agent.ID, false)
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `UPDATE inbox_compat_messages SET recipient_session_id=$2 WHERE id=$1`, compat, id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `UPDATE inbox_messages SET recipient_session_id=$2 WHERE id=$1`, message, id); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `INSERT INTO inbox_receipts(tenant_id,message_id,state,deliver_by) VALUES($1,$2,'queued',now()-interval '1 second')`, f.person.TenantID, message)
+			return err
+		})
+		return message
+	}
+	receipt := func(message string) (state string) {
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT state FROM inbox_receipts WHERE message_id=$1`, message).Scan(&state)
+		})
+		return
+	}
+	drain := func() map[string]any {
+		w := f.call(f.agent, "POST", base+"/"+id+"/drain", map[string]any{}, lease)
+		expect(t, w, 200)
+		var items []map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil || len(items) != 1 {
+			t.Fatalf("drain %s", w.Body.String())
+		}
+		return items[0]
+	}
+	sweep := func() {
+		if _, err := inbox.NewSweeper(f.db.App).SweepTenant(t.Context(), f.person.TenantID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first := bound()
+	d := drain()
+	sweep()
+	if state := receipt(first); state != "queued" {
+		t.Fatalf("leased message failed under the drain: %s", state)
+	}
+	expect(t, f.call(f.agent, "POST", base+"/"+id+"/complete-delivery", map[string]any{"delivery_id": d["delivery_id"], "cursor": d["cursor"]}, lease), 200)
+	if state := receipt(first); state != "handed_off" {
+		t.Fatalf("completed receipt %s", state)
+	}
+	second := bound()
+	d = drain()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_deliveries SET leased_at=now()-interval '3 minutes' WHERE message_id=$1`, second)
+		return err
+	})
+	sweep()
+	if state := receipt(second); state != "failed" {
+		t.Fatalf("stale lease receipt %s", state)
+	}
+	expect(t, f.call(f.agent, "POST", base+"/"+id+"/complete-delivery", map[string]any{"delivery_id": d["delivery_id"], "cursor": d["cursor"]}, lease), 409)
 }

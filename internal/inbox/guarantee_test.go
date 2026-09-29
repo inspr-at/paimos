@@ -165,9 +165,10 @@ func TestSessionDeadlineDeliveredThenFailedLoudly(t *testing.T) {
 	if n := sweepNow(t, w, w.sender.TenantID); n != 0 || len(noticesFor(t, w, msg.ID)) != 1 {
 		t.Fatalf("replayed sweep %d", n)
 	}
-	// A late acknowledgement cannot turn the sender's "not delivered" around.
+	// A late acknowledgement is refused, without the body: the sender was told
+	// "not delivered" and that stays true.
 	status, body = do(t, srv, w.agent.ID, "POST", "/api/inbox/messages/"+msg.ID+"/ack", "", nil)
-	if status != 200 {
+	if status != 409 || !strings.Contains(string(body), "not_delivered") || strings.Contains(string(body), in.Body) {
 		t.Fatalf("late ack %d %s", status, body)
 	}
 	guaranteeRow(t, w, `SELECT state FROM inbox_message_deliveries WHERE message_id=$1::uuid`, []any{msg.ID}, &delivery)
@@ -222,6 +223,9 @@ func TestSessionEndFailsBoundMessagesAndCopiesCoordinator(t *testing.T) {
 	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE harness_sessions SET parent_id=$2::uuid WHERE id=$1::uuid`, child, parent); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE harness_sessions SET role='coordinator' WHERE id=$1::uuid`, parent); err != nil {
+		t.Fatal(err)
+	}
 	in := compatInput("codex:worker", "to-child")
 	in.RecipientSessionID = &child
 	msg := mustCompatSend(t, m, w.sender, project, in)
@@ -249,7 +253,8 @@ func TestSessionEndFailsBoundMessagesAndCopiesCoordinator(t *testing.T) {
 	notices := noticesFor(t, w, msg.ID)
 	coordinator, ok := notices["/coordinator"]
 	if len(notices) != 2 || notices[""].recipient != w.sender.ID || !ok || coordinator.recipient != lead.ID ||
-		coordinator.session == nil || *coordinator.session != parent || !strings.Contains(coordinator.body, "Child worker") || !strings.Contains(coordinator.body, "Sender") {
+		coordinator.session == nil || *coordinator.session != parent || !strings.Contains(coordinator.body, "Child worker") || !strings.Contains(coordinator.body, "Sender") ||
+		strings.Contains(coordinator.body, in.Body) {
 		t.Fatalf("notices %+v", notices)
 	}
 	// The coordinator's session pulls its copy like any bound message.

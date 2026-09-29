@@ -4,6 +4,7 @@ package inbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -42,6 +43,23 @@ const (
 	SeenAck      = "ack"
 )
 
+// ErrNotDelivered answers an acknowledgement or completion of a message whose
+// delivery already failed.
+var ErrNotDelivered = &httpError{409, "not_delivered", "This message was not delivered."}
+
+// receiptFailed reports a terminal failure. Call it under the message row lock.
+func receiptFailed(ctx context.Context, tx pgx.Tx, messageID string) (bool, error) {
+	var failed bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_receipts WHERE message_id=$1::uuid AND state='failed')`, messageID).Scan(&failed)
+	return failed, err
+}
+
+// MessageNotDelivered is receiptFailed for the harness: true when the message's
+// delivery failed and it must not be acknowledged or completed.
+func MessageNotDelivered(ctx context.Context, tx pgx.Tx, messageID string) (bool, error) {
+	return receiptFailed(ctx, tx, messageID)
+}
+
 // DeliverySettings are the tenant's deadlines and adapter attempt cap.
 type DeliverySettings struct {
 	SessionDeadlineSeconds int `json:"session_deadline_seconds"`
@@ -68,12 +86,27 @@ const receiptDeadlineSQL = `(SELECT CASE WHEN rp.kind<>'agent' THEN NULL ELSE LE
  FROM inbox_messages m JOIN principals rp ON rp.tenant_id=m.tenant_id AND rp.id=m.recipient_principal_id
  LEFT JOIN inbox_delivery_settings s ON s.tenant_id=m.tenant_id WHERE m.id=$2::uuid)`
 
-func systemPrincipal(ctx context.Context, tx pgx.Tx, tenantID string) (tenant.Principal, error) {
+// systemActor returns the tenant's System principal, creating it on first use.
+func systemActor(ctx context.Context, tx pgx.Tx, tenantID string) (tenant.Principal, error) {
 	var id string
 	if err := tx.QueryRow(ctx, `SELECT aeon_authz_system_actor($1::uuid)::text`, tenantID).Scan(&id); err != nil {
 		return tenant.Principal{}, err
 	}
 	return tenant.Principal{ID: id, TenantID: tenantID, Kind: tenant.Agent, Name: "System"}, nil
+}
+
+// systemEvent appends one System-authored inbox event through the narrow SQL
+// path of migration 0926. Unlike events.Append it works inside a caller that
+// sees only some projects: such a caller could not read a node-less System
+// event back, and the INSERT ... RETURNING would roll its transaction back.
+func systemEvent(ctx context.Context, tx pgx.Tx, tenantID, kind string, after any) (int64, error) {
+	raw, err := json.Marshal(after)
+	if err != nil {
+		return 0, err
+	}
+	var id int64
+	err = tx.QueryRow(ctx, `SELECT aeon_inbox_system_event($1::uuid,$2,$3::jsonb)`, tenantID, kind, raw).Scan(&id)
+	return id, err
 }
 
 // MarkSessionSeen records that this generation pulled its inbox. Writes are
@@ -88,49 +121,74 @@ func MarkSessionSeen(ctx context.Context, tx pgx.Tx, sessionID, via string) erro
 	return err
 }
 
-// MarkFetched stamps the first hand-over of each message to its recipient and
-// appends one content-free inbox.message_fetched event per first hand-over.
-// A sender sees this as Delivered; the acknowledgement is Read.
-func MarkFetched(ctx context.Context, tx pgx.Tx, p tenant.Principal, via string, ids ...string) error {
+// Locking protocol (AEON-280), the same on every path that reads, hands over,
+// acknowledges, completes or fails a message: the inbox_messages row first,
+// then its delivery (inbox_message_deliveries or harness_deliveries), then the
+// receipt. A failure sets expires_at under that row lock, so a reader that
+// locks and re-checks the row can never hand over a failed message.
+
+// handOver is the read side of that protocol. It locks the candidate rows in id
+// order, keeps only those still deliverable to p (unacknowledged, not expired,
+// not failed), stamps a first hand-over (Delivered to the sender) with one
+// content-free inbox.message_fetched event each, and returns the survivors.
+func handOver(ctx context.Context, tx pgx.Tx, p tenant.Principal, via string, ids []string) (map[string]bool, error) {
+	alive := map[string]bool{}
 	if len(ids) == 0 {
-		return nil
+		return alive, nil
 	}
-	rows, err := tx.Query(ctx, `UPDATE inbox_messages SET fetched_at=clock_timestamp() WHERE id=ANY($1::uuid[]) AND recipient_principal_id=$2::uuid AND fetched_at IS NULL RETURNING id::text,sender_principal_id::text`, ids, p.ID)
+	rows, err := tx.Query(ctx, `SELECT id::text,sender_principal_id::text,fetched_at IS NULL FROM inbox_messages
+ WHERE id=ANY($1::uuid[]) AND recipient_principal_id=$2::uuid AND acked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())
+ ORDER BY id FOR NO KEY UPDATE`, ids, p.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	type fetched struct{ id, sender string }
 	var first []fetched
 	for rows.Next() {
 		var f fetched
-		if err := rows.Scan(&f.id, &f.sender); err != nil {
+		var fresh bool
+		if err := rows.Scan(&f.id, &f.sender, &fresh); err != nil {
 			rows.Close()
-			return err
+			return nil, err
 		}
-		first = append(first, f)
+		alive[f.id] = true
+		if fresh {
+			first = append(first, f)
+		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	for _, f := range first {
+		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET fetched_at=clock_timestamp() WHERE id=$1::uuid AND fetched_at IS NULL`, f.id); err != nil {
+			return nil, err
+		}
 		after := map[string]any{"message_id": f.id, "sender_principal_id": f.sender, "recipient_principal_id": p.ID}
 		if via != "" {
 			after["via"] = via
 		}
 		if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.message_fetched", After: after}); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return alive, nil
+}
+
+// MarkFetched hands messages to their recipient p after the caller locked them
+// (the harness drain); see handOver.
+func MarkFetched(ctx context.Context, tx pgx.Tx, p tenant.Principal, via string, ids ...string) error {
+	_, err := handOver(ctx, tx, p, via, ids)
+	return err
 }
 
 // FailSessionMessages fails every undelivered message bound to this ended
 // generation with session_ended. The harness calls it in the transaction that
-// stops or archives the session.
+// stops or archives the session, before it releases the generation's leases.
+// Messages accepted before deadlines existed keep their legacy behaviour.
 func FailSessionMessages(ctx context.Context, tx pgx.Tx, tenantID, sessionID string) error {
 	rows, err := tx.Query(ctx, `SELECT m.id::text FROM inbox_messages m JOIN inbox_receipts r ON r.tenant_id=m.tenant_id AND r.message_id=m.id
- WHERE m.recipient_session_id=$1::uuid AND m.acked_at IS NULL AND r.state='queued' ORDER BY m.sent_event_id`, sessionID)
+ WHERE m.recipient_session_id=$1::uuid AND m.acked_at IS NULL AND r.state='queued' AND r.deliver_by IS NOT NULL ORDER BY m.id`, sessionID)
 	if err != nil {
 		return err
 	}
@@ -148,54 +206,73 @@ func FailSessionMessages(ctx context.Context, tx pgx.Tx, tenantID, sessionID str
 		return err
 	}
 	for _, id := range ids {
-		if _, err := failMessage(ctx, tx, tenantID, id, ReasonSessionEnded); err != nil {
+		if _, err := failMessage(ctx, tx, id, ReasonSessionEnded, false); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-type failingMessage struct {
-	id, sender, recipient, recipientName string
-	recipientSession, senderSession      *string
-	sessionLabel                         *string
-	parentSession, parentPrincipal       *string
-	body                                 string
-	createdAt                            time.Time
+// FailMessage is the one terminal "not delivered" transition, for every caller
+// (the sweeper, session end, the attempt cap, managed delivery that gives up).
+// In the caller's transaction it locks the message, and when it is still
+// unacknowledged with a queued receipt that has a deadline it: marks the
+// delivery dead with reason, fails the receipt, hides the message from every
+// read path, releases drain leases, appends inbox.receipt_failed and
+// inbox.delivery_failed (System), and writes the System notice to the sender
+// plus the coordinator copy. It returns false and changes nothing otherwise
+// (already terminal, acknowledged, or a legacy message without a deadline),
+// so every caller is idempotent. The caller must not set acked_at first.
+// reason is deadline, attempts, session_ended, no_listener or an adapter
+// reason allowed by inbox_message_deliveries_reason_check.
+func FailMessage(ctx context.Context, tx pgx.Tx, messageID, reason string) (bool, error) {
+	return failMessage(ctx, tx, messageID, reason, false)
 }
 
-// failMessage is the one terminal "not delivered" transition. It returns false
-// when the message is already acknowledged or its receipt already terminal,
-// so every caller (sweeper, session end, attempt cap) is idempotent.
-func failMessage(ctx context.Context, tx pgx.Tx, tenantID, messageID, reason string) (bool, error) {
-	// Lock order matches the recipient ack: message, then delivery, then receipt.
+type failingMessage struct {
+	tenant, id, sender, recipient, recipientName string
+	recipientSession, senderSession              *string
+	sessionLabel                                 *string
+	parentSession, parentPrincipal               *string
+	body                                         string
+	createdAt                                    time.Time
+}
+
+// liveLeaseSQL: an adapter or drain holds the message right now and may have
+// injected it already. The sweeper waits; the lease expiry is its deadline.
+const liveLeaseSQL = `SELECT EXISTS(SELECT 1 FROM inbox_message_deliveries d JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id
+ WHERE c.inbox_message_id=$1::uuid AND d.state='pending' AND d.lease_until>clock_timestamp())
+ OR EXISTS(SELECT 1 FROM harness_deliveries h WHERE h.message_id=$1::uuid AND h.completed_at IS NULL AND h.released_at IS NULL AND h.leased_at>clock_timestamp()-interval '2 minutes')`
+
+func failMessage(ctx context.Context, tx pgx.Tx, messageID, reason string, respectLease bool) (bool, error) {
 	var f failingMessage
 	var acked *time.Time
-	err := tx.QueryRow(ctx, `SELECT m.id::text,m.sender_principal_id::text,m.recipient_principal_id::text,rp.name,m.recipient_session_id::text,m.sender_session_id::text,rs.display_label,rs.parent_id::text,ps.agent_principal_id::text,m.body,m.created_at,m.acked_at
+	// Only the coordinator of the recipient's own project counts as its parent.
+	err := tx.QueryRow(ctx, `SELECT m.tenant_id::text,m.id::text,m.sender_principal_id::text,m.recipient_principal_id::text,rp.name,m.recipient_session_id::text,m.sender_session_id::text,rs.display_label,ps.id::text,ps.agent_principal_id::text,m.body,m.created_at,m.acked_at
  FROM inbox_messages m JOIN principals rp ON rp.tenant_id=m.tenant_id AND rp.id=m.recipient_principal_id
  LEFT JOIN harness_sessions rs ON rs.tenant_id=m.tenant_id AND rs.id=m.recipient_session_id
- LEFT JOIN harness_sessions ps ON ps.tenant_id=rs.tenant_id AND ps.id=rs.parent_id
- WHERE m.id=$1::uuid FOR UPDATE OF m`, messageID).Scan(&f.id, &f.sender, &f.recipient, &f.recipientName, &f.recipientSession, &f.senderSession, &f.sessionLabel, &f.parentSession, &f.parentPrincipal, &f.body, &f.createdAt, &acked)
+ LEFT JOIN harness_sessions ps ON ps.tenant_id=rs.tenant_id AND ps.id=rs.parent_id AND ps.role='coordinator' AND ps.project_id=rs.project_id
+ WHERE m.id=$1::uuid FOR UPDATE OF m`, messageID).Scan(&f.tenant, &f.id, &f.sender, &f.recipient, &f.recipientName, &f.recipientSession, &f.senderSession, &f.sessionLabel, &f.parentSession, &f.parentPrincipal, &f.body, &f.createdAt, &acked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
-	if err != nil {
+	if err != nil || acked != nil {
 		return false, err
-	}
-	if acked != nil {
-		return false, nil
 	}
 	var state string
-	err = tx.QueryRow(ctx, `SELECT state FROM inbox_receipts WHERE message_id=$1::uuid`, messageID).Scan(&state)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && state != "queued") {
+	var deadline *time.Time
+	err = tx.QueryRow(ctx, `SELECT state,deliver_by FROM inbox_receipts WHERE message_id=$1::uuid`, messageID).Scan(&state, &deadline)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (state != "queued" || deadline == nil)) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	sys, err := systemPrincipal(ctx, tx, tenantID)
-	if err != nil {
-		return false, err
+	if respectLease {
+		var leased bool
+		if err := tx.QueryRow(ctx, liveLeaseSQL, messageID).Scan(&leased); err != nil || leased {
+			return false, err
+		}
 	}
 	var deliveryID *string
 	err = tx.QueryRow(ctx, `UPDATE inbox_message_deliveries d SET state='dead',reason=$2,lease_token=NULL,lease_until=NULL
@@ -208,15 +285,18 @@ func failMessage(ctx context.Context, tx pgx.Tx, tenantID, messageID, reason str
 		// Already dead (the routine dispatcher's terminal failure) or no delivery row.
 		_ = tx.QueryRow(ctx, `SELECT d.id::text FROM inbox_message_deliveries d JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id WHERE c.inbox_message_id=$1::uuid`, messageID).Scan(&deliveryID)
 	}
-	// Leave every read path: a message the sender was told failed must not
-	// surface later as a surprise duplicate.
-	if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET expires_at=LEAST(coalesce(expires_at,clock_timestamp()),clock_timestamp()) WHERE id=$1::uuid AND acked_at IS NULL`, messageID); err != nil {
-		return false, err
-	}
 	if _, err := tx.Exec(ctx, `UPDATE harness_deliveries SET released_at=clock_timestamp() WHERE message_id=$1::uuid AND completed_at IS NULL AND released_at IS NULL`, messageID); err != nil {
 		return false, err
 	}
-	if err := advanceReceipt(ctx, tx, sys, messageID, "failed", "", reason, receiptTarget{}); err != nil {
+	// Leave every read path: a message the sender was told failed must not
+	// surface later as a surprise duplicate.
+	if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET expires_at=LEAST(coalesce(expires_at,clock_timestamp()),clock_timestamp()) WHERE id=$1::uuid`, messageID); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE inbox_receipts SET state='failed',failure_reason=$2,handed_off_at=NULL WHERE message_id=$1::uuid AND state='queued'`, messageID, reason); err != nil {
+		return false, err
+	}
+	if _, err := systemEvent(ctx, tx, f.tenant, "inbox.receipt_failed", map[string]any{"message_id": messageID, "state": "failed", "failure_reason": reason}); err != nil {
 		return false, err
 	}
 	after := map[string]any{"message_id": messageID, "reason": reason, "sender_principal_id": f.sender, "recipient_principal_id": f.recipient}
@@ -226,16 +306,23 @@ func failMessage(ctx context.Context, tx pgx.Tx, tenantID, messageID, reason str
 	if f.recipientSession != nil {
 		after["recipient_session_id"] = *f.recipientSession
 	}
-	if _, err := events.Append(ctx, tx, sys, events.Change{Type: "inbox.delivery_failed", After: after}); err != nil {
+	if _, err := systemEvent(ctx, tx, f.tenant, "inbox.delivery_failed", after); err != nil {
+		return false, err
+	}
+	sys, err := systemActor(ctx, tx, f.tenant)
+	if err != nil {
 		return false, err
 	}
 	return true, notifyFailure(ctx, tx, sys, f, reason)
 }
 
 // notifyFailure writes one durable system message to the sender, and a copy to
-// the principal of the recipient session's coordinator (parent) session. Both
-// are keyed by the failed message, so a replay writes nothing new. Notices have
-// no receipt and no deadline: a notice can never fail into another notice.
+// the principal of the recipient session's coordinator. Both are keyed by the
+// failed message, so a replay writes nothing new. Notices have no receipt and
+// no deadline: a notice can never fail into another notice. The copy quotes the
+// message only when its reader could already read it (the coordinator runs as
+// the recipient principal); otherwise it says that, not what, was lost, so a
+// private session-bound message never leaks.
 func notifyFailure(ctx context.Context, tx pgx.Tx, sys tenant.Principal, f failingMessage, reason string) error {
 	if f.sender == sys.ID {
 		return nil
@@ -251,14 +338,17 @@ func notifyFailure(ctx context.Context, tx pgx.Tx, sys tenant.Principal, f faili
 	if err := postNotice(ctx, tx, sys, f.sender, f.senderSession, "delivery-failed/"+f.id, body); err != nil {
 		return err
 	}
-	if f.parentPrincipal == nil || *f.parentPrincipal == f.sender || *f.parentPrincipal == f.recipient {
+	if f.parentPrincipal == nil || *f.parentPrincipal == f.sender {
 		return nil
 	}
 	var senderName string
 	if err := tx.QueryRow(ctx, `SELECT name FROM principals WHERE id=$1::uuid`, f.sender).Scan(&senderName); err != nil {
 		return err
 	}
-	copyBody := fmt.Sprintf("Not delivered to your worker %s: a message from %s (%s). Sent %s, message %s.\n\n> %s", target, senderName, why, sent, f.id, excerpt)
+	copyBody := fmt.Sprintf("Not delivered to your worker %s: a message from %s (%s). Sent %s, message %s.", target, senderName, why, sent, f.id)
+	if *f.parentPrincipal == f.recipient {
+		copyBody += "\n\n> " + excerpt
+	}
 	return postNotice(ctx, tx, sys, *f.parentPrincipal, f.parentSession, "delivery-failed/"+f.id+"/coordinator", copyBody)
 }
 
@@ -284,14 +374,18 @@ func postNotice(ctx context.Context, tx pgx.Tx, sys tenant.Principal, recipient 
 	if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
 		return err
 	}
-	ev, err := events.Append(ctx, tx, sys, events.Change{Type: "inbox.sent", After: messageMeta{ID: id, SenderPrincipalID: sys.ID, RecipientPrincipalID: recipient, IdempotencyKey: key}})
+	eventID, err := systemEvent(ctx, tx, sys.TenantID, "inbox.sent", messageMeta{ID: id, SenderPrincipalID: sys.ID, RecipientPrincipalID: recipient, IdempotencyKey: key})
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_label) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7,$8::uuid,'System')`, sys.TenantID, id, sys.ID, recipient, ev.ID, body, key, bound); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_label) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7,$8::uuid,'System')`, sys.TenantID, id, sys.ID, recipient, eventID, body, key, bound); err != nil {
 		return err
 	}
-	return enqueueWakes(ctx, tx, sys, Message{ID: id, SenderPrincipalID: sys.ID, RecipientPrincipalID: recipient, SentEventID: ev.ID, RecipientSessionID: bound})
+	msg := Message{ID: id, SenderPrincipalID: sys.ID, RecipientPrincipalID: recipient, SentEventID: eventID, RecipientSessionID: bound}
+	return enqueueWakesWith(ctx, tx, sys.TenantID, msg, func(c events.Change) error {
+		_, err := systemEvent(ctx, tx, sys.TenantID, c.Type, c.After)
+		return err
+	})
 }
 
 func failureText(reason string) string {

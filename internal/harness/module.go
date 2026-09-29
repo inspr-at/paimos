@@ -978,6 +978,12 @@ func closeGeneration(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Sessi
 			return Session{}, e
 		}
 	}
+	// Undelivered messages bound to this generation fail now, loudly (AEON-280).
+	// This runs before the lease release below: message rows are locked before
+	// delivery rows on every inbox path.
+	if err = inbox.FailSessionMessages(ctx, tx, p.TenantID, s.ID); err != nil {
+		return Session{}, err
+	}
 	leaseRows, err := tx.Query(ctx, `SELECT id::text,message_id::text,cursor FROM harness_deliveries WHERE session_id=$1 AND completed_at IS NULL AND released_at IS NULL FOR UPDATE`, s.ID)
 	if err != nil {
 		return Session{}, err
@@ -1010,10 +1016,6 @@ func closeGeneration(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Sessi
 	}
 	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase='stopped',stopped_at=coalesce(stopped_at,clock_timestamp()),stop_reason=coalesce(stop_reason,$2) WHERE id=$1 RETURNING `+sessionColumns, s.ID, reason))
 	if err != nil {
-		return Session{}, err
-	}
-	// Undelivered messages bound to this generation fail now, loudly (AEON-280).
-	if err = inbox.FailSessionMessages(ctx, tx, p.TenantID, s.ID); err != nil {
 		return Session{}, err
 	}
 	return s, record(ctx, tx, p, s, "stopped", before, s)

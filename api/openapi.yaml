@@ -2365,14 +2365,14 @@ paths:
     post:
       operationId: ackInboxMessage
       summary: Acknowledge a message addressed to the caller
-      description: Idempotent for the same recipient. Acknowledgement and inbox.acked event commit together.
+      description: Idempotent for the same recipient. Acknowledgement and inbox.acked event commit together. A message whose delivery already failed (AEON-280) answers 409 not_delivered and is neither acknowledged nor returned.
       security: *auth
       parameters: [{name: messageId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
         '200': {description: Acknowledged message, content: {application/json: {schema: {$ref: '#/components/schemas/InboxMessage'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
-        '409': {description: 'session_ended — This session has ended.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
+        '409': {description: 'session_ended — This session has ended. not_delivered — the delivery already failed.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
   /inbox/targets:
     get:
       operationId: listInboxTargets
