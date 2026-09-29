@@ -170,9 +170,9 @@ func testOutcomeCapture(t *testing.T, d *dbtest.DB) {
 	if got := patch(`{"state":"done","fields":` + benefitFields + `}`); got.Code != http.StatusOK {
 		t.Fatalf("done: %d %s", got.Code, got.Body.String())
 	}
-	from, to := outcomeStates(t, d, person, ticket)
-	if len(from) != 1 || from[0] != "open" || to[0] != "done" {
-		t.Fatalf("first completion: %v %v", from, to)
+	first := doneFacts(t, d, person, ticket)
+	if len(first) != 1 || first[0].from != "open" || first[0].to != "done" || first[0].started != "" || first[0].elapsed != "" || first[0].session != "" {
+		t.Fatalf("first completion: %+v", first)
 	}
 	if got := patch(`{"title":"Finish the work today"}`); got.Code != http.StatusOK {
 		t.Fatalf("title: %d %s", got.Code, got.Body.String())
@@ -240,6 +240,106 @@ func testOutcomeCapture(t *testing.T, d *dbtest.DB) {
 	}
 	if titles := releasedTitles(t, d, person); !titles["September release"] || !titles["October release"] {
 		t.Fatalf("publication titles: %v", titles)
+	}
+}
+
+func TestOutcomeWorkInterval(t *testing.T) {
+	d := dbtest.Open(t)
+	person := newPerson(t, d, "outcomes-interval")
+	project := insertNode(t, d, person, "project", "TIM-1", "Interval", nil)
+	marked := insertNode(t, d, person, "ticket", "TIM-2", "Marked", &project)
+	progressed := insertNode(t, d, person, "ticket", "TIM-3", "Progressed", &project)
+	linked := insertNode(t, d, person, "ticket", "TIM-4", "Linked", &project)
+	markerOnly := insertNode(t, d, person, "ticket", "TIM-5", "Marker session", &project)
+	future := insertNode(t, d, person, "ticket", "TIM-6", "Future start", &project)
+	unparsed := insertNode(t, d, person, "ticket", "TIM-7", "Unparsed start", &project)
+	published := insertNode(t, d, person, "ticket", "TIM-8", "Published with a session", &project)
+
+	insertState(t, d, person, marked, "2019-01-01T00:00:00Z")
+	inTenant(t, d, person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after,at)
+			VALUES($1,$2,$3,'comment.created',jsonb_build_object('body_markdown',$4::text),$5::timestamptz)`,
+			person.TenantID, person.ID, marked,
+			"I work on this — session: night-worker (22222222-2222-4222-8222-222222222222); role: builder; started: 2020-01-01T00:00:00Z",
+			"2024-01-01T00:00:00Z")
+		return err
+	})
+	var harness string
+	inTenant(t, d, person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after,at)
+			VALUES($1,$2,$3,'comment.created',jsonb_build_object('body_markdown',$4::text),$5::timestamptz)`,
+			person.TenantID, person.ID, linked,
+			"I work on this — session: other (33333333-3333-4333-8333-333333333333); role: builder; started: 2021-01-01T00:00:00Z",
+			"2024-02-01T00:00:00Z"); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(
+			tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest
+		) VALUES($1,$2,$3,$4,'grok','test','unmanaged','worker','ship',decode(md5($5),'hex'),decode(md5($6),'hex'))
+		RETURNING id::text`, person.TenantID, project, person.ID, linked, "linked-ref-"+linked, "linked-lease-"+person.TenantID).Scan(&harness)
+	})
+	insertState(t, d, person, progressed, "2020-06-01T00:00:00Z")
+	inTenant(t, d, person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after,at)
+			VALUES($1,$2,$3,'comment.created',jsonb_build_object('body_markdown',$4::text),$5::timestamptz)`,
+			person.TenantID, person.ID, markerOnly,
+			"I work on this — session: marker-only (44444444-4444-4444-8444-444444444444); role: builder; started: 2022-01-01T00:00:00Z",
+			"2024-03-01T00:00:00Z")
+		return err
+	})
+	inTenant(t, d, person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after,at)
+			VALUES($1,$2,$3,'comment.created',jsonb_build_object('body_markdown',$4::text),$5::timestamptz)`,
+			person.TenantID, person.ID, future,
+			"I work on this — session: future (not-a-uuid); role: builder; started: 2999-01-01T00:00:00Z",
+			"2024-04-01T00:00:00Z")
+		return err
+	})
+	inTenant(t, d, person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after,at)
+			VALUES($1,$2,$3,'comment.created',jsonb_build_object('body_markdown',$4::text),$5::timestamptz)`,
+			person.TenantID, person.ID, unparsed,
+			"I work on this — session: broken (not-a-uuid); role: builder; started: not-a-time",
+			"2020-03-01T00:00:00Z")
+		return err
+	})
+	var publishedSession string
+	inTenant(t, d, person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(
+			tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest
+		) VALUES($1,$2,$3,$4,'grok','test','unmanaged','worker','ship',decode(md5($5),'hex'),decode(md5($6),'hex'))
+		RETURNING id::text`, person.TenantID, project, person.ID, published, "published-ref-"+published, "published-lease-"+person.TenantID).Scan(&publishedSession)
+	})
+
+	for _, ticket := range []string{marked, progressed, linked, markerOnly, future, unparsed} {
+		markDone(t, d, person, ticket)
+	}
+	assertDone(t, d, person, marked, "2020-01-01T00:00:00Z", true, "22222222-2222-4222-8222-222222222222")
+	assertDone(t, d, person, progressed, "2020-06-01T00:00:00Z", true, "")
+	assertDone(t, d, person, linked, "2021-01-01T00:00:00Z", true, harness)
+	assertDone(t, d, person, markerOnly, "2022-01-01T00:00:00Z", true, "44444444-4444-4444-8444-444444444444")
+	assertDone(t, d, person, future, "2999-01-01T00:00:00Z", false, "")
+	assertDone(t, d, person, unparsed, "2020-03-01T00:00:00Z", true, "")
+
+	release := insertNode(t, d, person, "release", "TIM-9", "Interval release", &project)
+	inTenant(t, d, person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id) VALUES($1,$2)`, person.TenantID, project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number) VALUES($1,$2,$3,1)`, person.TenantID, release, project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source)
+			VALUES($1,$2,$3,$4,0,'manual')`, person.TenantID, published, project, release)
+		return err
+	})
+	publishRelease(t, d, person, release, "260929120000.0.0")
+	var gotSession string
+	inTenant(t, d, person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT coalesce(session_id::text,'') FROM outcome_events WHERE ticket_node_id=$1 AND kind='released'`, published).Scan(&gotSession)
+	})
+	if gotSession != publishedSession {
+		t.Fatalf("released session %q, want %q", gotSession, publishedSession)
 	}
 }
 
@@ -475,26 +575,66 @@ func countOutcomes(t *testing.T, d *dbtest.DB, p tenant.Principal, ticket, kind 
 	return n
 }
 
-func outcomeStates(t *testing.T, d *dbtest.DB, p tenant.Principal, ticket string) (from, to []string) {
+type doneFact struct {
+	from, to, started, elapsed, session string
+}
+
+func doneFacts(t *testing.T, d *dbtest.DB, p tenant.Principal, ticket string) []doneFact {
 	t.Helper()
+	var facts []doneFact
 	inTenant(t, d, p, func(tx pgx.Tx) error {
-		rows, err := tx.Query(t.Context(), `SELECT payload->>'from_state', payload->>'to_state' FROM outcome_events
-			WHERE ticket_node_id=$1 AND kind='ticket_done' ORDER BY recorded_at, id`, ticket)
+		rows, err := tx.Query(t.Context(), `SELECT payload->>'from_state', payload->>'to_state',
+			coalesce(payload->>'started_at',''), coalesce(payload->>'elapsed_seconds',''), coalesce(session_id::text,'')
+			FROM outcome_events WHERE ticket_node_id=$1 AND kind='ticket_done' ORDER BY recorded_at, id`, ticket)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var a, b string
-			if err := rows.Scan(&a, &b); err != nil {
+			var fact doneFact
+			if err := rows.Scan(&fact.from, &fact.to, &fact.started, &fact.elapsed, &fact.session); err != nil {
 				return err
 			}
-			from = append(from, a)
-			to = append(to, b)
+			facts = append(facts, fact)
 		}
 		return rows.Err()
 	})
-	return from, to
+	return facts
+}
+
+func markDone(t *testing.T, d *dbtest.DB, p tenant.Principal, ticket string) {
+	t.Helper()
+	got := callAs(t, nodes.New(d.App, nil), p, http.MethodPatch, "/api/nodes/"+ticket, `{"state":"done","fields":`+benefitFields+`}`)
+	if got.Code != http.StatusOK {
+		t.Fatalf("done: %d %s", got.Code, got.Body.String())
+	}
+}
+
+func insertState(t *testing.T, d *dbtest.DB, p tenant.Principal, ticket, at string) {
+	t.Helper()
+	inTenant(t, d, p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after,at)
+			VALUES($1,$2,$3,'node.updated',jsonb_build_object('state','in_progress'),$4::timestamptz)`,
+			p.TenantID, p.ID, ticket, at)
+		return err
+	})
+}
+
+func assertDone(t *testing.T, d *dbtest.DB, p tenant.Principal, ticket, started string, wantElapsed bool, session string) {
+	t.Helper()
+	var from, to, gotSession string
+	var startedOK, elapsedOK bool
+	inTenant(t, d, p, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT payload->>'from_state', payload->>'to_state',
+			(payload->>'started_at')::timestamptz = $2::timestamptz,
+			CASE WHEN $3 THEN coalesce((payload->>'elapsed_seconds')::bigint, -1) > 0 ELSE payload->>'elapsed_seconds' IS NULL END,
+			coalesce(session_id::text,'')
+			FROM outcome_events WHERE ticket_node_id=$1 AND kind='ticket_done'`,
+			ticket, started, wantElapsed).Scan(&from, &to, &startedOK, &elapsedOK, &gotSession)
+	})
+	if from != "open" || to != "done" || !startedOK || !elapsedOK || gotSession != session {
+		t.Fatalf("ticket %s done from=%s to=%s started=%v elapsed=%v session=%q want session %q", ticket, from, to, startedOK, elapsedOK, gotSession, session)
+	}
 }
 
 func decodeOutcome(t *testing.T, raw []byte) outcome {

@@ -74,6 +74,8 @@ function detailParts(kind: string, payload: Record<string, unknown>): string[] {
       return [pullRequest(payload), text(payload.name), text(payload.summary)]
     case 'revert':
       return [text(payload.target), text(payload.summary)]
+    case 'ticket_done':
+      return [elapsed(payload.elapsed_seconds)]
     case 'released':
       return [text(payload.version)]
     default:
@@ -105,6 +107,19 @@ function marked(state: string): string {
     case 'delivered': return 'Marked delivered'
     default: return state ? `Marked ${state}` : 'Marked done'
   }
+}
+
+function elapsed(value: unknown): string {
+  const n = whole(value)
+  if (n == null) return ''
+  const hours = Math.floor(n / 3600)
+  const minutes = Math.floor((n % 3600) / 60)
+  const seconds = n % 60
+  const parts: string[] = []
+  if (hours) parts.push(hours === 1 ? '1 hour' : `${hours} hours`)
+  if (minutes) parts.push(minutes === 1 ? '1 minute' : `${minutes} minutes`)
+  if (seconds || !parts.length) parts.push(seconds === 1 ? '1 second' : `${seconds} seconds`)
+  return parts.join(' ')
 }
 
 function counted(label: string, value: unknown): string {

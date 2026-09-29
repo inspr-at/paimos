@@ -3,6 +3,10 @@
 -- rules_version stays null until a rules version is recorded (AEON-249).
 -- Ticket completion and release publication are captured here so every writer
 -- is covered. Assigning a ticket to a planned release records nothing.
+-- Completion stores the interval from the earliest worker-marker start, else
+-- that marker's comment time, else the first in-progress transition. A future
+-- start omits elapsed_seconds. Automatic rows copy the ticket's harness
+-- session, or a UUID from the latest worker marker.
 -- A missing actor skips the row. A visibility failure must not roll back
 -- the ticket write or the snapshot capture.
 
@@ -51,6 +55,112 @@ CREATE TRIGGER outcome_events_immutable
     BEFORE UPDATE OR DELETE ON outcome_events
     FOR EACH ROW EXECUTE FUNCTION aeon_events_append_only();
 
+CREATE FUNCTION aeon_outcome_timestamptz(raw text) RETURNS timestamptz
+LANGUAGE plpgsql
+STABLE
+SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+    IF raw IS NULL OR btrim(raw) = '' THEN
+        RETURN NULL;
+    END IF;
+    RETURN btrim(raw)::timestamptz;
+EXCEPTION
+    WHEN invalid_datetime_format OR datetime_field_overflow THEN
+        RETURN NULL;
+END;
+$$;
+
+-- A worker marker is the attribution comment. started: is read case-insensitively
+-- and trailing sentence punctuation is ignored, matching the activity parser.
+CREATE FUNCTION aeon_outcome_marker(body text) RETURNS boolean
+LANGUAGE sql
+STABLE
+SET search_path = pg_catalog, public
+AS $$
+    SELECT coalesce(body, '') ~* '^I work on this[[:space:]]*[-—–]+[[:space:]]*session:'
+       AND substring(lower(body) FROM 'started:[[:space:]]*([^[:space:]]+)') IS NOT NULL;
+$$;
+
+CREATE FUNCTION aeon_outcome_work_started(p_tenant uuid, p_ticket uuid) RETURNS timestamptz
+LANGUAGE plpgsql
+STABLE
+SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    parsed timestamptz;
+    marker_at timestamptz;
+BEGIN
+    SELECT min(aeon_outcome_timestamptz(regexp_replace(
+        substring(lower(e.after->>'body_markdown') FROM 'started:[[:space:]]*([^[:space:]]+)'),
+        '[.;,]+$', '')))
+    INTO parsed
+    FROM events e
+    WHERE e.tenant_id = p_tenant
+      AND e.node_id = p_ticket
+      AND e.type = 'comment.created'
+      AND aeon_outcome_marker(e.after->>'body_markdown');
+    IF parsed IS NOT NULL THEN
+        RETURN parsed;
+    END IF;
+    SELECT min(e.at) INTO marker_at
+    FROM events e
+    WHERE e.tenant_id = p_tenant
+      AND e.node_id = p_ticket
+      AND e.type = 'comment.created'
+      AND aeon_outcome_marker(e.after->>'body_markdown');
+    IF marker_at IS NOT NULL THEN
+        RETURN marker_at;
+    END IF;
+    SELECT min(e.at) INTO marker_at
+    FROM events e
+    WHERE e.tenant_id = p_tenant
+      AND e.node_id = p_ticket
+      AND e.type IN ('node.created', 'node.updated')
+      AND e.after->>'state' = 'in_progress';
+    RETURN marker_at;
+END;
+$$;
+
+CREATE FUNCTION aeon_outcome_session(p_tenant uuid, p_ticket uuid) RETURNS uuid
+LANGUAGE plpgsql
+STABLE
+SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    found uuid;
+    raw text;
+BEGIN
+    SELECT s.id INTO found
+    FROM harness_sessions s
+    WHERE s.tenant_id = p_tenant AND s.ticket_node_id = p_ticket
+    ORDER BY (s.stopped_at IS NULL) DESC, s.heartbeat_at DESC NULLS LAST, s.created_at DESC, s.id DESC
+    LIMIT 1;
+    IF found IS NOT NULL THEN
+        RETURN found;
+    END IF;
+    SELECT substring(lower(e.after->>'body_markdown') FROM 'session:[[:space:]]*[^()[:cntrl:]]{0,200}\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)')
+    INTO raw
+    FROM events e
+    WHERE e.tenant_id = p_tenant
+      AND e.node_id = p_ticket
+      AND e.type = 'comment.created'
+      AND aeon_outcome_marker(e.after->>'body_markdown')
+    ORDER BY e.at DESC, e.id DESC
+    LIMIT 1;
+    IF raw IS NULL OR raw = '' THEN
+        RETURN NULL;
+    END IF;
+    RETURN raw::uuid;
+EXCEPTION
+    WHEN invalid_text_representation THEN
+        RETURN NULL;
+END;
+$$;
+
 CREATE FUNCTION aeon_record_ticket_done() RETURNS trigger
 LANGUAGE plpgsql
 SECURITY INVOKER
@@ -59,6 +169,9 @@ AS $$
 DECLARE
     actor uuid;
     prior text := '';
+    started timestamptz;
+    seconds numeric;
+    work_session uuid;
 BEGIN
     IF TG_OP = 'UPDATE' THEN
         prior := OLD.state;
@@ -81,19 +194,30 @@ BEGIN
     ) THEN
         RETURN NEW;
     END IF;
+    started := aeon_outcome_work_started(NEW.tenant_id, NEW.id);
+    work_session := aeon_outcome_session(NEW.tenant_id, NEW.id);
+    IF started IS NOT NULL AND started <= clock_timestamp() THEN
+        seconds := floor(extract(epoch FROM clock_timestamp() - started));
+    END IF;
     BEGIN
         INSERT INTO outcome_events (
-            tenant_id, kind, project_id, ticket_node_id, idempotency_key,
+            tenant_id, kind, project_id, ticket_node_id, session_id, idempotency_key,
             actor_principal_id, source, payload, request_digest
         ) VALUES (
             NEW.tenant_id,
             'ticket_done',
             NEW.project_id,
             NEW.id,
+            work_session,
             'auto:ticket_done:' || NEW.id::text || ':' || clock_timestamp()::text,
             actor,
             'automatic',
-            jsonb_build_object('from_state', prior, 'to_state', NEW.state),
+            jsonb_strip_nulls(jsonb_build_object(
+                'from_state', prior,
+                'to_state', NEW.state,
+                'started_at', started,
+                'elapsed_seconds', seconds
+            )),
             decode(md5('ticket_done' || NEW.id::text || prior || NEW.state || clock_timestamp()::text), 'hex')
         )
         ON CONFLICT (tenant_id, idempotency_key) DO NOTHING;
@@ -126,6 +250,7 @@ DECLARE
     scheme text;
     ticket jsonb;
     ticket_id uuid;
+    work_session uuid;
 BEGIN
     SELECT (aeon_current_principals())[1] INTO actor;
     IF actor IS NULL OR NOT EXISTS (
@@ -165,15 +290,17 @@ BEGIN
         ) THEN
             CONTINUE;
         END IF;
+        work_session := aeon_outcome_session(NEW.tenant_id, ticket_id);
         BEGIN
             INSERT INTO outcome_events (
-                tenant_id, kind, project_id, ticket_node_id, release_node_id,
+                tenant_id, kind, project_id, ticket_node_id, session_id, release_node_id,
                 idempotency_key, actor_principal_id, source, payload, request_digest
             ) VALUES (
                 NEW.tenant_id,
                 'released',
                 NEW.project_node_id,
                 ticket_id,
+                work_session,
                 release_id,
                 'auto:released:' || ticket_id::text || ':' || release_id::text || ':' || clock_timestamp()::text,
                 actor,
