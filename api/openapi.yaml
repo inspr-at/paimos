@@ -573,7 +573,7 @@ paths:
     get:
       operationId: listMembers
       responses:
-        '200': {description: Workspace people, agents, invites and imported identities, content: {application/json: {schema: {$ref: '#/components/schemas/MemberDirectory'}}}}
+        '200': {description: 'Workspace people, agents, invites and imported identities', content: {application/json: {schema: {$ref: '#/components/schemas/MemberDirectory'}}}}
   /members/{principal_id}/workspace-role:
     put:
       operationId: setWorkspaceRole
@@ -606,7 +606,7 @@ paths:
                   invite: {$ref: '#/components/schemas/Invite'}
                   join_url: {type: string}
                   account: {$ref: '#/components/schemas/InviteAccountResult'}
-        '400': {description: Invalid email, expiry, role or project, or provisioning requested without a configured provisioner}
+        '400': {description: 'Invalid email, expiry, role or project, or provisioning requested without a configured provisioner'}
         '403': {description: Permission denied or the role exceeds the inviter}
         '409': {description: Email already belongs to an active member}
   /members/invites/{id}:
@@ -638,7 +638,7 @@ paths:
       responses:
         '200': {description: Deactivated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
         '403': {description: Permission denied}
-        '409': {description: Last active owner, or already deactivated}
+        '409': {description: 'Last active owner, or already deactivated'}
   /members/{principal_id}/reactivate:
     post:
       operationId: reactivateMember
@@ -666,7 +666,7 @@ paths:
         '200': {description: Person with the new alias, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
         '400': {description: Alias would form a chain or a self-link}
         '403': {description: Permission denied}
-        '409': {description: Already linked, or the alias is the last active owner}
+        '409': {description: 'Already linked, or the alias is the last active owner'}
   /members/{principal_id}/aliases/{from_principal_id}:
     delete:
       operationId: unlinkMemberAlias
@@ -829,7 +829,7 @@ paths:
       operationId: getRelease
       summary: One release of the embedded history
       parameters:
-        - {name: version, in: path, required: true, schema: {type: string}, description: The calendar version, with or without the leading v}
+        - {name: version, in: path, required: true, schema: {type: string}, description: 'The calendar version, with or without the leading v'}
       responses:
         '200':
           description: The release
@@ -986,7 +986,7 @@ paths:
               type: object
               required: [file, crop]
               properties:
-                file: {type: string, format: binary, description: PNG, JPEG or WebP up to 8 MiB}
+                file: {type: string, format: binary, description: 'PNG, JPEG or WebP up to 8 MiB'}
                 crop: {$ref: '#/components/schemas/AvatarCrop'}
       responses:
         '200': {description: Updated profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
@@ -1385,8 +1385,8 @@ paths:
         - {name: date_field, in: query, description: 'Which date date_from and date_to bound. created and updated compare instants; start, end and accepted read fields.start_date, end_date and accepted_at by the calendar day of the bounds in their own offset. Alone it keeps work that has that date.', schema: {type: string, enum: [created, updated, start, end, accepted]}}
         - {name: date_from, in: query, description: Inclusive lower bound (RFC 3339), schema: {type: string, format: date-time}}
         - {name: date_to, in: query, description: Exclusive upper bound (RFC 3339), schema: {type: string, format: date-time}}
-        - {name: q, in: query, description: Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last, schema: {type: string}}
-        - {name: within, in: query, description: Descendants of this node, excluding itself, schema: {type: string, format: uuid}}
+        - {name: q, in: query, description: 'Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last', schema: {type: string}}
+        - {name: within, in: query, description: 'Descendants of this node, excluding itself', schema: {type: string, format: uuid}}
         - {name: hide_closed, in: query, schema: {type: boolean, default: false}}
         - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
@@ -1983,7 +1983,7 @@ paths:
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: type, in: query, description: Comma-separated knowledge types, schema: {type: string}}
-        - {name: status, in: query, description: Comma-separated active, proposed, archived, schema: {type: string}}
+        - {name: status, in: query, description: 'Comma-separated active, proposed, archived', schema: {type: string}}
         - {name: q, in: query, schema: {type: string, maxLength: 200}}
         - {name: sort, in: query, schema: {type: string, enum: [relevance, updated, created, title, slug, type]}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000, default: 500}}
@@ -2042,7 +2042,7 @@ paths:
       parameters:
         - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
         - {name: types, in: query, description: Comma-separated knowledge types, schema: {type: string}}
-        - {name: status, in: query, description: Comma-separated active, proposed, archived; omitted means all, schema: {type: string}}
+        - {name: status, in: query, description: 'Comma-separated active, proposed, archived; omitted means all', schema: {type: string}}
         - {name: include, in: query, schema: {type: string, enum: [tickets]}}
       responses:
         '200':
@@ -2496,7 +2496,7 @@ paths:
         '201': {description: Pending or identical replay; reason authorization_expired means expired., content: {application/json: {schema: {$ref: '#/components/schemas/HarnessManagedControl'}}}}
         '400': {description: Invalid typed value or model/effort outside the enrolled account catalog}
         '403': {description: Person with project harness.control required}
-        '409': {description: Unmanaged, unsupported, stale ownership, changed retry or session unavailable}
+        '409': {description: 'Unmanaged, unsupported, stale ownership, changed retry or session unavailable'}
         '429': {description: Session control quota reached}
   /projects/{projectId}/harness-sessions/{sessionId}/managed-settings:
     parameters:
@@ -2568,7 +2568,7 @@ paths:
         '201': {description: Requested; waiting for the session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSessionRequest'}}}}
         '400': {description: Invalid rename or catalog selection}
         '403': {description: Person with harness.control permission required}
-        '409': {description: Closed or managed generation, stale generation, or divergent replay}
+        '409': {description: 'Closed or managed generation, stale generation, or divergent replay'}
   /projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2628,7 +2628,7 @@ paths:
       responses:
         '201': {description: Idempotent typed force control; inspect its state and outcome, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRecoveryControl'}}}}
         '403': {description: Human force permission required}
-        '409': {description: Stale confirmation, offline host or unverified process generation}
+        '409': {description: 'Stale confirmation, offline host or unverified process generation'}
   /projects/{projectId}/harness-sessions/{sessionId}/remove:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2678,7 +2678,7 @@ paths:
         '200': {description: Archived session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid confirmation or request}
         '403': {description: Human recovery permission required}
-        '409': {description: Stale observation, divergent retry, active force authorization or legacy managed daemon without safe detachment}
+        '409': {description: 'Stale observation, divergent retry, active force authorization or legacy managed daemon without safe detachment'}
   /projects/{projectId}/harness-sessions/{sessionId}/usage:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2702,7 +2702,7 @@ paths:
         - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessUsageReport'}}}}
       responses:
-        '410': {description: Authenticated archived generation; usage proof revoked, existing usage retained}
+        '410': {description: 'Authenticated archived generation; usage proof revoked, existing usage retained'}
         '200':
           description: Accepted cumulative report or exact replay
           content:
@@ -2715,7 +2715,7 @@ paths:
                   replayed: {type: boolean}
         '400': {description: Invalid or out-of-bounds report}
         '403': {description: Worker proof or scope rejected}
-        '409': {description: Conflicting replay, stale sequence, decreasing counters or changed final report}
+        '409': {description: 'Conflicting replay, stale sequence, decreasing counters or changed final report'}
     get:
       operationId: getHarnessSessionUsage
       security: *auth
@@ -2789,7 +2789,7 @@ paths:
                 brief: {$ref: '#/components/schemas/HarnessBrief'}
                 worktree: {$ref: '#/components/schemas/HarnessWorktree'}
                 branch: {$ref: '#/components/schemas/HarnessBranch'}
-                commits: {type: array, maxItems: 20, description: New commits to append, oldest first; duplicate SHAs are ignored and only the latest 20 are retained., items: {$ref: '#/components/schemas/HarnessCommit'}}
+                commits: {type: array, maxItems: 20, description: 'New commits to append, oldest first; duplicate SHAs are ignored and only the latest 20 are retained.', items: {$ref: '#/components/schemas/HarnessCommit'}}
                 eta_ready_at: {type: [string, 'null'], format: date-time, description: "Worker only. RFC3339 instant the bound ticket is ready for review, from 30 days ago through 365 days ahead. Omission preserves; null clears. A past instant inside that window is overdue."}
                 eta_live_at: {type: [string, 'null'], format: date-time, description: "Coordinator only. RFC3339 instant the bound ticket is live, from 30 days ago through 365 days ahead. Omission preserves; null clears. The ticket's current project is checked on every write."}
                 progress_pct: {type: [integer, 'null'], minimum: 0, maximum: 100, description: "Worker only. Percent done for the bound ticket, 0 through 100. Omission preserves; null clears."}
@@ -2852,7 +2852,7 @@ paths:
                 eta_live_at: {type: [string, 'null'], format: date-time}
       responses:
         '200': {description: The ticket estimate after the write, content: {application/json: {schema: {$ref: '#/components/schemas/TicketEta'}}}}
-        '400': {description: Not a ticket or task, or the timestamp is not RFC3339}
+        '400': {description: 'Not a ticket or task, or the timestamp is not RFC3339'}
         '403': {description: No active coordinator session for this agent in the project}
         '404': {description: Node not found}
   /projects/{projectId}/harness-sessions/{sessionId}/rules-receipts:
@@ -2917,7 +2917,7 @@ paths:
             schema: {$ref: '#/components/schemas/HarnessProvenanceWrite'}
       responses:
         '200': {description: Created or replayed revision, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessProvenanceRecorded'}}}}
-        '400': {description: Item is not an allowlisted name, digest or version}
+        '400': {description: 'Item is not an allowlisted name, digest or version'}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; existing provenance remains readable}
   /harness-sessions:
@@ -3001,7 +3001,7 @@ paths:
         Declared allowance, explicit reservations and the pace-cap schedule stay numbers. Null is unknown, not zero.
         Project visibility follows harness sessions. The most expensive tickets are a ranking, not a session list.
       parameters:
-        - {name: from, in: query, schema: {type: string}, description: RFC3339 or YYYY-MM-DD. Both from and to, or neither (then the last 30 UTC days).}
+        - {name: from, in: query, schema: {type: string}, description: 'RFC3339 or YYYY-MM-DD. Both from and to, or neither (then the last 30 UTC days).'}
         - {name: to, in: query, schema: {type: string}, description: Exclusive end. Span at most 366 days.}
         - {name: project, in: query, schema: {type: string, format: uuid}}
       responses:
@@ -4010,7 +4010,7 @@ paths:
       description: Admin or member person, while at least one business plugin is enabled at its compiled digest. A read model of principals (who logged time, whose period waits for approval); grants nothing.
       security: [{session: []}]
       responses:
-        '200': {description: Principals, people first, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessPrincipal'}}}}}
+        '200': {description: 'Principals, people first', content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessPrincipal'}}}}}
         '403': {$ref: '#/components/responses/Error'}
   /quotes:
     get:
@@ -4216,7 +4216,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: Last-Event-ID, in: header, schema: {type: string, pattern: '^[0-9]+$'}}]
       responses:
-        '200': {description: text/event-stream with presence, quote_change and access_revoked events, content: {text/event-stream: {schema: {type: string}}}}
+        '200': {description: 'text/event-stream with presence, quote_change and access_revoked events', content: {text/event-stream: {schema: {type: string}}}}
         '403': {$ref: '#/components/responses/Error'}
   /quotes/{quoteId}/finalize:
     post:
@@ -4499,7 +4499,7 @@ paths:
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishIntake'}}}}
       responses:
-        '201': {description: Accepted for review, or discarded by the honeypot, content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
+        '201': {description: 'Accepted for review, or discarded by the honeypot', content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -4530,7 +4530,7 @@ paths:
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCorrectionIntake'}}}}
       responses:
-        '201': {description: Accepted, or discarded without a stored row, content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
+        '201': {description: 'Accepted, or discarded without a stored row', content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -5272,7 +5272,7 @@ components:
         id: {type: string}
         key: {type: string}
         label: {type: string}
-        billing_mode: {type: string, enum: [subscription, api, unknown, unreported, mixed], description: Present on subscription groups. Reported metadata, not verified coverage.}
+        billing_mode: {type: string, enum: [subscription, api, unknown, unreported, mixed], description: 'Present on subscription groups. Reported metadata, not verified coverage.'}
         sessions: {type: integer, minimum: 0, description: Distinct sessions. A session with several models counts once.}
         usage_rows: {type: integer, minimum: 0, description: Current model rows. Several models on one session are several rows.}
         unreported_sessions: {type: integer, minimum: 0}
@@ -5282,7 +5282,7 @@ components:
         output_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
         output_known_rows: {type: integer, minimum: 0}
         output_unknown_rows: {type: integer, minimum: 0}
-        cached_input_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$', description: Sum of known cached input, which is a subset of input.}
+        cached_input_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$', description: 'Sum of known cached input, which is a subset of input.'}
         cached_input_known_rows: {type: integer, minimum: 0}
         cached_input_unknown_rows: {type: integer, minimum: 0}
         tokens_state: {type: string, enum: [known, partial, unknown]}
@@ -5326,14 +5326,14 @@ components:
               unit: {type: string, enum: [requests, tokens, cost_micros]}
               allowance: {type: integer, format: int64, minimum: 1, description: Declared window size.}
               used: {type: [integer, 'null'], format: int64, description: Measured ledger usage. Null while provisional. A present zero is measured zero.}
-              reserved: {type: integer, format: int64, minimum: 0, description: Explicit reservations. A hold, not measured usage.}
+              reserved: {type: integer, format: int64, minimum: 0, description: 'Explicit reservations. A hold, not measured usage.'}
               pace_model: {type: string, enum: [steady, frontload, unrestricted]}
               burst_ratio: {type: string}
               starts_at: {type: string, format: date-time}
               ends_at: {type: string, format: date-time}
-              provisional: {type: boolean, description: True when the window has no settled measurement, or any settled reservation recorded zero actual units.}
+              provisional: {type: boolean, description: 'True when the window has no settled measurement, or any settled reservation recorded zero actual units.'}
               pace_cap: {type: [integer, 'null'], format: int64, description: Schedule capacity at the read. Independent of measured usage.}
-              headroom: {type: [integer, 'null'], format: int64, description: Schedule capacity minus measured used and reserved. Null when usage or the cap is unknown, or the difference overflows.}
+              headroom: {type: [integer, 'null'], format: int64, description: 'Schedule capacity minus measured used and reserved. Null when usage or the cap is unknown, or the difference overflows.'}
               hard_remaining: {type: [integer, 'null'], format: int64, description: Declared allowance minus measured used and reserved. Null when usage is unknown or the difference overflows.}
     AuthzPermission:
       type: object
@@ -5570,7 +5570,7 @@ components:
         greeting_enabled: {type: boolean}
         avatar_color: {type: string, description: One of twelve muted palette tokens}
         avatar_hashes: {type: object, additionalProperties: {type: string, pattern: '^[a-f0-9]{64}$'}}
-        week_start: {type: integer, minimum: 0, maximum: 6, description: 0=Sunday, 1=Monday}
+        week_start: {type: integer, minimum: 0, maximum: 6, description: '0=Sunday, 1=Monday'}
         revision: {type: integer, minimum: 0}
     ProfileValidationError:
       type: object
@@ -5694,7 +5694,7 @@ components:
             ci: {$ref: '#/components/schemas/ReleaseRun'}
             release_run: {$ref: '#/components/schemas/ReleaseRun'}
             release_url: {type: string}
-            unavailable: {type: array, items: {type: string}, description: What could not be established, in plain words}
+            unavailable: {type: array, items: {type: string}, description: 'What could not be established, in plain words'}
     ReleaseRun:
       type: [object, 'null']
       properties: {name: {type: string}, url: {type: string}, status: {type: string}, conclusion: {type: string}}
@@ -5702,7 +5702,7 @@ components:
       type: object
       required: [project_node_id, project_key, tenant_slug, profile, revision, stage, stage_source, disposable, stages, next_action, requirements_revision, requirements_digest_sha256, requirements_approval_scope, launch_readiness]
       properties:
-        project_node_id: {type: string, format: uuid, description: Project node id, read from the node. Not taken from the client.}
+        project_node_id: {type: string, format: uuid, description: 'Project node id, read from the node. Not taken from the client.'}
         project_key: {type: string, description: 'Route key used in /p/{project_key} links (e.g. PHAROS), read from the project node. Not a request field.'}
         node_key: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$', description: 'Immutable key of the project node (nodes.key, e.g. PRJ-17). Not a request field.'}
         tenant_slug: {type: string, minLength: 1, description: Slug of the tenant that owns the node. Not taken from the client.}
@@ -6001,8 +6001,8 @@ components:
         plugin_id: {type: string}
         attempt: {type: integer, minimum: 1}
         authority_epoch: {type: integer, minimum: 1}
-        superseded_by: {type: [string, 'null'], format: uuid, description: Latest newer attempt for this release, stage and operation}
-        authority_open: {type: boolean, description: Whether this attempt can currently accept another action; read-only status, not a grant}
+        superseded_by: {type: [string, 'null'], format: uuid, description: 'Latest newer attempt for this release, stage and operation'}
+        authority_open: {type: boolean, description: 'Whether this attempt can currently accept another action; read-only status, not a grant'}
         state: {type: string, enum: [requested, active, blocked, succeeded, failed, revoked]}
         expires_at: {type: string, format: date-time}
         evidence_ceiling: {type: array, items: {type: string, enum: [deployment, verification, authorization, credential_handoff, launch_readiness]}}
@@ -6058,7 +6058,7 @@ components:
         target_build_passed: {type: boolean, description: Required for launch_readiness. A false value refuses admission.}
         backup_ready: {type: boolean, description: Required for launch_readiness. A false value refuses admission.}
         backup_observed_at: {type: string, format: date-time, description: Required for launch_readiness.}
-        restart_required: {type: boolean, description: Required for launch_readiness. Stored, and not an admission input.}
+        restart_required: {type: boolean, description: 'Required for launch_readiness. Stored, and not an admission input.'}
         running_kernel: {type: string, minLength: 1, maxLength: 128, description: Required for launch_readiness.}
         expected_kernel: {type: string, minLength: 1, maxLength: 128, description: Required for launch_readiness.}
     StageEvidence:
@@ -6345,7 +6345,7 @@ components:
         - type: object
           required: [key, title, customer_name, created_at, updated_at]
           properties:
-            key: {type: string, description: The quote node key, such as QUO-12}
+            key: {type: string, description: 'The quote node key, such as QUO-12'}
             title: {type: string}
             customer_name: {type: string, description: Current title of the customer organisation}
             currency: {type: string, pattern: '^[A-Z]{3}$'}
@@ -6353,7 +6353,7 @@ components:
             offer_date: {type: string, format: date}
             valid_until: {type: string, format: date}
             created_at: {type: string, format: date-time}
-            updated_at: {type: string, format: date-time, description: Latest of document, version, decision and archive changes}
+            updated_at: {type: string, format: date-time, description: 'Latest of document, version, decision and archive changes'}
             issued_at: {type: string, format: date-time, description: When the current version was issued}
             accepted_at: {type: string, format: date-time, description: When the current version was accepted}
     QuoteSettings:
@@ -6363,8 +6363,8 @@ components:
         revision: {type: integer, minimum: 0}
         numbering_time_zone: {type: string, description: Explicit IANA time zone such as Europe/Vienna}
         default_currency: {type: string, pattern: '^$|^[A-Z]{3}$', description: Empty only before first setup}
-        sender: {type: object, description: Tenant-owned company, address, contact, registration and bank fields}
-        defaults: {type: object, description: Tenant-owned intro, blocks, acceptance and VAT prose}
+        sender: {type: object, description: 'Tenant-owned company, address, contact, registration and bank fields'}
+        defaults: {type: object, description: 'Tenant-owned intro, blocks, acceptance and VAT prose'}
         layout: {type: object, description: Neutral rendering preferences and file references}
         smtp_confirmation_enabled: {type: boolean}
         smtp_configured: {type: boolean}
@@ -6421,11 +6421,11 @@ components:
         page: {type: object, description: A4 geometry and four exact decimal millimetre margins}
         cover: {type: object, description: Cover layout and spacing in exact decimal millimetres}
         sections: {type: object, description: Hierarchy and numbering style}
-        positions_table: {type: object, description: Ordered columns, exact millimetre widths, separators and repeated headings}
-        totals: {type: object, description: Net, VAT and discount display modes; amounts remain integer minor units}
+        positions_table: {type: object, description: 'Ordered columns, exact millimetre widths, separators and repeated headings'}
+        totals: {type: object, description: 'Net, VAT and discount display modes; amounts remain integer minor units'}
         payment_terms: {type: object, description: Payment block style and heading}
         acceptance: {type: object, description: Signature count and spacing}
-        footer: {type: object, description: Optional mark asset, width, offset, and page number template}
+        footer: {type: object, description: 'Optional mark asset, width, offset, and page number template'}
         labels: {type: object, additionalProperties: {type: string}, description: Localized document labels}
     QuoteDocument:
       type: object
@@ -6444,7 +6444,7 @@ components:
         recipient: {type: object}
         legal: {type: object}
         layout: {type: object}
-        profile: {type: object, description: Immutable selected profile id, revision, and full definition snapshot; included in the issued document digest}
+        profile: {type: object, description: 'Immutable selected profile id, revision, and full definition snapshot; included in the issued document digest'}
         sections: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/QuoteDocumentSection'}}
         positions: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/QuoteDocumentPosition'}}
         net_total_cents: {type: integer, minimum: 0, description: Server-computed; input is ignored}
@@ -7072,7 +7072,7 @@ components:
         node_id: {type: string, format: uuid}
         kind: {type: string, enum: [ticket, epic, task]}
         currency: {type: string, enum: [USD]}
-        usage_available: {type: boolean, description: True when harness_session_usage was read. A missing relation is an error, not an empty cost. Null figures are unreported, not zero.}
+        usage_available: {type: boolean, description: 'True when harness_session_usage was read. A missing relation is an error, not an empty cost. Null figures are unreported, not zero.'}
         includes_descendants: {type: boolean}
         scope_truncated: {type: boolean}
         list_truncated: {type: boolean}
@@ -7174,13 +7174,13 @@ components:
         tenant: {type: string, description: Tenant slug}
         sender_principal_id: {type: string, format: uuid}
         recipient_principal_id: {type: string, format: uuid}
-        target_id: {type: [string, 'null'], format: uuid, description: Receiver target, null for direct inbox messages}
+        target_id: {type: [string, 'null'], format: uuid, description: 'Receiver target, null for direct inbox messages'}
         target_version: {type: [integer, 'null'], minimum: 1}
-        adapter: {type: string, description: Receiver adapter, for example grok_bot_routine}
+        adapter: {type: string, description: 'Receiver adapter, for example grok_bot_routine'}
         address: {type: string}
         effective_level: {type: string, description: Empty for a direct inbox acknowledgement; simple or steer for a managed adapter hand-off}
         state: {type: string, enum: [queued, handed_off, failed]}
-        handed_off_at: {type: [string, 'null'], format: date-time, description: RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms}
+        handed_off_at: {type: [string, 'null'], format: date-time, description: 'RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms'}
         failure_reason: {type: string}
     InboxMessage:
       allOf:
@@ -7487,9 +7487,9 @@ components:
         cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         provisional: {type: boolean}
         account_id: {type: [string, 'null'], format: uuid}
-        account_label: {type: [string, 'null'], minLength: 1, maxLength: 128, description: Public self-reported label; trimmed, valid Unicode without control characters.}
+        account_label: {type: [string, 'null'], minLength: 1, maxLength: 128, description: 'Public self-reported label; trimmed, valid Unicode without control characters.'}
         billing_mode: {type: string, enum: [unknown, api, subscription]}
-        subscription_label: {type: [string, 'null'], minLength: 1, maxLength: 120, description: Allowed only with billing_mode subscription. Public self-reported label, not a credential.}
+        subscription_label: {type: [string, 'null'], minLength: 1, maxLength: 120, description: 'Allowed only with billing_mode subscription. Public self-reported label, not a credential.'}
     SessionModelUsage:
       type: object
       required: [session_id, model, sequence, input_tokens, output_tokens, cached_input_tokens, provisional, price_version, estimated_cost_usd, cost_status, currency, account_id, account_label, billing_mode, subscription_label, metadata_source, reported_at]
@@ -7648,7 +7648,7 @@ components:
         request_id: {type: string, format: uuid, description: Caller-generated idempotency ID scoped to the session; reuse only with the identical payload}
         expected_revision: {type: integer, format: int64, minimum: 0, maximum: 9223372036854775806}
         context: {$ref: '#/components/schemas/HarnessRulesReceiptContext'}
-        body_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Worker-reported SHA256 of exact merged bytes, never a hash of a version label}
+        body_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Worker-reported SHA256 of exact merged bytes, never a hash of a version label'}
         version: {type: string, maxLength: 16, pattern: '^(floor-only|[0-9]{12}\.0\.0)$', description: Worker-reported calendar version or floor-only; no assertion of publication}
         byte_size: {type: integer, minimum: 1, maximum: 12000}
         source: {type: string, enum: [online, cache, floor-only], description: Worker-reported source; cache/floor-only are stale fallback evidence and never fresh authority}
@@ -7690,10 +7690,10 @@ components:
       required: [kind, logical_name, hash_kind]
       properties:
         kind: {type: string, enum: [agents, claude, skill, prompt_template]}
-        logical_name: {type: string, maxLength: 80, description: AGENTS.md, CLAUDE.md, one skill slug plus /SKILL.md, or prompt-template. Not a filesystem path.}
+        logical_name: {type: string, maxLength: 80, description: 'AGENTS.md, CLAUDE.md, one skill slug plus /SKILL.md, or prompt-template. Not a filesystem path.'}
         hash_kind: {type: string, enum: [content, absent], description: content means content_sha256 is a digest of the instruction or template bytes. absent is only valid for a prompt template recorded with a version and no template digest.}
         content_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$', description: Required when hash_kind is content. Null when hash_kind is absent. Never a hash of the version identifier.}
-        version: {type: [string, 'null'], maxLength: 80, description: Required for prompt_template. A version identifier, not prompt text.}
+        version: {type: [string, 'null'], maxLength: 80, description: 'Required for prompt_template. A version identifier, not prompt text.'}
         byte_size: {type: [integer, 'null'], minimum: 0, maximum: 1048576, description: Present for instruction files. Absent for a prompt template.}
     HarnessProvenanceRevision:
       type: object
@@ -7758,7 +7758,7 @@ components:
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
         needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Shared inbox attention and nonblocking replies do not set this flag; stopped sessions are false."}
         attention_reasons: {type: array, description: "Authorized content-free reasons; withheld without harness.read at this project.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
-        has_problem: {type: boolean, description: Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false.}
+        has_problem: {type: boolean, description: 'Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false.'}
         stopped_at: {type: [string, 'null'], format: date-time}
         stop_reason: {type: [string, 'null'], description: Present only with harness.read at the project.}
         project_id: {type: string, format: uuid}
@@ -7775,7 +7775,7 @@ components:
         reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
         account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
         harness_version: {$ref: '#/components/schemas/HarnessVersion'}
-        activity_note: {type: [string, 'null'], maxLength: 120, description: Current step, present only with harness.read at the project}
+        activity_note: {type: [string, 'null'], maxLength: 120, description: 'Current step, present only with harness.read at the project'}
         activity_note_id: {type: integer, format: int64, description: Latest activity entry ID; present with the current step only where harness.read is granted.}
         ticket:
           description: The bound ticket and the project it lives in now
@@ -8364,7 +8364,7 @@ components:
         body: {type: string}
         status: {$ref: '#/components/schemas/KnowledgeStatus'}
         metadata: {type: object, additionalProperties: true}
-        key_prefix: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}$', description: Key prefix, usually the project's key; default is the kind's prefix}
+        key_prefix: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}$', description: 'Key prefix, usually the project''s key; default is the kind''s prefix'}
     KnowledgePatch:
       type: object
       minProperties: 1

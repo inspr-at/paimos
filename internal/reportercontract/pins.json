@@ -1592,7 +1592,7 @@
   },
   "journey": {
     "version": "journey/1.2",
-    "sha256": "70b5eeaaadac51687593bca949a160e1a4df34287785005d371030b1712437d1",
+    "sha256": "707c682a55cb986db03fc9df1813fd34efc61a09f9de3219a633ddf421e24086",
     "shape": {
       "GET /projects/{projectId}/journey 200": {
         "properties": {
@@ -1707,7 +1707,6 @@
           },
           "project_node_id": {
             "format": "uuid",
-            "read from the node. Not taken from the client.": null,
             "type": "string"
           },
           "requirements_approval_scope": {
@@ -1986,7 +1985,7 @@
   },
   "stage-evidence": {
     "version": "stage-evidence/1.0",
-    "sha256": "a63db0d0d535a21c5a2691cc9dc45207e4d892ca2c90cc3272b2a55b3f4c00e3",
+    "sha256": "ad8e9f46011757ba299727edc91f9d3e875eb8a6b4d8dd8c087bad82c6440f2b",
     "shape": {
       "POST /stage-handoffs/{handoffId}/evidence 201": {
         "allOf": [
@@ -2098,7 +2097,6 @@
                 "type": "string"
               },
               "restart_required": {
-                "and not an admission input.": null,
                 "type": "boolean"
               },
               "reviewed_plan_digest": {
@@ -2153,7 +2151,7 @@
   },
   "stage-handoffs": {
     "version": "stage-handoffs/1.0",
-    "sha256": "15ca943d8910a3ab2b41fbc839ab68e80506875bbbf0ae590b1af34276134c52",
+    "sha256": "9b6b726326a4acef72f39f383a4a369d1682835b1a066dc6c630e73ea1ffebbe",
     "shape": {
       "GET /stage-handoffs/{handoffId} 200": {
         "properties": {
@@ -2196,7 +2194,6 @@
             "type": "integer"
           },
           "authority_open": {
-            "not a grant": null,
             "type": "boolean"
           },
           "context_digest": {
@@ -2338,7 +2335,6 @@
           },
           "superseded_by": {
             "format": "uuid",
-            "stage and operation": null,
             "type": [
               "string",
               "null"
@@ -2407,7 +2403,6 @@
             "type": "integer"
           },
           "authority_open": {
-            "not a grant": null,
             "type": "boolean"
           },
           "context_digest": {
@@ -2549,7 +2544,6 @@
           },
           "superseded_by": {
             "format": "uuid",
-            "stage and operation": null,
             "type": [
               "string",
               "null"

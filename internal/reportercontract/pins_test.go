@@ -4,10 +4,14 @@ package reportercontract
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestResponseSchemaPins(t *testing.T) {
@@ -68,6 +72,149 @@ func TestRequiredBump(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPinnedShapeKeys rejects parse artifacts that landed in a pin as schema
+// keys. Operation labels are the shape's outer keys. Inside a schema, a key is
+// a JSON Schema keyword; names under properties, patternProperties,
+// dependentSchemas, and component schema maps are declared names.
+func TestPinnedShapeKeys(t *testing.T) {
+	raw, err := os.ReadFile("pins.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pins map[string]Pin
+	if err := json.Unmarshal(raw, &pins); err != nil {
+		t.Fatal(err)
+	}
+	openAPI, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Current(openAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(label string, pin Pin) {
+		var shape map[string]any
+		if err := json.Unmarshal(pin.Shape, &shape); err != nil {
+			t.Fatal(err)
+		}
+		for op, schema := range shape {
+			if err := lintSchema(schema, label+" "+op); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	for name, pin := range pins {
+		check(name+" pin", pin)
+	}
+	for name, pin := range current {
+		check(name+" parsed", pin)
+	}
+}
+
+// TestOpenAPIPropertyNamesHaveNoSpace re-parses the contract. An unquoted
+// flow-mapping description that contains ", " or ": " becomes extra keys, and
+// those keys contain a space.
+func TestOpenAPIPropertyNamesHaveNoSpace(t *testing.T) {
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var bad []string
+	var walk func(any, string)
+	walk = func(v any, path string) {
+		switch node := v.(type) {
+		case map[string]any:
+			keys := make([]string, 0, len(node))
+			for key := range node {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				if strings.Contains(key, " ") {
+					bad = append(bad, path+"/"+key)
+				}
+				walk(node[key], path+"/"+key)
+			}
+		case []any:
+			for i, item := range node {
+				walk(item, path+"["+strconv.Itoa(i)+"]")
+			}
+		}
+	}
+	walk(doc, "")
+	if len(bad) > 0 {
+		t.Fatalf("parsed OpenAPI property names contain a space:\n%s", strings.Join(bad, "\n"))
+	}
+}
+
+func lintSchema(v any, path string) error {
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	for key := range obj {
+		if !jsonSchemaKeyword(key) {
+			return fmt.Errorf("%s: %q is not a JSON Schema keyword or a declared property name", path, key)
+		}
+	}
+	for key, val := range obj {
+		switch key {
+		case "properties", "patternProperties", "$defs", "definitions", "dependentSchemas":
+			named, ok := val.(map[string]any)
+			if !ok {
+				continue
+			}
+			for name, sub := range named {
+				if err := lintSchema(sub, path+"."+key+"."+name); err != nil {
+					return err
+				}
+			}
+		case "allOf", "anyOf", "oneOf", "prefixItems":
+			items, ok := val.([]any)
+			if !ok {
+				continue
+			}
+			for i, sub := range items {
+				if err := lintSchema(sub, path+"."+key+"["+strconv.Itoa(i)+"]"); err != nil {
+					return err
+				}
+			}
+		case "items", "additionalProperties", "unevaluatedProperties", "unevaluatedItems", "not", "if", "then", "else", "contains", "propertyNames", "contentSchema":
+			if err := lintSchema(val, path+"."+key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func jsonSchemaKeyword(key string) bool {
+	_, ok := jsonSchemaKeywords[key]
+	return ok
+}
+
+// JSON Schema draft 2020-12 keywords plus the OpenAPI 3.1 schema-object fields.
+var jsonSchemaKeywords = map[string]bool{
+	"$anchor": true, "$comment": true, "$defs": true, "$dynamicAnchor": true, "$dynamicRef": true,
+	"$id": true, "$ref": true, "$schema": true, "$vocabulary": true,
+	"additionalProperties": true, "allOf": true, "anyOf": true, "const": true, "contains": true,
+	"contentEncoding": true, "contentMediaType": true, "contentSchema": true, "default": true,
+	"dependentRequired": true, "dependentSchemas": true, "deprecated": true, "description": true,
+	"discriminator": true, "else": true, "enum": true, "example": true, "examples": true,
+	"exclusiveMaximum": true, "exclusiveMinimum": true, "externalDocs": true, "format": true,
+	"if": true, "items": true, "maxContains": true, "maxItems": true, "maxLength": true,
+	"maxProperties": true, "maximum": true, "minContains": true, "minItems": true, "minLength": true,
+	"minProperties": true, "minimum": true, "multipleOf": true, "not": true, "nullable": true,
+	"oneOf": true, "pattern": true, "patternProperties": true, "prefixItems": true, "properties": true,
+	"propertyNames": true, "readOnly": true, "required": true, "then": true, "title": true, "type": true,
+	"unevaluatedItems": true, "unevaluatedProperties": true, "uniqueItems": true, "writeOnly": true, "xml": true,
 }
 
 func TestVersionShape(t *testing.T) {
