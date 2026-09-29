@@ -98,14 +98,15 @@ export function groupChanges(changes: ReleaseChange[]): Record<ChangeGroup, Rele
 }
 export interface TicketChangeLine { key: string; pill: string; benefit: string; pillLang: 'en' | 'de'; benefitLang: 'en' | 'de'; commits: ReleaseChange[] }
 export interface PresentedChanges { features: TicketChangeLine[]; fixes: TicketChangeLine[]; other: ReleaseChange[] }
-// One line per visible ticket inside Features and Fixes. The pill and benefit
-// follow the viewer's language. A feature or fix commit with no visible ticket
-// joins Other, cleaned subject and all. A ticket can appear in both groups
-// when its commits do.
-function visibleNotes(change: ReleaseChange, locale?: string | null): LinkedTicket[] {
-  const out: LinkedTicket[] = []
+type TicketText = Pick<ReleaseNoteItem, 'key' | 'pill_en' | 'pill_de' | 'benefit_en' | 'benefit_de'>
+// The tickets a release tells about, in order: a captured snapshot's items when
+// there is one, else each visible linked ticket as its commits first name it.
+// A ticket with neither pill nor benefit in the viewer's language is not told.
+function toldTickets(changes: ReleaseChange[], locale?: string | null, items?: TicketText[] | null): TicketText[] {
+  const out: TicketText[] = []
   const seen = new Set<string>()
-  for (const note of change.linked_tickets ?? []) {
+  const linked = () => changes.filter(c => { const g = changeGroup(c); return g === 'features' || g === 'fixes' }).flatMap(c => c.linked_tickets ?? [])
+  for (const note of items ?? linked()) {
     const key = note.key?.trim()
     if (!key || seen.has(key)) continue
     const text = localizedNote(note, locale)
@@ -115,51 +116,48 @@ function visibleNotes(change: ReleaseChange, locale?: string | null): LinkedTick
   }
   return out
 }
-export function presentChanges(changes: ReleaseChange[], locale?: string | null): PresentedChanges {
-  const buckets: Record<'features' | 'fixes', Map<string, TicketChangeLine>> = { features: new Map(), fixes: new Map() }
-  const other: ReleaseChange[] = []
-  for (const change of changes) {
-    const group = changeGroup(change)
-    if (!group) continue
-    const notes = group === 'other' ? [] : visibleNotes(change, locale)
-    if (group === 'other' || !notes.length) { other.push(change); continue }
-    for (const note of notes) {
-      let line = buckets[group].get(note.key)
-      if (!line) {
-        const text = localizedNote(note, locale)
-        line = { key: note.key, pill: text.pill, benefit: text.benefit, pillLang: text.pillLang, benefitLang: text.benefitLang, commits: [] }
-        buckets[group].set(note.key, line)
-      }
-      if (!line.commits.some(existing => existing.commit === change.commit)) line.commits.push(change)
-    }
+// Feature or fix, per ticket (no note carries a kind): the ticket's own type
+// first, as the server's group shows it on its commits without a conventional
+// prefix (a bug makes them fixes, a ticket with a benefit features), then the
+// commits' feat and fix prefixes. A ticket with neither is a feature.
+function ticketGroup(commits: ReleaseChange[]): 'features' | 'fixes' {
+  let bug = false, notBug = false, feat = false, fix = false
+  for (const c of commits) {
+    if (c.type === 'other' && c.group === 'fixes' && c.tickets.length === 1) bug = true
+    if (c.type === 'other' && c.group === 'features') notBug = true
+    if (c.type === 'feat') feat = true
+    if (c.type === 'fix') fix = true
   }
-  return { features: [...buckets.features.values()], fixes: [...buckets.fixes.values()], other }
+  if (bug) return 'fixes'
+  if (notBug || feat) return 'features'
+  return fix ? 'fixes' : 'features'
 }
-// The changes of one group, in order, each ticket's changes together under that
-// ticket's pill (AEON-305). Changes with no visible ticket note form a block
-// with an empty key, placed where the first of them appeared.
-export interface TicketBlock { key: string; pill: string; pillLang: 'en' | 'de'; changes: ReleaseChange[] }
-export function ticketBlocks(changes: ReleaseChange[], locale?: string | null): TicketBlock[] {
-  const blocks: TicketBlock[] = []
-  const byKey = new Map<string, TicketBlock>()
-  let loose: TicketBlock | undefined
-  for (const change of changes) {
-    const note = visibleNotes(change, locale).find(n => change.tickets.includes(n.key)) ?? visibleNotes(change, locale)[0]
-    if (!note) {
-      if (!loose) { loose = { key: '', pill: '', pillLang: 'en', changes: [] }; blocks.push(loose) }
-      loose.changes.push(change)
-      continue
-    }
-    let block = byKey.get(note.key)
-    if (!block) {
-      const text = localizedNote(note, locale)
-      block = { key: note.key, pill: text.pill || text.benefit, pillLang: text.pill ? text.pillLang : text.benefitLang, changes: [] }
-      byKey.set(note.key, block)
-      blocks.push(block)
-    }
-    block.changes.push(change)
+// Every release reads the same (AEON-305): one block per told ticket under
+// Features or Fixes, with the pill and benefit in the viewer's language and
+// every commit that names the ticket. A told ticket without commits still gets
+// its block. Commits no told ticket claims are Other; the version bump is left out.
+export function presentChanges(changes: ReleaseChange[], locale?: string | null, items?: TicketText[] | null): PresentedChanges {
+  const seen = new Set<string>()
+  const commits = changes.filter(c => {
+    if (!changeGroup(c) || seen.has(c.commit)) return false
+    seen.add(c.commit)
+    return true
+  })
+  const out: PresentedChanges = { features: [], fixes: [], other: [] }
+  const claimed = new Set<string>()
+  for (const note of toldTickets(changes, locale, items)) {
+    const mine = commits.filter(c => c.tickets.includes(note.key))
+    for (const c of mine) claimed.add(c.commit)
+    const text = localizedNote(note, locale)
+    out[ticketGroup(mine)].push({ key: note.key, pill: text.pill, benefit: text.benefit, pillLang: text.pillLang, benefitLang: text.benefitLang, commits: mine })
   }
-  return blocks
+  out.other = commits.filter(c => !claimed.has(c.commit))
+  return out
+}
+// A release as the sheet shows it: a captured snapshot decides which tickets are
+// told and their text; without one, the linked tickets do.
+export function presentRelease(r: Pick<Release, 'notes' | 'changes'>, locale?: string | null): PresentedChanges {
+  return presentChanges(r.changes, locale, hasUsableNotes(r) ? r.notes.items : null)
 }
 // ---------- Display ----------
 // Headlines and subjects as people read them, next to their ticket chips: the keys
@@ -215,60 +213,25 @@ export function localizedPresentation(r: Pick<Release, 'presentation'>, locale?:
   const theme = pick(p.theme_en, p.theme_de), headline = pick(p.headline_en, p.headline_de), intro = pick(p.intro_en, p.intro_de)
   return { theme: theme.text, headline: headline.text, intro: intro.text, themeLang: theme.lang, headlineLang: headline.lang, introLang: intro.lang }
 }
-// One benefit row: the pill is the label, the benefit the detail, the key stays quiet.
-export interface BenefitRow { key: string; label: string; detail: string; labelLang: 'en' | 'de'; detailLang: 'en' | 'de' }
-export interface ReleaseStory { benefits: BenefitRow[]; fixes: BenefitRow[]; commits: ReleaseChange[] }
-function benefitRow(key: string, text: LocalizedNote): BenefitRow | null {
-  const pill = text.pill.trim(), benefit = text.benefit.trim()
-  if (!pill && !benefit) return null
-  const label = pill || benefit
-  const detail = pill && benefit.toLowerCase() !== pill.toLowerCase() ? benefit : ''
-  return { key, label, detail, labelLang: pill ? text.pillLang : text.benefitLang, detailLang: text.benefitLang }
-}
-// What a release did, as the detail tells it: benefit rows, then fixes, then
-// every commit. A captured snapshot decides membership and text; its fix tickets
-// (by the served change groups) move to Fixes. Without one, linked tickets
-// decide. A ticket is listed once; as a benefit when it is both.
-export function releaseStory(r: Pick<Release, 'notes' | 'changes'>, locale?: string | null): ReleaseStory {
-  const lines = presentChanges(r.changes, locale)
-  const commits = r.changes.filter(c => c.type !== 'release')
-  const featureKeys = new Set(lines.features.map(line => line.key))
-  const fixKeys = new Set(lines.fixes.map(line => line.key).filter(key => !featureKeys.has(key)))
-  const benefits: BenefitRow[] = [], fixes: BenefitRow[] = []
-  if (hasUsableNotes(r)) {
-    for (const item of r.notes.items) {
-      const row = benefitRow(item.key, localizedNote(item, locale))
-      if (row) (fixKeys.has(item.key) ? fixes : benefits).push(row)
-    }
-    return { benefits, fixes, commits }
-  }
-  for (const line of lines.features) {
-    const row = benefitRow(line.key, { pill: line.pill, benefit: line.benefit, pillLang: line.pillLang, benefitLang: line.benefitLang })
-    if (row) benefits.push(row)
-  }
-  for (const line of lines.fixes) {
-    if (featureKeys.has(line.key)) continue
-    const row = benefitRow(line.key, { pill: line.pill, benefit: line.benefit, pillLang: line.pillLang, benefitLang: line.benefitLang })
-    if (row) fixes.push(row)
-  }
-  return { benefits, fixes, commits }
+// The pills a release tells, features first, for its title and rail line.
+function toldLabels(r: Pick<Release, 'notes' | 'changes'>, locale?: string | null) {
+  const p = presentRelease(r, locale)
+  return [...p.features, ...p.fixes].map(line => line.pill || line.benefit)
 }
 // A short name for a release in toasts and lists: its theme (or headline), else
-// its first benefit pill, else nothing, so callers show only version and date.
+// its first pill, else nothing, so callers show only version and date.
 // The Git tag message is evidence and never a name outside Evidence.
 export function releaseTitle(r: Pick<Release, 'changes' | 'notes' | 'presentation'>, locale?: string | null) {
   const presented = localizedPresentation(r, locale)
   if (presented) return presented.theme || presented.headline
-  const story = releaseStory(r, locale)
-  return [...story.benefits, ...story.fixes][0]?.label ?? ''
+  return toldLabels(r, locale)[0] ?? ''
 }
-// The rail's second line: the theme, else the benefit pills. Git tag headlines
-// are evidence, not names, so they are not shown there.
+// The rail's second line: the theme, else the pills. Git tag headlines are
+// evidence, not names, so they are not shown there.
 export function railLine(r: Release, locale?: string | null): { text: string; themed: boolean } {
   const presented = localizedPresentation(r, locale)
   if (presented) return { text: presented.theme || presented.headline, themed: true }
-  const story = releaseStory(r, locale)
-  return { text: [...story.benefits, ...story.fixes].map(row => row.label).join(' · '), themed: false }
+  return { text: toldLabels(r, locale).join(' · '), themed: false }
 }
 // Text split around each case-insensitive hit of the search query, for <mark>.
 export function markParts(text: string, query?: string | null): { text: string; hit: boolean }[] {
@@ -380,12 +343,11 @@ export function naturalKey(a: string, b: string) { return a.localeCompare(b, 'en
 // ---------- Search and filters ----------
 export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; tickets: boolean }
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
-// The same groups the list and the row counts show (AEON-305 restored the
-// per-change list): the server's group, else the commit type.
-export function matches(r: Release, f: ReleaseFilter, _locale?: string | null) {
-  const groups = groupChanges(r.changes)
-  if (f.features && !groups.features.length) return false
-  if (f.fixes && !groups.fixes.length) return false
+// The filters follow the blocks the detail and the row counts show.
+export function matches(r: Release, f: ReleaseFilter, locale?: string | null) {
+  const presented = presentRelease(r, locale)
+  if (f.features && !presented.features.length) return false
+  if (f.fixes && !presented.fixes.length) return false
   if (f.tickets && !ticketsOf(r).length) return false
   const q = f.q.trim().toLowerCase()
   if (!q) return true

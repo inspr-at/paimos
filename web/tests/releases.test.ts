@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { compare, displayHeadline, displayText, groupByDay, groupChanges, hasUsableNotes, matches, newSince, plainSubject, presentChanges, span, stats, ticketsOf, type Release } from '../src/lib/releases.ts'
+import { compare, displayHeadline, displayText, groupByDay, groupChanges, hasUsableNotes, matches, newSince, plainSubject, presentChanges, presentRelease, span, stats, ticketsOf, type Release } from '../src/lib/releases.ts'
 
 const rel = (version: string, at: string, extra: Partial<Release> = {}): Release => ({
   version, tag: `v${version}`, release_channel: 'stable', release_sequence: 1, state: 'published', reserved_at: at, tagged_at: at, published_at: at,
@@ -35,7 +35,7 @@ test('changes group into features, fixes and other; version bumps are left out',
   assert.equal(plainSubject('P0.x: showcase quotes load without crashing (AEON-274)', ['AEON-274']), 'Showcase quotes load without crashing')
 })
 
-test('features and fixes are one line per visible ticket; the rest stay in other', () => {
+test('features and fixes are one block per visible ticket; the rest stay in other', () => {
   const note = (key: string, pillEN: string, pillDE = '', benefitEN = 'You can use it.', benefitDE = '') => ({ key, pill_en: pillEN, pill_de: pillDE, benefit_en: benefitEN, benefit_de: benefitDE })
   const chat = note('AEON-273', 'Session chat', 'Sitzungschat', 'The chat stays put.', 'Der Chat bleibt.')
   const quotes = note('AEON-274', 'Quotes open reliably', 'Angebote öffnen zuverlässig', 'Quotes open.', 'Angebote öffnen sich.')
@@ -50,9 +50,10 @@ test('features and fixes are one line per visible ticket; the rest stay in other
     { ...change('1', 'other', 'P0.x: session chat again', ['AEON-273']), group: 'features' as const, linked_tickets: [chat] },
   ]
   const en = presentChanges(changes, 'en-GB')
-  assert.deepEqual(en.features.map(line => [line.key, line.pill, line.commits.map(c => c.commit)]), [['AEON-273', 'Session chat', ['1', '2']]])
+  // AEON-305: a ticket is one block, in one group; a commit naming two told tickets sits in both blocks.
+  assert.deepEqual(en.features.map(line => [line.key, line.pill, line.commits.map(c => c.commit)]), [['AEON-273', 'Session chat', ['1', '2', '6']]])
   assert.equal(en.features[0].benefit, 'The chat stays put.')
-  assert.deepEqual(en.fixes.map(line => [line.key, line.commits.map(c => c.commit)]), [['AEON-274', ['3', '6']], ['AEON-273', ['6']]])
+  assert.deepEqual(en.fixes.map(line => [line.key, line.commits.map(c => c.commit)]), [['AEON-274', ['3', '6']]])
   assert.deepEqual(en.other.map(c => c.commit), ['4', '5'])
   assert.equal(plainSubject(en.other[1].subject, en.other[1].tickets), 'No visible ticket')
   const de = presentChanges(changes, 'de-AT')
@@ -65,6 +66,37 @@ test('features and fixes are one line per visible ticket; the rest stay in other
   const hidden = presentChanges([{ ...change('8', 'fix', 'fix: private'), group: 'fixes' as const, linked_tickets: [{ key: 'AEON-1', pill_en: ' ', pill_de: '', benefit_en: '', benefit_de: '' }] }])
   assert.equal(hidden.fixes.length, 0)
   assert.deepEqual(hidden.other.map(c => c.commit), ['8'])
+})
+
+test('a backfilled snapshot tells the same blocks as linked tickets (AEON-305)', () => {
+  const item = (key: string, pill: string, benefit: string) => ({ id: key, key, pill_en: pill, pill_de: '', benefit_en: benefit, benefit_de: '' })
+  const notes = { source: 'database-snapshot', snapshot_sha256: 'c1', captured_at: '2026-09-29T12:40:00Z', release_revision: 1, written_after_release: true, gaps: [], hidden: 1, items: [
+    item('AEON-211', 'Deploy target on screen', 'Every approval names its server.'),
+    item('AEON-293', 'Readable risk chip', 'The chip is readable.'),
+    item('AEON-290', 'Older notes', 'No commit names this ticket.'),
+  ] }
+  const live = { key: 'AEON-211', pill_en: 'Live text', pill_de: '', benefit_en: 'Not the snapshot.', benefit_de: '' }
+  const changes = [
+    { ...change('a', 'other', 'AEON-211: reserve stable102', ['AEON-211']), group: 'features' as const, linked_tickets: [live] },
+    { ...change('b', 'other', 'P0.x: lift the chip contrast (AEON-293)', ['AEON-293']), group: 'fixes' as const },
+    { ...change('c', 'test', 'test(AEON-211): approvals name the target', ['AEON-211']), group: 'other' as const },
+    { ...change('d', 'other', 'P0.x: quote flow descriptions (AEON-278)', ['AEON-278']), group: 'other' as const },
+    change('e', 'release', 'release: v260929082208.0.0'),
+  ]
+  const r = rel('260929082208.0.0', '2026-09-29T08:22:08Z', { notes, changes })
+  const p = presentRelease(r)
+  // The snapshot decides who is told and with which text; the served groups decide feature or fix.
+  assert.deepEqual(p.features.map(line => [line.key, line.pill, line.commits.map(c => c.commit)]), [['AEON-211', 'Deploy target on screen', ['a', 'c']], ['AEON-290', 'Older notes', []]])
+  assert.deepEqual(p.fixes.map(line => [line.key, line.benefit, line.commits.map(c => c.commit)]), [['AEON-293', 'The chip is readable.', ['b']]])
+  // The hidden ticket's commit stays in Other; the version bump is left out.
+  assert.deepEqual(p.other.map(c => c.commit), ['d'])
+  // Without the snapshot the same commits read from the live linked text.
+  const linked = presentRelease({ ...r, notes: undefined })
+  assert.deepEqual(linked.features.map(line => [line.key, line.pill]), [['AEON-211', 'Live text']])
+  assert.deepEqual(linked.other.map(c => c.commit), ['b', 'd'])
+  // A conventional prefix decides when the ticket's type is not known.
+  const typed = presentChanges([change('f', 'fix', 'fix(AEON-9): repair', ['AEON-9'])], null, [item('AEON-9', 'Repaired', 'It works.')])
+  assert.deepEqual([typed.features.length, typed.fixes.map(line => line.key)], [0, ['AEON-9']])
 })
 
 test('a server group wins over the commit type, and a version bump stays out', () => {
@@ -120,25 +152,26 @@ test('search and filters look at headlines, changes and ticket keys', () => {
   const noted = rel('260924000009.0.0', '', { changes: [{ ...change('n', 'other', 'P0.x: internal', ['AEON-1']), group: 'features', linked_tickets: [{ key: 'AEON-1', pill_en: 'Hosts in minutes', pill_de: 'Hosts in Minuten', benefit_en: 'You approve the price once.', benefit_de: 'Du bestätigst den Preis einmal.' }] }] })
   assert.ok(matches(noted, { ...f, q: 'approve the price' }))
   assert.ok(matches(noted, { ...f, q: 'minuten' }))
-  assert.ok(matches(r, { ...f, fixes: true })) // AEON-305: filters follow the listed changes again
+  assert.ok(!matches(r, { ...f, fixes: true })) // no visible fix line; the row counts it as other
   assert.ok(!matches(r, { ...f, features: true }))
   assert.ok(matches(r, { ...f, tickets: true }))
   assert.ok(!matches({ ...r, tickets: [], changes: [] }, { ...f, tickets: true }))
   assert.deepEqual(ticketsOf(r), ['AEON-77', 'AEON-78'])
 })
 
-test('feature and fix filters follow the listed change groups (AEON-305)', () => {
+test('feature and fix filters follow the visible ticket lines, in the viewer locale', () => {
   const f = { q: '', features: false, fixes: false, tickets: false }
   const bare = rel('260924000010.0.0', '', { changes: [{ ...change('a', 'feat', 'feat: no visible ticket', ['AEON-9']), group: 'features' as const }] })
-  assert.equal(matches(bare, { ...f, features: true }), true)
+  assert.equal(presentChanges(bare.changes).features.length, 0)
+  assert.equal(matches(bare, { ...f, features: true }), false)
   const note = { key: 'AEON-1', pill_en: 'Hosts in minutes', pill_de: 'Hosts in Minuten', benefit_en: 'You approve the price once.', benefit_de: 'Du bestätigst den Preis einmal.' }
   const lined = rel('260924000009.0.0', '', { changes: [{ ...change('n', 'other', 'P0.x: internal', ['AEON-1']), group: 'features' as const, linked_tickets: [note] }] })
   assert.equal(matches(lined, { ...f, features: true }), true)
   assert.equal(matches(lined, { ...f, fixes: true }), false)
-  // The server group wins over the commit type.
-  const regrouped = rel('260924000011.0.0', '', { changes: [{ ...change('d', 'feat', 'feat: price', ['AEON-2']), group: 'fixes' as const }] })
-  assert.equal(matches(regrouped, { ...f, fixes: true }), true)
-  assert.equal(matches(regrouped, { ...f, features: true }), false)
+  const deOnly = rel('260924000011.0.0', '', { changes: [{ ...change('d', 'fix', 'fix: price', ['AEON-2']), group: 'fixes' as const, linked_tickets: [{ key: 'AEON-2', pill_en: ' ', pill_de: 'Preis', benefit_en: '', benefit_de: 'Du siehst den Preis.' }] }] })
+  assert.equal(matches(deOnly, { ...f, fixes: true }), false)
+  assert.equal(matches(deOnly, { ...f, fixes: true }, 'de-AT'), true)
+  assert.equal(presentChanges(deOnly.changes, 'de-AT').fixes.length, 1)
 })
 
 test('new since the last visit: newer published releases, nothing on a first visit', () => {

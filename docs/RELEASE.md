@@ -117,8 +117,9 @@ the public notes; they contribute only to the hidden count, even when benefit
 fields are incomplete or the member was unavailable at capture.
 Technical Git headlines, legacy top-level `tickets` references and changes remain
 evidence; membership claims come only from the snapshot. The release detail shows
-English/German notes as benefit rows in its header (see the release presentation
-below) above the change list; the tag message appears only under Evidence. Old v1 manifests without the optional
+each captured ticket as one block under Features or Fixes (pill as heading, key,
+benefit sentence, commits folded), exactly as it shows linked tickets of a release
+without a snapshot; the tag message appears only under Evidence. Old v1 manifests without the optional
 `notes` member and regenerated records with `notes.source = "unavailable"` keep
 their ticket references, ticket filter and commits, but their tag message is not
 shown as a title; their Git text is not presented as benefit notes or membership.
@@ -199,13 +200,15 @@ timestamp, or existing snapshot is rewritten. The coordinator owns production dr
 Every release introduces itself with a short **theme** (the kicker, 1–80
 characters, one line), one **headline** sentence (up to 200 characters, one line)
 and a short **intro** (two or three sentences, up to 600 characters), each in
-English and German. The release detail shows them as a compact header, together
-with the release's benefits (pill, then the benefit sentence, with a check icon),
-above the change list: Features, Fixes and Other changes with every change, where
-each ticket's features and fixes sit under its pill. The release list shows
-version, date and theme. A release without a presentation shows its benefits
-alone in the header, or no header at all. The Git tag message is evidence, never
-a title.
+English and German. The release detail shows them as a compact header above the
+blocks every release shows: Features and Fixes with one block per ticket (the
+pill as heading, the key, the benefit sentence and its commits folded), then
+Other changes. A captured or backfilled snapshot decides which tickets are told
+and their text; without one, the tickets linked from the commits do. A ticket is
+a fix when it is a bug (the served change group), else when its commits are only
+`fix:`; otherwise a feature. The release list shows version, date and theme, or
+the pills. A release without a presentation has no header. The Git tag message
+is evidence, never a title; "Notes written after release" is one muted line.
 
 Presentations live in `release_presentations` (migration `0945`), keyed by
 tenant, product project and calendar version, protected by tenant RLS and project

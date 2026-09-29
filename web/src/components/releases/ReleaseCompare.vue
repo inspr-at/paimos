@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { compare, releasedAt, releaseTitle, span, type Release } from '../../lib/releases'
+import { compare, presentChanges, releasedAt, releaseTitle, span, type Release } from '../../lib/releases'
 import { absoluteTime } from '../../lib/work'
 import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
@@ -17,6 +17,14 @@ const profile = useProfile()
 const locale = computed(() => profile.profile?.locale ?? null)
 const result = computed(() => props.to && props.to !== props.from ? compare(props.releases, props.from, props.to) : null)
 const count = computed(() => result.value ? result.value.groups.features.length + result.value.groups.fixes.length + result.value.groups.other.length : 0)
+// The range reads like one release: a block per linked ticket, and a chip only
+// for tickets that head no block.
+const lines = computed(() => result.value ? presentChanges(result.value.changes, locale.value) : null)
+const chipTickets = computed(() => {
+  if (!result.value || !lines.value) return []
+  const lined = new Set([...lines.value.features, ...lines.value.fixes].map(line => line.key))
+  return result.value.tickets.filter(key => !lined.has(key))
+})
 const between = computed(() => {
   if (!result.value) return ''
   const find = (v: string) => props.releases.find(r => r.version === v)
@@ -45,14 +53,14 @@ const between = computed(() => {
         <span><b>{{ result.tickets.length }}</b> {{ result.tickets.length === 1 ? 'ticket' : 'tickets' }}</span>
         <span v-if="between">over <b>{{ between }}</b></span>
       </p>
-      <TicketChips v-if="result.tickets.length" :tickets="result.tickets" />
+      <TicketChips v-if="chipTickets.length" :tickets="chipTickets" />
       <section class="included" aria-labelledby="compare-included">
         <h3 id="compare-included" class="included-h">Releases in this range</h3>
         <ul>
           <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span v-if="releaseTitle(r, locale)" class="inc-headline">{{ releaseTitle(r, locale) }}</span><span v-else-if="releasedAt(r)" class="inc-date">{{ absoluteTime(releasedAt(r)!) }}</span></li>
         </ul>
       </section>
-      <ReleaseChanges v-if="count" :groups="result.groups" :repository="repository" :query="query" class="changes" />
+      <ReleaseChanges v-if="count && lines" :presented="lines" :repository="repository" :query="query" class="changes" />
       <p v-else class="none">No changes are recorded between these releases.</p>
     </template>
     <p v-else class="hint">

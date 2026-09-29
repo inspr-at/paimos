@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-305: a compact header per release (theme as kicker, headline, intro and
-// the release's benefits as check rows) above the stable101 change list, whose
-// features and fixes sit under each ticket's pill. The rail shows version, date
-// and theme; the Git tag message is evidence only.
+// AEON-305: a compact header per named release (theme as kicker, headline,
+// intro) above the same blocks every release shows: Features and Fixes, one
+// block per ticket with its pill, key, benefit and folded commits. The rail
+// shows version, date and theme; the Git tag message is evidence only.
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockReleases, presentedHistory } from './releases-fixtures'
@@ -32,32 +32,34 @@ const noHorizontalScroll = (page: Page) => page.evaluate(() => {
 
 for (const colorScheme of ['light', 'dark'] as const) {
   for (const width of [1600, 390]) {
-    test(`a presented release leads with its header, then the change list at ${width} ${colorScheme}`, async ({ page }) => {
+    test(`a presented release leads with its header, then the ticket blocks at ${width} ${colorScheme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
       const errors = watchErrors(page)
       await open(page)
       const d = detail(page)
-      const header = d.getByRole('region', { name: 'Release notes' })
+      const header = d.getByRole('region', { name: 'Release notes' }).locator('.summary')
       await expect(header.locator('.kicker')).toHaveText('Releases with a name')
       await expect(header.locator('.kicker')).toHaveCSS('text-transform', 'uppercase')
       await expect(header.locator('.headline')).toHaveText('Every release says what it is about.')
       await expect(header.locator('.intro')).toContainText('opens each version with its theme')
-      const benefits = header.getByRole('list', { name: 'What this release brings' })
-      await expect(benefits.getByRole('listitem')).toHaveCount(4)
-      await expect(benefits.locator('.tick svg')).toHaveCount(4)
-      await expect(benefits.getByRole('listitem').first()).toContainText('Named releases')
-      await expect(benefits.getByRole('listitem').first()).toContainText('Every release opens with its theme and one sentence about what it changes for you.')
-      // The list below is the main content: groups with icons, each ticket's changes under its pill.
-      const features = d.getByRole('region', { name: 'Features, 4' })
+      // The pills and benefits are the blocks below, not repeated in the header.
+      await expect(d.getByRole('list', { name: 'What this release brings' })).toHaveCount(0)
+      await expect(header).not.toContainText('Named releases')
+      const features = d.getByRole('region', { name: 'Features, 3' })
       await expect(features.locator('.g-icon svg')).toHaveCount(1)
-      await expect(features.locator('.ticket-h .pill')).toHaveText(['Named releases', 'Changes by ticket', 'Older notes filled in'])
-      const items = features.getByRole('listitem')
-      await expect(items.nth(0)).toContainText('Named releases')
-      await expect(items.nth(1)).toContainText('Release presentation store, API and present CLI')
-      await expect(items.nth(2)).toContainText('Release detail with kicker, headline and benefit rows')
+      await expect(features.locator('.pill-title')).toHaveText(['Named releases', 'Changes by ticket', 'Older notes filled in'])
+      const named = features.getByRole('article', { name: 'Named releases' })
+      await expect(named.locator('.benefit')).toHaveText('Every release opens with its theme and one sentence about what it changes for you.')
+      await expect(named.locator('.line-head').getByText('AEON-305', { exact: true })).toBeVisible()
+      await expect(named.locator('summary')).toHaveText('2 commits')
+      await expect(named.getByText('Release presentation store, API and present CLI')).toBeHidden()
+      await named.locator('summary').click()
+      await expect(named.getByText('Release presentation store, API and present CLI')).toBeVisible()
+      await expect(named.getByText('Release detail with kicker, headline and benefit rows')).toBeVisible()
       await expect(features.getByText('P0.x:')).toHaveCount(0)
-      await expect(d.getByRole('region', { name: 'Fixes, 1' }).locator('.pill')).toHaveText('Search stays put')
+      await named.locator('summary').click()
+      await expect(d.getByRole('region', { name: 'Fixes, 1' }).locator('.pill-title')).toHaveText('Search stays put')
       await expect(d.getByRole('region', { name: 'Other changes, 1' })).toContainText('Pin the Go module vendor hash')
       // Keys named on a pill need no chip above the list.
       await expect(d.locator('.tickets')).toHaveCount(0)
@@ -75,23 +77,24 @@ for (const colorScheme of ['light', 'dark'] as const) {
   }
 }
 
-test('without a presentation: benefits alone lead, and a release without them is version, date and list', async ({ page }) => {
+test('without a presentation: the blocks lead, and a release without them is version, date and list', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 })
   const history = await open(page, 1)
   const d = detail(page)
   await expect(d.locator('.kicker')).toHaveCount(0)
   await expect(d.locator('.headline')).toHaveCount(0)
   await expect(d.getByRole('heading', { level: 2, name: history.releases[1]!.version })).toBeVisible()
-  await expect(d.getByRole('list', { name: 'What this release brings' })).toContainText('Wide lists')
-  await expect(d.getByRole('region', { name: /^Features,/ }).locator('.pill')).toHaveText('Wide lists')
+  await expect(d.locator('.summary')).toHaveCount(0)
+  await expect(d.getByRole('region', { name: 'Features, 1' }).locator('.pill-title')).toHaveText('Wide lists')
   // PHAROS-11 has no pill, so it keeps its chip.
   await expect(d.locator('.tickets')).toContainText('PHAROS-11')
   await expect(rows(page).nth(1).locator('.headline')).toHaveText('Wide lists')
   await expect(rows(page).nth(1).locator('.headline')).not.toHaveClass(/theme/)
   await rows(page).nth(3).click()
-  await expect(d.getByRole('region', { name: 'Release notes' })).toHaveCount(0)
+  await expect(d.locator('.summary')).toHaveCount(0)
   await expect(d.locator('.tickets')).toContainText('PAI-1057')
-  await expect(d.getByRole('region', { name: 'Fixes, 1' })).toContainText('Retry a busy BEGIN in release acceptance transactions')
+  // No ticket tells a benefit, so the fix commit is listed under Other.
+  await expect(d.getByRole('region', { name: 'Other changes, 1' })).toContainText('Retry a busy BEGIN in release acceptance transactions')
 })
 
 test('a German profile reads the German presentation and pills, with English where German is empty', async ({ page }) => {
@@ -101,8 +104,9 @@ test('a German profile reads the German presentation and pills, with English whe
   await expect(d.locator('.kicker')).toHaveText('Releases mit Namen')
   await expect(d.locator('.kicker')).toHaveAttribute('lang', 'de')
   await expect(d.locator('.summary .headline')).toHaveText('Jedes Release sagt, worum es geht.')
-  await expect(d.getByRole('list', { name: 'What this release brings' })).toContainText('Benannte Releases')
-  await expect(d.getByRole('region', { name: 'Features, 4' }).locator('.pill').first()).toHaveText('Benannte Releases')
+  const features = d.getByRole('region', { name: 'Features, 3' })
+  await expect(features.locator('.pill-title').first()).toHaveText('Benannte Releases')
+  await expect(features.locator('.benefit').first()).toHaveAttribute('lang', 'de')
   await expect(rows(page).first().locator('.headline')).toHaveText('Releases mit Namen')
 })
 

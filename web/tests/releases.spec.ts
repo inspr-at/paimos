@@ -74,8 +74,10 @@ test('the version pill opens the history over the page, and Esc brings the page 
   await expect(options(page)).toHaveCount(history.releases.length)
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   await expect(options(page).first()).toContainText('Current')
-  // Row counts follow the groups the detail lists (AEON-305 restored the per-change list).
-  await expect(options(page).first().getByRole('img', { name: '1 feature', exact: true })).toHaveAttribute('data-tip', '1 feature')
+  // Row counts follow the blocks in the detail. Without a told ticket, a feature or fix commit counts as other.
+  await expect(options(page).first().getByRole('img', { name: '3 other changes', exact: true })).toHaveAttribute('data-tip', '3 other changes')
+  await expect(options(page).first().getByRole('img', { name: '1 feature', exact: true })).toHaveCount(0)
+  await expect(options(page).nth(1).getByRole('img', { name: '4 other changes', exact: true })).toBeVisible()
   await expect(sheet(page).getByRole('heading', { level: 2, name: history.current })).toBeVisible()
   await expect(sheet(page)).toContainText('PAIMOS 7 · Release history')
   await expect(sheet(page).getByText(/^Live on this server since /)).toBeVisible()
@@ -157,19 +159,22 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(sheet(page)).toHaveCount(0)
 })
 
-test('filters keep releases with features, fixes or tickets', async ({ page }) => {
+test('filters follow the feature and fix blocks, and still keep releases with tickets', async ({ page }) => {
   await setup(page)
   await page.goto('/releases')
   await expect(options(page)).toHaveCount(7)
   const toggles = sheet(page).getByRole('group', { name: 'Show only releases with' })
+  // These commits name tickets but none tells a benefit, so the rows show other, not features or fixes.
   await toggles.getByRole('button', { name: 'Features' }).click()
-  await expect(options(page)).toHaveCount(5)
+  await expect(sheet(page).getByText('0 of 7')).toBeVisible()
+  await expect(sheet(page).getByRole('heading', { name: 'No release matches' })).toBeVisible()
   await toggles.getByRole('button', { name: 'Features' }).click()
   await toggles.getByRole('button', { name: 'Fixes' }).click()
   await expect(toggles.getByRole('button', { name: 'Fixes' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(options(page)).toHaveCount(4)
+  await expect(sheet(page).getByText('0 of 7')).toBeVisible()
+  await toggles.getByRole('button', { name: 'Fixes' }).click()
   await toggles.getByRole('button', { name: 'Tickets' }).click()
-  await expect(options(page)).toHaveCount(4)
+  await expect(options(page)).toHaveCount(5)
   await sheet(page).getByRole('searchbox', { name: 'Search releases' }).fill('nothing like this')
   await expect(sheet(page).getByRole('heading', { name: 'No release matches' })).toBeVisible()
   await sheet(page).getByRole('button', { name: 'Clear search and filters' }).click()
