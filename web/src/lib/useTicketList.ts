@@ -15,7 +15,8 @@ function message(error: unknown) { return error instanceof Error ? error.message
 // with facet counts. A dimension that is itself filtered gets its counts
 // from a second, one-row request without that filter, so its menu still
 // shows what else could be chosen.
-export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFilters>) {
+// review: a change that met someone else's newer version offers to show it.
+export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFilters>, listOptions: { review?: (row: ListItem) => void } = {}) {
   const rows = ref<ListItem[]>([])
   const cursor = ref<string | null>(null)
   const loading = ref(false)
@@ -28,6 +29,8 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   // Label colours seen on loaded rows (tag facets carry names only).
   const colors = reactive(new Map<string, string>())
   const loadedOnce = ref(false)
+  // Counts completed loads (not next pages): a live list starts over with each.
+  const loads = ref(0)
   // Counts asked for when a menu opens (labels, cost units, releases), per query.
   const extraFacets = ref<Record<string, Record<string, number>>>({})
   let generation = 0
@@ -62,6 +65,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
       facets.value = page.facets ?? {}
       learn(page.items)
       loadedOnce.value = true
+      loads.value++
     } catch (e) {
       if (request === generation) { error.value = message(e); rows.value = []; cursor.value = null }
     } finally {
@@ -96,6 +100,17 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     } finally {
       if (request === generation) loadingMore.value = false
     }
+  }
+
+  // The counts again, without rows: after live updates changed what matches.
+  async function refreshCounts() {
+    const within = projectId.value
+    if (!within || !loadedOnce.value) return
+    const request = generation
+    try {
+      const page = await listNodes(apiParams(within, filters.value, { facets: FACETS, limit: 1 }))
+      if (request === generation && page.facets) facets.value = page.facets
+    } catch { /* the counts stay as they were */ }
   }
 
   function counts(dimension: Dimension): Record<string, number> {
@@ -193,7 +208,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
           shiftFacet(state, before.state)
           Object.assign(target, before)
         }
-        toast(`${target.key} was changed elsewhere, so your status change was not saved. The latest version is shown.`, { tone: 'error' })
+        toast(`${target.key} was changed elsewhere, so your status change was not saved. The latest version is shown.`, { tone: 'error', ...(listOptions.review ? { action: { label: 'Review', run: () => listOptions.review!(target) } } : {}) })
         // The dialog texts were not written. Ask again with those texts filled in.
         if (fields && !options.undo) {
           const text = await askDoneGate({ key: target.key, title: target.title, state, fields: benefitRetryFields(baseFields, fields) })
@@ -219,9 +234,12 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   }
 
   // Bulk change: rows update in place from the server's answer; the list then
-  // reloads so rows that no longer match the filters leave.
+  // reloads so rows that no longer match the filters leave. Each row sends the
+  // version it shows, so one changed meanwhile comes back as a conflict.
   async function applyBulk(change: BulkChange): Promise<BulkResult> {
-    const result = await bulkChange(change)
+    const shown = new Map(rows.value.map(row => [row.id, row.updated_at]))
+    const since = Object.fromEntries(change.ids.flatMap(id => shown.has(id) ? [[id, shown.get(id)!]] : []))
+    const result = await bulkChange(Object.keys(since).length ? { ...change, if_unmodified_since: since } : change)
     const projectRef = rows.value[0]?.project
     for (const node of result.items) {
       const row = rows.value.find(item => item.id === node.id)
@@ -271,5 +289,5 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     if (state?.[row.state]) state[row.state]--
   }
 
-  return { rows, cursor, loading, loadingMore, error, moreError, facets, names, colors, loadedOnce, load, loadMore, loadAll, counts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }
+  return { rows, cursor, loading, loadingMore, error, moreError, facets, names, colors, loadedOnce, loads, load, loadMore, loadAll, counts, refreshCounts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }
 }

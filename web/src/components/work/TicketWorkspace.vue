@@ -432,6 +432,8 @@ function isDirty() {
 function focus() { root.value?.focus({ preventScroll: true }) }
 defineExpose({
   el: root, focus, isDirty,
+  // An editor or a save is open: a live list waits with its structural updates.
+  busy: () => liveBusy.value,
   editTitle: () => title.value?.start(),
   startEdit, editing,
   openStatus: () => { const anchor = anchorFor('s'); if (anchor && editable.value) emit('status', anchor) },

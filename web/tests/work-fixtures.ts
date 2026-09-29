@@ -338,11 +338,14 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     // ---------- Bulk changes (U22) ----------
     if (path === '/api/nodes/bulk' && method === 'POST') {
       if (options.readOnly) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
-      const input = body as { ids: string[]; state?: string; priority?: string | null; assignee?: string | null; tags_add?: (string | { name: string; color?: string })[]; tags_remove?: string[]; parent_id?: string }
+      const input = body as { ids: string[]; state?: string; priority?: string | null; assignee?: string | null; tags_add?: (string | { name: string; color?: string })[]; tags_remove?: string[]; parent_id?: string; if_unmodified_since?: Record<string, string> }
       const before: MockNode[] = [], after: MockNode[] = [], skipped: { id: string; key?: string; reason: string; code?: string }[] = [], unchanged: string[] = []
       for (const id of input.ids) {
         const node = data.nodes.find(n => n.id === id)
         if (!node) { skipped.push({ id, reason: 'not found' }); continue }
+        // Per-node preconditions (AEON-326): changed since the list showed it.
+        const seen = input.if_unmodified_since?.[id]
+        if (seen && Date.parse(seen) !== Date.parse(node.updated_at)) { skipped.push({ id, key: node.key, reason: 'changed since you loaded it', code: 'conflict' }); continue }
         if (input.parent_id && node.kind_slug === 'task' && data.nodes.find(n => n.id === input.parent_id)?.kind_slug === 'epic') { skipped.push({ id, key: node.key, reason: 'a task cannot sit under an epic' }); continue }
         const old = JSON.parse(JSON.stringify(node)) as MockNode
         const fields = { ...node.fields }
@@ -500,7 +503,10 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         const raw = dateField === 'created' ? n.created_at : dateField === 'updated' ? n.updated_at : dateField === 'start' ? n.fields.start_date : dateField === 'end' ? n.fields.end_date : n.fields.accepted_at
         return typeof raw === 'string' && !Number.isNaN(Date.parse(raw)) ? Date.parse(raw) : null
       }
+      // ids (AEON-326): only those nodes, every other filter still applied.
+      const onlyIds = listParam(query, 'ids')
       let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
+        .filter(n => !onlyIds.length || onlyIds.includes(n.id))
         .filter(n => passes(states, v => v === n.state))
         .filter(n => passes(priorities, v => v === (typeof n.fields.priority === 'string' ? n.fields.priority : 'none')))
         .filter(n => passes(assignees, v => v === (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')))

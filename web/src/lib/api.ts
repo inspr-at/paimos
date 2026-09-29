@@ -183,6 +183,8 @@ export interface ListQuery {
   tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]
   date_field?: string; date_from?: string; date_to?: string
   q?: string; hide_closed?: boolean; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
+  // Only these nodes (at most 200), every other filter still applied (AEON-326).
+  ids?: string[]
 }
 // Work (ticket, task, epic) counts. A kind's state category wins when one is set.
 // Otherwise open is every state that is not in progress, done, cancelled or archived
@@ -221,6 +223,8 @@ export const restoreView = (id: string) => json<SavedView>(`/views/${idPath(id)}
 export interface BulkChange {
   ids: string[]; state?: string; priority?: string | null; assignee?: string | null
   tags_add?: (string | { name: string; color?: string })[]; tags_remove?: string[]; parent_id?: string
+  // Per node, the updated_at the list showed: a node changed since is skipped with code conflict.
+  if_unmodified_since?: Record<string, string>
 }
 export interface BulkResult { event_id: number | null; items: WorkNode[]; unchanged: string[]; skipped: { id: string; key?: string; reason: string; code?: string }[] }
 export const bulkChange = (body: BulkChange) => json<BulkResult>('/nodes/bulk', 'POST', body)
