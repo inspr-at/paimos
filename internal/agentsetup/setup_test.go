@@ -345,11 +345,66 @@ func TestServiceConflictNeverStartsAndManagedSymlinkPreserved(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(dir, name)); err != nil {
 		t.Fatal(err)
 	}
+	o.StartService = true
 	if _, err := e.Begin(t.Context(), o); !errors.Is(err, ErrDeclarative) {
 		t.Fatal("managed service overwritten")
 	}
 	b, _ := os.ReadFile(target)
 	if string(b) != "managed fixture" {
 		t.Fatal("managed service changed")
+	}
+}
+
+func TestManagedPairingWaitsForPersonAndNeverControlsService(t *testing.T) {
+	e, a, _, o, x := engineFixture(t)
+	e.Services.Executable = "/nix/store/fixture-aeon/bin/aeon-agentd"
+	o.Candidates[0].Managed = true
+	p, err := e.Begin(t.Context(), o)
+	if err != nil || p.Stage != "awaiting_approval" || p.UserCode != "123-456-789" {
+		t.Fatalf("managed pairing: %s %v", p.Stage, err)
+	}
+	if _, err := e.Store.Read(RuntimeName, 128<<10); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("runtime created before approval")
+	}
+	e.Now = func() time.Time { return time.Now().Add(time.Minute) }
+	p, err = e.Step(t.Context())
+	if err != nil || p.Stage != "awaiting_approval" {
+		t.Fatal("person approval bypassed")
+	}
+	a.approved = true
+	e.Now = func() time.Time { return time.Now().Add(2 * time.Minute) }
+	p, err = e.Step(t.Context())
+	if err != nil || p.Stage != "connected" {
+		t.Fatalf("approved pairing failed: %s %v", p.Stage, err)
+	}
+	if len(x.calls) != 0 {
+		t.Fatal("declarative service was inspected or controlled")
+	}
+	if _, err := e.Store.Read("service.json", 64<<10); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("declarative service adopted")
+	}
+	p, err = e.Disconnect(t.Context(), "")
+	if err != nil || p.Stage != "disconnected" || len(x.calls) != 0 {
+		t.Fatal("disconnect controlled declarative service")
+	}
+}
+
+func TestAddManagedHarnessRequiresFreshPersonApproval(t *testing.T) {
+	e, a, _, o, x := engineFixture(t)
+	e.Services.Executable = "/nix/store/fixture-aeon/bin/aeon-agentd"
+	approveFixture(t, e, a, o)
+	a.approved = false
+	c := o.Candidates[0]
+	c.Harness, c.Label, c.Managed = "cursor", "cursor@example.test", true
+	p, err := e.AddHarness(t.Context(), []Candidate{c})
+	if err != nil || p.Stage != "awaiting_approval" || len(x.calls) != 0 {
+		t.Fatalf("managed add: %s %v", p.Stage, err)
+	}
+	if a.request.ExistingComputerID != testComputer || a.request.Accounts[0].Harness != "cursor" {
+		t.Fatal("added harness lost computer binding")
+	}
+	config, err := ReadRuntimeConfig(e.Store.Path())
+	if err != nil || len(config.Accounts) != 1 || config.Accounts[0].Harness != "codex" {
+		t.Fatal("unapproved harness reached runtime")
 	}
 }

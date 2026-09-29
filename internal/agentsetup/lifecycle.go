@@ -426,7 +426,7 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 	}
 	selected := map[string]bool{}
 	for _, c := range candidates {
-		if selected[c.Harness] || c.Login != "signed_in" || !safeLabel.MatchString(c.Label) || c.Managed {
+		if selected[c.Harness] || c.Login != "signed_in" || !safeLabel.MatchString(c.Label) {
 			return e.progress(s), errors.New("invalid Add harness account choice")
 		}
 		selected[c.Harness] = true

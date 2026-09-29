@@ -134,6 +134,21 @@ type Discovery struct {
 var safeLabel = regexp.MustCompile(`^[^\x00-\x1f\x7f]{1,128}$`)
 var safeVersion = regexp.MustCompile(`(?:^|[[:space:]])v?([0-9]+\.[0-9]+\.[0-9]+(?:[-+.][a-zA-Z0-9.-]+)?)(?:$|[[:space:]])`)
 
+// Available offers only accounts identified by the vendor's read-only status
+// command. A failed or missing sign-in never becomes an enrollment candidate.
+func (d Discovery) Available(ctx context.Context, accountContext string) []Candidate {
+	var candidates []Candidate
+	for _, harness := range []string{"claude", "codex", "cursor", "grok"} {
+		if ctx.Err() != nil {
+			break
+		}
+		if c, err := d.Detect(ctx, harness, accountContext); err == nil {
+			candidates = append(candidates, c)
+		}
+	}
+	return candidates
+}
+
 func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (Candidate, error) {
 	c := Candidate{Harness: harness, Login: "missing"}
 	name, authArgs := harness, []string{}

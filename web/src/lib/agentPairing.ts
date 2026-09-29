@@ -165,8 +165,16 @@ export interface PairingGuide {
   install_available: boolean
   install_targets: InstallTarget[]
   managed_installation?: string
+  managed_setup?: ManagedSetup
   verification_capabilities?: VerificationCapabilities
   verification_helper_version?: string
+}
+
+export interface ManagedSetup {
+  command: string
+  service_option: string
+  module_url: string
+  service_note: string
 }
 
 export interface ApproveBody {
@@ -304,6 +312,7 @@ export interface PublicGuidePresentation {
   installAvailable: boolean
   installNote: string
   targets: InstallTarget[]
+  managedSetup: ManagedSetup | null
 }
 
 function unpublishedInstaller(): string {
@@ -320,7 +329,7 @@ export function presentPublicGuide(guide: PairingGuide | null): PublicGuidePrese
     platforms ? `This ${product()} publishes setup for ${platforms}.` : 'Supported computers appear here when the server publishes them.',
     guide?.platform_qualification ? `Platform note from this ${product()}: ${guide.platform_qualification}` : '',
     guide?.default_tenant_slug ? `The published workspace slug is ${guide.default_tenant_slug}.` : '',
-    guide?.managed_installation ?? '',
+    guide?.managed_setup ? '' : guide?.managed_installation ?? '',
     guide?.verification_helper_version ? `Verification helper published by this ${product()}: ${guide.verification_helper_version}.` : '',
     guide?.setup_command
       ? ''
@@ -342,6 +351,7 @@ export function presentPublicGuide(guide: PairingGuide | null): PublicGuidePrese
       ? `Run only the published command for the platform you select. It comes from this ${product()}. A command in a pairing message is not an installer.`
       : unpublishedInstaller(),
     targets: guide && publishedInstall ? [...guide.install_targets] : [],
+    managedSetup: guide?.managed_setup ?? null,
   }
 }
 
@@ -1304,6 +1314,15 @@ function parseGuide(data: unknown): PairingGuide {
     install_targets: record.install_targets.map(parseInstallTarget),
   }
   if (typeof record.managed_installation === 'string' && record.managed_installation) guide.managed_installation = record.managed_installation.slice(0, 500)
+  if (record.managed_setup != null) {
+    const managed = asRecord(record.managed_setup, 'managed_setup')
+    guide.managed_setup = {
+      command: bounded(managed.command, 'managed_setup.command', 4000),
+      service_option: bounded(managed.service_option, 'managed_setup.service_option', 200),
+      module_url: httpsUrl(managed.module_url, 'managed_setup.module_url'),
+      service_note: bounded(managed.service_note, 'managed_setup.service_note', 1000),
+    }
+  }
   const capabilities = parseCapabilities(record.verification_capabilities, 'verification_capabilities')
   if (capabilities) guide.verification_capabilities = capabilities
   const helper = optionalBounded(record.verification_helper_version, 'verification_helper_version', 64)

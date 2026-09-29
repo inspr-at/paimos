@@ -493,7 +493,7 @@ func TestPairingGuideIsAgentReadableAndPublicRoutesExact(t *testing.T) {
 	r.Host = "attacker.invalid"
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	for _, want := range []string{"Connect a computer", "paimos-agentd path&gt; setup --url ", "/assets/pinned.js", "short code", "Server version:", "Cursor ask mode and an isolated config do not enforce a no-tools policy.", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", "Qualified verification with enforced no-tools mode."} {
+	for _, want := range []string{"Connect a computer", "paimos-agentd path&gt;&#34; pair --url ", "/assets/pinned.js", "short code", "Server version:", "Nix / Home Manager", "aeon-agentd pair --url", "uzumaki.aeon.agentd.enable", "needs a paired-service update", "Cursor ask mode and an isolated config do not enforce a no-tools policy.", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", "Qualified verification with enforced no-tools mode."} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("guide lacks %s", want)
 		}
@@ -758,12 +758,16 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 		Command       string                                         `json:"setup_command"`
 		Qualification string                                         `json:"platform_qualification"`
 		Targets       []agentpairing.InstallTarget                   `json:"install_targets"`
+		Managed       agentpairing.ManagedSetup                      `json:"managed_setup"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &guide); err != nil {
 		t.Fatal(err)
 	}
-	if guide.HelperVersion != version.Version || !guide.Capabilities["claude"].Supported || guide.Capabilities["codex"].Supported || guide.Capabilities["cursor"].Supported || guide.Capabilities["grok"].Supported || guide.Instance != origin || guide.Tenant != "reviewed-tenant" || len(guide.Targets) != 4 || !strings.Contains(guide.Command, " setup --url '") || !strings.Contains(guide.Qualification, "candidate") {
+	if guide.HelperVersion != version.Version || !guide.Capabilities["claude"].Supported || guide.Capabilities["codex"].Supported || guide.Capabilities["cursor"].Supported || guide.Capabilities["grok"].Supported || guide.Instance != origin || guide.Tenant != "reviewed-tenant" || len(guide.Targets) != 4 || !strings.Contains(guide.Command, " pair --url '") || !strings.Contains(guide.Qualification, "candidate") {
 		t.Fatalf("guide release contract mismatch: %s", w.Body.String())
+	}
+	if guide.Managed.Command != "aeon-agentd pair --url '"+origin+"'" || guide.Managed.ServiceOption != "uzumaki.aeon.agentd.enable" || !strings.HasSuffix(guide.Managed.ModuleURL, "/modules/uzumaki/aeon-agentd.nix") || strings.Contains(guide.Managed.Command, "attacker.invalid") {
+		t.Fatal("Nix guide is not bound to the server origin and owning module")
 	}
 	for _, target := range guide.Targets {
 		if !strings.HasPrefix(target.ArtifactURL, "https://github.com/inspr-at/paimos/releases/download/v260927160212.0.0/paimos-agentd-") || !strings.Contains(target.Command, "mkdir \"$aeon_pairing_dir\"") || !strings.Contains(target.Command, "if (n != 1) exit 1") || strings.Contains(target.Command, "attacker.invalid") {

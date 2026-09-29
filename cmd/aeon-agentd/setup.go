@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -83,6 +84,14 @@ func (l localPairing) Fence(ctx context.Context, daemon, account string) (agents
 }
 
 func setupCommand(command string, args []string, out io.Writer) error {
+	return setupCommandInput(command, args, os.Stdin, out)
+}
+
+func setupCommandInput(command string, args []string, in io.Reader, out io.Writer) error {
+	pair := command == "pair"
+	if pair {
+		command = "setup"
+	}
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
 	f.SetOutput(io.Discard)
 	var root, origin, tenantID, tenantSlug, workspace, computer, account, contextLabel, nodePath, sdkPath string
@@ -105,9 +114,7 @@ func setupCommand(command string, args []string, out io.Writer) error {
 	if f.Parse(args) != nil || len(f.Args()) != 0 {
 		return errors.New("invalid setup arguments")
 	}
-	if !filepath.IsAbs(root) {
-		return errors.New("--state-root must be an absolute private directory outside repositories")
-	}
+	prompt := setupPrompt{in: bufio.NewReader(in), out: out, json: jsonOutput}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return errors.New("user home unavailable")
@@ -118,6 +125,15 @@ func setupCommand(command string, args []string, out io.Writer) error {
 	}
 	platform, err := agentsetup.CurrentPlatform()
 	if err != nil {
+		return err
+	}
+	if root == "" {
+		root, err = agentsetup.DefaultStateRoot(platform.OS, home, os.Getenv("XDG_STATE_HOME"))
+		if err != nil {
+			return err
+		}
+	}
+	if err = agentsetup.ValidateStateLocation(root, ""); err != nil {
 		return err
 	}
 	executable, err := os.Executable()
@@ -134,14 +150,23 @@ func setupCommand(command string, args []string, out io.Writer) error {
 			systemctl, _ = filepath.EvalSymlinks(p)
 		}
 	}
-	store, err := agentsetup.OpenStore(root, command == "setup")
-	if err != nil {
+	// Read existing options before defaulting the workspace, so rerunning pair
+	// from another directory resumes the same approved request.
+	store, err := agentsetup.OpenStore(root, false)
+	if err != nil && !(command == "setup" && errors.Is(err, os.ErrNotExist)) {
 		return err
 	}
-	defer store.Close()
 	manager := &agentsetup.ServiceManager{Platform: platform, Home: home, UID: os.Getuid(), Executable: executable, Systemctl: systemctl}
 	engine := &agentsetup.Engine{Store: store, Services: manager, Local: localPairing{root: root}}
-	saved, savedErr := engine.SavedOptions()
+	var saved agentsetup.Options
+	var savedErr error = os.ErrNotExist
+	if store != nil {
+		defer store.Close()
+		saved, savedErr = engine.SavedOptions()
+		if savedErr != nil && !errors.Is(savedErr, os.ErrNotExist) {
+			return savedErr
+		}
+	}
 	if savedErr == nil {
 		if origin != "" && strings.TrimRight(origin, "/") != saved.Origin {
 			return errors.New("instance differs from existing pairing")
@@ -151,7 +176,32 @@ func setupCommand(command string, args []string, out io.Writer) error {
 			workspace = saved.Workspace
 		}
 	}
+	if origin == "" && command == "setup" {
+		origin, err = prompt.read("Aeon address from the pairing guide: ", "--url")
+		if err != nil {
+			return err
+		}
+	}
 	if err = agentsetup.ValidateOrigin(origin); err != nil {
+		return err
+	}
+	if workspace == "" && command == "setup" {
+		workspace, err = os.Getwd()
+		if err == nil {
+			workspace, err = filepath.EvalSymlinks(workspace)
+		}
+		if err != nil {
+			return errors.New("working folder unavailable; pass --workspace")
+		}
+		yes, err := prompt.confirm(fmt.Sprintf("Use %q as the working folder?", workspace), "--workspace")
+		if err != nil {
+			return err
+		}
+		if !yes {
+			return errors.New("working folder declined; rerun from the approved folder or pass --workspace")
+		}
+	}
+	if err = agentsetup.ValidateStateLocation(root, workspace); err != nil {
 		return err
 	}
 	engine.API = agentsetup.HTTPClient{Origin: origin}
@@ -160,6 +210,15 @@ func setupCommand(command string, args []string, out io.Writer) error {
 	var candidates []agentsetup.Candidate
 	if savedErr != nil || command == "add-harness" {
 		d := agentsetup.Discovery{Home: home}
+		if len(harnesses) == 0 && (command == "setup" || command == "add-harness") {
+			if jsonOutput {
+				return errors.New("--harness is required with --json")
+			}
+			candidates, err = prompt.selectHarnesses(d.Available(ctx, contextLabel))
+			if err != nil {
+				return err
+			}
+		}
 		for _, h := range harnesses {
 			c, e := d.Detect(ctx, h, contextLabel)
 			if e != nil {
@@ -181,6 +240,31 @@ func setupCommand(command string, args []string, out io.Writer) error {
 				}
 			}
 		}
+	}
+	if pair && savedErr != nil {
+		explicitService := false
+		f.Visit(func(v *flag.Flag) {
+			if v.Name == "start-service" {
+				explicitService = true
+			}
+		})
+		if !explicitService {
+			startService = true
+			if errors.Is(manager.Preflight(ctx, root, nil), agentsetup.ErrDeclarative) {
+				startService = false
+				if err = printSetupProgress(out, jsonOutput, agentsetup.Progress{Stage: "managed_plan", Action: "Pairing preserves the Nix/Home Manager service. After browser approval, enable the reviewed declarative paired service for this state root."}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if store == nil {
+		store, err = agentsetup.OpenStore(root, true)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		engine.Store = store
 	}
 	engine.ClaudeDependencies = agentsetup.ClaudeDependencies{NodePath: nodePath, SDKPath: sdkPath}
 	if computer == "" {
