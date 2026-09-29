@@ -225,6 +225,14 @@ func TestStoreAuthorizationHistoryAndGenericNodeGuards(t *testing.T) {
 	if strings.Contains(string(foreignLayers), layer.ID) {
 		t.Fatal("foreign tenant layer leak")
 	}
+	savedRules := maxBudgetRules
+	maxBudgetRules = 1
+	t.Cleanup(func() { maxBudgetRules = savedRules })
+	over := call(scoped, "GET", mergePath, nil, 422)
+	if !strings.Contains(string(over), `"code":"budget_check_too_large"`) {
+		t.Fatalf("store cap: %s", over)
+	}
+	maxBudgetRules = savedRules
 	var restoredFrom string
 	if err = d.Admin.QueryRow(t.Context(), `SELECT before->>'source_version' FROM events WHERE tenant_id=$1 AND node_id=$2 AND type='rules.restored'`, tid, set.ID).Scan(&restoredFrom); err != nil || restoredFrom != "260928110000.0.0" {
 		t.Fatal("missing restoration audit", err)

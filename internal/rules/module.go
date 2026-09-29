@@ -469,6 +469,9 @@ func (m *Module) merged(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		}
 		snapshots = append(snapshots, snap)
 	}
+	if err = storeBudget(r.Context(), snapshots); err != nil {
+		return nil, err
+	}
 	return Merge(c, snapshots, time.Now().UTC())
 }
 
