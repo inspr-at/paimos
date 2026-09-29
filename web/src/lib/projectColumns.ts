@@ -15,11 +15,23 @@ export const PROJECT_COLUMNS: ProjectColumnDef[] = [
   { id: 'open', label: 'Open', tip: 'Open · waiting, including blocked', min: STAT_WIDTH },
   { id: 'doing', label: 'Doing', tip: 'In progress · in progress, active and QA', min: STAT_WIDTH },
   { id: 'done', label: 'Done', tip: 'Done · done, delivered and accepted', min: STAT_WIDTH },
-  { id: 'progress', label: 'Progress', tip: 'Share of the work that is done', min: 150 },
+  { id: 'progress', label: 'Progress', tip: 'Done out of open, doing and done', min: 150 },
   { id: 'people', label: 'People', tip: 'Recently active people', min: 92 },
   { id: 'activity', label: 'Last activity', tip: 'When anything in the project last changed', min: 108 },
 ]
 export const PROJECT_COLUMN_BY_ID = new Map(PROJECT_COLUMNS.map(c => [c.id, c]))
+
+// Progress is done out of open, doing and done. Cancelled and archived stay
+// out of the share, so shelved work does not lower it.
+export function projectProgressPercent(open: number, inProgress: number, done: number): number {
+  const scope = open + inProgress + done
+  return scope > 0 ? Math.round((done / scope) * 100) : 0
+}
+
+export function projectProgressTip(open: number, inProgress: number, done: number, cancelled: number): string {
+  const scope = open + inProgress + done
+  return `${done.toLocaleString('en-GB')} of ${scope.toLocaleString('en-GB')} done${cancelled ? ` · ${cancelled} cancelled` : ''}`
+}
 export const DEFAULT_PROJECT_COLUMNS: ProjectColumnId[] = ['open', 'doing', 'done', 'progress', 'activity']
 // Without a saved choice, lists this wide also show who was active lately.
 export const WIDE_LIST = 1500

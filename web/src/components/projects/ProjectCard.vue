@@ -11,6 +11,7 @@ import { leadingState } from '../../lib/agentSignals'
 import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
 import PeopleStack from './PeopleStack.vue'
+import { projectProgressTip } from '../../lib/projectColumns'
 import ProgressRing from './ProgressRing.vue'
 import StatCount from './StatCount.vue'
 
@@ -40,7 +41,7 @@ const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
       <span class="card-name"><template v-for="(part, i) in highlight(project.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
       <span class="card-desc" :data-tip="project.description.length > 48 ? project.description : undefined" :aria-hidden="project.description ? undefined : 'true'">{{ project.description }}</span>
       <span class="card-mid">
-        <span class="ring-wrap" :data-tip="`${project.done.toLocaleString('en-GB')} of ${(project.total - project.cancelled).toLocaleString('en-GB')} done${project.cancelled ? ` · ${project.cancelled} cancelled` : ''}`">
+        <span class="ring-wrap" :data-tip="projectProgressTip(project.open, project.in_progress, project.done, project.cancelled)">
           <ProgressRing :percent="project.percent" :empty="!project.total" :size="56" />
         </span>
         <span class="counts">

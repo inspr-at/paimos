@@ -45,6 +45,8 @@ test('card and header count open, blocked and unknown work at 390 and 1600', asy
     await expect(card.locator('.k-open .stat-num')).toHaveText('5')
     await expect(card.locator('.k-doing .stat-num')).toHaveText('3')
     await expect(card.locator('.k-done .stat-num')).toHaveText('2')
+    await expect(card.locator('.ring .pct')).toHaveText('20%')
+    await expect(card.locator('.ring-wrap')).toHaveAttribute('data-tip', '2 of 10 done · 1 cancelled')
     const cardBox = (await card.boundingBox())!
     expect(cardBox.x).toBeGreaterThanOrEqual(0)
     expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(width + 1)
@@ -57,6 +59,8 @@ test('card and header count open, blocked and unknown work at 390 and 1600', asy
     await expect(stats).toContainText('5 open')
     await expect(stats).toContainText('3 doing')
     await expect(stats).toContainText('2 done')
+    await expect(stats.locator('.pct')).toHaveText('20%')
+    await expect(stats.locator('.progress-line')).toHaveAttribute('data-tip', '2 of 10 done · 1 cancelled')
     await expect(stats.locator('.stat').first()).toHaveAttribute('data-tip', 'Open · waiting, including blocked')
     const statsBox = (await stats.boundingBox())!
     expect(statsBox.x).toBeGreaterThanOrEqual(0)

@@ -5,7 +5,7 @@ import {
   ARCHIVED, NO_GROUP, addGroup, bucket, groupDefs, hiddenOf, newGroupId, nameProblem, placeOf, placementsOf, planMove, readPrefs, removeGroup,
   reorderGroup, replaceGroup, restoreGroup, setHidden, sharedIndex, showsHeaders, stepGroup, toggleCollapsed, withPlacements, type GroupPrefs, type SharedGroup,
 } from '../src/lib/projectGroups.ts'
-import { DEFAULT_PROJECT_COLUMNS, chosenProjectColumns, fittingProjectColumns, moveProjectColumn, projectColumnOrder } from '../src/lib/projectColumns.ts'
+import { DEFAULT_PROJECT_COLUMNS, chosenProjectColumns, fittingProjectColumns, moveProjectColumn, projectColumnOrder, projectProgressPercent, projectProgressTip } from '../src/lib/projectColumns.ts'
 
 const shared: SharedGroup[] = [
   { id: 'b0000000-0000-4000-8000-000000000002', name: 'Internal', position: 1, project_ids: ['p3'] },
@@ -138,4 +138,13 @@ test('project columns: Key and Project lead; the rest follow the person’s orde
   assert.deepEqual(fittingProjectColumns(1600, { visible: ['open'] }), ['open'])
   assert.deepEqual(moveProjectColumn(['open', 'doing', 'done'], 'doing', 1), ['open', 'done', 'doing'])
   assert.deepEqual(moveProjectColumn(['open', 'doing'], 'open', -1), ['open', 'doing'])
+})
+
+test('progress is done out of open, doing and done, so archived work does not lower it', () => {
+  // 2 done, 5 open, 3 doing, 1 cancelled, 1 archived: 2/10 is 20, not 2/11.
+  assert.equal(projectProgressPercent(5, 3, 2), 20)
+  assert.equal(projectProgressPercent(3, 2, 1), 17)
+  assert.equal(projectProgressPercent(0, 0, 0), 0)
+  assert.equal(projectProgressTip(5, 3, 2, 1), '2 of 10 done · 1 cancelled')
+  assert.equal(projectProgressTip(3, 2, 1, 0), '1 of 6 done')
 })

@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Project } from '../../stores/projects'
-import type { ProjectColumnId } from '../../lib/projectColumns'
+import { projectProgressTip, type ProjectColumnId } from '../../lib/projectColumns'
 import { useLiveAgents } from '../../stores/liveAgents'
 import { absoluteTime, highlight, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
@@ -46,7 +46,7 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
       </span>
       <template v-for="id in columns" :key="id">
         <StatCount v-if="stat(id)" class="stat" :kind="stat(id)!" :value="value(project, stat(id)!)" />
-        <span v-else-if="id === 'progress'" class="progress" :data-tip="`${project.done.toLocaleString('en-GB')} of ${(project.total - project.cancelled).toLocaleString('en-GB')} done${project.cancelled ? ` · ${project.cancelled} cancelled` : ''}`">
+        <span v-else-if="id === 'progress'" class="progress" :data-tip="projectProgressTip(project.open, project.in_progress, project.done, project.cancelled)">
           <span class="bar"><i :style="{ width: `${project.percent}%` }" /></span>
           <span class="mono pct">{{ project.total ? `${project.percent}%` : '—' }}</span>
         </span>
