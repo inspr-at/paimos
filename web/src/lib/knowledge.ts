@@ -62,6 +62,9 @@ export class KnowledgeError extends Error {
 }
 // What went wrong, as people say it.
 export function plainError(status: number, code: string, message: string): string {
+  if (code === 'person_required') return 'Only a person can accept or dismiss a method learning.'
+  if (code === 'learning_closed') return 'This learning is no longer open.'
+  if (code === 'already_decided') return 'This learning was already accepted or dismissed.'
   if (status === 403) return 'You can read knowledge here but not change it.'
   if (status === 404) return 'This entry no longer exists.'
   if (code === 'slug_taken') return message.replace(/^another/, 'Another')
@@ -104,6 +107,26 @@ export const updateKnowledge = (id: string, patch: KnowledgePatch, ifUnmodifiedS
   send<KnowledgeEntry>(`/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch, headers: ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {} })
 export const deleteKnowledge = (id: string, ifUnmodifiedSince?: string) =>
   send<{ id: string; event_id: number }>(`/${encodeURIComponent(id)}`, { method: 'DELETE', headers: ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {} })
+
+// ---------- Method learnings (AEON-275) ----------
+export interface MethodLearning {
+  id: string; source: 'ticket' | 'comment'; node_id: string; key: string; title: string; text: string
+  comment_id?: string; at: string; author: KnowledgePerson | null; href: string
+}
+export interface MethodLearningPage { items: MethodLearning[]; truncated: boolean }
+export interface MethodLearningDecision {
+  id: string; decision: 'accepted' | 'dismissed'; event_id: number
+  knowledge_id?: string; heading?: string; line?: string; entry?: KnowledgeEntry
+}
+export const listLearnings = (projectId: string, signal?: AbortSignal) =>
+  send<MethodLearningPage>(`/learnings${query({ project_id: projectId })}`, { signal })
+export const acceptLearning = (id: string, knowledgeId: string, ifUnmodifiedSince?: string) =>
+  send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/accept`, {
+    method: 'POST', body: { knowledge_id: knowledgeId },
+    headers: ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {},
+  })
+export const dismissLearning = (id: string) =>
+  send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/dismiss`, { method: 'POST', body: {} })
 // Undo one knowledge write through the event log.
 export async function undoKnowledge(eventId: number): Promise<void> {
   const response = await api(`/events/${eventId}/undo`, { method: 'POST' })

@@ -33,7 +33,7 @@ const nearestProject = `LEFT JOIN LATERAL (
 const lastWrite = `LEFT JOIN LATERAL (
     SELECT e.actor_principal_id AS actor, e.type FROM events e
     WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id
-      AND e.type IN ('knowledge.created','knowledge.updated','node.created','node.updated','import.node_created','import.node_updated')
+      AND e.type IN ('knowledge.created','knowledge.updated','knowledge.learning_accepted','node.created','node.updated','import.node_created','import.node_updated')
     ORDER BY e.id DESC LIMIT 1
 ) lw ON true
 LEFT JOIN principals lwp ON lwp.tenant_id=n.tenant_id AND lwp.id=lw.actor

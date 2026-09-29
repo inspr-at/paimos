@@ -26,9 +26,11 @@ import (
 )
 
 const (
-	evCreated = "knowledge.created"
-	evUpdated = "knowledge.updated"
-	evDeleted = "knowledge.deleted"
+	evCreated           = "knowledge.created"
+	evUpdated           = "knowledge.updated"
+	evDeleted           = "knowledge.deleted"
+	evLearningAccepted  = "knowledge.learning_accepted"
+	evLearningDismissed = "knowledge.learning_dismissed"
 )
 
 type module struct{ pool *pgxpool.Pool }
@@ -41,6 +43,9 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/knowledge", m.handleCreate)
 	mux.HandleFunc("GET /api/knowledge/resolve", m.handleResolve)
 	mux.HandleFunc("GET /api/knowledge/graph", m.handleGraph)
+	mux.HandleFunc("GET /api/knowledge/learnings", m.handleListLearnings)
+	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/accept", m.handleAcceptLearning)
+	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/dismiss", m.handleDismissLearning)
 	mux.HandleFunc("GET /api/knowledge/{id}", m.handleGet)
 	mux.HandleFunc("PATCH /api/knowledge/{id}", m.handleUpdate)
 	mux.HandleFunc("DELETE /api/knowledge/{id}", m.handleDelete)
