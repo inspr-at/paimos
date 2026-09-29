@@ -9,11 +9,12 @@ import (
 )
 
 // Catalog reads accept HEAD because net/http serves HEAD for a registered GET.
-// Votes are POST only; HEAD on that route stays authenticated.
+// Wishes, votes and corrections are POST only; other methods stay authenticated.
 const (
-	portalCatalogPattern = "GET /api/public/portal/{tenantSlug}"
-	portalWishPattern    = "POST /api/public/portal/{tenantSlug}/wishes"
-	portalVotePattern    = "POST /api/public/portal/{tenantSlug}/wishes/{wishKey}/votes"
+	portalCatalogPattern    = "GET /api/public/portal/{tenantSlug}"
+	portalWishPattern       = "POST /api/public/portal/{tenantSlug}/wishes"
+	portalVotePattern       = "POST /api/public/portal/{tenantSlug}/wishes/{wishKey}/votes"
+	portalCorrectionPattern = "POST /api/public/portal/{tenantSlug}/corrections"
 )
 
 // Slug and wish key match the portal handlers. Anything else keeps the auth gate,
@@ -37,6 +38,8 @@ func publicPortalRequest(r *http.Request) bool {
 		return kind == "wish"
 	case portalVotePattern:
 		return kind == "vote"
+	case portalCorrectionPattern:
+		return kind == "correction"
 	default:
 		return false
 	}
@@ -63,6 +66,12 @@ func portalPublicKind(r *http.Request) string {
 	if len(parts) == 6 && parts[1] == "api" && parts[2] == "public" && parts[3] == "portal" && parts[5] == "wishes" && portalSlugPattern.MatchString(parts[4]) {
 		if r.Method == http.MethodPost {
 			return "wish"
+		}
+		return ""
+	}
+	if len(parts) == 6 && parts[1] == "api" && parts[2] == "public" && parts[3] == "portal" && parts[5] == "corrections" && portalSlugPattern.MatchString(parts[4]) {
+		if r.Method == http.MethodPost {
+			return "correction"
 		}
 		return ""
 	}

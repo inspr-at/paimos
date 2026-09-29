@@ -18,6 +18,12 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
+// publicPaceMinGroup is the smallest sample a public pace figure may use.
+// Fewer than five releases hides the 30-day count and the gap, including a
+// count of zero. Fewer than five fulfilled wishes hides the wish-to-live
+// median. The admin pace view keeps the exact figures.
+const publicPaceMinGroup = 5
+
 // portalPace is the public delivery figure. Counts and medians only.
 type portalPace struct {
 	Releases30d          *int `json:"releases_30d,omitempty"`
@@ -173,15 +179,15 @@ func (m *Module) writeFulfillment(w http.ResponseWriter, r *http.Request) {
 }
 
 func attachPace(ctx context.Context, tx pgx.Tx, productID string, doc *portalDocument) error {
-	admin, err := loadPaceAdminFor(ctx, tx, productID)
+	admin, sample, err := loadPaceAdminFor(ctx, tx, productID)
 	if err != nil {
 		return err
 	}
-	pace := portalPace{
+	pace := sample.forPublic(portalPace{
 		Releases30d:          admin.Releases30d,
 		MedianReleaseGapDays: admin.MedianReleaseGapDays,
 		WishToLiveMedianDays: admin.WishToLiveMedianDays,
-	}
+	})
 	if !pace.empty() {
 		doc.Pace = &pace
 	}
@@ -196,10 +202,34 @@ func loadPaceAdmin(ctx context.Context, tx pgx.Tx) (paceAdmin, error) {
 	if err != nil {
 		return paceAdmin{}, err
 	}
-	return loadPaceAdminFor(ctx, tx, productID)
+	admin, _, err := loadPaceAdminFor(ctx, tx, productID)
+	return admin, err
 }
 
-func loadPaceAdminFor(ctx context.Context, tx pgx.Tx, productID string) (paceAdmin, error) {
+type paceSample struct {
+	releases int
+	recent   int
+	wishes   int
+}
+
+// forPublic drops every figure whose sample is smaller than publicPaceMinGroup.
+// The 30-day count uses the releases inside that window, so four recent
+// releases are absent rather than reported as four or zero.
+func (s paceSample) forPublic(raw portalPace) portalPace {
+	out := raw
+	if s.releases < publicPaceMinGroup {
+		out.MedianReleaseGapDays = nil
+	}
+	if s.recent < publicPaceMinGroup {
+		out.Releases30d = nil
+	}
+	if s.wishes < publicPaceMinGroup {
+		out.WishToLiveMedianDays = nil
+	}
+	return out
+}
+
+func loadPaceAdminFor(ctx context.Context, tx pgx.Tx, productID string) (paceAdmin, paceSample, error) {
 	out := paceAdmin{Fulfillments: []fulfillment{}}
 	var projectID, title string
 	err := tx.QueryRow(ctx, `
@@ -210,11 +240,11 @@ func loadPaceAdminFor(ctx context.Context, tx pgx.Tx, productID string) (paceAdm
 		WHERE n.deleted_at IS NULL AND k.slug = 'project'`).Scan(&projectID, &title)
 	linked := err == nil && uuidPattern.MatchString(projectID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return out, err
+		return out, paceSample{}, err
 	}
 	var now time.Time
 	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
-		return out, err
+		return out, paceSample{}, err
 	}
 	var released []time.Time
 	if linked {
@@ -230,19 +260,19 @@ func loadPaceAdminFor(ctx context.Context, tx pgx.Tx, productID string) (paceAdm
 			ORDER BY released_at DESC
 			LIMIT 400`, projectID)
 		if err != nil {
-			return out, err
+			return out, paceSample{}, err
 		}
 		for rows.Next() {
 			var at time.Time
 			if err := rows.Scan(&at); err != nil {
 				rows.Close()
-				return out, err
+				return out, paceSample{}, err
 			}
 			released = append(released, at)
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close()
-			return out, err
+			return out, paceSample{}, err
 		}
 		rows.Close()
 	}
@@ -270,7 +300,7 @@ func loadPaceAdminFor(ctx context.Context, tx pgx.Tx, productID string) (paceAdm
 		  AND w.state IN ('published', 'hidden') AND f.state = 'live'
 		ORDER BY w.created_at, w.id`, productID)
 	if err != nil {
-		return out, err
+		return out, paceSample{}, err
 	}
 	defer rows.Close()
 	var wishDays []int
@@ -278,7 +308,7 @@ func loadPaceAdminFor(ctx context.Context, tx pgx.Tx, productID string) (paceAdm
 		var created, liveAt time.Time
 		var wishID, featureID string
 		if err := rows.Scan(&created, &liveAt, &wishID, &featureID); err != nil {
-			return out, err
+			return out, paceSample{}, err
 		}
 		out.Fulfillments = append(out.Fulfillments, fulfillment{WishID: wishID, FeatureID: featureID})
 		if liveAt.Before(created) {
@@ -287,13 +317,13 @@ func loadPaceAdminFor(ctx context.Context, tx pgx.Tx, productID string) (paceAdm
 		wishDays = append(wishDays, dayGap(created, liveAt))
 	}
 	if err := rows.Err(); err != nil {
-		return out, err
+		return out, paceSample{}, err
 	}
-	pace := paceFrom(now, linked, released, wishDays)
+	pace, sample := paceFrom(now, linked, released, wishDays)
 	out.Releases30d = pace.Releases30d
 	out.MedianReleaseGapDays = pace.MedianReleaseGapDays
 	out.WishToLiveMedianDays = pace.WishToLiveMedianDays
-	return out, nil
+	return out, sample, nil
 }
 
 func featureLiveAt(ctx context.Context, tx pgx.Tx, featureID string) (time.Time, bool, error) {
@@ -312,14 +342,18 @@ func featureLiveAt(ctx context.Context, tx pgx.Tx, featureID string) (time.Time,
 	return *at, true, nil
 }
 
-// paceFrom folds release instants and wish-to-live day counts.
-// A linked project with no releases still reports zero releases in 30 days.
+// paceFrom folds release instants and wish-to-live day counts for the admin
+// view. A linked project with no releases still reports zero releases in 30
+// days. The public page applies paceSample.forPublic and omits that zero.
 // The median gap uses every consecutive pair in the sample, including long ones.
 // The window is 30 times 24 hours, not a calendar month.
-func paceFrom(now time.Time, linked bool, released []time.Time, wishDays []int) portalPace {
+func paceFrom(now time.Time, linked bool, released []time.Time, wishDays []int) (portalPace, paceSample) {
 	var out portalPace
+	var sample paceSample
+	sample.wishes = len(wishDays)
 	if linked {
 		n := countRecent(now, released)
+		sample.recent = n
 		out.Releases30d = &n
 		ordered := append([]time.Time(nil), released...)
 		sort.Slice(ordered, func(i, j int) bool { return ordered[i].Before(ordered[j]) })
@@ -329,6 +363,7 @@ func paceFrom(now time.Time, linked bool, released []time.Time, wishDays []int) 
 				kept = append(kept, at)
 			}
 		}
+		sample.releases = len(kept)
 		var gaps []int
 		for i := 1; i < len(kept); i++ {
 			gap := dayGap(kept[i-1], kept[i])
@@ -343,7 +378,7 @@ func paceFrom(now time.Time, linked bool, released []time.Time, wishDays []int) 
 	if med, ok := medianInts(wishDays); ok {
 		out.WishToLiveMedianDays = &med
 	}
-	return out
+	return out, sample
 }
 
 func countRecent(now time.Time, released []time.Time) int {

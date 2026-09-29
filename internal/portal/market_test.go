@@ -159,16 +159,8 @@ func TestPortalMarketAndPace(t *testing.T) {
 	if err := json.Unmarshal(body.Body.Bytes(), &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.Pace == nil || doc.Pace.WishToLiveMedianDays == nil || *doc.Pace.WishToLiveMedianDays != 15 {
-		t.Fatalf("public wish median %+v", doc.Pace)
-	}
-	now, released := readReleases(t, d, tenantA, project)
-	want := paceFrom(now, true, released, []int{10, 20})
-	if doc.Pace.Releases30d == nil || want.Releases30d == nil || *doc.Pace.Releases30d != *want.Releases30d {
-		t.Fatalf("releases public %v want %v", doc.Pace.Releases30d, want.Releases30d)
-	}
-	if doc.Pace.MedianReleaseGapDays == nil || want.MedianReleaseGapDays == nil || *doc.Pace.MedianReleaseGapDays != *want.MedianReleaseGapDays {
-		t.Fatalf("gap public %v want %v", doc.Pace.MedianReleaseGapDays, want.MedianReleaseGapDays)
+	if doc.Pace != nil {
+		t.Fatalf("public pace from two wishes and three releases %+v", doc.Pace)
 	}
 	fact := findPublicCell(t, doc, "Statutory deadlines", "Northwind")
 	if fact.Stance != "yes" || fact.Quote != "QUOTED-FACT-ALPHA on the public help page." || fact.Stale || fact.SourceURL != "https://northwind.example/deadlines" {
@@ -213,6 +205,15 @@ func TestPortalMarketAndPace(t *testing.T) {
 	}
 	if rec := f.do(http.MethodPost, corrA, `{"competitor":"Northwind","aspect":"Owner assembly","statement":"Write to leak@example.com about this."}`, "203.0.113.74:1000", nil, nil, nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("address in statement: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.do(http.MethodPost, corrA, `{"competitor":"Northwind","aspect":"reader@example.com","statement":"The public page quotes the wrong line."}`, "203.0.113.75:1000", nil, nil, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("address in aspect: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.do(http.MethodPost, corrA, `{"competitor":"reader%40example.com","aspect":"Owner assembly","statement":"The public page quotes the wrong line."}`, "203.0.113.76:1000", nil, nil, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("encoded address in competitor: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.do(http.MethodPost, corrA, `{"competitor":"Northwind","aspect":"Owner assembly","statement":"The public page quotes the wrong line.","source_url":"https://northwind.example/reader%40example.com"}`, "203.0.113.77:1000", nil, nil, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("encoded address in source: %d %s", rec.Code, rec.Body)
 	}
 	if correctionCount(t, d, tenantA) != before+1 {
 		t.Fatal("rejected corrections were stored")
@@ -452,37 +453,6 @@ func insertRelease(t *testing.T, d *dbtest.DB, tenantID, project, release string
 	if err != nil {
 		t.Fatal(err)
 	}
-}
-
-func readReleases(t *testing.T, d *dbtest.DB, tenantID, project string) (time.Time, []time.Time) {
-	t.Helper()
-	var now time.Time
-	var released []time.Time
-	err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
-			return err
-		}
-		rows, err := tx.Query(t.Context(), `
-			SELECT released_at FROM journey_releases
-			WHERE project_node_id = $1::uuid AND state IN ('released','superseded') AND released_at IS NOT NULL AND released_at <= clock_timestamp()
-			ORDER BY released_at DESC LIMIT 400`, project)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var at time.Time
-			if err := rows.Scan(&at); err != nil {
-				return err
-			}
-			released = append(released, at)
-		}
-		return rows.Err()
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return now, released
 }
 
 func correctionCount(t *testing.T, d *dbtest.DB, tenantID string) int {

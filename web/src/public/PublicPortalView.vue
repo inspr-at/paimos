@@ -2,7 +2,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import AppIcon from '../components/AppIcon.vue'
-import CalendarVersion from '../components/CalendarVersion.vue'
 import { setPageTitle } from '../lib/brand'
 import { resilientFetch } from '../lib/api'
 
@@ -157,6 +156,18 @@ function readOn(day: string) {
   return parsed.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 }
 
+function sinceLabel(version: string | undefined) {
+  const match = /^(\d{2})(\d{2})(\d{2})\d{6}\.0\.0$/.exec(version ?? '')
+  if (!match) return ''
+  const year = 2000 + Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const date = new Date(Date.UTC(year, month - 1, day))
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() + 1 !== month || date.getUTCDate() !== day) return ''
+  const formatted = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+  return `since ${formatted}`
+}
+
 async function sendCorrection() {
   const competitor = correctionCompetitor.value.trim()
   const aspect = correctionAspect.value.trim()
@@ -306,7 +317,7 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
                 <p :class="['status', item.status]">{{ statusLabel[item.status] || item.status }}</p>
               </div>
               <p v-if="item.summary" class="summary">{{ item.summary }}</p>
-              <p v-if="item.live_since" class="meta"><span>Live since</span> <CalendarVersion :value="item.live_since" /></p>
+              <p v-if="sinceLabel(item.live_since)" class="meta"><span :title="item.live_since">{{ sinceLabel(item.live_since) }}</span></p>
               <p v-if="item.legal_basis" class="meta"><span>Legal basis</span> {{ item.legal_basis }}</p>
               <p v-if="item.decline_reason" class="meta">{{ item.decline_reason }}</p>
             </li>
@@ -360,7 +371,7 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
                   <p class="who" :title="cell.competitor">{{ cell.competitor }}</p>
                   <p v-if="stanceLabel[cell.stance]" class="stance">{{ stanceLabel[cell.stance] }}</p>
                   <p v-else class="stance"><span aria-label="Not sourced">—</span></p>
-                  <a v-if="cell.quote && cell.source_url" class="quote-link" :href="cell.source_url" :title="cell.quote" target="_blank" rel="noopener noreferrer"><span class="quote">{{ cell.quote }}</span><AppIcon name="external" :size="13" /></a>
+                  <a v-if="cell.quote && cell.source_url" class="quote-link" :href="cell.source_url" :title="cell.quote" target="_blank" rel="noopener noreferrer nofollow"><span class="quote">{{ cell.quote }}</span><AppIcon name="external" :size="13" /></a>
                   <p v-if="cell.retrieved_on" class="meta"><span>Read</span> {{ readOn(cell.retrieved_on) }}</p>
                   <p v-if="cell.stale" class="stale">Stale</p>
                 </div>

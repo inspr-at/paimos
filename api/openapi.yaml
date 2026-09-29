@@ -4238,7 +4238,7 @@ paths:
     get:
       operationId: readPublicPortal
       summary: Read one tenant's published product catalog, wishes, sourced comparison and pace
-      description: Anonymous. A disabled portal and an unknown tenant both answer 404. The document is a whitelist of public fields; internal notes, ticket keys, voter identity, project names and wish titles that are not published are omitted. comparison and pace are absent when there is nothing public to say. An unapproved or unsourced comparison cell is stance unknown and carries no quote or source. At most one published product is returned.
+      description: Anonymous. A disabled portal and an unknown tenant both answer 404. The document is a whitelist of public fields; internal notes, ticket keys, voter identity, project names and wish titles that are not published are omitted. comparison and pace are absent when there is nothing public to say. A pace figure from fewer than five releases or five fulfilled wishes is omitted. An unapproved or unsourced comparison cell is stance unknown and carries no quote or source. At most one published product is returned.
       security: []
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
@@ -4280,7 +4280,7 @@ paths:
     post:
       operationId: submitPublicPortalCorrection
       summary: Send an anonymous factual correction
-      description: Competitor, aspect and statement only. No name and no email. A statement that contains an address is refused. The website field is a honeypot; a non-empty value is discarded and still answers 201. A competitor that is not on the public comparison is discarded the same way. Five corrections per address per minute, counted before the tenant is resolved, so an unknown address and a closed portal share one window. A disabled portal, unknown tenant or portal without a published product is 404. The correction stays off the public page; a person with settings.manage closes it.
+      description: Competitor, aspect, statement and source only. No name and no email. Any of those fields is refused when it contains an address, including a percent-encoded or HTML-entity form, decoded before the check. The website field is a honeypot; a non-empty value is discarded and still answers 201. A competitor that is not on the public comparison is discarded the same way. Five corrections per address per minute, counted before the tenant is resolved, so an unknown address and a closed portal share one window. A disabled portal, unknown tenant or portal without a published product is 404. The correction stays off the public page; a person with settings.manage closes it.
       security: []
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCorrectionIntake'}}}}
@@ -4419,7 +4419,7 @@ paths:
     get:
       operationId: readPortalPace
       summary: Read the linked project and the aggregated pace figures
-      description: settings.manage, people only. The project title is admin-only. Public pace is the counts and medians.
+      description: settings.manage, people only. The project title is admin-only. This read returns the exact counts and medians, including a sample smaller than five. The public document omits those small figures.
       security: [{session: []}]
       responses:
         '200': {description: Pace for this portal, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
@@ -4439,7 +4439,7 @@ paths:
     put:
       operationId: writePortalFulfillment
       summary: Link a published or hidden wish to the live feature that fulfilled it, or clear the link
-      description: settings.manage, people only. The wish must have been opened before the feature went live. The public figure is a median of days, never the wish title.
+      description: settings.manage, people only. The wish must have been opened before the feature went live. The public figure is a median of days once five wishes are fulfilled, never the wish title.
       security: [{session: []}]
       parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalFulfillmentWrite'}}}}
@@ -6547,7 +6547,7 @@ components:
     PortalPublicPace:
       type: object
       additionalProperties: false
-      description: Counts and medians only. Omitted from the public document when every figure is absent. A linked project with no releases still reports releases_30d as 0.
+      description: Counts and medians only. releases_30d needs five releases in the trailing 30 days, the gap needs five releases, and the wish median needs five fulfilled wishes. A smaller sample is omitted, including a count of zero. The object is omitted when every figure is absent. The admin pace read still returns the exact figures.
       properties:
         releases_30d: {type: integer, minimum: 0}
         median_release_gap_days: {type: integer, minimum: 0}

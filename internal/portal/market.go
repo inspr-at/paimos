@@ -6,11 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"html"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -140,6 +142,10 @@ func (m *Module) manage(w http.ResponseWriter, r *http.Request, fn func(context.
 	var out any
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
+			return err
+		}
+		// The market row guard allows publication only after this person check.
+		if _, err := tx.Exec(r.Context(), `SELECT set_config('aeon.portal_moderation','on',true)`); err != nil {
 			return err
 		}
 		var applyErr error
@@ -1088,20 +1094,63 @@ func decodeCorrection(r *http.Request) (correctionIntake, error) {
 func correctionText(in correctionIntake) (competitor, aspect, statement, source string, err error) {
 	var ok bool
 	competitor, ok = plainLabel(in.Competitor, 80)
-	if !ok {
+	if !ok || hidesContact(in.Competitor) || hidesContact(competitor) {
 		return "", "", "", "", errors.New("invalid correction")
 	}
 	aspect, ok = plainLabel(in.Aspect, 120)
-	if !ok {
+	if !ok || hidesContact(in.Aspect) || hidesContact(aspect) {
 		return "", "", "", "", errors.New("invalid correction")
 	}
 	statement, err = cleanWish(in.Statement, 2000, true)
-	if err != nil || utf8.RuneCountInString(statement) < 8 || strings.ContainsAny(statement, "<>@") {
+	if err != nil || utf8.RuneCountInString(statement) < 8 || strings.ContainsAny(statement, "<>") || hidesContact(in.Statement) || hidesContact(statement) {
 		return "", "", "", "", errors.New("invalid correction")
 	}
 	source, ok = storedURL(in.SourceURL)
-	if !ok {
+	if !ok || hidesContact(in.SourceURL) || hidesContact(source) {
 		return "", "", "", "", errors.New("invalid correction")
 	}
 	return competitor, aspect, statement, source, nil
+}
+
+// obfuscatedEmail matches a local part, an "(at)" stand-in, and a domain.
+// A literal @ is rejected separately, including after percent and entity decoding.
+var obfuscatedEmail = regexp.MustCompile(`(?i)[a-z0-9._%+\-]{1,64}\s*(?:\(at\)|\[at\]|\{at\})\s*[a-z0-9][a-z0-9.-]*\.[a-z]{2,}`)
+
+// hidesContact reports an address in text that will be stored. Encoded forms
+// are decoded before the check, including a percent-encoded @ in a source URL.
+func hidesContact(raw string) bool {
+	cur := raw
+	for i := 0; i < 4; i++ {
+		if contactMark(cur) {
+			return true
+		}
+		next := unfoldContact(cur)
+		if next == cur {
+			return false
+		}
+		cur = next
+	}
+	return contactMark(cur)
+}
+
+func unfoldContact(raw string) string {
+	next := html.UnescapeString(raw)
+	if decoded, err := url.PathUnescape(next); err == nil {
+		next = decoded
+	}
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\u200b', '\u200c', '\u200d', '\ufeff', '\u2060':
+			return -1
+		default:
+			return r
+		}
+	}, next)
+}
+
+func contactMark(s string) bool {
+	if strings.ContainsAny(s, "@\uFF20\uFE6B") {
+		return true
+	}
+	return obfuscatedEmail.MatchString(s)
 }

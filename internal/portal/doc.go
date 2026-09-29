@@ -10,6 +10,8 @@
 // nothing else; pending wishes stay out of the public catalog. Comparison
 // cells stay unknown until a person approves a sourced fact. Pace figures are
 // counts and medians, never a ticket title, a person or a private field. The
+// public page omits a figure until five releases or five fulfilled wishes
+// support it, and a smaller sample is absent rather than zero. The
 // tenant setting defaults off, and a closed portal answers the same 404 as an
 // unknown address.
 package portal
