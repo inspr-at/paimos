@@ -7407,7 +7407,7 @@ components:
       properties:
         project_id: {type: string, format: uuid}
         project_title: {type: string, description: Admin only. Never copied onto the public document.}
-        revision: {type: integer, minimum: 1, description: Admin only. Present while a project is linked. Advances when the link or its release-history choice changes, and is not reused after the link is cleared. A release-history write must send this value.}
+        revision: {type: integer, minimum: 1, description: "Admin only. Present while a project is linked. Advances when the link or its release-history choice changes, and is not reused after the link is cleared. A release-history write must send this value."}
         release_history: {type: boolean, default: false, description: Admin only. Frozen notes are public only when this is true. A new or existing link stays false until set.}
         releases_30d: {type: integer, minimum: 0}
         median_release_gap_days: {type: integer, minimum: 0}
@@ -7418,8 +7418,8 @@ components:
       additionalProperties: false
       minProperties: 1
       properties:
-        project_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}], description: A uuid links that project. Null clears the link. Together with release_history, it is the project the admin still expects to be linked and the write does not move the link.}
-        release_history: {type: boolean, description: Publish frozen notes for the linked project. Requires project_id and revision from the read this publish is based on. Absent on a project write leaves the current choice when the project stays, and leaves a different project off.}
+        project_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}], description: "A uuid links that project. Null clears the link. Together with release_history, it is the project the admin still expects to be linked and the write does not move the link."}
+        release_history: {type: boolean, description: "Publish frozen notes for the linked project. Requires project_id and revision from the read this publish is based on. Absent on a project write leaves the current choice when the project stays, and leaves a different project off."}
         revision: {type: integer, minimum: 1, description: Required together with release_history and project_id. The link revision from the read this publish is based on.}
     PortalFulfillmentWrite:
       type: object
