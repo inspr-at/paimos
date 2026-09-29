@@ -25,6 +25,7 @@ type hbCall struct {
 	method string
 	path   string
 	lease  string
+	query  string
 	body   map[string]any
 }
 
@@ -43,7 +44,7 @@ func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *http
 				t.Errorf("decode %s %s: %v", r.Method, r.URL.Path, err)
 			}
 		}
-		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: r.Header.Get("X-Aeon-Worker-Lease"), body: body})
+		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: r.Header.Get("X-Aeon-Worker-Lease"), query: r.URL.RawQuery, body: body})
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
@@ -383,6 +384,11 @@ func TestRunHeartbeatUsageAndControls(t *testing.T) {
 	if !strings.Contains(out, "control 22222222-2222-4222-8222-222222222222 stop pending\n") || strings.Contains(out, "completed") {
 		t.Fatalf("controls:\n%s", out)
 	}
+	// The inbox read names this generation so its bound messages are included (AEON-280).
+	pulls := hbWhere(calls, http.MethodGet, "/api/inbox/messages")
+	if len(pulls) == 0 || pulls[0].query != "wait_ms=0&session="+transcriptSessionID {
+		t.Fatalf("inbox pulls %#v", pulls)
+	}
 	if !strings.Contains(out, "message 55555555-5555-4555-8555-555555555555\n") || strings.Contains(out, "555555555556") || strings.Contains(out, "SECRET-BODY") {
 		t.Fatalf("messages:\n%s", out)
 	}
@@ -536,7 +542,7 @@ func hbServer(t *testing.T, calls *[]hbCall, handle func(r *http.Request, body m
 				t.Errorf("decode %s %s: %v", r.Method, r.URL.Path, err)
 			}
 		}
-		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: r.Header.Get("X-Aeon-Worker-Lease"), body: body})
+		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: r.Header.Get("X-Aeon-Worker-Lease"), query: r.URL.RawQuery, body: body})
 		w.Header().Set("Content-Type", "application/json")
 		if handle != nil && handle(r, body, w) {
 			return

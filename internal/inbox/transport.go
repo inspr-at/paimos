@@ -119,17 +119,19 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		var id, state string
 		var targetID, fallbackID *string
 		var cursor int64
-		var requested, priorFallback string
+		var requested, priorFallback, messageID string
+		var attempts int
 		var leaseUntil *time.Time
-		err = tx.QueryRow(ctx, `SELECT d.id::text,COALESCE(d.effective_target_id,d.target_id)::text,d.fallback_target_id::text,d.state,c.sent_event_id,d.lease_until,c.delivery_level,d.fallback_reason
+		// A dead delivery was already reported to its sender; it never blocks the queue.
+		err = tx.QueryRow(ctx, `SELECT d.id::text,COALESCE(d.effective_target_id,d.target_id)::text,d.fallback_target_id::text,d.state,c.sent_event_id,d.lease_until,c.delivery_level,d.fallback_reason,d.attempts,c.id::text
 		 FROM inbox_message_deliveries d
 		 JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id
 		 JOIN inbox_messages i ON i.tenant_id=c.tenant_id AND i.id=c.inbox_message_id
 		 WHERE c.project_id=$1::uuid AND c.recipient_principal_id=$2::uuid AND c.recipient_address=$3
-		 AND i.acked_at IS NULL AND NOT c.is_action_request AND c.recipient_session_id IS NULL
+		 AND i.acked_at IS NULL AND NOT c.is_action_request AND c.recipient_session_id IS NULL AND d.state<>'dead'
 		 AND c.sent_event_id > COALESCE((SELECT last_event_id FROM inbox_message_cursors
 		 WHERE project_id=$1::uuid AND principal_id=$2::uuid AND address=$3 AND adapter=$4),0)
-		 ORDER BY c.sent_event_id LIMIT 1 FOR UPDATE OF d`, project, p.ID, in.To, in.Adapter).Scan(&id, &targetID, &fallbackID, &state, &cursor, &leaseUntil, &requested, &priorFallback)
+		 ORDER BY c.sent_event_id LIMIT 1 FOR UPDATE OF d`, project, p.ID, in.To, in.Adapter).Scan(&id, &targetID, &fallbackID, &state, &cursor, &leaseUntil, &requested, &priorFallback, &attempts, &messageID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -147,6 +149,16 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		if targetID == nil {
 			work.State = "blocked"
 			return nil
+		}
+		// The attempt cap holds at the claim too, not only at the next sweep.
+		settings, err := loadDeliverySettings(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if attempts >= settings.MaxAttempts {
+			work = nil
+			_, err := failMessage(ctx, tx, p.TenantID, messageID, ReasonAttempts)
+			return err
 		}
 		var adapter, kind, maximum string
 		var sealed []byte
@@ -200,6 +212,9 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		var message CompatMessage
 		message, err = scanCompatMessage(tx.QueryRow(ctx, `SELECT `+compatMessageCols+` FROM inbox_compat_messages c `+compatObligationJoin+` JOIN inbox_message_deliveries d ON d.tenant_id=c.tenant_id AND d.message_id=c.id WHERE d.id=$1::uuid`, id))
 		if err != nil {
+			return err
+		}
+		if err := MarkFetched(ctx, tx, p, "", message.ID); err != nil {
 			return err
 		}
 		work.LeaseToken, work.TenantID, work.PrincipalID, work.TargetKind, work.TargetRef, work.TargetSecret, work.MaximumLevel, work.FallbackReason, work.Message = token, p.TenantID, p.ID, kind, private.Ref, private.Secret, maximum, priorFallback, &message

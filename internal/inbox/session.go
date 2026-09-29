@@ -60,19 +60,17 @@ func sameSession(a, b *string) bool {
 	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }
 
-// ConfirmSessionMessage records a session inbox handoff, never a shared adapter
-// handoff. The caller must first authenticate and acknowledge the exact message
-// in this transaction. Unbound messages retain their existing receipt behavior.
+// ConfirmSessionMessage records the receiver confirmation for a message the
+// caller acknowledged in this transaction (a direct ack or a harness drain
+// completion). Session-bound and unbound messages alike move their receipt to
+// handed_off (AEON-280); a receipt that already failed stays failed.
 func ConfirmSessionMessage(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID string) error {
-	var targeted bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_messages WHERE id=$1::uuid AND recipient_principal_id=$2::uuid AND recipient_session_id IS NOT NULL AND acked_at IS NOT NULL)`, messageID, p.ID).Scan(&targeted); err != nil {
+	var acked bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_messages WHERE id=$1::uuid AND recipient_principal_id=$2::uuid AND acked_at IS NOT NULL)`, messageID, p.ID).Scan(&acked); err != nil {
 		return err
 	}
-	if !targeted {
+	if !acked {
 		return nil
 	}
-	if _, err := tx.Exec(ctx, `UPDATE inbox_message_deliveries d SET state='delivered',effective_level='simple' FROM inbox_compat_messages c WHERE c.tenant_id=d.tenant_id AND c.id=d.message_id AND c.inbox_message_id=$1::uuid AND c.recipient_session_id IS NOT NULL`, messageID); err != nil {
-		return err
-	}
-	return advanceReceipt(ctx, tx, p, messageID, "handed_off", "simple", "", receiptTarget{})
+	return confirmReceived(ctx, tx, p, messageID)
 }

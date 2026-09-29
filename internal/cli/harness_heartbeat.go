@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -830,7 +831,9 @@ func (rt *runtime) printHeartbeatControls(ctx context.Context, projectID, sessio
 			SessionID string  `json:"recipient_session_id"`
 		} `json:"items"`
 	}
-	if err := rt.doCtx(ctx, http.MethodGet, "/api/inbox/messages?wait_ms=0", nil, &page); err != nil {
+	// ?session= returns this generation's bound messages too and records it as
+	// listening; without it session-bound messages never showed (AEON-280).
+	if err := rt.doCtx(ctx, http.MethodGet, "/api/inbox/messages?wait_ms=0&session="+url.QueryEscape(sessionID), nil, &page); err != nil {
 		return
 	}
 	for _, item := range page.Items {

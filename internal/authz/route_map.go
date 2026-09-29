@@ -98,6 +98,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/imports/{importId}":                                    "imports.read",
 	"GET /api/inbox/messages":                                        "inbox.read",
 	"GET /api/inbox/messages/{messageId}/receipt":                    "inbox.receipt",
+	"GET /api/inbox/message-status":                                  "inbox.receipt",
 	"GET /api/inbox/stream":                                          "inbox.read",
 	"GET /api/inbox/targets":                                         "inbox.read",
 	"GET /api/kinds":                                                 "nodes.read",
@@ -364,7 +365,9 @@ var RoutePermissions = map[string]string{
 	"PUT /api/projects/{projectId}/releases/{releaseId}/plan":          "releases.write",
 	"PUT /api/quotes/{quoteId}/profile":                                "quotes.write",
 	"GET /api/settings/eta-interval":                                   "settings.manage",
+	"GET /api/settings/inbox-delivery":                                 "settings.read",
 	"PUT /api/settings/eta-interval":                                   "settings.manage",
+	"PUT /api/settings/inbox-delivery":                                 "settings.manage",
 	"PUT /api/nodes/{nodeId}/live-eta":                                 "harness.worker",
 }
 

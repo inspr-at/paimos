@@ -215,7 +215,8 @@ func (d *RoutineDispatcher) failRoutine(ctx context.Context, actor tenant.Princi
 			return err
 		}
 		if state == "dead" && work.Message != nil {
-			if err := advanceReceipt(ctx, tx, actor, work.Message.ID, "failed", "", reason, receiptTarget{}); err != nil {
+			// Terminal: fail the receipt and tell the sender (AEON-280).
+			if _, err := failMessage(ctx, tx, actor.TenantID, work.Message.ID, reason); err != nil {
 				return err
 			}
 		}

@@ -37,8 +37,13 @@ func (m *module) listen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	// A one-shot pull is what a turn-boundary hook does; a wait is a long poll.
+	via := SeenHook
+	if waitMS > 0 {
+		via = SeenLongPoll
+	}
 	if waitMS == 0 {
-		page, err := m.page(ctx, p, after, limit, sessionID)
+		page, err := m.page(ctx, p, after, limit, sessionID, via)
 		if err != nil {
 			failure(w, err)
 			return
@@ -57,7 +62,7 @@ func (m *module) listen(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
-	page, err := m.page(ctx, p, after, limit, sessionID)
+	page, err := m.page(ctx, p, after, limit, sessionID, via)
 	if err != nil {
 		failure(w, err)
 		return
@@ -72,7 +77,7 @@ func (m *module) listen(w http.ResponseWriter, r *http.Request) {
 			failure(w, waitErr)
 			return
 		}
-		page, err = m.page(ctx, p, after, limit, sessionID)
+		page, err = m.page(ctx, p, after, limit, sessionID, via)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -115,8 +120,8 @@ func parseListenQuery(r *http.Request) (after int64, waitMS int, limit int, err 
 	return after, waitMS, limit, nil
 }
 
-func (m *module) page(ctx context.Context, p tenant.Principal, after int64, limit int, sessions ...*string) (Page, error) {
-	items, err := m.pending(ctx, p, after, limit+1, sessions...)
+func (m *module) page(ctx context.Context, p tenant.Principal, after int64, limit int, session *string, via string) (Page, error) {
+	items, err := m.pendingVia(ctx, p, after, limit+1, session, via)
 	if err != nil {
 		return Page{}, err
 	}
@@ -137,8 +142,16 @@ func (m *module) pending(ctx context.Context, p tenant.Principal, after int64, l
 	if len(sessions) > 0 {
 		sessionID = sessions[0]
 	}
+	return m.pendingVia(ctx, p, after, limit, sessionID, "")
+}
+
+// pendingVia reads the caller's unacked messages. With a session it records
+// that generation as listening through via (AEON-280); every returned message
+// is stamped as handed over to its recipient.
+func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64, limit int, sessionID *string, via string) ([]Message, error) {
 	var items []Message
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		items = nil
 		if _, err := messageSession(ctx, tx, sessionID, p.ID, ""); err != nil {
 			return err
 		}
@@ -169,7 +182,21 @@ func (m *module) pending(ctx context.Context, p tenant.Principal, after int64, l
 			}
 			items = append(items, msg)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		ids := make([]string, len(items))
+		for i := range items {
+			ids[i] = items[i].ID
+		}
+		if err := MarkFetched(ctx, tx, p, via, ids...); err != nil {
+			return err
+		}
+		if sessionID != nil {
+			return MarkSessionSeen(ctx, tx, *sessionID, via)
+		}
+		return nil
 	})
 	if items == nil {
 		items = []Message{}

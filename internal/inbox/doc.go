@@ -56,6 +56,21 @@
 // obligations and appends inbox.reply_obligation_closed with message_id and
 // closed_reason=session_ended, attributed to System. No reply is fabricated.
 //
+// AEON-280 delivery guarantee: a message to an agent is delivered or its
+// sender is told loudly. Every new queued receipt carries deliver_by (session
+// 5 min, otherwise 30 min, tenant-configurable at /api/settings/inbox-delivery
+// with the adapter attempt cap, default 8). paimos serve runs NewSweeper(pool);
+// a session advisory lock keeps it a single runner. Past the deadline, over
+// the cap, or when the bound session ends (FailSessionMessages, called by the
+// harness in the stop transaction) the delivery goes dead, the receipt fails
+// (deadline|attempts|session_ended|no_listener), the message leaves every read
+// path, inbox.delivery_failed is appended and System writes one notice to the
+// sender plus a copy to the recipient session's coordinator. Session pulls,
+// drains, streams and acks record inbox_seen_at/via on the session; a first
+// hand-over stamps fetched_at (Delivered) and appends inbox.message_fetched.
+// GET /api/inbox/message-status gives the sender sent|delivered|read|
+// not_delivered per message.
+//
 // Every inbox read and write runs inside db.InTenant. The worker's tenant
 // list is the one exception, because tenants has no tenant_id and no RLS
 // (the same registry read as the embedding worker). Mutation events commit

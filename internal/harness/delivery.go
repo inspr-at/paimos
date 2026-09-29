@@ -36,6 +36,10 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if s.Management != "managed" || !has(s, "inbox") {
 		return nil, workorders.Fail(409, "managed inbox capability required")
 	}
+	// Every drain is this generation listening, with or without work (AEON-280).
+	if err := inbox.MarkSessionSeen(ctx, tx, s.ID, inbox.SeenDrain); err != nil {
+		return nil, err
+	}
 	// Existing uncompleted lease must be replayed before taking later work.
 	var d Delivery
 	err = tx.QueryRow(ctx, `SELECT d.id::text,m.id::text,d.cursor,m.sender_principal_id::text,m.body,d.leased_at FROM harness_deliveries d JOIN inbox_messages m ON m.tenant_id=d.tenant_id AND m.id=d.message_id WHERE d.session_id=$1 AND d.completed_at IS NULL AND d.released_at IS NULL ORDER BY d.cursor LIMIT 1`, s.ID).Scan(&d.ID, &d.MessageID, &d.Cursor, &d.SenderPrincipalID, &d.Body, &d.LeasedAt)
@@ -64,6 +68,9 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	d.Cursor = cursor
 	d.SenderPrincipalID = sender
 	d.Body = body
+	if err := inbox.MarkFetched(ctx, tx, p, inbox.SeenDrain, messageID); err != nil {
+		return nil, err
+	}
 	return []Delivery{d}, record(ctx, tx, p, s, "delivery_leased", nil, map[string]any{"delivery_id": d.ID, "message_id": d.MessageID, "cursor": d.Cursor})
 }
 func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -121,6 +128,9 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 		return nil, err
 	}
 	if err = inbox.ConfirmSessionMessage(ctx, tx, p, messageID); err != nil {
+		return nil, err
+	}
+	if err = inbox.MarkSessionSeen(ctx, tx, s.ID, inbox.SeenAck); err != nil {
 		return nil, err
 	}
 	if err = record(ctx, tx, p, s, "delivery_acknowledged", nil, map[string]any{"message_id": messageID, "cursor": cursor}); err != nil {

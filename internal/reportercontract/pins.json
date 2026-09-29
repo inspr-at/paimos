@@ -445,8 +445,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/1.0",
-    "sha256": "f08037199cdce1c903eb6f57333d5edc3e6b8dc61d2015959d269c4d9d22d303",
+    "version": "harness-session/1.1",
+    "sha256": "c14839b475e7dae0c05842594f0e5d0e9c3501f91e99259db0564ea236ac937c",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -668,6 +668,20 @@
           },
           "id": {
             "format": "uuid",
+            "type": "string"
+          },
+          "inbox_seen_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "inbox_seen_via": {
+            "enum": [
+              "hook",
+              "drain",
+              "long_poll",
+              "stream",
+              "ack"
+            ],
             "type": "string"
           },
           "management_mode": {
@@ -1120,6 +1134,20 @@
           },
           "id": {
             "format": "uuid",
+            "type": "string"
+          },
+          "inbox_seen_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "inbox_seen_via": {
+            "enum": [
+              "hook",
+              "drain",
+              "long_poll",
+              "stream",
+              "ack"
+            ],
             "type": "string"
           },
           "management_mode": {

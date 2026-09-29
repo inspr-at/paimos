@@ -499,7 +499,26 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 			page.Items = append(page.Items, v)
 			page.NextAfter = v.SentEventID
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		if inspect {
+			return nil
+		}
+		// A recipient pull hands these messages over; with a session it is also
+		// that generation listening at a turn boundary (AEON-280).
+		ids := make([]string, 0, len(page.Items))
+		for _, v := range page.Items {
+			ids = append(ids, v.ID)
+		}
+		if err := MarkFetched(r.Context(), tx, p, SeenHook, ids...); err != nil {
+			return err
+		}
+		if sessionID != nil {
+			return MarkSessionSeen(r.Context(), tx, *sessionID, SeenHook)
+		}
+		return nil
 	})
 	if err != nil {
 		messagingFailure(w, err)

@@ -25,6 +25,13 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
+	// With ?session= the stream carries that generation's bound messages too
+	// and keeps the session marked as listening on every wake and keepalive.
+	sessionID, err := sessionQuery(r)
+	if err != nil {
+		failure(w, err)
+		return
+	}
 	conn, err := listenConn(r.Context(), m.pool)
 	if err != nil {
 		failure(w, err)
@@ -35,7 +42,7 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
-	batch, err := m.pending(r.Context(), p, after, 200)
+	batch, err := m.pendingVia(r.Context(), p, after, 200, sessionID, SeenStream)
 	if err != nil {
 		failure(w, err)
 		return
@@ -81,7 +88,7 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		batch, err = m.pending(r.Context(), p, after, 200)
+		batch, err = m.pendingVia(r.Context(), p, after, 200, sessionID, SeenStream)
 		if err != nil {
 			return
 		}
