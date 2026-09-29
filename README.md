@@ -56,6 +56,55 @@ Named instances and the default live in `~/.aeon/config.yaml`. The agent API key
 
 Versioning: INSPR Calendar Versioning v2 (`inspr-calendar-v2`, `YYMMDDhhmmss.0.0`); the version display uses the pinned INSPR presentation bundle, checked by `just release-check`.
 
+## Lead handover and short review/fix jobs
+
+A coordinator registered with the same principal, harness and native session
+reference automatically takes over its stopped or heartbeat-lost predecessor's
+live children. The transaction records one `harness.adopted` event per child and
+`harness.handed_over` on the old lead; stopped children remain historical.
+A healthy lead is never replaced. `harness run-heartbeat --role coordinator
+--source-session NATIVE_UUID` uses that stable native reference; use a fresh
+private state directory for the new process generation. For a different native
+session, pass `--succeeds OLD_SESSION_UUID` to `harness register` or
+`harness run-heartbeat`. The predecessor must belong to the same principal and
+project. A handed-over generation cannot revive through a late heartbeat.
+
+On **Agents**, the old lead links to its successor and adopted workers link back
+to the old lead. Drag a live worker to a live lead, or choose **Move to lead…**
+from its menu. A person must own both registrations or be an owner/admin in the
+same project and hold `harness.write`; sessions whose legacy owner is unknown
+require an admin. The server checks revisions and rejects cycles. The toast's
+**Undo** rechecks rights and hierarchy changes; an ordinary heartbeat does not
+invalidate it. Moves preserve ticket bindings and estimates.
+
+For flywheel gates and fixers, wrap the existing command without changing its
+own review, sandbox or permission arguments. Retain the launcher's environment
+sanitization (including the three `CLAUDE_CODE_*` messaging variables):
+
+```sh
+aeon harness run --project AEON --ticket AEON-322 --label "Handover review" \
+  --role reviewer --harness claude --parent-session "$LEAD_SESSION" \
+  -- claude -p "Review the prepared AEON-322 diff read-only"
+aeon harness run --project AEON --ticket AEON-322 --label "Handover fixes" \
+  --role fixer --harness claude --parent-session "$LEAD_SESSION" \
+  -- claude -p "Apply only the accepted AEON-322 fixes"
+```
+
+The helper registers before launching, heartbeats while the command runs and
+marks the generation stopped on success, nonzero exit, launch failure or
+SIGTERM. It preserves stdout, stderr and the command's exit code; SIGTERM exits
+143 after settling the session. It signals only the process group it launched,
+using the existing ownership fence, with a five-second TERM grace period.
+`reviewer` and `fixer` are worker jobs with a public activity note; reviewers
+default to `scout`, fixers to `ship`. Project defaults to the ticket prefix,
+agent to the authenticated caller, and harness to a recognized command name.
+No command text or arguments are sent to the server. The default private state
+directory is retained for recovery; `--state-dir` selects an explicit new one.
+A failed stop prints that directory and retains the existing heartbeat retry
+intent. Reuse `run-heartbeat` to settle it; `run` refuses to launch a second job
+from an already-used directory. These helpers confer no additional permissions
+and do not replace the ticket's worker marker or release review gates.
+
 ## Install the CLI
 
 Nix installs `bin/aeon` and a `bin/paimos` symlink:

@@ -260,6 +260,11 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 			return rt.abandonHeartbeat(o, &session, err)
 		}
 	}
+	return rt.heartbeatLoop(ctx, o, dep, &session)
+}
+
+// heartbeatLoop serves both the PID observer and a one-shot child process.
+func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep heartbeatDeps, session *heartbeatSession) error {
 	if dep.alive == nil {
 		pid, start := session.disk.OwnerPID, session.disk.OwnerStart
 		dep.alive = func(int) bool { return ownerAlive(pid, start) }
@@ -271,29 +276,29 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 	}
 	interval := time.Duration(o.Interval) * time.Second
 	for {
-		rt.noteHeartbeatSources(ctx, o, &session)
+		rt.noteHeartbeatSources(ctx, o, session)
 		if ctx.Err() != nil || !dep.alive(o.OwnerPID) {
-			return rt.finishHeartbeat(o, &session)
+			return rt.finishHeartbeat(o, session)
 		}
-		err := rt.heartbeatBeat(ctx, o, dep, &session)
+		err := rt.heartbeatBeat(ctx, o, dep, session)
 		switch {
 		case errors.Is(err, errHeartbeatTerminal):
-			rememberSettlement(&session)
-			if serr := saveHeartbeatSession(&session); serr != nil {
+			rememberSettlement(session)
+			if serr := saveHeartbeatSession(session); serr != nil {
 				return serr
 			}
 			return nil
 		case err != nil && ctx.Err() != nil:
-			return rt.finishHeartbeat(o, &session)
+			return rt.finishHeartbeat(o, session)
 		case err != nil:
 			fmt.Fprintf(rt.stderr, "heartbeat: beat failed: %s\n", err.Error())
 		default:
-			if serr := saveHeartbeatSession(&session); serr != nil {
+			if serr := saveHeartbeatSession(session); serr != nil {
 				fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
 			}
 		}
 		if err := dep.wait(ctx, o.OwnerPID, interval); err != nil {
-			return rt.finishHeartbeat(o, &session)
+			return rt.finishHeartbeat(o, session)
 		}
 	}
 }
