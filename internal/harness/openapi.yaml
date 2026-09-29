@@ -149,6 +149,20 @@ paths:
       responses:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Exact leased delivery acknowledged}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/managed-controls:
+    post:
+      operationId: requestManagedHarnessControl
+      description: Person-only harness.control; request_id, kind, exact expected_ownership and optional transient steer text. Managed sandbox/budget capability required; expiry and retries fenced.
+      responses:
+        '201': {description: Typed pending or replayed control metadata}
+        '403': {description: Person permission required}
+        '409': {description: Unmanaged, unsupported or stale generation}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/managed-context:
+    post:
+      operationId: managedHarnessContext
+      description: Exact managed worker lease; ephemeral ADR-004 rules for the bound session only.
+      responses:
+        '200': {description: Merged rules envelope}
   /api/projects/{projectId}/harness-sessions/{sessionId}/controls/interrupt:
     post:
       operationId: interruptHarnessSession

@@ -3,6 +3,7 @@
 package portal
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -31,6 +32,7 @@ var (
 	keyPattern    = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$`)
 	uuidPattern   = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	ballotPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+	prefixPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
 	errClosed     = errors.New("portal closed")
 )
 
@@ -54,8 +56,28 @@ func New(pool *pgxpool.Pool, secureCookies bool, macKey []byte) *Module {
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/portal/settings", m.readSettings)
 	mux.HandleFunc("PATCH /api/portal/settings", m.updateSettings)
+	mux.HandleFunc("POST /api/portal/wishes/{wishId}/publish", m.publishWish)
+	mux.HandleFunc("POST /api/portal/wishes/{wishId}/reject", m.rejectWish)
+	mux.HandleFunc("POST /api/portal/wishes/{wishId}/hide", m.hideWish)
+	mux.HandleFunc("PATCH /api/portal/products/{productId}", m.editProduct)
+	mux.HandleFunc("PATCH /api/portal/features/{featureId}", m.editFeature)
+	mux.HandleFunc("GET /api/portal/market", m.readMarket)
+	mux.HandleFunc("POST /api/portal/competitors", m.createCompetitor)
+	mux.HandleFunc("PATCH /api/portal/competitors/{competitorId}", m.patchCompetitor)
+	mux.HandleFunc("DELETE /api/portal/competitors/{competitorId}", m.deleteCompetitor)
+	mux.HandleFunc("POST /api/portal/aspects", m.createAspect)
+	mux.HandleFunc("PATCH /api/portal/aspects/{aspectId}", m.patchAspect)
+	mux.HandleFunc("DELETE /api/portal/aspects/{aspectId}", m.deleteAspect)
+	mux.HandleFunc("PUT /api/portal/cells", m.putCell)
+	mux.HandleFunc("POST /api/portal/cells/{cellId}/approve", m.approveCell)
+	mux.HandleFunc("POST /api/portal/corrections/{correctionId}/close", m.closeCorrection)
+	mux.HandleFunc("GET /api/portal/pace", m.readPace)
+	mux.HandleFunc("PUT /api/portal/pace", m.writePace)
+	mux.HandleFunc("PUT /api/portal/wishes/{wishId}/fulfillment", m.writeFulfillment)
 	mux.HandleFunc("GET /api/public/portal/{tenantSlug}", m.read)
+	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/wishes", m.submitWish)
 	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/wishes/{wishKey}/votes", m.vote)
+	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/corrections", m.submitCorrection)
 }
 
 func write(w http.ResponseWriter, status int, value any) {
@@ -75,7 +97,8 @@ func validKey(key string) bool {
 }
 
 type portalSettings struct {
-	Enabled bool `json:"enabled"`
+	Enabled bool   `json:"enabled"`
+	Slug    string `json:"slug"`
 }
 
 type settingsWrite struct {
@@ -84,8 +107,14 @@ type settingsWrite struct {
 
 func (m *Module) person(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	p, ok := tenant.PrincipalFrom(r.Context())
-	if !ok || p.Kind != tenant.Person || !uuidPattern.MatchString(p.TenantID) || !uuidPattern.MatchString(p.ID) {
+	if !ok || !uuidPattern.MatchString(p.TenantID) || !uuidPattern.MatchString(p.ID) {
 		fail(w, http.StatusUnauthorized, "sign in required")
+		return tenant.Principal{}, false
+	}
+	// Portal settings are a person decision. An agent key is refused even when
+	// its scopes name settings.manage, which is not an agent permission.
+	if p.Kind != tenant.Person {
+		fail(w, http.StatusForbidden, "permission denied")
 		return tenant.Principal{}, false
 	}
 	return p, true
@@ -121,16 +150,13 @@ func (m *Module) readSettings(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "portal unavailable")
 		return
 	}
-	var enabled bool
+	var settings portalSettings
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
 			return err
 		}
-		err := tx.QueryRow(r.Context(), `SELECT enabled FROM portal_settings`).Scan(&enabled)
-		if errors.Is(err, pgx.ErrNoRows) {
-			enabled = false
-			return nil
-		}
+		var err error
+		settings, err = loadSettings(r.Context(), tx)
 		return err
 	})
 	if errors.Is(err, authz.ErrForbidden) {
@@ -141,7 +167,7 @@ func (m *Module) readSettings(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "portal unavailable")
 		return
 	}
-	write(w, http.StatusOK, portalSettings{Enabled: enabled})
+	write(w, http.StatusOK, settings)
 }
 
 func (m *Module) updateSettings(w http.ResponseWriter, r *http.Request) {
@@ -159,20 +185,17 @@ func (m *Module) updateSettings(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "invalid settings")
 		return
 	}
-	var enabled bool
+	var settings portalSettings
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
 			return err
 		}
-		err := tx.QueryRow(r.Context(), `SELECT enabled FROM portal_settings`).Scan(&enabled)
-		if errors.Is(err, pgx.ErrNoRows) {
-			enabled = false
-			err = nil
-		}
+		current, err := loadSettings(r.Context(), tx)
 		if err != nil {
 			return err
 		}
-		if enabled == *in.Enabled {
+		if current.Enabled == *in.Enabled {
+			settings = current
 			return nil
 		}
 		if _, err := tx.Exec(r.Context(), `
@@ -182,12 +205,15 @@ func (m *Module) updateSettings(w http.ResponseWriter, r *http.Request) {
 			p.TenantID, *in.Enabled); err != nil {
 			return err
 		}
-		enabled = *in.Enabled
-		_, err = events.Append(r.Context(), tx, p, events.Change{
+		if _, err := events.Append(r.Context(), tx, p, events.Change{
 			Type:  "portal.settings_updated",
-			After: map[string]any{"enabled": enabled},
-		})
-		return err
+			After: map[string]any{"enabled": *in.Enabled},
+		}); err != nil {
+			return err
+		}
+		current.Enabled = *in.Enabled
+		settings = current
+		return nil
 	})
 	if errors.Is(err, authz.ErrForbidden) {
 		fail(w, http.StatusForbidden, "permission denied")
@@ -197,5 +223,25 @@ func (m *Module) updateSettings(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "portal unavailable")
 		return
 	}
-	write(w, http.StatusOK, portalSettings{Enabled: enabled})
+	write(w, http.StatusOK, settings)
+}
+
+func loadSettings(ctx context.Context, tx pgx.Tx) (portalSettings, error) {
+	var settings portalSettings
+	err := tx.QueryRow(ctx, `SELECT enabled FROM portal_settings`).Scan(&settings.Enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		settings.Enabled = false
+		err = nil
+	}
+	if err != nil {
+		return settings, err
+	}
+	err = tx.QueryRow(ctx, `SELECT slug FROM tenants WHERE id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid`).Scan(&settings.Slug)
+	if err != nil || !slugPattern.MatchString(settings.Slug) {
+		if err == nil {
+			err = errors.New("portal tenant slug")
+		}
+		return settings, err
+	}
+	return settings, nil
 }

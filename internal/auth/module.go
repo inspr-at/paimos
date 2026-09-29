@@ -87,7 +87,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 
 // Middleware resolves a session cookie or an agent bearer token onto the
 // request context. Unauthenticated /api requests, other than health, readiness,
-// version, /api/auth/*, /api/public/quotes/* and the two public portal routes, get 401 JSON.
+// version, /api/auth/*, /api/public/quotes/* and the public portal routes, get 401 JSON.
 func (m *Module) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, kind, err := m.authenticate(r)
@@ -460,13 +460,13 @@ func harnessScope(parts []string, read bool) string {
 		return "harness.read"
 	}
 	for _, part := range parts {
-		if part == "controls" {
+		if part == "controls" || part == "managed-controls" {
 			return "harness.control"
 		}
 	}
 	if len(parts) > 0 {
 		switch parts[len(parts)-1] {
-		case "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "rules-receipts":
+		case "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "rules-receipts", "managed-context":
 			return "harness.worker"
 		}
 	}

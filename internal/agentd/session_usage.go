@@ -64,9 +64,18 @@ func newSessionUsageReporter(api sessionUsageAPI, session HarnessSession, fenced
 			case <-r.wake:
 			case <-timer.C:
 			}
-			attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
+			// Stop and a wake can both be ready. Once finish has taken the
+			// flush, the loop must not start another attempt.
+			if ctx.Err() != nil {
+				return
+			}
+			// The POST is not a child of the reporter cancel context. finish
+			// cancels that context to stop the loop; cancelling this attempt
+			// too drops a 410 the server already committed, and the post-join
+			// flush then writes after archive.
+			attempt, cancelAttempt := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			_ = r.flush(attempt)
-			cancel()
+			cancelAttempt()
 		}
 	}()
 	return r

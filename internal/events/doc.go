@@ -10,7 +10,8 @@
 // with Last-Event-ID. Notifications contain only a tenant and event ID.
 //
 // Every resource mutation must call Append(ctx, tx, principal, Change{...})
-// inside its existing db.InTenant callback, after taking resource locks. Never
+// inside its existing db.InTenant callback, after taking resource locks. Append
+// runs MutationGuard when one is registered. Never
 // open a second transaction for the event. Writer implements the same Append
 // method for dependency injection. Before/After must be full API snapshots;
 // nil means absent. The DB allocates ordered IDs and notifies on commit.

@@ -1402,7 +1402,9 @@ paths:
           $ref: '#/components/responses/Error'
     post:
       operationId: createNode
-      description: Allocate a tenant-scoped key, or preserve a supplied import key.
+      description: |
+        Allocate a tenant-scoped key, or preserve a supplied import key.
+        Any create of a portal_product, portal_feature or portal_wish, and any create that places a node under a portal parent, requires a person with settings.manage. Agents are refused.
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/NodeCreate'
@@ -1410,6 +1412,8 @@ paths:
         '201':
           $ref: '#/components/responses/Node'
         '400':
+          $ref: '#/components/responses/Error'
+        '403':
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
@@ -1454,6 +1458,10 @@ paths:
         answers 409 and changes nothing when any of them changed since. A node that
         cannot take the change (not found, another project, a kind rule, a cycle) is
         listed under skipped with a reason; nodes already so are listed as unchanged.
+        Any change to a portal_product, portal_feature or portal_wish, and any
+        reparent into or out of a portal parent, requires a person with
+        settings.manage. Agents are refused, and the batch changes nothing.
+        Undoing that batch has the same requirement.
       security: *auth
       requestBody:
         required: true
@@ -1504,6 +1512,8 @@ paths:
                         key: {type: string}
                         reason: {type: string}
         '400':
+          $ref: '#/components/responses/Error'
+        '403':
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
@@ -1580,6 +1590,7 @@ paths:
         updated_at value while holding the node row lock in the write transaction.
         A stale value returns 412 without changing the node or appending an event.
         Omission preserves unconditional patch behavior.
+        Any change to a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
       parameters:
         - name: If-Unmodified-Since
           in: header
@@ -1593,6 +1604,8 @@ paths:
           $ref: '#/components/responses/Node'
         '400':
           $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
         '412':
@@ -1601,11 +1614,13 @@ paths:
           $ref: '#/components/responses/Error'
     delete:
       operationId: deleteNode
-      description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically.
+      description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
       security: *auth
       responses:
         '204':
           description: Deleted
+        '403':
+          $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
         '409':
@@ -1757,6 +1772,7 @@ paths:
         appending an event. Each successful move advances updated_at to at least
         the next second so competing moves cannot reuse the same precondition.
         Omission preserves unconditional move behavior.
+        Moving a portal_product, portal_feature or portal_wish, or moving any node into or out of a portal parent, requires a person with settings.manage. Agents are refused.
       parameters:
         - name: If-Unmodified-Since
           in: header
@@ -1769,6 +1785,8 @@ paths:
         '200':
           $ref: '#/components/responses/Node'
         '400':
+          $ref: '#/components/responses/Error'
+        '403':
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
@@ -1798,7 +1816,7 @@ paths:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     post:
       operationId: moveNodeProject
-      description: Atomically move an issue under a target project, assign its next project key, retain all former keys as aliases, and append an undoable node.project_moved event. Issues with child nodes or feature projections cannot move.
+      description: Atomically move an issue under a target project, assign its next project key, retain all former keys as aliases, and append an undoable node.project_moved event. Issues with child nodes or feature projections cannot move. Moving a portal_product, portal_feature or portal_wish, or moving any node into or out of a portal parent, requires a person with settings.manage. Agents are refused.
       security: *auth
       requestBody:
         required: true
@@ -1826,6 +1844,7 @@ paths:
                   detached: {type: array, items: {type: string}}
                   notes: {type: array, items: {type: string}}
         '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /tickets/graph:
@@ -1878,6 +1897,7 @@ paths:
         A 409 message reads as words and names items by key, so clients can show it as it stands: an identical
         link that already exists, or a blocks, implements or duplicates link that would close a loop through
         live items (the message spells out the chain). A link from an item to itself is a 400.
+        A relation touching a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/RelationCreate'
@@ -1885,6 +1905,8 @@ paths:
         '201':
           $ref: '#/components/responses/Relation'
         '400':
+          $ref: '#/components/responses/Error'
+        '403':
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
@@ -1894,10 +1916,13 @@ paths:
     parameters: [{$ref: '#/components/parameters/RelationId'}]
     delete:
       operationId: deleteRelation
+      description: A relation touching a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
       security: *auth
       responses:
         '204':
           description: Deleted
+        '403':
+          $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
   /events:
@@ -1934,7 +1959,7 @@ paths:
     parameters: [{$ref: '#/components/parameters/EventId'}]
     post:
       operationId: undoEvent
-      description: Append one compensating event and restore the prior resource snapshot atomically. Only reversible events can be undone; an event can be undone once.
+      description: Append one compensating event and restore the prior resource snapshot atomically. Only reversible events can be undone; an event can be undone once. Undoing a change to a portal_product, portal_feature or portal_wish, or a move into or out of a portal parent, requires a person with settings.manage. Agents are refused.
       security: *auth
       responses:
         '201':
@@ -2446,6 +2471,48 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/managed-controls:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: requestManagedHarnessControl
+      description: Person-only harness.control. Requires harness=claude, daemon-qualified managed_control_v1, a live run and fresh exact process ownership. A self-advertised capability alone does not qualify an adapter. Text is transient (never audit or journal content); expiry or server restart rejects undelivered text. Reusing request_id requires identical actor and payload. Claiming is at most once; an uncertain outcome is never automatically reinjected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, kind, expected_ownership]
+              properties:
+                request_id: {type: string, format: uuid}
+                kind: {type: string, enum: [steer, interrupt, stop]}
+                text: {type: string, maxLength: 8192, description: Required only for steer; UTF-8 byte limit 8192.}
+                expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+      responses:
+        '201': {description: Pending or identical replay; reason authorization_expired means expired., content: {application/json: {schema: {$ref: '#/components/schemas/HarnessManagedControl'}}}}
+        '403': {description: Person with project harness.control required}
+        '409': {description: Unmanaged, unsupported, stale ownership, changed retry or session unavailable}
+        '429': {description: Session control quota reached}
+  /projects/{projectId}/harness-sessions/{sessionId}/managed-context:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    post:
+      operationId: managedHarnessContext
+      description: Bound managed worker only. ADR-004 rules merge for this exact tenant/project/key creator/agent/task; delivered in ephemeral context. No repository writes. A receipt proves received bytes, not model obedience. No caller-selectable context or broader rules access.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '200': {description: ADR-004 merged rules envelope}
+        '403': {description: Invalid worker lease or owner}
+        '409': {description: Managed run required}
   /projects/{projectId}/harness-sessions/{sessionId}/recovery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -4244,7 +4311,7 @@ paths:
     get:
       operationId: readPortalSettings
       summary: Read whether this tenant's public product portal is enabled
-      description: settings.manage. A missing row is off. Enabling does not publish nodes by itself.
+      description: settings.manage, people only. Agents are refused. A missing row is off. The slug builds the public path. Enabling does not publish nodes by itself.
       security: [{session: []}]
       responses:
         '200': {description: Portal switch, content: {application/json: {schema: {$ref: '#/components/schemas/PortalSettings'}}}}
@@ -4253,7 +4320,7 @@ paths:
     patch:
       operationId: updatePortalSettings
       summary: Turn this tenant's public product portal on or off
-      description: settings.manage. The portal stays off until this is true. The response is the stored switch.
+      description: settings.manage, people only. Agents are refused. The portal stays off until this is true. The response is the stored switch and the public slug.
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalSettingsWrite'}}}}
       responses:
@@ -4261,15 +4328,99 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+  /portal/wishes/{wishId}/publish:
+    post:
+      operationId: publishPortalWish
+      summary: Publish a wish on the public portal
+      description: settings.manage, people only. Agents are refused. A pending or hidden wish becomes published. A wish that is already published is unchanged.
+      security: [{session: []}]
+      parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/wishes/{wishId}/reject:
+    post:
+      operationId: rejectPortalWish
+      summary: Reject a wish that is waiting for review
+      description: settings.manage, people only. Agents are refused. Only a pending wish can be rejected. A wish that is already rejected is unchanged.
+      security: [{session: []}]
+      parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/wishes/{wishId}/hide:
+    post:
+      operationId: hidePortalWish
+      summary: Hide a published wish
+      description: settings.manage, people only. Agents are refused. Only a published wish can be hidden. A wish that is already hidden is unchanged.
+      security: [{session: []}]
+      parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/products/{productId}:
+    patch:
+      operationId: editPortalProduct
+      summary: Edit the public product title, summary or publication
+      description: settings.manage, people only. Agents are refused. published true stores state published; false stores unpublished. Omitted fields stay as they are.
+      security: [{session: []}]
+      parameters: [{name: productId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalProductEdit'}}}}
+      responses:
+        '200': {description: Product after the edit, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /portal/features/{featureId}:
+    patch:
+      operationId: editPortalFeature
+      summary: Edit a public feature
+      description: settings.manage, people only. Agents are refused. A declined feature needs a public reason. live_since is kept only while the feature is live, and decline_reason only while it is declined.
+      security: [{session: []}]
+      parameters: [{name: featureId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalFeatureEdit'}}}}
+      responses:
+        '200': {description: Feature after the edit, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}:
     get:
       operationId: readPublicPortal
-      summary: Read one tenant's published product catalog and wishes
-      description: Anonymous. A disabled portal and an unknown tenant both answer 404. The document is a whitelist of public fields; internal notes, ticket keys and voter identity are omitted. At most one published product is returned.
+      summary: Read one tenant's published product catalog, wishes, sourced comparison and pace
+      description: Anonymous. A disabled portal and an unknown tenant both answer 404. The document is a whitelist of public fields; internal notes, ticket keys, voter identity, project names and wish titles that are not published are omitted. comparison and pace are absent when there is nothing public to say. A pace figure from fewer than five releases or five fulfilled wishes is omitted. An unapproved or unsourced comparison cell is stance unknown and carries no quote or source. At most one published product is returned.
       security: []
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
         '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/wishes:
+    post:
+      operationId: submitPublicPortalWish
+      summary: Submit an anonymous wish for review
+      description: Title and summary only. No name and no email. The website field is a honeypot; a non-empty value is discarded and still answers 201. Five wishes per address per minute, counted before the tenant is resolved, so an unknown address and a closed portal share one window. A disabled portal, unknown tenant or portal without a published product is 404. The wish is stored as pending and is not part of the public catalog until someone with settings.manage publishes it.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishIntake'}}}}
+      responses:
+        '201': {description: Accepted for review, or discarded by the honeypot, content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/wishes/{wishKey}/votes:
@@ -4289,6 +4440,179 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/corrections:
+    post:
+      operationId: submitPublicPortalCorrection
+      summary: Send an anonymous factual correction
+      description: Competitor, aspect, statement and source only. No name and no email. Any of those fields is refused when it contains an address, including a percent-encoded or HTML-entity form, decoded before the check. The website field is a honeypot; a non-empty value is discarded and still answers 201. A competitor that is not on the public comparison is discarded the same way. Five corrections per address per minute, counted before the tenant is resolved, so an unknown address and a closed portal share one window. A disabled portal, unknown tenant or portal without a published product is 404. The correction stays off the public page; a person with settings.manage closes it.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCorrectionIntake'}}}}
+      responses:
+        '201': {description: Accepted, or discarded without a stored row, content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /portal/market:
+    get:
+      operationId: readPortalMarket
+      summary: Read the comparison, its history and pending corrections
+      description: settings.manage, people only. Agents are refused. History and corrections are admin-only. Quotes stay off the public page until a cell is approved.
+      security: [{session: []}]
+      responses:
+        '200': {description: Comparison for the current product, content: {application/json: {schema: {$ref: '#/components/schemas/PortalMarket'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /portal/competitors:
+    post:
+      operationId: createPortalCompetitor
+      summary: Add a competitor that stays off the public page until it is published
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitorWrite'}}}}
+      responses:
+        '200': {description: Stored competitor, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitor'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/competitors/{competitorId}:
+    patch:
+      operationId: patchPortalCompetitor
+      summary: Rename a competitor or publish it on the comparison
+      security: [{session: []}]
+      parameters: [{name: competitorId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitorPatch'}}}}
+      responses:
+        '200': {description: Stored competitor, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitor'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deletePortalCompetitor
+      summary: Remove a competitor and its cells
+      security: [{session: []}]
+      parameters: [{name: competitorId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Removed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalDeleted'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /portal/aspects:
+    post:
+      operationId: createPortalAspect
+      summary: Add a row to the comparison
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspectWrite'}}}}
+      responses:
+        '200': {description: Stored row, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspect'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/aspects/{aspectId}:
+    patch:
+      operationId: patchPortalAspect
+      summary: Rename a comparison row
+      security: [{session: []}]
+      parameters: [{name: aspectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspectWrite'}}}}
+      responses:
+        '200': {description: Stored row, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspect'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deletePortalAspect
+      summary: Remove a comparison row and its cells
+      security: [{session: []}]
+      parameters: [{name: aspectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Removed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalDeleted'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /portal/cells:
+    put:
+      operationId: putPortalCell
+      summary: Save one comparison cell and clear its approval when the fact changes
+      description: settings.manage, people only. yes, no and partial need a short quote, an https page and the day it was read. An unchanged cell does not add a revision.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCellWrite'}}}}
+      responses:
+        '200': {description: Stored cell, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCell'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/cells/{cellId}/approve:
+    post:
+      operationId: approvePortalCell
+      summary: Approve a sourced cell for the public comparison
+      description: settings.manage, people only. An empty JSON object is the whole body. Approving again is unchanged. A yes, no or partial cell without a quote, https page and read date is refused.
+      security: [{session: []}]
+      parameters: [{name: cellId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '200': {description: Approved cell, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCell'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /portal/corrections/{correctionId}/close:
+    post:
+      operationId: closePortalCorrection
+      summary: Close a pending factual correction
+      description: settings.manage, people only. Closing does not change the comparison cell.
+      security: [{session: []}]
+      parameters: [{name: correctionId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '200': {description: Closed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalClosed'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /portal/pace:
+    get:
+      operationId: readPortalPace
+      summary: Read the linked project and the aggregated pace figures
+      description: settings.manage, people only. The project title is admin-only. This read returns the exact counts and medians, including a sample smaller than five. The public document omits those small figures.
+      security: [{session: []}]
+      responses:
+        '200': {description: Pace for this portal, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: writePortalPace
+      summary: Link one project whose release dates become the public count, or clear it
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPaceWrite'}}}}
+      responses:
+        '200': {description: Pace after the link, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /portal/wishes/{wishId}/fulfillment:
+    put:
+      operationId: writePortalFulfillment
+      summary: Link a published or hidden wish to the live feature that fulfilled it, or clear the link
+      description: settings.manage, people only. The wish must have been opened before the feature went live. The public figure is a median of days once five wishes are fulfilled, never the wish title.
+      security: [{session: []}]
+      parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalFulfillmentWrite'}}}}
+      responses:
+        '200': {description: Pace after the link, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /quotes/readiness:
     get:
       operationId: quoteConfirmationReadiness
@@ -6313,15 +6637,46 @@ components:
     PortalSettings:
       type: object
       additionalProperties: false
-      required: [enabled]
+      required: [enabled, slug]
       properties:
         enabled: {type: boolean}
+        slug: {type: string, description: Tenant address used in the public portal path}
     PortalSettingsWrite:
       type: object
       additionalProperties: false
       required: [enabled]
       properties:
         enabled: {type: boolean}
+    PortalModeration:
+      type: object
+      additionalProperties: false
+      required: [id, title, summary, state, fields]
+      properties:
+        id: {type: string, format: uuid}
+        title: {type: string}
+        summary: {type: string}
+        state: {type: string}
+        fields:
+          type: object
+          additionalProperties: {type: string}
+          description: Public feature fields only. Internal notes are omitted.
+    PortalProductEdit:
+      type: object
+      additionalProperties: false
+      properties:
+        title: {type: string, minLength: 1, maxLength: 300}
+        summary: {type: string, maxLength: 4000}
+        published: {type: boolean}
+    PortalFeatureEdit:
+      type: object
+      additionalProperties: false
+      properties:
+        title: {type: string, minLength: 1, maxLength: 300}
+        summary: {type: string, maxLength: 4000}
+        status: {type: string, enum: [idea, reviewed, planned, in_progress, live, declined]}
+        legal_basis: {type: string, maxLength: 240}
+        decline_reason: {type: string, maxLength: 500}
+        live_since: {type: string, maxLength: 64}
     PortalProduct:
       type: object
       additionalProperties: false
@@ -6359,12 +6714,201 @@ components:
         product: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/PortalProduct'}]}
         catalog: {type: array, items: {$ref: '#/components/schemas/PortalFeature'}}
         wishes: {type: array, items: {$ref: '#/components/schemas/PortalWish'}}
+        comparison:
+          type: array
+          description: Present only when at least one competitor is published and at least one row exists
+          items: {$ref: '#/components/schemas/PortalPublicComparison'}
+        pace: {$ref: '#/components/schemas/PortalPublicPace'}
     PortalVote:
       type: object
       additionalProperties: false
       required: [votes]
       properties:
         votes: {type: integer, minimum: 0}
+    PortalWishIntake:
+      type: object
+      additionalProperties: false
+      required: [title, summary]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 300}
+        summary: {type: string, minLength: 1, maxLength: 4000}
+        website: {type: string, maxLength: 500, description: Honeypot. Leave empty. A value discards the wish.}
+    PortalWishAccepted:
+      type: object
+      additionalProperties: false
+      required: [accepted]
+      properties:
+        accepted: {const: true}
+    PortalPublicComparison:
+      type: object
+      additionalProperties: false
+      required: [aspect, cells]
+      properties:
+        aspect: {type: string}
+        cells: {type: array, items: {$ref: '#/components/schemas/PortalPublicCell'}}
+    PortalPublicCell:
+      type: object
+      additionalProperties: false
+      required: [competitor, stance]
+      properties:
+        competitor: {type: string}
+        stance: {type: string, enum: ['yes', 'no', partial, unknown]}
+        quote: {type: string, description: Omitted unless the cell is approved and sourced}
+        source_url: {type: string, format: uri}
+        retrieved_on: {type: string, format: date}
+        stale: {type: boolean, description: True only when the source is older than 180 days}
+    PortalPublicPace:
+      type: object
+      additionalProperties: false
+      description: Counts and medians only. releases_30d needs five releases in the trailing 30 days, the gap needs five releases, and the wish median needs five fulfilled wishes. A smaller sample is omitted, including a count of zero. The object is omitted when every figure is absent. The admin pace read still returns the exact figures.
+      properties:
+        releases_30d: {type: integer, minimum: 0}
+        median_release_gap_days: {type: integer, minimum: 0}
+        wish_to_live_median_days: {type: integer, minimum: 0}
+    PortalCompetitor:
+      type: object
+      additionalProperties: false
+      required: [id, name, published]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        published: {type: boolean}
+    PortalCompetitorWrite:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+    PortalCompetitorPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        published: {type: boolean}
+    PortalAspect:
+      type: object
+      additionalProperties: false
+      required: [id, label]
+      properties:
+        id: {type: string, format: uuid}
+        label: {type: string}
+    PortalAspectWrite:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 120}
+    PortalCell:
+      type: object
+      additionalProperties: false
+      required: [id, aspect_id, competitor_id, stance, approved, stale, recheck]
+      properties:
+        id: {type: string, format: uuid}
+        aspect_id: {type: string, format: uuid}
+        competitor_id: {type: string, format: uuid}
+        stance: {type: string, enum: [unknown, 'yes', 'no', partial]}
+        quote: {type: string}
+        source_url: {type: string}
+        retrieved_on: {type: string, format: date}
+        approved: {type: boolean}
+        stale: {type: boolean}
+        recheck: {type: boolean, description: True when the source is 90 days old or older. Admin only.}
+    PortalCellWrite:
+      type: object
+      additionalProperties: false
+      required: [aspect_id, competitor_id, stance]
+      properties:
+        aspect_id: {type: string, format: uuid}
+        competitor_id: {type: string, format: uuid}
+        stance: {type: string, enum: [unknown, 'yes', 'no', partial]}
+        quote: {type: string, maxLength: 400}
+        source_url: {type: string, maxLength: 500}
+        retrieved_on: {type: string, format: date}
+    PortalCellRevision:
+      type: object
+      additionalProperties: false
+      required: [cell_id, stance, approved, at]
+      properties:
+        cell_id: {type: string, format: uuid}
+        stance: {type: string, enum: [unknown, 'yes', 'no', partial]}
+        quote: {type: string}
+        source_url: {type: string}
+        retrieved_on: {type: string, format: date}
+        approved: {type: boolean}
+        at: {type: string, format: date-time}
+    PortalCorrection:
+      type: object
+      additionalProperties: false
+      required: [id, competitor, aspect, statement, at]
+      properties:
+        id: {type: string, format: uuid}
+        competitor: {type: string}
+        aspect: {type: string}
+        statement: {type: string}
+        source_url: {type: string}
+        at: {type: string, format: date-time}
+    PortalMarket:
+      type: object
+      additionalProperties: false
+      required: [competitors, aspects, cells, history, corrections]
+      properties:
+        competitors: {type: array, items: {$ref: '#/components/schemas/PortalCompetitor'}}
+        aspects: {type: array, items: {$ref: '#/components/schemas/PortalAspect'}}
+        cells: {type: array, items: {$ref: '#/components/schemas/PortalCell'}}
+        history: {type: array, items: {$ref: '#/components/schemas/PortalCellRevision'}}
+        corrections: {type: array, items: {$ref: '#/components/schemas/PortalCorrection'}}
+    PortalCorrectionIntake:
+      type: object
+      additionalProperties: false
+      required: [competitor, aspect, statement]
+      properties:
+        competitor: {type: string, minLength: 1, maxLength: 80}
+        aspect: {type: string, minLength: 1, maxLength: 120}
+        statement: {type: string, minLength: 8, maxLength: 2000}
+        source_url: {type: string, maxLength: 500}
+        website: {type: string, maxLength: 500, description: Honeypot. Leave empty. A value discards the correction.}
+    PortalDeleted:
+      type: object
+      additionalProperties: false
+      required: [deleted]
+      properties:
+        deleted: {const: true}
+    PortalClosed:
+      type: object
+      additionalProperties: false
+      required: [closed]
+      properties:
+        closed: {const: true}
+    PortalFulfillment:
+      type: object
+      additionalProperties: false
+      required: [wish_id, feature_id]
+      properties:
+        wish_id: {type: string, format: uuid}
+        feature_id: {type: string, format: uuid}
+    PortalPace:
+      type: object
+      additionalProperties: false
+      required: [fulfillments]
+      properties:
+        project_id: {type: string, format: uuid}
+        project_title: {type: string, description: Admin only. Never copied onto the public document.}
+        releases_30d: {type: integer, minimum: 0}
+        median_release_gap_days: {type: integer, minimum: 0}
+        wish_to_live_median_days: {type: integer, minimum: 0}
+        fulfillments: {type: array, items: {$ref: '#/components/schemas/PortalFulfillment'}}
+    PortalPaceWrite:
+      type: object
+      additionalProperties: false
+      required: [project_id]
+      properties:
+        project_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}]}
+    PortalFulfillmentWrite:
+      type: object
+      additionalProperties: false
+      required: [feature_id]
+      properties:
+        feature_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}]}
     QuoteConfirmationJob:
       type: object
       required: [quote_node_id, version, state, attempts, next_attempt_at, updated_at]
@@ -6734,7 +7278,7 @@ components:
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
         work_shape: {type: string, enum: [unknown, ship, scout]}
-        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop]}}
+        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop, managed_control_v1]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
     HarnessProcessOwnership:
@@ -6748,6 +7292,22 @@ components:
         root_pid: {type: integer, minimum: 2}
         group_id: {type: integer, minimum: 2}
         started_at: {type: string, format: date-time}
+    HarnessManagedControl:
+      type: object
+      required: [id, session_id, kind, state, sequence, outcome, reason, created_at, expected_ownership, expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        kind: {type: string, enum: [steer, interrupt, stop]}
+        state: {type: string, enum: [pending, claimed, completed]}
+        sequence: {type: integer, format: int64}
+        outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
+        reason: {type: [string, 'null'], description: Content-free outcome. authorization_expired means expired before claim; outcome_unconfirmed means no safe retry. queued_next_turn acknowledges queued input rather than model obedience.}
+        expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+        expires_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        claimed_at: {type: [string, 'null'], format: date-time}
+        completed_at: {type: [string, 'null'], format: date-time}
     HarnessRecoveryControl:
       type: object
       required: [id, session_id, kind, state, sequence, outcome, reason, created_at, expected_ownership, expires_at]

@@ -98,12 +98,16 @@ func (m *Module) recovery(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
+	now, err := m.ownershipNow(r.Context(), tx)
+	if err != nil {
+		return nil, err
+	}
 	return RecoveryPreview{SessionID: s.ID, Host: s.Host, DisplayLabel: s.DisplayLabel,
 		ObservedRevision: recoveryRevision(s), Confirmation: archiveConfirmation(s),
 		ProcessState: "unknown", ProcessScope: "No process will be signalled. This action archives this registration only; other sessions and child processes are unaffected.",
 		CanArchive:               archiveUnavailable(s) == "" && archiveErr == nil,
 		ArchiveUnavailableReason: archiveUnavailable(s),
-		ForceStopAvailable:       forceErr == nil && forceAvailable(s, time.Now()),
+		ForceStopAvailable:       forceErr == nil && forceAvailable(s, now),
 		ProcessOwnership:         s.ProcessOwnership, ForceConfirmation: forceConfirmation(s),
 		ForceStopReason: "Force stop requires a live daemon with verified ownership of this exact process generation."}, nil
 }

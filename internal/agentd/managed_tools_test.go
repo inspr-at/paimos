@@ -70,7 +70,11 @@ func TestManagedToolsRunBinding(t *testing.T) {
 	active := true
 	const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" // gitleaks:allow synthetic test token
 	doneRequested := false
-	host, err := startManagedTools(token, toolBinding{api: f, workOrderID: "order-a", runID: "run-a", workspace: t.TempDir(), branch: "aeon/run-a", active: func() bool { return active }, requestDone: func() { doneRequested = true }, replySender: func(id string) (string, bool) {
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := startManagedTools(token, toolBinding{api: f, workOrderID: "order-a", runID: "run-a", workspace: workspace, branch: "aeon/run-a", active: func() bool { return active }, requestDone: func() { doneRequested = true }, replySender: func(id string) (string, bool) {
 		if id == "33333333-3333-3333-3333-333333333333" {
 			return "44444444-4444-4444-4444-444444444444", true
 		}
@@ -101,6 +105,15 @@ func TestManagedToolsRunBinding(t *testing.T) {
 			t.Fatalf("%s error=%v want %v", name, result.IsError, wantError)
 		}
 	}
+	call("aeon_write", map[string]any{"file_path": "source.txt", "content": "before"}, false)
+	call("aeon_edit", map[string]any{"file_path": "source.txt", "old_string": "before", "new_string": "after"}, false)
+	call("aeon_read", map[string]any{"file_path": "source.txt"}, false)
+	call("aeon_glob", map[string]any{"pattern": "*.txt"}, false)
+	call("aeon_grep", map[string]any{"pattern": "after"}, false)
+	call("aeon_read", map[string]any{"file_path": "../outside"}, true)
+	if data, err := os.ReadFile(filepath.Join(workspace, "source.txt")); err != nil || string(data) != "after" {
+		t.Fatal("MCP file proxy did not apply edit")
+	}
 	call("aeon_comment", map[string]any{"body": "progress"}, false)
 	call("aeon_status", map[string]any{"status": "blocked", "expected_revision": int64(4)}, false)
 	call("aeon_status", map[string]any{"status": "done", "expected_revision": int64(4)}, false)
@@ -112,6 +125,8 @@ func TestManagedToolsRunBinding(t *testing.T) {
 		t.Fatalf("wrong binding: %+v", f)
 	}
 	active = false
+	call("aeon_write", map[string]any{"file_path": "source.txt", "content": "late"}, true)
+	call("aeon_read", map[string]any{"file_path": "source.txt"}, true)
 	call("aeon_comment", map[string]any{"body": "late"}, true)
 	if len(f.comments) != 1 {
 		t.Fatal("expired run wrote a comment")
@@ -287,7 +302,7 @@ func TestTerminalSandboxesTestProcessNetwork(t *testing.T) {
 	const source = `package sandboxtest
 import ("net"; "testing"; "time")
 func TestNetworkFence(t *testing.T) {
-  l,err:=net.Listen("tcp","127.0.0.1:0"); if err!=nil { t.Fatalf("loopback bind: %v",err) }; l.Close()
+  l,err:=net.Listen("tcp","127.0.0.1:0"); if err==nil { l.Close(); t.Fatal("loopback bind escaped sandbox") }
   c,err:=net.DialTimeout("tcp","1.1.1.1:443",time.Second)
   if c!=nil { c.Close(); t.Fatal("external network escaped sandbox") }
   if err==nil { t.Fatal("external network escaped sandbox") }
@@ -391,5 +406,152 @@ func TestSandbox(t *testing.T) {
 	}
 	if content, err := os.ReadFile(filepath.Join(web, "npm-inside")); err != nil || string(content) != "ok" {
 		t.Fatalf("npm workspace output: %q %v", content, err)
+	}
+}
+
+// Policy fixtures only: do not launch or signal sandboxed processes here.
+func TestTerminalDefaultDenyProfile(t *testing.T) {
+	profile := terminalSandboxProfile("/fixture/work", "/fixture/private-temp", []string{"/fixture/toolchain", "/fixture/cache/download"}, []string{"/fixture/bin/go"}, []string{"/fixture/Cellar/lib/1/lib/example.dylib"})
+	if !strings.HasPrefix(profile, "(version 1) (deny default)") {
+		t.Fatal("terminal is not default deny")
+	}
+	for _, forbidden := range []string{"(allow default)", "(allow sysctl-read)", "(allow network", "localhost", "unix-socket", `(subpath "/")`, `(subpath "/Users")`, `(subpath "/private")`, `(subpath "/var/run")`, `(subpath "/nix/store")`} {
+		if strings.Contains(profile, forbidden) {
+			t.Fatalf("broad permission: %s", forbidden)
+		}
+	}
+	if !strings.Contains(profile, "(deny process-info*)") || !strings.Contains(profile, `(deny sysctl-read (sysctl-name-prefix "kern.procargs"))`) {
+		t.Fatal("process argument introspection is not explicitly denied")
+	}
+	for _, root := range []string{"/fixture/work", "/fixture/private-temp"} {
+		if !strings.Contains(profile, fmt.Sprintf("(allow file-read* file-write* (subpath %q))", root)) {
+			t.Fatal("missing run root")
+		}
+	}
+	if strings.Count(profile, "(allow file-read* file-write*") != 2 || strings.Count(profile, "(allow file-write*") != 1 {
+		t.Fatal("unexpected writable surface")
+	}
+	if !strings.Contains(profile, `(allow file-read* file-map-executable (literal "/fixture/Cellar/lib/1/lib/example.dylib"))`) || strings.Contains(profile, `(subpath "/fixture/Cellar`) {
+		t.Fatal("library permission is not exact and read-only")
+	}
+	for _, root := range []string{"/fixture/toolchain", "/fixture/cache/download"} {
+		if !strings.Contains(profile, fmt.Sprintf("(allow file-read* (subpath %q))", root)) {
+			t.Fatal("missing read-only dependency")
+		}
+	}
+}
+
+func TestTerminalEnvironmentDoesNotInheritCredentials(t *testing.T) {
+	for _, name := range []string{"AEON_TEST_DATABASE_URL", "AEON_URL", "AEON_RUNTIME_KEY", "DATABASE_URL", "PGPASSWORD", "ANTHROPIC_API_KEY", "AWS_SECRET_ACCESS_KEY", "NODE_OPTIONS", "DYLD_INSERT_LIBRARIES", "GIT_CONFIG_COUNT", "PATH", "HOME", "LANG"} {
+		t.Setenv(name, "inherited-fixture-value")
+	}
+	values := terminalEnvironment("/fixture/tmp", "off", "/fixture/go", "/fixture/bin/go")
+	for _, value := range values {
+		name, _, _ := strings.Cut(value, "=")
+		if strings.HasPrefix(name, "AEON_") || strings.Contains(value, "inherited-fixture-value") {
+			t.Fatal("child inherited daemon configuration")
+		}
+	}
+	for _, expected := range []string{"HOME=/fixture/tmp", "PATH=/fixture/bin:/usr/bin:/bin", "CGO_ENABLED=0"} {
+		found := false
+		for _, value := range values {
+			found = found || value == expected
+		}
+		if !found {
+			t.Fatalf("missing isolation setting %s", expected)
+		}
+	}
+}
+
+func TestTerminalToolRootsNeverGrantInstallationPrefix(t *testing.T) {
+	for path, want := range map[string]string{
+		"/nix/store/fixture-node/bin/node":               "/nix/store/fixture-node",
+		"/opt/homebrew/Cellar/node/22/bin/node":          "/opt/homebrew/Cellar/node/22",
+		"/usr/local/Cellar/node/22/bin/node":             "/usr/local/Cellar/node/22",
+		"/usr/local/lib/node_modules/npm/bin/npm-cli.js": "/usr/local/lib/node_modules/npm",
+		"/usr/bin/git": "", "/Users/fixture/bin/go": "", "/opt/homebrew/bin/node": "",
+	} {
+		if got := terminalToolRoot(path); got != want {
+			t.Fatalf("%s: %s", path, got)
+		}
+	}
+}
+
+func TestTerminalLibraryProfileGrantsOnlyResolvedKegs(t *testing.T) {
+	for _, prefix := range []string{"/opt/homebrew", "/usr/local"} {
+		keg := prefix + "/Cellar/llhttp/9.4.3"
+		alias := prefix + "/opt/llhttp/lib/libllhttp.9.4.dylib"
+		profile := terminalSandboxProfile("/fixture/work", "/fixture/tmp", nil, nil, []string{alias, keg + "/lib/libllhttp.9.4.3.dylib"})
+		if !strings.Contains(profile, fmt.Sprintf("(allow file-read* file-map-executable (subpath %q))", keg)) {
+			t.Fatal("resolved dependency keg is not readable/mappable")
+		}
+		for _, broad := range []string{prefix, prefix + "/Cellar", prefix + "/opt", prefix + "/opt/llhttp", prefix + "/Cellar/llhttp"} {
+			if strings.Contains(profile, fmt.Sprintf("(subpath %q)", broad)) {
+				t.Fatalf("broad library grant: %s", broad)
+			}
+		}
+		if strings.Count(profile, "(allow file-read* file-write*") != 2 || strings.Count(profile, "(allow file-write*") != 1 {
+			t.Fatal("library closure widened write permissions")
+		}
+		profile = terminalSandboxProfile("/fixture/work", "/fixture/tmp", nil, nil, []string{prefix + "/Cellar/openssl@3/3.6/lib/libcrypto.3.dylib"})
+		config := prefix + "/etc/openssl@3/openssl.cnf"
+		if !strings.Contains(profile, fmt.Sprintf("(deny file-read* file-test-existence (with errno ENOENT) (literal %q))", config)) {
+			t.Fatal("host OpenSSL configuration must remain unreadable")
+		}
+	}
+}
+
+func TestTerminalToolClosureGrantsOnlyExactPackages(t *testing.T) {
+	root := "/nix/store/" + strings.Repeat("a", 32) + "-node"
+	roots, err := terminalStoreClosure(root + "\n" + root + "-lib\n")
+	if err != nil || len(roots) != 2 || roots[0] != root {
+		t.Fatalf("closure: %v %v", roots, err)
+	}
+	for _, bad := range []string{"", "/nix/store", "/nix/store/", "/", "/Users/fixture", root + "/..", root + "/lib", root + "\n/etc", strings.Repeat(root+"\n", 4097)} {
+		if _, err := terminalStoreClosure(bad); err == nil {
+			t.Fatal("accepted a broad or invalid closure")
+		}
+	}
+}
+
+func TestTerminalGitChecksUseBoundProbe(t *testing.T) {
+	root := t.TempDir()
+	var queries []string
+	probe := func(args ...string) ([]byte, error) {
+		query := strings.Join(args, " ")
+		queries = append(queries, query)
+		switch query {
+		case "diff --cached --name-only -z", "ls-files -z -- deleted.go":
+			return []byte("deleted.go\x00"), nil
+		default:
+			t.Fatalf("unexpected preflight %s", query)
+			return nil, nil
+		}
+	}
+	if !safeStagedSet(root, probe) || len(queries) != 2 {
+		t.Fatal("staging checks did not use the bound sandbox probe")
+	}
+	for _, path := range []string{"../outside", ".env", "/etc/passwd", "."} {
+		if safeStagePath(root, path, probe) {
+			t.Fatal("unsafe staged path")
+		}
+	}
+	if len(queries) != 2 {
+		t.Fatal("unsafe path reached git")
+	}
+}
+
+func TestClaudeEnvironmentDoesNotInheritDaemonSettings(t *testing.T) {
+	for _, name := range []string{"AEON_DATABASE_URL", "AEON_TEST_DATABASE_URL", "AEON_RUNTIME_KEY", "DATABASE_URL", "ANTHROPIC_API_KEY", "NODE_OPTIONS", "DYLD_INSERT_LIBRARIES", "PATH", "HOME", "CLAUDE_CONFIG_DIR"} {
+		t.Setenv(name, "inherited-fixture-value")
+	}
+	values := claudeEnvironment("/fixture/account", "/fixture/node/bin/node", "/fixture/claude/bin/claude")
+	if len(values) != 5 {
+		t.Fatal("unexpected bridge environment surface")
+	}
+	for _, value := range values {
+		if strings.Contains(value, "inherited-fixture-value") {
+			t.Fatal("bridge inherited daemon environment")
+		}
 	}
 }

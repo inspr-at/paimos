@@ -111,3 +111,39 @@ func TestDelayedSignalRechecksAuthorizationUnderLifetimeLock(t *testing.T) {
 		})
 	}
 }
+
+func TestWaitGroupObserverFailureDoesNotSignal(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "read finish")
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	Configure(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	life := Track(cmd)
+	if err := life.Verify(); err != nil {
+		_ = in.Close()
+		_ = cmd.Wait()
+		t.Fatal(err)
+	}
+	observed := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- life.waitOwned(func(int) error { close(observed); return errors.New("injected observation failure") }, true)
+	}()
+	t.Cleanup(func() { _ = in.Close(); <-done })
+	<-observed
+	// Wait until the failed observer has revoked signaling under the mutex.
+	deadline := time.Now().Add(time.Second)
+	for life.Verify() == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if life.Signal(true) == nil {
+		t.Fatal("failed observer retained signal authority")
+	}
+	if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatal("failed group observation killed fixture")
+	}
+}

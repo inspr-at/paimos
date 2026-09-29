@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -287,11 +288,18 @@ func TestTerminalLifetimeCancellationDuringWait(t *testing.T) {
 					signalled.Store(force && err == nil)
 					return err
 				},
-				wait: func() error { close(waiting); return child.Wait() },
+				wait: func() error { return child.Wait() },
 			}
 			done := make(chan terminalResult, 1)
 			go func() {
-				out, err := collectTerminal(ctx, child.output, hooks)
+				reader := terminalReaderFunc(func(p []byte) (int, error) {
+					n, err := child.output.Read(p)
+					if err == io.EOF {
+						close(waiting)
+					}
+					return n, err
+				})
+				out, err := collectTerminal(ctx, reader, hooks)
 				done <- terminalResult{out, err}
 			}()
 			awaitTerminalEvent(t, waiting, "Wait after EOF")
@@ -304,6 +312,34 @@ func TestTerminalLifetimeCancellationDuringWait(t *testing.T) {
 			}
 			if timeout && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				t.Fatalf("expected deadline, got %v", ctx.Err())
+			}
+		})
+	}
+}
+
+func TestTerminalCompletionKillsBackgroundGroupMembers(t *testing.T) {
+	for _, inherit := range []bool{false, true} {
+		t.Run(map[bool]string{false: "closed_output", true: "inherited_output"}[inherit], func(t *testing.T) {
+			// The only descendants are our fixture shell and sleep. The shell exits
+			// immediately; without group cleanup its child creates a sentinel later.
+			root := t.TempDir()
+			sentinel := filepath.Join(root, "escaped-child")
+			redirect := " >/dev/null 2>&1"
+			if inherit {
+				redirect = ""
+			}
+			child := newTerminalChild(t, "(sleep 1; printf escaped > '"+sentinel+"')"+redirect+" &\nprintf ready\nexit 0")
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			out, err := collectTerminal(ctx, child.output, terminalGroupLifetime{child.lifetime})
+			// collectTerminal owns this reap; prevent fixture cleanup from reaping again.
+			child.waitOnce.Do(func() {})
+			if err != nil || out != "ready" {
+				t.Fatalf("terminal group completion: %q %v", out, err)
+			}
+			time.Sleep(1200 * time.Millisecond)
+			if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+				t.Fatal("background child outlived terminal completion")
 			}
 		})
 	}

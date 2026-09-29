@@ -123,6 +123,9 @@ func (m *Module) handleProjectMove(w http.ResponseWriter, r *http.Request) {
 func (m *Module) projectMove(ctx context.Context, p tenant.Principal, id, projectID string) (projectMoveResult, error) {
 	var result projectMoveResult
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := armPortalModeration(ctx, tx, p); err != nil {
+			return err
+		}
 		if err := lockTree(ctx, tx); err != nil {
 			return err
 		}

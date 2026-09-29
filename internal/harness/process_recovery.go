@@ -21,16 +21,33 @@ import (
 
 const ownershipWindow = 45 * time.Second
 
+// Ownership observations and freshness checks must share the database clock.
+// Even millisecond skew between Postgres and an API host can otherwise make a
+// just-accepted report appear future-dated. Read after acquiring the session
+// lock; a transaction-start timestamp can predate a heartbeat we waited for.
+func (m *Module) ownershipNow(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+	if m.ownershipClock != nil {
+		return m.ownershipClock(ctx, tx)
+	}
+	var now time.Time
+	err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+	return now, err
+}
+
 func validIdentity(value string) bool {
 	b, err := hex.DecodeString(value)
 	return err == nil && len(b) == 16
 }
-func reportOwnership(ctx context.Context, tx pgx.Tx, s Session, identity ownedprocess.Identity) error {
+func (m *Module) reportOwnership(ctx context.Context, tx pgx.Tx, s Session, identity ownedprocess.Identity) error {
 	daemon, err := cleanText(identity.DaemonID, 128, "daemon id")
 	if err != nil {
 		return err
 	}
-	if s.Management != "managed" || s.RunID == nil || daemon == "" || daemon != identity.DaemonID || !validIdentity(identity.Generation) || !validIdentity(identity.ProcessID) || identity.RootPID < 2 || identity.GroupID != identity.RootPID || identity.StartedAt.IsZero() || identity.StartedAt.After(time.Now().Add(time.Minute)) {
+	now, err := m.ownershipNow(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if s.Management != "managed" || s.RunID == nil || daemon == "" || daemon != identity.DaemonID || !validIdentity(identity.Generation) || !validIdentity(identity.ProcessID) || identity.RootPID < 2 || identity.GroupID != identity.RootPID || identity.StartedAt.IsZero() || identity.StartedAt.After(now.Add(time.Minute)) {
 		return workorders.Fail(400, "verified managed process identity required")
 	}
 	if s.ProcessOwnership != nil && *s.ProcessOwnership != identity {
@@ -40,7 +57,7 @@ func reportOwnership(ctx context.Context, tx pgx.Tx, s Session, identity ownedpr
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `UPDATE harness_sessions SET process_ownership=$2::jsonb,process_observed_at=clock_timestamp() WHERE id=$1`, s.ID, string(raw))
+	_, err = tx.Exec(ctx, `UPDATE harness_sessions SET process_ownership=$2::jsonb,process_observed_at=$3 WHERE id=$1`, s.ID, string(raw), now)
 	return err
 }
 func forceAvailable(s Session, now time.Time) bool {
@@ -96,7 +113,11 @@ func (m *Module) forceStop(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	if !forceAvailable(s, time.Now()) {
+	now, err := m.ownershipNow(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if !forceAvailable(s, now) {
 		return nil, workorders.Fail(409, "live owned process unavailable; no termination was requested")
 	}
 	if in.ExpectedRevision != recoveryRevision(s) || in.Confirmation != forceConfirmation(s) {

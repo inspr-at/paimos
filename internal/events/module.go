@@ -88,7 +88,7 @@ func failure(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound), errors.Is(err, pgx.ErrNoRows):
 		writeError(w, 404, "not_found", "event or resource not found")
-	case errors.Is(err, ErrForbidden):
+	case errors.Is(err, ErrForbidden), PortalCatalogDenied(err):
 		writeError(w, 403, "forbidden", "undo is not permitted")
 	case errors.Is(err, ErrConflict):
 		writeError(w, 409, "conflict", ErrConflict.Error())

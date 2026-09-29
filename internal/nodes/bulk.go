@@ -283,6 +283,9 @@ type bulkTarget struct {
 func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPlan) (bulkResult, error) {
 	result := bulkResult{Items: []nodeJSON{}, Unchanged: []string{}, Skipped: []bulkSkip{}}
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := armPortalModeration(ctx, tx, p); err != nil {
+			return err
+		}
 		if plan.parentID != nil {
 			if err := lockTree(ctx, tx); err != nil {
 				return err
@@ -540,6 +543,9 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 	if err := lockTree(ctx, tx); err != nil {
 		return events.Change{}, err
 	}
+	if err := armPortalModeration(ctx, tx, p); err != nil {
+		return events.Change{}, err
+	}
 	ids := make([]string, len(after.Items))
 	for i, item := range after.Items {
 		if before.Items[i].ID != item.ID {
@@ -600,7 +606,7 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 			 updated_at=greatest(clock_timestamp(), updated_at + interval '1 microsecond')
 			 WHERE id=$1::uuid RETURNING `+nodeReturning, now.ID, old.State, string(old.Fields)))
 			if err != nil {
-				return events.Change{}, events.ErrConflict
+				return events.Change{}, undoWriteErr(err)
 			}
 			if _, err := events.Append(ctx, tx, p, events.Change{NodeID: &latest.ID, Type: evNodeUpdated, Before: now, After: latest}); err != nil {
 				return events.Change{}, err
@@ -616,7 +622,7 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 			 updated_at=greatest(clock_timestamp(), date_trunc('second', updated_at) + interval '1 second')
 			 WHERE id=$3::uuid RETURNING `+nodeReturning, old.ParentID, old.Position, now.ID))
 			if err != nil {
-				return events.Change{}, events.ErrConflict
+				return events.Change{}, undoWriteErr(err)
 			}
 			if _, err := events.Append(ctx, tx, p, events.Change{NodeID: &moved.ID, Type: evNodeMoved, Before: latest, After: moved}); err != nil {
 				return events.Change{}, err

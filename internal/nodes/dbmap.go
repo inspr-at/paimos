@@ -5,12 +5,18 @@ package nodes
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/inspr-at/paimos/internal/events"
 )
 
 func mapDB(err error) *httpError {
+	if events.PortalCatalogDenied(err) {
+		return &httpError{status: http.StatusForbidden, msg: "permission denied"}
+	}
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
 		return nil

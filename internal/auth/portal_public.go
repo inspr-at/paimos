@@ -9,17 +9,19 @@ import (
 )
 
 // Catalog reads accept HEAD because net/http serves HEAD for a registered GET.
-// Votes are POST only; HEAD on that route stays authenticated.
+// Wishes, votes and corrections are POST only; other methods stay authenticated.
 const (
-	portalCatalogPattern = "GET /api/public/portal/{tenantSlug}"
-	portalVotePattern    = "POST /api/public/portal/{tenantSlug}/wishes/{wishKey}/votes"
+	portalCatalogPattern    = "GET /api/public/portal/{tenantSlug}"
+	portalWishPattern       = "POST /api/public/portal/{tenantSlug}/wishes"
+	portalVotePattern       = "POST /api/public/portal/{tenantSlug}/wishes/{wishKey}/votes"
+	portalCorrectionPattern = "POST /api/public/portal/{tenantSlug}/corrections"
 )
 
 // Slug and wish key match the portal handlers. Anything else keeps the auth gate,
 // including extra segments, trailing slashes, encoded slashes and dot segments.
 var (
-	portalSlugPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
-	portalWishPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$`)
+	portalSlugPattern    = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
+	portalWishKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$`)
 )
 
 func publicPortalRequest(r *http.Request) bool {
@@ -32,8 +34,12 @@ func publicPortalRequest(r *http.Request) bool {
 		return true
 	case portalCatalogPattern:
 		return kind == "read"
+	case portalWishPattern:
+		return kind == "wish"
 	case portalVotePattern:
 		return kind == "vote"
+	case portalCorrectionPattern:
+		return kind == "correction"
 	default:
 		return false
 	}
@@ -57,7 +63,19 @@ func portalPublicKind(r *http.Request) string {
 		}
 		return ""
 	}
-	if len(parts) == 8 && parts[1] == "api" && parts[2] == "public" && parts[3] == "portal" && parts[5] == "wishes" && parts[7] == "votes" && portalSlugPattern.MatchString(parts[4]) && len(parts[6]) <= 30 && portalWishPattern.MatchString(parts[6]) {
+	if len(parts) == 6 && parts[1] == "api" && parts[2] == "public" && parts[3] == "portal" && parts[5] == "wishes" && portalSlugPattern.MatchString(parts[4]) {
+		if r.Method == http.MethodPost {
+			return "wish"
+		}
+		return ""
+	}
+	if len(parts) == 6 && parts[1] == "api" && parts[2] == "public" && parts[3] == "portal" && parts[5] == "corrections" && portalSlugPattern.MatchString(parts[4]) {
+		if r.Method == http.MethodPost {
+			return "correction"
+		}
+		return ""
+	}
+	if len(parts) == 8 && parts[1] == "api" && parts[2] == "public" && parts[3] == "portal" && parts[5] == "wishes" && parts[7] == "votes" && portalSlugPattern.MatchString(parts[4]) && len(parts[6]) <= 30 && portalWishKeyPattern.MatchString(parts[6]) {
 		if r.Method == http.MethodPost {
 			return "vote"
 		}

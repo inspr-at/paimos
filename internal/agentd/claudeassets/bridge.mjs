@@ -3,8 +3,8 @@
 // Lifecycle events are content-free. The explicit native_message frame carries
 // bounded send arguments transiently to the owner; it is never journaled.
 import { randomUUID } from "node:crypto";
-import { lstatSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { realpathSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
@@ -15,46 +15,16 @@ const MAX_STEER_BYTES = 64 * 1024;
 const MAX_PENDING_STEERS = 256;
 const CORRELATION_TTL_MS = 60 * 1000;
 const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
-const DEFAULT_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write"];
+// Built-in file tools reopen paths after hooks and cannot enforce descriptor
+// ownership. All file access goes through the run-bound daemon MCP proxy.
 const AEON_TOOLS = ["aeon_comment", "aeon_status", "aeon_check_criterion", "aeon_evidence",
-  "aeon_request_approval", "aeon_reply", "aeon_terminal"];
+  "aeon_request_approval", "aeon_reply", "aeon_terminal", "aeon_read", "aeon_write",
+  "aeon_edit", "aeon_glob", "aeon_grep"];
 
-function editPathWithinWorkspace(filePath, root) {
-  if (typeof filePath !== "string" || filePath.length === 0 || filePath.includes("\0")) return false;
-  const target = resolve(root, filePath);
-  try {
-    // Resolve the target or its nearest existing parent. This rejects links
-    // from the workspace to another repo or a protected home directory.
-    let existing = target;
-    const suffix = [];
-    while (true) {
-      try {
-        existing = resolve(realpathSync(existing), ...suffix.reverse());
-        break;
-      } catch (error) {
-        if (error.code !== "ENOENT") return false;
-        try { if (lstatSync(existing).isSymbolicLink()) return false; } catch (statError) {
-          if (statError.code !== "ENOENT") return false;
-        }
-        const parent = dirname(existing);
-        if (parent === existing) return false;
-        suffix.push(existing.slice(parent.length + (parent === sep ? 0 : 1)));
-        existing = parent;
-      }
-    }
-    const rel = relative(root, existing);
-    return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-  } catch {
-    return false;
-  }
-}
-
-function workspaceEditHook(root) {
-  return async (input) => {
-    if (input?.tool_name !== "Edit" && input?.tool_name !== "Write") return {};
-    if (editPathWithinWorkspace(input.tool_input?.file_path, root)) return {};
-    return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny",
-      permissionDecisionReason: "Edit and Write paths must stay inside the run workspace" } };
+function managedToolHook(allowedTools) {
+  return async (input) => allowedTools.includes(input?.tool_name) ? {} : {
+    hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny",
+      permissionDecisionReason: "Only run-bound daemon tools are available" }
   };
 }
 
@@ -208,7 +178,10 @@ try {
   fail();
   process.exit(1);
 }
-if (start?.op !== "start" || typeof start.prompt !== "string" || start.prompt.length === 0 ||
+if ((start?.rules !== undefined && (typeof start.rules !== "string" || Buffer.byteLength(start.rules) > 12000)) ||
+    (start?.max_turns !== undefined && (!Number.isSafeInteger(start.max_turns) || start.max_turns < 0)) ||
+    (start?.max_tokens !== undefined && (!Number.isSafeInteger(start.max_tokens) || start.max_tokens < 0)) ||
+    start?.op !== "start" || typeof start.prompt !== "string" || start.prompt.length === 0 ||
     Buffer.byteLength(start.prompt) > MAX_PROMPT_BYTES || start.prompt.includes("\0") ||
     ((start.model !== undefined || start.effort !== undefined) &&
      (!validDispatchValue(start.model) || !["low", "medium", "high", "xhigh", "max"].includes(start.effort))) ||
@@ -227,6 +200,7 @@ let sessionID = "";
 let effectiveModel = "";
 let modelEvidenceStatus = "";
 let initialTurnStarted = false;
+let completedTurns = 0;
 let turnActive = false;
 let interruptReceipt = false;
 const correlations = new Map();
@@ -276,27 +250,26 @@ function observeTool(message) {
       message.event?.content_block?.type === "tool_use") emit({ kind: "tool_started" });
 }
 
-function safeTokens(value) {
-  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
-}
-
 function observeUsage(message) {
-  if (message?.type !== "result") return;
-  // modelUsage includes subagents and sidechains; result.usage covers only the
-  // main loop. Both modelUsage and total_cost_usd are cumulative for Query.
-  if (!message.modelUsage || typeof message.modelUsage !== "object") return;
-  let input = 0;
-  let output = 0;
+  // modelUsage includes subagents and sidechains and is cumulative for Query.
+  // Missing, malformed or overflowing usage cannot prove remaining budget.
+  if (!message.modelUsage || typeof message.modelUsage !== "object" ||
+      Array.isArray(message.modelUsage) || Object.keys(message.modelUsage).length === 0) return null;
+  let input = 0, output = 0;
   for (const usage of Object.values(message.modelUsage)) {
-    input += safeTokens(usage?.inputTokens) + safeTokens(usage?.cacheCreationInputTokens) +
-      safeTokens(usage?.cacheReadInputTokens);
-    output += safeTokens(usage?.outputTokens);
+    if (!usage || typeof usage !== "object") return null;
+    const values = [usage.inputTokens, usage.outputTokens,
+      usage.cacheCreationInputTokens ?? 0, usage.cacheReadInputTokens ?? 0];
+    if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) return null;
+    input += values[0] + values[2] + values[3];
+    output += values[1];
   }
+  if (!Number.isSafeInteger(input + output)) return null;
   const frame = { kind: "usage", input_tokens_total: input, output_tokens_total: output };
   if (typeof message.total_cost_usd === "number" && Number.isFinite(message.total_cost_usd) &&
       message.total_cost_usd >= 0) frame.cost_usd_total = message.total_cost_usd;
-  if (Number.isSafeInteger(input) && Number.isSafeInteger(output) &&
-      (input > 0 || output > 0 || frame.cost_usd_total !== undefined)) emit(frame);
+  emit(frame);
+  return input + output;
 }
 
 try {
@@ -314,7 +287,7 @@ try {
   }
   const mcpServers = toolBinding ? { aeon: { type: "http", url: toolBinding.url,
     headers: { Authorization: `Bearer ${toolBinding.token}` } } } : {};
-  const allowedTools = verification ? [] : toolBinding ? [...DEFAULT_TOOLS, ...AEON_TOOLS.map((name) => `mcp__aeon__${name}`)] : DEFAULT_TOOLS;
+  const allowedTools = !verification && toolBinding ? AEON_TOOLS.map((name) => `mcp__aeon__${name}`) : [];
   start.tools = undefined;
   input = new InputStream(userMessage(start.prompt));
   start.prompt = "";
@@ -329,11 +302,12 @@ try {
     includePartialMessages: true,
     permissionMode: "dontAsk",
     additionalDirectories: [],
-    hooks: verification ? { PreToolUse: [{ matcher: ".*", hooks: [async () => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "Verification has no tools" } })] }] } : { PreToolUse: [{ matcher: "Edit|Write", hooks: [workspaceEditHook(physicalWorkspace)] }] },
+    hooks: { PreToolUse: [{ matcher: ".*", hooks: [managedToolHook(allowedTools)] }] },
     allowedTools,
-    tools: verification ? [] : DEFAULT_TOOLS,
+    tools: [],
     ...(verification ? { maxTurns: 1, canUseTool: async () => ({ behavior: "deny", message: "Verification has no tools" }) } : {}),
-    systemPrompt: { type: "preset", preset: "claude_code" },
+    systemPrompt: { type: "preset", preset: "claude_code", ...(start.rules ? { append: start.rules } : {}) },
+    ...(!verification && Number.isSafeInteger(start.max_turns) && start.max_turns > 0 ? { maxTurns: start.max_turns } : {}),
     ...(start.model ? { model: start.model, effort: start.effort } : {})
   };
   queryHandle = query({
@@ -525,7 +499,18 @@ try {
     observeTool(message);
     if (message?.type === "result") {
       turnActive = false;
-      observeUsage(message);
+      const tokens = observeUsage(message);
+      completedTurns++;
+      const reason = start.max_tokens > 0 && (tokens === null || tokens >= start.max_tokens) ? "token_budget_exhausted"
+        : message.subtype === "error_max_turns" || (start.max_turns > 0 && completedTurns >= start.max_turns) ? "turn_budget_exhausted" : "";
+      if (reason && start.purpose !== "pairing_verification") {
+        // Enforce inside the Query owner too: remote telemetry cannot delay close.
+        emit({ kind: "budget_exhausted", reason });
+        stopping = true;
+        controlInput.close(); input.close(); queryHandle.close();
+        emit({ kind: "turn_completed" });
+        break;
+      }
       emit({ kind: "turn_completed" });
       if (start.purpose === "pairing_verification") {
         verificationSucceeded = message.subtype === "success" && message.is_error !== true;
