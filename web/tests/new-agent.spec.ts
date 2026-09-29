@@ -109,7 +109,7 @@ for (const who of ['member', 'viewer', 'agent'] as const) test(`empty agents hin
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/settings/access/agents')
   await expect(page.locator('.agents-tab')).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Connect a computer (the agent daemon, no key to handle)' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Connect your machine (the agent daemon, no key to handle)' })).toBeVisible()
   await expect(page.locator('.agents-tab')).not.toContainText('New agent (a key for a CLI or script)')
   await expect(page.getByRole('button', { name: 'New agent', exact: true })).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
