@@ -18,7 +18,7 @@ func TestNextStartUsesOwnerClockAcrossDST(t *testing.T) {
 			t.Fatal("work bands disagree")
 		}
 	}
-	s.Week = [7]Day{}
+	s.Week = make([]Day, 7)
 	if next := s.NextStart(time.Now(), false); next != nil {
 		t.Fatalf("disabled week: %v", next)
 	}
