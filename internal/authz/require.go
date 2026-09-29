@@ -123,7 +123,7 @@ func permitEffective(p tenant.Principal, permission string, effective Effective,
 	if !allowed {
 		return ErrForbidden
 	}
-	if p.Kind == tenant.Agent && !containsScope(p.Scopes, permission) {
+	if p.Kind == tenant.Agent && !containsScope(p.Scopes, permission) && !CoordinatorCeiling(p.Scopes, permission) {
 		return ErrForbidden
 	}
 	return nil
@@ -171,29 +171,40 @@ func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string
 	if err != nil {
 		return Effective{}, err
 	}
-	result := Effective{Workspace: Grant{Role: g.workspaceRole, Permissions: unique(g.workspace)}}
-	if projectID != "" {
-		result.Project = &ProjectGrant{ID: projectID, Permissions: []string{}}
-		if grant, ok := g.projects[projectID]; ok {
-			result.Project.Role = grant.Role
-			result.Project.Permissions = grant.Permissions
-		}
-		result.Project.Permissions = unique(append(result.Project.Permissions, result.Workspace.Permissions...))
-	}
-	result.anyProject = unique(append(g.anyProject, result.Workspace.Permissions...))
+	result := effectiveGrants(g, projectID)
+	var creator *grants
 	if p.Kind == tenant.Agent && p.KeyCreatorID != "" {
-		creator := tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person}
-		ceiling, err := loadTx(ctx, tx, creator, projectID)
+		c, err := readGrants(ctx, tx, tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person})
 		if err != nil {
 			return Effective{}, err
 		}
+		creator = &c
+		ceiling := effectiveGrants(c, projectID)
 		result.Workspace.Permissions = intersect(result.Workspace.Permissions, ceiling.Workspace.Permissions)
 		if result.Project != nil && ceiling.Project != nil {
 			result.Project.Permissions = intersect(result.Project.Permissions, ceiling.Project.Permissions)
 		}
 		result.anyProject = intersect(result.anyProject, ceiling.anyProject)
 	}
+	// Derived reads must use the same project in both sets of live grants.
+	applyCoordinatorReads(&result, p, g, creator)
 	return result, nil
+}
+
+func effectiveGrants(g grants, projectID string) Effective {
+	// Keep raw grants immutable: appending/sorting derived permissions must
+	// not change the live binding evidence used by coordinator checks.
+	result := Effective{Workspace: Grant{Role: g.workspaceRole, Permissions: unique(append([]string{}, g.workspace...))}}
+	if projectID != "" {
+		result.Project = &ProjectGrant{ID: projectID, Permissions: []string{}}
+		if grant, ok := g.projects[projectID]; ok {
+			result.Project.Role = grant.Role
+			result.Project.Permissions = append([]string{}, grant.Permissions...)
+		}
+		result.Project.Permissions = unique(append(result.Project.Permissions, result.Workspace.Permissions...))
+	}
+	result.anyProject = unique(append(append([]string{}, g.anyProject...), result.Workspace.Permissions...))
+	return result
 }
 
 // grants is one read of a principal's bindings: the workspace binding's
@@ -306,13 +317,16 @@ func ProjectsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (ProjectChec
 		creator = &c
 	}
 	return func(permission, projectID string) bool {
-		if _, ok := Lookup(permission); !ok || !own.allows(permission, projectID) {
+		if _, ok := Lookup(permission); !ok {
+			return false
+		}
+		if !own.allows(permission, projectID) && !coordinatorAllows(p, own, creator, permission, projectID) {
 			return false
 		}
 		if creator != nil && !creator.allows(permission, projectID) {
 			return false
 		}
-		return p.Kind != tenant.Agent || containsScope(p.Scopes, permission)
+		return p.Kind != tenant.Agent || containsScope(p.Scopes, permission) || CoordinatorCeiling(p.Scopes, permission)
 	}, nil
 }
 

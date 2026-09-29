@@ -322,6 +322,11 @@ func writeFailure(w http.ResponseWriter, err error) {
 func actorOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal) (string, error) {
 	id := p.ID
 	if p.Kind == tenant.Agent {
+		// Rule scopes and merged contexts require a human owner. Operator
+		// keys have none; never substitute an arbitrary person or service actor.
+		if p.KeyCreatorID == "" {
+			return "", fail(403, "rules_owner_required", "rules access requires an agent key created by a signed-in person; operator-created keys have no human rule owner")
+		}
 		id = p.KeyCreatorID
 	}
 	if !workorders.UUID(id) {
