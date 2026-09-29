@@ -137,7 +137,9 @@ export function liveAgent(fields: Partial<LiveAgentMock> & Pick<LiveAgentMock, '
 }
 export interface Call { path: string; method: string; query: URLSearchParams; body: unknown; headers: Record<string, string> }
 
-function item(node: MockNode, data: Fixtures) {
+// hideLead: the caller cannot read harness sessions, so the server sends no
+// lead_worker (AEON-316 gates it on the same visibility as the live read).
+function item(node: MockNode, data: Fixtures, hideLead = false) {
   const kindIds: Record<string, string> = { epic: 'k-epic', ticket: 'k-ticket', task: 'k-task', project: 'k-project' }
   const parent = node.parent_id ? data.nodes.find(n => n.id === node.parent_id) : undefined
   const project = data.projects.find(p => p.id === node.project)!
@@ -145,7 +147,7 @@ function item(node: MockNode, data: Fixtures) {
   // the payload reads like an older server's.
   const person = typeof node.fields.assignee === 'string' ? data.people.find(p => p.id === node.fields.assignee) : undefined
   const assignee = person ? { id: person.id, name: person.name, ...(person.has_avatar === undefined ? {} : { has_avatar: person.has_avatar }) } : null
-  const lead = leadOf(data, node)
+  const lead = hideLead ? undefined : leadOf(data, node)
   return {
     id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
@@ -546,7 +548,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       }
       const limit = Number(query.get('limit') ?? 50), offset = Number((query.get('cursor') ?? 'o:0').slice(2))
       const pageRows = rows.slice(offset, offset + limit)
-      return route.fulfill({ json: { items: pageRows.map(n => item(n, data)), next_cursor: offset + limit < rows.length ? `o:${offset + limit}` : null, ...(Object.keys(facets).length ? { facets } : {}) } })
+      return route.fulfill({ json: { items: pageRows.map(n => item(n, data, options.liveStatus === 403)), next_cursor: offset + limit < rows.length ? `o:${offset + limit}` : null, ...(Object.keys(facets).length ? { facets } : {}) } })
     }
     const agentWorkPath = /^\/api\/nodes\/([^/]+)\/agent-work$/.exec(path)
     if (agentWorkPath && method === 'GET') {

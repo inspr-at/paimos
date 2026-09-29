@@ -41,7 +41,7 @@ test('row overflow removes a live session; History preserves it and survives ref
   const before = await summary.innerText()
   // A live row carries no bin; the live line carries no removal.
   await expect(row(page, selected.id).getByRole('button', { name: /^Remove / })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0)
+  await expect(summary.getByRole('button', { name: /^Remove / })).toHaveCount(0)
   await removeFromRow(page, selected.id)
   // Its heartbeat is fresh, so the process consequence is true and said.
   await expect(confirm(page)).toContainText('Its process keeps running; only the record leaves Agents.')

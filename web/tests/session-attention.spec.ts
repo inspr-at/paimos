@@ -37,11 +37,12 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     await expect(panel.locator('.now-step')).toHaveText('Implementing the assigned change')
     await expect(panel.locator('.head-top .agent-state-label')).toHaveText('Working')
     const inbox = panel.getByRole('region', { name: 'Inbox attention' })
-    // One quiet line inside the Messages tab, not a block at the top of Now.
+    // AEON-313: shared-inbox obligations stay outside the session thread, in
+    // Messages as well as in Now.
     await panel.getByRole('tab', { name: /Messages/ }).click()
-    await expect(inbox).toContainText('Shared inbox')
-    await expect(inbox).toContainText('waiting for another agent')
-    await expect(panel.getByRole('tabpanel', { name: /Messages/ }).getByRole('region', { name: 'Inbox attention' })).toBeVisible()
+    await expect(panel.getByRole('tabpanel', { name: /Messages/ }).getByRole('region', { name: 'Conversation' })).toBeVisible()
+    await expect(inbox).toHaveCount(0)
+    await expect(panel).not.toContainText('Shared inbox')
     await expect(panel.locator('.now-block')).not.toContainText('Shared inbox')
     await expect(panel.locator('.callout')).toHaveCount(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)

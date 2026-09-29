@@ -7,6 +7,14 @@ import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
 
+// AEON-309: the CalVer3 renderer names a version by its canonical value and UTC
+// time; an interactive one adds its copy action.
+function versionLabel(version: string, copy = true): string {
+  const m = /^(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)\.0\.0$/.exec(version)
+  if (!m) throw new Error(`not a calendar version: ${version}`)
+  return `${version} · 20${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]} UTC${copy ? ' — Copy version' : ''}`
+}
+
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const options = (page: Page) => page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
 const pill = (page: Page) => page.getByRole('button', { name: /^Release history, version / })
@@ -272,7 +280,7 @@ test('a newer version on the server: a toast offers what is new and a reload', a
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   const update = sheet(page).getByRole('status').filter({ hasText: 'this page still runs' })
   await expect(update).toBeVisible()
-  await expect(update.locator('.calendar-version').first()).toHaveAttribute('aria-label', history.releases[1].version)
+  await expect(update.locator('.calendar-version').first()).toHaveAttribute('aria-label', versionLabel(history.releases[1].version))
   await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
 })
 
