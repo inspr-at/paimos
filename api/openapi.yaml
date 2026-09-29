@@ -2167,7 +2167,7 @@ paths:
     get:
       operationId: listNodeActivity
       summary: Merged comment and visible field-change timeline
-      description: Reverse chronological by (at, event ID). The opaque cursor binds tenant, node and event watermark. Imported snapshots with no visible changes are omitted; the first snapshot is a baseline. Comments retain their creation position after edits; deleted comments are omitted. Imported comments are read-only.
+      description: Reverse chronological by (at, event ID). The opaque cursor binds tenant, node and event watermark. Imported snapshots with no visible changes are omitted; the first snapshot is a baseline. Comments retain their creation position after edits; deleted comments are omitted. Imported comments are read-only. Native updates also show a labels change (field tags).
       security: *auth
       parameters:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
@@ -10733,6 +10733,9 @@ components:
             id: {type: [string, 'null'], format: uuid, description: Null if no imported principal mapping exists}
             name: {type: string}
             has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}
+            automatic: {type: boolean, description: 'True when the tenant System principal wrote the event. Clients show that actor as the product short name followed by (automatic). Omitted for people and ordinary agents, including a person named System.'}
+            job: {type: string, description: 'Background job recorded on the event, when one was.'}
+            reason: {type: string, description: 'Why that job wrote the event, when a reason was recorded.'}
         body_markdown: {type: string, description: Present for comments only}
         changes:
           type: array
@@ -10741,7 +10744,7 @@ components:
             type: object
             required: [field, from, to]
             properties:
-              field: {type: string, enum: [status, priority, assignee, title, parent]}
+              field: {type: string, description: "tags is the native label list, names in stored order joined by a comma and a space.", enum: [status, priority, assignee, title, parent, tags]}
               from: {type: [string, 'null']}
               to: {type: [string, 'null']}
     Attachment:
