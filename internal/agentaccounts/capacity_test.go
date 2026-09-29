@@ -507,3 +507,51 @@ func TestExpiredCapacityGetsOneProvisionalRefresh(t *testing.T) {
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{reading}}), 204, nil)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", body, 200, nil)
 }
+
+func TestCapacityPreviewPacesDraftWithoutSaving(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "preview", "person", "Ada", []string{"admin"})
+	runner := addPrincipal(t, admin.TenantID, "agent", "runner", nil)
+	token := issueKey(t, runner, []string{"account.manage", "account.probe"})
+	mod := accountsMod()
+	var a Account
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Codex"}`, 201, &a)
+	now := time.Now().UTC()
+	r := capacity.Reading{WindowKind: "weekly", WindowMinutes: 7 * 24 * 60, UsedPercent: 40, ResetsAt: now.Add(72 * time.Hour), ReadAt: now.Add(-time.Minute), Source: "harness"}
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{r}}), 204, nil)
+	saved := capacity.DefaultSchedule("Europe/Vienna")
+	saved.Week = capacity.Preset(3)
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"user", "", "", &saved}), 204, nil)
+	hold := saved
+	hold.Override = "hold"
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", &hold}), 204, nil)
+
+	draft := capacity.DefaultSchedule("Europe/Vienna")
+	for i := range draft.Week {
+		draft.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	var out []accountCapacity
+	callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/capacity/preview", encoded(t, map[string]any{"schedule": draft}), 200, &out)
+	if len(out) != 1 || workDays(out[0].Schedule) != 7 || out[0].Schedule.Override != "hold" || len(out[0].Windows) != 1 {
+		t.Fatal("preview must pace the draft and keep the active override", out)
+	}
+	// Hold keeps today's budget at what was already used, whatever the draft says.
+	if p := out[0].Windows[0].Pacing; p.SuggestedTodayPercent != 0 {
+		t.Fatal("hold ignored in preview", p)
+	}
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", nil}), 204, nil)
+	callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/capacity/preview", encoded(t, map[string]any{"schedule": draft}), 200, &out)
+	if p := out[0].Windows[0].Pacing; p.UsableHours <= 0 || p.BudgetPercent <= 0 {
+		t.Fatal("preview did not pace a round-the-clock draft", p)
+	}
+	var current []accountCapacity
+	callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/capacity", "", 200, &current)
+	if len(current) != 1 || workDays(current[0].Schedule) != 3 {
+		t.Fatal("preview changed the saved schedule", current)
+	}
+	bad := draft
+	bad.Week = capacity.Preset(0)
+	callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/capacity/preview", encoded(t, map[string]any{"schedule": bad}), 400, nil)
+	callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/capacity/preview", `{"schedule":null}`, 400, nil)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/capacity/preview", encoded(t, map[string]any{"schedule": draft}), 403, nil)
+}

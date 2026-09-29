@@ -241,6 +241,33 @@ type accountCapacity struct {
 }
 
 func (m *Module) capacityList(w http.ResponseWriter, r *http.Request) {
+	m.writeCapacity(w, r, nil)
+}
+
+// capacityPreview answers "today with these settings": the same projection as
+// capacityList, paced with a draft schedule in place of each account's saved
+// schedule. Active Sprint/Hold overrides are kept, nothing is stored, and the
+// client never re-implements the pacing formula for its live preview.
+func (m *Module) capacityPreview(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Schedule *capacity.Schedule `json:"schedule"`
+	}
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if in.Schedule == nil {
+		writeErr(w, fail(400, "schedule is required"))
+		return
+	}
+	if err := in.Schedule.Validate(); err != nil {
+		writeErr(w, fail(400, err.Error()))
+		return
+	}
+	m.writeCapacity(w, r, in.Schedule)
+}
+
+func (m *Module) writeCapacity(w http.ResponseWriter, r *http.Request, draft *capacity.Schedule) {
 	p, ok := principal(w, r)
 	if !ok {
 		return
@@ -263,6 +290,11 @@ func (m *Module) capacityList(w http.ResponseWriter, r *http.Request) {
 			s, err := effectiveSchedule(r.Context(), tx, p.ID, a)
 			if err != nil {
 				return err
+			}
+			if draft != nil {
+				d := *draft
+				d.Override, d.OverrideUntil = s.Override, s.OverrideUntil
+				s = d
 			}
 			item := accountCapacity{AccountID: a.ID, Schedule: s, Windows: []capacityWindow{}}
 			if err := tx.QueryRow(r.Context(), `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected'))`, a.ID).Scan(&item.OngoingUseApproved); err != nil {

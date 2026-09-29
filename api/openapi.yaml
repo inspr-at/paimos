@@ -3434,6 +3434,25 @@ paths:
       responses:
         '200': {description: Readings, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CapacityReading'}}}}}
         '403': {description: Scope or pairing ownership mismatch}
+  /agent-accounts/capacity/preview:
+    post:
+      operationId: previewAccountCapacity
+      summary: Capacity paced with a draft schedule, without saving it
+      description: Person account.read permission. Returns the same projection as listAccountCapacity, with the draft replacing each account's saved schedule while keeping any active Sprint or Hold override. Nothing is stored. Used by the schedule editors' live preview so clients never re-implement pacing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schedule]
+              properties:
+                schedule: {$ref: '#/components/schemas/CapacitySchedule'}
+      responses:
+        '200': {description: Capacity, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountCapacity'}}}}}
+        '400': {description: Invalid schedule}
+        '403': {description: Person account.read permission required}
   /agent-accounts/capacity/schedule:
     get:
       operationId: listCapacitySchedules
