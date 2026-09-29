@@ -128,6 +128,22 @@ func (w *batchWorld) publish(p tenant.Principal, s Set, version string) {
 	w.t.Helper()
 	w.call(p, "POST", "/api/rules/sets/"+s.ID+"/publish", map[string]any{"expected_revision": s.Revision, "version": version}, 200)
 }
+// publishUnchecked writes a version without the budget check that every
+// publication route runs, to seed a file that is already oversized.
+func (w *batchWorld) publishUnchecked(p tenant.Principal, s Set, version string) {
+	w.t.Helper()
+	ctx := w.t.Context()
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), w.d.App, w.tid, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.rules_access','on',true),set_config('aeon.rules_owner',$1,true),set_config('aeon.rules_projects',$2,true),set_config('aeon.visible_projects','*',true),set_config('aeon.rules_write','on',true)`, p.ID, "{"+w.project+"}"); err != nil {
+			return err
+		}
+		_, err := publishSet(ctx, tx, p, s, s.Revision, version, "")
+		return err
+	})
+	if err != nil {
+		w.t.Fatal(err)
+	}
+}
 func (w *batchWorld) events(where string, args ...any) int {
 	w.t.Helper()
 	var n int
@@ -501,9 +517,10 @@ func TestBatchBudgetKeepsOtherOwnersPrivate(t *testing.T) {
 	w.publish(colleague, w.set(colleague, theirs, "Helper", bulky("agent", 2)...), "260928090005.0.0")
 	w.refusedHidden(admin, "another owner's agent", w.set(admin, company, "Three", bulky("companya", 6)...))
 
-	// Unrelated: the colleague's own file is oversized already (single publish
-	// does not check the budget), yet the admin's person rules do not touch it.
-	w.publish(colleague, w.set(colleague, private, "More", bulky("more", 8)...), "260928090006.0.0")
+	// Unrelated: the colleague's own file is oversized already (seeded past the
+	// budget check, like data from before it), yet the admin's person rules do
+	// not touch it.
+	w.publishUnchecked(colleague, w.set(colleague, private, "More", bulky("more", 8)...), "260928090006.0.0")
 	own := w.layer(admin, Scope{Layer: "person", OwnerID: admin.ID})
 	w.call(admin, "POST", "/api/rules/publish", batch("", item(w.set(admin, own, "Pacing", testRule("pacing", "One step at a time.")), "auto")), 200)
 	// A company rule touches everyone's file, so it is refused, generically.
