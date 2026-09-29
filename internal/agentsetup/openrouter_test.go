@@ -85,10 +85,15 @@ func TestOpenRouterKeyFileNeverExecutesAndRejectsUnsafePaths(t *testing.T) {
 }
 
 func TestOpenRouterModelConfigPreservesLocalEdits(t *testing.T) {
-	home := physicalTemp(t)
-	if err := os.WriteFile(filepath.Join(home, "aeon-openrouter-profile"), []byte("aeon.openrouter.v1"), 0600); err != nil {
+	home := filepath.Join(physicalTemp(t), "pi-profile")
+	store, err := OpenStore(home, true)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if err := store.Write("aeon-openrouter-profile", []byte("aeon.openrouter.v1"), true); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
 	path := filepath.Join(home, "models.json")
 	if err := ConfigureOpenRouterModel(home, "vendor/model"); err != nil {
 		t.Fatal(err)
