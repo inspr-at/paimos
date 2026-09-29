@@ -188,10 +188,13 @@ let touchY: number | undefined
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 const markerPending = () => holdingMarker() || awaitingServerPlacement
 const upwardKey = (key: string) => key === 'ArrowUp' || key === 'PageUp' || key === 'Home'
+// A thread that already fits has scrollTop 0 and produces no scroll event, so
+// nothing would pin it again. An upward gesture unpins only when it can scroll.
+const canScrollUp = () => (scroller.value?.scrollTop ?? 0) > 0
 // Input runs before the browser queues scroll. Remember the reader so a marker
 // resolved in that gap cannot reclaim the position. Clear the pinned bottom
-// only for an upward scroll, or for a real scroll while that marker is still
-// pending. A tap or click never unpins.
+// only for an upward gesture that can scroll, or for a real scroll while that
+// marker is still pending. A tap or click never unpins.
 function claimReader() {
   if (!props.active || !entered) return false
   userMoved = true
@@ -201,7 +204,7 @@ function claimReader() {
 function onWheel(event: WheelEvent) {
   const pending = markerPending()
   if (!claimReader()) return
-  if (event.deltaY < 0 || pending) stick = false
+  if ((event.deltaY < 0 && canScrollUp()) || pending) stick = false
 }
 function onPointerDown() {
   claimReader()
@@ -214,8 +217,9 @@ function onTouchStart(event: TouchEvent) {
 function onTouchMove(event: TouchEvent) {
   const point = event.touches?.[0] ?? event.changedTouches?.[0]
   if (!point || touchY === undefined || point.clientY <= touchY + 8) return
+  const pending = markerPending()
   if (!claimReader()) return
-  stick = false
+  if (canScrollUp() || pending) stick = false
 }
 function onTouchEnd() {
   touchY = undefined
@@ -227,7 +231,7 @@ function onScrollKey(event: KeyboardEvent) {
   if (target instanceof HTMLElement && target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return
   const pending = markerPending()
   if (!claimReader()) return
-  if (upwardKey(event.key) || pending) stick = false
+  if ((upwardKey(event.key) && canScrollUp()) || pending) stick = false
 }
 function readerMoved() {
   // Also cover scrollbar/accessibility/programmatic scrolling whose scroll

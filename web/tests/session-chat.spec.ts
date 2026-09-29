@@ -320,6 +320,35 @@ test('a tap at the bottom keeps following new posts', async ({ page }) => {
   await expect(panel.getByRole('button', { name: /go to the latest/i })).toHaveCount(0)
 })
 
+test('an upward gesture on a thread that fits still follows the next post', async ({ page }) => {
+  const { worker, data, messages } = await setup(page, { count: 2, storage: { 'aeon.session-tab': 'messages' } })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/agents/${worker.id}`)
+  const panel = panelOf(page)
+  const thread = scroller(page)
+  const gap = () => thread.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)
+  await expect(panel.locator('.msg')).toHaveCount(2)
+  // The marker hold has released. The gestures below are ordinary reading on a
+  // thread that already fits, so scrollTop stays 0 and no scroll event re-pins.
+  await expect.poll(() => localEvent(page, worker.id)).toBeGreaterThan(200)
+  await expect.poll(() => thread.evaluate(el => el.scrollTop === 0 && el.scrollHeight <= el.clientHeight)).toBe(true)
+  await thread.evaluate(el => {
+    el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }))
+    const start = new Touch({ identifier: 1, target: el, clientX: 30, clientY: 200 })
+    el.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [start], changedTouches: [start] }))
+    const moved = new Touch({ identifier: 1, target: el, clientX: 30, clientY: 280 })
+    el.dispatchEvent(new TouchEvent('touchmove', { bubbles: true, touches: [moved], changedTouches: [moved] }))
+    for (const key of ['ArrowUp', 'PageUp', 'Home']) el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key }))
+  })
+  const tail = 'Short-thread tail stays on screen after an upward gesture.'
+  const template = messages.at(-1)!
+  data.messages.push({ ...template, id: '3e000000-0000-4000-8000-000000000931', sent_event_id: 931, body: tallPost(tail), created_at: new Date(now + 1000).toISOString() })
+  await page.clock.runFor(21_000)
+  await expect(panel.getByText(tail)).toBeInViewport()
+  await expect.poll(gap).toBeLessThanOrEqual(32)
+  await expect(panel.getByRole('button', { name: /go to the latest/i })).toHaveCount(0)
+})
+
 test('a wheel-up unpins the thread from new posts', async ({ page }) => {
   const { worker, data, messages } = await setup(page, { count: 16, storage: { 'aeon.session-tab': 'messages' } })
   await page.setViewportSize({ width: 390, height: 844 })
