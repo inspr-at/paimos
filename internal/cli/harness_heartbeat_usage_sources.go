@@ -344,17 +344,32 @@ func noteCodexTotals(line []byte, fallback string, sums map[string]usageSum, poi
 	}
 	delta := sessionusage.HeartbeatLine{
 		Input: snap.Input - codex.Input, Output: snap.Output - codex.Output, Cached: snap.Cached - codex.Cached,
-		ReasoningKnown: snap.ReasoningKnown,
 	}
-	// Codex can revise reasoning down while input grows; the attributed
-	// reasoning baseline never moves backwards.
-	if snap.ReasoningKnown && snap.Reasoning > codex.Reasoning {
-		delta.Reasoning = snap.Reasoning - codex.Reasoning
+	switch {
+	case !snap.ReasoningKnown:
+		// Reasoning since the last known total is unknown until a record
+		// carries it again.
+		codex.ReasoningKnown = false
+	case !codex.ReasoningKnown:
+		// A total after an unknown stretch only re-establishes the baseline;
+		// the increase cannot be attributed to the model in context.
+		codex.Reasoning, codex.ReasoningKnown = snap.Reasoning, true
+	case snap.Reasoning >= codex.Reasoning:
+		delta.Reasoning, delta.ReasoningKnown = snap.Reasoning-codex.Reasoning, true
 		codex.Reasoning = snap.Reasoning
+	default:
+		// Codex can revise reasoning down while input grows; the attributed
+		// baseline never moves backwards.
+		delta.ReasoningKnown = true
 	}
 	codex.Input, codex.Output, codex.Cached = snap.Input, snap.Output, snap.Cached
 	if delta.Cached > delta.Input {
 		delta.Cached = delta.Input
+	}
+	// Reasoning is a subset of output. An increase that cannot be one is not
+	// attributed rather than reported as an impossible figure.
+	if delta.ReasoningKnown && delta.Reasoning > delta.Output {
+		delta.Reasoning, delta.ReasoningKnown = 0, false
 	}
 	model := snap.Model
 	if model == "" {

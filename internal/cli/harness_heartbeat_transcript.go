@@ -89,6 +89,11 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 			}
 		}
 		reasoning, reasoningKnown = holdReasoning(prev, reasoning, reasoningKnown)
+		var valid bool
+		if reasoning, reasoningKnown, valid = fitUsageReport(prev, input, output, cached, reasoning, reasoningKnown); !valid {
+			fmt.Fprintf(rt.stderr, "heartbeat: usage for %s is not a valid cumulative report; skipped\n", model)
+			continue
+		}
 		if prev != nil && input == prev.Input && output == prev.Output && cached == prev.Cached && sameReasoning(prev.Reasoning, reasoning, reasoningKnown) {
 			continue
 		}
@@ -123,6 +128,30 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 	return rt.replayPendingUsage(ctx, projectID, session)
 }
 
+// fitUsageReport checks one cumulative per-model report against the rules the
+// server enforces before it is persisted, so a report that can never be
+// accepted is not queued. Reasoning above output falls back to the last
+// accepted reasoning (or unknown when none was reported); cached above input
+// or counters below the last accepted ones make the report invalid.
+func fitUsageReport(prev *heartbeatUsageDisk, input, output, cached, reasoning int64, reasoningKnown bool) (int64, bool, bool) {
+	if input < 0 || output < 0 || cached < 0 || cached > input || (reasoningKnown && reasoning < 0) {
+		return reasoning, reasoningKnown, false
+	}
+	if prev != nil && (input < prev.Input || output < prev.Output || cached < prev.Cached || input-cached < prev.Input-prev.Cached) {
+		return reasoning, reasoningKnown, false
+	}
+	if reasoningKnown && reasoning > output {
+		if prev == nil || prev.Reasoning == nil {
+			return 0, false, true
+		}
+		reasoning = *prev.Reasoning
+	}
+	if prev != nil && prev.Reasoning != nil && (!reasoningKnown || reasoning < *prev.Reasoning || reasoning > output) {
+		return reasoning, reasoningKnown, false
+	}
+	return reasoning, reasoningKnown, true
+}
+
 // legacyCodexCursor rebuilds the Codex baseline for state written before the
 // cursor existed. Each stored figure was a session-wide cumulative total, so
 // the largest one is what has already been reported.
@@ -134,6 +163,7 @@ func legacyCodexCursor(items []heartbeatUsageDisk) *heartbeatCodexCursor {
 		cur.Cached = max(cur.Cached, item.Cached)
 		if item.Reasoning != nil {
 			cur.Reasoning = max(cur.Reasoning, *item.Reasoning)
+			cur.ReasoningKnown = true
 		}
 	}
 	return cur
@@ -192,6 +222,13 @@ func (rt *runtime) postPendingUsage(ctx context.Context, projectID string, sessi
 	if heartbeatStatus(err) == http.StatusConflict {
 		return rt.reconcileUsage(ctx, projectID, session, pending)
 	}
+	if status := heartbeatStatus(err); status == http.StatusBadRequest || status == http.StatusUnprocessableEntity {
+		// The server will never accept these bytes. Drop the report so it
+		// does not block every later one; the cursor still moves past it.
+		fmt.Fprintf(rt.stderr, "heartbeat: usage report for %s rejected (%d); dropped\n", pending.Model, status)
+		dropUsage(session, pending)
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -235,6 +272,28 @@ func (rt *runtime) reconcileUsage(ctx context.Context, projectID string, session
 	return errors.New("usage report is still unacknowledged")
 }
 
+// dropUsage removes a report the server rejected for good. The model's
+// accepted totals stay as they were; the scan cursor advances as on commit.
+func dropUsage(session *heartbeatSession, pending heartbeatPendingUsage) {
+	if len(session.disk.PendingUsage) > 0 {
+		session.disk.PendingUsage = session.disk.PendingUsage[1:]
+	}
+	advanceUsageCursor(session, pending)
+}
+
+func advanceUsageCursor(session *heartbeatSession, pending heartbeatPendingUsage) {
+	if pending.Codex != nil && pending.Offset >= session.disk.UsageOffset {
+		session.disk.UsageCodex = pending.Codex
+	}
+	if pending.Offset > session.disk.UsageOffset || (pending.Offset == session.disk.UsageOffset && pending.Discard != session.disk.UsageDiscard) {
+		session.disk.UsageOffset = pending.Offset
+		session.disk.UsageDiscard = pending.Discard
+	}
+	if len(pending.Recent) > 0 {
+		session.disk.UsageRecent = trimRecent(pending.Recent)
+	}
+}
+
 func commitUsage(session *heartbeatSession, pending heartbeatPendingUsage, ack usageAck) {
 	seq, input, output, cached := pending.Sequence, pending.Input, pending.Output, pending.Cached
 	reasoning := pending.Reasoning
@@ -262,16 +321,7 @@ func commitUsage(session *heartbeatSession, pending heartbeatPendingUsage, ack u
 	if len(session.disk.PendingUsage) > 0 {
 		session.disk.PendingUsage = session.disk.PendingUsage[1:]
 	}
-	if pending.Codex != nil && pending.Offset >= session.disk.UsageOffset {
-		session.disk.UsageCodex = pending.Codex
-	}
-	if pending.Offset > session.disk.UsageOffset || (pending.Offset == session.disk.UsageOffset && pending.Discard != session.disk.UsageDiscard) {
-		session.disk.UsageOffset = pending.Offset
-		session.disk.UsageDiscard = pending.Discard
-	}
-	if len(pending.Recent) > 0 {
-		session.disk.UsageRecent = trimRecent(pending.Recent)
-	}
+	advanceUsageCursor(session, pending)
 }
 
 func codexSessionLabel(path, sessionID string) (string, bool) {
@@ -485,7 +535,8 @@ func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, m
 // scanUsageWindowState scans one window and returns the Codex cursor that
 // belongs to the returned offset. On error the input cursor is returned.
 func scanUsageWindowState(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool, source string, codex *heartbeatCodexCursor) (map[string]usageSum, int64, []string, bool, *heartbeatCodexCursor, error) {
-	cur := &heartbeatCodexCursor{}
+	// A scan from the start of a fresh log begins at known zero totals.
+	cur := &heartbeatCodexCursor{ReasoningKnown: offset == 0}
 	if codex != nil {
 		copied := *codex
 		cur = &copied

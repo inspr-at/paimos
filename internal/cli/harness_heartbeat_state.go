@@ -63,6 +63,9 @@ type heartbeatCodexCursor struct {
 	Output    int64  `json:"output"`
 	Cached    int64  `json:"cached"`
 	Reasoning int64  `json:"reasoning"`
+	// ReasoningKnown is false once a record omitted reasoning: the next
+	// reported total re-establishes the baseline without attributing it.
+	ReasoningKnown bool `json:"reasoning_known,omitempty"`
 }
 
 type heartbeatUsageDisk struct {

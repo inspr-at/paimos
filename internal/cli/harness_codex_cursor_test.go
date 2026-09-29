@@ -5,8 +5,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -133,5 +135,151 @@ func TestLegacyCodexStateDoesNotRecount(t *testing.T) {
 	cur := legacyCodexCursor([]heartbeatUsageDisk{{Model: "gpt-5", Input: 100, Output: 10, Reasoning: &five}, {Model: "gpt-5.4", Input: 150, Output: 16}})
 	if cur.Input != 150 || cur.Output != 16 || cur.Reasoning != 5 || cur.Model != "" {
 		t.Fatalf("legacy cursor %+v", cur)
+	}
+}
+
+func codexTotalsLine(input, output int64, reasoning string) string {
+	r := ""
+	if reasoning != "" {
+		r = `,"reasoning_output_tokens":` + reasoning
+	}
+	return fmt.Sprintf(`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d,"output_tokens":%d,"cached_input_tokens":0%s}}}}`+"\n", input, output, r)
+}
+
+// Round 3 review case: A reports 100 output without reasoning, then B's
+// cumulative 110 output carries 80 reasoning. The reasoning baseline was
+// unknown, so B must not receive 80 reasoning against 10 output.
+func TestCodexUnknownReasoningBaselineIsNotAttributed(t *testing.T) {
+	path := filepath.Join(fenceHome(t), "sessions", "2026", "09", "29", "rollout-probe.jsonl")
+	fenceWrite(t, path, codexContext("model-a")+codexTotalsLine(100, 100, "")+codexContext("model-b")+codexTotalsLine(150, 110, "80")+codexTotalsLine(200, 150, "90"))
+	sums, _, _, _, cursor, err := scanUsageWindowState(context.Background(), path, "", 0, 1<<20, nil, false, "codex", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for model, sum := range sums {
+		if sum.reasoningKnown && sum.reasoning > sum.output {
+			t.Errorf("%s: reasoning %d above output %d", model, sum.reasoning, sum.output)
+		}
+	}
+	if b := sums["model-b"]; b.input != 100 || b.output != 50 || b.reasoningKnown {
+		t.Fatalf("model-b %+v: the increase after an unknown baseline was attributed", b)
+	}
+	if cursor == nil || !cursor.ReasoningKnown || cursor.Reasoning != 90 {
+		t.Fatalf("baseline not re-established: %+v", cursor)
+	}
+	// Once the baseline is known again, the next beat attributes increases.
+	fenceWrite(t, path, codexContext("model-b")+codexTotalsLine(10, 10, "")+codexTotalsLine(20, 20, "5"))
+	sums, off, ring, discard, cursor, err := scanUsageWindowState(context.Background(), path, "", 0, 1<<20, nil, false, "codex", nil)
+	if err != nil || sums["model-b"].reasoningKnown || cursor.Reasoning != 5 || !cursor.ReasoningKnown {
+		t.Fatalf("re-baseline: %+v cursor %+v %v", sums, cursor, err)
+	}
+	appendFile(t, path, codexTotalsLine(30, 30, "9"))
+	sums, _, _, _, _, err = scanUsageWindowState(context.Background(), path, "", off, 1<<20, ring, discard, "codex", cursor)
+	if err != nil || !sums["model-b"].reasoningKnown || sums["model-b"].reasoning != 4 || sums["model-b"].output != 10 {
+		t.Fatalf("known baseline: %+v %v", sums, err)
+	}
+}
+
+// Round 3 review case end to end: a server that rejects reasoning above
+// output never sees such a report, and later usage keeps flowing.
+func TestCodexReasoningReportsStayAcceptable(t *testing.T) {
+	var calls []hbCall
+	srv := hbServer(t, &calls, func(r *http.Request, b map[string]any, w http.ResponseWriter) bool {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/usage") && numField(b, "reasoning_tokens") > numField(b, "output_tokens") {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"reasoning tokens exceed output"}`))
+			return true
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	dir := fenceHome(t)
+	path := filepath.Join(dir, "sessions", "2026", "09", "29", "rollout-reasoning.jsonl")
+	fenceWrite(t, path, codexContext("model-a")+codexTotalsLine(100, 100, ""))
+	opts := heartbeatTestOptions(dir)
+	opts.Harness, opts.UsageSource, opts.UsageFile, opts.Transcript = "codex", "codex", path, ""
+	session := openUsageSession(t, rt, opts)
+	for i, next := range []string{"", codexContext("model-b") + codexTotalsLine(150, 110, "80"), codexTotalsLine(200, 150, "90")} {
+		if next != "" {
+			appendFile(t, path, next)
+		}
+		if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {
+			t.Fatalf("report %d: %v stderr %s", i, err, stderr.String())
+		}
+	}
+	if len(session.disk.PendingUsage) != 0 || strings.Contains(stderr.String(), "rejected") {
+		t.Fatalf("queue blocked: pending=%+v stderr=%s", session.disk.PendingUsage, stderr.String())
+	}
+	var bOutput float64
+	for _, post := range usagePosts(calls) {
+		if post["model"] == "model-b" {
+			bOutput = numField(post, "output_tokens")
+		}
+	}
+	if bOutput != 50 {
+		t.Fatalf("model-b usage did not keep flowing: %v", usagePosts(calls))
+	}
+}
+
+// A persisted report the server rejects for good is dropped with a log line
+// instead of blocking every later report.
+func TestRejectedUsageReportDoesNotBlockQueue(t *testing.T) {
+	var calls []hbCall
+	srv := hbServer(t, &calls, func(r *http.Request, b map[string]any, w http.ResponseWriter) bool {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/usage") && b["model"] == "bad-model" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"invalid"}`))
+			return true
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	dir := fenceHome(t)
+	path := filepath.Join(dir, "sessions", "2026", "09", "29", "rollout-queue.jsonl")
+	fenceWrite(t, path, codexContext("gpt-5")+codexTotalsLine(10, 5, ""))
+	opts := heartbeatTestOptions(dir)
+	opts.Harness, opts.UsageSource, opts.UsageFile, opts.Transcript = "codex", "codex", path, ""
+	session := openUsageSession(t, rt, opts)
+	reasoning := int64(99)
+	session.disk.PendingUsage = []heartbeatPendingUsage{{Model: "bad-model", Sequence: 1, Input: 1, Output: 1, Reasoning: &reasoning, ReportID: "11111111-1111-5111-8111-111111111111"}}
+	if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {
+		t.Fatalf("rejected report blocked the queue: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "rejected (400); dropped") {
+		t.Fatalf("no log line for the dropped report: %s", stderr.String())
+	}
+	posts := usagePosts(calls)
+	if len(session.disk.PendingUsage) != 0 || len(posts) != 2 || posts[1]["model"] != "gpt-5" || usageByModel(session.disk.Usage, "bad-model") != nil {
+		t.Fatalf("later usage not reported: posts=%v pending=%+v", posts, session.disk.PendingUsage)
+	}
+}
+
+func TestFitUsageReport(t *testing.T) {
+	five, nine := int64(5), int64(9)
+	prev := &heartbeatUsageDisk{Input: 10, Output: 10, Cached: 2, Reasoning: &five}
+	cases := []struct {
+		name          string
+		prev          *heartbeatUsageDisk
+		in, out, c, r int64
+		known         bool
+		wantR         int64
+		wantKnown, ok bool
+	}{
+		{"valid", nil, 10, 10, 2, 4, true, 4, true, true},
+		{"reasoning above output, no prior", nil, 10, 10, 2, 40, true, 0, false, true},
+		{"reasoning above output keeps prior", prev, 20, 12, 2, 40, true, 5, true, true},
+		{"cached above input", nil, 10, 10, 11, 0, false, 0, false, false},
+		{"counter decreased", prev, 9, 10, 2, 5, true, 5, true, false},
+		{"uncached input decreased", prev, 11, 10, 4, 5, true, 5, true, false},
+		{"known reasoning becomes unknown", prev, 20, 20, 2, 0, false, 0, false, false},
+		{"reasoning grows", prev, 20, 20, 2, nine, true, nine, true, true},
+	}
+	for _, tc := range cases {
+		r, known, ok := fitUsageReport(tc.prev, tc.in, tc.out, tc.c, tc.r, tc.known)
+		if ok != tc.ok || (ok && (r != tc.wantR || known != tc.wantKnown)) {
+			t.Errorf("%s: got r=%d known=%t ok=%t", tc.name, r, known, ok)
+		}
 	}
 }
