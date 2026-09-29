@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { displayHeadline, emptyNotesLine, groupChanges, hasUsableNotes, hiddenNoteLine, HISTORICAL_TAG_LABEL, historicalTagFallback, localizedNote, releasedAt, shortCommit, span, ticketsOf, type Release } from '../../lib/releases'
+import { displayHeadline, emptyNotesLine, groupChanges, hasUsableNotes, hiddenNoteLine, HISTORICAL_TAG_LABEL, historicalTagFallback, localizedNote, presentChanges, releasedAt, shortCommit, span, ticketsOf, type Release } from '../../lib/releases'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
@@ -24,6 +24,12 @@ const reserved = computed(() => props.release.state === 'reserved')
 const groups = computed(() => groupChanges(props.release.changes))
 const tickets = computed(() => ticketsOf(props.release))
 const counted = computed(() => groups.value.features.length + groups.value.fixes.length + groups.value.other.length)
+// A ticket already named on a feature or fix line does not need a chip above the list.
+const linedKeys = computed(() => {
+  const lines = presentChanges(props.release.changes, locale.value)
+  return new Set([...lines.features, ...lines.fixes].map(line => line.key))
+})
+const chipTickets = computed(() => tickets.value.filter(key => !linedKeys.value.has(key)))
 const live = computed(() => {
   if (!props.current || !props.liveSince) return ''
   const t = Date.parse(props.liveSince)
@@ -81,7 +87,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
     <p v-if="historicalTagFallback(release)" class="eyebrow hist-label">{{ HISTORICAL_TAG_LABEL }}</p>
     <p v-if="!hasUsableNotes(release) && release.headline" class="headline">{{ displayHeadline(release, locale) }}</p>
 
-    <TicketChips v-if="tickets.length && !hasUsableNotes(release)" :tickets="tickets" class="tickets" />
+    <TicketChips v-if="chipTickets.length && !hasUsableNotes(release)" :tickets="chipTickets" class="tickets" />
 
     <section v-if="hasUsableNotes(release)" class="changes-block notes" aria-label="Release notes">
       <div v-for="note in release.notes.items" :key="note.id" class="note-item">
@@ -94,7 +100,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
     </section>
     <div v-else class="changes-block">
       <p v-for="gap in release.notes?.gaps" :key="gap" class="none">{{ gap }}</p>
-      <ReleaseChanges v-if="counted" :groups="groups" :repository="repository" :query="query" :sole-ticket="soleTicket" />
+      <ReleaseChanges v-if="counted" :changes="release.changes" :repository="repository" :query="query" :sole-ticket="soleTicket" />
       <p v-else class="none">{{ reserved ? 'Nothing shipped under this version.' : 'No changes are recorded between this release and the one before it.' }}</p>
       <p v-if="release.changes_omitted" class="none">And {{ release.changes_omitted }} more {{ release.changes_omitted === 1 ? 'change' : 'changes' }} not listed here.</p>
     </div>
@@ -113,7 +119,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
           <p v-if="hasUsableNotes(release) && release.headline" class="none">Git headline: {{ release.headline }}</p>
           <p class="none">Note source: {{ release.notes.source }}</p>
           <p v-if="release.notes.snapshot_sha256" class="mono wrap">Snapshot SHA-256: {{ release.notes.snapshot_sha256 }}</p>
-          <ReleaseChanges v-if="hasUsableNotes(release) && counted" :groups="groups" :repository="repository" :query="query" />
+          <ReleaseChanges v-if="hasUsableNotes(release) && counted" :changes="release.changes" :repository="repository" :query="query" />
         </template>
         <dl>
           <div>

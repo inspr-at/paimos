@@ -129,8 +129,8 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteError(w, http.StatusNotFound, "no such release in this build's history")
 }
 
-// annotated adds group from linked tickets. A lookup error, or no source,
-// returns the embedded history unchanged.
+// annotated adds group and linked ticket benefits. A lookup error, or no
+// source, returns the embedded history unchanged.
 func (m *Module) annotated(ctx context.Context) History {
 	if m.tickets == nil {
 		return m.history

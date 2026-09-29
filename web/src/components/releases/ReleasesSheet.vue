@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { displayHeadline, groupByDay, groupChanges, hasUsableNotes, HISTORICAL_TAG_LABEL, historicalTagFallback, matches, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
+import { displayHeadline, groupByDay, hasUsableNotes, HISTORICAL_TAG_LABEL, historicalTagFallback, matches, presentChanges, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
 import { useProfile } from '../../stores/profile'
 import { normalKey } from '../../lib/ticketLinks'
 import { relativeTime } from '../../lib/work'
@@ -245,7 +245,7 @@ const timeOf = (r: Release) => { const at = releasedAt(r); return at ? new Date(
 const ageOf = (r: Release) => { const at = releasedAt(r); return at ? relativeTime(at, { now: now.value }) : '' }
 // Per-row counts and ticket keys, worked out once per history rather than on every render.
 const summaries = computed(() => new Map(releases.value.map(r => {
-  const g = groupChanges(r.changes)
+  const g = presentChanges(r.changes, locale.value)
   return [r.version, { features: g.features.length, fixes: g.fixes.length, other: g.other.length, tickets: ticketsOf(r) }]
 })))
 const countsOf = (r: Release) => summaries.value.get(r.version) ?? { features: 0, fixes: 0, other: 0, tickets: [] as string[] }

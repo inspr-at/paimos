@@ -41,8 +41,18 @@ func TestParseTicketMeta(t *testing.T) {
 		t.Fatalf("hidden note %+v", got)
 	}
 	blank, _ := json.Marshal(map[string]any{"pill_en": "   ", "benefit_en": ""})
-	if got := ParseTicketMeta("ticket", blank); got.PublicBenefit {
+	if got := ParseTicketMeta("ticket", blank); got.PublicBenefit || got.Note != nil {
 		t.Fatalf("blank note %+v", got)
+	}
+	feature, _ := json.Marshal(map[string]any{"pill_en": " Quotes open ", "pill_de": "", "benefit_en": "Quotes open normally.", "benefit_de": "Angebote öffnen sich."})
+	if got := ParseTicketMeta("ticket", feature); got.Bug || !got.PublicBenefit || got.Note == nil || got.Note.PillEN != "Quotes open" || got.Note.PillDE != "" || got.Note.BenefitDE != "Angebote öffnen sich." {
+		t.Fatalf("feature note %+v", got)
+	}
+	if got := ParseTicketMeta("ticket", json.RawMessage(benefit(false))); got.Note == nil || got.Note.PillEN != "Quotes open reliably" || got.PublicBenefit {
+		t.Fatalf("visible bug keeps its note %+v", got)
+	}
+	if got := ParseTicketMeta("ticket", hiddenNote); got.Note != nil {
+		t.Fatalf("hidden note leaked %+v", got.Note)
 	}
 	if got := ParseTicketMeta("ticket", json.RawMessage(`{"tags":"bug","type":{"name":"bug"}}`)); got.Bug {
 		t.Fatalf("wrong shapes %+v", got)
@@ -97,6 +107,7 @@ func TestServeGroups(t *testing.T) {
 			{Commit: "d", Subject: "P0.x: one commit, a bug and a feature (AEON-274, AEON-273)", Type: "other", Tickets: []string{"AEON-274", "AEON-273"}, At: "2026-09-29T06:00:00Z"},
 			{Commit: "e", Subject: "P0.x: refresh the release manifest", Type: "other", Tickets: nil, At: "2026-09-29T05:50:00Z"},
 			{Commit: "f", Subject: "feat: keep a conventional feature", Type: "feat", Tickets: []string{"AEON-274"}, At: "2026-09-29T05:40:00Z"},
+			{Commit: "g", Subject: "P0.x: a hidden ticket only (AEON-1)", Type: "other", Tickets: []string{"AEON-1"}, At: "2026-09-29T05:30:00Z"},
 		},
 	}}}
 	mod := NewWith(h, "260929062507.0.0")
@@ -104,12 +115,14 @@ func TestServeGroups(t *testing.T) {
 		if tenantID != "11111111-1111-4111-8111-111111111111" {
 			t.Errorf("tenant %s", tenantID)
 		}
-		if strings.Join(keys, ",") != "AEON-273,AEON-274" {
+		if strings.Join(keys, ",") != "AEON-273,AEON-274,AEON-1" {
 			t.Errorf("keys %v", keys)
 		}
+		hidden, _ := json.Marshal(map[string]any{"pill_en": "Keep private", "benefit_en": "Stay out of the notes.", "hide_from_release_notes": true})
 		return map[string]TicketMeta{
-			"AEON-274": {Bug: true, PublicBenefit: true},
-			"AEON-273": {PublicBenefit: true},
+			"AEON-274": {Bug: true, PublicBenefit: true, Note: &TicketNote{PillEN: "Quotes open reliably", PillDE: "Angebote öffnen zuverlässig", BenefitEN: "Quotes open.", BenefitDE: "Angebote öffnen sich."}},
+			"AEON-273": {PublicBenefit: true, Note: &TicketNote{PillEN: "Session chat", PillDE: "Sitzungschat", BenefitEN: "The chat stays put.", BenefitDE: "Der Chat bleibt."}},
+			"AEON-1":   ParseTicketMeta("ticket", hidden),
 		}, nil
 	})
 	mux := http.NewServeMux()
@@ -129,7 +142,7 @@ func TestServeGroups(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"", GroupFixes, GroupFeatures, GroupFixes, GroupOther, GroupFeatures}
+	want := []string{"", GroupFixes, GroupFeatures, GroupFixes, GroupOther, GroupFeatures, GroupOther}
 	if len(body.Releases[0].Changes) != len(want) {
 		t.Fatalf("changes %d", len(body.Releases[0].Changes))
 	}
@@ -138,16 +151,29 @@ func TestServeGroups(t *testing.T) {
 			t.Errorf("change %d %q group %q want %q", i, change.Subject, change.Group, want[i])
 		}
 	}
-	if strings.Contains(string(changeJSON(t, w.Body.Bytes(), 0)), `"group"`) {
-		t.Fatal("version bump carries a group")
+	rawList := w.Body.String()
+	if strings.Contains(string(changeJSON(t, w.Body.Bytes(), 0)), `"group"`) || strings.Contains(string(changeJSON(t, w.Body.Bytes(), 0)), `linked_tickets`) {
+		t.Fatal("version bump carries a group or linked tickets")
+	}
+	if strings.Contains(rawList, "Keep private") || strings.Contains(rawList, "Stay out of the notes.") {
+		t.Fatal("hidden ticket text was served")
 	}
 	one := get("/api/releases/260929062507.0.0")
 	var rel Release
 	if one.Code != 200 || json.Unmarshal(one.Body.Bytes(), &rel) != nil || rel.Changes[1].Group != GroupFixes {
 		t.Fatalf("one %d %s", one.Code, one.Body)
 	}
+	if len(rel.Changes[1].Linked) != 1 || rel.Changes[1].Linked[0].Key != "AEON-274" || rel.Changes[1].Linked[0].PillEN != "Quotes open reliably" || rel.Changes[1].Linked[0].BenefitDE != "Angebote öffnen sich." {
+		t.Fatalf("bug note %+v", rel.Changes[1].Linked)
+	}
+	if len(rel.Changes[3].Linked) != 2 || rel.Changes[3].Linked[0].Key != "AEON-274" || rel.Changes[3].Linked[1].Key != "AEON-273" {
+		t.Fatalf("two notes %+v", rel.Changes[3].Linked)
+	}
+	if rel.Changes[4].Linked != nil || rel.Changes[6].Linked != nil || rel.Changes[6].Group != GroupOther {
+		t.Fatalf("other changes must not carry notes: %+v %+v", rel.Changes[4], rel.Changes[6])
+	}
 	for _, change := range h.Releases[0].Changes {
-		if change.Group != "" {
+		if change.Group != "" || change.Linked != nil {
 			t.Fatal("annotation mutated the stored history")
 		}
 	}

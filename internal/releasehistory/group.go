@@ -14,13 +14,25 @@ const (
 	GroupOther    = "other"
 )
 
+// TicketNote is one linked ticket's current release-note text. Hidden tickets
+// are not noted. Empty strings stay empty; the client picks the language.
+type TicketNote struct {
+	Key       string `json:"key"`
+	PillEN    string `json:"pill_en"`
+	PillDE    string `json:"pill_de"`
+	BenefitEN string `json:"benefit_en"`
+	BenefitDE string `json:"benefit_de"`
+}
+
 // TicketMeta is the part of a linked ticket that decides a change's group.
 // Bug is a bug tag, a type of bug, or a kind of bug. PublicBenefit is a
 // release-note pill or benefit on a ticket that is not a bug and not hidden.
-// A bug stays a fix even when it also carries a pill or benefit.
+// A bug stays a fix even when it also carries a pill or benefit. Note is set
+// for every non-hidden ticket that has a pill or benefit, including bugs.
 type TicketMeta struct {
 	Bug           bool
 	PublicBenefit bool
+	Note          *TicketNote
 }
 
 // ParseTicketMeta reads kind and nodes.fields. Tag entries may be names or
@@ -47,15 +59,25 @@ func ParseTicketMeta(kind string, fields json.RawMessage) TicketMeta {
 	}
 	var hidden bool
 	_ = json.Unmarshal(raw["hide_from_release_notes"], &hidden)
-	if !meta.Bug && !hidden && (fieldText(raw["pill_en"]) || fieldText(raw["pill_de"]) || fieldText(raw["benefit_en"]) || fieldText(raw["benefit_de"])) {
-		meta.PublicBenefit = true
+	note := TicketNote{
+		PillEN: textField(raw["pill_en"]), PillDE: textField(raw["pill_de"]),
+		BenefitEN: textField(raw["benefit_en"]), BenefitDE: textField(raw["benefit_de"]),
+	}
+	if !hidden && (note.PillEN != "" || note.PillDE != "" || note.BenefitEN != "" || note.BenefitDE != "") {
+		meta.Note = &note
+		if !meta.Bug {
+			meta.PublicBenefit = true
+		}
 	}
 	return meta
 }
 
-func fieldText(raw json.RawMessage) bool {
+func textField(raw json.RawMessage) string {
 	var text string
-	return json.Unmarshal(raw, &text) == nil && strings.TrimSpace(text) != ""
+	if json.Unmarshal(raw, &text) != nil {
+		return ""
+	}
+	return strings.TrimSpace(text)
 }
 
 func bugTag(raw json.RawMessage) bool {
@@ -116,6 +138,24 @@ func GroupChange(subject string, tickets []string, meta map[string]TicketMeta) s
 	return best
 }
 
+// linkedNotes copies the visible pill and benefit for each linked ticket, in
+// first-seen order. Hidden tickets and tickets without text are left out.
+func linkedNotes(tickets []string, meta map[string]TicketMeta) []TicketNote {
+	var out []TicketNote
+	seen := map[string]bool{}
+	for _, key := range tickets {
+		m, ok := meta[key]
+		if !ok || m.Note == nil || seen[key] {
+			continue
+		}
+		seen[key] = true
+		note := *m.Note
+		note.Key = key
+		out = append(out, note)
+	}
+	return out
+}
+
 func groupRank(group string) int {
 	switch group {
 	case GroupFixes:
@@ -136,8 +176,14 @@ func withGroups(h History, meta map[string]TicketMeta) History {
 		changes := make([]Change, len(rel.Changes))
 		copy(changes, rel.Changes)
 		for j := range changes {
-			if g := GroupChange(changes[j].Subject, changes[j].Tickets, meta); g != "" {
+			g := GroupChange(changes[j].Subject, changes[j].Tickets, meta)
+			if g != "" {
 				changes[j].Group = g
+			}
+			if g == GroupFeatures || g == GroupFixes {
+				if notes := linkedNotes(changes[j].Tickets, meta); len(notes) > 0 {
+					changes[j].Linked = notes
+				}
 			}
 		}
 		rel.Changes = changes
