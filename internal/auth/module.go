@@ -389,6 +389,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "views", "preferences", "project-groups":
 		return scope("views")
 	case "knowledge":
+		// Listing candidates is ordinary knowledge read. Accept and dismiss stay
+		// with a person: an agent key has no authority on those two routes, and
+		// the handler refuses every agent again.
+		if r.Method == http.MethodPost && len(parts) == 4 && parts[1] == "learnings" && (parts[3] == "accept" || parts[3] == "dismiss" || parts[3] == "draft") {
+			return "", false
+		}
 		return scope("knowledge")
 	case "approvals":
 		if len(parts) == 1 {
@@ -449,18 +455,25 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "run.claim", true
 		}
 	case "agent-accounts":
+		if r.Method == "GET" && len(parts) == 3 && parts[2] == "readings" {
+			return "account.probe", true
+		}
 		if read {
 			return "account.read", true
 		}
 		if r.Method == "POST" && len(parts) == 2 && parts[1] == "route" {
 			return "account.route", true
 		}
-		if r.Method == "POST" && len(parts) == 3 && parts[2] == "probe" {
+		if r.Method == "POST" && len(parts) == 3 && (parts[2] == "probe" || parts[2] == "readings") {
 			return "account.probe", true
 		}
 		return "account.manage", true
 	case "stage-handoffs":
 		return "stage.<op>", true
+	case "outcomes":
+		if len(parts) == 1 && (read || r.Method == http.MethodPost) {
+			return scope("outcome")
+		}
 	case "me":
 		// Any key may read its own identity; the rest of /api/me is for people.
 		if len(parts) == 1 && read {

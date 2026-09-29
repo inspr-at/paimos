@@ -114,13 +114,22 @@ func systemEvent(ctx context.Context, tx pgx.Tx, tenantID, kind string, after an
 
 // MarkSessionSeen records that this generation pulled its inbox. Writes are
 // throttled to one per five seconds per channel so long polls and streams do
-// not rewrite the row on every wake.
+// not rewrite the row on every wake. An acknowledgement is not a pull: it can
+// fill inbox_seen_via only when nothing has pulled yet, and on a later beat it
+// refreshes inbox_seen_at without replacing the pull path. A hook pull therefore
+// wins over the ack that follows it on the same beat (AEON-307).
 func MarkSessionSeen(ctx context.Context, tx pgx.Tx, sessionID, via string) error {
 	if sessionID == "" || via == "" {
 		return nil
 	}
-	_, err := tx.Exec(ctx, `UPDATE harness_sessions SET inbox_seen_at=clock_timestamp(),inbox_seen_via=$2
- WHERE id=$1::uuid AND (inbox_seen_at IS NULL OR inbox_seen_via IS DISTINCT FROM $2 OR inbox_seen_at<clock_timestamp()-interval '5 seconds')`, sessionID, via)
+	_, err := tx.Exec(ctx, `UPDATE harness_sessions SET
+ inbox_seen_at=clock_timestamp(),
+ inbox_seen_via=CASE WHEN $2='ack' AND inbox_seen_via IN ('hook','drain','long_poll','stream') THEN inbox_seen_via ELSE $2 END
+ WHERE id=$1::uuid AND (
+  inbox_seen_at IS NULL
+  OR inbox_seen_at<clock_timestamp()-interval '5 seconds'
+  OR ($2='ack' AND inbox_seen_via IN ('hook','drain','long_poll','stream')) IS NOT TRUE AND inbox_seen_via IS DISTINCT FROM $2
+ )`, sessionID, via)
 	return err
 }
 

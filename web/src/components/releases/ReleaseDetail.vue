@@ -1,35 +1,45 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { displayHeadline, emptyNotesLine, groupChanges, hasUsableNotes, hiddenNoteLine, HISTORICAL_TAG_LABEL, historicalTagFallback, localizedNote, presentChanges, releasedAt, shortCommit, span, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterRelease, type Release } from '../../lib/releases'
+import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releaseCopy, releasedAt, runWord, shortCommit, span, ticketsOf, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { absoluteTime, relativeTime } from '../../lib/work'
-import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
+import LangBadge from './LangBadge.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
 import TicketChips from './TicketChips.vue'
-import TicketLink from './TicketLink.vue'
-const profile = useProfile()
-const locale = computed(() => profile.profile?.locale ?? null)
 
-// One release: when it shipped, what changed, and the evidence behind it.
+// One release: when it shipped, its name when it has one, what it brings, and
+// the evidence behind it. Every release reads the same (AEON-305): backfilled
+// notes and linked tickets both become blocks under Features and Fixes.
+// Highlights tells the benefits; Details lists the commits and shows the
+// evidence open (AEON-323).
 const props = defineProps<{
   release: Release; repository: string; current: boolean; rollback: boolean; fresh: boolean
   liveSince: string | null; now: number; query: string; evidence: boolean
+  lang: ReleaseLang; view: ReleaseView
 }>()
+const locale = computed(() => props.lang)
+const details = computed(() => props.view === 'details')
+const evidenceOpen = computed(() => details.value || props.evidence)
 const emit = defineEmits<{ evidence: [open: boolean] }>()
 
 const at = computed(() => releasedAt(props.release))
 const reserved = computed(() => props.release.state === 'reserved')
-const groups = computed(() => groupChanges(props.release.changes))
+const lines = computed(() => presentRelease(props.release, locale.value))
 const tickets = computed(() => ticketsOf(props.release))
-const counted = computed(() => groups.value.features.length + groups.value.fixes.length + groups.value.other.length)
-// A ticket already named on a feature or fix line does not need a chip above the list.
-const linedKeys = computed(() => {
-  const lines = presentChanges(props.release.changes, locale.value)
-  return new Set([...lines.features, ...lines.fixes].map(line => line.key))
-})
-const chipTickets = computed(() => tickets.value.filter(key => !linedKeys.value.has(key)))
+const counted = computed(() => lines.value.features.length + lines.value.fixes.length + lines.value.other.length)
+// The header: theme, headline and intro when the release has them. The pills
+// and benefits are the blocks below; Git tag messages are evidence only.
+const presented = computed(() => localizedPresentation(props.release, locale.value))
+// One badge for the header when the headline fell back; else on the part that did.
+const badge = (lang: ReleaseLang, own = false) => lang !== props.lang && (own || presented.value?.headlineLang === props.lang)
+const noted = computed(() => hasUsableNotes(props.release) ? props.release.notes : null)
+const parts = (text: string) => markParts(text, props.query)
+const copyText = computed(() => releaseCopy(locale.value))
+// A ticket already heading a block needs no chip.
+const lined = computed(() => new Set([...lines.value.features, ...lines.value.fixes].map(line => line.key)))
+const chipTickets = computed(() => tickets.value.filter(key => !lined.value.has(key)))
 const live = computed(() => {
   if (!props.current || !props.liveSince) return ''
   const t = Date.parse(props.liveSince)
@@ -41,8 +51,6 @@ const soleTicket = computed(() => tickets.value.length === 1 ? tickets.value[0] 
 
 // ---------- Evidence ----------
 const ev = computed(() => props.release.evidence)
-const RUN_WORD: Record<string, string> = { success: 'passed', failure: 'failed', cancelled: 'cancelled', skipped: 'skipped', timed_out: 'timed out' }
-const runWord = (run: { status: string; conclusion: string }) => run.conclusion ? (RUN_WORD[run.conclusion] ?? run.conclusion.replace(/_/g, ' ')) : run.status.replace(/_/g, ' ')
 const summary = computed(() => {
   const bits: string[] = []
   if (ev.value.ci) bits.push(`CI ${runWord(ev.value.ci)}`)
@@ -84,43 +92,43 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       <template v-if="reserved">Reserved {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}. The version was taken{{ release.tag ? ' and tagged' : '' }}, but no release was published under it.</template>
       <template v-else>{{ release.published_at ? 'Published' : 'Tagged' }} {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}</template>
     </p>
-    <p v-if="historicalTagFallback(release)" class="eyebrow hist-label">{{ HISTORICAL_TAG_LABEL }}</p>
-    <p v-if="!hasUsableNotes(release) && release.headline" class="headline">{{ displayHeadline(release, locale) }}</p>
-
-    <TicketChips v-if="chipTickets.length && !hasUsableNotes(release)" :tickets="chipTickets" class="tickets" />
-
-    <section v-if="hasUsableNotes(release)" class="changes-block notes" aria-label="Release notes">
-      <p v-if="writtenAfterRelease(release)" class="written-after">{{ WRITTEN_AFTER_LABEL }}</p>
-      <div v-for="note in release.notes.items" :key="note.id" class="note-item">
-        <p class="note-line"><span class="chip note-pill" :lang="localizedNote(note, locale).pillLang">{{ localizedNote(note, locale).pill }}</span> <TicketLink :ticket-key="note.key" /></p>
-        <p class="note-benefit" :lang="localizedNote(note, locale).benefitLang">{{ localizedNote(note, locale).benefit }}</p>
+    <section class="notes" aria-label="Release notes">
+      <div v-if="!reserved && presented" class="summary">
+        <p v-if="presented.theme" class="kicker" :lang="presented.themeLang"><template v-for="(p, i) in parts(presented.theme)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.themeLang)" :lang="presented.themeLang" /></p>
+        <p class="headline" :lang="presented.headlineLang"><template v-for="(p, i) in parts(presented.headline)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.headlineLang, true)" :lang="presented.headlineLang" /></p>
+        <p v-if="presented.intro" class="intro" :lang="presented.introLang"><template v-for="(p, i) in parts(presented.intro)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.introLang)" :lang="presented.introLang" /></p>
       </div>
-      <p v-for="gap in release.notes.gaps" :key="gap" class="none">{{ gap }}</p>
-      <p v-if="!release.notes.items.length && !release.notes.gaps.length" class="none">{{ emptyNotesLine(locale) }}</p>
-      <p v-if="release.notes.hidden" class="none">{{ hiddenNoteLine(release.notes.hidden, locale) }}</p>
+      <p v-if="noted && !noted.items.length && !noted.gaps.length" class="none">{{ emptyNotesLine(locale) }}</p>
+      <TicketChips v-if="chipTickets.length" :tickets="chipTickets" class="tickets" />
+      <ReleaseChanges v-if="counted" :presented="lines" :repository="repository" :query="query" :sole-ticket="soleTicket" :view="view" :lang="lang" />
+      <p v-else-if="!noted" class="none" :lang="lang">{{ reserved ? copyText.nothingShipped : copyText.noChanges }}</p>
+      <template v-if="noted">
+        <p v-for="gap in noted.gaps" :key="gap" class="none">{{ gap }}</p>
+        <p v-if="noted.hidden" class="none">{{ hiddenNoteLine(noted.hidden, locale) }}</p>
+      </template>
+      <p v-if="release.changes_omitted" class="none" :lang="lang">{{ copyText.omitted(release.changes_omitted) }}</p>
+      <p v-if="writtenAfterRelease(release)" class="none written-after">{{ writtenAfterLine(locale) }}</p>
     </section>
-    <div v-else class="changes-block">
-      <p v-for="gap in release.notes?.gaps" :key="gap" class="none">{{ gap }}</p>
-      <ReleaseChanges v-if="counted" :changes="release.changes" :repository="repository" :query="query" :sole-ticket="soleTicket" />
-      <p v-else class="none">{{ reserved ? 'Nothing shipped under this version.' : 'No changes are recorded between this release and the one before it.' }}</p>
-      <p v-if="release.changes_omitted" class="none">And {{ release.changes_omitted }} more {{ release.changes_omitted === 1 ? 'change' : 'changes' }} not listed here.</p>
-    </div>
 
     <!-- A reservation that was tagged still has evidence: often why it never published. -->
-    <section v-if="release.tag" class="evidence" :class="{ open: evidence }">
-      <button type="button" class="ev-toggle" :aria-expanded="evidence" aria-controls="release-evidence" aria-keyshortcuts="e" @click="emit('evidence', !evidence)">
+    <!-- Details shows it open; Highlights keeps it behind a toggle. -->
+    <section v-if="release.tag" class="evidence" :class="{ open: evidenceOpen }" aria-labelledby="release-evidence-title">
+      <h3 v-if="details" id="release-evidence-title" class="ev-toggle ev-head">
         <span class="ev-icon"><AppIcon name="shield" :size="14" /></span>
         <span class="ev-title">Evidence</span>
+      </h3>
+      <button v-else type="button" class="ev-toggle" :aria-expanded="evidence" aria-controls="release-evidence" aria-keyshortcuts="e" @click="emit('evidence', !evidence)">
+        <span class="ev-icon"><AppIcon name="shield" :size="14" /></span>
+        <span id="release-evidence-title" class="ev-title">Evidence</span>
         <span class="ev-summary">{{ summary }}</span>
         <AppIcon name="chevron" :size="14" class="ev-chev" />
       </button>
-      <div v-if="evidence" id="release-evidence" class="ev-body">
+      <div v-if="evidenceOpen" id="release-evidence" class="ev-body">
         <p class="sr" role="status">{{ copyStatus }}</p>
+        <p v-if="release.headline" class="none">Tag message: {{ release.headline }}</p>
         <template v-if="release.notes">
-          <p v-if="hasUsableNotes(release) && release.headline" class="none">Git headline: {{ release.headline }}</p>
           <p class="none">Note source: {{ release.notes.source }}</p>
           <p v-if="release.notes.snapshot_sha256" class="mono wrap">Snapshot SHA-256: {{ release.notes.snapshot_sha256 }}</p>
-          <ReleaseChanges v-if="hasUsableNotes(release) && counted" :changes="release.changes" :repository="repository" :query="query" />
         </template>
         <dl>
           <div>
@@ -182,22 +190,23 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 .live-line { color: var(--ink); }
 .live-line .live-dot { display: inline-block; margin-right: 7px; vertical-align: 1px; }
 .live-line .for { white-space: nowrap; color: var(--ink-2); }
-.headline { margin-top: 4px; font: 500 19px/1.4 var(--serif); color: var(--ink); letter-spacing: -.01em; text-wrap: pretty; }
-.reserved .headline, .reserved .version { color: var(--ink-2); }
+.reserved .version { color: var(--ink-2); }
+/* AEON-305: a compact header for a named release; the blocks below stay the main content. */
+.notes { display: grid; gap: 8px; margin-top: 10px; min-width: 0; }
+.summary { display: grid; gap: 4px; margin-bottom: 8px; padding: 14px 16px; border-radius: 12px; background: color-mix(in oklab, var(--surface-2), transparent 40%); box-shadow: inset 0 0 0 1px var(--line); min-width: 0; }
+.kicker { margin: 0; font: 700 11px/1.35 var(--font); letter-spacing: .08em; text-transform: uppercase; color: var(--teal-ink); overflow-wrap: anywhere; }
+.summary .headline { margin: 0; font: 650 19px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); text-wrap: balance; overflow-wrap: anywhere; }
+.intro { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); text-wrap: pretty; overflow-wrap: anywhere; }
+mark { background: var(--mark-hl); color: inherit; border-radius: 3px; padding: 0 1px; }
 .tickets { margin-top: 2px; }
-.changes-block { display: grid; gap: 8px; margin-top: 10px; }
-.hist-label { margin: 8px 0 0; }
-.notes { gap: 0; }
-.written-after { margin: 8px 0 0; font-size: 12.5px; line-height: 1.4; color: var(--ink-3); }
-.note-item { display: grid; gap: 4px; min-width: 0; padding: 10px 0; }
-.note-item + .note-item { margin-top: 2px; }
-.note-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; margin: 0; }
-.note-benefit { margin: 0; font-size: 14.5px; line-height: 1.45; color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
 .none { font-size: 13px; color: var(--ink-3); }
+.written-after { font-size: 12.5px; }
 .evidence { margin-top: 14px; border-radius: 14px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 1px var(--line); overflow: hidden; }
 .ev-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 8px 14px; border: 0; background: transparent; color: var(--ink); text-align: left; }
 @media (hover: hover) { .ev-toggle:hover { background: var(--row-hover); } }
 .ev-toggle:focus-visible { box-shadow: inset 0 0 0 2px var(--aqua); }
+.ev-head { margin: 0; font: inherit; letter-spacing: 0; }
+@media (hover: hover) { .ev-head:hover { background: transparent; } }
 .ev-icon { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--surface-2); color: var(--teal-ink); }
 .ev-title { font-weight: 650; font-size: 13.5px; }
 .ev-summary { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -230,7 +239,8 @@ dd { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin:
   .ev-toggle { flex-wrap: wrap; row-gap: 2px; }
   .ev-summary { flex-basis: 100%; order: 3; padding-left: 36px; white-space: normal; overflow: visible; }
   .ext { min-height: 44px; }
-  .headline { font-size: 17px; }
+  .summary { padding: 12px; }
+  .summary .headline { font-size: 17px; }
 }
 @media (prefers-reduced-motion: reduce) { .ev-chev { transition: none; } }
 </style>

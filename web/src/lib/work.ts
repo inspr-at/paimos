@@ -44,7 +44,7 @@ export function statusMeta(state: string): StatusMeta {
 export function statusOptions(knownStates: Iterable<string> = []): { value: string; meta: StatusMeta }[] {
   const known = new Set(knownStates)
   const progress = known.has('in-progress') && !known.has('in_progress') ? 'in-progress' : 'in_progress'
-  return ['new', 'backlog', progress, 'qa', 'accepted', 'delivered', 'done', 'cancelled'].map(value => ({ value, meta: statusMeta(value) }))
+  return ['new', 'backlog', 'blocked', progress, 'qa', 'accepted', 'delivered', 'done', 'cancelled'].map(value => ({ value, meta: statusMeta(value) }))
 }
 
 export const PRIORITIES = [
@@ -136,11 +136,11 @@ export function highlight(text: string, query: string): Segment[] {
 }
 
 // Sort keys map one-to-one to the list API ("state,-updated_at").
-export type SortField = 'key' | 'title' | 'state' | 'priority' | 'updated_at' | 'created_at' | 'kind' | 'assignee' | 'eta_ready' | 'progress'
+export type SortField = 'key' | 'title' | 'state' | 'priority' | 'updated_at' | 'created_at' | 'kind' | 'assignee' | 'eta_ready' | 'progress' | 'estimate'
 export interface SortKey { field: SortField; desc: boolean }
-export const SORT_FIELDS: SortField[] = ['key', 'title', 'state', 'priority', 'updated_at', 'created_at', 'kind', 'assignee', 'eta_ready', 'progress']
+export const SORT_FIELDS: SortField[] = ['key', 'title', 'state', 'priority', 'updated_at', 'created_at', 'kind', 'assignee', 'eta_ready', 'progress', 'estimate']
 // What each sort key is called in the Display menu.
-export const SORT_LABELS: Record<SortField, string> = { updated_at: 'Updated', created_at: 'Created', key: 'Key', title: 'Title', state: 'Status', priority: 'Priority', kind: 'Type', assignee: 'Assignee', eta_ready: 'Ready', progress: 'Percent done' }
+export const SORT_LABELS: Record<SortField, string> = { updated_at: 'Updated', created_at: 'Created', key: 'Key', title: 'Title', state: 'Status', priority: 'Priority', kind: 'Type', assignee: 'Assignee', eta_ready: 'Ready', progress: 'Percent done', estimate: 'Estimate' }
 export function parseSort(raw: string | null | undefined): SortKey[] {
   if (!raw) return []
   const out: SortKey[] = []

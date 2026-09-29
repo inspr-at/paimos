@@ -75,7 +75,7 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
   ['account menu', signedIn, '/', async page => {
     await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
     await page.getByRole('button', { name: /^Account for/ }).click()
-    await expect(page.getByRole('dialog', { name: 'Account' })).toBeVisible()
+    await expect(page.getByRole('menu', { name: 'Account' })).toBeVisible()
   }],
   ['shortcut sheet', signedIn, '/p/PHAROS', async page => {
     await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(5)
@@ -92,10 +92,11 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
   ['agents', signedIn, '/agents', async page => { await expect(page.locator('.agents-page .row').first()).toBeVisible() }],
   ['agents empty', page => signedIn(page, true), '/agents', async page => { await expect(page.getByRole('heading', { name: 'No agent has connected yet' })).toBeVisible() }],
   ['agents session panel', signedIn, '/agents/5e000000-0000-4000-8000-000000000001?tab=messages', async page => {
-    // These fixture messages are unbound history, so open that disclosure to audit the bubbles.
+    // AEON-313: unbound history of other sessions is no longer shown in this
+    // thread, so the audit covers the conversation as the session shows it.
     const panel = page.getByRole('complementary', { name: 'Session details' })
-    await panel.getByText(/^Other sessions of/).click()
-    await expect(panel.locator('.msg').first()).toBeVisible()
+    await expect(panel.getByRole('region', { name: 'Conversation' })).toBeVisible()
+    await expect(panel.getByText(/^Other sessions of/)).toHaveCount(0)
   }],
   ['agents session overview', signedIn, '/agents/5e000000-0000-4000-8000-000000000001?tab=overview', async page => {
     await expect(page.getByRole('complementary', { name: 'Session details' }).locator('.now-step')).toBeVisible()

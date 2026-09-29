@@ -1,25 +1,30 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { compare, displayHeadline, presentChanges, releasedAt, span, type Release } from '../../lib/releases'
-import { useProfile } from '../../stores/profile'
+import { compare, presentChanges, releaseCopy, releasedAt, releaseName, span, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { absoluteTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
+import LangBadge from './LangBadge.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
 import TicketChips from './TicketChips.vue'
 
 // Two releases side by side: everything that shipped after the older one, up to
-// and including the newer one.
-const props = defineProps<{ releases: Release[]; from: string; to: string | null; repository: string; query: string }>()
+// and including the newer one, in the same language and view as one release.
+const props = defineProps<{ releases: Release[]; from: string; to: string | null; repository: string; query: string; lang: ReleaseLang; view: ReleaseView }>()
 const emit = defineEmits<{ swap: []; exit: [] }>()
-const profile = useProfile()
-const locale = computed(() => profile.profile?.locale ?? null)
 const result = computed(() => props.to && props.to !== props.from ? compare(props.releases, props.from, props.to) : null)
 const count = computed(() => result.value ? result.value.groups.features.length + result.value.groups.fixes.length + result.value.groups.other.length : 0)
+// The range reads like one release: a block per linked ticket, and a chip only
+// for tickets that head no block.
+const lines = computed(() => result.value ? presentChanges(result.value.changes, props.lang) : null)
+// Each release's name, with the language it is shown in for the fallback badge.
+const names = computed(() => new Map((result.value?.releases ?? []).map(r => [r.version, releaseName(r, props.lang)])))
+const rangeTitle = (r: Release) => names.value.get(r.version) ?? { text: '', lang: props.lang }
+const copyText = computed(() => releaseCopy(props.lang))
 const chipTickets = computed(() => {
-  if (!result.value) return []
-  const lines = presentChanges(result.value.changes, locale.value)
-  const lined = new Set([...lines.features, ...lines.fixes].map(line => line.key))
+  if (!result.value || !lines.value) return []
+  const lined = new Set([...lines.value.features, ...lines.value.fixes].map(line => line.key))
   return result.value.tickets.filter(key => !lined.has(key))
 })
 const between = computed(() => {
@@ -37,7 +42,7 @@ const between = computed(() => {
     <h2 id="compare-title" class="pair">
       <span class="end"><span class="tag">From</span><CalendarVersion :value="result?.older ?? from" /></span>
       <AppIcon name="arrow" :size="16" class="to-arrow" />
-      <span class="end" :class="{ waiting: !result }"><span class="tag">To</span><CalendarVersion v-if="result" :value="result.newer" /><span v-else class="pick">Pick a second release</span></span>
+      <span class="end" :class="{ waiting: !result }"><span class="tag">To</span><CalendarVersion v-if="result" :value="result.newer" /><span v-else class="pick" :lang="lang">{{ copyText.comparePick }}</span></span>
     </h2>
     <div class="actions">
       <button v-if="result" type="button" class="btn sm" @click="emit('swap')"><AppIcon name="refresh" :size="12" />Swap</button>
@@ -54,14 +59,14 @@ const between = computed(() => {
       <section class="included" aria-labelledby="compare-included">
         <h3 id="compare-included" class="included-h">Releases in this range</h3>
         <ul>
-          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span class="inc-headline">{{ r.notes || r.headline ? displayHeadline(r, locale) : 'No headline recorded' }}</span></li>
+          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span v-if="rangeTitle(r).text" class="inc-headline" :lang="rangeTitle(r).lang">{{ rangeTitle(r).text }}<LangBadge v-if="rangeTitle(r).lang !== lang" :lang="rangeTitle(r).lang" /></span><span v-else-if="releasedAt(r)" class="inc-date">{{ absoluteTime(releasedAt(r)!) }}</span></li>
         </ul>
       </section>
-      <ReleaseChanges v-if="count" :changes="result.changes" :repository="repository" :query="query" class="changes" />
-      <p v-else class="none">No changes are recorded between these releases.</p>
+      <ReleaseChanges v-if="count && lines" :presented="lines" :repository="repository" :query="query" :view="view" :lang="lang" class="changes" />
+      <p v-else class="none" :lang="lang">{{ copyText.compareNone }}</p>
     </template>
-    <p v-else class="hint">
-      Move through the list with <kbd class="keycap">j</kbd> <kbd class="keycap">k</kbd> and press <kbd class="keycap">Enter</kbd>, or click a release. The changes from the older to the newer one are added up here.
+    <p v-else class="hint" :lang="lang">
+      {{ copyText.compareHint[0] }} <kbd class="keycap">j</kbd> <kbd class="keycap">k</kbd> {{ copyText.compareHint[1] }} <kbd class="keycap">Enter</kbd>{{ copyText.compareHint[2] }}
     </p>
   </section>
 </template>
@@ -86,6 +91,7 @@ const between = computed(() => {
 .included li:last-child { border-bottom: 0; }
 .inc-version { font-size: 12px; }
 .inc-headline { overflow-wrap: anywhere; }
+.inc-date { color: var(--ink-3); }
 .none, .hint { font-size: 13.5px; color: var(--ink-2); line-height: 1.7; }
 @media (max-width: 760px) { .pair { font-size: 15px; } .included li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 </style>

@@ -5,7 +5,7 @@ import { APIError } from '../lib/api'
 import { agreeRequirements, getJourney, GATE_OF_ACTION, matchesJourneyConfirmation, offeredApproval, postAction, putProfile, type ActionKey, type Journey, type JourneyConfirmation, type Profile } from '../lib/journey'
 import { useAgents } from './agents'
 
-// The journey projection per project (the header's compact stage and the
+// The journey projection per project (the footer's flow pill and the
 // Journey view share it). Every write carries the revision it was made on; a
 // stale revision reloads the projection and says so instead of retrying.
 const RELEASE_ACTIONS: ActionKey[] = ['start_build', 'mark_candidate', 'approve_candidate', 'reject_candidate', 'approve_deploy', 'renew_candidate', 'renew_deploy', 'retry_deploy', 'approve_permit', 'plan_next_release']

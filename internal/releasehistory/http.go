@@ -84,10 +84,13 @@ func (m *Module) UseTickets(src TicketSource) {
 
 var _ httpapi.Module = (*Module)(nil)
 
-// Mount registers GET /api/releases and GET /api/releases/{version}.
+// Mount registers GET /api/releases, GET /api/releases/{version} and the
+// presentation writes PUT and DELETE /api/releases/{version}/presentation.
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/releases", m.list)
 	mux.HandleFunc("GET /api/releases/{version}", m.one)
+	mux.HandleFunc("PUT /api/releases/{version}/presentation", m.putPresentation)
+	mux.HandleFunc("DELETE /api/releases/{version}/presentation", m.deletePresentation)
 }
 
 // Response is the history as served, with the running version and since when
@@ -125,7 +128,7 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 	}
 	v := strings.TrimPrefix(r.PathValue("version"), "v")
 	if !ValidVersion(v) {
-		httpapi.WriteError(w, http.StatusBadRequest, "not an inspr-calendar-v2 version")
+		httpapi.WriteError(w, http.StatusBadRequest, "not a calendar version")
 		return
 	}
 	h, err := m.historyFor(r.Context())

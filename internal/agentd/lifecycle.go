@@ -25,18 +25,19 @@ type DrainRequest struct {
 // LifecycleStatus does not conflate telemetry acceptance with observed exit.
 // Only a drained status permits removing a pairing-owned service or credential.
 type LifecycleStatus struct {
-	LoginRequired           bool              `json:"login_required"`
-	VerificationUnavailable []string          `json:"verification_unavailable_account_ids"`
-	Ready                   bool              `json:"ready"`
-	DaemonID                string            `json:"daemon_id"`
-	Generation              string            `json:"generation"`
-	State                   string            `json:"state"`
-	ActiveRunIDs            []string          `json:"active_run_ids"`
-	UnconfirmedRunIDs       []string          `json:"unconfirmed_run_ids"`
-	SettlementPendingRunIDs []string          `json:"settlement_pending_run_ids"`
-	FencedAccountIDs        []string          `json:"fenced_account_ids"`
-	AllFenced               bool              `json:"all_fenced"`
-	VerificationResults     map[string]string `json:"verification_results"`
+	CapacityAccounts        []CapacityAccountStatus `json:"capacity_accounts,omitzero"`
+	LoginRequired           bool                    `json:"login_required"`
+	VerificationUnavailable []string                `json:"verification_unavailable_account_ids"`
+	Ready                   bool                    `json:"ready"`
+	DaemonID                string                  `json:"daemon_id"`
+	Generation              string                  `json:"generation"`
+	State                   string                  `json:"state"`
+	ActiveRunIDs            []string                `json:"active_run_ids"`
+	UnconfirmedRunIDs       []string                `json:"unconfirmed_run_ids"`
+	SettlementPendingRunIDs []string                `json:"settlement_pending_run_ids"`
+	FencedAccountIDs        []string                `json:"fenced_account_ids"`
+	AllFenced               bool                    `json:"all_fenced"`
+	VerificationResults     map[string]string       `json:"verification_results"`
 }
 
 func fenceName(account string) string {
@@ -131,6 +132,10 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	v := LifecycleStatus{DaemonID: s.daemonID, Generation: s.generation, State: "drained", ActiveRunIDs: []string{}, UnconfirmedRunIDs: []string{}, SettlementPendingRunIDs: []string{}, FencedAccountIDs: []string{}, VerificationResults: map[string]string{}}
 	s.mu.Lock()
 	v.Ready = len(s.accounts) > 0
+	if s.capacityCapturing {
+		v.State = "capturing"
+		v.Ready = false
+	}
 	v.AllFenced, _ = s.readFence("")
 	for _, a := range s.accounts {
 		fenced, e := s.readFence(a.ID)
@@ -147,6 +152,9 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 				v.VerificationUnavailable = append(v.VerificationUnavailable, a.ID)
 			}
 		}
+	}
+	if s.capacityCapturing && (s.closing || v.AllFenced || len(v.FencedAccountIDs) > 0) {
+		v.State = "draining"
 	}
 	entries := make([]*owned, 0, len(s.runs))
 	for _, e := range s.runs {

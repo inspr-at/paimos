@@ -286,10 +286,10 @@ test('the thread stays pinned at the bottom, counts posts that arrive while scro
   const panel = panelOf(page)
   const thread = scroller(page)
   await expect(panel.locator('.msg').first()).toBeVisible()
-  // Everything unread: the view opens at the first post, without a divider.
-  await expect(panel.locator('.msg').first()).toBeInViewport()
+  // A first visit opens at the latest exchange, without a divider.
+  await expect(panel.locator('.msg').last()).toBeInViewport()
   await expect(panel.getByRole('separator')).toHaveCount(0)
-  await expect(panel.getByRole('button', { name: /new messages, go to the latest/ })).toBeVisible()
+  await expect(panel.getByRole('button', { name: /new messages, go to the latest/ })).toHaveCount(0)
   // Reading to the bottom clears the badge.
   await thread.evaluate(el => el.scrollTo({ top: el.scrollHeight }))
   await expect(messagesTab(page).locator('.count')).toHaveCount(0)

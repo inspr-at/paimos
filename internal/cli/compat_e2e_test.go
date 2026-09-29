@@ -144,6 +144,21 @@ func TestCompatEndToEnd(t *testing.T) {
 		t.Fatalf("create out %q", out)
 	}
 
+	if !strings.Contains(errOut, "--estimate") {
+		t.Fatalf("missing agent estimate warning: %s", errOut)
+	}
+	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "--json", "issue", "update", key, "--estimate", "90m"}, "")
+	if code != 0 {
+		t.Fatalf("estimate by agent key: %d %s %s", code, out, errOut)
+	}
+	var estimate issueView
+	if err := json.Unmarshal([]byte(out), &estimate); err != nil {
+		t.Fatal(err)
+	}
+	if estimate.EstimateHours == nil || *estimate.EstimateHours != 1.5 || estimate.EstimateSource != "agent" || estimate.EstimateBy == "" || estimate.EstimateAt == "" {
+		t.Fatalf("agent key estimate provenance missing: %+v", estimate)
+	}
+
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "get", key}, "")
 	if code != 0 || !strings.Contains(out, key+"  Calendar compat") || !strings.Contains(out, "type:     ticket") || !strings.Contains(out, "status:   open") || !strings.Contains(out, "priority: high") {
 		t.Fatalf("get code %d out %q err %q", code, out, errOut)

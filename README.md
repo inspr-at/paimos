@@ -54,7 +54,90 @@ Named instances and the default live in `~/.aeon/config.yaml`. The agent API key
 
 `whoami` calls `GET /api/me`. Issue, knowledge, search and onboard exit 3 with `arrives in R1` until those endpoints exist. `model resolve` exits 3 with a not-yet message. `aeon mcp` serves those tools over stdio.
 
-Versioning: INSPR Calendar Versioning v2 (`inspr-calendar-v2`, `YYMMDDhhmmss.0.0`); the version display uses the pinned INSPR presentation bundle, checked by `just release-check`.
+Versioning: INSPR Calendar Versioning, INSPR-CalVer3 (`inspr-calver-3`, `YYMMDDhhmmss.0.0`); releases up to 260929113854.0.0 stay INSPR-CalVer2 history. The version display uses the pinned INSPR presentation bundle, checked by `just release-check`.
+
+Session **Messages** shows both directions of that session's conversation, newest
+messages at the bottom. `aeon tell PERSON_UUID --project AEON -m 'Reply text'`
+automatically uses `AEON_SESSION_ID`, `AEON_SESSION_FILE` (or
+`AEON_SESSION_STATE_DIR/session.id`), then the registered harness binding when no
+explicit source is configured. Ambient sessions are attached only when active in
+the target project; an ended or unavailable session is omitted with a stderr note.
+`--sender-session` overrides these sources and strictly requires your active
+session in the target project.
+Use `--reply-to MESSAGE_UUID` to link an answer to the person's question; linked
+answers appear in the same thread even when sent without a session binding.
+“Read” means the session acknowledged receipt; “Answered” means an accepted
+counterpart reply exists in the loaded conversation. Unrelated principal history
+and shared-inbox obligations stay outside the session thread.
+
+### Agent work estimates
+
+Estimates are expected **agent hours until ready for review**, separate from a live ETA.
+Set them with `aeon issue create ... --estimate 2h`, `aeon issue update AEON-317 --estimate 90m`, or `aeon issue estimate AEON-317 --hours 1.5 --source agent`. Decimal hours and minutes are accepted; values must be greater than zero and at most 200 hours. The optional source asserts the authenticated principal kind; the server stamps the principal and time. Creating a ticket or task as an agent without an estimate returns a warning.
+
+Agent drafts show `est.` until a person or a working agent bound to the ticket confirms or changes them. Resubmitting the hours through the estimate command confirms them; provenance is recorded again. The ticket's Estimate control also edits or clears the value. Epics show the sum of direct, visible, open ticket/task children, with estimated-child coverage in the tooltip; nested tasks are not counted twice. The Estimate sort keeps empty values last in either direction. Imported points remain visible as points, not converted to hours.
+
+For a backfill, an agent drafts a JSON plan such as `[{"key":"AEON-317","hours":2},{"key":"AEON-318","hours":0.5}]`, then runs:
+
+```sh
+aeon issue estimate --missing --project AEON --from-file plan.json --dry-run
+aeon issue estimate --missing --project AEON --from-file plan.json --apply
+```
+
+Both modes validate every plan entry and project membership before any write. Apply uses the agent identity, skips work already estimated and checks each node's revision. A concurrent change stops the plan; earlier successful writes remain applied and a rerun skips them. There are no server-side model calls.
+
+## Lead handover and short review/fix jobs
+
+A coordinator registered with the same principal, harness and native session
+reference automatically takes over its stopped or heartbeat-lost predecessor's
+live children. The transaction records one `harness.adopted` event per child and
+`harness.handed_over` on the old lead; stopped children remain historical.
+A healthy lead is never replaced. `harness run-heartbeat --role coordinator
+--source-session NATIVE_UUID` uses that stable native reference; use a fresh
+private state directory for the new process generation. After an unclean
+restart, the helper retries an active-generation registration conflict at the
+heartbeat interval while its owner process lives, logging each retry. Once the
+predecessor's heartbeat expires, registration and child adoption proceed
+automatically. For a different native session, pass `--succeeds OLD_SESSION_UUID`
+to `harness register` or `harness run-heartbeat`. The predecessor must belong to
+the same principal and project. A handed-over generation cannot revive through
+a late heartbeat.
+
+On **Agents**, the old lead links to its successor and adopted workers link back
+to the old lead. Drag a live worker to a live lead, or choose **Move to lead…**
+from its menu. A person must own both registrations or be an owner/admin in the
+same project and hold `harness.write`; sessions whose legacy owner is unknown
+require an admin. The server checks revisions and rejects cycles. The toast's
+**Undo** rechecks rights and hierarchy changes; an ordinary heartbeat does not
+invalidate it. Moves preserve ticket bindings and estimates.
+
+For flywheel gates and fixers, wrap the existing command without changing its
+own review, sandbox or permission arguments. Retain the launcher's environment
+sanitization (including the three `CLAUDE_CODE_*` messaging variables):
+
+```sh
+aeon harness run --project AEON --ticket AEON-322 --label "Handover review" \
+  --role reviewer --harness claude --parent-session "$LEAD_SESSION" \
+  -- claude -p "Review the prepared AEON-322 diff read-only"
+aeon harness run --project AEON --ticket AEON-322 --label "Handover fixes" \
+  --role fixer --harness claude --parent-session "$LEAD_SESSION" \
+  -- claude -p "Apply only the accepted AEON-322 fixes"
+```
+
+The helper registers before launching, heartbeats while the command runs and
+marks the generation stopped on success, nonzero exit, launch failure or
+SIGTERM. It preserves stdout, stderr and the command's exit code; SIGTERM exits
+143 after settling the session. It signals only the process group it launched,
+using the existing ownership fence, with a five-second TERM grace period.
+`reviewer` and `fixer` are worker jobs with a public activity note; reviewers
+default to `scout`, fixers to `ship`. Project defaults to the ticket prefix,
+agent to the authenticated caller, and harness to a recognized command name.
+No command text or arguments are sent to the server. The default private state
+directory is retained for recovery; `--state-dir` selects an explicit new one.
+A failed stop prints that directory and retains the existing heartbeat retry
+intent. Reuse `run-heartbeat` to settle it; `run` refuses to launch a second job
+from an already-used directory. These helpers confer no additional permissions
+and do not replace the ticket's worker marker or release review gates.
 
 ## Install the CLI
 

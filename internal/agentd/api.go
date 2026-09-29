@@ -362,11 +362,37 @@ func (r *Remote) AddEvidence(ctx context.Context, workOrderID, runID, answer str
 }
 
 func (r *Remote) Probe(ctx context.Context, accountID, daemonID, generation string, available bool) error {
-	body := map[string]any{"daemon_id": daemonID, "daemon_generation": generation, "available": available}
+	status := ProbeStatus{OK: available}
+	if !available {
+		status.Failure = ProbeUnavailable
+	}
+	return r.ProbeStatus(ctx, accountID, daemonID, generation, status)
+}
+
+// ProbeStatusReporter is implemented by API clients that also send why a probe
+// failed; older fakes keep the boolean Probe.
+type ProbeStatusReporter interface {
+	ProbeStatus(ctx context.Context, accountID, daemonID, generation string, status ProbeStatus) error
+}
+
+// ProbeStatus reports a probe and, when it failed, only its cause category.
+func (r *Remote) ProbeStatus(ctx context.Context, accountID, daemonID, generation string, status ProbeStatus) error {
+	body := map[string]any{"daemon_id": daemonID, "daemon_generation": generation, "available": status.OK}
+	if !status.OK && (status.Failure == ProbeAuthFailed || status.Failure == ProbeUnavailable) {
+		body["failure"] = status.Failure
+	}
 	if host, err := os.Hostname(); err == nil && host != "" && len(host) <= 128 {
 		body["host_label"] = host
 	}
-	return r.Client.Do(ctx, "POST", "/api/agent-accounts/"+url.PathEscape(accountID)+"/probe", body, nil)
+	path := "/api/agent-accounts/" + url.PathEscape(accountID) + "/probe"
+	err := r.Client.Do(ctx, "POST", path, body, nil)
+	if err != nil && body["failure"] != nil {
+		// A server from before probe causes rejects the extra field; the boolean
+		// probe must still land so routing sees the failure.
+		delete(body, "failure")
+		return r.Client.Do(ctx, "POST", path, body, nil)
+	}
+	return err
 }
 
 // ValidateBaseURL rejects credential-bearing and remote cleartext endpoints.

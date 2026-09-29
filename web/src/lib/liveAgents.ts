@@ -53,6 +53,75 @@ export function byLead(a: LiveAgent, b: LiveAgent) {
     || (a.session_id ?? a.since).localeCompare(b.session_id ?? b.since)
 }
 
+// The list API's lead, after attention rank: a worker before a coordinator,
+// then start, then heartbeat, then public session facts. A withheld session
+// id is not a tie-break. Other views keep byLead.
+export function compareServerLead(a: LiveAgent, b: LiveAgent) {
+  const rank = (agent: LiveAgent) => STATE_PRIORITY[agent.state ?? 'working']
+  const beat = (agent: LiveAgent) => {
+    const parsed = Date.parse(agent.heartbeat_at ?? '')
+    return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
+  }
+  return rank(a) - rank(b)
+    || Number(a.role === 'coordinator') - Number(b.role === 'coordinator')
+    || Date.parse(a.since) - Date.parse(b.since)
+    || beat(a) - beat(b)
+    || a.harness.localeCompare(b.harness)
+    || (a.activity_sequence ?? 0) - (b.activity_sequence ?? 0)
+    || a.phase.localeCompare(b.phase)
+    || a.activity.localeCompare(b.activity)
+    || who(a).localeCompare(who(b))
+    || leadWorkerKey(a).localeCompare(leadWorkerKey(b))
+}
+
+// Same token the list API returns as lead_worker.key. A session id is used
+// only when this feed already includes one. Otherwise use immutable public
+// facts; changing telemetry or names must not create a second worker.
+export function leadWorkerKey(agent: Pick<LiveAgent, 'session_id' | 'harness' | 'since'>) {
+  const id = agent.session_id?.trim()
+  if (id) return `s:${id}`
+  // The live feed may serialize the server's local offset. Match SQL's UTC
+  // timestamp without losing the sub-millisecond precision Date discards.
+  const parsed = Date.parse(agent.since)
+  const fraction = agent.since.match(/\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/)?.[1]?.replace(/0+$/, '')
+  const since = Number.isNaN(parsed) ? agent.since
+    : new Date(parsed).toISOString().replace(/\.\d{3}Z$/, `${fraction ? `.${fraction}` : ''}Z`)
+  return ['v', agent.harness, since].join('\u0001')
+}
+
+const LEAD_HARNESS = new Set<LiveAgent['harness']>(['codex', 'claude', 'pi', 'cursor', 'grok'])
+
+// Assignee cell order: the server's lead first, then the other live workers.
+// A lead the feed has not listed yet still shows, under its projected name.
+export function withServerLead(workers: readonly LiveAgent[], lead?: { name: string; key: string } | null): LiveAgent[] {
+  if (!lead?.key || !lead.name) return workers.slice()
+  // Public harness/start keys may coincide. Prefer the matching visible name,
+  // then consume exactly one match so other real sessions retain their count.
+  let index = workers.findIndex(agent => leadWorkerKey(agent) === lead.key && who(agent) === lead.name)
+  if (index < 0) index = workers.findIndex(agent => leadWorkerKey(agent) === lead.key)
+  if (index >= 0) {
+    // The list snapshot owns the lead name, even if this feed was renamed
+    // before or after it. Clone the lead without changing the shared feed.
+    const first = { ...workers[index]!, display_label: undefined, name: lead.name }
+    return [first, ...workers.slice(0, index), ...workers.slice(index + 1)]
+  }
+  const parts = lead.key.split('\u0001')
+  const harness = parts[0] === 'v' && LEAD_HARNESS.has(parts[1] as LiveAgent['harness']) ? parts[1] as LiveAgent['harness'] : 'claude'
+  const placeholder: LiveAgent = {
+    project_id: workers[0]?.project_id ?? '',
+    harness,
+    management_mode: 'unmanaged',
+    role: 'worker',
+    phase: 'working',
+    activity: 'busy',
+    ticket: workers[0]?.ticket ?? null,
+    since: parts[0] === 'v' ? (parts[2] ?? '') : '',
+    heartbeat_at: null,
+    name: lead.name,
+  }
+  return [placeholder, ...workers]
+}
+
 export function liveState(agent: LiveAgent, serverNow: number, preferences: AgentStatePreference = DEFAULT_AGENT_STATE): LiveBotState {
   return deriveAgentState({ ...agent, needs_attention: agent.needs_attention ?? (agent.state === 'waiting' ? true : undefined) }, serverNow, preferences)
 }

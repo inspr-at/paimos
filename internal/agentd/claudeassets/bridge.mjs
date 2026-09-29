@@ -256,22 +256,52 @@ function observeTool(message) {
       message.event?.content_block?.type === "tool_use") emit({ kind: "tool_started" });
 }
 
+// Project only the documented quota fields. Never forward arbitrary SDK data.
+let lastCapacity = null;
+let lastCapacityAt = "";
+function observeCapacity(message) {
+  if (message?.type !== "rate_limit_event") return;
+  const src = message.rate_limit_info;
+  if (!src || typeof src !== "object") return;
+  const info = {};
+  for (const k of ["status", "rateLimitType"]) if (typeof src[k] === "string") info[k] = src[k];
+  for (const k of ["utilization", "resetsAt"]) if (typeof src[k] === "number" && Number.isFinite(src[k])) info[k] = src[k];
+  info.unifiedWindows = {};
+  for (const k of ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet", "seven_day_overage_included"]) {
+    const w = src.unifiedWindows?.[k];
+    if (typeof w?.utilization === "number" && Number.isFinite(w.utilization) && Number.isSafeInteger(w.resetsAt)) info.unifiedWindows[k] = { utilization: w.utilization, resetsAt: w.resetsAt };
+  }
+  lastCapacity = { type: "rate_limit_event", rate_limit_info: info };
+  lastCapacityAt = new Date().toISOString();
+  emit({kind:"capacity", event:lastCapacity, read_at:lastCapacityAt});
+}
+function finishCapacity() {
+  // Preserve observation time: an end snapshot is not a fresh vendor reading.
+  if (lastCapacity) emit({kind:"capacity", event:lastCapacity, phase:"end", read_at:lastCapacityAt});
+}
+
 function observeUsage(message) {
   // modelUsage includes subagents and sidechains and is cumulative for Query.
   // Missing, malformed or overflowing usage cannot prove remaining budget.
   if (!message.modelUsage || typeof message.modelUsage !== "object" ||
       Array.isArray(message.modelUsage) || Object.keys(message.modelUsage).length === 0) return null;
-  let input = 0, output = 0;
-  for (const usage of Object.values(message.modelUsage)) {
+  let input = 0, output = 0, cachedTotal = 0;
+  const models = [];
+  for (const [model, usage] of Object.entries(message.modelUsage)) {
     if (!usage || typeof usage !== "object") return null;
-    const values = [usage.inputTokens, usage.outputTokens,
-      usage.cacheCreationInputTokens ?? 0, usage.cacheReadInputTokens ?? 0];
+    const created = usage.cacheCreationInputTokens ?? 0;
+    const cached = usage.cacheReadInputTokens ?? 0;
+    const values = [usage.inputTokens, usage.outputTokens, created, cached];
     if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) return null;
-    input += values[0] + values[2] + values[3];
+    const inclusive = values[0] + created + cached;
+    input += inclusive;
     output += values[1];
+    cachedTotal += cached;
+    models.push({ model, input_tokens: inclusive, output_tokens: usage.outputTokens, cached_input_tokens: cached });
   }
-  if (!Number.isSafeInteger(input + output)) return null;
-  const frame = { kind: "usage", input_tokens_total: input, output_tokens_total: output };
+  if (!Number.isSafeInteger(input + output) || !Number.isSafeInteger(cachedTotal)) return null;
+  const frame = { kind: "usage", input_tokens_total: input, output_tokens_total: output,
+    cached_input_tokens_total: cachedTotal, models };
   if (typeof message.total_cost_usd === "number" && Number.isFinite(message.total_cost_usd) &&
       message.total_cost_usd >= 0) frame.cost_usd_total = message.total_cost_usd;
   emit(frame);
@@ -464,6 +494,7 @@ const handleControlLine = (line) => {
         }
         emit({ kind: "control_applied", correlation_id: correlationID });
       } else if (request.op === "stop") {
+        finishCapacity();
         stopping = true;
         controlInput.close();
         input.close();
@@ -528,11 +559,13 @@ try {
         emit({ kind: "turn_started" });
       }
     }
+    observeCapacity(message);
     observeTurnActivity(message);
     observeReaction(message);
     observeTool(message);
     if (message?.type === "result") {
       turnActive = false;
+      finishCapacity();
       const tokens = observeUsage(message);
       completedTurns++;
       const reason = start.max_tokens > 0 && (tokens === null || tokens >= start.max_tokens) ? "token_budget_exhausted"

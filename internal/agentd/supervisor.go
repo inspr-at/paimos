@@ -21,6 +21,7 @@ import (
 	"unicode"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
@@ -37,6 +38,7 @@ type Config struct {
 	Accounts          []EnrolledAccount
 	HeartbeatInterval time.Duration
 	MaxRunDuration    time.Duration
+	CapacityInterval  time.Duration
 }
 
 type replay struct {
@@ -53,23 +55,27 @@ type Record struct {
 	BudgetStopUnconfirmed bool   `json:"budget_stop_unconfirmed,omitempty"`
 	// Only launchPrepared proves that adapter.Start has never been called.
 	// Empty is a legacy record, never evidence that no child was forked.
-	LaunchState   string            `json:"launch_state,omitempty"`
-	ClaimRoute    *Route            `json:"claim_route,omitempty"`
-	AccountID     string            `json:"account_id,omitempty"`
-	ExecutionMode string            `json:"execution_mode,omitempty"`
-	ExitObserved  bool              `json:"exit_observed,omitempty"`
-	Pending       []Telemetry       `json:"pending,omitempty"`
-	SettlementGap bool              `json:"settlement_gap,omitempty"`
-	TenantID      string            `json:"tenant_id"`
-	PrincipalID   string            `json:"principal_id"`
-	RunID         string            `json:"run_id"`
-	WorkOrderID   string            `json:"work_order_id,omitempty"`
-	Generation    string            `json:"generation"`
-	Workspace     string            `json:"workspace"`
-	PID           int               `json:"pid"`
-	State         string            `json:"state"`
-	Sequence      int64             `json:"sequence"`
-	Controls      map[string]replay `json:"controls,omitempty"`
+	LaunchState   string `json:"launch_state,omitempty"`
+	ClaimRoute    *Route `json:"claim_route,omitempty"`
+	AccountID     string `json:"account_id,omitempty"`
+	ExecutionMode string `json:"execution_mode,omitempty"`
+	ExitObserved  bool   `json:"exit_observed,omitempty"`
+	// LaunchRev and LaunchDefaultRev are the workspace HEAD and the default
+	// branch's commit at launch, the base of the run's commit evidence.
+	LaunchRev        string            `json:"launch_rev,omitempty"`
+	LaunchDefaultRev string            `json:"launch_default_rev,omitempty"`
+	Pending          []Telemetry       `json:"pending,omitempty"`
+	SettlementGap    bool              `json:"settlement_gap,omitempty"`
+	TenantID         string            `json:"tenant_id"`
+	PrincipalID      string            `json:"principal_id"`
+	RunID            string            `json:"run_id"`
+	WorkOrderID      string            `json:"work_order_id,omitempty"`
+	Generation       string            `json:"generation"`
+	Workspace        string            `json:"workspace"`
+	PID              int               `json:"pid"`
+	State            string            `json:"state"`
+	Sequence         int64             `json:"sequence"`
+	Controls         map[string]replay `json:"controls,omitempty"`
 }
 
 type owned struct {
@@ -91,6 +97,7 @@ type owned struct {
 	metadataSeq     uint64
 	metadataPending []harnessMetadata
 	usage           *sessionUsageReporter
+	capacityPending map[string]capacity.Reading
 	inboxCapable    bool
 	pending         []HarnessControl
 	process         Process
@@ -112,6 +119,11 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	capacityInterval    time.Duration
+	capacityLast        map[string]time.Time
+	capacitySaved       map[string]time.Time
+	capacityAttempt     map[string]time.Time
+	capacityCapturing   bool
 	maxTokens, maxTurns int64
 
 	dispatchMu        sync.Mutex
@@ -137,6 +149,10 @@ type Supervisor struct {
 	maxRunDuration    time.Duration
 	prepareScratch    func(string) (string, error)
 	newHarnessID      func() (string, error)
+	// lifetime is the daemon context. Cancelling it ends a clean Codex idle
+	// wait so shutdown does not sit out the wake window. A busy turn is left
+	// to finish; the idle wait is not armed again afterwards.
+	lifetime context.Context
 }
 
 func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
@@ -172,6 +188,12 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	if len(adapters) == 0 {
 		return nil, errors.New("no adapters configured")
+	}
+	if c.CapacityInterval == 0 {
+		c.CapacityInterval = 5 * time.Minute
+	}
+	if c.CapacityInterval < time.Second {
+		return nil, errors.New("invalid capacity interval")
 	}
 	heartbeat := c.HeartbeatInterval
 	if heartbeat == 0 {
@@ -256,9 +278,12 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
-		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID}
+		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx}
+	if err := s.loadCapacityCaptures(); err != nil {
+		return nil, err
+	}
 	for _, rec := range j.Snapshot() {
 		// A persisted PID is never proof of ownership after a restart.
 		if !noLocalProcess(rec) && rec.State != "ownership_lost" {
@@ -363,15 +388,24 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			}
 		}
 		if probeBlocked {
+			s.mu.Lock()
+			s.probedAccounts[account.ID] = false
+			s.mu.Unlock()
 			continue
 		}
-		probe := adapters[account.Harness].(AccountProber)
-		available := probe.Probe(ctx, account.Key)
-		err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
+		status := probeAccount(ctx, adapters[account.Harness].(AccountProber), account.Key)
+		available := status.OK
+		var err error
+		if reporter, ok := s.api.(ProbeStatusReporter); ok {
+			err = reporter.ProbeStatus(ctx, account.ID, s.daemonID, s.generation, status)
+		} else {
+			err = s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
+		}
 		s.mu.Lock()
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
-		s.loginRequired[account.ID] = !available
+		// Only a confirmed sign-out asks the person to sign in again.
+		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed
 		s.mu.Unlock()
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
@@ -392,6 +426,12 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
+	s.mu.Lock()
+	capturing := s.capacityCapturing
+	s.mu.Unlock()
+	if capturing {
+		return ErrDraining
+	}
 	if !s.dispatchAllowed(run.requestedAccount()) {
 		return ErrDraining
 	}
@@ -641,7 +681,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	if usageAPI, ok := s.api.(sessionUsageAPI); ok && profile.Harness == Codex {
+	if usageAPI, ok := s.api.(sessionUsageAPI); ok {
 		entry.usage = newSessionUsageReporter(usageAPI, entry.harness, func() bool {
 			entry.mu.Lock()
 			defer entry.mu.Unlock()
@@ -705,9 +745,14 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	// Commit the possible-fork boundary before handing control to an adapter.
 	// On a journal failure Start is never invoked; after success a crash is
 	// unconfirmed, even if no PID was subsequently persisted.
+	var launchRev, launchDefault string
+	if !verification {
+		launchRev, launchDefault = workspaceHEAD(ctx, s.workspace), launchDefaultRev(ctx, s.workspace)
+	}
 	entry.mu.Lock()
 	intent := entry.record
 	intent.LaunchState, intent.State = launchAttempted, "starting"
+	intent.LaunchRev, intent.LaunchDefaultRev = launchRev, launchDefault
 	err = s.journal.Put(intent)
 	if err == nil {
 		entry.record = intent
@@ -769,6 +814,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		startErr = errors.Join(startErr, ErrTelemetryProtocol)
 	}
 	s.handleRunError(entry, startErr)
+	if binder, ok := proc.(interface{ bindLifetime(context.Context) }); ok {
+		binder.bindLifetime(s.lifetime)
+	}
 	go s.monitor(entry)
 	go s.heartbeat(entry)
 	return startErr
@@ -798,6 +846,7 @@ func (s *Supervisor) heartbeat(entry *owned) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		var err error
 		if beat {
+			s.flushCapacity(ctx, entry)
 			err = s.update(ctx, entry, Telemetry{Kind: "heartbeat"})
 		}
 		serviceErr := s.serviceHarnessCycle(ctx, entry, beat)
@@ -833,6 +882,9 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 		entry.mu.Lock()
 		entry.harness.Activity = ev.Activity
 		entry.mu.Unlock()
+	}
+	if len(ev.Capacity) > 0 {
+		s.observeCapacity(entry, ev.Capacity)
 	}
 	if ev.SessionUsage != nil {
 		entry.usage.submit(*ev.SessionUsage)
@@ -879,7 +931,8 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := s.update(ctx, entry, Telemetry{Kind: kind, InputTokensDelta: ev.InputTokensDelta,
-		OutputTokensDelta: ev.OutputTokensDelta, CostMicrosDelta: ev.CostMicrosDelta, TurnCountDelta: ev.TurnCountDelta,
+		OutputTokensDelta: ev.OutputTokensDelta, CachedInputTokensDelta: ev.CachedInputTokensDelta,
+		ReasoningTokensDelta: ev.ReasoningTokensDelta, CostMicrosDelta: ev.CostMicrosDelta, TurnCountDelta: ev.TurnCountDelta,
 		EffectiveModel: ev.EffectiveModel, ModelEvidence: ev.ModelEvidence, ErrorCode: ev.ErrorCode}); err != nil {
 		s.handleRunError(entry, err)
 	}
@@ -967,7 +1020,10 @@ func (s *Supervisor) monitor(entry *owned) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	reportErr := s.update(ctx, entry, Telemetry{Kind: "finished", Status: status, ErrorCode: code})
+	entry.mu.Lock()
+	launchRev, launchDefault := entry.record.LaunchRev, entry.record.LaunchDefaultRev
+	entry.mu.Unlock()
+	reportErr := s.update(ctx, entry, Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: runCommits(ctx, s.workspace, launchRev, launchDefault)})
 	entry.mu.Lock()
 	doneRequested := entry.doneRequested
 	entry.mu.Unlock()
@@ -999,6 +1055,10 @@ func (s *Supervisor) monitor(entry *owned) {
 
 func (s *Supervisor) finishSessionUsage(entry *owned) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s.flushCapacity(ctx, entry)
+	cancel()
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := entry.usage.finish(ctx); err != nil && !errors.Is(err, ErrHarnessArchived) {
 		// No server errors, vendor fields, lease or account context in diagnostics.
@@ -1428,7 +1488,11 @@ func (s *Supervisor) Close(ctx context.Context) error {
 	defer s.dispatchMu.Unlock()
 	s.mu.Lock()
 	s.closing = true
+	capturing := s.capacityCapturing
 	s.mu.Unlock()
+	if capturing {
+		return ErrDraining
+	}
 	status := s.Lifecycle("")
 	if len(status.ActiveRunIDs) > 0 {
 		return ErrDraining

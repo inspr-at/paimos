@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -31,12 +32,17 @@ type Run struct {
 	RequestedAccountID        *string    `json:"requested_account_id"`
 	Outcome                   *string    `json:"outcome"`
 	DurationMS                *int64     `json:"duration_ms"`
+	ActiveMS                  *int64     `json:"active_ms"`
+	OutcomeDetail             *string    `json:"outcome_detail"`
+	RetryOfRunID              *string    `json:"retry_of_run_id"`
 	Status                    string     `json:"status"`
 	RequestedModel            *string    `json:"requested_model"`
 	EffectiveModel            *string    `json:"effective_model"`
 	ModelEvidence             string     `json:"model_evidence"`
 	InputTokens               int64      `json:"input_tokens"`
 	OutputTokens              int64      `json:"output_tokens"`
+	CachedInputTokens         int64      `json:"cached_input_tokens"`
+	ReasoningTokens           int64      `json:"reasoning_tokens"`
 	Cost                      int64      `json:"cost_micros"`
 	StartedAt                 *time.Time `json:"started_at"`
 	EndedAt                   *time.Time `json:"ended_at"`
@@ -96,11 +102,11 @@ func (m *module) Mount(mux *http.ServeMux) {
 }
 
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
- requested_model,effective_model,model_evidence,input_tokens,output_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose`
+ requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID)
 
 	v.RepositoryMutationAllowed = true
 	if v.Purpose == "pairing_verification" {
@@ -194,11 +200,12 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		Agent   string  `json:"agent_principal_id"`
 		Profile string  `json:"model_profile_id"`
 		Account *string `json:"requested_account_id"`
+		Retry   *string `json:"retry_of_run_id"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
-	if !workorders.UUID(in.Agent) || !workorders.UUID(in.Profile) || (in.Account != nil && !workorders.UUID(*in.Account)) {
+	if !workorders.UUID(in.Agent) || !workorders.UUID(in.Profile) || (in.Account != nil && !workorders.UUID(*in.Account)) || (in.Retry != nil && !workorders.UUID(*in.Retry)) {
 		return nil, workorders.Fail(400, "agent and model profile required")
 	}
 	ctx := r.Context()
@@ -231,7 +238,14 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			return nil, workorders.Fail(409, "requested account must belong to the run agent and allow the model profile")
 		}
 	}
-	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account))
+	if in.Retry != nil {
+		var orderID, agentID string
+		err = tx.QueryRow(ctx, `SELECT work_order_id::text, agent_principal_id::text FROM agent_runs WHERE id=$1`, *in.Retry).Scan(&orderID, &agentID)
+		if err != nil || orderID != o.NodeID || agentID != in.Agent {
+			return nil, workorders.Fail(400, "retry_of_run_id must be an earlier run of this work order and agent")
+		}
+	}
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry))
 	if err != nil {
 		return nil, err
 	}
@@ -324,6 +338,7 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	// Validate the exact reservation set, including on retry; never let a caller
 	// replace or omit a window from the account module's atomic reservation.
 	rows, err := tx.Query(ctx, `SELECT r.id::text,r.state,w.account_id::text,w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp()
+  AND (w.capacity_read_at IS NULL OR (w.capacity_allowed AND NOT w.capacity_retired AND (w.capacity_read_at>=clock_timestamp()-interval '10 minutes' OR w.capacity_refresh_run IS NOT DISTINCT FROM r.run_id) AND w.used+w.reserved<=w.allowance))
 	 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
 	 WHERE r.run_id=$1 ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID)
 	if err != nil {
@@ -361,6 +376,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	if !active || !fresh || state != "available" || !compatible {
 		return nil, workorders.Fail(409, "reservation or daemon probe is not eligible")
+	}
+	if err := agentaccounts.ValidateReservedCapacity(ctx, tx, v.ID, *v.AccountID); err != nil {
+		return nil, workorders.Fail(409, "reserved capacity is not eligible")
 	}
 	if o.Assignee != nil && *o.Assignee != v.AgentID {
 		return nil, workorders.Fail(409, "work-order assignment changed")

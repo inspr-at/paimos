@@ -173,3 +173,18 @@ for (const theme of ['light', 'dark'] as const) {
     })
   }
 }
+
+test('a stopped lead links its successor instead of claiming live workers', async ({ page }) => {
+  const { data, session } = await setup(page)
+  data.sessions.push(session(90, { role: 'coordinator', parent_harness_session_id: null, display_label: 'Resumed lead' }))
+  Object.assign(data.sessions.find(s => s.id === lead)!, { phase: 'stopped', stopped_at: ago(0), handed_over_to_id: id(90) })
+  for (const worker of data.sessions.filter(s => s.parent_harness_session_id === lead && s.phase !== 'stopped')) {
+    Object.assign(worker, { parent_harness_session_id: id(90), adopted_from_id: lead })
+  }
+  await page.goto('/agents')
+  await page.locator('.group-toggle').filter({ hasText: 'Stopped' }).click()
+  await expect(row(page, lead).getByRole('link', { name: 'Handed over to Resumed lead' })).toBeVisible()
+  await expect(row(page, lead).locator('.worker-tools')).toHaveCount(0)
+  await expect(row(page, id(2)).getByRole('link', { name: 'Adopted from Release lead' })).toBeVisible()
+  await expect(row(page, lead).locator('.history-toggle')).toContainText('8 stopped')
+})

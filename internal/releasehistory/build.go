@@ -67,7 +67,7 @@ func Build(ctx context.Context, opts Options) (History, error) {
 		GeneratedAt: now().UTC().Truncate(time.Second), Source: "git", Releases: []Release{},
 	}
 	if h.VersionScheme == "" {
-		h.VersionScheme = "inspr-calendar-v2"
+		h.VersionScheme = SchemeCalVer2
 	}
 	tags, err := listTags(git)
 	if err != nil {
@@ -180,7 +180,7 @@ func Build(ctx context.Context, opts Options) (History, error) {
 	return h, nil
 }
 
-// coordinateTime reads the reservation instant an inspr-calendar-v2 coordinate encodes (UTC).
+// coordinateTime reads the reservation instant a calendar coordinate encodes (UTC).
 func coordinateTime(v string) *time.Time {
 	t, err := time.Parse("060102150405", strings.TrimSuffix(v, ".0.0"))
 	if err != nil {

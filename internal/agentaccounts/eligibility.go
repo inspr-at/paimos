@@ -58,9 +58,48 @@ func allowanceHeadroom(windows []Window, now time.Time) bool {
 
 func activeWindows(windows []Window, now time.Time) []Window {
 	out := []Window{}
-	for _, window := range windows {
-		if !now.Before(window.StartsAt) && now.Before(window.EndsAt) {
-			out = append(out, window)
+	manual := false
+	latest := map[string]Window{}
+	for _, w := range windows {
+		if w.capacityReadAt == nil {
+			if !w.pairingVerification && !now.Before(w.StartsAt) && now.Before(w.EndsAt) {
+				manual = true
+			}
+			continue
+		}
+		key := w.capacityKind + "/" + w.capacityBucket
+		old, exists := latest[key]
+		if !exists || w.capacityReadAt.After(*old.capacityReadAt) {
+			latest[key] = w
+		}
+	}
+	// A current vendor denial fences even explicit manual budgets. Expired or
+	// replaced buckets are history, not permanent account constraints.
+	usable := !manual
+	for key, w := range latest {
+		if w.capacityRetired {
+			delete(latest, key)
+			continue
+		}
+		if !w.capacityAllowed && now.Sub(*w.capacityReadAt) <= 10*time.Minute {
+			return out
+		}
+		if !now.Before(w.EndsAt) {
+			delete(latest, key)
+			continue
+		}
+		if !w.capacityAllowed || now.Before(w.StartsAt) {
+			usable = false
+		}
+	}
+	for _, w := range windows {
+		if w.capacityReadAt == nil && !now.Before(w.StartsAt) && now.Before(w.EndsAt) {
+			out = append(out, w)
+		}
+	}
+	if usable {
+		for _, w := range latest {
+			out = append(out, w)
 		}
 	}
 	return out

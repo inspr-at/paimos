@@ -19,7 +19,7 @@ import { mockAnonymousGuide, mockPairing } from './agent-pairing-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { RULE_PERSON, RULE_PROJECT, mockRules } from './rules-fixtures'
 import { journeyWorld, mockJourney, PROJECT, retryJourneyWorld, type JourneyWorld } from './journey-fixtures'
-import { mockReleases, releaseHistory } from './releases-fixtures'
+import { mockReleases, presentedHistory, releaseHistory } from './releases-fixtures'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
 import { mockIndicator } from './agent-indicator-fixtures'
 import type { UsageDashboard, UsageGroup } from '../src/lib/usageFormat.ts'
@@ -523,6 +523,7 @@ const ticketRow = (page: Page, key: string) => grid(page).locator('tr.ticket-row
 const ticketPanel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
 
 // ---------------------------------------------------------------- the shots
+const PRESENTED_NOW = Date.parse('2026-09-29T12:00:00Z')
 const shots: Shot[] = [
   // 1. Agents overview
   { screen: 'agents', state: 'overview', setup: page => agentsSetup(page, 'busy'), act: page => openAgents(page) },
@@ -531,8 +532,7 @@ const shots: Shot[] = [
     await page.getByRole('button', { name: /^Stopped/ }).first().click()
     const history = page.locator(`[data-row="s:${LEAD}"] .history-toggle`)
     if (await history.isEnabled()) await history.click()
-    await page.getByText('Accounts and pacing', { exact: true }).first().click()
-    await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Accounts' })).toBeVisible()
   } },
   { screen: 'agents', state: 'eta', setup: page => agentsSetup(page, 'eta'), act: async page => { await openAgents(page); await visible(page, '.eta-cell') } },
   { screen: 'session-panel', state: 'eta', setup: page => agentsSetup(page, 'eta'), act: async page => {
@@ -578,8 +578,7 @@ const shots: Shot[] = [
     await expect(startDialog(page).getByText('Account is draining', { exact: true })).toBeVisible()
   } },
   { screen: 'start-agent', state: 'accounts-card', setup: async page => { await mockStartAgent(page, { catalog: 'two-hosts' }) }, act: async page => {
-    await page.goto('/agents')
-    await page.getByText('Accounts and pacing', { exact: true }).first().click()
+    await page.goto('/settings/accounts')
     await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('5-hour')
   } },
   // 5. Connected computers and pairing
@@ -712,6 +711,14 @@ const shots: Shot[] = [
     await page.goto(`/releases/${releaseHistory().current}`)
     await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
   } },
+  // AEON-305: a presented release, one with benefits only, one with internal changes only.
+  ...([['history-presented', 0], ['history-benefits-only', 1], ['history-internal', 3]] as const).map(([state, index]) => ({ screen: 'releases', state, setup: async (page: Page) => {
+    await mockWork(page, fixtures())
+    await mockReleases(page, presentedHistory(PRESENTED_NOW))
+  }, act: async (page: Page) => {
+    await page.goto(`/releases/${presentedHistory(PRESENTED_NOW).releases[index].version}`)
+    await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
+  } })),
   // 10. Project view, header glimpse, ticket workspace
   { screen: 'project', state: 'tickets-glimpse-workers', motion: true, setup: async page => {
     await page.clock.setSystemTime(AT)
@@ -751,6 +758,22 @@ const shots: Shot[] = [
     await projectAgents(page)
     await ticketAgentWork(page)
   }, act: async page => { await page.goto('/p/PHAROS/PHAROS-11'); await expect(ticketPanel(page)).toBeVisible(); await page.waitForTimeout(400) } },
+  { screen: 'ticket', state: 'workspace-outcomes', setup: async page => {
+    page.setDefaultTimeout(30_000)
+    await page.clock.setSystemTime(AT)
+    await mockWork(page, ticketDataWithAgents())
+    await projectAgents(page)
+    await ticketAgentWork(page)
+    await page.route('**/api/outcomes*', route => route.fulfill({ json: { outcomes: [
+      { id: 'o-1', kind: 'review_verdict', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos', session_id: null, rules_version: null, release_node_id: null, release_key: null, release_title: null, source: 'recorded', payload: { verdict: 'pass', reviewer_model: 'codex', route: 'backend', round: 2, findings: 1, summary: 'One naming mismatch in the release note, otherwise the benefit text is ready to ship with the candidate.' }, actor_principal_id: 'a-1', recorded_at: new Date(AT - 2 * 60 * 60_000).toISOString(), idempotency_key: 'review-1' },
+      { id: 'o-2', kind: 'fix_round', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos', session_id: null, rules_version: null, release_node_id: null, release_key: null, release_title: null, source: 'recorded', payload: { round: 2, summary: 'Renamed the release note field.' }, actor_principal_id: 'a-1', recorded_at: new Date(AT - 3 * 60 * 60_000).toISOString(), idempotency_key: 'fix-2' },
+      { id: 'o-3', kind: 'ci_result', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos', session_id: null, rules_version: null, release_node_id: null, release_key: null, release_title: null, source: 'recorded', payload: { result: 'fail', name: 'web' }, actor_principal_id: 'a-1', recorded_at: new Date(AT - 4 * 60 * 60_000).toISOString(), idempotency_key: 'ci-1' },
+      { id: 'o-4', kind: 'released', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos', session_id: null, rules_version: null, release_node_id: 'rel-1', release_key: 'PHAROS-90', release_title: 'September release', source: 'automatic', payload: { version: '260929120000.0.0' }, actor_principal_id: 'a-1', recorded_at: new Date(AT - 5 * 60 * 60_000).toISOString(), idempotency_key: 'rel-1' },
+    ] } }))
+  }, act: async page => {
+    await page.goto('/p/PHAROS/PHAROS-11')
+    await expect(ticketPanel(page).getByRole('region', { name: 'Outcomes' })).toBeVisible()
+  } },
   { screen: 'ticket', state: 'benefits-missing', setup: async page => {
     await page.clock.setSystemTime(AT)
     await mockWork(page, ticketDataWithAgents())

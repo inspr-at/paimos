@@ -42,13 +42,41 @@ const shots: Shot[] = [
     await expect(page.getByRole('button', { name: /Import 14 sets as drafts/ })).toBeVisible()
     await page.getByText('Secrets', { exact: true }).click()
   } },
-  { name: 'publish', options: { state: 'drafts' }, act: async page => {
+  { name: 'publish', options: { state: 'drafts', tldr: true, budget: { max_bytes: 12000, layer_max_bytes: { company: 8000, project: 3000 } } }, act: async page => {
     await page.getByRole('button', { name: /Review and publish/ }).click()
     await page.getByRole('dialog').getByText('Cross-repo authoring').click()
   } },
-  { name: 'preview', options: { state: 'live' }, act: async page => {
+  { name: 'preview', options: { state: 'live', tldr: true }, act: async page => {
     await page.getByRole('button', { name: 'Preview' }).click()
-    await page.getByRole('button', { name: 'Preview for…' }).click()
+    await expect(page.getByRole('table', { name: 'Explanation and exact rule' })).toBeVisible()
+  } },
+  { name: 'preview-search', options: { state: 'live', tldr: true, budget: { max_bytes: 12000, layer_max_bytes: { company: 8000, project: 3000 } } }, act: async page => {
+    await page.getByRole('button', { name: 'Preview' }).click()
+    await page.getByRole('searchbox', { name: 'Search rules and explanations' }).fill('secret')
+  } },
+  { name: 'preview-file', options: { state: 'live', tldr: true }, act: async page => {
+    await page.getByRole('button', { name: 'Preview' }).click()
+    await page.getByRole('button', { name: 'Show exact file' }).click()
+    await page.getByLabel('Session file', { exact: true }).scrollIntoViewIfNeeded()
+  } },
+  { name: 'explained-sets', options: { state: 'drafts', tldr: true }, full: true, act: async page => {
+    await page.getByRole('button', { name: /^Secrets/ }).click()
+    await page.getByRole('button', { name: /^Git/ }).click()
+  } },
+  { name: 'explain-rule', options: { state: 'drafts', tldr: true }, act: async page => {
+    await page.getByRole('button', { name: /^Git/ }).click()
+    await page.getByRole('button', { name: /Show details for Never bypass hooks/ }).click()
+    await page.getByRole('button', { name: 'Check', exact: true }).click()
+    await page.locator('.tldr-edit').scrollIntoViewIfNeeded()
+  } },
+  { name: 'explain-set', options: { state: 'drafts', tldr: true }, act: async page => {
+    await page.getByRole('button', { name: 'Actions for Knowledge' }).click()
+    await page.getByRole('menuitem', { name: 'Add explanation' }).click()
+    await page.locator('.tldr-edit').scrollIntoViewIfNeeded()
+  } },
+  { name: 'budget', options: { state: 'live', tldr: true, budget: { max_bytes: 12000, layer_max_bytes: { company: 8000 } } }, act: async page => {
+    await page.getByRole('region', { name: 'Budget' }).getByRole('button', { name: 'Change' }).click()
+    await page.locator('.budget-section').scrollIntoViewIfNeeded()
   } },
   { name: 'history', options: { state: 'drafts' }, act: async page => {
     await page.getByRole('button', { name: 'Actions for Secrets' }).click()

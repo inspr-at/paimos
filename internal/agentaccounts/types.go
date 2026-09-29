@@ -42,6 +42,13 @@ type Account struct {
 type Window struct {
 	// Internal routing metadata; never accepted from or serialized to user APIs.
 	pairingVerification bool
+	capacityReadAt      *time.Time
+	capacityAllowed     bool
+	capacityKind        string
+	capacityBucket      string
+	capacityRetired     bool
+	capacityRefreshRun  *string
+	capacityBudget      *float64
 
 	ID          string    `json:"id"`
 	AccountID   string    `json:"account_id"`

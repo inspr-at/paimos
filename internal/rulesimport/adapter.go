@@ -48,6 +48,17 @@ type DraftRule struct {
 	Roles     []string    `json:"roles,omitempty"`
 	Harnesses []string    `json:"harnesses,omitempty"`
 	Source    DraftSource `json:"source"`
+	// TLDR is the people-only explanation (AEON-314). The importer never writes
+	// one; it keeps an existing one, so a re-import never erases explanations.
+	TLDR *DraftTLDR `json:"tldr,omitempty"`
+}
+
+// DraftTLDR mirrors rules.TLDR; check is derived by the server and ignored.
+type DraftTLDR struct {
+	EN    string `json:"en"`
+	DE    string `json:"de,omitempty"`
+	Basis string `json:"basis,omitempty"`
+	Check bool   `json:"check,omitempty"`
 }
 type DraftSet struct {
 	ID               string      `json:"id"`
@@ -287,7 +298,10 @@ func ApplyDraft(ctx context.Context, c *client.Client, p Proposal, target Target
 	return result, nil
 }
 
+// sameDraftRule compares what agents receive and the rule's own metadata. The
+// explanation is for people and is kept, not compared.
 func sameDraftRule(a, b DraftRule) bool {
+	a.TLDR, b.TLDR = nil, nil
 	a.Roles, b.Roles = uniqueSorted(a.Roles), uniqueSorted(b.Roles)
 	a.Harnesses, b.Harnesses = uniqueSorted(a.Harnesses), uniqueSorted(b.Harnesses)
 	if a.ExpiresAt != nil {

@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue'
 import BizIcon from '../business/BizIcon.vue'
-import { HARNESS_LABEL, HARNESSES, ROLE_LABEL, ROLES, resetAvailability, resetRule, ruleSwitchLabel, touchRule, type AgentRule, type HarnessName, type RoleName, type RulePatch } from '../../lib/rules'
+import { HARNESS_LABEL, HARNESSES, ROLE_LABEL, ROLES, TLDR_MAX, resetAvailability, resetRule, ruleSwitchLabel, touchRule, type AgentRule, type HarnessName, type RoleName, type RulePatch } from '../../lib/rules'
 
 // One rule while its set is being edited: the text and its reason in view, the
 // on/off switch and the lock beside them, everything rarer under "More".
@@ -34,6 +34,12 @@ function expiry(value: string) {
   if (!value) { patch({ expires_at: null }); return }
   const date = new Date(value)
   if (!Number.isNaN(date.getTime())) patch({ expires_at: date.toISOString() })
+}
+// An explanation edited here counts as written for the current text.
+function explain(field: 'en' | 'de', value: string) {
+  const next = { en: props.rule.tldr?.en ?? '', de: props.rule.tldr?.de ?? '', [field]: oneLine(value) }
+  if (!next.en.trim() && !next.de.trim()) { patch({ tldr: null }); return }
+  patch({ tldr: next.de.trim() ? { en: next.en, de: next.de } : { en: next.en } })
 }
 function toggleRole(role: RoleName) {
   // An empty list means every role; a click takes one out or puts it back, never all.
@@ -76,6 +82,12 @@ function toggleHarness(harness: HarnessName) {
     <details class="more">
       <summary><BizIcon name="chevron-right" :size="12" class="chev" />More</summary>
       <div class="grid">
+        <label class="fld">Explanation <span class="opt">for people, never sent to agents</span>
+          <input class="field" :value="rule.tldr?.en ?? ''" :maxlength="TLDR_MAX" placeholder="What it does and why, in one line" @input="explain('en', ($event.target as HTMLInputElement).value)">
+        </label>
+        <label class="fld">German <span class="opt">optional</span>
+          <input class="field" lang="de" :value="rule.tldr?.de ?? ''" :maxlength="TLDR_MAX" @input="explain('de', ($event.target as HTMLInputElement).value)">
+        </label>
         <label class="fld wide">Details <span class="opt">loaded on demand, not in the session file</span>
           <textarea class="field" rows="3" :value="rule.details ?? ''" @input="patch({ details: ($event.target as HTMLTextAreaElement).value })"></textarea>
         </label>

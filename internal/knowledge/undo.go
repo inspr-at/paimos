@@ -17,7 +17,11 @@ import (
 // Each handler locks the entry, requires it to be exactly as the event left
 // it (a later edit closes the undo path), and keeps slugs unique.
 func UndoHandlers() map[string]events.UndoFunc {
-	return map[string]events.UndoFunc{evCreated: undoCreate, evUpdated: undoUpdate, evDeleted: undoDelete}
+	return map[string]events.UndoFunc{
+		evCreated: undoCreate, evUpdated: undoUpdate, evDeleted: undoDelete,
+		evLearningAccepted: undoLearningAccepted, evLearningDismissed: undoLearningDismissed,
+		evLearningDrafted: undoLearningDrafted,
+	}
 }
 
 func snapshots(e events.Event) (before, after nodeSnap, err error) {

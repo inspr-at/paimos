@@ -126,7 +126,7 @@ Messages are durable rows in one tenant. Each names a sender, a recipient, an id
 
 `aeon tell` sends. The target is a `harness:agent` address or a principal UUID, with `--project` and the message text. `aeon listen --project KEY` reads the caller's inbox (at most 10 rows). `--ack` acknowledges each message that was printed. Only the recipient can acknowledge, and only an acknowledgement removes the message from the pending view. Repeating an acknowledgement is safe. `aeon message deliveries --project KEY` shows redacted delivery state, not message bodies.
 
-Use `aeon tell <address> --project KEY --recipient-session <id> -m TEXT` for one exact live harness generation, and `--sender-session <id>` to record your generation and freeze its current label. `aeon listen --project KEY --session <id>` reads only that generation's messages plus unbound principal-wide broadcasts. With no session flags, principal sends and listen output retain their existing behavior. Session-targeted messages use the session inbox. `--session --deliver codex|claude_resume --target-ref-file PATH` hands them to an operator-supplied exact local harness reference (a private, owned file); it never claims a principal-wide target. Session delivery also skips unbound or differently bound messages without acknowledging them. The adapter must match the selected session; this validation also requires `harness.read`. The file contains the vendor thread/session ID, not the Aeon UUID or heartbeat `session.ref`. Managed sessions continue to use agentd drain/complete-delivery. Stopped or archived recipients return 409, and their bound reply obligations close without a fabricated reply. Replies to a session-bound message must supply the matching sender/recipient session bindings. In the session panel, unbound history lives under “Other sessions”; exact duplicate posts within 60 seconds share a count, while durable messages and receipts remain separate.
+Use `aeon tell <address> --project KEY --recipient-session <id> -m TEXT` for one exact live harness generation, and `--sender-session <id>` to record your generation and freeze its current label. `aeon listen --project KEY --session <id>` reads only that generation's messages plus unbound principal-wide broadcasts. With no session flags, principal sends and listen output retain their existing behavior. Session-targeted messages use the session inbox. `--session --deliver codex|claude_resume --target-ref-file PATH` hands them to an operator-supplied exact local harness reference (a private, owned file); it never claims a principal-wide target. Session delivery also skips unbound or differently bound messages without acknowledging them. The adapter must match the selected session; this validation also requires `harness.read`. The file contains the vendor thread/session ID, not the Aeon UUID or heartbeat `session.ref`. Managed sessions continue to use agentd drain/complete-delivery. Stopped or archived recipients return 409, and their bound reply obligations close without a fabricated reply. A reply to a session-bound message may omit session bindings. An explicit binding for a different generation is still not found. `aeon tell --reply-to` fills the sender session when `CLAUDE_CODE_SESSION_ID`, or `CODEX_SESSION_ID` (otherwise `CODEX_THREAD_ID`), resolves to exactly one active generation of the caller. A lookup miss leaves the field unset. Ordinary tells do not infer a sender session. In the session panel, unbound history lives under “Other sessions”; exact duplicate posts within 60 seconds share a count, while durable messages and receipts remain separate.
 
 `listen --follow` uses `wait_ms=25000` long-poll requests, with no two-second sleep after a response. Address-based listeners retain their existing project/address payload and use the inbox as a wake hint with a separate cursor. `--follow --deliver` remains resident on leased, foreign-worker, blocked, rerouted or temporarily unavailable adapter work, with exponential backoff capped at 30 seconds (initial delay: `--poll-interval`, default 2s). Resident reads, wake polls and acknowledgements retry transient network failures and HTTP 408/429/5xx responses with the same bounded exponential backoff. Acknowledgements retry in place after handoff, so an acknowledgement outage does not repeat local delivery or printed output during that process. Permanent errors still terminate the listener; one-shot requests do not retry. One-shot delivery retains exit codes 3 (empty), 4 (unavailable), and 5 (another worker). Ctrl-C cancels polling and backoff. Long poll holds at most 30 seconds. A webhook or a notify is a hint. The daemon then fetches authenticated state. The webhook body is ids only and is not authority.
 
@@ -140,7 +140,7 @@ Bind each launched harness to its **Aeon generation**, using exactly one of:
 - `AEON_SESSION_FILE`: an owned, regular, non-symlink file containing that UUID and an optional newline.
 - `AEON_SESSION_STATE_DIR`: the existing `harness run-heartbeat --state-dir` directory; the hook reads only its `session.id`, never the lease. This lets a hook observe a newly registered generation without changing the environment.
 
-The explicit ID wins over the file, and the explicit file wins over the state directory. Missing binding/file is a quiet no-op; invalid binding fails open with a content-free diagnostic. The vendor's hook `session_id` is **not** an Aeon UUID and is never used as one. Supply the binding in the harness launch environment, separately for each worker; do not set one global session ID for unrelated sessions. The normal Aeon CLI instance configuration and recipient credentials apply, with `inbox.read` and `inbox.send` scopes (the acknowledgement route currently uses `inbox.send`).
+The explicit ID wins over the file, and the explicit file wins over the state directory. An invalid explicit binding fails open with a content-free diagnostic and does not fall through. When none of those is set, the hook posts the harness input `session_id` to `POST /api/inbox/session-binding` and pulls with the returned Aeon generation. The vendor id is not an Aeon UUID and is never used as one. No unique active match is a quiet no-op. `aeon harness register` and `harness run-heartbeat` send `vendor_session_ref` when the harness provides one: `CLAUDE_CODE_SESSION_ID` for `--harness claude`, and `CODEX_SESSION_ID` or else `CODEX_THREAD_ID` for `--harness codex`. The value is recorded only when it differs from the private session ref and the worker lease. A registration whose private ref is already that vendor id matches the same lookup. Do not set one global Aeon session ID for unrelated sessions. Hook credentials need `inbox.read` and `inbox.send`; acknowledgement and this lookup both use `inbox.send`.
 
 Install from the operator's shell with the released binary and the intended instance/configuration:
 
@@ -164,7 +164,7 @@ aeon hook uninstall --harness claude --scope user
 
 Codex uses the same commands with `--harness codex`; they merge `~/.codex/hooks.json` (`CODEX_HOME/hooks.json` when set), or `.codex/hooks.json` for project scope. Review and trust the new definitions in Codex `/hooks`; project scope also requires a trusted project. The installer does not override managed policy, enable disabled hooks, or bypass hook trust. Its additional-context handlers set `additionalContextLimit: 0` to avoid Codex replacing long messages with previews. Codex may still apply its own size handling to Stop continuation prompts; see the vendor's large-output documentation.
 
-Each invocation pulls `/api/inbox/messages?session=<Aeon UUID>&wait_ms=0`. The API also returns principal-wide broadcasts, but the hook injects and acknowledges only rows whose non-null `recipient_session_id` matches its binding; all other rows remain untouched. The hook pages past skipped rows within its time budget so broadcasts cannot permanently occupy the first page. Both Claude and Codex inputs with `agent_id` set are quiet no-ops before fetching: subagents must not consume the parent generation's messages. Codex uses the same optional field in its [hook input schema](https://github.com/openai/codex/blob/main/codex-rs/hooks/src/schema.rs). Messages are framed as untrusted data with sender, timestamp and message ID. Bodies are JSON-quoted in full, never shortened by Aeon. A batch contains at most ten messages; later hooks retrieve any remainder. `PostToolUse` and `UserPromptSubmit` emit `hookSpecificOutput.additionalContext`; `Stop` emits `decision: "block"` with a reason only for a nonempty batch. When `stop_hook_active` is true, it returns without fetching, emitting or acknowledging, preventing repeated Stop continuations even if an acknowledgement previously failed.
+Each invocation pulls `/api/inbox/messages?session=<Aeon UUID>&exact_session=true&wait_ms=0`. That query returns only rows bound to the generation. The hook still injects and acknowledges only rows whose non-null `recipient_session_id` matches its binding; any other row stays untouched. The hook pages past skipped rows within its time budget. Both Claude and Codex inputs with `agent_id` set are quiet no-ops before fetching: subagents must not consume the parent generation's messages. Codex uses the same optional field in its [hook input schema](https://github.com/openai/codex/blob/main/codex-rs/hooks/src/schema.rs). Messages are framed as untrusted data with sender, timestamp and message ID. Bodies are JSON-quoted in full, never shortened by Aeon. A batch contains at most ten messages; later hooks retrieve any remainder. `PostToolUse` and `UserPromptSubmit` emit `hookSpecificOutput.additionalContext`; `Stop` emits `decision: "block"` with a reason only for a nonempty batch. When `stop_hook_active` is true, it returns without fetching, emitting or acknowledging, preventing repeated Stop continuations even if an acknowledgement previously failed.
 
 Only a successful write of the complete JSON output permits `POST /api/inbox/messages/{id}/ack`. That endpoint invokes session confirmation and advances the session delivery/receipt. A broken output pipe never acknowledges. A failed acknowledgement leaves the message pending and may cause replay: delivery is at least once, not exactly once. Emitting is a transport handoff, not proof the model acted. The command returns success on runtime failures, reports only content-free errors to stderr, and has a 2.5-second total budget; installed hook entries also have a three-second harness timeout. No pending messages means no output or Stop block. Hooks run only at boundaries; guaranteed idle/mid-turn injection remains the managed agentd path.
 
@@ -172,13 +172,15 @@ Only a successful write of the complete JSON output permits `POST /api/inbox/mes
 
 A harness session is a public generation of a local worker on one project. `POST /api/projects/{projectId}/harness-sessions` registers it. The body names the agent principal, the harness (`codex`, `claude`, `pi`, `cursor`, or `grok`), the host, managed or unmanaged mode, worker or coordinator role, advertised capabilities, a session ref, and a worker lease. A ticket and a work shape (`ship` or `scout`) are bound together. A run, when set, must belong to that agent and to the named work order.
 
-The same session ref and lease register again without a second row. A different active registration for that ref conflicts. Worker calls (heartbeat, yield, drain, stop) require the agent, the lease, and a harness worker scope. People can interrupt or stop a session with a harness control scope.
+The same session ref and lease register again without a second row. A different active registration for that ref conflicts. Optional `vendor_session_ref` stores a second digest of the harness-native session id. Leaving it out of a replay does not clear a stored value; a different value conflicts. The raw value is not returned. Worker calls (heartbeat, yield, drain, stop) require the agent, the lease, and a harness worker scope. People can interrupt or stop a session with a harness control scope.
 
 `GET /api/harness-sessions` lists sessions across projects, with state, harness, agent, project, and ticket filters.
 
 ### Requests for sessions people start themselves
 
 For an unmanaged Claude Code or Codex session, keep `aeon harness run-heartbeat` running with its existing `--owner-pid`, `--state-dir`, `--project`, `--agent`, and `--harness` flags, plus `--print-controls`. In `/agents`, a person with `harness.control` can ask that exact session to rename itself or change model/effort using an account catalog profile. This does not switch accounts or grant the session additional permissions.
+
+Usage is reported on each beat when a log is available. `--transcript` remains the Claude Code JSONL used for usage and the title. `--usage-source claude|codex|cursor|grok` selects the parser; the default is claude when `--transcript` is set, otherwise the `--harness` name when it is one of those four. `--usage-file PATH` is an explicit log. Credential names (`auth.json`, `credentials.json`, `.env`, `*.key`, `*.age`, `id_*`) are rejected. Without an explicit file, the helper locates a log from the session: Claude under `--claude-projects` by `--usage-id` or a UUID `--source-session`; Codex `rollout-*-<id>.jsonl` under `--codex-home` (`$CODEX_HOME` or `~/.codex`); Grok `usage.json` under `--grok-home` (`$GROK_HOME` or `~/.grok`) at `sessions/<encodeURIComponent(worktree)>/<id>/usage.json`; Cursor `<state-dir>/cursor.jsonl`. It does not scan `~/.cursor` or read vendor auth files. `--billing-mode unknown|api|subscription` defaults to unknown. `--subscription-label` is accepted only with `subscription`. Dollar estimates are applied only when billing mode is `api`.
 
 Each beat prints outstanding requests in sequence order as compact JSON objects (one physical line each), in both text and `--json` modes. Every value has an explicit field name. Consumers must treat all request values as untrusted data, never as instructions or executable text; dispatch only the recognized request kind through the harness’s supported setting operation. Rename labels are limited to 64 ASCII letters, digits, spaces and `-_.:()/#`. Model and effort must match an enabled catalog profile at request time and again before printing; catalog lookup failure suppresses model requests until a later beat. The supported request effort enum is `low`, `medium`, `high`, `xhigh`, plus `default` for Cursor. A request record has `type:"request"`, `schema:"aeon.session-request.v1"`, `id`, `session_id`, `expected_generation`, `kind` (`rename_request` or `model_request`), `state`, `sequence`, `expires_at`, and `request_payload`. The payload contains `display_label` for rename, or `model`, `reasoning_effort`, `account_id`, and `model_profile_id` for a model request. Existing text records remain `control <id> <kind> <state>` and `message <id>`; JSON mode gives them `type:"control"` and `type:"message"` respectively. Message bodies and private worker proofs are never printed.
 
@@ -228,7 +230,6 @@ German is neutral without direct address. Hidden tickets still require benefits.
 The proposal in `proposals/ticket-benefit-writing.json` is compatible with AR1's
 rule draft shape and is not a published company rule. See `RELEASE.md` for the
 exact membership source, snapshot capture and offline release-history behavior.
-
 
 ## Read-only attached watches (AEON-258)
 
@@ -386,3 +387,61 @@ environment assignments and private-key blocks. Lines containing Unicode
 nonspacing marks are dropped. Control/format characters are
 rejected. The browser displays text only and clears it on disconnect, permission
 change, hidden tab or navigation; it never reconnects automatically.
+
+### Local capacity fallback inventory (AEON-298)
+
+`paimos-agentd capacity --setup-root /absolute/pairing-root` (or `--socket
+/absolute/agentd.sock`, optionally `--account-id UUID`) reads the authenticated
+local daemon's `GET /v1/lifecycle?include_capacity=1` projection. Its opt-in `capacity_accounts`
+array enumerates **approved enrollments**, including separate accounts with the
+same vendor or display label. It returns account ID, harness, approved display
+label/plan when supplied, fallback capability and the last observation time.
+It never returns local config paths, account keys, provider IDs or credentials.
+Ordinary lifecycle requests retain their existing strict response shape.
+This is a capability inventory, not a claim that a login is valid or quota is
+available; a missing observation stays missing. Older daemons without the
+inventory report unavailable rather than an empty successful discovery.
+
+Idle capture follows fresh harness readings and never interrupts a live managed
+run. The default interval is five minutes (`serve --capacity-interval`); failures
+never become a zero-percent reading. Existing Codex app-server readings and
+Claude in-run stream readings remain the source paths from AEON-297.
+
+| Harness | Private home binding | Idle fallback |
+| --- | --- | --- |
+| Codex | Registry `home` → `CODEX_HOME` | `account/read` identity check, then `account/rateLimits/read` |
+| Claude | Registry `home` → `CLAUDE_CONFIG_DIR` | Not available idle; readings start with a run |
+| Grok | Registry `home` → `GROK_HOME` | Not available: billing capability unverified |
+| Cursor | Registry `home` → `CURSOR_CONFIG_DIR` | Not available headless |
+
+Homes come from each approved local registry/runtime account, not from directory
+crawling or credential extraction. Cursor uses the same explicit home for its
+identity probe and ACP child. Legacy Cursor registrations with no home retain
+their previous behavior; once homes are configured, unbound account keys fail
+closed. Codex idle capture and explicit Cursor homes use a restricted environment
+so parent API keys and alternate auth paths cannot select another account.
+
+The installed Grok artifact confirms `x.ai/billing` and the names
+`BillingConfigResponse`, `BillingPeriodUsage`, and `BillingCycle`, but does not
+establish their field names or quota-neutral initialization. Its fallback is
+therefore capability-gated **before any process launch**. The gated transport
+permits only `grok agent stdio` → `initialize` → `x.ai/billing`, with bounded
+requests and owned-child cleanup. Enabling a production capability requires a
+verified executable binding and an identity-checking decoder; there is currently
+no production capability or user switch to guess the schema. Tests use a clearly
+synthetic response, not invented vendor fields. No real Grok billing probe or
+Cursor TUI/cookie extraction is used. Native Grok execution bindings and approval
+requirements remain unchanged.
+
+## Outcome events (AEON-286)
+
+Review verdicts, fix rounds, CI results and reverts are outcome events. Record one with `aeon outcome record`. The agent key needs `outcome.write`. Repeat the same `--idempotency-key` and body after a lost response; a different body for that key conflicts. Keys starting with `auto:` are reserved.
+
+```
+aeon outcome record --ticket AEON-286 --kind review_verdict \
+  --idempotency-key review-aeon-286-r1 --verdict ok \
+  --reviewer-model codex --route backend --author-family grok --round 1 --blocking-count 0 \
+  --session "$SESSION" --rules-version "$RULES"
+```
+
+`--kind` is `review_verdict`, `fix_round`, `ci_result` or `revert`. A review verdict is `--verdict ok` or `--verdict changes`, and may name `--author-family` and `--blocking-count`. A fix round needs `--round`. A CI result needs `--result pass` or `--result fail`, `--repo` and `--pr`, and may name the check with `--name`. A revert needs `--summary`. `--session` is the harness session UUID when the work had one. `--rules-version` may be omitted; it stays empty until a rules version is recorded. Marking a ticket done, accepted or delivered, and publishing a release, are recorded automatically. Completion records the time from the first worker marker, or from the first move to in progress, and the harness session when one is known. A published release records the same session. Do not post those two kinds.

@@ -4,6 +4,7 @@ package rules
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
@@ -93,7 +94,7 @@ func allSets(ctx context.Context, tx pgx.Tx, layerID string) ([]Set, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, Set{ID: id, LayerID: parent, Scope: f.Scope, Name: f.Name, Revision: f.Revision, Rules: []Rule{}, PublishedVersion: f.PublishedVersion})
+		out = append(out, Set{ID: id, LayerID: parent, Scope: f.Scope, Name: f.Name, Revision: f.Revision, Rules: []Rule{}, PublishedVersion: f.PublishedVersion, TLDR: f.TLDR})
 	}
 	return out, rows.Err()
 }
@@ -102,7 +103,7 @@ func loadSet(ctx context.Context, tx pgx.Tx, id string) (Set, error) {
 	if err != nil {
 		return Set{}, err
 	}
-	s := Set{ID: id, LayerID: parent, Scope: f.Scope, Name: f.Name, Revision: f.Revision, Rules: []Rule{}, PublishedVersion: f.PublishedVersion}
+	s := Set{ID: id, LayerID: parent, Scope: f.Scope, Name: f.Name, Revision: f.Revision, Rules: []Rule{}, PublishedVersion: f.PublishedVersion, TLDR: f.TLDR}
 	rows, err := tx.Query(ctx, `SELECT fields FROM nodes WHERE parent_id=$1 AND rule_resource='rule' AND deleted_at IS NULL ORDER BY fields->'rule'->>'identity'`, id)
 	if err != nil {
 		return s, err
@@ -142,6 +143,7 @@ func (m *Module) sets(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		if err != nil {
 			return nil, err
 		}
+		out[i] = present(out[i])
 	}
 	return map[string]any{"sets": out}, nil
 }
@@ -174,7 +176,7 @@ func (m *Module) createSet(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = audit(r.Context(), tx, p, id, "set_created", nil, s); err != nil {
 		return nil, err
 	}
-	return s, nil
+	return present(s), nil
 }
 func (m *Module) authorizedSet(r *http.Request, tx pgx.Tx, p tenant.Principal, action string) (Set, error) {
 	s, err := loadSet(r.Context(), tx, r.PathValue("setId"))
@@ -184,13 +186,53 @@ func (m *Module) authorizedSet(r *http.Request, tx pgx.Tx, p tenant.Principal, a
 	return s, permission(r.Context(), tx, p, s.Scope, action)
 }
 func (m *Module) getSet(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	return m.authorizedSet(r, tx, p, "rules.read")
+	s, err := m.authorizedSet(r, tx, p, "rules.read")
+	if err != nil {
+		return nil, err
+	}
+	return present(s), nil
+}
+
+// present is a set as the API shows it: every explanation whose text changed
+// after it was written is marked for a check. Stored sets never carry the mark.
+func present(s Set) Set {
+	s.TLDR = checked(s.TLDR, SetBasis(s.Rules))
+	rules := make([]Rule, len(s.Rules))
+	for i, r := range s.Rules {
+		r.TLDR = checked(r.TLDR, RuleBasis(r))
+		rules[i] = r
+	}
+	s.Rules = rules
+	return s
 }
 
 type draftInput struct {
 	ExpectedRevision int64  `json:"expected_revision"`
 	Name             string `json:"name"`
 	Rules            []Rule `json:"rules"`
+	// TLDR explains the set. Absent keeps the current explanation, so a client
+	// that does not know explanations never removes one; null removes it.
+	TLDR json.RawMessage `json:"tldr,omitempty"`
+}
+
+// setTLDR reads the draft's set explanation: keep is true when it is absent.
+func (in draftInput) setTLDR() (t *TLDR, keep bool, err error) {
+	if len(in.TLDR) == 0 {
+		return nil, true, nil
+	}
+	if string(in.TLDR) == "null" {
+		return nil, false, nil
+	}
+	var v TLDR
+	dec := json.NewDecoder(strings.NewReader(string(in.TLDR)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&v); err != nil {
+		return nil, false, fail(400, "invalid_tldr", "the set explanation must be an object with en and optional de")
+	}
+	if err := ValidateTLDR(&v); err != nil {
+		return nil, false, err
+	}
+	return &v, false, nil
 }
 
 func canonicalRules(in []Rule) []Rule {
@@ -209,11 +251,17 @@ func canonicalRules(in []Rule) []Rule {
 			at := out[i].ExpiresAt.UTC()
 			out[i].ExpiresAt = &at
 		}
+		out[i].TLDR = storedTLDR(out[i].TLDR, RuleBasis(out[i]))
 	}
 	slices.SortFunc(out, func(a, b Rule) int { return strings.Compare(a.Identity, b.Identity) })
 	return out
 }
 func replaceDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set, in draftInput) (Set, error) {
+	return replaceDraftAs(ctx, tx, p, s, in, "draft_replaced")
+}
+
+// replaceDraftAs replaces the draft and records it as the given event kind.
+func replaceDraftAs(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set, in draftInput, kind string) (Set, error) {
 	if in.Rules == nil {
 		return s, fail(400, "invalid_rule", "rules must be an explicit array; use [] to intentionally clear the draft")
 	}
@@ -226,9 +274,16 @@ func replaceDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set, in 
 	if err := ValidateRules(in.Rules); err != nil {
 		return s, err
 	}
+	tldr, keep, err := in.setTLDR()
+	if err != nil {
+		return s, err
+	}
 	before := s
 	s.Name = in.Name
 	s.Rules = canonicalRules(in.Rules)
+	if !keep {
+		s.TLDR = storedTLDR(tldr, SetBasis(s.Rules))
+	}
 	s.Revision++
 	// Preserve stable node IDs for retained identities; removed rules are soft
 	// deleted, with the full before/after set recorded in the append-only event.
@@ -270,10 +325,10 @@ func replaceDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set, in 
 	if err = saveSet(ctx, tx, s); err != nil {
 		return s, err
 	}
-	return s, audit(ctx, tx, p, s.ID, "draft_replaced", before, s)
+	return s, audit(ctx, tx, p, s.ID, kind, before, s)
 }
 func saveSet(ctx context.Context, tx pgx.Tx, s Set) error {
-	_, err := tx.Exec(ctx, `UPDATE nodes SET title=$2,fields=$3,updated_at=clock_timestamp() WHERE id=$1`, s.ID, s.Name, jsonBytes(fields{Resource: "set", Scope: s.Scope, Name: s.Name, Revision: s.Revision, PublishedVersion: s.PublishedVersion}))
+	_, err := tx.Exec(ctx, `UPDATE nodes SET title=$2,fields=$3,updated_at=clock_timestamp() WHERE id=$1`, s.ID, s.Name, jsonBytes(fields{Resource: "set", Scope: s.Scope, Name: s.Name, Revision: s.Revision, PublishedVersion: s.PublishedVersion, TLDR: storedTLDR(s.TLDR, SetBasis(s.Rules))}))
 	return err
 }
 func (m *Module) draft(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -285,7 +340,11 @@ func (m *Module) draft(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err != nil {
 		return nil, err
 	}
-	return replaceDraft(r.Context(), tx, p, s, in)
+	s, err = replaceDraft(r.Context(), tx, p, s, in)
+	if err != nil {
+		return nil, err
+	}
+	return present(s), nil
 }
 
 // beforeSnapshotLoad observes each snapshot read. Tests count it to prove a
@@ -329,7 +388,7 @@ func publishSetIn(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set, rev
 	if err := ValidateRules(s.Rules); err != nil {
 		return Snapshot{}, err
 	}
-	snap := Snapshot{SetID: s.ID, Scope: s.Scope, Name: s.Name, Revision: s.Revision, Version: version, Rules: canonicalRules(s.Rules), PublishedAt: time.Now().UTC(), Note: note}
+	snap := Snapshot{SetID: s.ID, Scope: s.Scope, Name: s.Name, Revision: s.Revision, Version: version, Rules: canonicalRules(s.Rules), PublishedAt: time.Now().UTC(), Note: note, TLDR: storedTLDR(s.TLDR, SetBasis(s.Rules))}
 	snap.SHA256 = SnapshotDigest(snap)
 	old, err := loadVersion(ctx, tx, s.ID, version)
 	if err == nil {
@@ -383,7 +442,30 @@ func (m *Module) publish(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if err != nil {
 		return nil, err
 	}
-	return publishSet(r.Context(), tx, p, s, in.ExpectedRevision, in.Version, note)
+	snap, err := publishSet(r.Context(), tx, p, s, in.ExpectedRevision, in.Version, note)
+	if err != nil {
+		return nil, err
+	}
+	if err = publishedWithinBudget(r.Context(), tx, p, s); err != nil {
+		return nil, err
+	}
+	return snap, nil
+}
+
+// publishedWithinBudget runs the batch publication's budget check (total and
+// per-layer caps) for one set after its new version is written, so a single
+// publication or restoration that no longer fits fails and rolls back whole.
+func publishedWithinBudget(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set) error {
+	owner, err := actorOwner(ctx, tx, p)
+	if err != nil {
+		return err
+	}
+	limits, err := LoadBudget(ctx, tx)
+	if err != nil {
+		return err
+	}
+	_, err = budgetCheck(ctx, tx, p, owner, []Set{s}, time.Now().UTC(), limits)
+	return err
 }
 func (m *Module) restore(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
@@ -413,12 +495,15 @@ func (m *Module) restore(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if old.SHA256 != SnapshotDigest(old) {
 		return nil, fail(409, "snapshot_integrity", "historical digest mismatch")
 	}
-	s, err = replaceDraft(r.Context(), tx, p, s, draftInput{in.ExpectedRevision, old.Name, old.Rules})
+	s, err = replaceDraft(r.Context(), tx, p, s, draftInput{ExpectedRevision: in.ExpectedRevision, Name: old.Name, Rules: old.Rules, TLDR: jsonBytes(old.TLDR)})
 	if err != nil {
 		return nil, err
 	}
 	snap, err := publishSet(r.Context(), tx, p, s, s.Revision, in.NewVersion, note)
 	if err != nil {
+		return nil, err
+	}
+	if err = publishedWithinBudget(r.Context(), tx, p, s); err != nil {
 		return nil, err
 	}
 	restored := map[string]string{"version": snap.Version, "sha256": snap.SHA256}

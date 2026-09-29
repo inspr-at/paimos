@@ -188,6 +188,10 @@ test('rebinding follows the next poll, and leaving the list stops it', async ({ 
   const nova = data.live.find(agent => agent.session_id === 's-nova')!
   nova.ticket = ticket('n-1', 'PHAROS-11', 'Connect Hetzner Cloud for managed provisioning')
   await page.clock.fastForward(21_000)
+  // AEON-316: the list snapshot owns the assignee lead, so a live poll alone does
+  // not move it; the next list load does.
+  await expect(row(page, 'PHAROS-14').locator('.c-assignee')).toContainText('nova')
+  await page.goto('/p/PHAROS')
   await expect(row(page, 'PHAROS-14').locator('.c-assignee')).toHaveText('—')
   await row(page, 'PHAROS-11').getByRole('button', { name: /more worker on PHAROS-11/ }).click()
   await expect(page.getByRole('dialog', { name: 'Workers on PHAROS-11' })).toContainText('nova')

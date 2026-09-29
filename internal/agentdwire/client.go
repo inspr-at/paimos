@@ -69,6 +69,19 @@ func (c Client) Lifecycle(ctx context.Context, accountID string) (agentd.Lifecyc
 	return out, err
 }
 
+// CapacityAccounts explicitly opts into the additional lifecycle projection.
+// Ordinary lifecycle consumers retain their strict response contract.
+func (c Client) CapacityAccounts(ctx context.Context, accountID string) ([]agentd.CapacityAccountStatus, error) {
+	var out agentd.LifecycleStatus
+	if err := c.lifecycleRequest(ctx, "GET", "/v1/lifecycle?include_capacity=1&account_id="+url.QueryEscape(accountID), nil, &out); err != nil {
+		return nil, err
+	}
+	if out.CapacityAccounts == nil {
+		return nil, errors.New("capacity inventory not available from this daemon")
+	}
+	return out.CapacityAccounts, nil
+}
+
 func (c Client) Drain(ctx context.Context, req agentd.DrainRequest) (agentd.LifecycleStatus, error) {
 	var out agentd.LifecycleStatus
 	err := c.lifecycleRequest(ctx, "POST", "/v1/drain", req, &out)

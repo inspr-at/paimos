@@ -34,4 +34,4 @@ func (r *Remote) PublishAccountMetadata(ctx context.Context, accountID string, m
 // then request that account's UUID through RunCreate.requested_account_id.
 // Never infer a CODEX_HOME from a CodexBar label, copy authentication files,
 // publish raw CodexBar output, or convert a percentage to invented token units.
-// Only independently configured allowance windows feed the existing ledger.
+// Capacity readings now derive percent windows; manual windows remain overrides.

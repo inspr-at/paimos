@@ -16,6 +16,7 @@ export interface MetadataChange {
 }
 export interface ProcessOwnership { daemon_id: string; generation: string; process_id: string; root_pid: number; group_id: number; started_at: string }
 export interface HarnessSession {
+  handed_over_to_id?: string; adopted_from_id?: string | null; can_reparent?: boolean
   watch?: import("./attachWatch").AttachStatus
   id: string; project_id: string; agent_principal_id: string
   archived_at?: string | null; recovery_process_state?: 'unknown' | null
@@ -50,7 +51,7 @@ export interface SessionControl {
   outcome: 'applied' | 'rejected' | null; reason: string | null; created_at: string; claimed_at: string | null; completed_at: string | null
 }
 export interface AllowanceWrite {
-  starts_at: string; ends_at: string; unit: 'requests' | 'tokens' | 'cost_micros'
+  starts_at: string; ends_at: string; unit: 'requests' | 'tokens' | 'cost_micros' | 'percent'
   allowance: number; pace_model: 'steady' | 'frontload' | 'unrestricted'; burst_ratio: number
 }
 export interface AllowanceWindow extends AllowanceWrite {
@@ -130,6 +131,7 @@ export const listRuns = (params: { session?: string; agent?: string; work_order?
 export interface RemoveSessionResult { session: HarnessSession; message: string; processes_signalled: false; process_state: 'unknown'; event_id?: number; undoable?: boolean }
 export const removeSession = (session: HarnessSession, reason: string) => request<RemoveSessionResult>(`${sessionPath(session.project_id, session.id)}/remove`, 'POST', { reason })
 // Undo of a removal restores the record exactly as it was (POST /events/{id}/undo).
+export const reparentSession = (worker: HarnessSession, lead: HarnessSession) => request<{ session: HarnessSession; event_id: number; undoable: boolean }>(`${sessionPath(worker.project_id, worker.id)}/reparent`, 'POST', { expected_revision: worker.revision, parent_harness_session_id: lead.id })
 export const undoRemoval = (eventId: number) => request<{ after: HarnessSession }>(`/events/${enc(String(eventId))}/undo`, 'POST').then(event => event.after)
 export const removeStaleSessions = (projectId: string, reason: string) => request<{ items: RemoveSessionResult[]; cutoff: string; more: boolean }>(`${sessionPath(projectId)}/remove-stale`, 'POST', { reason })
 export const requestControl = (projectId: string, sessionId: string, kind: SessionControl['kind']) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${kind}`, 'POST', {})
@@ -157,7 +159,7 @@ export async function resolveModelRole(role: string, harness: string): Promise<M
   }
 }
 export const listTargets = (projectId: string) => request<MessageTarget[]>(`/projects/${enc(projectId)}/message-targets`)
-export const listMessages = (projectId: string, params: { newest_first?: boolean; pending?: boolean; address?: string; thread?: string; after?: number; limit?: number } = {}) =>
+export const listMessages = (projectId: string, params: { session?: string; newest_first?: boolean; pending?: boolean; address?: string; thread?: string; after?: number; limit?: number } = {}) =>
   request<MessagePage>(`/projects/${enc(projectId)}/messages${query({ limit: 200, newest_first: true, ...params })}`)
 export const resolveMessage = (projectId: string, messageId: string, decision: HeldResolution['decision'], note: string) =>
   request<HeldResolution>(`/projects/${enc(projectId)}/messages/${enc(messageId)}/resolution`, 'POST', { decision, note })

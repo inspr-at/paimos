@@ -26,7 +26,8 @@ export async function mockAllowanceRoutes(page: Page, accounts: AgentData['accou
     const path = url.pathname
     if (path === '/api/me/permissions') {
       const body = mockEffectivePermissions('admin')
-      const permissions = options.manage ? [...body.workspace.permissions, 'account.manage'] : [...body.workspace.permissions]
+      // account.read opens Settings → Accounts, where manual windows live (AEON-299).
+      const permissions = options.manage ? [...body.workspace.permissions, 'account.read', 'account.manage'] : [...body.workspace.permissions, 'account.read']
       return route.fulfill({ json: { ...body, workspace: { ...body.workspace, permissions } } })
     }
     if (path === '/api/me' && options.kind === 'agent') {

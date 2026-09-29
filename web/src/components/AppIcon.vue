@@ -12,7 +12,7 @@ export type IconName =
   | 'command' | 'option' | 'backspace'
   | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash' | 'graph'
   | 'bookmark' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift' | 'thumbs-down'
-  | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress'
+  | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -125,6 +125,9 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'select'"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="3" /><path d="m5.2 8.2 2 2 3.6-4.2" /></template>
     <path v-else-if="name === 'shift'" d="M8 2.2 2.6 8h2.9v5.2h5V8h2.9Z" />
     <template v-else-if="name === 'thumbs-down'"><path stroke-width="1.5" d="M11.3 9.4V1.7" /><path stroke-width="1.5" d="M6.1 12.2 6.8 9.4H2.9a1.3 1.3 0 0 1-1.2-1.7l1.5-5.2A1.3 1.3 0 0 1 4.4 1.4h8.8a1.3 1.3 0 0 1 1.3 1.3v5.4a1.3 1.3 0 0 1-1.3 1.3H11.3a1.3 1.3 0 0 0-1.2.8L8.2 14.5a2 2 0 0 1-2.1-2.3Z" /></template>
+    <template v-else-if="name === 'help'"><circle cx="8" cy="8" r="6.2" /><path d="M6.2 6.3a1.9 1.9 0 0 1 3.7.5c0 1.3-1.9 1.6-1.9 2.8M8 11.4v.05" /></template>
+    <path v-else-if="name === 'pulse'" d="M1.8 8.4h2.6l1.6-4 2.6 8 1.8-5.2.9 1.2h2.9" />
+    <path v-else-if="name === 'message'" d="M2.4 4.2c0-.9.7-1.6 1.6-1.6h8c.9 0 1.6.7 1.6 1.6v5.4c0 .9-.7 1.6-1.6 1.6H7l-3 2.4v-2.4a1.6 1.6 0 0 1-1.6-1.6Z" />
     <template v-else-if="name === 'info'"><circle cx="8" cy="8" r="6.2" /><path d="M8 7.4v3.8M8 4.9v.05" /></template>
     <template v-else><circle cx="8" cy="8" r="6.2" /><path d="M10.6 5.4 9.2 9.2l-3.8 1.4 1.4-3.8Z" /></template>
   </svg>

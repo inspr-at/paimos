@@ -36,12 +36,12 @@ test('row overflow removes a live session; History preserves it and survives ref
   const errors = watchErrors(page)
   const { selected, bodies } = await setup(page)
   await page.goto('/agents')
-  const summary = page.locator('.summary')
+  const summary = page.getByRole('group', { name: 'Live sessions' })
   await expect(summary).toContainText('live')
   const before = await summary.innerText()
-  // A live row carries no bin; Live now chips carry no removal.
+  // A live row carries no bin; the live line carries no removal.
   await expect(row(page, selected.id).getByRole('button', { name: /^Remove / })).toHaveCount(0)
-  await expect(page.locator('.live-now').getByRole('button', { name: /^Remove / })).toHaveCount(0)
+  await expect(summary.getByRole('button', { name: /^Remove / })).toHaveCount(0)
   await removeFromRow(page, selected.id)
   // Its heartbeat is fresh, so the process consequence is true and said.
   await expect(confirm(page)).toContainText('Its process keeps running; only the record leaves Agents.')
@@ -117,13 +117,13 @@ test('panel Remove sits with the controls, closes the panel after confirmation, 
   await expect(panel).toHaveCount(0)
 })
 
-test('phones show the overflow button on every row; Live now chips carry no removal', async ({ page }) => {
+test('phones show the overflow button on every row; the live line carries no removal', async ({ page }) => {
   const { selected } = await setup(page)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/agents')
   const more = row(page, selected.id).getByRole('button', { name: 'Actions for ghost-worker' })
   await expect(more).toHaveCSS('opacity', '1')
-  await expect(page.locator('.live-now').getByRole('button', { name: /Remove/ })).toHaveCount(0)
+  await expect(page.getByRole('group', { name: 'Live sessions' }).getByRole('button', { name: /Remove/ })).toHaveCount(0)
   await expect(more).toHaveCSS('width', '44px')
   await more.click()
   await page.getByRole('menuitem', { name: /^Remove/ }).click()

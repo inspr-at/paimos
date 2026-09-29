@@ -63,7 +63,8 @@ for (const pass of [1, 2]) for (const theme of ['light', 'dark'] as const) for (
     if (width === 390) expect(await result.evaluate(el => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)).toBe(true)
     await quietRow.locator('.agent-link').focus()
     await expect(quietRow.locator('.agent-link')).toBeFocused()
-    await expect(page.locator('.accounts-disclosure')).not.toHaveAttribute('open', '')
+    // Focusing a row opens nothing else: no pacing editor, no pool menu.
+    await expect(page.locator('.cap .ed, .cap .menu')).toHaveCount(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
     const border = await row.evaluate(el => getComputedStyle(el).borderLeftWidth)
     expect(border).toBe('0px')

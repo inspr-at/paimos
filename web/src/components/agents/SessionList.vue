@@ -1,7 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { SessionControl } from '../../lib/agents'
+import { reparentSession, undoRemoval, type SessionControl } from '../../lib/agents'
+import { movableWorker, moveTarget } from './sessionMove'
+import { useAgents } from '../../stores/agents'
 import { GROUPS, controlBlocked, elapsed, sessionForest, type SessionBranch, type SessionGroup } from '../../lib/agentState'
 import { relativeTime } from '../../lib/work'
 import type { Availability, SessionView } from '../../stores/agents'
@@ -46,6 +48,7 @@ function toggleHistory() {
 const removal = useSessionRemoval()
 const current = computed(() => GROUPS.flatMap(g => props.groups[g.id]))
 const stale = computed(() => current.value.map(v => v.session).filter(s => isStale(s, props.now) && removal.canRemove(s)))
+const lineageName = (id: string) => [...current.value, ...(props.history ?? [])].find(v => v.session.id === id)?.name || 'lead session'
 const total = computed(() => GROUPS.reduce((sum, g) => sum + props.groups[g.id].length, 0))
 type Branch = SessionBranch<SessionView>
 const forest = computed(() => sessionForest(showRemoved.value ? props.history ?? [] : current.value, props.now))
@@ -148,6 +151,66 @@ const inline = (view: SessionView, kind: SessionControl['kind']) => menuOf(view)
 const menu = ref<{ view: SessionView; anchor: HTMLElement } | null>(null)
 const menuItems = computed(() => menu.value ? menuOf(menu.value.view) : null)
 function openMenu(view: SessionView, event: MouseEvent) { menu.value = menu.value?.view.session.id === view.session.id ? null : { view, anchor: event.currentTarget as HTMLElement } }
+const agents = useAgents()
+const moving = ref(false)
+const dragged = ref<SessionView | null>(null)
+const dropOver = ref('')
+const moveMenu = ref<{ view: SessionView; anchor: HTMLElement } | null>(null)
+const permittedWorker = (view: SessionView) => grant.value.person && can('harness.write', view.session.project_id) && movableWorker(view.session)
+const targetFor = (worker: SessionView, lead: SessionView) => permittedWorker(worker) && moveTarget(worker.session, lead.session, current.value.map(v => v.session))
+const leadsFor = (worker: SessionView) => current.value.filter(lead => targetFor(worker, lead))
+function pickMove() { moveMenu.value = menu.value; menu.value = null }
+function closeMove(restoreFocus: boolean) {
+  if (restoreFocus) moveMenu.value?.anchor.focus()
+  moveMenu.value = null
+}
+function menuKeys(event: KeyboardEvent) {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="menuitem"]')].filter(item => !(item as HTMLButtonElement).disabled)
+  if (!items.length) return
+  event.preventDefault(); event.stopPropagation()
+  const current = items.indexOf(document.activeElement as HTMLElement)
+  const index = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+  items[index]?.focus()
+}
+async function move(worker: SessionView, lead: SessionView) {
+  if (moving.value || !targetFor(worker, lead)) return
+  moving.value = true
+  moveMenu.value = null
+  try {
+    const result = await reparentSession(worker.session, lead.session)
+    agents.recordRemoval({ ...result.session, adopted_from_id: result.session.adopted_from_id ?? null })
+    toast(`Moved ${worker.name} to ${lead.name}`, result.undoable ? { timeout: 8000, action: { label: 'Undo', run: () => void undoMove(result.event_id, worker.name) } } : {})
+  } catch (error) { toast(error instanceof Error ? error.message : 'Move failed. Refresh and retry.', { tone: 'error' }) }
+  finally { moving.value = false }
+}
+async function undoMove(event: number, label: string) {
+  try {
+    const restored = await undoRemoval(event)
+    agents.recordRemoval({ ...restored, adopted_from_id: restored.adopted_from_id ?? null })
+    toast(`Move of ${label} undone`)
+  }
+  catch (error) { toast(error instanceof Error ? error.message : 'Could not undo this move.', { tone: 'error' }) }
+}
+function startDrag(event: DragEvent, view: SessionView) {
+  if (!permittedWorker(view) || moving.value || (event.target as HTMLElement).closest('button')) { event.preventDefault(); return }
+  dragged.value = view
+  if (event.dataTransfer) { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', view.session.id) }
+}
+function dragOver(event: DragEvent, lead: SessionView) {
+  if (!dragged.value || !targetFor(dragged.value, lead)) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  dropOver.value = lead.session.id
+}
+function endDrag() { dragged.value = null; dropOver.value = '' }
+function drop(event: DragEvent, lead: SessionView) {
+  const worker = dragged.value
+  endDrag()
+  if (!worker || !targetFor(worker, lead)) return
+  event.preventDefault()
+  void move(worker, lead)
+}
 function pick(kind: SessionControl['kind']) {
   const view = menu.value?.view
   menu.value = null
@@ -231,7 +294,10 @@ function rowClick(event: MouseEvent, id: string) {
         </div>
         <div
           v-for="{ view, branch, depth, parent, open, guides, family, familyEnd, primary, context, exec } in visible(group.id)" :key="view.session.id" class="row agent-state-surface" :data-state="view.status.state" role="row" :data-row="`s:${view.session.id}`" :data-parent="view.session.parent_harness_session_id || undefined" :data-depth="depth" :style="{ '--depth': depth, ...appearance(view.status.state) }" tabindex="-1" @focusin="emit('focusRow', `s:${view.session.id}`)"
-          :class="[view.status.group, { worker: depth > 0, family, 'family-start': family && !depth, 'family-end': family && familyEnd, active: cursor === `s:${view.session.id}`, selected: selected === view.session.id }]" @click="rowClick($event, view.session.id)"
+          :draggable="permittedWorker(view) && !moving"
+          :data-drop-target="dragged && targetFor(dragged, view) ? 'true' : undefined"
+          @dragstart="startDrag($event, view)" @dragend="endDrag" @dragover="dragOver($event, view)" @dragleave="dropOver = ''" @drop="drop($event, view)"
+          :class="[view.status.group, { 'drop-over': dropOver === view.session.id, worker: depth > 0, family, 'family-start': family && !depth, 'family-end': family && familyEnd, active: cursor === `s:${view.session.id}`, selected: selected === view.session.id }]" @click="rowClick($event, view.session.id)"
         >
           <span v-if="depth || open" class="tree-lines" aria-hidden="true">
             <span v-for="(continues, level) in guides" :key="level" class="tree-guide" :class="{ continues, elbow: level === depth - 1, last: level === depth - 1 && !continues }" :style="{ '--level': level }" />
@@ -259,7 +325,11 @@ function rowClick(event: MouseEvent, id: string) {
                 </span>
               </span>
             </RouterLink>
-            <span v-if="branch.children.length" class="worker-tools">
+            <span v-if="view.session.stopped_at && view.session.handed_over_to_id" class="lineage">
+              <RouterLink :to="`/agents/${view.session.handed_over_to_id}`" :title="`Handed over to ${lineageName(view.session.handed_over_to_id)}`">Handed over to {{ lineageName(view.session.handed_over_to_id) }}</RouterLink>
+              <button v-if="stoppedChildren(branch)" type="button" class="worker-toggle history-toggle" :aria-expanded="!!history[view.session.id]" :aria-label="`Show stopped workers of ${view.name}`" @click="toggleStopped(branch)">{{ stoppedChildren(branch) }} stopped</button>
+            </span>
+            <span v-else-if="branch.children.length" class="worker-tools">
               <button type="button" class="worker-toggle" :disabled="!candidates(branch).length" :aria-expanded="open" :aria-label="`${open ? 'Collapse' : 'Expand'} ${workerLabel(branch)} of ${view.name}: ${workingChildren(branch)} working`" @click="toggle(branch)">
                 <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: open }" />{{ workingChildren(branch) }} working
               </button>
@@ -267,6 +337,7 @@ function rowClick(event: MouseEvent, id: string) {
               <span aria-hidden="true"> · </span>
               <button type="button" class="worker-toggle history-toggle" :disabled="!stoppedChildren(branch)" :aria-expanded="!!history[view.session.id]" :aria-label="`${history[view.session.id] ? 'Hide' : 'Show'} stopped workers of ${view.name}: ${stoppedChildren(branch)} stopped`" @click="toggleStopped(branch)">{{ stoppedChildren(branch) }} stopped</button>
             </span>
+            <RouterLink v-if="view.session.adopted_from_id" class="lineage adopted" :to="`/agents/${view.session.adopted_from_id}`" :title="`Adopted from ${lineageName(view.session.adopted_from_id)}`">Adopted from {{ lineageName(view.session.adopted_from_id) }}</RouterLink>
           </span>
           <span role="cell" class="c-ticket">
             <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
@@ -307,7 +378,10 @@ function rowClick(event: MouseEvent, id: string) {
       <button type="button" class="btn sm ghost quiet-btn" :disabled="historyState === 'loading'" @click="emit('older')">{{ historyState === 'loading' ? 'Loading…' : 'Show older' }}</button>
     </div>
     <FloatingPanel v-if="menu && menuItems" :anchor="menu.anchor" align="end" :width="248" :label="`Actions for ${menu.view.name}`" @close="menu = null">
-      <div role="menu" :aria-label="`Actions for ${menu.view.name}`">
+      <div role="menu" :aria-label="`Actions for ${menu.view.name}`" @keydown="menuKeys">
+        <button v-if="permittedWorker(menu.view) && leadsFor(menu.view).length" type="button" role="menuitem" class="menu-item" data-autofocus @click="pickMove">
+          <AppIcon name="arrow" :size="16" /><span class="mi-text">Move to lead…</span>
+        </button>
         <template v-if="menuItems.control.length">
           <button v-if="menuItems.control.includes('interrupt')" type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('interrupt')">
             <AppIcon name="interrupt" :size="16" /><span class="mi-text"><span>Interrupt</span><small>Stop the current turn, keep the session</small></span>
@@ -335,10 +409,24 @@ function rowClick(event: MouseEvent, id: string) {
         <p v-if="menuItems.note" class="menu-note">{{ menuItems.note }}</p>
       </div>
     </FloatingPanel>
+    <FloatingPanel v-if="moveMenu" :anchor="moveMenu.anchor" align="end" :width="248" :label="`Move ${moveMenu.view.name} to lead`" @close="closeMove">
+      <div role="menu" :aria-label="`Move ${moveMenu.view.name} to lead`" @keydown="menuKeys">
+        <p class="menu-note">Move to lead</p>
+        <button v-for="lead in leadsFor(moveMenu.view)" :key="lead.session.id" type="button" role="menuitem" class="menu-item move-lead" :title="lead.name" @click="move(moveMenu.view, lead)">
+          <AppIcon name="arrow" :size="16" /><span class="mi-text">{{ lead.name }}</span>
+        </button>
+      </div>
+    </FloatingPanel>
   </section>
 </template>
 
 <style scoped>
+.row.drop-over { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--ink-2); }
+.move-lead .mi-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lineage { flex-basis: 100%; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 3px 38px; font-size: 11px; color: var(--ink-2); }
+.lineage a, .lineage.adopted { color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lineage a:hover, .lineage.adopted:hover { text-decoration: underline; }
+.lineage .history-toggle { flex-shrink: 0; }
 .sessions { overflow: clip; container: sessions / inline-size; }
 .card-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 10px; }
 .card-head h2 { font-size: 15px; font-weight: 650; }
@@ -497,6 +585,10 @@ function rowClick(event: MouseEvent, id: string) {
   .ctx-beat { display: inline; }
   .ctx-beat::before { content: '·'; margin-right: 6px; }
   .row > .tree-lines { left: 25px; }
+  .row:has(.lineage) { grid-template-rows: auto auto auto auto auto; }
+  .row:has(.lineage) > .c-agent { grid-row: 1 / 6; }
+  .lineage { grid-column: 2 / -1; grid-row: 4; padding: 4px 0 0; min-height: 24px; }
+  .worker-tools ~ .lineage { grid-row: 5; }
   .worker-tools { grid-column: 2 / -1; grid-row: 4; flex-wrap: nowrap; white-space: nowrap; margin: 0 0 0 -6px; padding: 0; }
   /* The 44 px toggle line closes a lead's row by itself. */
   .row:has(> .c-agent > .worker-tools) { padding-bottom: 0; }

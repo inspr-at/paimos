@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 func TestGrokAssetsStayPinned(t *testing.T) {
@@ -84,6 +86,24 @@ func TestGrokQualifiedVerificationReachesPinnedNativePreflight(t *testing.T) {
 	}
 	if p, err := NewGrokAdapter().Start(t.Context(), r, func(AdapterEvent) {}); p != nil || err == nil || err.Error() != "native Grok account unavailable" {
 		t.Fatalf("missing private binding did not fail closed: process=%t err=%v", p != nil, err)
+	}
+}
+
+func TestGrokNativeUsageUpdate(t *testing.T) {
+	var got *sessionusage.UsageReport
+	p := &grokProcess{sessionID: "session", model: grokModel, observe: func(ev AdapterEvent) {
+		if ev.SessionUsage != nil {
+			report := *ev.SessionUsage
+			got = &report
+		}
+	}}
+	p.onEvent([]byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"usage_update"}}}`))
+	if p.violation.Load() || got != nil {
+		t.Fatal("token-free usage update became tokens or a violation")
+	}
+	p.onEvent([]byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"usage_update","inputTokens":11,"outputTokens":3,"cachedReadTokens":4}}}`))
+	if p.violation.Load() || got == nil || got.Model != grokModel || got.InputTokens == nil || *got.InputTokens != 11 || got.OutputTokens == nil || *got.OutputTokens != 3 || got.CachedInputTokens == nil || *got.CachedInputTokens != 4 || got.BillingMode != "unknown" {
+		t.Fatalf("native usage %+v violation %t", got, p.violation.Load())
 	}
 }
 

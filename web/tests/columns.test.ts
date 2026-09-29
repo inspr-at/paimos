@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { automaticColumns, COLUMN_BY_ID, layoutWidths, moveColumn, orderOf, releaseLabel, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf } from '../src/lib/columns.ts'
+import { automaticColumns, COLUMN_BY_ID, layoutWidths, moveColumn, orderOf, releaseLabel, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf, type ColumnId } from '../src/lib/columns.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
 const ids = (width: number, options: Parameters<typeof visibleColumns>[1]) => visibleColumns(width, options).columns.map(c => c.id)
@@ -32,6 +32,8 @@ test('a saved choice fixes order and visibility; what cannot fit steps aside', (
   assert.deepEqual(ids(700, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status'])
   assert.equal(visibleColumns(2000, { phone: false, prefs: p }).customised, true)
   assert.deepEqual(ids(390, { phone: true, prefs: p }), ['key', 'title', 'status', 'priority', 'updated'])
+  assert.deepEqual(ids(390, { phone: true, present: { estimate: true } }), ['key', 'title', 'status', 'priority', 'updated', 'estimate'])
+  assert.deepEqual(ids(390, { phone: true, present: { eta: true, estimate: true }, prefs: { visible: ['status'] } }), ['key', 'title', 'status', 'priority', 'updated', 'eta', 'estimate'])
   // A saved choice that hides Assignee stays hidden when a live worker is present.
   assert.deepEqual(ids(1600, { phone: false, present: { workers: true }, prefs: { visible: ['status', 'updated'] } }), ['key', 'title', 'status', 'updated'])
   assert.deepEqual(ids(390, { phone: true, present: { workers: true }, prefs: p }), ['key', 'title', 'status', 'priority', 'updated'])
@@ -39,13 +41,27 @@ test('a saved choice fixes order and visibility; what cannot fit steps aside', (
 
 test('order keeps Key and Title first and appends unknown or missing columns', () => {
   assert.deepEqual(orderOf({ order: ['title', 'created', 'bogus' as never, 'created'] }).slice(0, 4), ['key', 'title', 'created', 'status'])
-  assert.equal(orderOf(null).length, 13)
+  assert.equal(orderOf(null).length, 14)
   assert.deepEqual(automaticColumns(1600, { eta: true }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'created', 'updated', 'eta'])
+  assert.deepEqual(automaticColumns(1600, { eta: true, progress: true }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'created', 'updated', 'progress', 'eta'])
+  assert.deepEqual(automaticColumns(1200, { progress: true, eta: true }), ['key', 'title', 'status', 'priority', 'updated', 'progress', 'eta'])
   assert.deepEqual(ids(390, { phone: true, present: { eta: true } }), ['key', 'title', 'status', 'priority', 'updated', 'eta'])
+  assert.deepEqual(ids(390, { phone: true, present: { eta: true, progress: true } }), ['key', 'title', 'status', 'priority', 'updated', 'progress', 'eta'])
   const order = orderOf(null)
   assert.deepEqual(moveColumn(order, 'priority', -1).slice(0, 4), ['key', 'title', 'priority', 'status'])
   assert.deepEqual(moveColumn(order, 'status', -1), order)
   assert.deepEqual(moveColumn(order, 'key', 1), order)
+})
+
+test('progress leaves before Estimate when a saved choice cannot fit', () => {
+  const prefs = { visible: ['status', 'updated', 'estimate', 'progress', 'eta'] as const }
+  const shown = ['key', 'title', 'status', 'estimate', 'updated', 'progress', 'eta'] as const
+  const width = (names: readonly string[]) => names.reduce((sum, id) => sum + (id === 'title' ? 240 : COLUMN_BY_ID.get(id as ColumnId)!.width), 0)
+  const p = { visible: [...prefs.visible] }
+  assert.deepEqual(ids(width(shown), { phone: false, prefs: p }), [...shown])
+  assert.deepEqual(ids(width(shown) - 1, { phone: false, prefs: p }), shown.filter(id => id !== 'eta'))
+  const kept = shown.filter(id => id !== 'eta')
+  assert.deepEqual(ids(width(kept) - 1, { phone: false, prefs: p }), ['key', 'title', 'status', 'estimate', 'updated'])
 })
 
 test('widths clamp to each column’s bounds', () => {

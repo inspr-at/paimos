@@ -54,7 +54,7 @@ for (const state of ['done', 'accepted', 'delivered']) {
 }
 
 for (const regenerated of [false, true]) {
-  test(`${regenerated ? 'regenerated missing-snapshot' : 'v1'} history keeps headlines, chips, filters and visible changes`, async ({ page }) => {
+  test(`${regenerated ? 'regenerated missing-snapshot' : 'v1'} history keeps chips, filters and visible changes without a tag title`, async ({ page }) => {
     const { mockReleases, releaseHistory } = await import('./releases-fixtures')
     const history = releaseHistory()
     const current = history.releases[0]!
@@ -69,28 +69,30 @@ for (const regenerated of [false, true]) {
     await page.goto(`/releases/${current.version}`)
     const detail = page.locator('article.detail')
     const options = page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
-    await expect(options.first()).toContainText('Time entry editing')
+    // AEON-305: the tag message is evidence, never a labelled title.
+    await expect(options.first()).not.toContainText('Time entry editing')
     await expect(options.first()).toContainText('AEON-75')
-    await expect(detail.locator('.headline')).toHaveText('Time entry editing')
-    await expect(detail.getByText('Historical tag headline')).toBeVisible()
+    await expect(detail.locator('.headline')).toHaveCount(0)
+    await expect(page.getByText('Historical tag headline')).toHaveCount(0)
     await expect(detail.getByText('Notes written after release')).toHaveCount(0)
     await expect(detail.locator('.tickets')).toContainText('AEON-75')
-    await expect(detail.locator('.changes-block')).toContainText('Correct and delete time entries in the Hours view')
+    await expect(detail.locator('.notes')).toContainText('Correct and delete time entries in the Hours view')
     await expect(detail.locator('#release-evidence')).toHaveCount(0)
-    await expect(detail.getByRole('region', { name: 'Release notes' })).toHaveCount(0)
-    await expect(detail.getByText(gap, { exact: true })).toHaveCount(regenerated ? 1 : 0)
+    // No capture: no header and no note lines, only the changes.
+    await expect(detail.locator('.summary')).toHaveCount(0)
+    await expect(detail.getByText('Internal changes only.')).toHaveCount(0)
+    await expect(detail.getByText(gap, { exact: true })).toHaveCount(0)
     await page.getByRole('group', { name: 'Show only releases with' }).getByRole('button', { name: 'Tickets', exact: true }).click()
     await expect(options).toHaveCount(5)
     await page.getByRole('searchbox', { name: 'Search releases' }).fill('AEON-75')
     await expect(options).toHaveCount(1)
-    await expect(options.first()).toContainText('Time entry editing')
+    await expect(options.first()).toContainText('AEON-75')
     await page.getByRole('searchbox', { name: 'Search releases' }).fill('')
     await page.getByRole('group', { name: 'Show only releases with' }).getByRole('button', { name: 'Tickets', exact: true }).click()
     await options.last().click()
-    await expect(detail.locator('.headline')).toHaveText('First release')
-    await expect(detail.getByText('Historical tag headline')).toBeVisible()
-    await expect(detail.locator('.changes-block')).toContainText('Projects, tickets and sign-in')
-    await expect(detail.getByText(gap, { exact: true })).toHaveCount(regenerated ? 1 : 0)
+    await expect(detail.locator('.headline')).toHaveCount(0)
+    await expect(detail.locator('.notes')).toContainText('Projects, tickets and sign-in')
+    await expect(detail.getByText(gap, { exact: true })).toHaveCount(0)
   })
 }
 
@@ -117,11 +119,14 @@ test('release notes use benefit text and do not fall back to the Git headline', 
   const detail = page.locator('article.detail')
   await expect(detail.locator('.headline')).toHaveCount(0)
   await expect(detail.getByText('Historical tag headline')).toHaveCount(0)
-  await expect(detail.locator('.changes')).toHaveCount(0)
+  // AEON-305: the captured ticket is a block like any other, with its commits folded.
   await expect(page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').first()).toContainText('Clear release notes')
-  await expect(notes.locator('.note-item')).toHaveCount(1)
-  await expect(notes.locator('.note-pill')).toHaveText('Clear release notes')
-  await expect(notes.locator('.note-benefit')).toHaveText('Tickets explain what you gain.')
+  const block = notes.getByRole('region', { name: 'Features, 1' }).getByRole('article', { name: 'Clear release notes' })
+  await expect(notes.getByRole('article')).toHaveCount(1)
+  await expect(block.locator('.benefit')).toHaveText('Tickets explain what you gain.')
+  await expect(block.locator('.line-head').getByText('AEON-75', { exact: true })).toBeVisible()
+  await expect(block.locator('summary')).toHaveText('3 commits')
+  await expect(notes.getByRole('region', { name: /^Other changes,/ })).toHaveCount(0)
   await expect(notes).toContainText('benefit_de is required')
   await expect(notes).toContainText('One ticket is hidden from release notes.')
   await expect(notes).not.toContainText(current.headline)
@@ -139,16 +144,18 @@ test('a German language setting shows the German pill and sentence, and an empty
   }
   await show()
   const notes = page.getByRole('region', { name: 'Release notes' })
-  await expect(notes.locator('.note-pill')).toHaveText('Verständliche Release Notes')
-  await expect(notes.locator('.note-benefit')).toHaveText('Tickets erklären den Nutzen.')
+  await expect(notes.locator('.pill-title')).toHaveText('Verständliche Release Notes')
+  await expect(notes.locator('.benefit')).toHaveText('Tickets erklären den Nutzen.')
   await expect(notes).toContainText('Ein Ticket ist in den Release Notes ausgeblendet.')
   profile.locale = 'de-DE'
   const partial = benefitNotes()
   partial.items[0]!.pill_de = ''
   partial.items[0]!.benefit_de = ' '
   await show(partial)
-  await expect(notes.locator('.note-pill')).toHaveText('Clear release notes')
-  await expect(notes.locator('.note-benefit')).toHaveText('Tickets explain what you gain.')
+  // The English text carries one small badge on the title (AEON-323).
+  await expect(notes.locator('.pill-title')).toHaveText('Clear release notesEN')
+  await expect(notes.locator('.pill-title .lang-badge')).toHaveText('EN')
+  await expect(notes.locator('.benefit')).toHaveText('Tickets explain what you gain.')
 })
 
 for (const width of [1600, 390]) {
@@ -157,13 +164,13 @@ for (const width of [1600, 390]) {
     await openNotedRelease(page)
     const notes = page.getByRole('region', { name: 'Release notes' })
     const sheet = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
-    await expect(notes.locator('.note-pill')).toHaveText('Clear release notes')
-    await expect(notes.locator('.note-benefit')).toHaveText('Tickets explain what you gain.')
-    await expect(notes.locator('.note-pill')).toBeInViewport({ ratio: 1 })
+    await expect(notes.locator('.pill-title')).toHaveText('Clear release notes')
+    await expect(notes.locator('.benefit')).toHaveText('Tickets explain what you gain.')
+    await expect(notes.locator('.pill-title')).toBeInViewport({ ratio: 1 })
     const overflow = await sheet.evaluate(el => el.scrollWidth > el.clientWidth + 1)
     expect(overflow).toBeFalsy()
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
-    await expect(notes.locator('.note-benefit')).toBeVisible()
+    await expect(notes.locator('.benefit')).toBeVisible()
     if (process.env.SHOTS) {
       await page.screenshot({ path: `${process.env.SHOTS}/${width}-dark.png` })
       await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
@@ -189,13 +196,8 @@ for (const width of [1600, 390]) {
       return { size: s.fontSize, transform: s.textTransform }
     })
     expect(detailStyle).toEqual({ size: '12.5px', transform: 'none' })
-    if (width === 1600) {
-      const rowHint = page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').first().getByText('Notes written after release', { exact: true })
-      await expect(rowHint).toBeVisible()
-      await expect(rowHint).toBeInViewport({ ratio: 1 })
-      const rowStyle = await rowHint.evaluate(el => getComputedStyle(el).fontSize)
-      expect(rowStyle).toBe('12px')
-    }
+    // AEON-305: the list row stays version, date and theme; the hint lives in the detail.
+    if (width === 1600) await expect(page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').first().getByText('Notes written after release', { exact: true })).toHaveCount(0)
     const overflow = await sheet.evaluate(el => el.scrollWidth > el.clientWidth + 1)
     expect(overflow).toBeFalsy()
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
@@ -209,7 +211,7 @@ for (const width of [1600, 390]) {
 }
 
 for (const width of [1600, 390]) {
-  test(`internal-only releases keep the tag headline and quiet detail at ${width}px`, async ({ page }) => {
+  test(`internal-only releases show no tag title and a quiet detail at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     // Cover both a hidden-only capture and an empty internal capture.
     for (const hidden of [2, 0]) {
@@ -218,12 +220,12 @@ for (const width of [1600, 390]) {
       const row = page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').first()
       const notes = page.getByRole('region', { name: 'Release notes' })
       await expect(notes.getByText('Internal changes only.', { exact: true })).toBeVisible()
-      await expect(notes.locator('.note-item')).toHaveCount(0)
+      await expect(notes.getByRole('article')).toHaveCount(0)
       await expect(sheet).not.toContainText('No public release notes')
       await expect(notes).not.toContainText('is required')
       if (width === 390) await sheet.getByRole('button', { name: 'All releases' }).click()
-      await expect(row.locator('.headline')).toHaveText('Time entry editing (AEON-75)')
-      await expect(row.locator('.headline')).not.toBeEmpty()
+      // An empty capture names no benefits, so the row keeps version, date and counts.
+      await expect(row.locator('.headline')).toHaveCount(0)
       await expect(row.getByText('Historical tag headline')).toHaveCount(0)
       if (process.env.SHOTS && hidden && width === 390) {
         for (const theme of ['light', 'dark']) {

@@ -1,6 +1,12 @@
 # Release
 
-Aeon uses INSPR Calendar Versioning v2 (`inspr-calendar-v2`). The coordinate is `YYMMDDhhmmss.0.0`: two-digit year, month, day, hour, minute, and second in UTC, then `.0.0`. It is SemVer-shaped and fixed width. `version.json` is the only source of that coordinate. The fields that matter for a release are `version_scheme`, `version`, `release_channel`, and `release_sequence`.
+Aeon uses INSPR Calendar Versioning, currently INSPR-CalVer3 (`inspr-calver-3`). The coordinate is `YYMMDDhhmmss.0.0`: two-digit year, month, day, hour, minute, and second in UTC, then `.0.0`. It is SemVer-shaped and fixed width. `version.json` is the only source of that coordinate. The fields that matter for a release are `version_scheme`, `version`, `release_channel`, and `release_sequence`.
+
+### From CalVer2 to CalVer3
+
+Releases up to `260929113854.0.0` (release 10, sequence 105) were reserved under `inspr-calendar-v2` (INSPR-CalVer2). Both schemes share one coordinate, so versions keep sorting as time and every earlier tag stays exactly as published. From release 11 on, a reservation writes `"version_scheme": "inspr-calver-3"` in `version.json` with a coordinate later than `260929113854.0.0`; `scripts/verify-release.mjs` rejects a new reservation that still declares `inspr-calendar-v2` (`LAST_CALVER2` in that script, `releasehistory.LastCalVer2` in Go). Only the reservation changes; `release_sequence` continues.
+
+The version pill uses the shared INSPR renderer: six segments (`YY·MM·DD hh:mm`, seconds on hover, focus or tap), never the `v` or `.0.0`. Copying always yields the exact canonical version, `.0.0` included. The label table (`schemes.json`) names the schemes INSPR-CalVer3, INSPR-CalVer2 and INSPR-CalVer1.
 
 The git tag is `v` plus the `version` field, for example `v260926064658.0.0`. `scripts/release-tag.mjs` checks that a pushed tag has that shape. `scripts/verify-release.mjs` checks that `version.json` matches the scheme and that the vendored calendar presentation bundle under `web/src/vendor/calendar-version-display` matches `scripts/calendar-version-bundle-pin.json`. `just release-check` runs the verifier. A production web build runs the same check before it emits assets.
 
@@ -117,11 +123,12 @@ the public notes; they contribute only to the hidden count, even when benefit
 fields are incomplete or the member was unavailable at capture.
 Technical Git headlines, legacy top-level `tickets` references and changes remain
 evidence; membership claims come only from the snapshot. The release detail shows
-English/German notes; Git evidence is expandable when a snapshot is available.
-Old v1 manifests without the optional `notes` member and regenerated records with
-`notes.source = "unavailable"` keep their historical headline, ticket references,
-ticket filter and visible changes. Regenerated records also show the missing
-benefit-data gap; their Git text is not presented as benefit notes or membership.
+each captured ticket as one block under Features or Fixes (pill as heading, key,
+benefit sentence, commits folded), exactly as it shows linked tickets of a release
+without a snapshot; the tag message appears only under Evidence. Old v1 manifests without the optional
+`notes` member and regenerated records with `notes.source = "unavailable"` keep
+their ticket references, ticket filter and commits, but their tag message is not
+shown as a title; their Git text is not presented as benefit notes or membership.
 Available snapshots remain authoritative even when empty or incomplete. This
 additive reader boundary does not modify any existing published artifact or
 legacy tag.
@@ -188,7 +195,69 @@ version-keyed backfills for the visible AEON project. Otherwise they retain the
 historical tag headline. The database overlay is computed per request and never
 changes the shared embedded manifest. A malformed database snapshot is logged
 without its payload and falls back for that release alone; other releases remain
-available. Releases with no public notes or gaps keep their tag headline in the
-list and show a quiet **Internal changes only** in the detail. Backfilled notes
+available. Releases with no public notes or gaps show a quiet **Internal changes
+only** in the detail (or **No notes for this release** without any commit); their
+tag message is evidence only. Backfilled notes
 show **Notes written after release**. No original tag, artifact, published
 timestamp, or existing snapshot is rewritten. The coordinator owns production dry-run review and apply.
+
+## Release presentation (AEON-305)
+
+Every release introduces itself with a short **theme** (the kicker, 1–80
+characters, one line), one **headline** sentence (up to 200 characters, one line)
+and a short **intro** (two or three sentences, up to 600 characters), each in
+English and German. The release detail shows them as a compact header above the
+blocks every release shows: Features and Fixes with one block per ticket (the
+pill as heading, the key, the benefit sentence and its commits folded), then
+Other changes. A captured or backfilled snapshot decides which tickets are told
+and their text; without one, the tickets linked from the commits do. A ticket is
+a fix when it is a bug (the served change group), else when its commits are only
+`fix:`; otherwise a feature. The release list shows version, date and theme, or
+the pills. A release without a presentation has no header. The Git tag message
+is evidence, never a title; "Notes written after release" is one muted line.
+
+Presentations live in `release_presentations` (migration `0945`), keyed by
+tenant, product project and calendar version, protected by tenant RLS and project
+visibility, separate from tags, manifests and note snapshots. The version need not
+be in the running build yet, so the presentation can be written before the new
+build is live. English theme and headline are required; German fields may be
+empty and readers then show English. Writing identical text changes nothing.
+Every change records one `release.presentation_set` event (before and after);
+removing one records `release.presentation_cleared`.
+
+**The release agent must write the presentation for every new release**, in both
+languages, as part of the release, right after the notes snapshot is final and
+before announcing the release. It is written against the production database from
+the deployed container, like the backfill, and is a dry run until `--apply`:
+
+```sh
+/paimos release-notes present --tenant inspr --project AEON --actor-principal-id PERSON_UUID \
+  --release VERSION \
+  --theme "Releases with a name" --theme-de "Releases mit Namen" \
+  --headline "Every release says what it is about." --headline-de "Jedes Release sagt, worum es geht." \
+  --intro "Two or three sentences." --intro-de "Zwei oder drei Sätze." \
+  --apply
+```
+
+or with the six fields as a JSON file (`-` reads stdin; use `docker exec -i`),
+which avoids shell quoting:
+
+```sh
+/paimos release-notes present --tenant inspr --project AEON --actor-principal-id PERSON_UUID \
+  --release VERSION --file - --apply < presentation.json
+# {"theme_en":"…","theme_de":"…","headline_en":"…","headline_de":"…","intro_en":"…","intro_de":"…"}
+```
+
+`--clear` removes a presentation. Outside the container the binary is `aeon`
+with the same arguments. The actor is an active **person** with `releases.deploy`
+on the project (workspace admins and owners); offline there is no agent key, so
+the release agent names its operator, as for the backfill. The command prints a
+JSON report with `applied`, `tenant_id` and `change` (`version`, `changed`,
+`before`, `after`). People can also use `PUT` and `DELETE
+/api/releases/{version}/presentation` (same authority; optional
+`expected_revision` answers 409 when stale).
+
+Write for the reader, not the repository: the theme names what the release is
+about in a few words, the headline says what changes for them in one sentence, the
+intro adds context in two or three. No ticket keys, package names or commit
+jargon; those stay in the rows and the commits.

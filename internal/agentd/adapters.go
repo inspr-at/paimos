@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
@@ -107,28 +109,37 @@ func NewCodexAdapter(path string, homes map[string]string) *CodexAdapter {
 func (a *CodexAdapter) SetExpectedEmails(emails map[string]string) { a.Emails = emails }
 func (*CodexAdapter) Name() string                                 { return Codex }
 
+// codexShutdown carries the daemon context's done channel. Wait loads it
+// atomically and never locks eventMu: an observer callback may already hold it.
+type codexShutdown struct {
+	done <-chan struct{}
+}
+
 type codexProcess struct {
+	capacityParser capacity.Parser
 	*wireProcess
-	persistent                bool
-	idleTimeout               time.Duration
-	idleTimer                 *time.Timer
-	idleGeneration            uint64
-	finishing                 bool
-	profile                   Profile
-	idlePublished             bool
-	controlMu                 sync.Mutex
-	done                      chan bool
-	once                      sync.Once
-	usage                     *sessionusage.ManagedCodex
-	inputTokens, outputTokens int64
-	terminal                  *sessionusage.CodexTerminal
-	terminalSeen, invalid     bool
-	acknowledged, sealed      bool
-	abandoned                 atomic.Bool // drain failure; never needs eventMu to publish
+	persistent                                               bool
+	idleTimeout                                              time.Duration
+	idleTimer                                                *time.Timer
+	idleGeneration                                           uint64
+	finishing                                                bool
+	profile                                                  Profile
+	idlePublished                                            bool
+	shutdownRequested                                        bool
+	shutdownWait                                             atomic.Pointer[codexShutdown]
+	controlMu                                                sync.Mutex
+	done                                                     chan bool
+	once                                                     sync.Once
+	usage                                                    *sessionusage.ManagedCodex
+	inputTokens, outputTokens, cachedTokens, reasoningTokens int64
+	terminal                                                 *sessionusage.CodexTerminal
+	terminalSeen, invalid                                    bool
+	acknowledged, sealed                                     bool
+	abandoned                                                atomic.Bool // drain failure; never needs eventMu to publish
 }
 
 func (p *codexProcess) Wait() error {
-	return p.waitForTurn(p.wireProcess.Stop, 2*time.Second)
+	return p.waitForTurn(func(ctx context.Context) error { p.readCapacity(ctx, "end"); return p.wireProcess.Stop(ctx) }, 3*time.Second)
 }
 func (p *codexProcess) Control(ctx context.Context, op, text string) error {
 	p.controlMu.Lock()
@@ -229,6 +240,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		!strings.EqualFold(strings.TrimSpace(*account.Account.Email), expectedEmail) {
 		return fail(errors.New("Codex account identity mismatch"))
 	}
+	cp.readCapacity(op, "start")
 	var thread struct {
 		Thread struct {
 			ID string `json:"id"`
@@ -431,6 +443,7 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 // CursorAdapter speaks ACP. Account identity is checked with Cursor's
 // bounded status JSON before a child is launched.
 type CursorAdapter struct {
+	Homes      map[string]string
 	Path       string
 	Identities map[string]string
 }
@@ -501,7 +514,11 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	op, cancel := operationContext(ctx)
 	defer cancel()
 	args := []string{"--trust", "--model", r.Profile.Model, "acp"}
-	p, err := launchWire(path, args, r.Workspace, nil, "jsonrpc", observe)
+	environment, err := a.accountEnvironment(r.AccountKey)
+	if err != nil {
+		return nil, err
+	}
+	p, err := launchWire(path, args, r.Workspace, environment, "jsonrpc", observe)
 	if err != nil {
 		return nil, err
 	}
@@ -531,6 +548,8 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			var result struct {
 				StopReason string `json:"stopReason"`
 			}
+			// A Cursor prompt result is only a stop reason. It carries no token
+			// usage; cost arrives separately as a usage_update.
 			if len(frame.Error) > 0 && string(frame.Error) != "null" || json.Unmarshal(frame.Result, &result) != nil || result.StopReason != "end_turn" {
 				cp.finish(errors.New("Cursor ACP prompt failed"))
 			} else {
@@ -732,23 +751,53 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	for _, capability := range r.Capabilities {
 		cp.steerEnabled = cp.steerEnabled || capability == "steer"
 	}
-	var inputTokens, outputTokens, costMicros int64
+	var inputTokens, outputTokens, cachedTokens, costMicros int64
+	capacitySeen := false
+	capacityParser := capacity.Parser{}
 	p.setOnEvent(func(raw json.RawMessage) {
 		var frame struct {
-			Kind            string          `json:"kind"`
-			Reason          string          `json:"reason"`
-			CorrelationID   string          `json:"correlation_id"`
-			EffectiveModel  string          `json:"effective_model"`
-			EffectiveEffort string          `json:"effective_effort"`
-			ModelEvidence   string          `json:"model_evidence_status"`
-			InputTokens     int64           `json:"input_tokens_total"`
-			OutputTokens    int64           `json:"output_tokens_total"`
-			CostUSD         json.RawMessage `json:"cost_usd_total"`
+			Kind            string             `json:"kind"`
+			Reason          string             `json:"reason"`
+			CorrelationID   string             `json:"correlation_id"`
+			EffectiveModel  string             `json:"effective_model"`
+			EffectiveEffort string             `json:"effective_effort"`
+			ModelEvidence   string             `json:"model_evidence_status"`
+			InputTokens     int64              `json:"input_tokens_total"`
+			OutputTokens    int64              `json:"output_tokens_total"`
+			CachedTokens    *int64             `json:"cached_input_tokens_total"`
+			CostUSD         json.RawMessage    `json:"cost_usd_total"`
+			Models          []claudeModelUsage `json:"models"`
 		}
 		if json.Unmarshal(raw, &frame) != nil {
 			return
 		}
 		switch frame.Kind {
+		case "capacity":
+			var payload struct {
+				Event  json.RawMessage `json:"event"`
+				Phase  string          `json:"phase"`
+				ReadAt time.Time       `json:"read_at"`
+			}
+			if json.Unmarshal(raw, &payload) == nil {
+				at := payload.ReadAt
+				if at.IsZero() {
+					at = time.Now().UTC()
+				}
+				readings := capacityParser.Claude(payload.Event, at)
+				for i := range readings {
+					readings[i].Phase = "update"
+					if !capacitySeen {
+						readings[i].Phase = "start"
+					}
+					if payload.Phase == "end" {
+						readings[i].Phase = "end"
+					}
+				}
+				if len(readings) > 0 {
+					capacitySeen = true
+					observe(AdapterEvent{Capacity: readings})
+				}
+			}
 		case "session_started":
 			observe(AdapterEvent{Kind: "status", EffectiveModel: frame.EffectiveModel, ModelEvidence: frame.ModelEvidence, HarnessModel: frame.EffectiveModel})
 			select {
@@ -771,11 +820,19 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			}
 			ev := AdapterEvent{Kind: "usage", InputTokensDelta: cumulativeDelta(frame.InputTokens, &inputTokens),
 				OutputTokensDelta: cumulativeDelta(frame.OutputTokens, &outputTokens)}
+			if cached, ok := claudeCachedTotal(frame.CachedTokens, frame.Models); ok && cached >= cachedTokens {
+				ev.CachedInputTokensDelta = cumulativeDelta(cached, &cachedTokens)
+			}
 			if cost, ok := usdMicros(frame.CostUSD); ok {
 				ev.CostMicrosDelta = cumulativeDelta(cost, &costMicros)
 			}
-			if ev.InputTokensDelta > 0 || ev.OutputTokensDelta > 0 || ev.CostMicrosDelta > 0 {
+			if ev.InputTokensDelta > 0 || ev.OutputTokensDelta > 0 || ev.CachedInputTokensDelta > 0 || ev.CostMicrosDelta > 0 {
 				observe(ev)
+			}
+			reports := claudeModelReports(frame.Models)
+			for i := range reports {
+				report := reports[i]
+				observe(AdapterEvent{SessionUsage: &report})
 			}
 		case "tool_started":
 			observe(AdapterEvent{Kind: "tool"})
@@ -802,4 +859,42 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	case <-p.readDone:
 		return p.failStart(errors.New("Claude bridge ended before readiness"))
 	}
+}
+
+type claudeModelUsage struct {
+	Model  string `json:"model"`
+	Input  int64  `json:"input_tokens"`
+	Output int64  `json:"output_tokens"`
+	Cached int64  `json:"cached_input_tokens"`
+}
+
+// claudeCachedTotal is the cumulative cache-read input across models: the
+// bridge's own total, or the sum of its per-model figures. The same numbers
+// feed session usage, so run telemetry and session usage agree.
+func claudeCachedTotal(total *int64, models []claudeModelUsage) (int64, bool) {
+	if total != nil {
+		return *total, *total >= 0
+	}
+	if len(models) == 0 {
+		return 0, false
+	}
+	var sum int64
+	for _, model := range models {
+		if model.Cached < 0 || sum > math.MaxInt64-model.Cached {
+			return 0, false
+		}
+		sum += model.Cached
+	}
+	return sum, true
+}
+
+func claudeModelReports(models []claudeModelUsage) []sessionusage.UsageReport {
+	out := make([]sessionusage.UsageReport, 0, len(models))
+	for _, model := range models {
+		report, ok := sessionusage.CountReport(model.Model, model.Input, model.Output, model.Cached, true)
+		if ok {
+			out = append(out, report)
+		}
+	}
+	return out
 }

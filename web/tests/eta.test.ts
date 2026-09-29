@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { etaFromSession, etaFromTicket, formatEta } from '../src/lib/eta.ts'
+import { etaFromSession, etaFromTicket, formatEta, progressAccessibleName, progressReportedAt } from '../src/lib/eta.ts'
 
 const now = Date.parse('2026-09-28T13:15:00Z')
 const ready = { at: '2026-09-28T13:40:00Z', kind: 'Ready' as const, by: 'Ada', reported_at: '2026-09-28T13:10:00Z' }
@@ -51,4 +51,14 @@ test('a stale report is flagged with its age and author', () => {
   const view = formatEta(session, 'relative', now, 'UTC')
   assert.equal(view?.stale, true)
   assert.match(view?.tip ?? '', /^Estimate from 12:41 by wren is 34 min old\nReady at 13:40, in ~25 min/)
+})
+
+test('progress names the percent and, when the estimate is stale, when it was reported', () => {
+  const at = Date.parse('2026-09-28T12:00:00Z')
+  assert.equal(progressAccessibleName(45, false, '2026-09-28T12:10:00Z', at, 'Europe/Vienna'), '45% done')
+  assert.equal(progressAccessibleName(45, true, '2026-09-28T12:10:00Z', at, 'Europe/Vienna'), '45% done, estimate stale since 14:10')
+  assert.equal(progressAccessibleName(10, true, null, at, 'Europe/Vienna'), '10% done, estimate stale')
+  assert.equal(progressReportedAt({ progress_pct: 10, ready_stale: true, ready_reported_at: '2026-09-28T12:10:00Z', eta_stale: true }), '2026-09-28T12:10:00Z')
+  assert.equal(progressReportedAt({ progress_pct: 10, live_stale: true, live_reported_at: '2026-09-28T11:00:00Z', eta_stale: true }), '2026-09-28T11:00:00Z')
+  assert.equal(progressReportedAt({ progress_pct: 10 }), null)
 })

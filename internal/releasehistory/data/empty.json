@@ -2,7 +2,7 @@
   "schema": "inspr.release-history.v1",
   "product": "",
   "repository": "",
-  "version_scheme": "inspr-calendar-v2",
+  "version_scheme": "inspr-calver-3",
   "generated_at": "0001-01-01T00:00:00Z",
   "source": "none",
   "releases": []

@@ -24,6 +24,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	codexHomes, emails, claudeHomes, cursorIDs := map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}
 	claudeEmails := map[string]string{}
 	grokBindings := map[string]agentd.GrokBinding{}
+	grokHomes, cursorHomes := map[string]string{}, map[string]string{}
 	paths := map[string]string{}
 	accounts := []agentd.EnrolledAccount{}
 	for _, a := range c.Accounts {
@@ -41,7 +42,13 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 			claudeEmails[a.Key] = a.Identity
 		case agentd.Cursor:
 			cursorIDs[a.Key] = a.Identity
+			if a.Home != "" {
+				cursorHomes[a.Key] = a.Home
+			}
 		case agentd.Grok:
+			if a.Home != "" {
+				grokHomes[a.Key] = a.Home
+			}
 			if a.Grok.BinaryPath != a.Path || a.Grok.PrincipalSHA256 != a.Identity || a.Grok.AuthPath == "" || a.Grok.ScratchRoot == "" {
 				return nil, nil, errors.New("native Grok private binding unavailable")
 			}
@@ -62,15 +69,21 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 		adapters = append(adapters, a)
 	}
 	if p := paths[agentd.Cursor]; p != "" {
-		adapters = append(adapters, agentd.NewCursorAdapter(p, cursorIDs))
+		cursor := agentd.NewCursorAdapter(p, cursorIDs)
+		if len(cursorHomes) > 0 {
+			cursor.Homes = cursorHomes
+		}
+		adapters = append(adapters, cursor)
 	}
 	if len(grokBindings) > 0 {
-		adapters = append(adapters, agentd.NewGrokAdapter(grokBindings))
+		grok := agentd.NewGrokAdapter(grokBindings)
+		grok.Homes = grokHomes
+		adapters = append(adapters, grok)
 	}
 	return accounts, adapters, nil
 }
 
-func servePaired(root string) error {
+func servePaired(root string, capacityInterval time.Duration) error {
 	c, err := agentsetup.ReadRuntimeConfig(root)
 	if err != nil {
 		return err
@@ -96,7 +109,7 @@ func servePaired(root string) error {
 	defer stop()
 	state := filepath.Join(root, "daemon")
 	remote := agentd.NewRemote(c.Origin, string(key))
-	s, err := agentd.NewSupervisor(ctx, agentd.Config{API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1}})
+	s, err := agentd.NewSupervisor(ctx, agentd.Config{CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1}})
 	if err != nil {
 		return err
 	}
@@ -130,68 +143,69 @@ func servePaired(root string) error {
 	if err != nil {
 		return err
 	}
+	captureCtx, stopCapture := context.WithCancel(ctx)
+	captureDone := make(chan struct{})
+	go func() { defer close(captureDone); s.RunCapacityCaptures(captureCtx) }()
+	defer func() { stopCapture(); <-captureDone }()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	stopping := false
 	for {
-		if stopping {
-			op, cancel := context.WithTimeout(context.Background(), time.Second)
+		if stopping || ctx.Err() != nil {
+			stopping = true
+			stopCapture()
+			<-captureDone
+			op, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			err = s.Close(op)
 			cancel()
 			if err == nil {
 				return nil
 			}
+			awaitDrainRetry()
+			continue
 		}
-		op, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		op, cancel := context.WithTimeout(ctx, 20*time.Second)
 		watches.Sweep(op)
-		if !stopping {
-			// Lifecycle reconciliation is required before every fresh dispatch;
-			// the independent tombstone proof still works after key revocation.
-			err = syncPairing(op, root, c.Origin, s)
-			if err == nil {
-				next, _, readErr := agentsetup.ReadRuntime(root)
-				if readErr == nil {
-					readErr = agentsetup.ValidateRuntimeDependencies(next)
-				}
-				if readErr == nil && !reflect.DeepEqual(c, next) {
-					if next.Origin != c.Origin || next.TenantID != c.TenantID || next.PrincipalID != c.PrincipalID || next.DaemonID != c.DaemonID || next.Workspace != c.Workspace || next.ComputerID != c.ComputerID {
-						readErr = errors.New("pairing configuration identity changed")
-					} else {
-						for _, nextAccount := range next.Accounts {
-							for _, oldAccount := range c.Accounts {
-								if oldAccount.AccountID == nextAccount.AccountID && oldAccount != nextAccount {
-									readErr = errors.New("approved account binding changed")
-								}
-							}
-						}
-						if readErr != nil {
-							stopping = true
-							cancel()
-							continue
-						}
-						var ac []agentd.EnrolledAccount
-						var ad []agentd.Adapter
-						ac, ad, readErr = pairedAdapters(next)
-						if readErr == nil {
-							readErr = s.RefreshAccounts(ac, ad)
-							if readErr == nil {
-								c = next
+		// Lifecycle reconciliation is required before every fresh dispatch;
+		// the independent tombstone proof still works after key revocation.
+		err = syncPairing(op, root, c.Origin, s)
+		if err == nil {
+			next, _, readErr := agentsetup.ReadRuntime(root)
+			if readErr == nil {
+				readErr = agentsetup.ValidateRuntimeDependencies(next)
+			}
+			if readErr == nil && !reflect.DeepEqual(c, next) {
+				if next.Origin != c.Origin || next.TenantID != c.TenantID || next.PrincipalID != c.PrincipalID || next.DaemonID != c.DaemonID || next.Workspace != c.Workspace || next.ComputerID != c.ComputerID {
+					readErr = errors.New("pairing configuration identity changed")
+				} else {
+					for _, nextAccount := range next.Accounts {
+						for _, oldAccount := range c.Accounts {
+							if oldAccount.AccountID == nextAccount.AccountID && oldAccount != nextAccount {
+								readErr = errors.New("approved account binding changed")
 							}
 						}
 					}
-				}
-				if readErr == nil {
-					_ = s.PollOnce(op)
+					if readErr != nil {
+						stopping = true
+						cancel()
+						continue
+					}
+					var ac []agentd.EnrolledAccount
+					var ad []agentd.Adapter
+					ac, ad, readErr = pairedAdapters(next)
+					if readErr == nil {
+						readErr = s.RefreshAccounts(ac, ad)
+						if readErr == nil {
+							c = next
+						}
+					}
 				}
 			}
-		} else {
-			_ = s.PollOnce(op)
+			if readErr == nil {
+				_ = s.PollOnce(op)
+			}
 		}
 		cancel()
-		if stopping {
-			<-ticker.C
-			continue
-		}
 		select {
 		case <-ctx.Done():
 			stopping = true

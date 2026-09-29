@@ -15,25 +15,30 @@ import (
 // issueView is the classic issue text/JSON shape. Aeon stores the issue as a
 // node: type is the kind slug, status is state, and priority lives in fields.
 type issueView struct {
-	PillEN      string   `json:"pill_en,omitempty"`
-	PillDE      string   `json:"pill_de,omitempty"`
-	BenefitEN   string   `json:"benefit_en,omitempty"`
-	BenefitDE   string   `json:"benefit_de,omitempty"`
-	Hide        bool     `json:"hide_from_release_notes,omitempty"`
-	Warnings    []string `json:"warnings,omitempty"`
-	IssueKey    string   `json:"issue_key"`
-	Title       string   `json:"title"`
-	Type        string   `json:"type"`
-	Status      string   `json:"status"`
-	Priority    string   `json:"priority"`
-	Description string   `json:"description,omitempty"`
-	ID          string   `json:"id"`
-	Assignee    string   `json:"assignee,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	Comments    []string `json:"comments,omitempty"`
+	EstimateHours  *float64 `json:"estimate_hours,omitempty"`
+	EstimateSource string   `json:"estimate_source,omitempty"`
+	EstimateBy     string   `json:"estimate_by,omitempty"`
+	EstimateAt     string   `json:"estimate_at,omitempty"`
+	PillEN         string   `json:"pill_en,omitempty"`
+	PillDE         string   `json:"pill_de,omitempty"`
+	BenefitEN      string   `json:"benefit_en,omitempty"`
+	BenefitDE      string   `json:"benefit_de,omitempty"`
+	Hide           bool     `json:"hide_from_release_notes,omitempty"`
+	Warnings       []string `json:"warnings,omitempty"`
+	IssueKey       string   `json:"issue_key"`
+	Title          string   `json:"title"`
+	Type           string   `json:"type"`
+	Status         string   `json:"status"`
+	Priority       string   `json:"priority"`
+	Description    string   `json:"description,omitempty"`
+	ID             string   `json:"id"`
+	Assignee       string   `json:"assignee,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
+	Comments       []string `json:"comments,omitempty"`
 }
 
 type issueInput struct {
+	Estimate    string
 	Benefits    benefitFlags
 	Project     string
 	Title       string
@@ -62,7 +67,12 @@ func (rt *runtime) viewIssue(n apiNode, kinds kindTable) issueView {
 		}
 	}
 	hidden, _ := fields["hide_from_release_notes"].(bool)
+	var estimate *float64
+	if h, ok := fields["estimate_hours"].(float64); ok && validEstimate(h) {
+		estimate = &h
+	}
 	return issueView{
+		EstimateHours: estimate, EstimateSource: fieldString(fields, "estimate_source"), EstimateBy: fieldString(fields, "estimate_by"), EstimateAt: fieldString(fields, "estimate_at"),
 		PillEN: fieldString(fields, "pill_en"), PillDE: fieldString(fields, "pill_de"), BenefitEN: fieldString(fields, "benefit_en"), BenefitDE: fieldString(fields, "benefit_de"), Hide: hidden, Warnings: n.Warnings,
 		IssueKey:    n.Key,
 		Title:       n.Title,
@@ -85,6 +95,9 @@ func (rt *runtime) printIssue(v issueView) error {
 	fmt.Fprintf(rt.stdout, "  type:     %s\n", v.Type)
 	fmt.Fprintf(rt.stdout, "  status:   %s\n", v.Status)
 	fmt.Fprintf(rt.stdout, "  priority: %s\n", v.Priority)
+	if v.EstimateHours != nil {
+		fmt.Fprintf(rt.stdout, "  estimate: %gh (%s)\n", *v.EstimateHours, v.EstimateSource)
+	}
 	if v.Description != "" {
 		desc := clipRunes(v.Description, 160, "…")
 		fmt.Fprintf(rt.stdout, "\n  %s\n", strings.ReplaceAll(desc, "\n", "\n  "))
@@ -259,6 +272,13 @@ func (rt *runtime) createIssue(in issueInput) error {
 		parentID = parent.ID
 	}
 	fields := map[string]any{}
+	if in.Estimate != "" {
+		hours, err := parseEstimate(in.Estimate)
+		if err != nil {
+			return err
+		}
+		estimateFields(fields, hours, "")
+	}
 	if _, err := in.Benefits.apply(fields); err != nil {
 		return err
 	}
@@ -308,21 +328,23 @@ func (rt *runtime) createIssue(in issueInput) error {
 }
 
 type issuePatch struct {
-	Benefits    benefitFlags
-	Ref         string
-	Title       string
-	Type        string
-	Status      string
-	Priority    string
-	Parent      string
-	Assignee    string
-	Project     string
-	Description string
-	AC          string
-	Notes       string
-	CloseNote   string
-	AddTag      []string
-	RemoveTag   []string
+	Estimate       string
+	EstimateSource string
+	Benefits       benefitFlags
+	Ref            string
+	Title          string
+	Type           string
+	Status         string
+	Priority       string
+	Parent         string
+	Assignee       string
+	Project        string
+	Description    string
+	AC             string
+	Notes          string
+	CloseNote      string
+	AddTag         []string
+	RemoveTag      []string
 }
 
 func (rt *runtime) updateIssue(in issuePatch) error {
@@ -345,6 +367,14 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 	}
 	fields := fieldMap(n.Fields)
 	changedFields, err := in.Benefits.apply(fields)
+	if in.Estimate != "" {
+		hours, parseErr := parseEstimate(in.Estimate)
+		if parseErr != nil {
+			return parseErr
+		}
+		estimateFields(fields, hours, in.EstimateSource)
+		changedFields = true
+	}
 	if err != nil {
 		return err
 	}

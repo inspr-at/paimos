@@ -28,6 +28,14 @@ async function openAgents(page: Page, path = '/agents') {
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
   await expect(page.locator('.agents-page .row').first()).toBeVisible()
 }
+// Account management lives in Settings → Accounts (AEON-299).
+async function grantAccounts(page: Page) {
+  await page.route('**/api/me/permissions*', route => {
+    const effective = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    effective.workspace.permissions.push('account.read')
+    return route.fulfill({ json: effective })
+  })
+}
 const queue = (page: Page) => page.getByRole('region', { name: 'Needs you' })
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Session details' })
 const row = (page: Page, id: string) => page.locator(`[data-row="s:${id}"]`)
@@ -63,8 +71,8 @@ test('sessions are grouped by what they need, with ticket and heartbeat; details
   await expect(row(page, session(7))).toHaveCount(0)
   await page.getByRole('button', { name: /^Stopped/ }).click()
   await expect(row(page, session(7))).toBeVisible()
-  // At most three counts; the table groups carry the rest.
-  await expect(page.locator('.summary')).toHaveText(/^4 need you · 2 with a problem · \d+ live$/)
+  // One compact live line; the table groups carry the rest.
+  await expect(page.getByRole('group', { name: 'Live sessions' })).toContainText(/^\d+ live/)
   await lead.locator('.agent-link').click()
   await expect(panel(page)).toContainText('Claude Max')
   await expect(panel(page)).toContainText('claude-fable-high')
@@ -165,18 +173,18 @@ test('approvals: j and k move, a opens a reason, Enter records the decision', as
   const { calls, data } = await setup(page)
   await openAgents(page)
   await page.keyboard.press('j')
-  const first = queue(page).locator('.item').first()
+  const first = queue(page).locator('.item:not(.signin)').first()
   await expect(first).toHaveClass(/active/)
   await expect(first).toContainText('Interrupt or stop agent sessions')
   await expect(first).toContainText('High risk')
-  await expect(queue(page).locator('.item').nth(2)).toContainText('Low risk')
+  await expect(queue(page).locator('.item:not(.signin)').nth(2)).toContainText('Low risk')
   await expect(first).toContainText(/Expires in \d+m/)
   // Only the selected request's Approve is the filled primary; the emphasis moves with j and k.
   await expect(first.getByRole('button', { name: 'Approve' })).toHaveClass(/primary/)
-  await expect(queue(page).locator('.item').nth(1).getByRole('button', { name: 'Approve' })).toHaveClass(/approve-soft/)
+  await expect(queue(page).locator('.item:not(.signin)').nth(1).getByRole('button', { name: 'Approve' })).toHaveClass(/approve-soft/)
   await page.keyboard.press('j')
-  await expect(queue(page).locator('.item').nth(1)).toHaveClass(/active/)
-  await expect(queue(page).locator('.item').nth(1).getByRole('button', { name: 'Approve' })).toHaveClass(/primary/)
+  await expect(queue(page).locator('.item:not(.signin)').nth(1)).toHaveClass(/active/)
+  await expect(queue(page).locator('.item:not(.signin)').nth(1).getByRole('button', { name: 'Approve' })).toHaveClass(/primary/)
   await expect(first.getByRole('button', { name: 'Approve' })).not.toHaveClass(/primary/)
   await page.keyboard.press('a')
   const reason = queue(page).getByLabel('Reason (optional)')
@@ -186,7 +194,7 @@ test('approvals: j and k move, a opens a reason, Enter records the decision', as
   await expect(page.locator('.toast').filter({ hasText: 'Approved: nova was told.' })).toBeVisible()
   expect(calls.find(c => c.path.endsWith('/decision'))?.body).toEqual({ decision: 'approved', reason: 'Fine for this run.' })
   expect(data.approvals.find(a => a.scope === 'run.claim' && a.decision === 'approved' && a.agent_principal_id.endsWith('2'))).toBeTruthy()
-  await expect(queue(page).locator('.item')).toHaveCount(3)
+  await expect(queue(page).locator('.item:not(.signin)')).toHaveCount(3)
   // d opens a denial; Escape backs out without a request.
   await page.keyboard.press('d')
   await expect(queue(page).getByLabel('Why not? The agent sees this.')).toBeFocused()
@@ -200,7 +208,7 @@ test('approvals: j and k move, a opens a reason, Enter records the decision', as
 test('members can decide lower risk requests but not high risk requests', async ({ page }) => {
   const { calls } = await setup(page, { member: true })
   await openAgents(page)
-  const items = queue(page).locator('.item')
+  const items = queue(page).locator('.item:not(.signin)')
   await expect(items.first()).toContainText('High risk')
   await expect(items.first().getByRole('button', { name: 'Approve' })).toHaveCount(0)
   await items.first().focus()
@@ -224,7 +232,7 @@ test('approval controls require the action permission even with an admin legacy 
     return route.fulfill({ json: effective })
   })
   await openAgents(page)
-  const high = queue(page).locator('.item').first()
+  const high = queue(page).locator('.item:not(.signin)').first()
   await expect(high).toContainText('High risk')
   await expect(high.getByRole('button', { name: 'Approve' })).toHaveCount(0)
   await high.focus()
@@ -235,7 +243,7 @@ test('approval controls require the action permission even with an admin legacy 
 test('a failed decision keeps the reason and says why', async ({ page }) => {
   await setup(page, { failDecision: true })
   await openAgents(page)
-  const item = queue(page).locator('.item').first()
+  const item = queue(page).locator('.item:not(.signin)').first()
   await item.getByRole('button', { name: 'Deny' }).click()
   await queue(page).getByLabel('Why not? The agent sees this.').fill('Use the staging account instead.')
   await item.getByRole('button', { name: 'Deny permission' }).click()
@@ -246,7 +254,7 @@ test('a failed decision keeps the reason and says why', async ({ page }) => {
 test('read-only people see requests but cannot decide or control', async ({ page }) => {
   await setup(page, { readOnly: true })
   await openAgents(page)
-  await expect(queue(page).locator('.item')).toHaveCount(4)
+  await expect(queue(page).locator('.item:not(.signin)')).toHaveCount(4)
   await expect(queue(page).getByRole('button', { name: 'Approve' })).toHaveCount(0)
   // Controls that cannot work are not offered at all: no row button, no disabled item, no excuse (AEON-291).
   await expect(row(page, camy).getByRole('button', { name: 'Interrupt camy' })).toHaveCount(0)
@@ -288,7 +296,7 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   expect(typeof sent.idempotency_key).toBe('string')
   // B7: runs by agent, messages newest first in one page, sessions tenant-wide.
   expect(calls.some(c => c.path === '/api/runs' && c.query?.get('agent') === 'a0000000-0000-4000-8000-000000000001')).toBe(true)
-  expect(calls.some(c => c.path === '/api/projects/p-pharos/messages' && c.method === 'GET' && c.query?.get('newest_first') === 'true' && c.query?.get('limit') === '200')).toBe(true)
+  expect(calls.some(c => c.path === '/api/projects/p-pharos/messages' && c.method === 'GET' && c.query?.get('session') === camy && c.query?.get('newest_first') === 'true' && c.query?.get('limit') === '200')).toBe(true)
   expect(calls.some(c => /\/api\/projects\/[^/]+\/harness-sessions$/.test(c.path))).toBe(false)
 })
 
@@ -394,8 +402,8 @@ test('held action requests resolve or dismiss with an optional note, by button o
 
 test('accounts show what is left and the pace; admins can drain and resume', async ({ page }) => {
   const { calls } = await setup(page)
-  await openAgents(page)
-  await page.getByText('Accounts and pacing', { exact: true }).first().click()
+  await grantAccounts(page)
+  await page.goto('/settings/accounts')
   const accounts = page.getByRole('region', { name: 'Accounts and pacing' })
   const claude = accounts.locator('.account').filter({ hasText: 'Claude Max' })
   await expect(claude).toContainText('28% tokens left')
@@ -417,8 +425,8 @@ test('accounts show what is left and the pace; admins can drain and resume', asy
 test('an unmeasured allowance is unknown, not a percentage left', async ({ page }) => {
   const { data } = await setup(page)
   ;(data.accounts[0].windows[0] as Record<string, unknown>).provisional = true
-  await openAgents(page)
-  await page.getByText('Accounts and pacing', { exact: true }).first().click()
+  await grantAccounts(page)
+  await page.goto('/settings/accounts')
   const claude = page.getByRole('region', { name: 'Accounts and pacing' }).locator('.account').filter({ hasText: 'Claude Max' })
   await expect(claude).toContainText('Unmeasured')
   await expect(claude).toContainText('allowance unknown')
@@ -428,8 +436,8 @@ test('an unmeasured allowance is unknown, not a percentage left', async ({ page 
 
 test('accounts explain themselves when the person may not see them', async ({ page }) => {
   await setup(page, { accountsForbidden: true })
-  await openAgents(page)
-  await page.getByText('Accounts and pacing', { exact: true }).first().click()
+  await grantAccounts(page)
+  await page.goto('/settings/accounts')
   await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('visible to workspace admins')
 })
 
@@ -443,9 +451,10 @@ test('an empty workspace explains how an agent connects', async ({ page }) => {
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'No agent has connected yet' })).toBeVisible()
   await expect(page.locator('.connect .lead')).toHaveText('Start an agent to queue a run; its daemon connects when an account is ready.')
-  await expect(queue(page)).toHaveCount(0)
+  // No request waits (a failed check is not a sign-in prompt).
+  await expect(queue(page).locator('.item:not(.signin)')).toHaveCount(0)
   // The empty state says it once; the header adds no second sentence.
-  await expect(page.locator('.summary')).toHaveText('')
+  await expect(page.getByRole('group', { name: 'Live sessions' })).toHaveText('')
   await page.locator('.connect').getByRole('button', { name: 'Start agent' }).click()
   await expect(page.getByRole('dialog', { name: 'Start agent' }).getByRole('button', { name: 'Queue run' })).toBeVisible()
 })
@@ -457,7 +466,7 @@ test('a failing sessions read is a real error with a retry, and approvals keep w
   await expect(failure).toContainText('Sessions could not be loaded')
   await expect(failure).toContainText('(404)')
   await expect(failure.getByRole('button', { name: 'Try again' })).toBeVisible()
-  await expect(queue(page).locator('.item')).toHaveCount(3)
+  await expect(queue(page).locator('.item:not(.signin)')).toHaveCount(3)
 })
 
 test('the ticket panel shows the bound agent’s attention state and links to its session', async ({ page }) => {
@@ -488,7 +497,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await setup(page)
     await openAgents(page)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.querySelector('main')!.scrollWidth <= innerWidth)).toBe(true)
-    for (const item of await queue(page).locator('.item').all()) {
+    for (const item of await queue(page).locator('.item:not(.signin)').all()) {
       const box = (await item.boundingBox())!
       expect(box.x + box.width).toBeLessThanOrEqual(390)
     }

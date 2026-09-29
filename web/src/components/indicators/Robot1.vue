@@ -41,9 +41,12 @@ onBeforeUnmount(() => clearTimeout(clear))
     <g class="robot" :style="inner">
       <path d="M16 10V7.5M14 7.5h4M8.5 15H7v5h1.5M23.5 15H25v5h-1.5" />
       <rect x="9" y="10.5" width="14" height="12" rx="1.5" />
-      <path v-if="state === 'working'" d="M12.5 15.5h2M17.5 15.5h2M13 19h6" />
-      <path d="M12 25h8M16 22.5V25" />
-      <RobotExpression v-if="state !== 'working'" :state="state" />
+      <!-- Working keeps LA2's single face-and-legs path. Other states swap the face for an expression and leave the legs. -->
+      <path v-if="state === 'working'" d="M12.5 15.5h2M17.5 15.5h2M13 19h6M12 25h8M16 22.5V25" />
+      <template v-else>
+        <RobotExpression :state="state" />
+        <path d="M12 25h8M16 22.5V25" />
+      </template>
     </g>
     <AgentStateMark :state="state" x="21" y="0" :size="11" />
     <path v-if="glint && state === 'working'" :key="glint" class="glint" d="m26 1 1.5 3.5L31 6l-3.5 1.5L26 11l-1.5-3.5L21 6l3.5-1.5Z" />

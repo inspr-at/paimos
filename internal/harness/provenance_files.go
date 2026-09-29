@@ -37,6 +37,31 @@ func CollectInstructionFiles(paths []string) ([]ProvenanceItem, error) {
 	return items, nil
 }
 
+// CollectPresentInstructionFiles hashes each named instruction file that
+// exists directly in dir, one at a time through CollectInstructionFiles.
+// A missing name is skipped. settled is false when a name could not be checked
+// (other than not existing), so the caller can try again later. A present file
+// that the reader refuses is skipped, like an absent one.
+func CollectPresentInstructionFiles(dir string, names ...string) ([]ProvenanceItem, bool) {
+	settled := true
+	var items []ProvenanceItem
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			settled = false
+			continue
+		}
+		got, err := CollectInstructionFiles([]string{path})
+		if err != nil {
+			continue
+		}
+		items = append(items, got...)
+	}
+	return items, settled
+}
+
 // PromptTemplateProvenance records a version identifier. digest is an
 // explicit lowercase sha256 of the template bytes when the caller has one.
 // An empty digest stores hash_kind absent and a null content digest. This

@@ -1,16 +1,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { displayHeadline, groupByDay, hasUsableNotes, HISTORICAL_TAG_LABEL, historicalTagFallback, matches, presentChanges, releasedAt, stats as statsOf, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterRelease, type Release } from '../../lib/releases'
+import { groupByDay, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, releaseView, stats as statsOf, technicalLine, ticketsOf, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { useProfile } from '../../stores/profile'
+import { useSession } from '../../stores/session'
 import { normalKey } from '../../lib/ticketLinks'
 import { relativeTime } from '../../lib/work'
-import { isCalendar, useReleases } from '../../stores/releases'
+import { useReleases } from '../../stores/releases'
 import { useVersion } from '../../stores/version'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
+import LangBadge from './LangBadge.vue'
 import ReleaseCompare from './ReleaseCompare.vue'
 import ReleaseDetail from './ReleaseDetail.vue'
 import ReleaseStats from './ReleaseStats.vue'
@@ -23,11 +26,57 @@ import { TICKET_PEEK } from '../../lib/ticketPeek'
 // e shows the evidence, ? lists the keys, Esc steps back and finally closes.
 // A ticket key opens that ticket in the app's side panel beside the history.
 const props = defineProps<{ target: string | null }>()
-const emit = defineEmits<{ select: [version: string]; close: []; home: []; navigate: [path: string] }>()
+const emit = defineEmits<{ select: [version: string]; query: [key: 'release_lang' | 'release_view', value: string]; close: []; home: []; navigate: [path: string] }>()
 const store = useReleases()
 const version = useVersion()
 const profile = useProfile()
-const locale = computed(() => profile.profile?.locale ?? null)
+const session = useSession()
+const route = useRoute()
+// EN | DE and Highlights | Details (AEON-323). Both live in the address under
+// their own keys, since the page behind the sheet may use ?view= itself, so a
+// link, a reload and a version change keep them. The language is also this
+// person's remembered choice on this device, else the profile's. The labels
+// read the same in both languages.
+const langKey = computed(() => session.identity ? releaseLangKey(session.identity.principal.id) : '')
+const remembered = ref<string | null>(null)
+watch(langKey, key => { try { remembered.value = key ? localStorage.getItem(key) : null } catch { remembered.value = null } }, { immediate: true })
+// A choice waits here until the address has it, so two quick clicks both land.
+type SwitchKey = 'release_lang' | 'release_view'
+const pending = reactive<Partial<Record<SwitchKey, string>>>({})
+watch(() => route.query, query => { for (const key of ['release_lang', 'release_view'] as const) if (query[key] === pending[key]) delete pending[key] })
+const lang = computed(() => releaseLang(pending.release_lang ?? route.query.release_lang, profile.profile?.locale, remembered.value))
+const view = computed(() => releaseView(pending.release_view ?? route.query.release_view))
+const locale = lang
+const copyText = computed(() => releaseCopy(lang.value))
+const LANGS = ['en', 'de'] as const
+const VIEWS = ['highlights', 'details'] as const
+// The address changes where the release does: in the app, so a choice and a
+// selection it causes (a filter hiding the selected release) land together.
+function putQuery(key: SwitchKey, value: string) {
+  if ((pending[key] ?? route.query[key]) === value) return
+  pending[key] = value
+  emit('query', key, value)
+}
+function chooseLang(next: ReleaseLang) {
+  remembered.value = next
+  try { if (langKey.value) localStorage.setItem(langKey.value, next) } catch { /* private window: the address keeps it */ }
+  putQuery('release_lang', next)
+}
+function chooseView(next: ReleaseView) { putQuery('release_view', next) }
+// The W3C radio group: Right and Down choose the next option, Left and Up the
+// one before, wrapping; Home and End the first and last. Focus follows.
+const SWITCH_STEP: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }
+function switchKeys(event: KeyboardEvent, current: string, options: readonly string[], choose: (value: string) => void) {
+  const key = event.key
+  if (!(key in SWITCH_STEP) && key !== 'Home' && key !== 'End') return
+  event.preventDefault()
+  event.stopPropagation()
+  const index = Math.max(0, options.indexOf(current))
+  const next = key === 'Home' ? 0 : key === 'End' ? options.length - 1 : (index + SWITCH_STEP[key]! + options.length) % options.length
+  choose(options[next]!)
+  const group = event.currentTarget as HTMLElement
+  void nextTick(() => group.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus())
+}
 
 const dialog = ref<HTMLDialogElement>()
 const listbox = ref<HTMLElement>()
@@ -50,22 +99,33 @@ const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
 
 const history = computed(() => store.history)
 const releases = computed(() => [...(history.value?.releases ?? [])].sort((a, b) => b.version.localeCompare(a.version)))
-const visible = computed(() => releases.value.filter(r => matches(r, filter, locale.value)))
+const visible = computed(() => releases.value.filter(r => matches(r, filter, locale.value, view.value)))
 const days = computed(() => groupByDay(visible.value, now.value))
 const order = computed(() => days.value.flatMap(d => d.releases))
 const indexOf = computed(() => new Map(order.value.map((r, i) => [r.version, i])))
 const byVersion = computed(() => new Map(releases.value.map(r => [r.version, r])))
+// Each row's name in the chosen language, with the language it fell back to.
+const rails = computed(() => new Map(visible.value.map(r => [r.version, railLine(r, locale.value)])))
 const selected = computed(() => cursor.value ? byVersion.value.get(cursor.value) ?? null : null)
 const current = computed(() => history.value?.current ?? '')
+// The version this page loaded with. The history's current is the server, which
+// can already be newer while this page is still the old build.
+const pageRuns = computed(() => version.value?.version ?? '')
+const runningHere = computed(() => pageRuns.value || current.value)
+// live_since belongs to the server version. It does not describe an older page.
+const runningSince = computed(() => runningHere.value === current.value ? history.value?.live_since ?? null : null)
 const currentKnown = computed(() => byVersion.value.has(current.value))
-// The published release before the one running here: where a rollback would go.
+// The published release before the one the server runs: where a rollback would go.
 const rollbackTarget = computed(() => currentKnown.value ? releases.value.find(r => r.state === 'published' && r.version < current.value)?.version ?? null : null)
 const stats = computed(() => statsOf(releases.value, now.value))
 const filtering = computed(() => !!filter.q.trim() || filter.features || filter.fixes || filter.tickets)
 const reservedCount = computed(() => releases.value.filter(r => r.state === 'reserved').length)
 const compareTo = computed(() => mode.value === 'compare' && cursor.value && cursor.value !== compareFrom.value ? cursor.value : null)
-// This page still runs an older build than the server: say so, with a reload.
-const stale = computed(() => isCalendar(version.value?.version) && isCalendar(current.value) && current.value > version.value.version)
+// One notice. An outdated page says a newer version is live; it does not also
+// warn that this build's history lacks that version. The server is the newer of
+// the cached history and the version the update poll already saw.
+const server = computed(() => liveServer(current.value, store.available))
+const notice = computed(() => releaseNotice(pageRuns.value, current.value, missing.value, store.available))
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
 
 // ---------- Selection ----------
@@ -73,7 +133,9 @@ function initialSelection() {
   if (cursor.value && byVersion.value.has(cursor.value)) return
   const wanted = props.target && props.target !== 'all' ? props.target.replace(/^v/, '') : ''
   if (wanted && byVersion.value.has(wanted)) { cursor.value = wanted; if (phone.value) showDetail.value = true; return }
-  if (wanted) missing.value = wanted
+  // A version this build does not have cannot open as detail. Stay on the list,
+  // where the one notice explains it.
+  if (wanted) { missing.value = wanted; showDetail.value = false }
   cursor.value = currentKnown.value ? current.value : releases.value[0]?.version ?? null
 }
 watch(() => props.target, target => {
@@ -197,6 +259,7 @@ function keydown(event: KeyboardEvent) {
   }
   if (typing(event.target) || event.metaKey || event.ctrlKey || event.altKey) return
   if (inPeek(event.target)) { peekKeys(event); return }
+  if (event.target instanceof Element && event.target.closest('.switches') && ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
   const onControl = event.target instanceof HTMLElement && !!event.target.closest('button, a, summary') && event.target !== listbox.value
   switch (event.key) {
     case 'j': case 'ArrowDown': event.preventDefault(); step(1); break
@@ -243,9 +306,10 @@ onBeforeUnmount(() => {
 
 const timeOf = (r: Release) => { const at = releasedAt(r); return at ? new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—' }
 const ageOf = (r: Release) => { const at = releasedAt(r); return at ? relativeTime(at, { now: now.value }) : '' }
-// Per-row counts and ticket keys, worked out once per history rather than on every render.
+// Per-row counts follow the detail's blocks (features and fixes count tickets, other
+// counts commits), worked out once per history rather than on every render.
 const summaries = computed(() => new Map(releases.value.map(r => {
-  const g = presentChanges(r.changes, locale.value)
+  const g = presentRelease(r, locale.value)
   return [r.version, { features: g.features.length, fixes: g.fixes.length, other: g.other.length, tickets: ticketsOf(r) }]
 })))
 const countsOf = (r: Release) => summaries.value.get(r.version) ?? { features: 0, fixes: 0, other: 0, tickets: [] as string[] }
@@ -271,6 +335,16 @@ const KINDS = [
             <h1 id="releases-title">{{ brand.wordmark }} releases</h1>
           </div>
           <span class="spacer" />
+          <div class="switches">
+            <div class="seg" role="radiogroup" aria-label="Language" @keydown="switchKeys($event, lang, LANGS, value => chooseLang(value as ReleaseLang))">
+              <button type="button" role="radio" :aria-checked="lang === 'en'" :tabindex="lang === 'en' ? 0 : -1" @click="chooseLang('en')">EN</button>
+              <button type="button" role="radio" :aria-checked="lang === 'de'" :tabindex="lang === 'de' ? 0 : -1" @click="chooseLang('de')">DE</button>
+            </div>
+            <div class="seg" role="radiogroup" aria-label="View" @keydown="switchKeys($event, view, VIEWS, value => chooseView(value as ReleaseView))">
+              <button type="button" role="radio" :aria-checked="view === 'highlights'" :tabindex="view === 'highlights' ? 0 : -1" @click="chooseView('highlights')">Highlights</button>
+              <button type="button" role="radio" :aria-checked="view === 'details'" :tabindex="view === 'details' ? 0 : -1" @click="chooseView('details')">Details</button>
+            </div>
+          </div>
           <label class="search-field search">
             <AppIcon name="search" :size="14" />
             <input ref="searchInput" v-model="filter.q" class="field" type="search" placeholder="Search headlines, changes, tickets" aria-label="Search releases" aria-keyshortcuts="/" @keydown="searchKeys" />
@@ -282,24 +356,24 @@ const KINDS = [
           <button type="button" class="icon-btn flat help-btn" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" :aria-expanded="help" @click="help = !help"><AppIcon name="keyboard" :size="15" /></button>
           <button type="button" class="icon-btn close-btn" aria-label="Close release history" aria-keyshortcuts="Escape" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
         </div>
-        <p v-if="stale" class="notice" role="status">
+        <p v-if="notice === 'update'" class="notice" role="status">
           <AppIcon name="info" :size="14" />
-          <span>This page still runs {{ version.value?.version }}; the server runs {{ current }}.</span>
+          <span>A newer version is live: this page still runs <CalendarVersion v-if="pageRuns" :value="pageRuns" class="notice-version" />, and the server runs <CalendarVersion v-if="server" :value="server" class="notice-version" />.</span>
           <button type="button" class="btn sm" @click="reload"><AppIcon name="refresh" :size="12" />Reload</button>
         </p>
-        <p v-if="missing" class="notice" role="status">
+        <p v-else-if="notice === 'missing'" class="notice" role="status">
           <AppIcon name="info" :size="14" />
-          <span>{{ missing }} is not in this build’s release history.</span>
+          <span><CalendarVersion :value="missing" class="notice-version" /> is not in this build’s release history.</span>
           <button type="button" class="icon-btn flat sm" aria-label="Dismiss" @click="missing = ''"><AppIcon name="close" :size="12" /></button>
         </p>
-        <ReleaseStats v-if="releases.length && !phone" class="stats" :stats="stats" :current="current" :live-since="history?.live_since ?? null" :now="now" />
+        <ReleaseStats v-if="releases.length && !phone" class="stats" :stats="stats" :current="runningHere" :live-since="runningSince" :now="now" />
         <div v-else-if="!phone && !history && !store.error" class="stats-placeholder skeleton-body" aria-hidden="true"><span v-for="i in 6" :key="i" class="skeleton" /></div>
       </header>
 
       <div class="body">
         <section class="list-pane" aria-label="Releases" :inert="covered">
           <!-- Phones: the stats scroll away with the list, inside the gutter. -->
-          <ReleaseStats v-if="releases.length && phone" compact class="stats" :stats="stats" :current="current" :live-since="history?.live_since ?? null" :now="now" />
+          <ReleaseStats v-if="releases.length && phone" compact class="stats" :stats="stats" :current="runningHere" :live-since="runningSince" :now="now" />
           <div class="filters">
             <div class="toggles" role="group" aria-label="Show only releases with">
               <button type="button" class="toggle" :aria-pressed="filter.features" @click="filter.features = !filter.features"><AppIcon name="sparkle" :size="13" />Features</button>
@@ -313,9 +387,9 @@ const KINDS = [
           </div>
 
           <p v-if="mode === 'compare'" class="compare-hint" role="status">
-            <span>Comparing from</span><CalendarVersion v-if="compareFrom" :value="compareFrom" class="hint-version" />
-            <span v-if="phone">Tap the other end.</span>
-            <span v-else>Pick the other end with <kbd class="keycap">j</kbd> <kbd class="keycap">k</kbd> or a click.</span>
+            <span :lang="lang">{{ copyText.comparingFrom }}</span><CalendarVersion v-if="compareFrom" :value="compareFrom" class="hint-version" />
+            <span v-if="phone" :lang="lang">{{ copyText.compareTap }}</span>
+            <span v-else :lang="lang">{{ copyText.compareOther[0] }} <kbd class="keycap">j</kbd> <kbd class="keycap">k</kbd> {{ copyText.compareOther[1] }}</span>
           </p>
 
           <div v-if="!history && store.loading" class="loading" role="status" aria-label="Loading the release history">
@@ -326,15 +400,15 @@ const KINDS = [
             <p>{{ store.error }}</p>
             <button type="button" class="btn sm" @click="store.load(true).then(initialSelection)"><AppIcon name="refresh" :size="12" />Try again</button>
           </div>
-          <div v-else-if="history && !releases.length" class="empty">
+          <div v-else-if="history && !releases.length" class="empty" :lang="lang">
             <span class="empty-icon"><AppIcon name="history" :size="20" /></span>
-            <h2>No release history in this build</h2>
-            <p>Release builds carry the history of every tag. This one was built without it{{ current === 'dev' ? ', as development builds are' : '' }}.</p>
+            <h2>{{ copyText.noHistory }}</h2>
+            <p>{{ copyText.noHistoryText(current === 'dev') }}</p>
           </div>
-          <div v-else-if="history && !visible.length" class="empty">
-            <h2>No release matches</h2>
-            <p>Nothing in {{ releases.length }} releases fits {{ filter.q.trim() ? `“${filter.q.trim()}”` : 'these filters' }}.</p>
-            <button type="button" class="btn sm" @click="clearFilters">Clear search and filters</button>
+          <div v-else-if="history && !visible.length" class="empty" :lang="lang">
+            <h2>{{ copyText.noMatch }}</h2>
+            <p>{{ copyText.noMatchText(releases.length, filter.q.trim()) }}</p>
+            <button type="button" class="btn sm" @click="clearFilters">{{ copyText.clear }}</button>
           </div>
 
           <div
@@ -365,9 +439,8 @@ const KINDS = [
                   </span>
                   <span v-if="r.state === 'reserved'" class="headline">Reserved, never published</span>
                   <template v-else>
-                    <span v-if="historicalTagFallback(r)" class="eyebrow hist-label">{{ HISTORICAL_TAG_LABEL }}</span>
-                    <span class="headline"><template v-for="(p, i) in marked(hasUsableNotes(r) || r.headline ? displayHeadline(r, locale) : 'No headline recorded')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
-                    <span v-if="writtenAfterRelease(r)" class="written-after">{{ WRITTEN_AFTER_LABEL }}</span>
+                    <span v-if="rails.get(r.version)?.text" class="rail-name"><span class="headline" :class="{ theme: rails.get(r.version)!.themed }" :lang="rails.get(r.version)!.lang"><template v-for="(p, i) in marked(rails.get(r.version)!.text)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span><LangBadge v-if="rails.get(r.version)!.lang !== lang" :lang="rails.get(r.version)!.lang" /></span>
+                    <span v-if="view === 'details' && technicalLine(r)" class="subjects" :title="technicalLine(r)"><template v-for="(p, i) in marked(technicalLine(r))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                   </template>
                   <span v-if="r.state === 'published'" class="counts">
                     <template v-for="k in KINDS" :key="k.key">
@@ -386,12 +459,12 @@ const KINDS = [
           <button v-if="phone" type="button" class="btn sm ghost back" @click="showDetail = false"><AppIcon name="arrow-left" :size="13" />All releases</button>
           <ReleaseCompare
             v-if="mode === 'compare' && compareFrom" key="compare" :releases="releases" :from="compareFrom" :to="compareTo"
-            :repository="history?.repository ?? ''" :query="filter.q" @swap="swap" @exit="exitCompare"
+            :repository="history?.repository ?? ''" :query="filter.q" :lang="lang" :view="view" @swap="swap" @exit="exitCompare"
           />
           <ReleaseDetail
             v-else-if="selected" ref="detail" :key="selected.version" :release="selected" :repository="history?.repository ?? ''"
             :current="selected.version === current" :rollback="selected.version === rollbackTarget" :fresh="store.highlight.has(selected.version)"
-            :live-since="history?.live_since ?? null" :now="now" :query="filter.q" :evidence="evidence" @evidence="value => evidence = value"
+            :live-since="history?.live_since ?? null" :now="now" :query="filter.q" :evidence="evidence" :lang="lang" :view="view" @evidence="value => evidence = value"
           />
           <div v-else-if="store.loading" class="detail-loading skeleton-body" role="status" aria-label="Loading release"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
         </section>
@@ -435,6 +508,9 @@ const KINDS = [
 /* ---------- Head ---------- */
 .head { display: grid; gap: 14px; padding: 18px 0 16px; }
 .title-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+/* The two switches sit with search and Compare, at the header controls' 36 px. */
+.switches { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.switches .seg button { height: 30px; padding: 0 12px; }
 .mark-backing { display: grid; place-items: center; text-decoration: none; transition: transform .12s ease, box-shadow .12s ease; flex-shrink: 0; width: 40px; height: 40px; border-radius: 12px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim), 0 6px 16px -10px rgba(32, 60, 61, .5); }
 .mark-backing:hover { box-shadow: 0 0 0 1px var(--glass-rim), 0 8px 20px -10px rgba(32, 60, 61, .6); transform: translateY(-1px); }
 .mark-backing:focus-visible { outline: 2px solid var(--focus, #0e6f6c); outline-offset: 2px; }
@@ -450,7 +526,9 @@ const KINDS = [
 .compare-btn .keycap { margin-right: -5px; }
 .icon-btn { width: 36px; height: 36px; }
 .notice { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; border-radius: 12px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 1px var(--line); color: var(--ink); font-size: 13px; }
-.notice > span { flex: 1; min-width: 0; }
+.notice > span { flex: 1; min-width: 0; line-height: 1.45; }
+.notice-version { font-size: inherit; vertical-align: baseline; }
+.notice .btn, .notice .icon-btn { flex: none; }
 .notice svg { color: var(--teal-ink); }
 .stats-placeholder { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; height: 110px; }
 .stats-placeholder .skeleton { border-radius: 14px; }
@@ -510,9 +588,14 @@ const KINDS = [
 .new-tag { background: var(--gold-2); color: #3a2804; }
 .end-tag { background: var(--teal); color: var(--surface); }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
-.hist-label { letter-spacing: .12em; }
-.written-after { font-size: 12px; line-height: 1.35; color: var(--ink-3); }
 .headline { color: var(--ink); font-size: 13.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.subjects { color: var(--ink-3); font-size: 12.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+/* The fallback badge sits beside the clamped name, never cut off with it. */
+.rail-name { display: flex; align-items: flex-start; min-width: 0; }
+.rail-name .headline { min-width: 0; }
+.rail-name > .lang-badge { flex: none; margin-top: 2px; color: var(--ink-2); }
+.headline:not(.theme) { color: var(--ink-2); }
+.headline.theme { font-weight: 600; }
 .reserved .headline { color: var(--ink-2); font-style: italic; }
 .counts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 11.5px; color: var(--ink-3); }
 .count { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
@@ -563,6 +646,11 @@ const KINDS = [
   .body { grid-template-columns: minmax(320px, 380px) minmax(0, 1fr); gap: 20px; }
   .search { width: min(280px, 30vw); }
 }
+/* Too narrow for the title, switches and search in one line: the switches take the next one. */
+@media (max-width: 1180px) and (min-width: 761px) {
+  .title-row { flex-wrap: wrap; row-gap: 10px; }
+  .switches { order: 10; flex-basis: 100%; padding-left: 52px; }
+}
 /* Too narrow for three columns: the release and its ticket side by side. */
 @media (max-width: 1279px) and (min-width: 761px) {
   .peeking .body { grid-template-columns: minmax(0, 1fr) minmax(400px, 48%); gap: 20px; }
@@ -571,6 +659,8 @@ const KINDS = [
 @media (max-width: 760px) {
   .shell { padding: 0 16px; }
   .head { gap: 10px; padding: 12px 0 10px; }
+  .switches { order: 4; flex: 1 1 100%; flex-wrap: wrap; }
+  .switches .seg button { height: 38px; padding: 0 14px; }
   .title-row { flex-wrap: wrap; gap: 10px; }
   .mark-backing { width: 34px; height: 34px; border-radius: 10px; }
   .mark-backing img { width: 20px; height: 20px; }
@@ -579,6 +669,8 @@ const KINDS = [
   .titles h1 { font-size: 21px; }
   .spacer { display: none; }
   .close-btn { order: 1; width: 44px; height: 44px; }
+  .notice .btn, .notice .icon-btn { height: 44px; }
+  .notice .icon-btn { width: 44px; }
   .search { order: 2; flex: 1 1 calc(100% - 54px); width: auto; }
   .search .field { height: 44px; }
   .slash, .help-btn, .compare-btn .btn-text, .compare-btn .keycap { display: none; }
@@ -595,7 +687,7 @@ const KINDS = [
   .filters { flex-wrap: wrap; row-gap: 4px; }
   .toggles { flex: 1 1 100%; }
   .result-count { flex: 1 1 100%; padding-left: 2px; }
-  .headline { display: block; overflow: visible; -webkit-line-clamp: unset; }
+  .headline, .subjects { display: block; overflow: visible; -webkit-line-clamp: unset; }
 
   .row-chev { opacity: 1; }
   .day-h { top: 74px; padding: 4px 8px 6px; }

@@ -27,18 +27,21 @@ type History struct {
 
 // Release is one reserved or published version.
 type Release struct {
-	Notes           *Notes     `json:"notes,omitempty"`
-	Version         string     `json:"version"`
-	Tag             string     `json:"tag"`
-	ReleaseChannel  string     `json:"release_channel"`
-	ReleaseSequence int        `json:"release_sequence"`
-	State           string     `json:"state"`
-	ReservedAt      *time.Time `json:"reserved_at"`
-	TaggedAt        *time.Time `json:"tagged_at"`
-	PublishedAt     *time.Time `json:"published_at"`
-	Headline        string     `json:"headline"`
-	Tickets         []string   `json:"tickets"`
-	Changes         []Change   `json:"changes"`
+	Notes *Notes `json:"notes,omitempty"`
+	// Presentation is the release's theme, headline and intro (AEON-305),
+	// read from the database per request. Absent when none was written.
+	Presentation    *Presentation `json:"presentation,omitempty"`
+	Version         string        `json:"version"`
+	Tag             string        `json:"tag"`
+	ReleaseChannel  string        `json:"release_channel"`
+	ReleaseSequence int           `json:"release_sequence"`
+	State           string        `json:"state"`
+	ReservedAt      *time.Time    `json:"reserved_at"`
+	TaggedAt        *time.Time    `json:"tagged_at"`
+	PublishedAt     *time.Time    `json:"published_at"`
+	Headline        string        `json:"headline"`
+	Tickets         []string      `json:"tickets"`
+	Changes         []Change      `json:"changes"`
 	// ChangesOmitted counts changes beyond MaxChanges that are not listed.
 	ChangesOmitted int      `json:"changes_omitted"`
 	Evidence       Evidence `json:"evidence"`
@@ -100,7 +103,35 @@ var (
 	sequenceField   = regexp.MustCompile(`^release_sequence\s+(\d+)$`)
 )
 
-// ValidVersion reports whether v is an inspr-calendar-v2 coordinate without "v".
+// Version schemes (INSPR-CalVer3, AEON-309). Both calendar schemes share one
+// coordinate, YYMMDDhhmmss.0.0, so versions keep sorting as time across them.
+const (
+	// SchemeCalVer3 is the current scheme; every new reservation declares it.
+	SchemeCalVer3 = "inspr-calver-3"
+	// SchemeCalVer2 is its predecessor: valid history, never a new reservation.
+	SchemeCalVer2 = "inspr-calendar-v2"
+	// LastCalVer2 is the last version Aeon reserved under SchemeCalVer2.
+	LastCalVer2 = "260929113854.0.0"
+)
+
+// CalendarScheme reports whether scheme names the calendar coordinate
+// (inspr-calver-3 or its predecessor inspr-calendar-v2).
+func CalendarScheme(scheme string) bool {
+	return scheme == SchemeCalVer3 || scheme == SchemeCalVer2
+}
+
+// SchemeOf returns the scheme an Aeon release version was reserved under:
+// inspr-calendar-v2 up to LastCalVer2, inspr-calver-3 after it. This is
+// Aeon's recorded switch-over, not a guess from the coordinate's shape.
+func SchemeOf(version string) string {
+	if version <= LastCalVer2 {
+		return SchemeCalVer2
+	}
+	return SchemeCalVer3
+}
+
+// ValidVersion reports whether v is a calendar coordinate (inspr-calver-3 or
+// inspr-calendar-v2, which share the grammar) without "v".
 func ValidVersion(v string) bool {
 	if !calendarVersion.MatchString(v) {
 		return false

@@ -63,7 +63,13 @@ func TestModelPricesThroughProductionAuth(t *testing.T) {
 			expect(t, w, tc.status)
 			if tc.status == 200 && tc.method == "GET" {
 				items := decode(t, w)["items"].([]any)
-				if len(items) != 1 || items[0].(map[string]any)["model"] != "test-model" {
+				seen := map[string]bool{}
+				for _, item := range items {
+					seen[item.(map[string]any)["model"].(string)] = true
+				}
+				// Every tenant receives the published list-price seed. Isolation
+				// is that this tenant sees its own price and not the other tenant's.
+				if !seen["test-model"] || !seen["grok-4.7"] || seen["foreign-model"] {
 					t.Fatal("tenant price isolation lost")
 				}
 			}

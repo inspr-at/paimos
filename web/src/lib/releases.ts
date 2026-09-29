@@ -5,7 +5,8 @@
 import { api } from './api.ts'
 
 export type ChangeGroup = 'features' | 'fixes' | 'other'
-export interface LinkedTicket { key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string }
+// group: the ticket's own features or fixes; older servers omit it.
+export interface LinkedTicket { key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string; group?: 'features' | 'fixes' }
 export interface ReleaseChange { commit: string; subject: string; type: 'feat' | 'fix' | 'test' | 'docs' | 'release' | 'refactor' | 'chore' | 'other'; scope: string; tickets: string[]; at: string; group?: ChangeGroup; linked_tickets?: LinkedTicket[] }
 export interface ReleaseRun { name: string; url: string; status: string; conclusion: string }
 export interface ReleaseEvidence {
@@ -14,8 +15,12 @@ export interface ReleaseEvidence {
 }
 export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string }
 export interface ReleaseNotes { source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; gaps: string[]; hidden: number; written_after_release?: boolean }
+// How a release introduces itself (AEON-305): the theme is the kicker, the
+// headline one sentence, the intro two or three. German may be empty.
+export interface ReleasePresentation { theme_en: string; theme_de: string; headline_en: string; headline_de: string; intro_en: string; intro_de: string; revision: number; updated_at: string }
 export interface Release {
   notes?: ReleaseNotes
+  presentation?: ReleasePresentation
   version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved'
   reserved_at: string | null; tagged_at: string | null; published_at: string | null; headline: string
   tickets: string[]; changes: ReleaseChange[]; changes_omitted: number; evidence: ReleaseEvidence
@@ -94,14 +99,15 @@ export function groupChanges(changes: ReleaseChange[]): Record<ChangeGroup, Rele
 }
 export interface TicketChangeLine { key: string; pill: string; benefit: string; pillLang: 'en' | 'de'; benefitLang: 'en' | 'de'; commits: ReleaseChange[] }
 export interface PresentedChanges { features: TicketChangeLine[]; fixes: TicketChangeLine[]; other: ReleaseChange[] }
-// One line per visible ticket inside Features and Fixes. The pill and benefit
-// follow the viewer's language. A feature or fix commit with no visible ticket
-// joins Other, cleaned subject and all. A ticket can appear in both groups
-// when its commits do.
-function visibleNotes(change: ReleaseChange, locale?: string | null): LinkedTicket[] {
-  const out: LinkedTicket[] = []
+type TicketText = Pick<ReleaseNoteItem, 'key' | 'pill_en' | 'pill_de' | 'benefit_en' | 'benefit_de'> & { group?: string }
+// The tickets a release tells about, in order: a captured snapshot's items when
+// there is one, else each visible linked ticket as its commits first name it.
+// A ticket with neither pill nor benefit in the viewer's language is not told.
+function toldTickets(changes: ReleaseChange[], locale?: string | null, items?: TicketText[] | null): TicketText[] {
+  const out: TicketText[] = []
   const seen = new Set<string>()
-  for (const note of change.linked_tickets ?? []) {
+  const linked = () => changes.filter(c => { const g = changeGroup(c); return g === 'features' || g === 'fixes' }).flatMap(c => c.linked_tickets ?? [])
+  for (const note of items ?? linked()) {
     const key = note.key?.trim()
     if (!key || seen.has(key)) continue
     const text = localizedNote(note, locale)
@@ -111,25 +117,54 @@ function visibleNotes(change: ReleaseChange, locale?: string | null): LinkedTick
   }
   return out
 }
-export function presentChanges(changes: ReleaseChange[], locale?: string | null): PresentedChanges {
-  const buckets: Record<'features' | 'fixes', Map<string, TicketChangeLine>> = { features: new Map(), fixes: new Map() }
-  const other: ReleaseChange[] = []
-  for (const change of changes) {
-    const group = changeGroup(change)
-    if (!group) continue
-    const notes = group === 'other' ? [] : visibleNotes(change, locale)
-    if (group === 'other' || !notes.length) { other.push(change); continue }
-    for (const note of notes) {
-      let line = buckets[group].get(note.key)
-      if (!line) {
-        const text = localizedNote(note, locale)
-        line = { key: note.key, pill: text.pill, benefit: text.benefit, pillLang: text.pillLang, benefitLang: text.benefitLang, commits: [] }
-        buckets[group].set(note.key, line)
-      }
-      if (!line.commits.some(existing => existing.commit === change.commit)) line.commits.push(change)
-    }
+// Feature or fix, per ticket and never per commit, since a commit naming
+// several tickets carries only the strongest group: the note's own group, else
+// the server's group for this ticket on any commit, else the ticket's type as
+// its own commits show it (a commit of its own without a conventional prefix
+// carries it; a shared one grouped features holds no bug), else the commits'
+// feat and fix prefixes, else a shared commit the server made a fix (older
+// servers). A ticket with none of these is a feature.
+function ticketGroup(key: string, commits: ReleaseChange[], note?: { group?: string }): 'features' | 'fixes' {
+  const kind = (g?: string) => g === 'features' || g === 'fixes' ? g : null
+  const told = kind(note?.group) ?? commits.flatMap(c => c.linked_tickets ?? []).map(t => t.key === key ? kind(t.group) : null).find(g => g)
+  if (told) return told
+  let bug = false, notBug = false, feat = false, fix = false, sharedFix = false
+  for (const c of commits) {
+    if (c.type === 'other' && c.group === 'fixes') { if (c.tickets.length === 1) bug = true; else sharedFix = true }
+    if (c.type === 'other' && c.group === 'features') notBug = true
+    if (c.type === 'feat') feat = true
+    if (c.type === 'fix') fix = true
   }
-  return { features: [...buckets.features.values()], fixes: [...buckets.fixes.values()], other }
+  if (bug) return 'fixes'
+  if (notBug || feat) return 'features'
+  return fix || sharedFix ? 'fixes' : 'features'
+}
+// Every release reads the same (AEON-305): one block per told ticket under
+// Features or Fixes, with the pill and benefit in the viewer's language and
+// every commit that names the ticket. A told ticket without commits still gets
+// its block. Commits no told ticket claims are Other; the version bump is left out.
+export function presentChanges(changes: ReleaseChange[], locale?: string | null, items?: TicketText[] | null): PresentedChanges {
+  const seen = new Set<string>()
+  const commits = changes.filter(c => {
+    if (!changeGroup(c) || seen.has(c.commit)) return false
+    seen.add(c.commit)
+    return true
+  })
+  const out: PresentedChanges = { features: [], fixes: [], other: [] }
+  const claimed = new Set<string>()
+  for (const note of toldTickets(changes, locale, items)) {
+    const mine = commits.filter(c => c.tickets.includes(note.key))
+    for (const c of mine) claimed.add(c.commit)
+    const text = localizedNote(note, locale)
+    out[ticketGroup(note.key, mine, note)].push({ key: note.key, pill: text.pill, benefit: text.benefit, pillLang: text.pillLang, benefitLang: text.benefitLang, commits: mine })
+  }
+  out.other = commits.filter(c => !claimed.has(c.commit))
+  return out
+}
+// A release as the sheet shows it: a captured snapshot decides which tickets are
+// told and their text; without one, the linked tickets do.
+export function presentRelease(r: Pick<Release, 'notes' | 'changes'>, locale?: string | null): PresentedChanges {
+  return presentChanges(r.changes, locale, hasUsableNotes(r) ? r.notes.items : null)
 }
 // ---------- Display ----------
 // Headlines and subjects as people read them, next to their ticket chips: the keys
@@ -163,20 +198,113 @@ export function hasUsableNotes(r: Pick<Release, 'notes'>): r is Pick<Release, 'n
 export function noteLocale(locale?: string | null): 'en' | 'de' {
   return locale?.trim().toLowerCase().startsWith('de') ? 'de' : 'en'
 }
+// The release history's own language and view, chosen in its header (AEON-323).
+// The address wins, then this person's last choice on this device, then the
+// profile locale. The view is Highlights unless the address says Details.
+export type ReleaseLang = 'en' | 'de'
+export type ReleaseView = 'highlights' | 'details'
+const first = (value: unknown) => Array.isArray(value) ? value[0] : value
+export function releaseLang(value: unknown, profileLocale?: string | null, remembered?: string | null): ReleaseLang {
+  const raw = first(value)
+  if (raw === 'en' || raw === 'de') return raw
+  return remembered === 'en' || remembered === 'de' ? remembered : noteLocale(profileLocale)
+}
+export function releaseView(value: unknown): ReleaseView {
+  return first(value) === 'details' ? 'details' : 'highlights'
+}
+// Where a person's language choice is kept on this device.
+export const releaseLangKey = (principalId: string) => `aeon.release-history.lang.${principalId}`
+// Details: a short technical line for a list row, the first few commit subjects.
+export function technicalLine(r: Pick<Release, 'changes'>, limit = 3): string {
+  const seen = new Set<string>()
+  const parts: string[] = []
+  for (const c of r.changes) {
+    if (!changeGroup(c)) continue
+    const text = plainSubject(c.subject, c.tickets)
+    if (!text || seen.has(text)) continue
+    seen.add(text)
+    parts.push(text)
+    if (parts.length === limit) break
+  }
+  return parts.join(' · ')
+}
 export interface LocalizedNote { pill: string; benefit: string; pillLang: 'en' | 'de'; benefitLang: 'en' | 'de' }
-// One ticket's pill and sentence in the viewer's language. An empty German
-// field falls back to English; English is never replaced by an empty string.
+// One text in the chosen language; a missing one falls back to the other
+// language, never to an empty string while either has words. The lang tells
+// the reader (and the fallback badge) which one it is.
+export function pickText(en: string | null | undefined, de: string | null | undefined, locale?: string | null): { text: string; lang: ReleaseLang } {
+  const want = noteLocale(locale)
+  const texts = { en: (en ?? '').trim(), de: (de ?? '').trim() }
+  const other: ReleaseLang = want === 'de' ? 'en' : 'de'
+  if (texts[want] || !texts[other]) return { text: texts[want], lang: want }
+  return { text: texts[other], lang: other }
+}
+// One ticket's pill and sentence in the chosen language, each falling back on its own.
 export function localizedNote(item: Pick<ReleaseNoteItem, 'pill_en' | 'pill_de' | 'benefit_en' | 'benefit_de'>, locale?: string | null): LocalizedNote {
-  const de = noteLocale(locale) === 'de'
-  const pillDe = item.pill_de.trim(), pillEn = item.pill_en.trim()
-  const benefitDe = item.benefit_de.trim(), benefitEn = item.benefit_en.trim()
-  const pillLang = de && pillDe ? 'de' : 'en'
-  const benefitLang = de && benefitDe ? 'de' : 'en'
-  return { pill: pillLang === 'de' ? pillDe : pillEn, benefit: benefitLang === 'de' ? benefitDe : benefitEn, pillLang, benefitLang }
+  const pill = pickText(item.pill_en, item.pill_de, locale), benefit = pickText(item.benefit_en, item.benefit_de, locale)
+  return { pill: pill.text, benefit: benefit.text, pillLang: pill.lang, benefitLang: benefit.lang }
+}
+export interface LocalizedPresentation { theme: string; headline: string; intro: string; themeLang: 'en' | 'de'; headlineLang: 'en' | 'de'; introLang: 'en' | 'de' }
+// A release's theme, headline and intro in the chosen language, each falling
+// back to the other one. Null when the release has no headline in either.
+export function localizedPresentation(r: Pick<Release, 'presentation'>, locale?: string | null): LocalizedPresentation | null {
+  const p = r.presentation
+  if (!p) return null
+  const theme = pickText(p.theme_en, p.theme_de, locale), headline = pickText(p.headline_en, p.headline_de, locale), intro = pickText(p.intro_en, p.intro_de, locale)
+  if (!headline.text) return null
+  return { theme: theme.text, headline: headline.text, intro: intro.text, themeLang: theme.lang, headlineLang: headline.lang, introLang: intro.lang }
+}
+// The pills a release tells, features first, for its title and rail line, each
+// with the language it is shown in.
+function toldLabels(r: Pick<Release, 'notes' | 'changes'>, locale?: string | null) {
+  const p = presentRelease(r, locale)
+  return [...p.features, ...p.fixes].map(line => line.pill ? { text: line.pill, lang: line.pillLang } : { text: line.benefit, lang: line.benefitLang })
+}
+// A name shown in the chosen language, or in the other one when any part of it
+// had to fall back: that is the language its badge names.
+export interface NamedText { text: string; lang: ReleaseLang }
+function named(r: Pick<Release, 'changes' | 'notes' | 'presentation'>, locale: string | null | undefined, all: boolean): NamedText & { themed: boolean } {
+  const want = noteLocale(locale)
+  const presented = localizedPresentation(r, locale)
+  if (presented) return presented.theme ? { text: presented.theme, lang: presented.themeLang, themed: true } : { text: presented.headline, lang: presented.headlineLang, themed: true }
+  const labels = toldLabels(r, locale).slice(0, all ? undefined : 1)
+  return { text: labels.map(l => l.text).join(' · '), lang: labels.find(l => l.lang !== want)?.lang ?? want, themed: false }
+}
+// A short name for a release in toasts and lists: its theme (or headline), else
+// its first pill, else nothing, so callers show only version and date.
+// The Git tag message is evidence and never a name outside Evidence.
+export function releaseName(r: Pick<Release, 'changes' | 'notes' | 'presentation'>, locale?: string | null): NamedText {
+  const { text, lang } = named(r, locale, false)
+  return { text, lang }
+}
+export function releaseTitle(r: Pick<Release, 'changes' | 'notes' | 'presentation'>, locale?: string | null) {
+  return releaseName(r, locale).text
+}
+// The rail's second line: the theme, else the pills. Git tag headlines are
+// evidence, not names, so they are not shown there.
+export function railLine(r: Release, locale?: string | null): { text: string; themed: boolean; lang: ReleaseLang } {
+  return named(r, locale, true)
+}
+// Text split around each case-insensitive hit of the search query, for <mark>.
+export function markParts(text: string, query?: string | null): { text: string; hit: boolean }[] {
+  const q = query?.trim()
+  if (!q) return [{ text, hit: false }]
+  const out: { text: string; hit: boolean }[] = []
+  const lower = text.toLowerCase(), needle = q.toLowerCase()
+  let at = 0
+  for (let i = lower.indexOf(needle); i !== -1; i = lower.indexOf(needle, at)) {
+    if (i > at) out.push({ text: text.slice(at, i), hit: false })
+    out.push({ text: text.slice(i, i + needle.length), hit: true })
+    at = i + needle.length
+  }
+  if (at < text.length) out.push({ text: text.slice(at), hit: false })
+  return out
 }
 export const HISTORICAL_TAG_FALLBACK = 'historical-tag-headline'
-export const HISTORICAL_TAG_LABEL = 'Historical tag headline'
 export const WRITTEN_AFTER_LABEL = 'Notes written after release'
+export function writtenAfterLine(locale?: string | null) {
+  return noteLocale(locale) === 'de' ? 'Notizen nach dem Release geschrieben' : WRITTEN_AFTER_LABEL
+}
 // A backfilled snapshot was captured after publication. The hint stays off
 // when the notes are only the historical headline.
 export function writtenAfterRelease(r: Pick<Release, 'notes'>): boolean {
@@ -188,6 +316,42 @@ export function historicalTagFallback(r: Pick<Release, 'notes' | 'headline'>): b
   if (hasUsableNotes(r)) return false
   if (!r.notes) return true
   return r.notes.fallback === HISTORICAL_TAG_FALLBACK || r.notes.source === 'unavailable'
+}
+// The sheet's empty and compare lines in the chosen language (AEON-323).
+export function releaseCopy(locale?: string | null) {
+  const de = noteLocale(locale) === 'de'
+  const plural = (n: number, one: string, many: string) => n === 1 ? one : many
+  return de ? {
+    nothingShipped: 'Unter dieser Version wurde nichts ausgeliefert.',
+    noChanges: 'Zwischen diesem und dem vorherigen Release sind keine Änderungen verzeichnet.',
+    omitted: (n: number) => `${plural(n, 'Eine weitere Änderung ist', `${n} weitere Änderungen sind`)} hier nicht aufgeführt.`,
+    compareNone: 'Zwischen diesen Releases sind keine Änderungen verzeichnet.',
+    comparePick: 'Zweites Release wählen',
+    compareHint: ['Mit', 'durch die Liste gehen und', ' drücken oder ein Release anklicken. Die Änderungen vom älteren zum neueren werden hier zusammengezählt.'],
+    comparingFrom: 'Vergleich ab',
+    compareTap: 'Das andere Ende antippen.',
+    compareOther: ['Das andere Ende mit', 'oder einem Klick wählen.'],
+    noMatch: 'Kein Release passt',
+    noMatchText: (count: number, q: string) => `Nichts in ${count} Releases passt zu ${q ? `„${q}“` : 'diesen Filtern'}.`,
+    clear: 'Suche und Filter zurücksetzen',
+    noHistory: 'Kein Release-Verlauf in diesem Build',
+    noHistoryText: (dev: boolean) => `Release-Builds enthalten den Verlauf aller Tags. Dieser wurde ohne ihn gebaut${dev ? ', wie Entwicklungs-Builds' : ''}.`,
+  } : {
+    nothingShipped: 'Nothing shipped under this version.',
+    noChanges: 'No changes are recorded between this release and the one before it.',
+    omitted: (n: number) => `And ${n} more ${plural(n, 'change', 'changes')} not listed here.`,
+    compareNone: 'No changes are recorded between these releases.',
+    comparePick: 'Pick a second release',
+    compareHint: ['Move through the list with', 'and press', ', or click a release. The changes from the older to the newer one are added up here.'],
+    comparingFrom: 'Comparing from',
+    compareTap: 'Tap the other end.',
+    compareOther: ['Pick the other end with', 'or a click.'],
+    noMatch: 'No release matches',
+    noMatchText: (count: number, q: string) => `Nothing in ${count} releases fits ${q ? `“${q}”` : 'these filters'}.`,
+    clear: 'Clear search and filters',
+    noHistory: 'No release history in this build',
+    noHistoryText: (dev: boolean) => `Release builds carry the history of every tag. This one was built without it${dev ? ', as development builds are' : ''}.`,
+  }
 }
 export function emptyNotesLine(locale?: string | null) {
   return noteLocale(locale) === 'de' ? 'Nur interne Änderungen.' : 'Internal changes only.'
@@ -270,17 +434,49 @@ export function naturalKey(a: string, b: string) { return a.localeCompare(b, 'en
 // ---------- Search and filters ----------
 export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; tickets: boolean }
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
-// The same lines the row counts. A feature or fix commit with no visible
-// ticket is Other, so it must not pass the Features or Fixes filter.
-export function matches(r: Release, f: ReleaseFilter, locale?: string | null) {
-  const presented = presentChanges(r.changes, locale)
+// The filters follow the blocks the detail and the row counts show. Search
+// looks at the text the chosen language and view show (AEON-323): both views
+// show the name, pills, ticket keys, commit subjects and SHAs (Highlights opens
+// a folded list on a hit); Highlights adds the benefits, Details the evidence
+// it shows open.
+export function matches(r: Release, f: ReleaseFilter, locale?: string | null, view: ReleaseView = 'highlights') {
+  const presented = presentRelease(r, locale)
   if (f.features && !presented.features.length) return false
   if (f.fixes && !presented.fixes.length) return false
   if (f.tickets && !ticketsOf(r).length) return false
   const q = f.q.trim().toLowerCase()
   if (!q) return true
-  return !!r.notes?.items.some(item => [item.pill_en, item.pill_de, item.benefit_en, item.benefit_de, item.key].some(text => text.toLowerCase().includes(q))) || r.version.includes(q) || r.headline.toLowerCase().includes(q) || r.tickets.some(t => t.toLowerCase().includes(q))
-    || r.changes.some(c => c.subject.toLowerCase().includes(q) || c.tickets.some(t => t.toLowerCase().includes(q)) || (c.linked_tickets ?? []).some(t => [t.pill_en, t.pill_de, t.benefit_en, t.benefit_de, t.key].some(text => text.toLowerCase().includes(q))))
+  const lines = [...presented.features, ...presented.fixes]
+  const named = localizedPresentation(r, locale)
+  const commits = [...lines.flatMap(line => line.commits), ...presented.other]
+  const texts = [
+    r.version, ...ticketsOf(r), ...r.tickets,
+    ...(named ? [named.theme, named.headline, named.intro] : []),
+    ...lines.map(line => line.pill || line.benefit),
+    ...(view === 'highlights' ? lines.map(line => line.benefit) : evidenceSearch(r).texts),
+    ...commits.flatMap(c => [plainSubject(c.subject, c.tickets), ...c.tickets]),
+  ]
+  const ids = [...commits.map(c => c.commit), ...(view === 'details' ? evidenceSearch(r).ids : [])]
+  return texts.some(text => text.toLowerCase().includes(q)) || ids.some(id => idMatches(id, q))
+}
+// Hashes match from their start, as people type them, and from four characters,
+// so a word like "dead" or "cafe" does not hit every hex string that holds it.
+export function idMatches(id: string, q: string) {
+  const needle = q.trim().toLowerCase().replace(/^sha256:/, '')
+  return needle.length >= 4 && id.toLowerCase().replace(/^sha256:/, '').startsWith(needle)
+}
+
+// A CI or release run's outcome in words: "passed", "failed", "in progress".
+const RUN_WORD: Record<string, string> = { success: 'passed', failure: 'failed', cancelled: 'cancelled', skipped: 'skipped', timed_out: 'timed out' }
+export const runWord = (run: { status: string; conclusion: string }) => run.conclusion ? (RUN_WORD[run.conclusion] ?? run.conclusion.replace(/_/g, ' ')) : run.status.replace(/_/g, ' ')
+// What Details shows open under Evidence, for search: words, and the hashes.
+export function evidenceSearch(r: Release): { texts: string[]; ids: string[] } {
+  const ev = r.evidence
+  const runs = [ev?.ci, ev?.release_run].flatMap(run => run ? [run.name, runWord(run)] : [])
+  return {
+    texts: [r.headline, r.tag, r.notes?.source ?? '', ...runs, ev?.image?.reference ?? '', ...(ev?.unavailable ?? [])].filter(Boolean),
+    ids: [r.notes?.snapshot_sha256 ?? '', ev?.source_commit ?? '', ev?.image?.digest ?? ''].filter(Boolean),
+  }
 }
 
 // ---------- New since the last visit ----------
@@ -290,3 +486,28 @@ export function newSince(releases: Release[], lastSeen: string | null) {
   return new Set(releases.filter(r => r.state === 'published' && r.version > lastSeen).map(r => r.version))
 }
 export const shortCommit = (sha: string) => sha.slice(0, 7)
+
+// ---------- One notice after a deploy ----------
+// Calendar versions are fixed-width, so string order is version order.
+// The releases store uses the same test.
+const CALENDAR_VERSION = /^\d{12}\.\d+\.\d+$/
+export function isCalendarVersion(value: string | null | undefined): value is string {
+  return !!value && CALENDAR_VERSION.test(value)
+}
+
+// The history can still name the build this page loaded. The update poll may
+// already have seen a newer version on the server. Talk about the newer of the
+// two, so a cached history does not pretend the deploy is missing.
+export function liveServer(historyCurrent: string, available?: string | null): string {
+  if (isCalendarVersion(available) && (!isCalendarVersion(historyCurrent) || available > historyCurrent)) return available
+  return historyCurrent
+}
+
+// A page older than the server already says a newer version is live. That
+// version missing from this build's history is the same fact, so the history
+// shows one notice, never both.
+export function releaseNotice(pageVersion: string | null | undefined, serverVersion: string, missingVersion: string, available?: string | null): 'update' | 'missing' | null {
+  const server = liveServer(serverVersion, available)
+  if (isCalendarVersion(pageVersion) && isCalendarVersion(server) && server > pageVersion) return 'update'
+  return missingVersion ? 'missing' : null
+}

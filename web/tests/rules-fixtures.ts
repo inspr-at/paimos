@@ -20,7 +20,21 @@ export interface RulesMock {
   releaseDraftFailure: () => void
 }
 
-export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'; conflict?: boolean; publish?: boolean; draftFailAt?: number; draftFailStatus?: number; holdDraftFailure?: boolean; rejectNextDraft?: boolean; setAbortAt?: number; comparisons?: unknown[]; comparisonStatus?: number } = {}): Promise<RulesMock> {
+export interface RulesMockOptions {
+  kind?: 'person' | 'agent'; conflict?: boolean; publish?: boolean; draftFailAt?: number; draftFailStatus?: number; holdDraftFailure?: boolean; rejectNextDraft?: boolean; setAbortAt?: number; comparisons?: unknown[]; comparisonStatus?: number
+  /** AEON-314: sets and rules carry explanations for people. */
+  tldr?: boolean
+  /** AEON-314: the caller may manage workspace settings (the budget). */
+  settings?: boolean
+  /** AEON-314: the workspace budget the server reports. */
+  budget?: { max_bytes: number; layer_max_bytes: Record<string, number> }
+  /** AEON-315: every named-agent preview is refused as not_key_creator. */
+  denyNamedPreview?: boolean
+  /** AEON-315: the named agents the members listing returns. */
+  agents?: { principal_id: string; name: string; preview?: { allowed: boolean; reason?: string; creator_name?: string } }[]
+}
+
+export async function mockRules(page: Page, options: RulesMockOptions = {}): Promise<RulesMock> {
   const calls: RulesMock['calls'] = []
   let releaseDraftFailure = () => {}
   const draftGate = options.holdDraftFailure ? new Promise<void>(resolve => { releaseDraftFailure = () => resolve() }) : null
@@ -44,14 +58,24 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
     projectPublished: '',
     companyRules: [rule('keep-secrets', 'Never print the environment.', 'locked'), rule('record-source', 'Record the source.')],
     projectRules: [rule('keep-secrets', 'Never print the environment.'), rule('package-scope', 'Your package is your scope.')],
+    companyTldr: null as null | { en: string; de?: string; basis?: string; check?: boolean },
+    projectTldr: null as null | { en: string; de?: string; basis?: string; check?: boolean },
+    budget: options.budget ?? { max_bytes: 12000, layer_max_bytes: {} as Record<string, number> },
+  }
+  if (options.tldr) {
+    state.companyTldr = { en: 'Keeps credentials and private data out of every transcript and log.', de: 'Hält Zugangsdaten aus Protokollen heraus.', basis: '0123456789abcdef' }
+    state.projectTldr = { en: 'How work in Aeon is scoped and recorded.', basis: '0123456789abcdef', check: true }
+    Object.assign(state.companyRules[0]!, { tldr: { en: 'Environment dumps put secrets into logs and chat; agents never print them.', de: 'Keine Umgebungsvariablen ausgeben.', basis: '0123456789abcdef' } })
+    Object.assign(state.projectRules[1]!, { tldr: { en: 'A worker changes only the files its package needs.', basis: '0123456789abcdef', check: true } })
   }
   const versions = [{
     set_id: COMPANY_SET, scope: { layer: 'company' }, name: 'Secrets', revision: 2, version: '260920100000.0.0',
     sha256: 'ab'.repeat(32), rules: state.companyRules.map(item => ({ ...item })), published_at: '2026-09-20T10:00:00Z',
+    ...(state.companyTldr ? { tldr: { ...state.companyTldr } } : {}),
   }]
   const sets = () => ({
-    [COMPANY_SET]: { id: COMPANY_SET, layer_id: COMPANY, scope: { layer: 'company' }, name: state.companyName, revision: state.revision, rules: state.companyRules, published_version: state.published },
-    [PROJECT_SET]: { id: PROJECT_SET, layer_id: PROJECT_LAYER, scope: { layer: 'project', project_id: RULE_PROJECT }, name: state.projectName, revision: state.revision, rules: state.projectRules, published_version: state.projectPublished },
+    [COMPANY_SET]: { id: COMPANY_SET, layer_id: COMPANY, scope: { layer: 'company' }, name: state.companyName, revision: state.revision, rules: state.companyRules, published_version: state.published, ...(state.companyTldr ? { tldr: state.companyTldr } : {}) },
+    [PROJECT_SET]: { id: PROJECT_SET, layer_id: PROJECT_LAYER, scope: { layer: 'project', project_id: RULE_PROJECT }, name: state.projectName, revision: state.revision, rules: state.projectRules, published_version: state.projectPublished, ...(state.projectTldr ? { tldr: state.projectTldr } : {}) },
   })
   await page.route('**/api/**', async route => {
     const request = route.request()
@@ -68,6 +92,7 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
     if (path === '/api/me/permissions') {
       const answer = mockEffectivePermissions('admin', url.searchParams.get('project_id') ?? undefined)
       const extra = ['rules.read', 'rules.write', ...(options.publish === false ? [] : ['rules.publish'])]
+      if (options.settings === false) answer.workspace.permissions = answer.workspace.permissions.filter(permission => permission !== 'settings.manage')
       answer.workspace.permissions = [...answer.workspace.permissions, ...extra]
       return route.fulfill({ json: answer })
     }
@@ -77,7 +102,7 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
     if (path === '/api/members' && method === 'GET') {
       return route.fulfill({ json: {
         people: [{ principal_id: RULE_PERSON, name: 'Markus Barta', avatar_url: null, has_avatar: false, email: 'markus@barta.com', status: 'active', identity: 'inspr_id', workspace_role: null, project_roles: [], aliases: [], classic_role: null, last_active_at: null, last_owner: true }],
-        agents: [{ principal_id: RULE_AGENT, name: 'Worker', has_avatar: false, workspace_role: null, key_count: 1, last_seen_at: null, service: false }],
+        agents: (options.agents ?? [{ principal_id: RULE_AGENT, name: 'Worker' }]).map(agent => ({ principal_id: agent.principal_id, name: agent.name, has_avatar: false, workspace_role: null, key_count: 1, last_seen_at: null, service: false, ...(agent.preview ? { preview: agent.preview } : {}) })),
         invites: [], imported: [], owner_count: 1,
       } })
     }
@@ -138,6 +163,60 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
       if (draft[1] === PROJECT_SET) { state.projectName = body.name; state.projectRules = body.rules }
       return route.fulfill({ json: sets()[draft[1]] })
     }
+    const tldr = /^\/api\/rules\/sets\/([^/]+)\/tldr$/.exec(path)
+    if (tldr && method === 'PUT') {
+      if (body.expected_revision !== state.revision) return route.fulfill({ status: 409, json: { error: 'revision conflict', code: 'revision_conflict' } })
+      const company = tldr[1] === COMPANY_SET
+      const rules = (company ? state.companyRules : state.projectRules) as Record<string, unknown>[]
+      for (const [identity, value] of Object.entries((body.rules ?? {}) as Record<string, { en: string; de?: string } | null>)) {
+        const target = rules.find(item => item.identity === identity)
+        if (!target) return route.fulfill({ status: 400, json: { error: 'no rule ' + identity, code: 'unknown_rule' } })
+        if (value) target.tldr = { ...value, basis: 'fedcba9876543210' }
+        else delete target.tldr
+      }
+      if ('set' in body) {
+        const value = body.set ? { ...body.set, basis: 'fedcba9876543210' } : null
+        if (company) state.companyTldr = value
+        else state.projectTldr = value
+      }
+      state.revision += 1
+      return route.fulfill({ json: sets()[tldr[1]] })
+    }
+    if (path === '/api/rules/budget') {
+      if (method === 'PUT') {
+        if (body.max_bytes < 2000 || body.max_bytes > 12000) return route.fulfill({ status: 400, json: { error: 'the session file budget must be between 2000 and 12000 bytes', code: 'invalid_budget' } })
+        state.budget = { max_bytes: body.max_bytes, layer_max_bytes: body.layer_max_bytes ?? {} }
+      }
+      return route.fulfill({ json: { ...state.budget, default_bytes: 12000, min_bytes: 2000, ceiling_bytes: 12000, min_layer_bytes: 500 } })
+    }
+    if (path === '/api/rules/explained' && method === 'GET') {
+      if (options.denyNamedPreview && url.searchParams.get('agent_id')) {
+        return route.fulfill({ status: 403, json: { error: "You didn't create a key for this agent.", code: 'not_key_creator' } })
+      }
+      const harness = url.searchParams.get('harness') ?? 'claude-code'
+      const served: { rule: Record<string, unknown>; set: string; layer: string }[] = []
+      const seen = new Set<string>()
+      const add = (list: Record<string, unknown>[], set: string, layer: string) => { for (const item of list) if (!seen.has(item.identity as string) && item.enabled) { seen.add(item.identity as string); served.push({ rule: item, set, layer }) } }
+      add(state.companyRules as Record<string, unknown>[], COMPANY_SET, 'company')
+      add(state.projectRules as Record<string, unknown>[], PROJECT_SET, 'project')
+      if (harness === 'cursor') served.push({ rule: rule('cursor-only', 'Use the Cursor rules file.'), set: PROJECT_SET, layer: 'project' })
+      served.sort((a, b) => (a.rule.identity as string).localeCompare(b.rule.identity as string))
+      const lines = served.map(item => `- [${item.rule.identity}] ${item.rule.text}`)
+      const body = `# Aeon session rules\n\n${lines.map(line => line + '\n').join('')}`
+      const bytes = (text: string) => new TextEncoder().encode(text).length
+      const usage: Record<string, number> = {}
+      for (const [i, item] of served.entries()) usage[item.layer] = (usage[item.layer] ?? 0) + bytes(lines[i]! + '\n')
+      const setBytes = (id: string) => served.reduce((n, item, i) => item.set === id ? n + bytes(lines[i]! + '\n') : n, 0)
+      return route.fulfill({ json: {
+        context: { tenant_id: 't1', project_id: url.searchParams.get('project_id'), person_id: url.searchParams.get('person_id'), role: url.searchParams.get('role'), harness },
+        version: '260920100000.0.0', sha256: 'ab'.repeat(32), body, byte_size: bytes(body), budget: state.budget, usage,
+        sets: [
+          { set_id: COMPANY_SET, name: state.companyName, scope: { layer: 'company' }, version: '260920100000.0.0', bytes: setBytes(COMPANY_SET), ...(state.companyTldr ? { tldr: state.companyTldr } : {}) },
+          { set_id: PROJECT_SET, name: state.projectName, scope: { layer: 'project', project_id: RULE_PROJECT }, version: '260920100000.0.0', bytes: setBytes(PROJECT_SET), ...(state.projectTldr ? { tldr: state.projectTldr } : {}) },
+        ].filter(set => set.bytes > 0),
+        rules: served.map((item, i) => ({ identity: item.rule.identity, text: item.rule.text, line: lines[i], set_id: item.set, layer: item.layer, strength: item.rule.strength, bytes: bytes(lines[i]! + '\n'), ...(item.rule.tldr ? { tldr: item.rule.tldr } : {}) })),
+      } })
+    }
     const publish = /^\/api\/rules\/sets\/([^/]+)\/publish$/.exec(path)
     if (publish && method === 'POST') {
       state.revision += 1
@@ -182,6 +261,9 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
       return route.fulfill({ json: { comparisons: options.comparisons ?? [] } })
     }
     if (path === '/api/rules/merged' && method === 'GET') {
+      if (options.denyNamedPreview && url.searchParams.get('agent_id')) {
+        return route.fulfill({ status: 403, json: { error: "You didn't create a key for this agent.", code: 'not_key_creator' } })
+      }
       return route.fulfill({ json: {
         context: { tenant_id: 't1', project_id: url.searchParams.get('project_id'), person_id: url.searchParams.get('person_id'), role: url.searchParams.get('role'), harness: url.searchParams.get('harness') },
         versions: [{ set_id: COMPANY_SET, version: '260920100000.0.0', sha256: 'ab'.repeat(32) }],

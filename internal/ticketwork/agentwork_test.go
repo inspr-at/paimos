@@ -110,14 +110,27 @@ func TestApplyUsageGroupsModelsOnce(t *testing.T) {
 	}
 	partial := Session{Models: []UsageModel{}}
 	applyUsage(&partial, []usageRow{
-		{model: "priced", input: ptr("10"), output: ptr("2"), cached: ptr("1"), cost: ptr("0.500000000000"), provisional: true, price: ptr("4"), billing: "subscription", subscription: ptr("Reported team")},
+		{model: "priced", input: ptr("10"), output: ptr("2"), cached: ptr("1"), cost: ptr("0.500000000000"), provisional: true, price: ptr("4"), billing: "api"},
 		{model: "open", input: ptr("3"), output: nil, cached: nil, provisional: true, billing: "unknown"},
 	})
 	if partial.TokensState != "partial" || str(partial.InputTokens) != "10" || partial.UnknownTokenModels != 1 || partial.CostState != "partial" || str(partial.EstimatedCostUSD) != "0.500000000000" || partial.UnknownCostModels != 1 {
 		t.Fatalf("partial model coverage %+v", partial)
 	}
-	if partial.Models[0].BillingMode != "subscription" || str(partial.Models[0].SubscriptionLabel) != "Reported team" || partial.Models[0].CostState != "estimated" || !partial.Models[0].Provisional || str(partial.Models[0].PriceVersion) != "4" {
+	if partial.Models[0].BillingMode != "api" || partial.Models[0].CostState != "estimated" || !partial.Models[0].Provisional || str(partial.Models[0].PriceVersion) != "4" {
 		t.Fatalf("model metadata %+v", partial.Models[0])
+	}
+	// Review case: a historical subscription row still carrying $12.34 is
+	// never shown or summed as dollars; only api billing is priced.
+	for _, billing := range []string{"subscription", "unknown"} {
+		sub := Session{Models: []UsageModel{}}
+		applyUsage(&sub, []usageRow{{model: "test-model", input: ptr("100"), output: ptr("20"), cached: ptr("40"), cost: ptr("12.340000000000"), price: ptr("1"), billing: billing, subscription: ptr("Reported team")}})
+		m := sub.Models[0]
+		if sub.EstimatedCostUSD != nil || sub.CostState == "estimated" || m.EstimatedCostUSD != nil || m.CostState != "unknown" || m.PriceVersion != nil || m.BillingMode != billing {
+			t.Fatalf("%s row priced: session=%s/%s model=%+v", billing, str(sub.EstimatedCostUSD), sub.CostState, m)
+		}
+		if billing == "subscription" && str(m.SubscriptionLabel) != "Reported team" {
+			t.Fatalf("subscription label lost %+v", m)
+		}
 	}
 	var rows []usageRow
 	for i := 0; i < maxModels+1; i++ {
@@ -192,7 +205,7 @@ func TestTicketAgentWork(t *testing.T) {
 	f.session(t, sHidden, hiddenProject, hiddenTicket, "codex", "hidden-model", "high", past, past.Add(5*time.Second), past, "stopped")
 	f.usage(t, f.person, s1, "gpt-test", "1000", "200", "40", "1.000000000000", false, "1", "api", "")
 	f.usage(t, f.person, s1, "gpt-test-mini", "5", "1", "0", "0.250000000000", false, "1", "api", "")
-	f.usage(t, f.person, s2, "claude-test", "50", "10", "4", "2.500000000000", true, "2", "subscription", "Reported team")
+	f.usage(t, f.person, s2, "claude-test", "50", "10", "4", "2.500000000000", true, "2", "api", "")
 	f.usage(t, f.person, s3, "cursor-fast", "", "", "", "", true, "", "unknown", "")
 	f.usage(t, f.person, s4, "pi-test", "4242", "1", "0", "4.242000000000", false, "1", "api", "")
 	f.usage(t, f.person, s5, "grok-test", "777", "1", "0", "0.777000000000", false, "1", "api", "")
@@ -234,7 +247,7 @@ func TestTicketAgentWork(t *testing.T) {
 	if len(byID[s1].Models) != 2 || str(byID[s1].EstimatedCostUSD) != "1.250000000000" || byID[s1].CostState != "estimated" || str(byID[s1].InputTokens) != "1005" || byID[s1].Models[0].BillingMode != "api" {
 		t.Fatalf("s1 usage %+v", byID[s1])
 	}
-	if byID[s2].CostState != "provisional" || byID[s2].Models[0].BillingMode != "subscription" || str(byID[s2].Models[0].SubscriptionLabel) != "Reported team" || byID[s2].DurationState != "ongoing" || byID[s2].TicketKey != "TW1-3" || str(byID[s2].Models[0].PriceVersion) != "2" {
+	if byID[s2].CostState != "provisional" || byID[s2].Models[0].BillingMode != "api" || byID[s2].DurationState != "ongoing" || byID[s2].TicketKey != "TW1-3" || str(byID[s2].Models[0].PriceVersion) != "2" {
 		t.Fatalf("s2 %+v", byID[s2])
 	}
 	if byID[s3].ModelState != "missing" || byID[s3].EffortState != "missing" || byID[s3].TokensState != "unknown" || byID[s3].InputTokens != nil || byID[s3].CostState != "unknown" || byID[s3].EstimatedCostUSD != nil || !byID[s3].UsageReported || len(byID[s3].Models) != 1 || byID[s3].Models[0].Model != "cursor-fast" {
@@ -298,6 +311,35 @@ func TestTicketAgentWork(t *testing.T) {
 	if str(again.Totals.InputTokens) != "1055" || str(again.Totals.EstimatedCostUSD) != "3.750000000000" {
 		t.Fatalf("retry changed the sum: %+v", again.Totals)
 	}
+}
+
+// Review case: a historical subscription row that still stores $12.34 is
+// never returned or summed in ticket agent work; only api billing is priced.
+func TestTicketAgentWorkNeverPricesSubscription(t *testing.T) {
+	f := newWorkFixture(t)
+	ticket := uid()
+	f.node(t, f.project, "project", "TW1-1", "Visible", "")
+	f.node(t, ticket, "ticket", "TW1-2", "Ticket", f.project)
+	api, sub := uid(), uid()
+	past := time.Date(2020, 1, 2, 0, 0, 0, 0, time.UTC)
+	f.session(t, api, f.project, ticket, "codex", "gpt-test", "high", past, past.Add(time.Minute), past, "stopped")
+	f.session(t, sub, f.project, ticket, "claude", "claude-test", "high", past, past.Add(time.Minute), past, "stopped")
+	f.usage(t, f.person, api, "gpt-test", "100", "20", "0", "1.000000000000", false, "1", "api", "")
+	f.usage(t, f.person, sub, "claude-test", "100", "20", "40", "12.340000000000", false, "1", "subscription", "Reported team")
+	report := f.get(t, f.person, ticket, "")
+	if str(report.Totals.EstimatedCostUSD) != "1.000000000000" || report.Totals.CostState != "partial" || report.Totals.UnknownCostSessions != 1 {
+		t.Fatalf("subscription dollars reached ticket totals: %+v", report.Totals)
+	}
+	for _, s := range report.Sessions {
+		if s.ID != sub {
+			continue
+		}
+		if s.EstimatedCostUSD != nil || s.CostState != "unknown" || s.Models[0].EstimatedCostUSD != nil || s.Models[0].PriceVersion != nil || s.Models[0].BillingMode != "subscription" {
+			t.Fatalf("subscription session priced: %+v model %+v", s, s.Models[0])
+		}
+		return
+	}
+	t.Fatal("subscription session missing")
 }
 
 func TestTicketAgentWorkWithoutUsageRows(t *testing.T) {

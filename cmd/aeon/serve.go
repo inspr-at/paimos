@@ -55,6 +55,7 @@ import (
 	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
+	"github.com/inspr-at/paimos/internal/outcomes"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
@@ -233,6 +234,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	// AEON-280: delivery deadlines and the attempt cap; one runner across
 	// processes through an advisory lock.
 	go inbox.NewSweeper(pool).Run(ctx)
+	// AEON-288: one daily pass nominates method learnings. It never accepts them.
+	go knowledge.NewTagger(pool).Run(ctx)
 	api := &httpapi.Server{
 		Pool:  pool,
 		Brand: &productBrand,
@@ -261,6 +264,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			harness.New(pool),
 			rules.New(pool),
 			ticketwork.New(pool),
+			outcomes.New(pool),
 			deliveryvote.New(pool),
 			usagedashboard.New(pool),
 			workorders.New(pool),
