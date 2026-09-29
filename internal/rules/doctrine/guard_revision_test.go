@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/jackc/pgx/v5"
 )
 
 // A valid PG2 corpus using AEON-319's normalization: these NFKC lowercase
@@ -135,6 +138,24 @@ func TestVerifiedMainSharedTextCanBeProposed(t *testing.T) {
 	f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 200)
 	if forge.minted != 1 || len(forge.pulls) != 1 {
 		t.Fatal("verified public main exemption failed")
+	}
+}
+
+func TestPublicMainCacheTenantIsolation(t *testing.T) {
+	f, _, _, owner, in := publicProposalFixture(t)
+	other := f.tenant("cache-other")
+	for _, tid := range []string{owner.TenantID, other} {
+		var count int
+		err := db.InTenant(t.Context(), f.d.App, tid, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT count(*) FROM doctrine_public_main_cache WHERE source_id=$1`, in.SourceID).Scan(&count)
+		})
+		want := 0
+		if tid == owner.TenantID {
+			want = 1
+		}
+		if err != nil || count != want {
+			t.Fatal("public main cache crossed tenant boundaries")
+		}
 	}
 }
 

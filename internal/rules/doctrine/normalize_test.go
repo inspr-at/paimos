@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 func TestEveryASCIIConfusableMapping(t *testing.T) {
@@ -73,6 +74,14 @@ func TestEveryNamedLatinSmallCapital(t *testing.T) {
 	}
 	if unicodeSmallCapitals['\ua7af'] != "q" {
 		t.Fatal("small-cap Q absent")
+	}
+}
+
+func TestAllFormatControlsRemainInvisibleToComparison(t *testing.T) {
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if unicode.Is(unicode.Cf, r) && normalizeProposalText("note"+string(r)+"book") != normalizeProposalText("notebook") {
+			t.Fatalf("format control U+%04X became a word separator", r)
+		}
 	}
 }
 

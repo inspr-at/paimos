@@ -5,8 +5,10 @@ package doctrine
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -340,13 +342,14 @@ func TestPrivateGuardFullTreeAndWriteObservation(t *testing.T) {
 	)
 	paragraph := "The copper observatory keeps seven violet notebooks beneath the eastern stairway. Seasonal planning uses the silver ledger beside the northern window each week."
 	f, forge, m, owner, in := publicProposalFixture(t)
+	fixtureBinary := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 0, 1, 2, 3)
 	f.fake.failBlob = "docs/AGENTS-PROFILE-MARKUS.md"
 	f.fake.commit(privateRepository, fixtureCommit, map[string]string{
 		"docs/AGENTS-KERNEL-PRIVATE.md":        "# Private\n\n## Copy\n\n" + in.Source + "\n\n" + proseLine + "\n\n" + paragraph + "\n",
 		"docs/AGENTS-PROFILE-MARKUS.md":        "# Profile\n\n- " + profileRule + "\n",
 		"commands/secrets.md":                  "# Secrets\n\n- " + commandLine + "\n",
 		"docs/AGENTS-KERNEL-PRIVATE.tldr.yaml": "rules:\n  copper:\n    en: " + guardTLDR + "\n",
-		"assets/blank.png":                     string(append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 0, 1, 2, 3)),
+		"assets/blank.png":                     string(fixtureBinary),
 	}, "main")
 	allowCredential(t, m.credentials.Dir, "guard-read", owner.TenantID, privateRepository)
 	if err := os.WriteFile(filepath.Join(m.credentials.Dir, "guard-read"), []byte("fixtureGuardRead319"), 0o600); err != nil {
@@ -362,6 +365,16 @@ func TestPrivateGuardFullTreeAndWriteObservation(t *testing.T) {
 		t.Fatal("unreadable private tree reached GitHub")
 	}
 	f.fake.failBlob = ""
+	blocked := find(f.layer(owner, "POST", "/api/rules/doctrine/sources/"+created.ID+"/index", nil), privateRepository)
+	if blocked.State != "failed" || !strings.Contains(blocked.Error, "assets/blank.png") {
+		t.Fatal("unreviewed binary did not block the private guard with its path")
+	}
+	beforeCalls, beforeMinted := forge.calls, forge.minted
+	f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 422)
+	if forge.calls != beforeCalls || forge.minted != beforeMinted {
+		t.Fatal("binary index failure reached GitHub")
+	}
+	m.binaryAllowlist = map[string]string{"assets/blank.png": fmt.Sprintf("%x", sha256.Sum256(fixtureBinary))}
 	ready := find(f.layer(owner, "POST", "/api/rules/doctrine/sources/"+created.ID+"/index", nil), privateRepository)
 	if ready.Error != "" || ready.State != "ready" {
 		t.Fatalf("reindex %+v", ready)
@@ -614,8 +627,11 @@ func TestPublicProposalRejectsNonLatin(t *testing.T) {
 		if latinPublicText(text) && strings.ContainsRune(text, '\u0131') {
 			continue
 		}
-		if guardPrivateQuotes(corpus, nil, text) == nil {
-			t.Fatal("lookalike quotation accepted")
+		// The generated skeleton does not transliterate an arbitrary alphabet
+		// (the legacy Greek probe even substitutes Gamma for Latin y). Such
+		// text must fail the public-script gate before any quotation lookup.
+		if guardPublic(publicRepository, text) == nil && guardPrivateQuotes(corpus, nil, text) == nil {
+			t.Fatal("lookalike quotation accepted by both public guards")
 		}
 	}
 	if guardPrivateQuotes(corpus, nil, strings.ReplaceAll(guardRule, "i", "\u0131")) == nil {

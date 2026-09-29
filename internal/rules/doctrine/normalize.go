@@ -157,6 +157,12 @@ func writeSkeleton(b *strings.Builder, r rune) {
 }
 
 func isIgnoredFormat(r rune) bool {
+	// Preserve the format-control defense too: not every Cf character belongs
+	// to Default_Ignorable_Code_Point (e.g. interlinear annotations). Neither
+	// class may become a word separator that hides a private quotation.
+	if unicode.Is(unicode.Cf, r) {
+		return true
+	}
 	for _, span := range unicodeDefaultIgnorables {
 		if r < span[0] {
 			return false
