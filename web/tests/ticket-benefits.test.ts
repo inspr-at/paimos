@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { benefitDraft, benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
+import { benefitDraft, benefitIssues, completedTicketState, firstBenefitGap } from '../src/lib/ticketBenefits.ts'
 import { displayHeadline, hasUsableNotes, historicalTagFallback, localizedNote, noteLocale, ticketsOf, matches, type Release } from '../src/lib/releases.ts'
 const fields = { pill_en: 'Clear release notes', pill_de: 'Verständliche Release Notes', benefit_en: 'Tickets explain what you gain.', benefit_de: 'Tickets erklären den Nutzen.' }
 test('benefit completion covers product completion states without guessing custom or cancelled states', () => {
@@ -15,6 +15,10 @@ test('benefit drafts warn without inventing translations, including hidden ticke
   assert.equal(benefitIssues({ ...fields, pill_en: 'One\u00a0two' }).length, 0)
   assert.equal(benefitIssues({ ...fields, benefit_de: ' \n ' }).length, 1)
   assert.equal(benefitDraft({ benefit_en: 'Kept' }).benefit_de, '')
+  assert.equal(firstBenefitGap({})?.line, 'Pill · English is required.')
+  assert.equal(firstBenefitGap({ ...fields, benefit_de: ' ' })?.line, 'Benefit · Deutsch is required.')
+  assert.equal(firstBenefitGap({ ...fields, pill_de: 'Eins' })?.line, 'Pill · Deutsch needs 2–4 words.')
+  assert.equal(firstBenefitGap(fields), null)
 })
 test('snapshot notes displace Git headlines and ticket guesses while archives stay readable', () => {
   const r = { version: '260928120000.0.0', headline: 'Invented headline', tickets: ['TEST-999'], changes: [], notes: { source: 'snapshot', snapshot_sha256: '', captured_at: null, release_revision: 1, hidden: 1, gaps: [], items: [{ id: 'one', key: 'TEST-7', ...fields }] } } as unknown as Release

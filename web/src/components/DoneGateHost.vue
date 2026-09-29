@@ -9,7 +9,7 @@ import AppIcon from './AppIcon.vue'
 const dialog = ref<HTMLDialogElement>()
 const titleId = useId()
 const tried = ref(false)
-const draft = reactive({ pill_en: '', pill_de: '', benefit_en: '', benefit_de: '' })
+const draft = reactive({ pill_en: '', pill_de: '', benefit_en: '', benefit_de: '', hide_from_release_notes: false })
 const fieldEls: Record<string, HTMLElement | null> = {}
 const languages = [
   { key: 'en', label: 'English', pill: 'pill_en', benefit: 'benefit_en', pillHint: 'e.g. Hosts in minutes', benefitHint: 'What people gain, in one or two sentences.' },
@@ -31,6 +31,7 @@ function load(fields: Record<string, unknown>) {
   draft.pill_de = next.pill_de
   draft.benefit_en = next.benefit_en
   draft.benefit_de = next.benefit_de
+  draft.hide_from_release_notes = next.hide_from_release_notes
   tried.value = false
 }
 function countLabel(value: string) {
@@ -45,6 +46,18 @@ function countOff(value: string) {
 function invalid(key: typeof order[number]) {
   return benefitIssues(draft).some(issue => issue.startsWith(key))
 }
+function fieldIssue(key: typeof order[number]) {
+  const value = draft[key].trim()
+  if (!value) return 'Required'
+  if (key.startsWith('pill_') && (pillWords(value) < 2 || pillWords(value) > 4)) return '2–4 words'
+  return ''
+}
+function describedBy(key: typeof order[number]) {
+  const ids: string[] = []
+  if (key.startsWith('pill_')) ids.push(`${titleId}-${key}-count`)
+  if (tried.value && fieldIssue(key)) ids.push(`${titleId}-${key}-error`)
+  return ids.join(' ') || undefined
+}
 function focusFirst() {
   const key = order.find(item => invalid(item)) ?? 'pill_en'
   fieldEls[key]?.focus()
@@ -55,7 +68,20 @@ function submit() {
     focusFirst()
     return
   }
-  settleDoneGate({ pill_en: draft.pill_en, pill_de: draft.pill_de, benefit_en: draft.benefit_en, benefit_de: draft.benefit_de })
+  settleDoneGate({
+    pill_en: draft.pill_en,
+    pill_de: draft.pill_de,
+    benefit_en: draft.benefit_en,
+    benefit_de: draft.benefit_de,
+    hide_from_release_notes: draft.hide_from_release_notes,
+  })
+}
+function onFormKey(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+    event.preventDefault()
+    event.stopPropagation()
+    submit()
+  }
 }
 function backdrop(event: MouseEvent) {
   if (event.target === dialog.value) settleDoneGate(null)
@@ -74,7 +100,7 @@ watch(() => doneGateState.request, async (next) => {
 
 <template>
   <dialog ref="dialog" class="gate" :aria-labelledby="titleId" @cancel.prevent="settleDoneGate(null)" @click="backdrop">
-    <form v-if="request" class="card" @submit.prevent="submit">
+    <form v-if="request" class="card" @submit.prevent="submit" @keydown="onFormKey">
       <span class="grabber" aria-hidden="true" />
       <div class="head">
         <span class="mark" aria-hidden="true"><AppIcon name="sparkle" :size="16" /></span>
@@ -100,10 +126,11 @@ watch(() => doneGateState.request, async (next) => {
               v-model="draft[language.pill]"
               class="field"
               :placeholder="language.pillHint"
-              :aria-describedby="`${titleId}-${language.pill}-count`"
+              :aria-describedby="describedBy(language.pill)"
               :aria-invalid="tried && invalid(language.pill) ? 'true' : undefined"
               autocomplete="off"
             />
+            <p v-if="tried && fieldIssue(language.pill)" :id="`${titleId}-${language.pill}-error`" class="field-error">{{ fieldIssue(language.pill) }}</p>
             <label :for="`${titleId}-${language.benefit}`">Benefit · {{ language.label }}</label>
             <textarea
               :id="`${titleId}-${language.benefit}`"
@@ -112,10 +139,16 @@ watch(() => doneGateState.request, async (next) => {
               class="field"
               rows="3"
               :placeholder="language.benefitHint"
+              :aria-describedby="describedBy(language.benefit)"
               :aria-invalid="tried && invalid(language.benefit) ? 'true' : undefined"
             />
+            <p v-if="tried && fieldIssue(language.benefit)" :id="`${titleId}-${language.benefit}-error`" class="field-error">{{ fieldIssue(language.benefit) }}</p>
           </div>
         </div>
+        <label class="hide" data-tip="Hidden tickets still need both languages.">
+          <input v-model="draft.hide_from_release_notes" type="checkbox" />
+          Hide from release notes
+        </label>
       </div>
       <div class="actions">
         <button type="button" class="btn" @click="settleDoneGate(null)">Not now</button>
@@ -168,6 +201,9 @@ label { font-size: 12px; color: var(--ink-2); }
 .field { width: 100%; min-width: 0; }
 textarea.field { height: auto; min-height: 72px; padding-top: 8px; padding-bottom: 8px; resize: vertical; line-height: 1.45; }
 .field[aria-invalid="true"] { box-shadow: 0 0 0 1px var(--warn); }
+.field-error { margin: 0; font-size: 12px; line-height: 1.35; color: var(--warn); }
+.hide { display: inline-flex; align-items: center; gap: 8px; justify-self: start; margin-top: 2px; cursor: pointer; }
+.hide input { width: 16px; height: 16px; margin: 0; }
 .actions {
   display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;
   position: sticky; bottom: 0;
@@ -198,6 +234,7 @@ textarea.field { height: auto; min-height: 72px; padding-top: 8px; padding-botto
   .scroll { padding: 0 16px; }
   .field { height: auto; min-height: 44px; font-size: 16px; }
   textarea.field { min-height: 88px; font-size: 16px; }
+  .hide { min-height: 44px; font-size: 15px; }
   .actions { margin: 12px 0 0; padding: 12px 16px 0; border-top: 1px solid var(--line); background: var(--surface-raised); }
   .actions .btn { height: 44px; flex: 1; }
 }

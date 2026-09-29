@@ -3,7 +3,7 @@ import { reactive, ref, type Ref } from 'vue'
 import { APIError, bulkChange, getNode, listNodes, undoEvent, updateNode, type BulkChange, type BulkResult, type Facets, type ListItem } from './api'
 import { activeDimensions, apiParams, DIMENSION_BY_KEY, LIST_FACETS, rowTags, WORK_KINDS, type Dimension, type EpicOption, type ListFilters } from './ticketList'
 import { askDoneGate } from './doneGateAsk'
-import { benefitGateError, completionFields, needsBenefitPrompt } from './doneGate'
+import { benefitGateError, benefitRetryFields, completionFields, needsBenefitPrompt } from './doneGate'
 import { toast } from './toast'
 import { normaliseState, statusMeta } from './work'
 
@@ -158,6 +158,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   // Optimistic status change: the row updates at once and the server confirms.
   // The PATCH carries the row's updated_at as If-Unmodified-Since; a newer
   // server copy answers 412, nothing is written, and the latest version is shown.
+  // Benefit text from the dialog is asked again, still filled in.
   // A ticket entering completion is asked for its benefit before the row moves,
   // so cancelling leaves the list as it was.
   async function setStatus(row: ListItem, state: string, options: { undo?: boolean; fields?: Record<string, unknown> } = {}): Promise<boolean> {
@@ -182,15 +183,23 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
       return true
     } catch (e) {
       if (e instanceof APIError && e.status === 412) {
+        let baseFields = before.fields
         try {
           const latest = await getNode(target.id)
           shiftFacet(state, latest.state)
           Object.assign(target, { title: latest.title, body: latest.body, fields: latest.fields, state: latest.state, updated_at: latest.updated_at })
+          baseFields = latest.fields
         } catch {
           shiftFacet(state, before.state)
           Object.assign(target, before)
         }
         toast(`${target.key} was changed elsewhere, so your status change was not saved. The latest version is shown.`, { tone: 'error' })
+        // The dialog texts were not written. Ask again with those texts filled in.
+        if (fields && !options.undo) {
+          const text = await askDoneGate({ key: target.key, title: target.title, state, fields: benefitRetryFields(baseFields, fields) })
+          if (!text) return false
+          return setStatus(target, state, { ...options, fields: completionFields(target.fields, text) })
+        }
         return false
       }
       shiftFacet(state, before.state)

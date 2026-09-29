@@ -22,6 +22,21 @@ export function benefitIssues(fields: Record<string, unknown>): string[] {
   if ('hide_from_release_notes' in fields && typeof fields.hide_from_release_notes !== 'boolean') issues.push('hide_from_release_notes must be a boolean')
   return issues
 }
+const benefitFieldNames: Record<(typeof benefitTextKeys)[number], string> = {
+  pill_en: 'Pill · English',
+  pill_de: 'Pill · Deutsch',
+  benefit_en: 'Benefit · English',
+  benefit_de: 'Benefit · Deutsch',
+}
+// The first incomplete benefit field, as one short line a person can act on.
+export function firstBenefitGap(fields: Record<string, unknown>): { key: (typeof benefitTextKeys)[number]; line: string } | null {
+  const issues = benefitIssues(fields)
+  const key = benefitTextKeys.find(item => issues.some(issue => issue.startsWith(`${item} `)))
+  if (!key) return null
+  const issue = issues.find(item => item.startsWith(`${key} `)) ?? ''
+  const name = benefitFieldNames[key]
+  return { key, line: issue.includes('2–4') ? `${name} needs 2–4 words.` : `${name} is required.` }
+}
 export function benefitDraft(fields: Record<string, unknown>) {
   return {
     pill_en: typeof fields.pill_en === 'string' ? fields.pill_en : '',

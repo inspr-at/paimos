@@ -5,7 +5,7 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, p
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
 import { askDoneGate } from '../lib/doneGateAsk'
-import { benefitGateError, benefitSkip, completionFields, needsBenefitPrompt } from '../lib/doneGate'
+import { benefitGateError, benefitSkip, benefitStepSummary, completionFields, needsBenefitPrompt, skippedStatusLabel } from '../lib/doneGate'
 import { can } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
@@ -992,21 +992,40 @@ async function runBulk(change: Omit<BulkChange, 'ids'>, done: (count: number) =>
     table.value?.focusGrid()
   }
 }
-async function offerBenefitSkips(held: BulkResult['skipped'], state: string) {
-  for (let index = 0; index < held.length; index++) {
-    const row = list.rows.value.find(item => item.id === held[index].id)
-    if (!row) continue
+async function stepBenefitGate(rows: ListItem[], state: string) {
+  let done = 0
+  const skipped: ListItem[] = []
+  for (let index = 0; index < rows.length; index++) {
+    const row = list.rows.value.find(item => item.id === rows[index].id) ?? rows[index]
     if (!needsBenefitPrompt(row, state)) {
-      if (await list.setStatus(row, state)) { void projects.load(true); outline.refreshStatsFor(row.id) }
+      if (await list.setStatus(row, state)) { done++; void projects.load(true); outline.refreshStatsFor(row.id) }
+      else skipped.push(row)
       continue
     }
-    const text = await askDoneGate({ key: row.key, title: row.title, state, fields: row.fields ?? {} }, { index: index + 1, total: held.length })
-    if (!text) continue
+    const text = await askDoneGate({ key: row.key, title: row.title, state, fields: row.fields ?? {} }, { index: index + 1, total: rows.length })
+    if (!text) { skipped.push(row); continue }
     if (await list.setStatus(row, state, { fields: completionFields(row.fields, text) })) {
+      done++
       void projects.load(true)
       outline.refreshStatsFor(row.id)
-    }
+    } else skipped.push(row)
   }
+  return { done, skipped }
+}
+function announceBenefitStep(done: number, skipped: ListItem[]) {
+  if (!done && !skipped.length) return
+  const still = skippedStatusLabel(skipped.map(row => statusMeta(row.state).label))
+  const phone = window.matchMedia('(max-width: 700px)').matches
+  toast(benefitStepSummary(done, skipped.length, still), phone ? { sticky: true, key: 'benefit-step' } : { timeout: 8000, key: 'benefit-step' })
+}
+async function offerBenefitSkips(held: BulkResult['skipped'], state: string) {
+  const rows = held.flatMap(item => {
+    const row = list.rows.value.find(entry => entry.id === item.id)
+    return row ? [row] : []
+  })
+  if (!rows.length) return
+  const outcome = await stepBenefitGate(rows, state)
+  announceBenefitStep(outcome.done, outcome.skipped)
 }
 async function undoBulk(eventId: number) {
   try {
@@ -1025,18 +1044,14 @@ async function bulkStatus(state: string) {
   const gatedIds = new Set(gated.map(row => row.id))
   const ready = [...selected.value].filter(id => !gatedIds.has(id))
   if (ready.length) await runBulk({ state }, n => `${count(n)} ${n === 1 ? 'is' : 'are'} now ${statusMeta(state).label}`, ready)
-  for (let index = 0; index < gated.length; index++) {
-    const row = list.rows.value.find(item => item.id === gated[index].id) ?? gated[index]
-    if (!needsBenefitPrompt(row, state)) {
-      if (await list.setStatus(row, state)) { void projects.load(true); outline.refreshStatsFor(row.id) }
-      continue
-    }
-    const text = await askDoneGate({ key: row.key, title: row.title, state, fields: row.fields ?? {} }, { index: index + 1, total: gated.length })
-    if (!text) continue
-    if (await list.setStatus(row, state, { fields: completionFields(row.fields, text) })) {
-      void projects.load(true)
-      outline.refreshStatsFor(row.id)
-    }
+  if (!gated.length) return
+  bulkBusy.value = true
+  try {
+    const outcome = await stepBenefitGate(gated, state)
+    announceBenefitStep(outcome.done, outcome.skipped)
+  } finally {
+    bulkBusy.value = false
+    table.value?.focusGrid()
   }
 }
 function bulkArchive() { void runBulk({ state: 'archived' }, n => `Archived ${count(n)}`) }

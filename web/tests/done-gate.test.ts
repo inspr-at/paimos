@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { APIError } from '../src/lib/api.ts'
 import { pillWords } from '../src/lib/ticketBenefits.ts'
-import { benefitGateError, benefitRequiredCode, benefitSkip, completionFields, gateAction, gateProgress, gateTitle, needsBenefitPrompt } from '../src/lib/doneGate.ts'
+import { benefitGateError, benefitRequiredCode, benefitRetryFields, benefitSkip, benefitStepSummary, completionFields, gateAction, gateProgress, gateTitle, needsBenefitPrompt, skippedStatusLabel } from '../src/lib/doneGate.ts'
 
 const text = {
   pill_en: 'Clear release notes',
@@ -77,4 +77,30 @@ test('completion fields keep unrelated values and do not invent a hide flag', ()
   assert.equal('hide_from_release_notes' in next, false)
   assert.notEqual(next, existing)
   assert.equal(completionFields({ hide_from_release_notes: true }, text).hide_from_release_notes, true)
+  assert.equal(completionFields(existing, { ...text, hide_from_release_notes: true }).hide_from_release_notes, true)
+  assert.equal('hide_from_release_notes' in completionFields(existing, { ...text, hide_from_release_notes: false }), false)
+  assert.equal(completionFields({ hide_from_release_notes: true }, { ...text, hide_from_release_notes: false }).hide_from_release_notes, false)
+})
+
+test('a step-through summary says what finished and what stayed', () => {
+  assert.equal(benefitStepSummary(2, 1, 'In progress'), '2 done · 1 skipped (still In progress)')
+  assert.equal(benefitStepSummary(0, 3, 'New'), '3 skipped (still New)')
+  assert.equal(benefitStepSummary(4, 0, 'New'), '4 done')
+  assert.equal(skippedStatusLabel(['In progress']), 'In progress')
+  assert.equal(skippedStatusLabel(['In progress', 'Backlog']), 'In progress or Backlog')
+  assert.equal(skippedStatusLabel(['In progress', 'Backlog', 'New']), 'an earlier status')
+})
+
+test('a rejected benefit write is asked again with the typed text', () => {
+  const latest = { priority: 'low', pill_en: 'Server text here', tags: ['a'] }
+  const typed = completionFields({ priority: 'high', hide_from_release_notes: true }, { ...text, hide_from_release_notes: false })
+  const fields = benefitRetryFields(latest, typed)
+  assert.equal(fields.pill_en, text.pill_en)
+  assert.equal(fields.benefit_de, text.benefit_de)
+  assert.equal(fields.priority, 'low')
+  assert.deepEqual(fields.tags, ['a'])
+  assert.equal(fields.hide_from_release_notes, false)
+  const hidden = benefitRetryFields({ priority: 'low' }, completionFields({}, { ...text, hide_from_release_notes: true }))
+  assert.equal(hidden.hide_from_release_notes, true)
+  assert.equal(hidden.pill_en, text.pill_en)
 })

@@ -7,7 +7,7 @@ import AppIcon from '../AppIcon.vue'
 // The plain-language user benefit (AEON-256): a 2–4 word pill and one or two
 // sentences, in English and German. Reading shows what is there, one line when
 // something is missing and, when the viewer may edit, the one action that fixes it.
-const props = defineProps<{ fields: Record<string, unknown>; editing?: boolean; disabled?: boolean; done?: boolean; editable?: boolean }>()
+const props = defineProps<{ fields: Record<string, unknown>; editing?: boolean; disabled?: boolean; done?: boolean; editable?: boolean; notice?: string; invalidKey?: string }>()
 const emit = defineEmits<{ change: [key: string, value: string | boolean]; edit: [] }>()
 const uid = useId()
 const issues = computed(() => benefitIssues(props.fields))
@@ -35,16 +35,17 @@ const countLabel = (value: string) => { const n = pillWords(value); return n ? `
     </header>
 
     <template v-if="editing">
-      <p v-if="guidance" class="guidance" role="status">{{ guidance }}</p>
+      <p v-if="notice" :id="`${uid}-notice`" class="guidance" role="status">{{ notice }}</p>
+      <p v-else-if="guidance" class="guidance" role="status">{{ guidance }}</p>
       <div class="languages">
         <div v-for="language in languages" :key="language.key" :lang="language.key" class="language-edit">
           <div class="label-row">
             <label :for="`${uid}-pill-${language.key}`">Pill · {{ language.label }}</label>
             <span class="count" :class="{ off: pillWords(text(`pill_${language.key}`)) > 4 || pillWords(text(`pill_${language.key}`)) === 1 }" aria-hidden="true">{{ countLabel(text(`pill_${language.key}`)) }}</span>
           </div>
-          <input :id="`${uid}-pill-${language.key}`" class="field" :value="raw(`pill_${language.key}`)" :placeholder="language.pill" :disabled="disabled" @input="emit('change', `pill_${language.key}`, ($event.target as HTMLInputElement).value)" />
+          <input :id="`${uid}-pill-${language.key}`" class="field" :value="raw(`pill_${language.key}`)" :placeholder="language.pill" :disabled="disabled" :aria-invalid="invalidKey === `pill_${language.key}` ? 'true' : undefined" :aria-describedby="invalidKey === `pill_${language.key}` && notice ? `${uid}-notice` : undefined" @input="emit('change', `pill_${language.key}`, ($event.target as HTMLInputElement).value)" />
           <label :for="`${uid}-benefit-${language.key}`">Benefit · {{ language.label }}</label>
-          <textarea :id="`${uid}-benefit-${language.key}`" class="field" rows="3" :value="raw(`benefit_${language.key}`)" :placeholder="language.benefit" :disabled="disabled" @input="emit('change', `benefit_${language.key}`, ($event.target as HTMLTextAreaElement).value)" />
+          <textarea :id="`${uid}-benefit-${language.key}`" class="field" rows="3" :value="raw(`benefit_${language.key}`)" :placeholder="language.benefit" :disabled="disabled" :aria-invalid="invalidKey === `benefit_${language.key}` ? 'true' : undefined" :aria-describedby="invalidKey === `benefit_${language.key}` && notice ? `${uid}-notice` : undefined" @input="emit('change', `benefit_${language.key}`, ($event.target as HTMLTextAreaElement).value)" />
         </div>
       </div>
       <label class="hide" data-tip="Hidden tickets still need both languages."><input type="checkbox" :checked="fields.hide_from_release_notes === true" :disabled="disabled" @change="emit('change', 'hide_from_release_notes', ($event.target as HTMLInputElement).checked)" />Hide from release notes</label>
@@ -98,6 +99,7 @@ label { font-size: 12px; color: var(--ink-2); }
 .count { font: 500 10.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
 .count.off { color: var(--warn); }
 .field { width: 100%; padding: 8px 10px; }
+.field[aria-invalid="true"] { box-shadow: 0 0 0 1px var(--warn); }
 textarea.field { height: auto; min-height: 68px; resize: vertical; line-height: 1.45; }
 .hide { display: inline-flex; align-items: center; gap: 8px; justify-self: start; margin-top: 2px; }
 </style>
