@@ -43,13 +43,15 @@ type Member struct {
 	LastOwner     bool          `json:"last_owner"`
 }
 type AgentMember struct {
-	PrincipalID   string     `json:"principal_id"`
-	Name          string     `json:"name"`
-	HasAvatar     bool       `json:"has_avatar"`
-	WorkspaceRole *RoleRef   `json:"workspace_role"`
-	KeyCount      int        `json:"key_count"`
-	LastSeenAt    *time.Time `json:"last_seen_at"`
-	Service       bool       `json:"service"`
+	Description   string        `json:"description"`
+	ProjectRoles  []ProjectRole `json:"project_roles"`
+	PrincipalID   string        `json:"principal_id"`
+	Name          string        `json:"name"`
+	HasAvatar     bool          `json:"has_avatar"`
+	WorkspaceRole *RoleRef      `json:"workspace_role"`
+	KeyCount      int           `json:"key_count"`
+	LastSeenAt    *time.Time    `json:"last_seen_at"`
+	Service       bool          `json:"service"`
 }
 type ImportedMember struct {
 	PrincipalID string  `json:"principal_id"`
@@ -75,7 +77,7 @@ func (m *Module) members(w http.ResponseWriter, r *http.Request) {
 		out.Provisioner = &provisionerCapability{Name: provisioner.Name()}
 	}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(r.Context(), `SELECT p.id::text,p.kind,p.name,p.email,p.status,p.roles,
+		rows, err := tx.Query(r.Context(), `SELECT p.id::text,p.kind,p.name,p.description,p.email,p.status,p.roles,
           i.issuer,coalesce(pp.avatar_original_hash,''),br.id::text,br.key,br.name,
           (SELECT max(s.last_seen_at) FROM sessions s WHERE s.tenant_id=p.tenant_id AND s.principal_id=p.id),
           (SELECT count(*) FROM agent_keys k WHERE k.tenant_id=p.tenant_id AND k.principal_id=p.id AND k.revoked_at IS NULL),
@@ -91,13 +93,13 @@ func (m *Module) members(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		for rows.Next() {
-			var id, kind, name, status, avatarHash string
+			var id, kind, name, description, status, avatarHash string
 			var email, issuer, roleID, roleKey, roleName *string
 			var legacy []string
 			var lastActive, lastSeen *time.Time
 			var keyCount int
 			var hasAvatar bool
-			if err := rows.Scan(&id, &kind, &name, &email, &status, &legacy, &issuer, &avatarHash, &roleID, &roleKey, &roleName, &lastActive, &keyCount, &lastSeen, &hasAvatar); err != nil {
+			if err := rows.Scan(&id, &kind, &name, &description, &email, &status, &legacy, &issuer, &avatarHash, &roleID, &roleKey, &roleName, &lastActive, &keyCount, &lastSeen, &hasAvatar); err != nil {
 				rows.Close()
 				return err
 			}
@@ -112,7 +114,7 @@ func (m *Module) members(w http.ResponseWriter, r *http.Request) {
 						service = true
 					}
 				}
-				out.Agents = append(out.Agents, AgentMember{PrincipalID: id, Name: name, HasAvatar: hasAvatar, WorkspaceRole: role, KeyCount: keyCount, LastSeenAt: lastSeen, Service: service})
+				out.Agents = append(out.Agents, AgentMember{PrincipalID: id, Name: name, Description: description, ProjectRoles: []ProjectRole{}, HasAvatar: hasAvatar, WorkspaceRole: role, KeyCount: keyCount, LastSeenAt: lastSeen, Service: service})
 				continue
 			}
 			var classic *string
@@ -170,6 +172,16 @@ func (m *Module) members(w http.ResponseWriter, r *http.Request) {
 		applyOwnerFlags(out.People, out.OwnerCount)
 		if err := attachProjectRoles(r.Context(), tx, p.TenantID, out.People); err != nil {
 			return err
+		}
+		agentMembers := make([]Member, len(out.Agents))
+		for i, a := range out.Agents {
+			agentMembers[i] = Member{PrincipalID: a.PrincipalID, ProjectRoles: []ProjectRole{}}
+		}
+		if err := attachProjectRoles(r.Context(), tx, p.TenantID, agentMembers); err != nil {
+			return err
+		}
+		for i := range out.Agents {
+			out.Agents[i].ProjectRoles = agentMembers[i].ProjectRoles
 		}
 		out.Invites, err = listInvites(r.Context(), tx, p.TenantID)
 		return err

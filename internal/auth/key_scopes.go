@@ -130,7 +130,7 @@ func (m *Module) agentKeyScopes(ctx context.Context, p tenant.Principal, id stri
 		if creator != nil {
 			agent.KeyCreatorID = *creator
 		}
-		ceiling, err := authz.EffectiveTx(ctx, tx, agent, "")
+		ceiling, err := authz.AgentKeyCeilingTx(ctx, tx, agent)
 		if err != nil {
 			return err
 		}
@@ -138,7 +138,7 @@ func (m *Module) agentKeyScopes(ctx context.Context, p tenant.Principal, id stri
 		if err != nil {
 			return err
 		}
-		for _, scope := range ceiling.Workspace.Permissions {
+		for _, scope := range ceiling {
 			perm, known := authz.Lookup(scope)
 			if known && perm.AgentGrantable && slices.Contains(editor.Workspace.Permissions, scope) {
 				view.Grantable = append(view.Grantable, scope)

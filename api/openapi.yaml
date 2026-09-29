@@ -763,6 +763,39 @@ paths:
       operationId: listMembers
       responses:
         '200': {description: 'Workspace people, agents, invites and imported identities', content: {application/json: {schema: {$ref: '#/components/schemas/MemberDirectory'}}}}
+  /members/agents:
+    post:
+      operationId: createAgent
+      summary: Create an agent with a role ceiling and project access, before issuing its first key
+      description: People with keys.manage only. Role grants must be held by the creator. Agent, description, bindings and audit events commit atomically. Names are unique across principals within the workspace (case-insensitive). Choose a workspace role or project roles; project-only agents never acquire workspace access when keys are issued.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 200}
+                description: {type: string, maxLength: 1000}
+                workspace_role_id: {type: string, format: uuid}
+                project_roles:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [project_id, role_id]
+                    properties:
+                      project_id: {type: string, format: uuid}
+                      role_id: {type: string, format: uuid}
+      responses:
+        '201': {description: Agent ready for its first key, content: {application/json: {schema: {$ref: '#/components/schemas/AgentMember'}}}}
+        '400': {description: Invalid name, description or role selection}
+        '403': {description: Requires a person with keys.manage and authority to grant the requested roles}
+        '404': {description: Role or project not found in this workspace}
+        '409': {description: Name already used in this workspace}
   /members/{principal_id}/workspace-role:
     put:
       operationId: setWorkspaceRole
@@ -6211,6 +6244,19 @@ components:
         subject: {oneOf: [{$ref: '#/components/schemas/PrincipalRef'}, {type: 'null'}]}
         project: {oneOf: [{type: object, required: [id, key], properties: {id: {type: string, format: uuid}, key: {type: string}}}, {type: 'null'}]}
         data: {type: object}
+    AgentMember:
+      type: object
+      required: [principal_id, name, has_avatar, workspace_role, key_count, last_seen_at, service]
+      properties:
+        principal_id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string}
+        has_avatar: {type: boolean}
+        workspace_role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
+        project_roles: {type: array, items: {$ref: '#/components/schemas/ProjectRole'}}
+        key_count: {type: integer}
+        last_seen_at: {type: [string, 'null'], format: date-time}
+        service: {type: boolean}
     MemberDirectory:
       type: object
       required: [people, agents, invites, imported, owner_count, provisioner]
@@ -6219,16 +6265,7 @@ components:
         agents:
           type: array
           items:
-            type: object
-            required: [principal_id, name, has_avatar, workspace_role, key_count, last_seen_at, service]
-            properties:
-              principal_id: {type: string, format: uuid}
-              name: {type: string}
-              has_avatar: {type: boolean}
-              workspace_role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
-              key_count: {type: integer}
-              last_seen_at: {type: [string, 'null'], format: date-time}
-              service: {type: boolean}
+            $ref: '#/components/schemas/AgentMember'
         invites: {type: array, items: {$ref: '#/components/schemas/Invite'}}
         imported: {type: array, items: {type: object}}
         owner_count: {type: integer}

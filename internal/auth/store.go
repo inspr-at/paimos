@@ -663,6 +663,22 @@ func ensureAgentBinding(ctx context.Context, tx pgx.Tx, creator tenant.Principal
 			}
 		}
 	}
+	var configured bool
+	if err := tx.QueryRow(ctx, `SELECT agent_access_configured FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid`, creator.TenantID, agentID).Scan(&configured); err != nil {
+		return err
+	}
+	if configured {
+		ceiling, err := authz.AgentKeyCeilingTx(ctx, tx, tenant.Principal{ID: agentID, TenantID: creator.TenantID, Kind: tenant.Agent})
+		if err != nil {
+			return err
+		}
+		for key := range requested {
+			if !slices.Contains(ceiling, key) {
+				return authz.ErrForbidden
+			}
+		}
+		return nil
+	}
 	var roleID, roleKey string
 	var builtin bool
 	err := tx.QueryRow(ctx, `SELECT r.id::text,r.key,r.builtin FROM role_bindings b
