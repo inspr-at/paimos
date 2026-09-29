@@ -10,6 +10,7 @@ import RulesBudgetSection from './RulesBudgetSection.vue'
 import RulesImportDialog from './RulesImportDialog.vue'
 import RulesPreview from './RulesPreview.vue'
 import RulesPublishDialog, { type Budget, type PublishItem } from './RulesPublishDialog.vue'
+import DoctrineLayer from './DoctrineLayer.vue'
 import { accountName, getProjects } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { getMembers } from '../../lib/access'
@@ -611,6 +612,7 @@ onMounted(() => {
       <RulesBudgetSection :view="budgetView" :can-manage="canManageBudget" @saved="view => { budgetView = view; toast('Budget saved') }" />
     </div>
 
+    <DoctrineLayer />
     <RulesImportDialog
       v-if="importOpen" :tenant-id="tenantId" :tenant-name="tenantName" :caller="caller" :existing="existing" :scope-title="scopeTitle" :hold="importHold"
       @close="importOpen = false" @imported="imported"

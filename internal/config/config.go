@@ -31,6 +31,10 @@ type Config struct {
 	LinkKey []byte
 	// FilesDir is the attachment store root (AEON_FILES_DIR, default data/files).
 	FilesDir string
+	// DoctrineCredentialsDir holds host-provisioned read-only tokens for private
+	// doctrine repositories, one token file and <ref>.allowlist.json per reference
+	// (AEON_DOCTRINE_CREDENTIALS_DIR, AEON-318). Aeon stores only the names.
+	DoctrineCredentialsDir string
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -47,6 +51,8 @@ func FromEnv() (Config, error) {
 		BootstrapTenantSlug: getenv("AEON_BOOTSTRAP_TENANT_SLUG", "inspr"),
 		BootstrapTenantName: getenv("AEON_BOOTSTRAP_TENANT_NAME", "INSPR"),
 		FilesDir:            getenv("AEON_FILES_DIR", "data/files"),
+		// Only the directory path is read here; a token is read at fetch time.
+		DoctrineCredentialsDir: os.Getenv("AEON_DOCTRINE_CREDENTIALS_DIR"),
 	}
 	switch cfg.Env {
 	case "dev", "prod":

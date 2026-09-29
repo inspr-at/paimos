@@ -260,6 +260,7 @@ export async function mockRules(page: Page, options: RulesMockOptions = {}): Pro
       if (options.comparisonStatus) return route.fulfill({ status: options.comparisonStatus, json: { error: 'unavailable', code: 'not_found' } })
       return route.fulfill({ json: { comparisons: options.comparisons ?? [] } })
     }
+    if (path === '/api/rules/doctrine' && method === 'GET') return route.fulfill({ json: { sources: [] } })
     if (path === '/api/rules/merged' && method === 'GET') {
       if (options.denyNamedPreview && url.searchParams.get('agent_id')) {
         return route.fulfill({ status: 403, json: { error: "You didn't create a key for this agent.", code: 'not_key_creator' } })

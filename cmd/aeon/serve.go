@@ -65,6 +65,7 @@ import (
 	"github.com/inspr-at/paimos/internal/releases"
 	"github.com/inspr-at/paimos/internal/requirements"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/search"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -263,6 +264,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			inbox.New(pool),
 			harness.New(pool),
 			rules.New(pool),
+			doctrine.New(pool, doctrine.Options{CredentialsDir: cfg.DoctrineCredentialsDir}),
 			ticketwork.New(pool),
 			outcomes.New(pool),
 			deliveryvote.New(pool),

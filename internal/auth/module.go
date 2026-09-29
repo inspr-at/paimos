@@ -261,7 +261,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if len(parts) == 2 && (parts[1] == "layers" || parts[1] == "sets") && (read || r.Method == http.MethodPost) {
 			return scope("rules")
 		}
-		if len(parts) == 2 && parts[1] == "merged" && read {
+		if len(parts) == 2 && (parts[1] == "merged" || parts[1] == "doctrine") && read {
 			return "rules.read", true
 		}
 		if len(parts) == 2 && parts[1] == "comparisons" && (read || r.Method == http.MethodPost) {
