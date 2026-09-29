@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -10,12 +11,108 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/localjournal"
 )
+
+func TestPairedAttachRegistersFreshMemoryOnlyKeyAtEveryStart(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	const tenant = "11111111-1111-4111-8111-111111111111"
+	const computer = "22222222-2222-4222-8222-222222222222"
+	const principal = "33333333-3333-4333-8333-333333333333"
+	const request = "44444444-4444-4444-8444-444444444444"
+	var fixture [32]byte
+	if _, err = rand.Read(fixture[:]); err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := hex.EncodeToString(fixture[:])
+	var registrations []string
+	var mu sync.Mutex
+	refuse := false
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		var in attachwatch.DeviceRequest
+		if r.Method != "POST" || r.URL.Path != "/api/agent-pairing/attach" || json.NewDecoder(r.Body).Decode(&in) != nil || in.Operation != "register" || in.ComputerID != computer || in.DeviceProof != lifecycle || len(in.PollKey) != 64 || in.PollKey == lifecycle || in.Text != "" {
+			t.Error("invalid daemon-start registration")
+			w.WriteHeader(403)
+			return
+		}
+		registrations = append(registrations, in.PollKey)
+		if refuse {
+			w.WriteHeader(403)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"state": "registered"})
+	}))
+	defer server.Close()
+	view := agentsetup.View{RequestID: request, TenantID: tenant, ComputerID: computer, PrincipalID: principal}
+	snapshot := map[string]any{"schema": "aeon.agent-setup.private.v1", "origin": server.URL, "request": map[string]string{"request_id": request, "computer_name": "fixture", "workspace_path": root}, "view": view, "device_secret": lifecycle, "runtime_secret": lifecycle, "lifecycle_secret": lifecycle}
+	raw, _ := json.Marshal(snapshot)
+	store, err := agentsetup.OpenStore(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Write("pairing.json", raw, true); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	c := agentsetup.RuntimeConfig{Origin: server.URL, TenantID: tenant, PrincipalID: principal, ComputerID: computer, Workspace: root}
+	remote := agentd.NewRemote(server.URL, "fixture-runtime-bearer")
+	remote.Client.HTTP = server.Client()
+	for i := 0; i < 2; i++ {
+		manager, err := pairedAttach(root, c, remote)
+		if err != nil {
+			t.Fatal("daemon-start registration failed")
+		}
+		manager.Close(t.Context())
+	}
+	mu.Lock()
+	distinct := len(registrations) == 2 && registrations[0] != registrations[1]
+	refuse = true
+	mu.Unlock()
+	if !distinct {
+		t.Fatal("daemon restart reused poll key")
+	}
+	if manager, err := pairedAttach(root, c, remote); err == nil || manager != nil {
+		t.Fatal("registration failure left attach enabled")
+	}
+	// Inspect only this generated fixture, never the operator's setup store.
+	mu.Lock()
+	defer mu.Unlock()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			t.Fatal("watch registration created a store")
+		}
+		data, err := os.ReadFile(filepath.Join(root, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range registrations {
+			if bytes.Contains(data, []byte(key)) {
+				t.Fatal("poll key written to disk")
+			}
+		}
+		if entry.Name() == "pairing.json" && !bytes.Equal(data, raw) {
+			t.Fatal("watch registration changed pairing store")
+		}
+	}
+}
 
 func TestColdRevokedDaemonReconcilesWithoutRuntimeAuthentication(t *testing.T) {
 	for _, prior := range []string{"empty", "unresolved", "observed_exit"} {

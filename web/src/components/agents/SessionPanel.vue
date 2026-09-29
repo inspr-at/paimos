@@ -23,6 +23,7 @@ import SessionStateEvidence from './SessionStateEvidence.vue'
 import SessionRecovery from './SessionRecovery.vue'
 import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import ManagedSessionControls from './ManagedSessionControls.vue'
+import LiveWatch from './LiveWatch.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 import EtaCell from '../work/EtaCell.vue'
@@ -47,7 +48,8 @@ const managedControls = computed(() => {
   const session = props.view?.session
   return !!session && session.management_mode === 'managed' && session.advertised_capabilities.includes('managed_control_v1')
 })
-const compactControls = computed(() => phone.value && managedControls.value)
+// A watched session is read-only (AEON-258): no controls to collapse.
+const compactControls = computed(() => phone.value && managedControls.value && !reported.value?.watch)
 const showRecover = computed(() => {
   const session = props.view?.session
   return !!session && !session.archived_at && (can('harness.recover', session.project_id) || can('harness.force_stop', session.project_id))
@@ -77,6 +79,8 @@ const recentRuns = computed(() => s.value ? agents.recentRuns(s.value.agent_prin
 const run = computed(() => props.view?.run)
 const activity = computed(() => detail.value?.id === s.value?.id ? detail.value : props.view ? activityOf(props.view) : null)
 const reported = computed(() => detail.value?.id === s.value?.id ? detail.value : s.value)
+// A watched session has no Messages tab, so it always shows the overview with the live view.
+const pane = computed<SessionTab>(() => reported.value?.watch ? 'overview' : tab.value)
 const hasWork = computed(() => !!(reported.value?.brief || reported.value?.worktree || reported.value?.branch || reported.value?.commits?.length))
 const timeline = computed(() => activity.value?.activity_history ?? [])
 const metadataHistory = computed(() => metadataChanges(detail.value?.id === s.value?.id ? detail.value?.metadata_history : undefined))
@@ -150,14 +154,14 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <div v-if="view && !loading && !compactControls" class="head-actions">
         <span class="host-meta">{{ view.harness }}<template v-if="view.session.host"> on {{ view.session.host }}</template></span>
         <span class="spacer" />
-        <template v-if="view.session.phase !== 'stopped' && !view.session.advertised_capabilities.includes('managed_control_v1')">
+        <template v-if="view.session.phase !== 'stopped' && !reported?.watch && !view.session.advertised_capabilities.includes('managed_control_v1')">
           <button type="button" class="btn sm ghost" :aria-disabled="!!controlBlock(view, 'interrupt')" :data-tip="controlBlock(view, 'interrupt') || 'Stop the current turn'" @click="control('interrupt')"><AppIcon name="interrupt" :size="14" />Interrupt</button>
           <button type="button" class="btn sm ghost stop" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'End this session'" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
         </template>
-        <SessionRecovery :session="view.session" />
+        <SessionRecovery v-if="!reported?.watch" :session="view.session" />
         <RemoveSessionDialog :session="view.session" :label="view.name" />
       </div>
-      <ManagedSessionControls v-if="view && !loading" :session="reported || view.session" :now="now">
+      <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now">
         <template v-if="compactControls" #more>
           <button v-if="showRecover" type="button" role="menuitem" class="menu-item" @click="recovery?.open()"><AppIcon name="wrench" :size="16" /><span class="mi-text"><span>Recover</span></span></button>
           <button v-if="showRemove" type="button" role="menuitem" class="menu-item" :aria-label="`Remove ${view.name} from Agents`" @click="removal?.remove()"><AppIcon name="archive" :size="16" /><span class="mi-text"><span>Remove</span><small>Hides the record; does not stop the process</small></span></button>
@@ -165,7 +169,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </ManagedSessionControls>
       <SessionRecovery v-if="view && !loading && compactControls" ref="recovery" hide-trigger :session="view.session" />
       <RemoveSessionDialog v-if="view && !loading && compactControls" ref="removal" hide-trigger :session="view.session" :label="view.name" />
-      <SessionTabs v-if="view && !loading" :selected="tab" :unread="tab === 'messages' ? 0 : unread" @select="selectTab" />
+      <SessionTabs v-if="view && !loading && !reported?.watch" :selected="tab" :unread="tab === 'messages' ? 0 : unread" @select="selectTab" />
     </header>
 
     <!-- Until the first load completes the body stays a placeholder, so runs and
@@ -182,7 +186,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </div>
     </div>
 
-    <div v-else v-show="tab === 'overview'" id="session-panel-overview" ref="thread" class="scroll" role="tabpanel" aria-labelledby="session-tab-overview">
+    <div v-else v-show="pane === 'overview'" id="session-panel-overview" ref="thread" class="scroll" role="tabpanel" aria-labelledby="session-tab-overview">
       <div v-if="pending.length" class="callout" role="note">
         <AppIcon name="shield" :size="15" />
         <div class="callout-text">
@@ -191,6 +195,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         </div>
         <button type="button" class="btn sm primary" @click="emit('review', pending[0])">Review</button>
       </div>
+
+      <LiveWatch v-if="reported?.watch" :session="reported" />
 
       <section class="now-block" aria-labelledby="now-title">
         <h3 id="now-title" class="sr-only">Now</h3>
@@ -265,7 +271,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 
       <ProvenanceDetail v-if="s" :project-id="s.project_id" :session-id="s.id" :now="now" />
     </div>
-    <SessionChat v-if="view && !loading" v-show="tab === 'messages'" id="session-panel-messages" :view="view" :now="now" :can-write="canWrite" :active="tab === 'messages'"
+    <SessionChat v-if="view && !loading && !reported?.watch" v-show="tab === 'messages'" id="session-panel-messages" :view="view" :now="now" :can-write="canWrite" :active="tab === 'messages'"
       role="tabpanel" aria-labelledby="session-tab-messages" @unread="unread = $event" />
   </aside>
 </template>

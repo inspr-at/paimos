@@ -26,7 +26,7 @@ type LocalServer struct {
 	tokenInfo os.FileInfo
 }
 
-func ServeLocal(s *Supervisor, socket string) (*LocalServer, error) {
+func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*LocalServer, error) {
 	if s == nil || !filepath.IsAbs(socket) {
 		return nil, errors.New("invalid local socket")
 	}
@@ -82,6 +82,9 @@ func ServeLocal(s *Supervisor, socket string) (*LocalServer, error) {
 		return nil, err
 	}
 	mux := http.NewServeMux()
+	if len(attachments) == 1 && attachments[0] != nil {
+		mux.HandleFunc("POST /v1/attach", func(w http.ResponseWriter, r *http.Request) { attachments[0].serve(w, r, token) })
+	}
 	mux.HandleFunc("GET /v1/lifecycle", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, token) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -140,7 +143,7 @@ func ServeLocal(s *Supervisor, socket string) (*LocalServer, error) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(receipt)
 	})
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ConnContext: attachConnContext}
 	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, info: info, tokenInfo: tokenInfo}
 	go func() { _ = server.Serve(listener) }()
 	complete = true

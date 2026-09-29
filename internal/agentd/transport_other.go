@@ -7,7 +7,7 @@ import "errors"
 
 type LocalServer struct{}
 
-func ServeLocal(*Supervisor, string) (*LocalServer, error) {
+func ServeLocal(*Supervisor, string, ...*AttachManager) (*LocalServer, error) {
 	return nil, errors.New("local agentd transport unsupported on this platform")
 }
 func (*LocalServer) Close() error { return nil }
