@@ -61,9 +61,23 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/portal/wishes/{wishId}/hide", m.hideWish)
 	mux.HandleFunc("PATCH /api/portal/products/{productId}", m.editProduct)
 	mux.HandleFunc("PATCH /api/portal/features/{featureId}", m.editFeature)
+	mux.HandleFunc("GET /api/portal/market", m.readMarket)
+	mux.HandleFunc("POST /api/portal/competitors", m.createCompetitor)
+	mux.HandleFunc("PATCH /api/portal/competitors/{competitorId}", m.patchCompetitor)
+	mux.HandleFunc("DELETE /api/portal/competitors/{competitorId}", m.deleteCompetitor)
+	mux.HandleFunc("POST /api/portal/aspects", m.createAspect)
+	mux.HandleFunc("PATCH /api/portal/aspects/{aspectId}", m.patchAspect)
+	mux.HandleFunc("DELETE /api/portal/aspects/{aspectId}", m.deleteAspect)
+	mux.HandleFunc("PUT /api/portal/cells", m.putCell)
+	mux.HandleFunc("POST /api/portal/cells/{cellId}/approve", m.approveCell)
+	mux.HandleFunc("POST /api/portal/corrections/{correctionId}/close", m.closeCorrection)
+	mux.HandleFunc("GET /api/portal/pace", m.readPace)
+	mux.HandleFunc("PUT /api/portal/pace", m.writePace)
+	mux.HandleFunc("PUT /api/portal/wishes/{wishId}/fulfillment", m.writeFulfillment)
 	mux.HandleFunc("GET /api/public/portal/{tenantSlug}", m.read)
 	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/wishes", m.submitWish)
 	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/wishes/{wishKey}/votes", m.vote)
+	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/corrections", m.submitCorrection)
 }
 
 func write(w http.ResponseWriter, status int, value any) {

@@ -50,6 +50,20 @@ async function install(page: Page) {
   const settings = { enabled: false, slug: 'inspr' }
   const nodes: PortalNode[] = []
   let next = 1
+  const market = {
+    competitors: [] as { id: string; name: string; published: boolean }[],
+    aspects: [] as { id: string; label: string }[],
+    cells: [] as { id: string; aspect_id: string; competitor_id: string; stance: string; quote: string; source_url: string; retrieved_on: string; approved: boolean; stale: boolean; recheck: boolean }[],
+    history: [] as { cell_id: string; stance: string; quote: string; source_url: string; retrieved_on: string; approved: boolean; at: string }[],
+    corrections: [] as { id: string; competitor: string; aspect: string; statement: string }[],
+  }
+  const pace: {
+    project_id?: string
+    project_title?: string
+    releases_30d?: number
+    median_release_gap_days?: number
+    fulfillments: { wish_id: string; feature_id: string }[]
+  } = { fulfillments: [] }
   const add = (partial: Pick<PortalNode, 'kind_id' | 'kind_slug' | 'kind_label' | 'title' | 'body' | 'state' | 'parent_id'> & { fields?: Record<string, string> }) => {
     const kind = kinds.find(item => item.id === partial.kind_id)!
     const node: PortalNode = {
@@ -177,6 +191,96 @@ async function install(page: Page) {
       await route.fulfill({ json: { id: node.id, title: node.title, summary: node.body, state: node.state, fields: node.fields } })
       return
     }
+    if (path === '/api/portal/market' && method === 'GET') {
+      await route.fulfill({ json: market })
+      return
+    }
+    if (path === '/api/portal/competitors' && method === 'POST') {
+      const input = request.postDataJSON() as { name?: string }
+      const item = { id: `cmp-${next}`, name: input.name ?? '', published: false }
+      next += 1
+      market.competitors.push(item)
+      await route.fulfill({ json: item })
+      return
+    }
+    const competitorPatch = /^\/api\/portal\/competitors\/([^/]+)$/.exec(path)
+    if (competitorPatch && method === 'PATCH') {
+      const item = market.competitors.find(row => row.id === competitorPatch[1])
+      if (!item) {
+        await route.fulfill({ status: 404, json: { error: 'not found' } })
+        return
+      }
+      const patch = request.postDataJSON() as { name?: string; published?: boolean }
+      if (patch.name !== undefined) item.name = patch.name
+      if (patch.published !== undefined) item.published = patch.published
+      await route.fulfill({ json: item })
+      return
+    }
+    if (path === '/api/portal/aspects' && method === 'POST') {
+      const input = request.postDataJSON() as { label?: string }
+      const item = { id: `asp-${next}`, label: input.label ?? '' }
+      next += 1
+      market.aspects.push(item)
+      await route.fulfill({ json: item })
+      return
+    }
+    if (path === '/api/portal/cells' && method === 'PUT') {
+      const input = request.postDataJSON() as { aspect_id: string; competitor_id: string; stance: string; quote?: string; source_url?: string; retrieved_on?: string }
+      let cell = market.cells.find(row => row.aspect_id === input.aspect_id && row.competitor_id === input.competitor_id)
+      if (!cell) {
+        cell = { id: `cell-${next}`, aspect_id: input.aspect_id, competitor_id: input.competitor_id, stance: 'unknown', quote: '', source_url: '', retrieved_on: '', approved: false, stale: false, recheck: false }
+        next += 1
+        market.cells.push(cell)
+      }
+      cell.stance = input.stance
+      cell.quote = input.quote ?? ''
+      cell.source_url = input.source_url ?? ''
+      cell.retrieved_on = input.retrieved_on ?? ''
+      cell.approved = false
+      market.history.unshift({ cell_id: cell.id, stance: cell.stance, quote: cell.quote, source_url: cell.source_url, retrieved_on: cell.retrieved_on, approved: false, at: stamp() })
+      await route.fulfill({ json: cell })
+      return
+    }
+    const approve = /^\/api\/portal\/cells\/([^/]+)\/approve$/.exec(path)
+    if (approve && method === 'POST') {
+      const cell = market.cells.find(row => row.id === approve[1])
+      if (!cell) {
+        await route.fulfill({ status: 404, json: { error: 'not found' } })
+        return
+      }
+      cell.approved = true
+      market.history.unshift({ cell_id: cell.id, stance: cell.stance, quote: cell.quote, source_url: cell.source_url, retrieved_on: cell.retrieved_on, approved: true, at: stamp() })
+      await route.fulfill({ json: cell })
+      return
+    }
+    if (path === '/api/portal/pace' && method === 'GET') {
+      await route.fulfill({ json: pace })
+      return
+    }
+    if (path === '/api/portal/pace' && method === 'PUT') {
+      const input = request.postDataJSON() as { project_id?: string | null }
+      if (!input.project_id) {
+        pace.project_id = undefined
+        pace.project_title = undefined
+        pace.releases_30d = undefined
+        pace.median_release_gap_days = undefined
+      } else {
+        pace.project_id = input.project_id
+        pace.project_title = input.project_id === 'p-pharos' ? 'Pharos' : 'Project'
+        pace.releases_30d = 4
+        pace.median_release_gap_days = 21
+      }
+      await route.fulfill({ json: pace })
+      return
+    }
+    const fulfillment = /^\/api\/portal\/wishes\/([^/]+)\/fulfillment$/.exec(path)
+    if (fulfillment && method === 'PUT') {
+      const input = request.postDataJSON() as { feature_id?: string | null }
+      pace.fulfillments = pace.fulfillments.filter(row => row.wish_id !== fulfillment[1])
+      if (input.feature_id) pace.fulfillments.push({ wish_id: fulfillment[1], feature_id: input.feature_id })
+      await route.fulfill({ json: pace })
+      return
+    }
     const nodePath = /^\/api\/nodes\/([^/]+)$/.exec(path)
     if (nodePath && method === 'PATCH') {
       const node = nodes.find(item => item.id === nodePath[1])
@@ -245,9 +349,31 @@ for (const width of [1600, 390]) {
     await expect(page.getByText('Noisy wish')).toHaveCount(0)
     await quiet.getByRole('button', { name: 'Hide' }).click()
     await expect(quiet.getByText('Hidden')).toBeVisible()
+
+    await page.getByRole('button', { name: 'Add competitor' }).click()
+    await page.getByLabel('Competitor').fill('Northwind')
+    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    await expect(page.getByText('Northwind', { exact: true })).toBeVisible()
+    await page.getByRole('checkbox', { name: 'Public' }).check()
+    await page.getByRole('button', { name: 'Add aspect' }).click()
+    await page.getByLabel('Aspect').fill('Statutory deadlines')
+    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    await page.getByLabel('Stance').selectOption('yes')
+    await page.getByLabel('Quote').fill('Every deadline is on the public help page.')
+    await page.getByLabel('Source page').fill('https://northwind.example/deadlines')
+    await page.getByLabel('Read on').fill('2026-09-01')
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await page.getByRole('button', { name: 'Approve', exact: true }).click()
+    await expect(page.getByText('Approved.')).toBeVisible()
+    await page.getByLabel('Releases from').selectOption({ label: 'Pharos' })
+    await expect(page.getByText('releases in 30 days')).toBeVisible()
+    await expect(page.getByText('4', { exact: true }).first()).toBeVisible()
     await expectFits(page)
     await capture(page, `admin-${width}-light.png`)
+    await page.getByText('Approved.').scrollIntoViewIfNeeded()
+    await capture(page, `admin-comparison-${width}-light.png`)
     await page.emulateMedia({ colorScheme: 'dark' })
+    await capture(page, `admin-comparison-${width}-dark.png`)
     await capture(page, `admin-${width}-dark.png`)
   })
 }
