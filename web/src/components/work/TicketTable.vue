@@ -16,7 +16,7 @@ import StatusIcon from './StatusIcon.vue'
 import TicketWorkers from './TicketWorkers.vue'
 import QuickCreateRow, { type QuickDraft } from './QuickCreateRow.vue'
 import EtaCell from './EtaCell.vue'
-import { etaFromTicket } from '../../lib/eta'
+import { etaFromTicket, progressAccessibleName, progressReportedAt } from '../../lib/eta'
 
 const NO_WORKERS: LiveAgent[] = []
 
@@ -118,13 +118,13 @@ const present = computed(() => {
     eta: listed.some(row => { const eta = etaFromTicket(row.eta); return !!eta?.ready || !!eta?.live }),
   }
 })
-function progressOf(row: ListItem): { pct: number; stale: boolean } | null {
+const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+function progressOf(row: ListItem): { pct: number; stale: boolean; label: string } | null {
   const eta = etaFromTicket(row.eta)
   if (!eta || typeof eta.progress !== 'number') return null
-  return { pct: Math.max(0, Math.min(100, Math.round(eta.progress))), stale: !!eta.stale }
-}
-function progressTip(view: { pct: number; stale: boolean }) {
-  return view.stale ? `${view.pct}% done\nEstimate not refreshed in time` : `${view.pct}% done`
+  const pct = Math.max(0, Math.min(100, Math.round(eta.progress)))
+  const stale = !!eta.stale
+  return { pct, stale, label: progressAccessibleName(pct, stale, stale ? progressReportedAt(row.eta) : null, props.now, timeZone) }
 }
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs }))
 const columns = computed(() => layout.value.columns.map(def => ({ ...def, field: def.sort, cls: CLS[def.id] })))
@@ -727,9 +727,9 @@ defineExpose({
               <td v-else-if="column.id === 'updated'" class="c-updated"><div class="cell"><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }) }}</time></div></td>
               <td v-else-if="column.id === 'progress'" class="c-progress">
                 <div class="cell">
-                  <span v-if="progressOf(entry.row)" class="progress-read" :class="{ stale: progressOf(entry.row)!.stale }" :data-tip="progressTip(progressOf(entry.row)!)">
+                  <span v-if="progressOf(entry.row)" class="progress-read" :class="{ stale: progressOf(entry.row)!.stale }" role="img" :aria-label="progressOf(entry.row)!.label" :data-tip="progressOf(entry.row)!.label">
                     <span class="bar" aria-hidden="true"><i :style="{ width: `${progressOf(entry.row)!.pct}%` }" /></span>
-                    <span class="pct">{{ progressOf(entry.row)!.pct }}%</span>
+                    <span class="pct" aria-hidden="true">{{ progressOf(entry.row)!.pct }}%</span>
                   </span>
                   <span v-else class="empty" aria-label="No progress">—</span>
                 </div>

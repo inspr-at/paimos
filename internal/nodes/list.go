@@ -16,7 +16,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/eta"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 type listPerson struct {
@@ -113,6 +115,9 @@ type listQuery struct {
 	DateField string     `json:"date_field,omitempty"`
 	DateFrom  *time.Time `json:"date_from,omitempty"`
 	DateTo    *time.Time `json:"date_to,omitempty"`
+	// seen is filled by listNodes for an assignee sort. It is not request
+	// input and stays out of the cursor fingerprint (encoding/json skips it).
+	seen assigneeSeen
 }
 type listCursor struct {
 	Hash string `json:"hash"`
@@ -417,6 +422,15 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 		if mark != nil {
 			anchor = mark.ID
 		}
+		if sortsBy(q, "assignee") {
+			if p, ok := tenant.PrincipalFrom(ctx); ok {
+				seen, err := assigneeAudience(ctx, tx, p)
+				if err != nil {
+					return dbErr("assignee sort", err)
+				}
+				q.seen = seen
+			}
+		}
 		sql, args := listSQL(q, anchor)
 		rows, err := tx.Query(ctx, sql, args...)
 		if err != nil {
@@ -543,31 +557,115 @@ LEFT JOIN LATERAL (SELECT coalesce(assignee_target.id,native_person.id,classic_p
 // otherwise the lead live worker (worker.shown_name).
 const assigneeShownSQL = `coalesce(ap.name, worker.shown_name)`
 
-// assigneeWorkerJoin picks that lead worker. It is attached only while sorting
-// by assignee. ap.name IS NULL inside the lateral skips the lookup when a
-// stored name already decides the order. Eligibility matches the list chip
-// (ticketWorkers / isActiveSession): bound to the ticket, not stopped, and a
-// stop reason that is not an archive. Among those, a worker leads a
-// coordinator, then the earliest start, then the session id — the same
-// tie-break the chip uses once two sessions share a state. The partial index
-// harness_sessions_ticket_eta (tenant, ticket, stopped_at IS NULL) probes one
-// ticket, so a list that is not sorted by assignee never touches the table.
-const assigneeWorkerJoin = ` LEFT JOIN LATERAL (
-    SELECT coalesce(nullif(btrim(s.display_label), ''), nullif(btrim(agent.name), ''),
-        CASE s.harness WHEN 'codex' THEN 'Codex' WHEN 'claude' THEN 'Claude' WHEN 'pi' THEN 'Pi'
-            WHEN 'cursor' THEN 'Cursor' WHEN 'grok' THEN 'Grok'
-            ELSE upper(left(s.harness, 1)) || substr(s.harness, 2) END || ' agent') AS shown_name
+// assigneeSeen is what GET /api/harness-sessions/live would put in who():
+// a session label only with harness.read on the ticket's project, a principal
+// name with harness.read or workspace members.read, otherwise the harness
+// label ("Claude agent"). A zero value withholds both, so a sort cannot
+// order by a name the caller is not shown.
+type assigneeSeen struct {
+	harnessAll bool
+	projects   []string
+	members    bool
+}
+
+// assigneeAudience reads the caller's grants once. Workspace harness.read
+// covers every project; a project grant is listed so the sort can match
+// that ticket's project_id. members.read is workspace-only.
+func assigneeAudience(ctx context.Context, tx pgx.Tx, p tenant.Principal) (assigneeSeen, error) {
+	allowed, err := authz.ProjectsTx(ctx, tx, p)
+	if err != nil {
+		return assigneeSeen{}, err
+	}
+	seen := assigneeSeen{harnessAll: allowed("harness.read", ""), members: allowed("members.read", "")}
+	if seen.harnessAll {
+		return seen, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT n.id::text FROM nodes n
+		JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+		WHERE n.deleted_at IS NULL AND k.slug='project'`)
+	if err != nil {
+		return assigneeSeen{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return assigneeSeen{}, err
+		}
+		if allowed("harness.read", id) {
+			seen.projects = append(seen.projects, id)
+		}
+	}
+	return seen, rows.Err()
+}
+
+// assigneeLeadRank is byLead's state order (web STATE_PRIORITY) at the
+// default chip thresholds: problem, unresponsive (10 min), waiting, awaiting
+// (3 min), throttled, working, idle, stale. Stopped sessions are already
+// excluded. Waiting is a yielded phase, a waiting run, a stale estimate, or
+// a pending approval bound to this session's run — the same evidence the
+// live feed turns into needs_attention, eta_stale and phase.
+const assigneeLeadRank = `CASE
+    WHEN coalesce(run.status IN ('failed','ownership_lost'), false)
+      OR coalesce(s.stop_reason <> 'heartbeat_lost' AND replace(replace(s.stop_reason, '_', ' '), '-', ' ') ~* '\m(error|errored|failed|failure|blocked|crash(ed)?|ownership lost|heartbeat lost|timeout|timed out)\M', false) THEN 0
+    WHEN s.phase IN ('starting','working','stopping') AND s.activity NOT IN ('idle','throttled')
+      AND coalesce(s.heartbeat_at, s.created_at) <= now() - interval '10 minutes' THEN 1
+    WHEN s.phase = 'yielded' OR coalesce(run.status = 'waiting', false)
+      OR (s.eta_reported_at IS NOT NULL AND now() - s.eta_reported_at > 2 * aeon_eta_interval())
+      OR EXISTS (
+        SELECT 1 FROM approval_requests a
+        WHERE a.tenant_id = s.tenant_id AND a.agent_principal_id = s.agent_principal_id
+          AND a.expires_at > now() AND s.run_id IS NOT NULL
+          AND coalesce(a.run_id, CASE WHEN a.resource_kind = 'run' THEN a.resource_id END) = s.run_id
+          AND NOT EXISTS (SELECT 1 FROM approval_decisions d WHERE d.tenant_id = a.tenant_id AND d.request_id = a.id)
+      ) THEN 2
+    WHEN s.activity = 'throttled' THEN 4
+    WHEN s.phase IN ('starting','working','stopping') AND s.activity NOT IN ('idle','throttled')
+      AND (s.heartbeat_at IS NULL OR s.heartbeat_at <= now() - interval '3 minutes') THEN 3
+    WHEN s.phase IN ('starting','working','stopping') AND s.activity NOT IN ('idle','throttled') THEN 5
+    WHEN s.heartbeat_at IS NULL OR s.heartbeat_at <= now() - interval '3 minutes' THEN 7
+    ELSE 6
+END`
+
+// assigneeHarnessLabel is who()'s last resort: the harness word plus " agent".
+const assigneeHarnessLabel = `CASE s.harness WHEN 'codex' THEN 'Codex' WHEN 'claude' THEN 'Claude' WHEN 'pi' THEN 'Pi'
+        WHEN 'cursor' THEN 'Cursor' WHEN 'grok' THEN 'Grok'
+        ELSE upper(left(s.harness, 1)) || substr(s.harness, 2) END || ' agent'`
+
+// assigneeWorkerJoin picks the lead worker and names it the way this caller
+// would see it. It is attached only while sorting by assignee. ap.name IS
+// NULL inside the lateral skips the lookup when a stored name already
+// decides the order. Eligibility matches the list chip (ticketWorkers /
+// isActiveSession): bound to the ticket, not stopped, and a stop reason
+// that is not an archive. Attention state leads, then a worker before a
+// coordinator, then the earliest start, then the session id. The partial
+// index harness_sessions_ticket_eta (tenant, ticket, stopped_at IS NULL)
+// probes one ticket, so a list that is not sorted by assignee never touches
+// the table. harnessAll, projects and members are the boolean and uuid[]
+// placeholders from assigneeSeen.
+func assigneeWorkerJoin(harnessAll, projects, members string) string {
+	shown := `CASE
+        WHEN ` + harnessAll + ` OR f.project_id = ANY(` + projects + `::uuid[])
+            THEN coalesce(nullif(btrim(s.display_label), ''), nullif(btrim(agent.name), ''), ` + assigneeHarnessLabel + `)
+        WHEN ` + members + `
+            THEN coalesce(nullif(btrim(agent.name), ''), ` + assigneeHarnessLabel + `)
+        ELSE ` + assigneeHarnessLabel + `
+    END`
+	return ` LEFT JOIN LATERAL (
+    SELECT ` + shown + ` AS shown_name
     FROM harness_sessions s
     LEFT JOIN principals agent ON agent.tenant_id=s.tenant_id AND agent.id=s.agent_principal_id
+    LEFT JOIN agent_runs run ON run.tenant_id=s.tenant_id AND run.id=s.run_id
     WHERE ap.name IS NULL
       AND s.tenant_id=current_setting('aeon.tenant_id')::uuid
       AND s.ticket_node_id=f.id
       AND s.stopped_at IS NULL
       AND s.phase<>'stopped'
       AND position('archived' in lower(coalesce(s.stop_reason, '')))=0
-    ORDER BY (s.role='coordinator'), s.created_at, s.id
+    ORDER BY ` + assigneeLeadRank + `, (s.role='coordinator'), s.created_at, s.id
     LIMIT 1
 ) worker ON true `
+}
 
 // Label and tag expressions over a node n. Native fields win, also an
 // explicit null; imported work falls back to its classic copy.
@@ -741,7 +839,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
             ORDER BY updated_at DESC OFFSET 0
         ) c
     )` + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
-		SELECT n.id,` + projection + `
+		SELECT n.id,n.project_id,` + projection + `
             assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
             coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + kindJoin + configuredJoin + assigneeJoin + `
         WHERE n.deleted_at IS NULL
@@ -805,7 +903,13 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	anchorArg, limitArg := fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args))
 	people := ""
 	if sortsBy(q, "assignee") {
-		people = ` LEFT JOIN principals ap ON ap.tenant_id=current_setting('aeon.tenant_id')::uuid AND ap.id=f.assignee_id::uuid` + assigneeWorkerJoin
+		projects := q.seen.projects
+		if projects == nil {
+			projects = []string{}
+		}
+		args = append(args, q.seen.harnessAll, projects, q.seen.members)
+		people = ` LEFT JOIN principals ap ON ap.tenant_id=current_setting('aeon.tenant_id')::uuid AND ap.id=f.assignee_id::uuid` +
+			assigneeWorkerJoin(fmt.Sprintf("$%d", len(args)-2), fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args)))
 	}
 	etaJoin := ""
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {

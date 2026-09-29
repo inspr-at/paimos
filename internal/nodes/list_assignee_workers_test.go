@@ -14,11 +14,13 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Assignee sort follows the name the cell shows: the stored person, else the
-// lead live worker (worker before coordinator, earliest start). Stopped
-// sessions and rows with neither sort last in both directions.
+// lead live worker (attention state, then a worker before a coordinator, then
+// the earliest start). Stopped sessions and rows with neither sort last in
+// both directions.
 func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 	p := newPrincipal(t, "assignee-workers")
 	ada := addPrincipalIn(t, p.TenantID, "Ada")
@@ -147,6 +149,8 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The measured plan is the one a workspace reader runs: labels and names visible.
+	q.seen = assigneeSeen{harnessAll: true, members: true}
 	sqlText, args := listSQL(q, nil)
 	var planRaw string
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
@@ -193,5 +197,189 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 	}
 	if seqLoops > 1 || !slices.Contains(indexes, "harness_sessions_ticket_eta") {
 		t.Fatalf("assignee sort did not probe harness_sessions_ticket_eta (seq loops %.0f, indexes %v)", seqLoops, indexes)
+	}
+}
+
+// A viewer sorts by the name the live feed would show them. harness.read
+// (workspace or on the project) uses the session label, members.read uses
+// the principal name, and neither uses the harness label. Hidden names must
+// not decide the order.
+func TestListAssigneeSortUsesTheNameTheViewerSees(t *testing.T) {
+	p := newPrincipal(t, "assignee-redacted")
+	project := kindBySlug(t, p, "project")
+	ticketKind := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Redacted"}`)
+	makeTicket := func(key string) nodeJSON {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"kind_id": ticketKind.ID, "key": key, "title": key, "state": "new", "parent_id": root.ID})
+		return mustNode(t, p, string(raw))
+	}
+	created := []nodeJSON{makeTicket("VIS-1"), makeTicket("VIS-2"), makeTicket("VIS-3")}
+	slices.SortFunc(created, func(a, b nodeJSON) int { return strings.Compare(a.ID, b.ID) })
+	least, mid, most := created[0], created[1], created[2]
+	empty := makeTicket("VIS-4")
+
+	bee := insertNamedAgent(t, p.TenantID, "Bee")
+	cee := insertNamedAgent(t, p.TenantID, "Cee")
+	aaa := insertNamedAgent(t, p.TenantID, "Aaa")
+	// Least id: label Cee, principal Bee, Claude → guest sees "Claude agent".
+	insertLiveSession(t, p.TenantID, root.ID, bee, least.ID, "claude", "worker", "Cee", "working", "busy", "", 30)
+	// Middle: label Aaa, principal Cee, Grok → guest sees "Grok agent".
+	insertLiveSession(t, p.TenantID, root.ID, cee, mid.ID, "grok", "worker", "Aaa", "working", "busy", "", 30)
+	// Greatest id: label Bee, principal Aaa, Codex → guest sees "Codex agent".
+	insertLiveSession(t, p.TenantID, root.ID, aaa, most.ID, "codex", "worker", "Bee", "working", "busy", "", 30)
+
+	guest := insertPerson(t, p.TenantID, "Guest")
+	bindProjectRole(t, p.TenantID, guest.ID, "guest", root.ID)
+	viewer := insertPerson(t, p.TenantID, "Viewer")
+	bindProjectRole(t, p.TenantID, viewer.ID, "viewer", root.ID)
+	names := insertPerson(t, p.TenantID, "Names")
+	bindNamesOnly(t, p.TenantID, names.ID)
+
+	keys := func(who tenant.Principal, sort string) []string {
+		t.Helper()
+		status, body := call(t, &who, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket&sort="+sort, "")
+		page := decode[nodePage](t, status, body, http.StatusOK)
+		out := make([]string, 0, len(page.Items))
+		for _, item := range page.Items {
+			out = append(out, item.Key)
+		}
+		return out
+	}
+	// Labels: Aaa, Bee, Cee. Principal names: Aaa, Bee, Cee on the other
+	// tickets. Harness labels: Claude, Codex, Grok.
+	labelAsc := []string{mid.Key, most.Key, least.Key, empty.Key}
+	labelDesc := []string{least.Key, most.Key, mid.Key, empty.Key}
+	nameAsc := []string{most.Key, least.Key, mid.Key, empty.Key}
+	nameDesc := []string{mid.Key, least.Key, most.Key, empty.Key}
+	genericAsc := []string{least.Key, most.Key, mid.Key, empty.Key}
+	genericDesc := []string{mid.Key, most.Key, least.Key, empty.Key}
+	check := func(name string, who tenant.Principal, asc, desc []string) {
+		t.Helper()
+		if got := keys(who, "assignee"); strings.Join(got, ",") != strings.Join(asc, ",") {
+			t.Fatalf("%s asc: got %v want %v", name, got, asc)
+		}
+		if got := keys(who, "-assignee"); strings.Join(got, ",") != strings.Join(desc, ",") {
+			t.Fatalf("%s desc: got %v want %v", name, got, desc)
+		}
+	}
+	check("admin", p, labelAsc, labelDesc)
+	check("project viewer", viewer, labelAsc, labelDesc)
+	check("members.read", names, nameAsc, nameDesc)
+	check("guest", guest, genericAsc, genericDesc)
+}
+
+// Waiting outranks an older working session, and a problem outranks an older
+// wait. The chip's lead (ticketWorkers / byLead) is the sort name.
+func TestListAssigneeSortLeadsWithTheAttentionState(t *testing.T) {
+	p := newPrincipal(t, "assignee-lead")
+	project := kindBySlug(t, p, "project")
+	ticketKind := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Leads"}`)
+	makeTicket := func(key string) nodeJSON {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"kind_id": ticketKind.ID, "key": key, "title": key, "state": "new", "parent_id": root.ID})
+		return mustNode(t, p, string(raw))
+	}
+	old := makeTicket("LEAD-1")
+	mix := makeTicket("LEAD-2")
+	bad := makeTicket("LEAD-3")
+	ada := insertNamedAgent(t, p.TenantID, "Ada")
+	insertLiveSession(t, p.TenantID, root.ID, ada, old.ID, "claude", "worker", "Mia", "working", "busy", "", 180)
+	// Older working Aaa would lead if start time won. Later yielded Zed is waiting.
+	insertLiveSession(t, p.TenantID, root.ID, ada, mix.ID, "claude", "worker", "Aaa", "working", "busy", "", 120)
+	insertLiveSession(t, p.TenantID, root.ID, ada, mix.ID, "claude", "worker", "Zed", "yielded", "idle", "", 60)
+	// Older wait Yyy would lead if only yielded beat working. Bea has a problem.
+	insertLiveSession(t, p.TenantID, root.ID, ada, bad.ID, "claude", "worker", "Yyy", "yielded", "idle", "", 90)
+	insertLiveSession(t, p.TenantID, root.ID, ada, bad.ID, "claude", "worker", "Bea", "working", "busy", "error: failed", 20)
+
+	keys := func(sort string) []string {
+		t.Helper()
+		status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket&sort="+sort, "")
+		page := decode[nodePage](t, status, body, http.StatusOK)
+		out := make([]string, 0, len(page.Items))
+		for _, item := range page.Items {
+			out = append(out, item.Key)
+		}
+		return out
+	}
+	// Bea, Mia, Zed.
+	if got := keys("assignee"); strings.Join(got, ",") != "LEAD-3,LEAD-1,LEAD-2" {
+		t.Fatalf("asc %v", got)
+	}
+	if got := keys("-assignee"); strings.Join(got, ",") != "LEAD-2,LEAD-1,LEAD-3" {
+		t.Fatalf("desc %v", got)
+	}
+}
+
+func insertNamedAgent(t *testing.T, tenantID, name string) string {
+	t.Helper()
+	var id string
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO principals (tenant_id, kind, name) VALUES ($1, 'agent', $2) RETURNING id::text`, tenantID, name).Scan(&id)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func insertLiveSession(t *testing.T, tenantID, projectID, principal, node, harness, role, label, phase, activity, stopReason string, minutesAgo int) {
+	t.Helper()
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions (
+			tenant_id, project_id, agent_principal_id, ticket_node_id, harness, host, management, role, work_shape,
+			ref_digest, lease_digest, phase, activity, display_label, created_at, heartbeat_at, stop_reason)
+			VALUES ($1, $2, $3, $4, $5, 'test', 'unmanaged', $6, 'ship',
+				decode(replace(gen_random_uuid()::text, '-', ''), 'hex'),
+				decode(replace(gen_random_uuid()::text, '-', ''), 'hex'),
+				$7, $8, nullif($9::text, ''), clock_timestamp() - make_interval(mins => $10::int), clock_timestamp(),
+				nullif($11::text, ''))`,
+			tenantID, projectID, principal, node, harness, role, phase, activity, label, minutesAgo, stopReason)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertPerson(t *testing.T, tenantID, name string) tenant.Principal {
+	t.Helper()
+	person := tenant.Principal{TenantID: tenantID, Kind: tenant.Person, Name: name}
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO principals (tenant_id, kind, name) VALUES ($1, 'person', $2) RETURNING id::text`, tenantID, name).Scan(&person.ID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return person
+}
+
+func bindProjectRole(t *testing.T, tenantID, principalID, roleKey, projectID string) {
+	t.Helper()
+	tag, err := testDB.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+		SELECT $1::uuid,$2::uuid,id,'project',$3::uuid FROM roles WHERE tenant_id=$1::uuid AND key=$4`,
+		tenantID, principalID, projectID, roleKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("bind %s affected %d", roleKey, tag.RowsAffected())
+	}
+}
+
+func bindNamesOnly(t *testing.T, tenantID, principalID string) {
+	t.Helper()
+	var roleID string
+	if err := testDB.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES ($1::uuid,'names_only','Names only') RETURNING id::text`, tenantID).Scan(&roleID); err != nil {
+		t.Fatal(err)
+	}
+	for _, permission := range []string{"nodes.read", "members.read"} {
+		if _, err := testDB.Admin.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES ($1::uuid,$2::uuid,$3)`, tenantID, roleID, permission); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := testDB.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES ($1::uuid,$2::uuid,$3::uuid,'workspace')`, tenantID, principalID, roleID); err != nil {
+		t.Fatal(err)
 	}
 }

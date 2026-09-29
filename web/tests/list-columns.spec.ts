@@ -49,6 +49,7 @@ test('assignee sort uses the live worker when nobody is stored, and progress and
 
   const fresh = row(page, 'PHAROS-11')
   await expect(fresh.locator('.progress-read .pct')).toHaveText('45%')
+  await expect(fresh.locator('.progress-read')).toHaveAttribute('aria-label', '45% done')
   await expect(fresh.locator('.progress-read .bar > i')).toHaveAttribute('style', /width:\s*45%/)
   await expect(fresh.locator('.eta-cell .when')).toHaveText(/^~2\d min$/)
   await expect(fresh.locator('.eta-cell')).toHaveAttribute('data-tip', /45% done/)
@@ -59,6 +60,7 @@ test('assignee sort uses the live worker when nobody is stored, and progress and
   await expect(overdue.locator('.c-progress .empty')).toHaveCount(0)
   const stale = row(page, 'PHAROS-13')
   await expect(stale.locator('.progress-read')).toHaveClass(/stale/)
+  await expect(stale.locator('.progress-read')).toHaveAttribute('aria-label', /^10% done, estimate stale since \d{2}:\d{2}$/)
   await expect(stale.locator('.eta-cell')).toHaveClass(/stale/)
   await expect(stale.locator('.eta-cell svg')).toHaveCount(1)
   await expect(row(page, 'PHAROS-14').locator('.progress-read')).toHaveCount(0)
@@ -74,6 +76,18 @@ test('assignee sort uses the live worker when nobody is stored, and progress and
   const order = await names.allTextContents()
   expect(order.indexOf('Progress')).toBeGreaterThan(-1)
   expect(order.indexOf('Progress')).toBeLessThan(order.indexOf('ETA'))
+})
+
+test('progress names a stale estimate when the ETA column is hidden', async ({ page }) => {
+  const data = world()
+  data.preferences['list:p-pharos'] = { visible: ['status', 'priority', 'assignee', 'updated', 'progress'] }
+  await mockWork(page, data)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/p/PHAROS?sort=assignee')
+  await expect(page.getByRole('columnheader', { name: 'ETA' })).toHaveCount(0)
+  await expect(row(page, 'PHAROS-13').locator('.progress-read')).toHaveAttribute('aria-label', /^10% done, estimate stale since \d{2}:\d{2}$/)
+  await expect(row(page, 'PHAROS-11').locator('.progress-read')).toHaveAttribute('aria-label', '45% done')
+  await expect(row(page, 'PHAROS-11').locator('.c-eta')).toHaveCount(0)
 })
 
 for (const width of [1600, 390] as const) {
