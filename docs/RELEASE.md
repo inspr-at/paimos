@@ -207,7 +207,7 @@ version, date and theme. A release without a presentation shows its benefits
 alone in the header, or no header at all. The Git tag message is evidence, never
 a title.
 
-Presentations live in `release_presentations` (migration `0943`), keyed by
+Presentations live in `release_presentations` (migration `0945`), keyed by
 tenant, product project and calendar version, protected by tenant RLS and project
 visibility, separate from tags, manifests and note snapshots. The version need not
 be in the running build yet, so the presentation can be written before the new
