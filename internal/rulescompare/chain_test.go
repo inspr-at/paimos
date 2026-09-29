@@ -125,6 +125,59 @@ func TestClaudeChainOrderFallbackAndBoundaries(t *testing.T) {
 	}
 }
 
+func TestClaudeLocalAtEachLevelSuppressesAgentsFallback(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "fixture")
+	leaf := filepath.Join(repo, "pkg")
+	if err := os.MkdirAll(leaf, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitDir(t, repo)
+	writeFixture(t, filepath.Join(repo, "CLAUDE.local.md"), doc("root-local", "Root local.", "Synthetic."))
+	writeFixture(t, filepath.Join(leaf, "CLAUDE.md"), doc("leaf", "Leaf.", "Synthetic."))
+	writeFixture(t, filepath.Join(repo, "AGENTS.md"), "SYNTHETIC_OUTSIDE_251 agents\n")
+	got, err := LoadChain("claude-code", "", leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(logicals(got), ",") != "repo/CLAUDE.local.md,repo/pkg/CLAUDE.md" {
+		t.Fatalf("ancestor local omitted: %v", logicals(got))
+	}
+	if strings.Contains(texts(got), "SYNTHETIC_OUTSIDE_251") {
+		t.Fatal("agents fallback loaded beside an ancestor local file")
+	}
+
+	localOnly := filepath.Join(t.TempDir(), "local-only")
+	if err = os.MkdirAll(localOnly, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitDir(t, localOnly)
+	writeFixture(t, filepath.Join(localOnly, "CLAUDE.local.md"), doc("local", "Local.", "Synthetic."))
+	writeFixture(t, filepath.Join(localOnly, "AGENTS.md"), doc("agents", "Agents.", "Synthetic."))
+	got, err = LoadChain("claude-code", "", localOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(logicals(got), ",") != "repo/CLAUDE.local.md" {
+		t.Fatalf("wrong fallback chain: %v", logicals(got))
+	}
+
+	nested := filepath.Join(t.TempDir(), "nested-local")
+	nestedLeaf := filepath.Join(nested, "pkg")
+	if err = os.MkdirAll(nestedLeaf, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitDir(t, nested)
+	writeFixture(t, filepath.Join(nested, "AGENTS.md"), "SYNTHETIC_OUTSIDE_251\n")
+	writeFixture(t, filepath.Join(nestedLeaf, "CLAUDE.local.md"), "leaf local\n")
+	got, err = LoadChain("claude-code", "", nestedLeaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(logicals(got), ",") != "repo/pkg/CLAUDE.local.md" || strings.Contains(texts(got), "SYNTHETIC_OUTSIDE_251") {
+		t.Fatalf("nested local did not suppress fallback: %v", logicals(got))
+	}
+}
+
 func TestClaudeSymlinkAndGitRoot(t *testing.T) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "fixture")

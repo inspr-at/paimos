@@ -40,8 +40,9 @@ type ChainFile struct {
 // LoadChain reads the allowlisted instruction chain for harness (claude-code
 // or codex). It does not list directories or read above the git root. Claude
 // @path imports are expanded inside the given repo or home root, with a depth,
-// count and byte bound. Home and repo are explicit; this function does not
-// look up the operator's home directory.
+// count and byte bound. CLAUDE.local.md is read at each project directory and
+// counts against the AGENTS.md fallback. Home and repo are explicit; this
+// function does not look up the operator's home directory.
 func LoadChain(harness, home, repo string) (Chain, error) {
 	if harness != "claude-code" && harness != "codex" {
 		return Chain{}, fmt.Errorf("harness must be claude-code or codex")
@@ -70,7 +71,7 @@ func LoadChain(harness, home, repo string) (Chain, error) {
 	}
 	b := &builder{harness: harness, repo: logicalRoot, home: home, seen: map[string]bool{}}
 	if harness == "claude-code" {
-		err = b.claude(home, dirs, abs)
+		err = b.claude(home, dirs)
 	} else {
 		err = b.codex(home, dirs)
 	}
@@ -125,48 +126,42 @@ func (b *builder) add(logical, text, sum string, size int) bool {
 	return true
 }
 
-func (b *builder) claude(home string, dirs []string, launch string) error {
+func (b *builder) claude(home string, dirs []string) error {
 	if home != "" {
 		if _, err := b.take(filepath.Join(home, ".claude", "CLAUDE.md"), "user/CLAUDE.md", false); err != nil {
 			return err
 		}
-		if b.capped {
-			return nil
-		}
 	}
+	// Claude walks root-down. At each directory it loads CLAUDE.md, or
+	// .claude/CLAUDE.md when that is absent, then CLAUDE.local.md. Any of
+	// those project files suppresses the AGENTS.md fallback. The user file
+	// does not count.
 	found := false
 	for _, dir := range dirs {
 		ok, err := b.take(filepath.Join(dir, "CLAUDE.md"), logicalName(b.repo, dir, "CLAUDE.md"), false)
 		if err != nil {
 			return err
 		}
-		if ok {
-			found = true
-		} else {
+		if !ok {
 			ok, err = b.take(filepath.Join(dir, ".claude", "CLAUDE.md"), logicalName(b.repo, dir, ".claude/CLAUDE.md"), false)
 			if err != nil {
 				return err
 			}
-			found = found || ok
 		}
-		if b.capped {
-			return nil
+		local, err := b.take(filepath.Join(dir, "CLAUDE.local.md"), logicalName(b.repo, dir, "CLAUDE.local.md"), false)
+		if err != nil {
+			return err
 		}
+		found = found || ok || local
 	}
-	// AGENTS.md is only part of the chain when the project has no CLAUDE.md.
-	// The user file does not count. A symlink is an error only on this path.
 	if !found {
 		for _, dir := range dirs {
 			if _, err := b.take(filepath.Join(dir, "AGENTS.md"), logicalName(b.repo, dir, "AGENTS.md"), false); err != nil {
 				return err
 			}
-			if b.capped {
-				return nil
-			}
 		}
 	}
-	_, err := b.take(filepath.Join(launch, "CLAUDE.local.md"), logicalName(b.repo, launch, "CLAUDE.local.md"), false)
-	return err
+	return nil
 }
 
 func (b *builder) codex(home string, dirs []string) error {
