@@ -45,6 +45,8 @@ test('changes read in product words', () => {
   assert.deepEqual(describeChange({ field: 'assignee', from: null, to: 'mba' }), { label: 'assigned it to', to: 'mba' })
   assert.deepEqual(describeChange({ field: 'priority', from: null, to: 'low' }), { label: 'changed priority', from: 'No priority', to: 'Low' })
   assert.equal(describeChange({ field: 'parent', from: 'a', to: 'b' }).label, 'moved it to another parent')
+  assert.deepEqual(describeChange({ field: 'tags', from: null, to: 'process-learning' }), { label: 'added the label', to: 'process-learning' })
+  assert.deepEqual(describeChange({ field: 'tags', from: 'ops', to: 'ops, process-learning' }), { label: 'changed labels', from: 'ops', to: 'ops, process-learning' })
 })
 
 test('own comments stay editable for 15 minutes', () => {

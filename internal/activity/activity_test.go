@@ -196,6 +196,35 @@ func TestTimelineMergePaginationAndImportedDiffs(t *testing.T) {
 	}
 }
 
+func TestNativeLabelChange(t *testing.T) {
+	f := setup(t)
+	at := time.Date(2026, 2, 2, 9, 0, 0, 0, time.UTC)
+	id := f.event("node.updated", at,
+		record{"state": "done", "title": "Ticket", "fields": record{"tags": []any{"ops"}}},
+		record{"state": "done", "title": "Ticket", "fields": record{"tags": []any{record{"name": "ops"}, "process-learning"}}})
+	page := f.page("?limit=20")
+	if len(page.Items) != 1 || page.Items[0].ID != id || page.Items[0].Author.Name != "Writer" || len(page.Items[0].Changes) != 1 {
+		t.Fatalf("timeline %+v", page.Items)
+	}
+	change := page.Items[0].Changes[0]
+	if change.Field != "tags" || change.From == nil || *change.From != "ops" || change.To == nil || *change.To != "ops, process-learning" {
+		t.Fatalf("label diff %+v", change)
+	}
+	added := f.event("node.updated", at.Add(time.Minute),
+		record{"state": "done", "title": "Ticket", "fields": record{}},
+		record{"state": "done", "title": "Ticket", "fields": record{"tags": []any{"process-learning"}}})
+	page = f.page("?limit=20")
+	var found bool
+	for _, item := range page.Items {
+		if item.ID == added {
+			found = len(item.Changes) == 1 && item.Changes[0].Field == "tags" && item.Changes[0].From == nil && item.Changes[0].To != nil && *item.Changes[0].To == "process-learning"
+		}
+	}
+	if !found {
+		t.Fatalf("added label %+v", page.Items)
+	}
+}
+
 func TestCommentLifecycleAuthorizationIsolationAndConcurrency(t *testing.T) {
 	f := setup(t)
 	path := "/api/nodes/" + f.node + "/comments"

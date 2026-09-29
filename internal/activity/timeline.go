@@ -357,9 +357,39 @@ func classicAuthor(r record, source string, people map[string]Author, idKey stri
 	return Author{Name: "Unknown"}
 }
 
+// tagLabel is the ticket's labels as one string, names in stored order.
+// A missing list and an empty list are the same. Objects contribute their name.
+func tagLabel(v any) any {
+	names := tagNames(v)
+	if len(names) == 0 {
+		return nil
+	}
+	return strings.Join(names, ", ")
+}
+
+func tagNames(v any) []string {
+	switch value := v.(type) {
+	case string:
+		if name := strings.TrimSpace(value); name != "" {
+			return []string{name}
+		}
+	case map[string]any:
+		if name := strings.TrimSpace(textValue(value["name"])); name != "" {
+			return []string{name}
+		}
+	case []any:
+		var names []string
+		for _, item := range value {
+			names = append(names, tagNames(item)...)
+		}
+		return names
+	}
+	return nil
+}
+
 func nativeFields(r record, people map[string]Author) record {
 	f := object(r["fields"])
-	return record{"status": r["state"], "priority": f["priority"], "assignee": personName(f["assignee"], "", people), "title": r["title"], "parent": r["parent_id"]}
+	return record{"status": r["state"], "priority": f["priority"], "assignee": personName(f["assignee"], "", people), "title": r["title"], "parent": r["parent_id"], "tags": tagLabel(f["tags"])}
 }
 
 func classicFields(r record, source string, people map[string]Author) record {
@@ -383,7 +413,7 @@ func personName(v any, source string, people map[string]Author) any {
 
 func diff(before, after record) []FieldChange {
 	var changes []FieldChange
-	for _, field := range []string{"status", "priority", "assignee", "title", "parent"} {
+	for _, field := range []string{"status", "priority", "assignee", "title", "parent", "tags"} {
 		a, b := scalar(before[field]), scalar(after[field])
 		if (a == nil && b == nil) || (a != nil && b != nil && *a == *b) {
 			continue

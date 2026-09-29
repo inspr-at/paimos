@@ -231,7 +231,7 @@ export const deleteProjectGroup = (id: string) => json<ProjectGroupWrite>(`/proj
 export const assignProjectGroup = (groupId: string | null, projectIds: string[]) => json<ProjectGroupWrite>('/project-groups/assign', 'POST', { group_id: groupId, project_ids: projectIds })
 export const undoGroupEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 // B2 ticket activity and comments.
-export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent'
+export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent' | 'tags'
 export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }
 export interface ActivityItem {
   id: string; at: string; type: 'comment' | 'change' | 'created'
