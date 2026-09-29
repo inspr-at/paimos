@@ -215,17 +215,23 @@ func nextVersion(now time.Time, published string) string {
 // and maxBudgetBytes bytes of rule text across every snapshot it reads); and by
 // the number of session files it may render (maxBudgetContexts). The caps and
 // the server-side timeout are the protection; the measurements only show that
-// ordinary stores stay far from them. Render cost depends on the store (a
-// disabled-rule store measured ~1 ms per render at the bound here, an
-// enabled-rule store ~3 ms elsewhere), so a check that would outrun the
-// deadline answers 503 and commits nothing (BenchmarkBudgetCheck,
-// TestBudgetCapFitsTheDeadline). Past a bound the publication is refused (422
-// budget_check_too_large). Variables so tests can change them; beforeRender and
+// ordinary stores stay far from them. Render cost depends on the store and the
+// machine (a CI runner is several times slower than a workstation), so the caps
+// keep the worst check to a fraction of the deadline there too, and a check
+// that would still outrun it answers 503 and commits nothing
+// (BenchmarkBudgetCheck, TestBudgetCapFitsTheDeadline). Past a bound the
+// publication is refused (422 budget_check_too_large).
+//
+// Product limit: 1,000 files per check. A company-wide set touches every
+// role and harness (20 files) of every project with project rules plus one
+// without, for a person without person rules and for each person who has
+// some, so one company set fits while (projects + 1) × (people with rules + 1)
+// stays at or below 50. Variables so tests can change them; beforeRender and
 // beforeStore are test hooks.
 var (
-	maxBudgetContexts       = 4000
-	maxBudgetRules          = 4000
-	maxBudgetBytes    int64 = 4 << 20
+	maxBudgetContexts       = 1000
+	maxBudgetRules          = 2000
+	maxBudgetBytes    int64 = 2 << 20
 	beforeRender            = func() {}
 	beforeStore             = func(context.Context, pgx.Tx) error { return nil }
 )
@@ -234,7 +240,7 @@ var (
 // no size and no identity.
 var (
 	errHiddenBudget = &Error{Status: 422, Code: "rules_budget_exceeded", Message: "A session file for another person or agent would exceed the limit. Shorten always-on text or move it to details."}
-	errTooManyCtx   = &Error{Status: 422, Code: "budget_check_too_large", Message: "This publication touches too many session files, or too many rules, to check at once. Publish fewer sets together."}
+	errTooManyCtx   = &Error{Status: 422, Code: "budget_check_too_large", Message: "This publication touches more session files (limit 1,000) or rules (limit 2,000) than one check can cover. Publish fewer sets together."}
 )
 
 // work tracks one budget check against the deadline and the store bounds.
