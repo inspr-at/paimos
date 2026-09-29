@@ -163,3 +163,85 @@ func TestPartialAttentionKeepsSixOfSevenAndADeclaredTotal(t *testing.T) {
 		t.Fatalf("count did not round-trip: %+v %s %v", detail, raw, err)
 	}
 }
+
+func TestResolveAttentionKeepsLegacyUncertainty(t *testing.T) {
+	enroll := func(n int) []string {
+		ids := make([]string, n)
+		for i := range ids {
+			ids[i] = fmt.Sprintf("a%02d", i)
+		}
+		return ids
+	}
+	blocked := func(ids []string, n int) []AccountAttention {
+		items := make([]AccountAttention, n)
+		for i := range items {
+			items[i] = AccountAttention{AccountID: ids[i+1], Reason: PinDrifted}
+		}
+		return items
+	}
+	type want struct {
+		count, list int
+		truncated   bool
+	}
+	check := func(t *testing.T, name string, enrolled []string, items []AccountAttention, count int, flag bool, want want) {
+		t.Helper()
+		rawIn, err := json.Marshal(HarnessDetail{State: "ready", Attention: items, AttentionCount: count, AttentionTruncated: flag})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded HarnessDetail
+		if err := json.Unmarshal(rawIn, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if decoded.AttentionCount != count || decoded.AttentionTruncated != flag {
+			t.Fatalf("%s decode: %+v", name, decoded)
+		}
+		got := ResolveAttention("codex", "ready", enrolled, decoded.Attention, decoded.AttentionCount, decoded.AttentionTruncated)
+		if got.Count != want.count || len(got.Accounts) != want.list || got.Truncated != want.truncated {
+			t.Fatalf("%s: count=%d list=%d truncated=%v want %+v", name, got.Count, len(got.Accounts), got.Truncated, want)
+		}
+		for _, item := range got.Accounts {
+			if item.AccountID == enrolled[0] {
+				t.Fatalf("%s listed the healthy account", name)
+			}
+		}
+		rawOut, err := json.Marshal(HarnessDetail{State: "ready", Attention: got.Accounts, AttentionCount: got.Count, AttentionTruncated: got.Truncated})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Truncated != bytes.Contains(rawOut, []byte(`"attention_truncated":true`)) {
+			t.Fatalf("%s wire %s", name, rawOut)
+		}
+		var round HarnessDetail
+		if err := json.Unmarshal(rawOut, &round); err != nil || round.AttentionCount != got.Count || round.AttentionTruncated != got.Truncated || len(round.Attention) != len(got.Accounts) {
+			t.Fatalf("%s round-trip %+v %s %v", name, round, rawOut, err)
+		}
+	}
+	seven := enroll(7)
+	fiveNames := blocked(seven, 5)
+	check(t, "legacy", seven, fiveNames, 0, false, want{5, 5, true})
+	check(t, "count-only", seven, fiveNames, 6, false, want{6, 5, true})
+	check(t, "flag-only", seven, fiveNames, 0, true, want{5, 5, true})
+	for _, n := range []int{5, 6, 7, 32, 33} {
+		ids := enroll(n)
+		items := blocked(ids, n-1)
+		check(t, fmt.Sprintf("total%d", n), ids, items, n-1, false, want{n - 1, n - 1, false})
+	}
+	ids34 := enroll(34)
+	full34 := blocked(ids34, 33)
+	check(t, "total34-full", ids34, full34, 33, false, want{33, AttentionAccountLimit, true})
+	check(t, "total34-capped", ids34, full34[:AttentionAccountLimit], 33, false, want{33, AttentionAccountLimit, true})
+	ids65 := enroll(65)
+	full65 := blocked(ids65, 64)
+	check(t, "total65-full", ids65, full65, 64, false, want{64, AttentionAccountLimit, true})
+	check(t, "total65-capped", ids65, full65[:AttentionAccountLimit], 64, false, want{64, AttentionAccountLimit, true})
+	local := PartialAttention("codex", enroll(6), "ready", blocked(enroll(6), 5))
+	if local.Count != 5 || local.Truncated || len(local.Accounts) != 5 {
+		t.Fatalf("current daemon list of five was treated as uncertain: %+v", local)
+	}
+	pair := enroll(2)
+	one := PartialAttention("codex", pair, "ready", []AccountAttention{{AccountID: pair[1], Reason: PinDrifted}})
+	if resolved := one.WithDeclaredTotal(0, false, len(pair)); resolved.Count != 1 || resolved.Truncated || len(resolved.Accounts) != 1 {
+		t.Fatalf("short list without metadata became uncertain: %+v", resolved)
+	}
+}

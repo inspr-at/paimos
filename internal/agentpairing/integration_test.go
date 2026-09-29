@@ -1436,6 +1436,36 @@ func TestPartialAttentionCountsSixOfSeven(t *testing.T) {
 			t.Fatal("omitted account was stored in the capped list")
 		}
 	}
+	// A legacy five-name list, a count without the flag, and a flag without
+	// the count must not reconcile as a complete set of five.
+	for _, tc := range []struct {
+		name      string
+		detail    agentsetup.HarnessDetail
+		count     int
+		truncated bool
+	}{
+		{name: "legacy", detail: agentsetup.HarnessDetail{State: "ready", Attention: attention[:5]}, count: 5, truncated: true},
+		{name: "count-only", detail: agentsetup.HarnessDetail{State: "ready", Attention: attention[:5], AttentionCount: 6}, count: 6, truncated: true},
+		{name: "flag-only", detail: agentsetup.HarnessDetail{State: "ready", Attention: attention[:5], AttentionTruncated: true}, count: 5, truncated: true},
+	} {
+		progress.HarnessDetails["claude"] = tc.detail
+		proof["progress"] = progress
+		w = f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200)
+		if !strings.Contains(w.Body.String(), `"attention_truncated":true`) || !strings.Contains(w.Body.String(), fmt.Sprintf(`"attention_count":%d`, tc.count)) {
+			t.Fatalf("%s body: %s", tc.name, w.Body.String())
+		}
+		report = agentpairing.View{}
+		decodeResult(t, w, &report)
+		got = report.HarnessDetails["claude"]
+		if got.AttentionCount != tc.count || !got.AttentionTruncated || len(got.Attention) != 5 {
+			t.Fatalf("%s: %+v", tc.name, got)
+		}
+		for _, item := range got.Attention {
+			if item.AccountID == blocked[5] {
+				t.Fatalf("%s stored the omitted account", tc.name)
+			}
+		}
+	}
 }
 
 func (f *fixture) addClaude(p *proposal, computerID, key string) agentpairing.View {

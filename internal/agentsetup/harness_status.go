@@ -55,8 +55,10 @@ func HarnessFailureReason(err error) string {
 // enrolled accounts that still need a fix while a sibling can work. Reasons
 // use this same vocabulary. Commands are derived again from the reason and
 // are never stored on the attention entry. attention_count is the full size
-// of that subset. attention_truncated is true when the list stops at
-// AttentionAccountLimit; an omitted account is not ready.
+// of that subset, or a lower bound when an older report stopped at
+// legacyAttentionCap names without a count. attention_truncated is true when
+// the stored list is shorter than the count or that older report did not
+// prove the list was complete. An omitted account is not ready.
 
 const (
 	PinMissing    = "pin_missing"
@@ -85,6 +87,11 @@ type HarnessFix struct {
 // maxItems matches it. The full total still travels in attention_count.
 const AttentionAccountLimit = 32
 
+// legacyAttentionCap is the attention_accounts limit from before attention_count
+// and attention_truncated were reported. A list of that length with no count
+// has not proved that every blocked account is present.
+const legacyAttentionCap = 5
+
 // AccountAttention names one enrolled account that still needs a fix while
 // its harness stays ready because another account of that harness can work.
 type AccountAttention struct {
@@ -93,8 +100,9 @@ type AccountAttention struct {
 }
 
 // AttentionBlock is the validated partial block for one ready harness.
-// Count is the full number of blocked enrollments. Truncated means Accounts
-// is a prefix of that set.
+// Count is the full number of blocked enrollments, or a lower bound when
+// Truncated is set and the sender did not prove a larger total. Truncated
+// means an account missing from Accounts is not ready.
 type AttentionBlock struct {
 	Accounts  []AccountAttention
 	Count     int
@@ -300,20 +308,34 @@ func PartialAttention(harness string, enrolledIDs []string, state string, items 
 	return block
 }
 
-// WithDeclaredTotal keeps a caller's full count when that caller already
-// truncated a proper subset. The count cannot shrink the validated list and
-// cannot meet or exceed the enrollment total.
+// WithDeclaredTotal keeps a caller's larger proper-subset count even when the
+// truncation flag was omitted, and keeps an explicit truncation flag even
+// when the count was omitted. A count that meets or exceeds enrollment is
+// ignored and does not shrink the validated list. A list of exactly
+// legacyAttentionCap names and no count stays uncertain, because an older
+// daemon stopped there. A matching count, including five names, stays
+// complete. Truncation already applied by PartialAttention is left in place.
 func (b AttentionBlock) WithDeclaredTotal(count int, truncated bool, enrolled int) AttentionBlock {
-	if len(b.Accounts) == 0 || !truncated || count <= b.Count || count >= enrolled {
+	if len(b.Accounts) == 0 {
 		return b
 	}
-	b.Count = count
-	b.Truncated = true
+	if count > b.Count && count < enrolled {
+		b.Count = count
+		b.Truncated = true
+		return b
+	}
+	if truncated {
+		b.Truncated = true
+		return b
+	}
+	if count == 0 && len(b.Accounts) == legacyAttentionCap {
+		b.Truncated = true
+	}
 	return b
 }
 
-// ResolveAttention validates a reported list, then restores a declared total
-// that a truncated sender already computed.
+// ResolveAttention validates a reported list, then applies a declared total
+// and legacy-cap uncertainty.
 func ResolveAttention(harness, state string, enrolledIDs []string, items []AccountAttention, declaredCount int, declaredTruncated bool) AttentionBlock {
 	enrolled := map[string]bool{}
 	for _, id := range enrolledIDs {

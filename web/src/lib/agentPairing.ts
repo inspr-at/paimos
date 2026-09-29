@@ -113,9 +113,9 @@ export interface HarnessDetail {
   reason?: HarnessReason
   fix?: HarnessFix
   attention_accounts?: AccountAttention[]
-  /** Full count of enrolled accounts that need a fix. May exceed attention_accounts when that list is truncated. */
+  /** Full count of enrolled accounts that need a fix, or a lower bound when an older report stopped at five names. */
   attention_count?: number
-  /** True when attention_accounts omits accounts included in attention_count. */
+  /** True when the list may omit a blocked account. An omitted account is not ready. */
   attention_truncated?: boolean
 }
 
@@ -976,6 +976,8 @@ function attentionItems(detail: HarnessDetail | undefined): AccountAttention[] {
   return detail?.state === 'ready' ? detail.attention_accounts ?? [] : []
 }
 
+// Parsed details already carry attention_truncated when a five-name list had no count.
+// A matching count without that flag is complete, including a list of five.
 function attentionReport(detail: HarnessDetail | undefined): AttentionReport | undefined {
   const accounts = attentionItems(detail)
   if (!accounts.length) return
@@ -1536,7 +1538,8 @@ function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unkn
   if (items.length === 0 || items.length >= enrolled.size) return
   const declared = attentionTotal(declaredCount, enrolled.size)
   let count = items.length
-  // Five or more names without a total may be the old cap: absence is not readiness. A declared total names the real set.
+  // Five or more names without a total may be the old cap: absence is not readiness.
+  // A declared total equal to the list, including exactly five, is complete.
   let truncated = declaredTruncated === true || (declared === undefined && items.length >= 5)
   if (declared !== undefined && declared > items.length) {
     count = declared

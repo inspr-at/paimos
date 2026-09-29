@@ -994,6 +994,75 @@ test('six blocked accounts of seven keep the full count and are not labeled read
   assert.equal(describeEnrollmentStatus(old, { account_id: omitted, harness: 'codex' }).includes('Ready'), false)
 })
 
+function attentionAccountId(index: number): string {
+  return `88888888-8888-4888-8888-${String(index).padStart(12, '0')}`
+}
+
+test('legacy, count-only and truncation-only attention never call an omitted account ready', async () => {
+  async function parsedAttention(total: number, blockedCount: number, listed: number, detail: Record<string, unknown>) {
+    const ids = Array.from({ length: total }, (_, index) => attentionAccountId(index))
+    const healthy = ids[0]!
+    const blocked = ids.slice(1, 1 + blockedCount)
+    const enrollments = ids.map((account_id, index) => enrollment({
+      account_id, account_key: `codex-${index}`, harness: 'codex', label: index ? `Blocked ${index}` : 'Healthy',
+    }))
+    const computer = view({
+      state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+      harness_statuses: { codex: 'ready' },
+      enrollments,
+      harness_details: {
+        codex: {
+          state: 'ready',
+          attention_accounts: blocked.slice(0, listed).map(account_id => ({ account_id, reason: 'pin_drifted' })),
+          ...detail,
+        },
+      },
+    })
+    globalThis.fetch = async () => jsonResponse({ computers: [computer] })
+    const parsed = (await listPairingComputers())[0]!
+    return { healthy, blocked, parsed }
+  }
+
+  const legacy = await parsedAttention(7, 6, 5, {})
+  assert.equal(legacy.parsed.harness_details?.codex?.attention_count, 5)
+  assert.equal(legacy.parsed.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeHarnessHint(legacy.parsed, 'codex'), 'At least 5 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(legacy.parsed, { account_id: legacy.blocked[5]!, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(legacy.parsed, { account_id: legacy.healthy, harness: 'codex' }).includes('Ready'), false)
+
+  const countOnly = await parsedAttention(7, 6, 5, { attention_count: 6 })
+  assert.equal(countOnly.parsed.harness_details?.codex?.attention_count, 6)
+  assert.equal(countOnly.parsed.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeHarnessHint(countOnly.parsed, 'codex'), '6 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(countOnly.parsed, { account_id: countOnly.blocked[5]!, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(countOnly.parsed, { account_id: countOnly.healthy, harness: 'codex' }).includes('Ready'), false)
+  assert.equal(describeEnrollmentStatus(countOnly.parsed, { account_id: countOnly.blocked[0]!, harness: 'codex' }), 'Pin changed')
+
+  const flagOnly = await parsedAttention(7, 6, 5, { attention_truncated: true })
+  assert.equal(flagOnly.parsed.harness_details?.codex?.attention_count, 5)
+  assert.equal(flagOnly.parsed.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeHarnessHint(flagOnly.parsed, 'codex'), 'At least 5 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(flagOnly.parsed, { account_id: flagOnly.blocked[5]!, harness: 'codex' }), 'Needs attention')
+
+  for (const [total, blockedCount] of [[5, 4], [6, 5], [7, 6], [32, 31], [33, 32]] as const) {
+    const current = await parsedAttention(total, blockedCount, blockedCount, { attention_count: blockedCount })
+    assert.equal(current.parsed.harness_details?.codex?.attention_truncated, undefined, `total ${total}`)
+    assert.equal(current.parsed.harness_details?.codex?.attention_count, blockedCount)
+    assert.equal(describeEnrollmentStatus(current.parsed, { account_id: current.healthy, harness: 'codex' }), 'Ready', `total ${total}`)
+    assert.equal(describeHarnessHint(current.parsed, 'codex').startsWith('At least '), false, `total ${total}`)
+  }
+
+  const capped34 = await parsedAttention(34, 33, 32, { attention_count: 33, attention_truncated: true })
+  assert.equal(describeEnrollmentStatus(capped34.parsed, { account_id: capped34.blocked[32]!, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(capped34.parsed, { account_id: capped34.healthy, harness: 'codex' }).includes('Ready'), false)
+
+  const capped65 = await parsedAttention(65, 64, 32, { attention_count: 64, attention_truncated: true })
+  assert.equal(capped65.parsed.harness_details?.codex?.attention_count, 64)
+  assert.equal(capped65.parsed.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeEnrollmentStatus(capped65.parsed, { account_id: capped65.blocked[32]!, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(capped65.parsed, { account_id: capped65.healthy, harness: 'codex' }).includes('Ready'), false)
+})
+
 test('Homebrew commands are additive, bounded and published by this instance', async () => {
   const command = "brew install inspr-at/tap/aeon-agentd\naeon-agentd pair --url 'https://other.example'"
   globalThis.fetch = async () => jsonResponse(guidePayload({ homebrew_command: command }))
