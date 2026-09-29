@@ -5,8 +5,8 @@ import AppIcon from '../AppIcon.vue'
 import BizIcon from '../business/BizIcon.vue'
 import RulesDialog from './RulesDialog.vue'
 import {
-  HARNESS_LABEL, HARNESSES, LAYER_LABEL, ROLE_LABEL, ROLES, budgetParts, byteSize, explainRules, mergeQuery, rulesMessage,
-  type ExplainedRule, type ExplainedRules, type ExplainedSet, type HarnessName, type RoleName, type RuleScope,
+  HARNESS_LABEL, HARNESSES, LAYER_LABEL, ROLE_LABEL, ROLES, RulesError, budgetParts, byteSize, explainRules, mergeQuery, orderPreviewAgents, previewDenial, previewOptionLabel, rulesMessage,
+  type ExplainedRule, type ExplainedRules, type ExplainedSet, type HarnessName, type NamedAgent, type RoleName, type RuleScope,
 } from '../../lib/rules'
 
 // What one agent receives now, as a translation table (AEON-314): every rule
@@ -17,7 +17,7 @@ import {
 const props = defineProps<{
   projects: { id: string; title: string }[]
   people: { id: string; name: string }[]
-  agents: { id: string; name: string }[]
+  agents: NamedAgent[]
   projectId: string
   personId: string
   waiting: number
@@ -40,6 +40,7 @@ const showFile = ref(false)
 const projectName = computed(() => props.projects.find(item => item.id === projectId.value)?.title ?? 'No project')
 const personName = computed(() => props.people.find(item => item.id === personId.value)?.name ?? 'You')
 const agentName = computed(() => props.agents.find(item => item.id === agentId.value)?.name ?? '')
+const previewAgents = computed(() => orderPreviewAgents(props.agents))
 const forLine = computed(() => [projectName.value, personName.value, agentName.value || ROLE_LABEL[role.value]].join(' · '))
 const fmt = (n: number) => n.toLocaleString('en-US')
 
@@ -82,8 +83,24 @@ const summary = computed(() => {
 })
 const whereOf = (scope: RuleScope) => props.where?.(scope) ?? LAYER_LABEL[scope.layer]
 
+// A named agent the caller cannot preview says why in a plain sentence
+// (AEON-315), from the listing or from the server's denial code.
+function denial(cause: unknown): string {
+  if (!(cause instanceof RulesError)) return ''
+  const selected = props.agents.find(item => item.id === agentId.value)
+  return previewDenial(cause.code, selected?.preview?.creator_name)
+}
+
 let serial = 0
 async function load() {
+  const blocked = props.agents.find(item => item.id === agentId.value && item.preview?.allowed === false)
+  if (blocked) {
+    serial++
+    data.value = null
+    loading.value = false
+    error.value = previewDenial(blocked.preview?.reason ?? '', blocked.preview?.creator_name) || 'You do not have permission for that.'
+    return
+  }
   const request = mergeQuery({ projectId: projectId.value, personId: personId.value, agentId: agentId.value, role: role.value, harness: harness.value, taskId: '' })
   if ('error' in request) { error.value = request.error; data.value = null; return }
   const mine = ++serial
@@ -93,7 +110,7 @@ async function load() {
     const out = await explainRules(request.query)
     if (mine === serial) data.value = out
   } catch (cause) {
-    if (mine === serial) { data.value = null; error.value = rulesMessage(cause) }
+    if (mine === serial) { data.value = null; error.value = denial(cause) || rulesMessage(cause) }
   } finally { if (mine === serial) loading.value = false }
 }
 onMounted(load)
@@ -110,7 +127,7 @@ watch([projectId, role, harness, agentId], load)
     <div v-if="choosing" class="choose" role="group" aria-label="Preview for">
       <label>Project<select v-model="projectId" class="field"><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.title }}</option></select></label>
       <label>Role<select v-model="role" class="field"><option v-for="item in ROLES" :key="item" :value="item">{{ ROLE_LABEL[item] }}</option></select></label>
-      <label v-if="agents.length">Named agent<select v-model="agentId" class="field"><option value="">None</option><option v-for="agent in agents" :key="agent.id" :value="agent.id">{{ agent.name }}</option></select></label>
+      <label v-if="agents.length">Named agent<select v-model="agentId" class="field"><option value="">None</option><option v-for="agent in previewAgents" :key="agent.id" :value="agent.id" :disabled="agent.preview?.allowed === false">{{ previewOptionLabel(agent) }}</option></select></label>
     </div>
 
     <div class="tools">
@@ -183,6 +200,7 @@ watch([projectId, role, harness, agentId], load)
 .for-value { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .choose { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .choose label { display: grid; gap: 4px; min-width: 0; color: var(--ink-2); font-size: 12px; font-weight: 650; }
+.choose option:disabled { color: var(--ink-3); }
 .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .harness { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); }
 .seg { display: inline-flex; align-items: center; justify-content: center; height: 28px; min-height: 0; margin: 0; padding: 0 12px; border: 0; border-radius: 7px; background: none; color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 600; line-height: 1; cursor: pointer; }

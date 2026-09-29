@@ -327,7 +327,7 @@ paths:
               schema:
                 "$ref": "#/components/schemas/MergedRules"
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules. GET /rules/merged and GET /rules/explained are the only rules routes that return not_key_creator, key_revoked, key_expired, or agent_inactive, and only when the caller could already see that agent (members.read, so GET /members lists it, or they created its key). Every other caller, and a missing agent, receives forbidden.","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap, or the snapshots for this session exceed 2,000 rules or 2 MiB of rule text","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
@@ -431,7 +431,7 @@ paths:
               schema:
                 "$ref": "#/components/schemas/ExplainedRules"
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules. A named-agent preview the caller could already see may return not_key_creator, key_revoked, key_expired, or agent_inactive (as GET /rules/merged); every other caller receives forbidden.","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
@@ -5859,7 +5859,7 @@ components:
         consent_mode: {type: string, enum: [aeon, local_auth]}
         consent_digest: {type: string, description: 'SHA-256 binding of request ID, snapshot digest and server-selected mode; immutable after approval'}
 
-    RuleError: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string}, actual_bytes: {type: integer}, max_bytes: {type: integer}, layer: {type: string, enum: [company, project, person, agent], description: "AEON-314: the layer whose own cap was crossed; absent for the total"}}}
+    RuleError: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string, description: "forbidden for a general denial. GET /rules/merged and GET /rules/explained may use not_key_creator, key_revoked, key_expired, or agent_inactive when the caller could already see that agent."}, actual_bytes: {type: integer}, max_bytes: {type: integer}, layer: {type: string, enum: [company, project, person, agent], description: "AEON-314: the layer whose own cap was crossed; absent for the total"}}}
     RuleTLDR:
       type: "object"
       additionalProperties: false
@@ -6722,6 +6722,14 @@ components:
               key_count: {type: integer}
               last_seen_at: {type: [string, 'null'], format: date-time}
               service: {type: boolean}
+              preview:
+                description: Whether this caller may preview the agent's session file. creator_name is present only for workspace owners and admins, and only when another person holds a current key.
+                type: object
+                required: [allowed]
+                properties:
+                  allowed: {type: boolean}
+                  reason: {type: string, enum: [not_key_creator, key_revoked, key_expired, agent_inactive]}
+                  creator_name: {type: string}
         invites: {type: array, items: {$ref: '#/components/schemas/Invite'}}
         imported: {type: array, items: {type: object}}
         owner_count: {type: integer}

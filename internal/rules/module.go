@@ -363,6 +363,23 @@ func permission(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Scope, act
 				return err
 			}
 			if !controlled {
+				// The EXISTS above stays the allow rule. A reason only explains the denial
+				// and never grants access when the two disagree. Someone who cannot already
+				// see this agent gets the same forbidden result as a missing agent, so the
+				// code does not reveal that the agent exists or is inactive.
+				allowed, reason, classErr := authz.ClassifyAgentControl(ctx, tx, p.TenantID, owner, s.AgentID)
+				if classErr != nil {
+					return classErr
+				}
+				if !allowed && reason != "" {
+					visible, seeErr := mayExplainAgentDenial(ctx, tx, p, owner, s.AgentID)
+					if seeErr != nil {
+						return seeErr
+					}
+					if visible {
+						return &agentControlDenial{reason: reason}
+					}
+				}
 				return authz.ErrForbidden
 			}
 		}
@@ -466,7 +483,7 @@ func (m *Module) mergeInputs(r *http.Request, tx pgx.Tx, p tenant.Principal) (Co
 	}
 	scope := Scope{Layer: "project", ProjectID: c.ProjectID}
 	if err = permission(r.Context(), tx, p, scope, "rules.read"); err != nil {
-		return c, nil, err
+		return c, nil, surfacePreviewReason(err)
 	}
 	if c.AgentID != "" {
 		scope = Scope{Layer: "agent", OwnerID: c.PersonID, AgentID: c.AgentID}
@@ -475,7 +492,7 @@ func (m *Module) mergeInputs(r *http.Request, tx pgx.Tx, p tenant.Principal) (Co
 			scope.ProjectID = c.ProjectID
 		}
 		if err = permission(r.Context(), tx, p, scope, "rules.read"); err != nil {
-			return c, nil, err
+			return c, nil, surfacePreviewReason(err)
 		}
 	}
 	ss, err := allSets(r.Context(), tx, "")
@@ -492,7 +509,7 @@ func (m *Module) mergeInputs(r *http.Request, tx pgx.Tx, p tenant.Principal) (Co
 			continue
 		}
 		if err = permission(r.Context(), tx, p, s.Scope, "rules.read"); err != nil {
-			return c, nil, err
+			return c, nil, surfacePreviewReason(err)
 		}
 		if budget.rules >= maxBudgetRules {
 			return c, nil, errMergeStoreTooLarge
@@ -563,4 +580,44 @@ func nodeFields(ctx context.Context, tx pgx.Tx, id, resource string) (fields, st
 }
 func isDenied(err error) bool {
 	return errors.Is(err, authz.ErrForbidden) || errors.Is(err, pgx.ErrNoRows)
+}
+
+// agentControlDenial is a forbidden decision that also names why this person
+// does not control the named agent. List and budget checks use isDenied and
+// skip the layer. Only the merged preview turns the reason into a response code.
+type agentControlDenial struct {
+	reason string
+}
+
+func (e *agentControlDenial) Error() string { return authz.PreviewDenialMessage(e.reason) }
+func (e *agentControlDenial) Unwrap() error { return authz.ErrForbidden }
+
+func surfacePreviewReason(err error) error {
+	var denial *agentControlDenial
+	if errors.As(err, &denial) {
+		return fail(403, denial.reason, authz.PreviewDenialMessage(denial.reason))
+	}
+	return err
+}
+
+// mayExplainAgentDenial reports whether a specific denial would tell this
+// person something they can already see. GET /members lists every agent to a
+// caller with members.read. A key they created is already known to them.
+func mayExplainAgentDenial(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner, agentID string) (bool, error) {
+	var created bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_keys WHERE tenant_id=$1 AND principal_id=$2 AND created_by_principal_id=$3)`, p.TenantID, agentID, owner).Scan(&created)
+	if err != nil {
+		return false, err
+	}
+	if created {
+		return true, nil
+	}
+	err = authz.RequireTx(ctx, tx, p, "members.read", authz.Scope{})
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, authz.ErrForbidden) {
+		return false, nil
+	}
+	return false, err
 }

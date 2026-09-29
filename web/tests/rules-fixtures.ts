@@ -28,6 +28,10 @@ export interface RulesMockOptions {
   settings?: boolean
   /** AEON-314: the workspace budget the server reports. */
   budget?: { max_bytes: number; layer_max_bytes: Record<string, number> }
+  /** AEON-315: every named-agent preview is refused as not_key_creator. */
+  denyNamedPreview?: boolean
+  /** AEON-315: the named agents the members listing returns. */
+  agents?: { principal_id: string; name: string; preview?: { allowed: boolean; reason?: string; creator_name?: string } }[]
 }
 
 export async function mockRules(page: Page, options: RulesMockOptions = {}): Promise<RulesMock> {
@@ -98,7 +102,7 @@ export async function mockRules(page: Page, options: RulesMockOptions = {}): Pro
     if (path === '/api/members' && method === 'GET') {
       return route.fulfill({ json: {
         people: [{ principal_id: RULE_PERSON, name: 'Markus Barta', avatar_url: null, has_avatar: false, email: 'markus@barta.com', status: 'active', identity: 'inspr_id', workspace_role: null, project_roles: [], aliases: [], classic_role: null, last_active_at: null, last_owner: true }],
-        agents: [{ principal_id: RULE_AGENT, name: 'Worker', has_avatar: false, workspace_role: null, key_count: 1, last_seen_at: null, service: false }],
+        agents: (options.agents ?? [{ principal_id: RULE_AGENT, name: 'Worker' }]).map(agent => ({ principal_id: agent.principal_id, name: agent.name, has_avatar: false, workspace_role: null, key_count: 1, last_seen_at: null, service: false, ...(agent.preview ? { preview: agent.preview } : {}) })),
         invites: [], imported: [], owner_count: 1,
       } })
     }
@@ -186,6 +190,9 @@ export async function mockRules(page: Page, options: RulesMockOptions = {}): Pro
       return route.fulfill({ json: { ...state.budget, default_bytes: 12000, min_bytes: 2000, ceiling_bytes: 12000, min_layer_bytes: 500 } })
     }
     if (path === '/api/rules/explained' && method === 'GET') {
+      if (options.denyNamedPreview && url.searchParams.get('agent_id')) {
+        return route.fulfill({ status: 403, json: { error: "You didn't create a key for this agent.", code: 'not_key_creator' } })
+      }
       const harness = url.searchParams.get('harness') ?? 'claude-code'
       const served: { rule: Record<string, unknown>; set: string; layer: string }[] = []
       const seen = new Set<string>()
@@ -254,6 +261,9 @@ export async function mockRules(page: Page, options: RulesMockOptions = {}): Pro
       return route.fulfill({ json: { comparisons: options.comparisons ?? [] } })
     }
     if (path === '/api/rules/merged' && method === 'GET') {
+      if (options.denyNamedPreview && url.searchParams.get('agent_id')) {
+        return route.fulfill({ status: 403, json: { error: "You didn't create a key for this agent.", code: 'not_key_creator' } })
+      }
       return route.fulfill({ json: {
         context: { tenant_id: 't1', project_id: url.searchParams.get('project_id'), person_id: url.searchParams.get('person_id'), role: url.searchParams.get('role'), harness: url.searchParams.get('harness') },
         versions: [{ set_id: COMPANY_SET, version: '260920100000.0.0', sha256: 'ab'.repeat(32) }],

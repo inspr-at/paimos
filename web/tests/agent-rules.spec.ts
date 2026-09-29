@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
-import { RULE_PROJECT, mockRules } from './rules-fixtures'
+import { RULE_AGENT, RULE_PROJECT, mockRules } from './rules-fixtures'
 
 async function setup(page: Page, options: Parameters<typeof mockRules>[1] = {}) {
   await mockWork(page, fixtures())
@@ -158,6 +158,44 @@ test('an agent cannot publish or import', async ({ page }) => {
   await page.getByRole('button', { name: 'Import' }).click({ force: true })
   await expect(page.getByRole('dialog', { name: 'Import rules' })).toHaveCount(0)
   expect(rules.calls.some(call => call.method !== 'GET' && call.path.startsWith('/api/rules'))).toBe(false)
+})
+
+test('preview lists controlled agents first and disables the rest with a plain reason', async ({ page }) => {
+  const rules = await setup(page, {
+    denyNamedPreview: true,
+    agents: [
+      { principal_id: '33333333-3333-4333-8333-333333333333', name: 'Zebra', preview: { allowed: true } },
+      { principal_id: '44444444-4444-4444-8444-444444444444', name: 'Middle', preview: { allowed: false, reason: 'key_revoked' } },
+      { principal_id: RULE_AGENT, name: 'Able', preview: { allowed: true } },
+      { principal_id: '55555555-5555-4555-8555-555555555555', name: 'Principal link operator', preview: { allowed: false, reason: 'not_key_creator', creator_name: 'Ada Lovelace' } },
+    ],
+  })
+  await page.goto('/settings/agent-rules')
+  await page.getByRole('button', { name: 'Preview' }).click()
+  const dialog = page.getByRole('dialog', { name: 'What agents receive' })
+  await dialog.getByRole('button', { name: 'Change' }).click()
+  const named = dialog.getByRole('combobox', { name: 'Named agent' })
+  await expect(named.locator('option')).toHaveText([
+    'None',
+    'Able',
+    'Zebra',
+    'Middle · Your key for this agent was revoked.',
+    "Principal link operator · Ada Lovelace created this agent's key.",
+  ])
+  await expect(named.locator('option').nth(3)).toHaveJSProperty('disabled', true)
+  await expect(named.locator('option').nth(4)).toHaveJSProperty('disabled', true)
+  await named.selectOption(RULE_AGENT)
+  await expect(dialog.getByRole('alert')).toContainText("You didn't create a key for this agent.")
+  expect(rules.calls.some(call => call.path.includes('agent_id=' + RULE_AGENT) && call.path.startsWith('/api/rules/explained'))).toBe(true)
+  for (const theme of ['light', 'dark'] as const) {
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    for (const width of [1600, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      await expect(dialog.getByRole('combobox', { name: 'Named agent' })).toBeVisible()
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 || document.body.scrollWidth > document.body.clientWidth + 1)
+      expect(overflow, `${theme} ${width}`).toBe(false)
+    }
+  }
 })
 
 test('preview explains the session file for this project, you and the builder role', async ({ page }) => {

@@ -43,13 +43,14 @@ type Member struct {
 	LastOwner     bool          `json:"last_owner"`
 }
 type AgentMember struct {
-	PrincipalID   string     `json:"principal_id"`
-	Name          string     `json:"name"`
-	HasAvatar     bool       `json:"has_avatar"`
-	WorkspaceRole *RoleRef   `json:"workspace_role"`
-	KeyCount      int        `json:"key_count"`
-	LastSeenAt    *time.Time `json:"last_seen_at"`
-	Service       bool       `json:"service"`
+	PrincipalID   string       `json:"principal_id"`
+	Name          string       `json:"name"`
+	HasAvatar     bool         `json:"has_avatar"`
+	WorkspaceRole *RoleRef     `json:"workspace_role"`
+	KeyCount      int          `json:"key_count"`
+	LastSeenAt    *time.Time   `json:"last_seen_at"`
+	Service       bool         `json:"service"`
+	Preview       AgentPreview `json:"preview"`
 }
 type ImportedMember struct {
 	PrincipalID string  `json:"principal_id"`
@@ -165,6 +166,9 @@ func (m *Module) members(w http.ResponseWriter, r *http.Request) {
 		}
 		out.OwnerCount, err = ownerCount(r.Context(), tx, p.TenantID)
 		if err != nil {
+			return err
+		}
+		if err = fillAgentPreviews(r.Context(), tx, p, out.Agents); err != nil {
 			return err
 		}
 		applyOwnerFlags(out.People, out.OwnerCount)

@@ -22,7 +22,10 @@ export interface Person {
   // The server says who is the last active owner (contract v2 #5); the UI never counts role keys.
   last_owner: boolean
 }
-export interface Agent { principal_id: string; name: string; has_avatar: boolean; workspace_role: RoleRef | null; key_count: number; last_seen_at: string | null; service: boolean }
+export type AgentPreviewReason = 'not_key_creator' | 'key_revoked' | 'key_expired' | 'agent_inactive'
+// Whether this caller may preview the agent's session file. creator_name is sent only to workspace owners and admins.
+export interface AgentPreview { allowed: boolean; reason?: AgentPreviewReason; creator_name?: string }
+export interface Agent { principal_id: string; name: string; has_avatar: boolean; workspace_role: RoleRef | null; key_count: number; last_seen_at: string | null; service: boolean; preview?: AgentPreview }
 export type InviteStatus = 'pending' | 'expired' | 'revoked' | 'accepted'
 export interface Invite {
   id: string; email: string; workspace_role: RoleRef | null; project_roles: ProjectRole[]; status: InviteStatus
