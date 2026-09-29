@@ -71,6 +71,7 @@ type finding struct {
 	RuleLabel    string             `json:"rule_label,omitempty"`
 	Evidence     []analysisEvidence `json:"evidence"`
 	Before       analysisMetric     `json:"before"`
+	Metrics      []analysisMetric   `json:"metrics,omitempty"`
 	After        *analysisMetric    `json:"after,omitempty"`
 	Delta        *float64           `json:"delta,omitempty"`
 	CreatedAt    time.Time          `json:"created_at"`
@@ -205,6 +206,13 @@ func detectFindings(samples []analysisSample, p AnalysisPolicy, from, until time
 		}
 		f := finding{Pattern: parts[0], Title: patternTitle(parts[0]), Count: len(seen), RulesVersion: parts[1], Harness: parts[2], TicketKind: parts[3], Evidence: evidence, Status: "pending"}
 		f.Before = measure(samples, f, from, until)
+		for _, name := range []string{"review_rounds", "fix_rounds", "ci_failures", "reverts", "exception_votes", "time_to_done"} {
+			context := f
+			context.Pattern = name
+			if metric := measure(samples, context, from, until); metric.Samples > 0 {
+				f.Metrics = append(f.Metrics, metric)
+			}
+		}
 		out = append(out, f)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -247,6 +255,10 @@ func measure(samples []analysisSample, f finding, from, until time.Time) analysi
 			}
 		case f.Pattern == "fix_rounds":
 			eligible = s.Kind == "fix_round"
+			key = s.TicketID
+			value = float64(s.Round)
+		case f.Pattern == "review_rounds":
+			eligible = s.Kind == "review_verdict" && s.Round > 0
 			key = s.TicketID
 			value = float64(s.Round)
 		case f.Pattern == "ci_failures":

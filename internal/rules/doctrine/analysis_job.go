@@ -283,7 +283,20 @@ func (m *Module) attemptFinding(ctx context.Context, actor tenant.Principal, f *
 	if err != nil {
 		var failure *failure
 		if errors.As(err, &failure) && (failure.Code == "private_doctrine" || failure.Code == "private_index_unavailable" || failure.Code == "public_identity" || failure.Code == "credential_text" || failure.Code == "non_latin") {
-			return m.noteFinding(ctx, actor, f, "Kept internal by the doctrine leak guard ("+failure.Code+").")
+			reason := "Kept internal to protect private instruction text."
+			if failure.Code == "private_index_unavailable" {
+				// Startup may still be rebuilding the guard. Preserve the slot
+				// and retry tomorrow without treating unknown safety as a leak.
+				f.Reason = "The private instruction check is unavailable; no draft was published."
+				return m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error { return saveFinding(ctx, tx, actor, *f, "doctrine.finding_pending") })
+			}
+			if failure.Code == "credential_text" || failure.Code == "public_identity" {
+				reason = "Kept internal because the proposed text may contain sensitive information."
+			}
+			if failure.Code == "non_latin" {
+				reason = "The proposed text needs a person to review its public wording."
+			}
+			return m.noteFinding(ctx, actor, f, reason)
 		}
 		// Unknown GitHub outcomes keep their slot; don't create an untracked draft
 		// or silently turn a transport failure into a safe-to-forget internal note.

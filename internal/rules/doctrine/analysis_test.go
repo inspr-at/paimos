@@ -52,6 +52,9 @@ func TestAnalysisPatternsAndMetrics(t *testing.T) {
 			t.Fatalf("%s metric: %+v", pattern, f)
 		}
 	}
+	if len(byPattern["gate:validation"].Metrics) != 6 {
+		t.Fatal("baseline lost supporting outcome metrics")
+	}
 	done := byPattern["fix_rounds"]
 	done.Pattern = "time_to_done"
 	if got := measure(samples, done, from, now); got.Value != 375 || got.Samples != 4 {
@@ -331,6 +334,10 @@ func TestAnalysisCapsAndRuleDedupe(t *testing.T) {
 	if inserted, err := m.reserveFinding(ctx, actor, &second); err != nil || !inserted {
 		t.Fatal("second distinct rule not admitted")
 	}
+	f.layer(owner, "DELETE", "/api/rules/doctrine/sources/"+src.ID, nil)
+	if len(readAnalysis(t, f, owner)) != 2 {
+		t.Fatal("source removal discarded proposal history")
+	}
 }
 
 func TestAnalysisPrivateQuoteBecomesInternalNote(t *testing.T) {
@@ -352,7 +359,7 @@ func TestAnalysisPrivateQuoteBecomesInternalNote(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := readAnalysis(t, f, owner)
-	if len(got) != 1 || got[0].Status != "internal_note" || !strings.Contains(got[0].Reason, "private_doctrine") {
+	if len(got) != 1 || got[0].Status != "internal_note" || !strings.Contains(got[0].Reason, "private instruction") {
 		t.Fatalf("note = %+v", got)
 	}
 	if len(forge.pulls) != 0 || forge.writes != writes {
@@ -391,5 +398,28 @@ func TestAnalysisDailyAttemptCap(t *testing.T) {
 	}
 	if len(forge.pulls) != 2 {
 		t.Fatal("next day did not recover reserved second rule")
+	}
+}
+
+func TestAnalysisWaitsForPrivateGuard(t *testing.T) {
+	f, forge, m, owner := setupAnalysis(t)
+	now := time.Now().UTC().Add(time.Minute)
+	layer := f.layer(owner, "GET", "/api/rules/doctrine", nil)
+	f.layer(owner, "DELETE", "/api/rules/doctrine/sources/"+find(layer, privateRepository).ID, nil)
+	seedAnalysisOutcomes(t, f, owner, "GUARD", "v1", "Missing regression test", "changes", strings.Repeat("c", 64), now.Add(-time.Hour))
+	if err := m.analyzeOnce(t.Context(), now); err != nil {
+		t.Fatal(err)
+	}
+	got := readAnalysis(t, f, owner)
+	if len(got) != 1 || got[0].Status != "pending" || forge.writes != 0 {
+		t.Fatal("missing guard neither held nor blocked writes")
+	}
+	seedPrivateGuard(t, f, m, owner)
+	if err := m.analyzeOnce(t.Context(), now.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	got = readAnalysis(t, f, owner)
+	if got[0].Status != "draft" || len(forge.pulls) != 1 {
+		t.Fatal("rebuilt guard did not resume the reserved draft")
 	}
 }
