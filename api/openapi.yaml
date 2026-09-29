@@ -1564,7 +1564,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/NodeError'
+                oneOf:
+                  - {$ref: '#/components/schemas/ApiError'}
+                  - {$ref: '#/components/schemas/NodeError'}
   /tags/{tagId}:
     parameters:
       - {name: tagId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -1765,7 +1767,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/NodeError'
+                oneOf:
+                  - {$ref: '#/components/schemas/ApiError'}
+                  - {$ref: '#/components/schemas/NodeError'}
     delete:
       operationId: deleteNode
       description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
