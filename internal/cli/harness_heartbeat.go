@@ -80,6 +80,7 @@ type heartbeatOptions struct {
 	Note           string
 	Phase          string
 	Activity       string
+	Succeeds       string
 	Parent         string
 	Ticket         string
 	Shape          string
@@ -124,6 +125,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.Note, "note", 0, "current step, at most 120 characters")
 			fs.string(&o.Phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&o.Activity, "activity", 0, "busy, idle or throttled")
+			fs.string(&o.Succeeds, "succeeds", 0, "stopped or heartbeat-lost predecessor coordinator UUID")
 			fs.string(&o.Parent, "parent-session", 0, "parent public session UUID")
 			fs.string(&o.Ticket, "ticket", 0, "ticket node key")
 			fs.string(&o.Shape, "work-shape", 0, "ship or scout")
@@ -210,6 +212,9 @@ func (o *heartbeatOptions) prepare() error {
 	}
 	if o.SourceSession != "" && !validUUID(o.SourceSession) {
 		return usagef("--source-session must be a UUID")
+	}
+	if o.Succeeds != "" && !validUUID(o.Succeeds) {
+		return usagef("invalid --succeeds session")
 	}
 	if o.Parent != "" && !validUUID(o.Parent) {
 		return usagef("invalid parent session")
@@ -624,6 +629,10 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if err != nil {
 		return heartbeatSession{}, false, err
 	}
+	// A native coordinator session survives a helper process restart.
+	if o.Role == "coordinator" && o.SourceSession != "" {
+		ref = o.Harness + ":" + strings.ToLower(o.SourceSession)
+	}
 	label, haveLabel := resolveHeartbeatLabel(ctx, o, dep, true)
 	body := map[string]any{
 		"agent_principal_id":      me.Principal.ID,
@@ -642,6 +651,9 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
 	putText(body, "branch", heartbeatText(o.Branch, 200), true)
+	if o.Succeeds != "" {
+		body["succeeds_session_id"] = strings.ToLower(o.Succeeds)
+	}
 	if o.Parent != "" {
 		body["parent_harness_session_id"] = strings.ToLower(o.Parent)
 	}

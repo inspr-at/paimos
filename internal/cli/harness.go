@@ -272,7 +272,7 @@ func (rt *runtime) harnessTicket(projectID, key string, classicID int) (*string,
 }
 
 func (rt *runtime) harnessRegister() *Command {
-	var project, agent, harness, host, label, model, effort, accountLabel, harnessVersion, brief, worktree, branch, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID string
+	var project, agent, harness, host, label, model, effort, accountLabel, harnessVersion, brief, worktree, branch, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID, succeeds string
 	var ticketIDFlag int
 	var caps []string
 	return &Command{Name: "register", Short: "Register one public harness generation", Use: "harness register --project KEY --agent NAME --harness KIND --host HOST --harness-session-file PATH --worker-lease-file PATH", addFlags: func(fs *flagSet) {
@@ -294,6 +294,7 @@ func (rt *runtime) harnessRegister() *Command {
 		fs.string(&management, "management", 0, "managed or unmanaged")
 		fs.string(&role, "role", 0, "worker or coordinator")
 		fs.string(&parent, "parent-session", 0, "parent public session UUID")
+		fs.string(&succeeds, "succeeds", 0, "stopped or heartbeat-lost predecessor coordinator UUID")
 		fs.string(&ticket, "ticket", 0, "ticket node key")
 		fs.int(&ticketIDFlag, "ticket-id", "classic numeric ticket id")
 		fs.string(&shape, "work-shape", 0, "ship or scout")
@@ -350,6 +351,13 @@ func (rt *runtime) harnessRegister() *Command {
 		if me.Principal.Name != agent {
 			return usagef("--agent must name the authenticated agent")
 		}
+		var predecessor *string
+		if succeeds != "" {
+			if !validUUID(succeeds) {
+				return usagef("invalid --succeeds session")
+			}
+			predecessor = &succeeds
+		}
 		var ticketID, parentID, run, order *string
 		if parent != "" {
 			if !validUUID(parent) {
@@ -381,7 +389,7 @@ func (rt *runtime) harnessRegister() *Command {
 			order = &orderID
 		}
 		var out any
-		err = rt.harnessDo(http.MethodPost, harnessPath(projectID, ""), "", map[string]any{"agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "display_label": label, "model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersion, "brief": brief, "worktree": worktree, "branch": branch, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}, &out)
+		err = rt.harnessDo(http.MethodPost, harnessPath(projectID, ""), "", map[string]any{"succeeds_session_id": predecessor, "agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "display_label": label, "model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersion, "brief": brief, "worktree": worktree, "branch": branch, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}, &out)
 		if err != nil {
 			return err
 		}

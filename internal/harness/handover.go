@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package harness
+
+import (
+	"context"
+	"errors"
+
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/jackc/pgx/v5"
+)
+
+// Every hierarchy writer takes this before row locks, including registrations
+// without a parent. Concurrent restarts cannot split or duplicate adoption.
+func lockHierarchy(ctx context.Context, tx pgx.Tx, projectID string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))`, projectID)
+	return err
+}
+
+func heartbeatExpired(ctx context.Context, tx pgx.Tx, s Session) (bool, error) {
+	mins, err := heartbeatLostMinutes(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	var expired bool
+	err = tx.QueryRow(ctx, `SELECT coalesce(heartbeat_at,created_at)<clock_timestamp()-make_interval(mins=>$2) FROM harness_sessions WHERE id=$1`, s.ID, mins).Scan(&expired)
+	return expired, err
+}
+
+func handoverPredecessor(ctx context.Context, tx pgx.Tx, projectID string, in registration, ref []byte) (*Session, error) {
+	if in.Role != "coordinator" {
+		if in.SucceedsID != nil {
+			return nil, workorders.Fail(400, "only coordinators can succeed a lead")
+		}
+		return nil, nil
+	}
+	var s Session
+	var err error
+	if in.SucceedsID != nil {
+		s, err = load(ctx, tx, projectID, *in.SucceedsID, true)
+	} else {
+		s, err = scanSession(tx.QueryRow(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND agent_principal_id=$2 AND harness=$3 AND ref_digest=$4 ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`, projectID, in.AgentPrincipalID, in.Harness, ref))
+	}
+	if errors.Is(err, pgx.ErrNoRows) && in.SucceedsID == nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if s.AgentPrincipalID != in.AgentPrincipalID || s.Role != "coordinator" || s.ArchivedAt != nil || s.HandedOverToID != nil {
+		if in.SucceedsID == nil {
+			return nil, nil
+		}
+		return nil, workorders.Fail(409, "same-principal available predecessor required")
+	}
+	if s.StoppedAt == nil {
+		stale, e := heartbeatExpired(ctx, tx, s)
+		if e != nil {
+			return nil, e
+		}
+		if !stale {
+			return nil, workorders.Fail(409, "predecessor still heartbeating")
+		}
+	}
+	return &s, nil
+}
+
+func adoptChildren(ctx context.Context, tx pgx.Tx, p tenant.Principal, old, next Session) error {
+	if old.StoppedAt == nil {
+		var err error
+		old, err = closeGeneration(ctx, tx, p, old, StopReasonHeartbeatLost)
+		if err != nil {
+			return err
+		}
+	}
+	rows, err := tx.Query(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND parent_id=$2 AND stopped_at IS NULL AND archived_at IS NULL ORDER BY id FOR UPDATE`, old.ProjectID, old.ID)
+	if err != nil {
+		return err
+	}
+	children := []Session{}
+	for rows.Next() {
+		s, e := scanSession(rows)
+		if e != nil {
+			rows.Close()
+			return e
+		}
+		children = append(children, s)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for _, child := range children {
+		if err = validateParent(ctx, tx, old.ProjectID, next.ID, child.ID); err != nil {
+			return err
+		}
+		adopted, e := scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET parent_id=$2,adopted_from_id=$3,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, child.ID, next.ID, old.ID))
+		if e != nil {
+			return e
+		}
+		// A dedicated lineage note cannot be overwritten by the worker's next beat.
+		if err = record(ctx, tx, p, adopted, "adopted", child, adopted); err != nil {
+			return err
+		}
+	}
+	handed, err := scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET handed_over_to_id=$2,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, old.ID, next.ID))
+	if err != nil {
+		return err
+	}
+	return record(ctx, tx, p, handed, "handed_over", old, handed)
+}

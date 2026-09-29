@@ -2682,7 +2682,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: registerHarnessSession
-      description: Registers a generation or returns an exact active replay. Emits harness.registered on the existing events stream after commit; stopping emits harness.stopped. Labels are public display metadata, never identity or authority.
+      description: Registers a generation or returns an exact active replay. A restarted coordinator with the same principal, harness and native reference adopts live children from its stopped or heartbeat-lost predecessor atomically. succeeds_session_id selects a same-principal predecessor with a different native reference. A healthy predecessor is never replaced. Emits harness.adopted per child and harness.handed_over on the predecessor, with public lineage fields. Emits harness.registered on the existing events stream after commit; stopping emits harness.stopped. Labels are public display metadata, never identity or authority.
       requestBody:
         required: true
         content:
@@ -8135,6 +8135,7 @@ components:
       type: object
       required: [agent_principal_id, harness, host, management_mode, role, harness_session_ref, worker_lease]
       properties:
+        succeeds_session_id: {type: [string, 'null'], format: uuid, description: Explicit stopped or heartbeat-lost coordinator predecessor owned by the same principal in this project.}
         agent_principal_id: {type: string, format: uuid}
         run_id: {type: [string, 'null'], format: uuid}
         ticket_node_id: {type: [string, 'null'], format: uuid}
@@ -8364,6 +8365,8 @@ components:
         needs_attention: {type: boolean, description: "Bound run waiting or an exact bound-run approval pending. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
         attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
         has_problem: {type: boolean, description: "Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false. Omitted when not loaded."}
+        handed_over_to_id: {type: string, format: uuid, description: Successor coordinator; omitted without a handover.}
+        adopted_from_id: {type: string, format: uuid, description: Previous lead from which this live child was adopted.}
         id: {type: string, format: uuid}
         project_id: {type: string, format: uuid}
         agent_principal_id: {type: string, format: uuid}
