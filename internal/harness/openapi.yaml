@@ -386,6 +386,7 @@ components:
       type: object
       required: [agent_principal_id, harness, host, management_mode, role, harness_session_ref, worker_lease]
       properties:
+        succeeds_session_id: {type: [string, 'null'], format: uuid, description: Explicit same-principal coordinator predecessor in this project.}
         agent_principal_id: {type: string, format: uuid}
         run_id: {type: [string, 'null'], format: uuid}
         ticket_node_id: {type: [string, 'null'], format: uuid}

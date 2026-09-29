@@ -81,6 +81,9 @@ func lostContact(s Session) bool {
 // registered the same session reference, whatever its state now, it replaced
 // this one for good: the old generation stays closed.
 func revive(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, phase string) (Session, error) {
+	if s.HandedOverToID != nil {
+		return s, workorders.Fail(403, "harness generation handed over")
+	}
 	var taken bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE project_id=$1 AND ref_digest=$2 AND id<>$3 AND (created_at,id)>($4,$3::uuid))`, s.ProjectID, s.refDigest, s.ID, s.CreatedAt).Scan(&taken); err != nil {
 		return s, err

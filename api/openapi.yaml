@@ -2991,9 +2991,14 @@ paths:
   /projects/{projectId}/harness-sessions:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: listProjectHarnessSessions
+      description: Project generations with lineage and caller-specific move permission for the Agents tree.
+      responses:
+        '200': {description: Public generations, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/HarnessSessionHierarchy'}}}}}
     post:
       operationId: registerHarnessSession
-      description: Registers a generation or returns an exact active replay. Emits harness.registered on the existing events stream after commit; stopping emits harness.stopped. Labels are public display metadata, never identity or authority.
+      description: Registers a generation or returns an exact active replay. A restarted coordinator with the same principal, harness and native reference adopts live children from its stopped or heartbeat-lost predecessor atomically. succeeds_session_id selects a same-principal predecessor with a different native reference. A healthy predecessor is never replaced. Emits harness.adopted per child and harness.handed_over on the predecessor, with public lineage fields. Emits harness.registered on the existing events stream after commit; stopping emits harness.stopped. Labels are public display metadata, never identity or authority.
       requestBody:
         required: true
         content:
@@ -3004,7 +3009,7 @@ paths:
           description: Registered or exact active replay
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/HarnessSession'}
+              schema: {$ref: '#/components/schemas/HarnessSessionHierarchy'}
         '400': {description: Invalid registration or label}
         '403': {description: Scope required or another agent requested}
         '409': {description: Active generation conflicts with registration}
@@ -3017,6 +3022,38 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/reparent:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reparentHarnessSession
+      description: A person owning both registrations or an owner/admin in their project moves a live worker to a live coordinator in the same project. Requires harness.write; verifies expected_revision and prevents cycles. Emits harness.reparented. Undo rechecks permissions, liveness and subsequent hierarchy changes; heartbeats do not invalidate undo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, parent_harness_session_id]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                parent_harness_session_id: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Updated worker and undo event
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session, event_id, undoable]
+                properties:
+                  session: {$ref: '#/components/schemas/HarnessSessionHierarchy'}
+                  event_id: {type: integer, format: int64}
+                  undoable: {type: boolean}
+        '403': {description: Person must own both registrations or administer the project}
+        '404': {description: Session or destination not visible in this project}
+        '409': {description: 'Stale revision, ended session or invalid hierarchy'}
   /projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -8721,6 +8758,7 @@ components:
       type: object
       required: [agent_principal_id, harness, host, management_mode, role, harness_session_ref, worker_lease]
       properties:
+        succeeds_session_id: {type: [string, 'null'], format: uuid, description: Explicit stopped or heartbeat-lost coordinator predecessor owned by the same principal in this project.}
         agent_principal_id: {type: string, format: uuid}
         run_id: {type: [string, 'null'], format: uuid}
         ticket_node_id: {type: [string, 'null'], format: uuid}
@@ -9165,9 +9203,18 @@ components:
       properties:
         sha: {type: string, pattern: '^[0-9a-fA-F]{7,40}$'}
         subject: {type: string, minLength: 1, maxLength: 200}
-    HarnessSessionSummary:
+    HarnessSessionHierarchy:
+      description: Agents tree extension for lists and hierarchy mutations. The pinned reporter status and heartbeat responses retain HarnessSession without these fields.
       allOf:
         - {$ref: '#/components/schemas/HarnessSession'}
+        - type: object
+          properties:
+            can_reparent: {type: boolean, description: Caller may move this live session or select it as a lead; read-time hint rechecked on writes. Omitted in event snapshots.}
+            handed_over_to_id: {type: string, format: uuid, description: Successor coordinator; omitted without a handover.}
+            adopted_from_id: {type: string, format: uuid, description: Previous lead from which this child was adopted; omitted after a manual move clears the lineage.}
+    HarnessSessionSummary:
+      allOf:
+        - {$ref: '#/components/schemas/HarnessSessionHierarchy'}
         - type: object
           required: [project, ticket, agent]
           properties:

@@ -238,6 +238,185 @@ func TestRunHeartbeatOwnerExitMarksStopped(t *testing.T) {
 	}
 }
 
+func TestCoordinatorHeartbeatRetriesActiveGeneration(t *testing.T) {
+	var calls []hbCall
+	registrations, waits := 0, 0
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/harness-sessions") {
+			return false
+		}
+		registrations++
+		if registrations <= 3 {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":"active generation conflicts with registration"}`))
+		} else {
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":"` + transcriptSessionID + `"}`))
+		}
+		return true
+	})
+	defer srv.Close()
+	rt, stdout, stderr := heartbeatRuntime(t, srv)
+	o := heartbeatTestOptions(t.TempDir())
+	o.Role, o.SourceSession, o.Interval = "coordinator", transcriptSessionID, 50
+	err := rt.runHeartbeat(context.Background(), o, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait: func(_ context.Context, pid int, interval time.Duration) error {
+			if pid != o.OwnerPID || interval != 50*time.Second {
+				t.Fatal("retry did not preserve owner and heartbeat interval")
+			}
+			if registrations == 4 {
+				return errOwnerExited
+			}
+			waits++
+			if waits != registrations || len(hbWhere(calls, http.MethodPost, "/heartbeat")) != 0 {
+				t.Fatal("must wait once after each conflict before heartbeating")
+			}
+			hold, lockErr := openHeartbeatHold(o.StateDir)
+			if lockErr == nil {
+				hold.release()
+			}
+			if !errors.Is(lockErr, errHeartbeatBusy) {
+				t.Fatal("registration retry released the private state lock")
+			}
+			// No real sleep: simulate the predecessor remaining healthy for
+			// three intervals, then becoming eligible for server-side adoption.
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	regs := hbWhere(calls, http.MethodPost, "/harness-sessions")
+	if len(regs) != 4 || waits != 3 {
+		t.Fatalf("registrations=%d waits=%d", len(regs), waits)
+	}
+	wantBody, _ := json.Marshal(regs[0].body)
+	for _, reg := range regs[1:] {
+		gotBody, _ := json.Marshal(reg.body)
+		if !bytes.Equal(gotBody, wantBody) {
+			t.Fatal("retry changed registration identity or metadata")
+		}
+	}
+	if regs[0].body["harness_session_ref"] != "claude:"+transcriptSessionID {
+		t.Fatal("retry lost the native coordinator reference")
+	}
+	if len(hbWhere(calls, http.MethodPost, "/heartbeat")) != 1 || len(hbWhere(calls, http.MethodPost, "/stop")) != 1 {
+		t.Fatal("successful retry did not enter the normal heartbeat/stop lifecycle")
+	}
+	wantLog := strings.Repeat("heartbeat: predecessor generation is still active; retrying registration in 50s\n", 3)
+	if stderr.String() != wantLog || stdout.Len() != 0 {
+		t.Fatal("each retry must log exactly once without exposing registration data")
+	}
+}
+
+func TestCoordinatorHeartbeatRetryStopsWithOwner(t *testing.T) {
+	for _, mode := range []string{"owner already gone", "owner exits during wait", "owner gone after wait", "already cancelled", "cancelled during wait"} {
+		t.Run(mode, func(t *testing.T) {
+			var calls []hbCall
+			srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/harness-sessions") {
+					w.WriteHeader(http.StatusConflict)
+					_, _ = w.Write([]byte(`{"error":"active generation conflicts with registration"}`))
+					return true
+				}
+				return false
+			})
+			defer srv.Close()
+			rt, _, _ := heartbeatRuntime(t, srv)
+			o := heartbeatTestOptions(t.TempDir())
+			o.Role, o.SourceSession = "coordinator", transcriptSessionID
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if mode == "already cancelled" {
+				cancel()
+			}
+			alive, waits := mode != "owner already gone", 0
+			err := rt.runHeartbeat(ctx, o, heartbeatDeps{
+				alive: func(int) bool { return alive },
+				wait: func(ctx context.Context, pid int, interval time.Duration) error {
+					waits++
+					switch mode {
+					case "owner exits during wait":
+						alive = false
+						return waitHeartbeat(ctx, pid, func(int) bool { return alive }, interval)
+					case "owner gone after wait":
+						alive = false
+						return nil
+					case "cancelled during wait":
+						cancel()
+						return waitHeartbeat(ctx, pid, func(int) bool { return alive }, interval)
+					default:
+						t.Fatal("waited after owner exit or cancellation")
+						return errOwnerExited
+					}
+				},
+			})
+			if err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			wantWaits := 1
+			if mode == "owner already gone" || mode == "already cancelled" {
+				wantWaits = 0
+			}
+			if waits != wantWaits || len(hbWhere(calls, http.MethodPost, "/harness-sessions")) != 1 {
+				t.Fatal("registration retried after owner exit or cancellation")
+			}
+			if len(hbWhere(calls, http.MethodPost, "/heartbeat")) != 0 || len(hbWhere(calls, http.MethodPost, "/stop")) != 0 {
+				t.Fatal("failed registration must not heartbeat or stop the predecessor")
+			}
+			if _, err := os.Stat(filepath.Join(o.StateDir, "session.id")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("failed registration persisted a session")
+			}
+			hold, err := openHeartbeatHold(o.StateDir)
+			if err != nil {
+				t.Fatalf("retry retained state lock after exit: %v", err)
+			}
+			hold.release()
+		})
+	}
+}
+
+func TestCoordinatorHeartbeatRetryRejectsOtherFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, role, source, message string
+		status                      int
+	}{
+		{"worker", "worker", transcriptSessionID, "active generation conflicts with registration", 409},
+		{"no native reference", "coordinator", "", "active generation conflicts with registration", 409},
+		{"other conflict", "coordinator", transcriptSessionID, "successor registration conflicts", 409},
+		{"archived", "coordinator", transcriptSessionID, "archived generation revoked; use a new session reference and worker lease", 409},
+		{"forbidden", "coordinator", transcriptSessionID, "active generation conflicts with registration", 403},
+		{"server error", "coordinator", transcriptSessionID, "active generation conflicts with registration", 500},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []hbCall
+			srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/harness-sessions") {
+					w.WriteHeader(tc.status)
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": tc.message})
+					return true
+				}
+				return false
+			})
+			defer srv.Close()
+			rt, _, stderr := heartbeatRuntime(t, srv)
+			o := heartbeatTestOptions(t.TempDir())
+			o.Role, o.SourceSession = tc.role, tc.source
+			err := rt.runHeartbeat(context.Background(), o, heartbeatDeps{
+				alive: func(int) bool { return true },
+				wait: func(context.Context, int, time.Duration) error {
+					t.Fatal("unrelated registration failure was retried")
+					return errOwnerExited
+				},
+			})
+			if err == nil || len(hbWhere(calls, http.MethodPost, "/harness-sessions")) != 1 || stderr.Len() != 0 {
+				t.Fatal("must return unrelated registration failure without retrying")
+			}
+		})
+	}
+}
+
 func TestRunHeartbeatCLIOwnerExit(t *testing.T) {
 	isolate(t)
 	var calls []hbCall

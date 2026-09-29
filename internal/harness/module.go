@@ -87,6 +87,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}", "harness.read", false, 200, m.status},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker", "harness.read", false, 200, m.getReadMarker},
 		{"PUT /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker", "harness.read", false, 200, m.putReadMarker},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/reparent", "harness.write", false, 200, m.reparent},
 		{"PATCH /api/projects/{projectId}/harness-sessions/{sessionId}/binding", "harness.write", false, 200, m.bind},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/usage", "harness.worker", true, 200, m.reportUsage},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/usage", "harness.read", false, 200, m.sessionUsage},
@@ -130,6 +131,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
+	CanReparent          *bool `json:"can_reparent,omitempty"`
+	ownerID              *string
+	HandedOverToID       *string                `json:"handed_over_to_id,omitempty"`
+	AdoptedFromID        *string                `json:"adopted_from_id,omitempty"`
 	Controls             []Control              `json:"controls,omitempty"`
 	Watch                *AttachStatus          `json:"watch,omitempty"`
 	ProcessOwnership     *ownedprocess.Identity `json:"process_ownership,omitempty"`
@@ -306,12 +311,12 @@ func normalizeActivityNote(raw string) (string, bool) {
 	return clean, clean != "" && utf8.RuneCountInString(clean) <= 120
 }
 
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID)
 	if progress != nil {
 		value := int(*progress)
 		s.ProgressPct = &value
@@ -526,6 +531,7 @@ func validateParent(ctx context.Context, tx pgx.Tx, projectID, parentID, childID
 }
 
 type registration struct {
+	SucceedsID       *string `json:"succeeds_session_id"`
 	AgentPrincipalID string  `json:"agent_principal_id"`
 	RunID            *string `json:"run_id"`
 	TicketNodeID     *string `json:"ticket_node_id"`
@@ -579,6 +585,9 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if in.Role != "worker" && in.Role != "coordinator" {
 		return nil, workorders.Fail(400, "invalid hierarchy role")
 	}
+	if in.SucceedsID != nil && (!workorders.UUID(*in.SucceedsID) || in.Role != "coordinator") {
+		return nil, workorders.Fail(400, "coordinator and valid predecessor required")
+	}
 	caps, err := normalizeCaps(in.Capabilities, in.Management)
 	if err != nil {
 		return nil, err
@@ -628,13 +637,37 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
+	if err = lockHierarchy(ctx, tx, projectID); err != nil {
+		return nil, err
+	}
 	ref, lease := digest("ref", in.SessionRef), digest("lease", in.WorkerLease)
 	vendor, err := vendorRefDigest(in.SessionRef, in.WorkerLease, in.VendorSessionRef)
 	if err != nil {
 		return nil, err
 	}
 	existing, err := scanSession(tx.QueryRow(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND ref_digest=$2 AND stopped_at IS NULL FOR UPDATE`, projectID, ref))
+	if err == nil && subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 && in.Role == "coordinator" && existing.Role == "coordinator" && existing.AgentPrincipalID == in.AgentPrincipalID && existing.Harness == in.Harness {
+		stale, e := heartbeatExpired(ctx, tx, existing)
+		if e != nil {
+			return nil, e
+		}
+		if stale {
+			if _, e = closeGeneration(ctx, tx, p, existing, StopReasonHeartbeatLost); e != nil {
+				return nil, e
+			}
+			err = pgx.ErrNoRows
+		}
+	}
 	if err == nil {
+		if in.SucceedsID != nil {
+			var replay bool
+			if e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE project_id=$1 AND id=$2 AND handed_over_to_id=$3)`, projectID, *in.SucceedsID, existing.ID).Scan(&replay); e != nil {
+				return nil, e
+			}
+			if !replay {
+				return nil, workorders.Fail(409, "successor registration conflicts")
+			}
+		}
 		if subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 || existing.AgentPrincipalID != in.AgentPrincipalID || existing.Harness != in.Harness || existing.Host != in.Host || existing.Management != in.Management || existing.Role != in.Role || existing.WorkShape != in.WorkShape || !same(existing.DisplayLabel, in.DisplayLabel) || !sameRegistrationMetadata(existing, in.sessionText, metaDigest) || !same(existing.ParentID, in.ParentID) || !same(existing.TicketNodeID, in.TicketNodeID) || !same(existing.RunID, in.RunID) || !same(existing.WorkOrderID, in.WorkOrderID) || !sameCaps(existing.Capabilities, caps) {
 			return nil, workorders.Fail(409, "active generation conflicts with registration")
 		}
@@ -644,6 +677,10 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		return existing, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	predecessor, err := handoverPredecessor(ctx, tx, projectID, in, ref)
+	if err != nil {
 		return nil, err
 	}
 	// An archived worker generation cannot resurrect by replaying registration.
@@ -663,7 +700,24 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, registrationConflict(err)
 	}
-	return s, record(ctx, tx, p, s, "registered", nil, s)
+	owner := p.KeyCreatorID
+	if p.Kind == tenant.Person {
+		owner = p.ID
+	}
+	if owner != "" {
+		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=(SELECT coalesce(linked_to,id) FROM principals WHERE id=$2 AND kind='person') WHERE id=$1 RETURNING owner_principal_id::text`, s.ID, owner).Scan(&s.ownerID); err != nil {
+			return nil, err
+		}
+	}
+	if err = record(ctx, tx, p, s, "registered", nil, s); err != nil {
+		return nil, err
+	}
+	if predecessor != nil {
+		if err = adoptChildren(ctx, tx, p, *predecessor, s); err != nil {
+			return nil, err
+		}
+	}
+	return s, nil
 }
 func same(a, b *string) bool {
 	if a == nil || b == nil {
@@ -798,7 +852,7 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		return nil, err
 	}
 	s.Controls = controls
-	return s, nil
+	return reporterSession(s), nil
 }
 func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	id := r.PathValue("projectId")
@@ -848,6 +902,9 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		return nil, workorders.Fail(400, "expected revision required")
 	}
 	ctx := r.Context()
+	if err := lockHierarchy(ctx, tx, r.PathValue("projectId")); err != nil {
+		return nil, err
+	}
 	s, err := load(ctx, tx, r.PathValue("projectId"), r.PathValue("sessionId"), true)
 	if err != nil {
 		return nil, err
@@ -872,6 +929,11 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	if in.ParentID != nil {
 		if err = validateParent(ctx, tx, s.ProjectID, *in.ParentID, s.ID); err != nil {
+			return nil, err
+		}
+	}
+	if p.Kind == tenant.Person && !same(s.ParentID, in.ParentID) {
+		if err = authorizeMove(ctx, tx, p, s, in.ParentID); err != nil {
 			return nil, err
 		}
 	}
@@ -1000,7 +1062,7 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = m.stampSessions(ctx, tx, []*Session{&s}); err != nil {
 		return nil, err
 	}
-	return s, nil
+	return reporterSession(s), nil
 }
 func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {

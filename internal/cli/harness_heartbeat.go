@@ -81,6 +81,7 @@ type heartbeatOptions struct {
 	Note              string
 	Phase             string
 	Activity          string
+	Succeeds          string
 	Parent            string
 	Ticket            string
 	Shape             string
@@ -133,6 +134,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.Note, "note", 0, "current step, at most 120 characters")
 			fs.string(&o.Phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&o.Activity, "activity", 0, "busy, idle or throttled")
+			fs.string(&o.Succeeds, "succeeds", 0, "stopped or heartbeat-lost predecessor coordinator UUID")
 			fs.string(&o.Parent, "parent-session", 0, "parent public session UUID")
 			fs.string(&o.Ticket, "ticket", 0, "ticket node key")
 			fs.string(&o.Shape, "work-shape", 0, "ship or scout")
@@ -246,6 +248,9 @@ func (o *heartbeatOptions) prepare() error {
 	if o.SourceSession != "" && !validUUID(o.SourceSession) {
 		return usagef("--source-session must be a UUID")
 	}
+	if o.Succeeds != "" && !validUUID(o.Succeeds) {
+		return usagef("invalid --succeeds session")
+	}
 	if o.Parent != "" && !validUUID(o.Parent) {
 		return usagef("invalid parent session")
 	}
@@ -294,6 +299,9 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 	o.applyRuntimeDefaults()
 	session, created, err := rt.openHeartbeatSession(ctx, o, dep)
 	if err != nil {
+		if errors.Is(err, errOwnerExited) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil
+		}
 		return err
 	}
 	defer session.hold.release()
@@ -312,6 +320,11 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 			return rt.abandonHeartbeat(o, &session, err)
 		}
 	}
+	return rt.heartbeatLoop(ctx, o, dep, &session)
+}
+
+// heartbeatLoop serves both the PID observer and a one-shot child process.
+func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep heartbeatDeps, session *heartbeatSession) error {
 	if dep.alive == nil {
 		pid, start := session.disk.OwnerPID, session.disk.OwnerStart
 		dep.alive = func(int) bool { return ownerAlive(pid, start) }
@@ -323,29 +336,29 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 	}
 	interval := time.Duration(o.Interval) * time.Second
 	for {
-		rt.noteHeartbeatSources(ctx, o, &session)
+		rt.noteHeartbeatSources(ctx, o, session)
 		if ctx.Err() != nil || !dep.alive(o.OwnerPID) {
-			return rt.finishHeartbeat(o, &session)
+			return rt.finishHeartbeat(o, session)
 		}
-		err := rt.heartbeatBeat(ctx, o, dep, &session)
+		err := rt.heartbeatBeat(ctx, o, dep, session)
 		switch {
 		case errors.Is(err, errHeartbeatTerminal):
-			rememberSettlement(&session)
-			if serr := saveHeartbeatSession(&session); serr != nil {
+			rememberSettlement(session)
+			if serr := saveHeartbeatSession(session); serr != nil {
 				return serr
 			}
 			return nil
 		case err != nil && ctx.Err() != nil:
-			return rt.finishHeartbeat(o, &session)
+			return rt.finishHeartbeat(o, session)
 		case err != nil:
 			fmt.Fprintf(rt.stderr, "heartbeat: beat failed: %s\n", err.Error())
 		default:
-			if serr := saveHeartbeatSession(&session); serr != nil {
+			if serr := saveHeartbeatSession(session); serr != nil {
 				fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
 			}
 		}
 		if err := dep.wait(ctx, o.OwnerPID, interval); err != nil {
-			return rt.finishHeartbeat(o, &session)
+			return rt.finishHeartbeat(o, session)
 		}
 	}
 }
@@ -660,6 +673,7 @@ func (rt *runtime) abandonHeartbeat(o heartbeatOptions, session *heartbeatSessio
 }
 
 func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions, dep heartbeatDeps) (session heartbeatSession, created bool, err error) {
+	ownerCtx := ctx
 	// A signal that arrives before registration still has to record the generation
 	// and then stop it. Cancellation applies to beats, scans and later requests.
 	if ctx.Err() != nil {
@@ -708,6 +722,10 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if err != nil {
 		return heartbeatSession{}, false, err
 	}
+	// A native coordinator session survives a helper process restart.
+	if o.Role == "coordinator" && o.SourceSession != "" {
+		ref = o.Harness + ":" + strings.ToLower(o.SourceSession)
+	}
 	label, haveLabel := resolveHeartbeatLabel(ctx, o, dep, true)
 	body := map[string]any{
 		"agent_principal_id":      me.Principal.ID,
@@ -726,6 +744,9 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
 	putText(body, "branch", heartbeatText(o.Branch, 200), true)
+	if o.Succeeds != "" {
+		body["succeeds_session_id"] = strings.ToLower(o.Succeeds)
+	}
 	if o.Parent != "" {
 		body["parent_harness_session_id"] = strings.ToLower(o.Parent)
 	}
@@ -747,17 +768,54 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	var out struct {
 		ID string `json:"id"`
 	}
-	if err = rt.harnessDoCtx(ctx, http.MethodPost, harnessPath(projectID, ""), "", body, &out); err != nil {
-		return heartbeatSession{}, false, err
-	}
-	if !validUUID(out.ID) {
-		return heartbeatSession{}, false, errors.New("registration did not return a session id")
-	}
-	disk := heartbeatDisk{Schema: heartbeatSchema, SessionID: strings.ToLower(out.ID), OwnerPID: o.OwnerPID, ProjectID: projectID}
+	// Capture the owner before registration: a long predecessor timeout must
+	// not attach the new generation to a process that reused the owner's PID.
+	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID}
 	if stamp, stampErr := readOwnerStamp(o.OwnerPID); stampErr == nil {
 		disk.OwnerPID = stamp.PID
 		disk.OwnerStart = stamp.Start
 	}
+	if dep.alive == nil {
+		dep.alive = func(int) bool { return ownerAlive(disk.OwnerPID, disk.OwnerStart) }
+	}
+	if dep.wait == nil {
+		dep.wait = func(ctx context.Context, pid int, interval time.Duration) error {
+			return waitHeartbeat(ctx, pid, dep.alive, interval)
+		}
+	}
+	for {
+		err = rt.harnessDoCtx(ctx, http.MethodPost, harnessPath(projectID, ""), "", body, &out)
+		if err == nil {
+			break
+		}
+		// A crashed coordinator can still count as healthy until its last
+		// heartbeat expires. Retry only that registration conflict, keeping
+		// the same body and state lock until the server can adopt its children.
+		if o.Role != "coordinator" || o.SourceSession == "" || err.Error() != "api 409: active generation conflicts with registration" {
+			return heartbeatSession{}, false, err
+		}
+		if err = ownerCtx.Err(); err != nil {
+			return heartbeatSession{}, false, err
+		}
+		if !dep.alive(o.OwnerPID) {
+			return heartbeatSession{}, false, errOwnerExited
+		}
+		interval := time.Duration(o.Interval) * time.Second
+		fmt.Fprintf(rt.stderr, "heartbeat: predecessor generation is still active; retrying registration in %s\n", interval)
+		if err = dep.wait(ownerCtx, o.OwnerPID, interval); err != nil {
+			return heartbeatSession{}, false, err
+		}
+		if err = ownerCtx.Err(); err != nil {
+			return heartbeatSession{}, false, err
+		}
+		if !dep.alive(o.OwnerPID) {
+			return heartbeatSession{}, false, errOwnerExited
+		}
+	}
+	if !validUUID(out.ID) {
+		return heartbeatSession{}, false, errors.New("registration did not return a session id")
+	}
+	disk.SessionID = strings.ToLower(out.ID)
 	bindHeartbeatWorktree(ctx, o, &disk)
 	if haveLabel {
 		disk.LabelSent = true
