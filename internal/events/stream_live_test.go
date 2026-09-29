@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-// liveStream opens /api/events/stream?after=... (live mode) and returns the
-// ID its stream.ready event names.
-func liveStream(t *testing.T, srv *httptest.Server, after, lastEventID string) (*http.Response, *bufio.Scanner, int64) {
+// liveStream opens /api/events/stream?after=... (live mode), checks that
+// stream.ready says resumed as expected and returns the ID it names.
+func liveStream(t *testing.T, srv *httptest.Server, after, lastEventID string, resumed bool) (*http.Response, *bufio.Scanner, int64) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
 	t.Cleanup(cancel)
@@ -44,7 +44,7 @@ func liveStream(t *testing.T, srv *httptest.Server, after, lastEventID string) (
 		t.Fatalf("live stream opening %q (%v)", lines, sc.Err())
 	}
 	id, err := strconv.ParseInt(strings.TrimPrefix(lines[2], "id: "), 10, 64)
-	if err != nil || lines[4] != `data: {"after":`+strconv.FormatInt(id, 10)+`}` {
+	if err != nil || lines[4] != `data: {"after":`+strconv.FormatInt(id, 10)+`,"resumed":`+strconv.FormatBool(resumed)+`}` {
 		t.Fatalf("stream.ready framing %q", lines)
 	}
 	if !sc.Scan() || sc.Text() != "" {
@@ -58,7 +58,7 @@ func TestSSELiveModeStartsAtLatestAndResumes(t *testing.T) {
 	srv := testServer(t, d, a, b)
 
 	// A tenant without events starts at 0.
-	resp, _, ready := liveStream(t, srv, "latest", "")
+	resp, _, ready := liveStream(t, srv, "latest", "", false)
 	if ready != 0 {
 		t.Fatalf("empty tenant ready at %d", ready)
 	}
@@ -66,7 +66,7 @@ func TestSSELiveModeStartsAtLatestAndResumes(t *testing.T) {
 
 	appendEvents(t, d, a, 3)
 	appendEvents(t, d, b, 2) // another tenant's counter never shows here
-	resp, sc, ready := liveStream(t, srv, "latest", "")
+	resp, sc, ready := liveStream(t, srv, "latest", "", false)
 	if ready != 3 {
 		t.Fatalf("latest ready at %d, want 3", ready)
 	}
@@ -78,7 +78,7 @@ func TestSSELiveModeStartsAtLatestAndResumes(t *testing.T) {
 
 	// A reconnect sends Last-Event-ID, which wins over the query.
 	appendEvents(t, d, a, 1)
-	resp, sc, ready = liveStream(t, srv, "latest", "4")
+	resp, sc, ready = liveStream(t, srv, "latest", "4", true)
 	if ready != 4 {
 		t.Fatalf("resume ready at %d, want 4", ready)
 	}
@@ -88,7 +88,7 @@ func TestSSELiveModeStartsAtLatestAndResumes(t *testing.T) {
 	resp.Body.Close()
 
 	// A numeric after replays from there.
-	resp, sc, ready = liveStream(t, srv, "2", "")
+	resp, sc, ready = liveStream(t, srv, "2", "", true)
 	if ready != 2 {
 		t.Fatalf("after=2 ready at %d", ready)
 	}
@@ -99,7 +99,7 @@ func TestSSELiveModeStartsAtLatestAndResumes(t *testing.T) {
 
 	// A resume point from the future (another database) restarts at the
 	// newest event; stream.ready names it, so the client knows to refetch.
-	resp, _, ready = liveStream(t, srv, "latest", "999")
+	resp, _, ready = liveStream(t, srv, "latest", "999", false)
 	if ready != 5 {
 		t.Fatalf("future resume ready at %d, want 5", ready)
 	}
@@ -122,7 +122,7 @@ func TestSSELiveModeSkipsALongBacklog(t *testing.T) {
 	d, a, b := fixture(t)
 	appendEvents(t, d, a, maxLiveReplay+2)
 	srv := testServer(t, d, a, b)
-	resp, sc, ready := liveStream(t, srv, "latest", "1")
+	resp, sc, ready := liveStream(t, srv, "latest", "1", false)
 	defer resp.Body.Close()
 	if ready != maxLiveReplay+2 {
 		t.Fatalf("long backlog ready at %d, want %d", ready, maxLiveReplay+2)
@@ -132,7 +132,7 @@ func TestSSELiveModeSkipsALongBacklog(t *testing.T) {
 		t.Fatalf("after the skip got %d", e.ID)
 	}
 	// Within the bound the backlog is replayed.
-	resp2, sc2, ready2 := liveStream(t, srv, "latest", "3")
+	resp2, sc2, ready2 := liveStream(t, srv, "latest", "3", true)
 	defer resp2.Body.Close()
 	if ready2 != 3 {
 		t.Fatalf("short backlog ready at %d", ready2)

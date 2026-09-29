@@ -43,7 +43,7 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 	// stream.ready event naming the ID it resumes after. A browser reconnect
 	// sends Last-Event-ID, which wins over the query.
 	query := r.URL.Query()
-	live, latest := query.Has("after"), query.Get("after") == "latest"
+	live, latest, resumed := query.Has("after"), query.Get("after") == "latest", false
 	if values, present := r.Header["Last-Event-Id"]; present {
 		var err error
 		if len(values) != 1 {
@@ -90,11 +90,13 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// A resume point from another database, or one so far behind that a
-		// refetch is cheaper than the replay, restarts at the newest event;
-		// stream.ready then names an ID the client did not send, its cue to
-		// refetch what it shows.
+		// refetch is cheaper than the replay, restarts at the newest event.
+		// stream.ready says resumed:false then (and for "latest"): the
+		// client's cue to refetch what it shows.
 		if latest || after > newest || newest-after > maxLiveReplay {
 			after = newest
+		} else {
+			resumed = true
 		}
 	}
 	// Subscribe before replay to close the gap between reading and listening.
@@ -121,7 +123,7 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if live {
-		if err := flush(fmt.Sprintf("id: %d\nevent: stream.ready\ndata: {\"after\":%d}\n\n", after, after)); err != nil {
+		if err := flush(fmt.Sprintf("id: %d\nevent: stream.ready\ndata: {\"after\":%d,\"resumed\":%t}\n\n", after, after, resumed)); err != nil {
 			return
 		}
 	}
