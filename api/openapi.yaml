@@ -4043,7 +4043,7 @@ paths:
     post:
       operationId: approveOngoingObservedCapacity
       summary: Approve ongoing managed work using observed account capacity
-      description: Person account.manage permission required. Records the existing separate pairing approval without creating a manual allowance window. Fresh readings, probe, grant and reservation checks still apply. Ingesting a reading never grants this approval.
+      description: Person account.manage permission required. Records ongoing-use approval after pairing approval, including before helper redemption, without creating a manual allowance window. Dispatch still requires redeemed pairing, a fresh probe, model grants and capacity admission. Accounts without readings use the provisional first-run policy. Ingesting a reading never grants this approval.
       parameters:
         - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
       responses:

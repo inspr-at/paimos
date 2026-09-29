@@ -2,12 +2,13 @@
 package agentaccounts
 
 import (
+	"testing"
+	"time"
+
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/jackc/pgx/v5"
-	"testing"
-	"time"
 )
 
 func TestFirstReadingGrantIsSingleUsePerGeneration(t *testing.T) {
@@ -126,7 +127,28 @@ func TestBlindDayPolicyAndDurableDailyLimit(t *testing.T) {
 				if err == nil && wait != nil {
 					t.Fatalf("night blocked: %+v", wait)
 				}
-				return err
+				if err != nil {
+					return err
+				}
+				// A content-free vendor stop survives night, the next day and a
+				// person-requested schedule override. No reset is invented.
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2 WHERE id=$1`, run, a.ID); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code) VALUES($1,$2,1,'usage','vendor_limit')`, person.TenantID, run); err != nil {
+					return err
+				}
+				for _, at := range []time.Time{now, now.Add(24 * time.Hour)} {
+					a.LastProbeAt = &at
+					_, w, err := admission(t.Context(), tx, a, nil, at, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, false)
+					if err != nil {
+						return err
+					}
+					if w == nil || w.Code != "vendor" || w.RunNowAllowed || w.Until != nil {
+						t.Fatalf("vendor stop lost: %+v", w)
+					}
+				}
+				return nil
 			})
 		})
 	}
@@ -183,6 +205,31 @@ func TestAdmissionScheduleClockAndRunNowFences(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("%s: %s != %s", tc.name, got, tc.want)
 			}
+		}
+		// A deliberate hold is not a schedule exception.
+		s.Override = "hold"
+		if _, err := tx.Exec(t.Context(), `UPDATE account_capacity_schedules SET schedule=$2::jsonb WHERE account_id=$1`, a.ID, encoded(t, s)); err != nil {
+			return err
+		}
+		_, w, err := admission(t.Context(), tx, a, nil, now, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, false)
+		if err != nil {
+			return err
+		}
+		if w == nil || w.Code != "hold" || w.RunNowAllowed {
+			t.Fatalf("hold lost: %+v", w)
+		}
+		// A sign-in failure has an actionable reason rather than generic offline.
+		no := false
+		a.LastProbeOK = &no
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_failure='auth_failed' WHERE id=$1`, a.ID); err != nil {
+			return err
+		}
+		_, w, err = admission(t.Context(), tx, a, nil, now, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, false)
+		if err != nil {
+			return err
+		}
+		if w == nil || w.Code != "sign_in" || w.RunNowAllowed {
+			t.Fatalf("sign-in lost: %+v", w)
 		}
 		return nil
 	}); err != nil {

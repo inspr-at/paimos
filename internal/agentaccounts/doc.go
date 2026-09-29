@@ -24,7 +24,7 @@
 // existing queue policy: available and per-window remaining/pace_remaining
 // describe ledger headroom, not proof of measured provider allowance. Unknown
 // usage is never measured zero. No role route means no default model, and absent
-// allowance means unavailable.
+// allowance can use the explicitly provisional first-run policy below.
 // Registry initialization remains with /api/models; the catalog is read-only.
 //
 // PUT /api/agent-accounts/{id}/metadata replaces label, plan, host_label and
@@ -55,6 +55,16 @@
 // refresh; expiry/release never renews it without a new measured observation. Explicit vendor denial fails closed until explicit vendor recovery.
 // Readings never approve pairing: POST {id}/capacity/approve requires a person
 // with account.manage and records the existing separate ongoing-use approval.
+// AEON-353 permits saving this approval after the person approves pairing,
+// before helper redemption; dispatch still requires redemption and a fresh probe.
+// Without prior readings Codex/Claude get one provisional first-reading run per
+// daemon generation. No parallel second run starts before a real reading. Blind
+// Grok/Cursor/Pi use blindDayPolicy: one at a time, three daily attempts during
+// the owner's work bands; nights/off days retain the normal parallel cap. A
+// vendor_limit telemetry signal blocks further blind use, with no guessed reset.
+// Catalog and queued runs expose structured advisory waits; reservation and
+// claim recheck admission under the account lock. A person's per-run "now"
+// override skips schedule pacing, never holds, truth or ownership fences.
 // Active manual windows override pacing; fresh vendor denial still fences them. Percent reservations hold an
 // initial 1% per job; tokens/dollars never masquerade as vendor quota.
 // Settlement releases that hold without adding usage already in observations.

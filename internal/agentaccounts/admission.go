@@ -100,6 +100,15 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 		}
 	}
 	active := activeWindows(regular, now)
+	// A person-scheduled manual budget must not be substituted with a first
+	// reading grant before that budget opens (pairing verification is separate).
+	if len(active) == 0 {
+		for _, w := range regular {
+			if w.capacityReadAt == nil && w.StartsAt.After(now) {
+				return nil, &CapacityWait{Code: "allowance", Until: &w.StartsAt, Timezone: s.Timezone}, nil
+			}
+		}
+	}
 	if own != nil && len(active) == 0 {
 		active = []Window{*own}
 	}
