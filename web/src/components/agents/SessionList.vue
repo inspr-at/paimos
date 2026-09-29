@@ -516,8 +516,7 @@ function rowClick(event: MouseEvent, id: string) {
   .c-ticket { grid-column: 3; grid-row: 3; justify-self: start; min-width: 0; overflow: hidden; margin-top: 4px; min-height: 22px; }
   .row > .c-ticket { padding-block: 0; }
   .c-beat { display: none; }
-  /* AEON-280 x AEON-304: no beat cell on phones, so the listening cue stays in the state line. */
-  .row .c-state:has(.state-listen) { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 2px; }
+  /* AEON-280 x AEON-304: no beat cell on phones, so the listening cue stays under the state label. */
   .c-elapsed { display: none; }
   .row > .c-actions { grid-area: actions; grid-row: 1 / span 3; align-self: center; flex-direction: column; justify-content: center; gap: 0; padding: 0; }
   .act { display: none; }
