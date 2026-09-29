@@ -436,7 +436,9 @@ function rowClick(event: MouseEvent, id: string) {
   .ctx-beat { display: inline; }
   .ctx-beat::before { content: '·'; margin-right: 6px; }
   .row > .tree-lines { left: 25px; }
-  .worker-tools { grid-column: 2 / -1; grid-row: 4; flex-wrap: nowrap; white-space: nowrap; margin: 2px 0 -10px -6px; padding: 0; }
+  .worker-tools { grid-column: 2 / -1; grid-row: 4; flex-wrap: nowrap; white-space: nowrap; margin: 0 0 0 -6px; padding: 0; }
+  /* The 44 px toggle line closes a lead's row by itself. */
+  .row:has(> .c-agent > .worker-tools) { padding-bottom: 0; }
   .worker-toggle { min-height: 44px; padding-inline: 6px; }
   .worker-tools .idle-count, .worker-tools > span[aria-hidden]:has(+ .idle-count) { display: none; }
   .c-exec { grid-column: 2 / 4; grid-row: 2; min-width: 0; margin-top: 6px; gap: 6px; }
