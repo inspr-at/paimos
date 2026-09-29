@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Method learnings (AEON-275): the Knowledge tab inbox, accept into a changelog,
-// dismiss, and the read-only and agent states. Screenshots stay outside the repo.
+// dismiss, and the read-only and agent states. Screenshots stay outside the repo
+// and run only with VISUAL_AUDIT=1 (optional VISUAL_AUDIT_DIR).
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { test, expect, type Browser, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors, me } from './work-fixtures'
 import { knowledgeWorld, mockKnowledge, type MockLearning } from './knowledge-fixtures'
-
-const shots = '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-275'
 
 function learnings(now = Date.now()): MockLearning[] {
   return [
@@ -80,6 +79,7 @@ test('a person accepts a learning into the changelog and can dismiss another', a
   await expect(dialog).toBeVisible()
   await expect(dialog.getByLabel('Entry')).toHaveValue('k-deploy')
   await expect(dialog.getByText('Write the release note in the same turn')).toHaveCount(1)
+  await expect(dialog.locator('.preview span').first()).toHaveText(/^\d{4}-\d{2}-\d{2}: Write the release note in the same turn\.$/)
   await expect(dialog.getByText('Adds this line')).toHaveCount(0)
   const source = dialog.locator('.preview a')
   await expect(source).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
@@ -107,6 +107,22 @@ test('a person accepts a learning into the changelog and can dismiss another', a
   await expect(page.getByRole('heading', { name: 'Method learnings' })).toBeFocused()
   await expect(page.getByText('Dismissed.')).toBeVisible()
   expect(errors).toEqual([])
+})
+
+test('removing the last learning keeps focus on the search', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, { learnings: learnings().slice(0, 1) })
+  await page.getByRole('button', { name: /^Dismiss PHAROS-11:/ }).click()
+  await page.getByRole('button', { name: 'Dismiss learning' }).click()
+  await expect(page.getByRole('heading', { name: 'Method learnings' })).toHaveCount(0)
+  await expect(page.getByRole('searchbox', { name: 'Search knowledge in Pharos' })).toBeFocused()
+
+  await page.getByRole('button', { name: 'Undo' }).click()
+  await expect(card(page, 'Write the release note in the same turn')).toBeVisible()
+  await card(page, 'Write the release note in the same turn').getByRole('button', { name: /^Accept PHAROS-11:/ }).click()
+  await page.getByRole('button', { name: 'Add to changelog' }).click()
+  await expect(page.getByRole('heading', { name: 'Method learnings' })).toHaveCount(0)
+  await expect(page.getByRole('searchbox', { name: 'Search knowledge in Pharos' })).toBeFocused()
 })
 
 test('viewers and agents see the inbox without a way to decide', async ({ page }) => {
@@ -167,7 +183,9 @@ test('the inbox has no axe violations', async ({ page }) => {
 })
 
 test('screenshots at 1600 and 390, light and dark', async ({ browser }) => {
+  test.skip(process.env.VISUAL_AUDIT !== '1', 'Screenshots run only with VISUAL_AUDIT=1.')
   test.setTimeout(240_000)
+  const shots = resolve(process.env.VISUAL_AUDIT_DIR ?? 'test-results/knowledge-learnings')
   mkdirSync(shots, { recursive: true })
   const shot = async (browser: Browser, width: number, theme: 'light' | 'dark', mode: 'inbox' | 'dialog' | 'empty' | 'long') => {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: theme, reducedMotion: 'reduce', deviceScaleFactor: 1 })

@@ -176,6 +176,7 @@ function keydown(event: KeyboardEvent) {
   }
 }
 function focusSearch() { input.value?.focus(); input.value?.select() }
+function holdFocus() { input.value?.focus({ preventScroll: true }) }
 function openCreate(type?: KnowledgeType) { createDialog.value?.open(type ?? (props.filters.type || undefined)) }
 async function created(entry: KnowledgeEntry) {
   props.state.upsert(entry)
@@ -246,7 +247,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
   </Teleport>
 
   <div class="k-frame">
-  <MethodLearnings :project="project" :entries="state.items.value" :can-write="canWrite" :person="person" :now="now" @accepted="accepted" @reverted="emit('reverted')" />
+  <MethodLearnings :project="project" :entries="state.items.value" :can-write="canWrite" :person="person" :now="now" @accepted="accepted" @reverted="emit('reverted')" @emptied="holdFocus" />
   <div class="k-layout">
     <nav class="k-rail" aria-label="Kinds of knowledge">
       <div class="k-kinds">

@@ -19,7 +19,7 @@ const props = defineProps<{
   person: boolean
   now: number
 }>()
-const emit = defineEmits<{ accepted: [entry: KnowledgeEntry]; reverted: [] }>()
+const emit = defineEmits<{ accepted: [entry: KnowledgeEntry]; reverted: []; emptied: [] }>()
 
 const inboxPreview = 3
 const items = ref<MethodLearning[]>([])
@@ -112,7 +112,12 @@ async function settleFocus(removedId: string, before: MethodLearning[]) {
     button.focus()
     return
   }
-  heading.value?.focus()
+  // The inbox unmounts with its last row, so the heading is gone.
+  if ((items.value.length || error.value) && heading.value) {
+    heading.value.focus()
+    return
+  }
+  emit('emptied')
 }
 function backdrop(event: MouseEvent) { if (event.target === dialog.value) close() }
 
@@ -230,7 +235,7 @@ async function undo(eventId: number) {
           <option v-for="entry in choices" :key="entry.id" :value="entry.id">{{ entry.title }}</option>
         </select>
         <p v-if="accepting" class="preview">
-          <span>- {{ previewDate }}: {{ accepting.text }}.</span>
+          <span>{{ previewDate }}: {{ accepting.text }}.</span>
           <span>Source: <a :href="accepting.href">{{ linkLabel(accepting.key) }}</a>.</span>
         </p>
         <p v-if="dialogError" class="problem" role="alert">{{ dialogError }}</p>
