@@ -82,7 +82,7 @@ function parts(text: string) {
         <li v-for="line in presented[g.key]" :key="line.key">
           <article class="ticket-line" :aria-labelledby="titleId(g.key, line.key)">
             <div class="line-head">
-              <h4 :id="titleId(g.key, line.key)" class="pill-title" :lang="titleLang(line)"><template v-for="(p, i) in parts(line.pill || line.benefit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="fellBack(titleLang(line))" :lang="titleLang(line)" /></h4>
+              <h4 :id="titleId(g.key, line.key)" class="pill-title" :lang="titleLang(line)"><span class="change-glyph" aria-hidden="true"><AppIcon :name="g.icon" :size="13" /></span><template v-for="(p, i) in parts(line.pill || line.benefit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="fellBack(titleLang(line))" :lang="titleLang(line)" /></h4>
               <TicketLink :ticket-key="line.key" variant="inline" />
             </div>
             <p v-if="line.pill && showBenefit(line)" class="benefit" :lang="line.benefitLang"><template v-for="(p, i) in parts(line.benefit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="fellBack(line.benefitLang) && !fellBack(titleLang(line))" :lang="line.benefitLang" /></p>
@@ -108,7 +108,7 @@ function parts(text: string) {
       </ul>
       <ul v-else>
         <li v-for="c in presented.other" :key="c.commit">
-          <p class="subject"><template v-for="(p, i) in parts(plainSubject(c.subject, c.tickets))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
+          <p class="subject"><span class="change-glyph" aria-hidden="true"><AppIcon :name="g.icon" :size="13" /></span><template v-for="(p, i) in parts(plainSubject(c.subject, c.tickets))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
           <p class="meta">
             <span v-if="TYPE_LABEL[c.type]" class="type">{{ TYPE_LABEL[c.type] }}</span>
             <TicketLink v-for="t in ticketsShown(c)" :key="t" :ticket-key="t" variant="inline" />
@@ -131,10 +131,23 @@ function parts(text: string) {
 ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
 .group > ul { padding-left: 33px; }
 .ticket-lines { gap: 4px; }
-.ticket-lines > li, .group > ul:not(.ticket-lines) > li { padding: 6px 10px 7px; margin-left: -10px; border-radius: 9px; }
+.ticket-lines > li, .group > ul:not(.ticket-lines) > li { padding: 6px 10px 7px 28px; margin-left: -28px; border-radius: 9px; }
 .ticket-line { display: grid; gap: 3px; min-width: 0; }
 .line-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
 .pill-title { margin: 0; min-width: 0; font: 650 14.5px/1.35 var(--font); color: var(--ink); letter-spacing: 0; overflow-wrap: anywhere; }
+/* Hanging kind mark in the gutter. Cap-centred on the first line, so a wrapped
+   title stays put and the benefit and commit count keep their left edge. */
+.pill-title, .group > ul:not(.ticket-lines) > li > .subject { position: relative; }
+.change-glyph {
+  --glyph-gap: 8px;
+  position: absolute; z-index: 0; right: calc(100% + var(--glyph-gap)); top: 0;
+  display: grid; place-items: center; width: 13px; height: 1lh;
+  transform: translateY(calc((1cap - 1em) / 2));
+  opacity: .7; pointer-events: none;
+}
+.features .change-glyph { color: var(--teal-ink); }
+.fixes .change-glyph { color: var(--gold-ink); }
+.other .change-glyph { color: var(--ink-3); }
 .benefit { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
 .commits { min-width: 0; }
 .commits summary { display: inline-flex; align-items: center; gap: 4px; margin: 1px 0 0; padding: 2px 6px 2px 0; border-radius: 6px; color: var(--ink-3); font: 500 12px/1.3 var(--font); cursor: pointer; }
@@ -162,6 +175,13 @@ ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
   .group > ul { padding-left: 0; }
   .ticket-lines > li, .group > ul:not(.ticket-lines) > li { margin-left: 0; padding: 6px 4px 7px; }
   .commit-list li { padding-left: 8px; }
+  /* The detail pane scrolls, so a mark in the page padding is clipped. The
+     fallback keeps the 13px mark in the row with an 8px gap, and the benefit,
+     commits and meta share the title's text edge. */
+  .pill-title, .group > ul:not(.ticket-lines) > li > .subject { padding-left: 21px; }
+  .change-glyph { right: auto; left: 0; }
+  .benefit, .commits, .commit-list.open, .group > ul:not(.ticket-lines) > li > .meta { margin-left: 21px; }
+  .commit-list.open li { padding-left: 0; }
 }
 /* Phones: the subject wraps on the left and the SHA keeps its 44 px target on the right. */
 @media (max-width: 600px) {
