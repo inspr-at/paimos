@@ -279,8 +279,9 @@ pinned mode. Changing settings neither upgrades nor downgrades existing watches.
 Mode A retains the original snapshot digest and accepts legacy A approvals.
 
 Native Mac confirmation needs `CGO_ENABLED=1`, Apple's Foundation,
-LocalAuthentication and Security frameworks, and an executable named
-`aeon-agentd` with a valid Developer ID signature, hardened runtime and no
+LocalAuthentication and Security frameworks, and an installed executable named
+`paimos-agentd` (the pairing installer) or `aeon-agentd` (the Nix package) with
+a valid Developer ID signature by the team the build expects, hardened runtime and no
 get-task-allow, library-validation or DYLD-environment exceptions. It validates
 the running process through `SecCodeCopySelf`/`SecCodeCheckValidity`, checks for
 a graphical login, and evaluates a fresh `LAContext` with
@@ -289,10 +290,42 @@ The OS supplies Touch ID/device-password authentication (and other OS-supported
 owner factors); the reason names the harness session PID and host. Contexts
 are never reused. The prompt is asynchronous, remains revocable during polling,
 and times out after 90 seconds. These checks do not replace installer provenance
-or same-user OS isolation. **Current CGO-disabled Nix packages, unsigned/ad-hoc
-builds, and headless contexts fail closed with a specific local error**; no
-signing identity or release pipeline is changed by this feature. A real signed
-interactive-device acceptance check belongs to release qualification.
+or same-user OS isolation. Release darwin `paimos-agentd` is built with
+`CGO_ENABLED=1` and links LocalAuthentication. Linux `paimos-agentd`, `aeon-cli`,
+and the server image stay `CGO_ENABLED=0`. The Nix `aeon-agentd` package uses
+the same split. At watch registration the daemon reports a non-interactive
+capability: `available`, `unsupported`, `unsigned`, `no_gui`, or `policy`.
+An omitted report is stored as `unreported`. Settings lists that report for
+the signed-in person's connected computers and does not offer Mac confirmation
+unless one reports `available`. Unsigned, ad-hoc, and headless builds still
+fail closed. A signed interactive Touch ID acceptance check remains release
+qualification.
+
+### Signed release daemon (AEON-285)
+
+Release darwin `paimos-agentd` is signed with **Developer ID Application:
+Markus Barta (P66J39QV6V)**, hardened runtime and a secure timestamp, then
+notarized, in the Release workflow's `agentd-darwin` job ("Sign and notarize
+paimos-agentd", `scripts/sign-notarize.sh`, vendored from the
+`markus-barta/apple-signing` vault). The certificate and notarization
+credentials come from that vault into the `release-signing` GitHub
+environment, which releases them only to `v*` tag runs; PR and branch CI never
+see them. Signing happens before `SHA256SUMS` is computed.
+
+`scripts/build-release-binaries.sh` embeds the expected team through
+`-X github.com/inspr-at/paimos/internal/agentd.expectedTeamID=P66J39QV6V`
+(`AEON_DEVELOPER_ID_TEAM` overrides it). The daemon compares the team of its own
+valid signature with that value. An empty value (development and Nix builds),
+an ad-hoc signature or another team reports `unsigned` and refuses Mac
+confirmation with an explicit message.
+
+Bare binaries cannot be stapled, so Gatekeeper looks the notarization ticket up
+online on first run. To verify a downloaded daemon:
+
+```sh
+codesign -dv paimos-agentd                        # Authority=Developer ID Application: Markus Barta (P66J39QV6V), TeamIdentifier=P66J39QV6V, flags=…runtime
+codesign --verify --strict --test-requirement="=notarized" paimos-agentd
+```
 
 The original pairing owner reviews the immutable host, harness, kernel process
 identity, physical cwd, transcript inode, project and ticket snapshot at the

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -170,4 +171,316 @@ func TestProjectCountsWorkKindsAndStateGroups(t *testing.T) {
 			t.Fatalf("delivered workflow order: %s", body)
 		}
 	}
+}
+
+func TestProjectStatusBuckets(t *testing.T) {
+	if normaliseWorkState(" QA ") != "qa" || normaliseWorkState("in-progress") != "in_progress" || normaliseWorkState("in progress") != "in_progress" {
+		t.Fatalf("state spelling: %q %q %q", normaliseWorkState(" QA "), normaliseWorkState("in-progress"), normaliseWorkState("in progress"))
+	}
+	p := newPrincipal(t, "status-buckets")
+	create := func(kind, state, parent string) {
+		t.Helper()
+		k := kindBySlug(t, p, kind)
+		body := map[string]any{"kind_id": k.ID, "title": kind + " " + state, "state": state, "parent_id": parent}
+		if kind == "ticket" {
+			body["fields"] = json.RawMessage(benefitFields)
+		}
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustNode(t, p, string(raw))
+	}
+	root := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "project").ID+`","title":"Buckets","state":"active"}`)
+	folder := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "release").ID+`","title":"Folder","state":"done","parent_id":"`+root.ID+`"}`)
+	// Every stored spelling, plus one unknown state. A non-work node must not count.
+	for _, state := range []string{
+		"new", "backlog", "open", "blocked", "mystery",
+		"in_progress", "in-progress", "in progress", "inprogress", "active", "qa", " QA ",
+		"accepted", "delivered", "done", "cancelled", "canceled", "archived",
+	} {
+		create("ticket", state, folder.ID)
+	}
+	create("task", "open", folder.ID)
+	create("epic", "blocked", folder.ID)
+	create("memory", "done", root.ID)
+
+	assertBuckets := func(open, progress, done, cancelled, total int) projectSummary {
+		t.Helper()
+		status, body := call(t, &p, "GET", "/api/projects", "")
+		projects := decode[projectPage](t, status, body, 200)
+		if len(projects.Items) != 1 {
+			t.Fatalf("projects: %s", body)
+		}
+		got := projects.Items[0]
+		if got.Open != open || got.InProgress != progress || got.Done != done || got.Cancelled != cancelled || got.Total != total {
+			t.Fatalf("buckets open=%d progress=%d done=%d cancelled=%d total=%d, got %+v", open, progress, done, cancelled, total, got)
+		}
+		return got
+	}
+	// open: new, backlog, open, blocked, mystery, task open, epic blocked.
+	// in progress: four spellings, active, qa, " QA ".
+	// done: accepted, delivered, done. cancelled: cancelled, canceled. archived is total only.
+	assertBuckets(7, 7, 3, 2, 20)
+
+	ticketKind := kindBySlug(t, p, "ticket")
+	var schema map[string]any
+	if err := json.Unmarshal(ticketKind.FieldSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	schema["states"] = []any{
+		map[string]string{"state": "mystery", "category": "done"},
+		map[string]string{"state": "blocked", "category": "doing"},
+		map[string]string{"state": "qa", "category": "open"},
+		map[string]string{"state": "QA", "category": "done"},
+	}
+	raw, err := json.Marshal(map[string]any{"field_schema": schema})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, body := call(t, &p, "PATCH", "/api/kinds/"+ticketKind.ID, string(raw)); status != 400 {
+		t.Fatalf("duplicate state accepted: %d %s", status, body)
+	}
+	schema["states"] = []any{map[string]string{"state": "mystery", "category": "nope"}}
+	raw, _ = json.Marshal(map[string]any{"field_schema": schema})
+	if status, body := call(t, &p, "PATCH", "/api/kinds/"+ticketKind.ID, string(raw)); status != 400 {
+		t.Fatalf("unknown category accepted: %d %s", status, body)
+	}
+	schema["states"] = []any{
+		map[string]string{"state": "mystery", "category": "done"},
+		map[string]string{"state": "blocked", "category": "doing"},
+		map[string]string{"state": "qa", "category": "open"},
+	}
+	raw, _ = json.Marshal(map[string]any{"field_schema": schema})
+	status, body := call(t, &p, "PATCH", "/api/kinds/"+ticketKind.ID, string(raw))
+	updated := decode[kindJSON](t, status, body, 200)
+	var stored map[string]any
+	if err := json.Unmarshal(updated.FieldSchema, &stored); err != nil {
+		t.Fatal(err)
+	}
+	props, _ := stored["properties"].(map[string]any)
+	if _, ok := props["pill_en"]; !ok {
+		t.Fatalf("state catalog replaced field properties: %s", updated.FieldSchema)
+	}
+	// Ticket catalog only: mystery is done, blocked is in progress, both qa spellings are open.
+	// The epic's blocked state keeps the fixed mapping.
+	got := assertBuckets(7, 6, 4, 2, 20)
+	status, body = call(t, &p, "GET", "/api/nodes?within="+root.ID+"&kind=ticket,task,epic&hide_closed=true&limit=100", "")
+	hidden := decode[nodePage](t, status, body, 200)
+	if len(hidden.Items) != got.Open+got.InProgress {
+		t.Fatalf("hide closed %d, open+doing %d", len(hidden.Items), got.Open+got.InProgress)
+	}
+	seen := map[string]bool{}
+	for _, n := range hidden.Items {
+		seen[n.Title] = true
+	}
+	for _, title := range []string{"ticket mystery", "ticket canceled", "ticket done", "ticket archived", "ticket accepted", "ticket delivered"} {
+		if seen[title] {
+			t.Fatalf("closed work stayed visible: %s", title)
+		}
+	}
+	for _, title := range []string{"ticket open", "ticket blocked", "task open", "epic blocked"} {
+		if !seen[title] {
+			t.Fatalf("open work hidden: %s", title)
+		}
+	}
+}
+
+// Hide closed and the project counts share one bucket, per work kind.
+func TestHideClosedAgreesWithBuckets(t *testing.T) {
+	p := newPrincipal(t, "hide-closed-buckets")
+	for _, kind := range []string{"ticket", "task", "epic"} {
+		t.Run(kind, func(t *testing.T) {
+			k := kindBySlug(t, p, kind)
+			var schema map[string]any
+			if err := json.Unmarshal(k.FieldSchema, &schema); err != nil {
+				t.Fatal(err)
+			}
+			schema["states"] = []any{map[string]string{"state": "mystery", "category": "done"}}
+			raw, err := json.Marshal(map[string]any{"field_schema": schema})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status, body := call(t, &p, "PATCH", "/api/kinds/"+k.ID, string(raw)); status != 200 {
+				t.Fatalf("catalog: %d %s", status, body)
+			}
+			root := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "project").ID+`","title":"`+kind+` project","state":"active"}`)
+			for _, state := range []string{"open", "blocked", "mystery", "canceled", "done", "accepted", "delivered", "in-progress", "qa", "archived"} {
+				body := map[string]any{"kind_id": k.ID, "title": kind + " " + state, "state": state, "parent_id": root.ID}
+				if kind == "ticket" {
+					body["fields"] = json.RawMessage(benefitFields)
+				}
+				raw, err := json.Marshal(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				mustNode(t, p, string(raw))
+			}
+			status, body := call(t, &p, "GET", "/api/projects", "")
+			projects := decode[projectPage](t, status, body, 200)
+			var summary projectSummary
+			found := false
+			for _, item := range projects.Items {
+				if item.ID == root.ID {
+					summary = item
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("project missing: %s", body)
+			}
+			// open, blocked stay open; in-progress and qa are doing. mystery is done by category.
+			// canceled, done, accepted, delivered and archived are closed.
+			if summary.Open != 2 || summary.InProgress != 2 {
+				t.Fatalf("counts %+v", summary)
+			}
+			status, body = call(t, &p, "GET", "/api/nodes?within="+root.ID+"&kind="+kind+"&hide_closed=true&limit=100", "")
+			page := decode[nodePage](t, status, body, 200)
+			if len(page.Items) != summary.Open+summary.InProgress {
+				t.Fatalf("hide closed %d, open+doing %d (%s)", len(page.Items), summary.Open+summary.InProgress, body)
+			}
+			seen := map[string]bool{}
+			for _, n := range page.Items {
+				seen[n.State] = true
+				if n.KindSlug != kind {
+					t.Fatalf("kind %s in %s list", n.KindSlug, kind)
+				}
+			}
+			for _, state := range []string{"open", "blocked", "in-progress", "qa"} {
+				if !seen[state] {
+					t.Fatalf("%s hidden", state)
+				}
+			}
+			for _, state := range []string{"mystery", "canceled", "done", "accepted", "delivered", "archived"} {
+				if seen[state] {
+					t.Fatalf("%s stayed visible", state)
+				}
+			}
+		})
+	}
+}
+
+func TestStateSortFollowsWorkflow(t *testing.T) {
+	p := newPrincipal(t, "state-sort")
+	project := kindBySlug(t, p, "project")
+	ticket := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Sort","state":"active"}`)
+	for _, state := range []string{"archived", "mystery", "done", "qa", "active", "in-progress", "blocked", "open", "new", "cancelled", "canceled", "accepted", "delivered"} {
+		body := map[string]any{"kind_id": ticket.ID, "title": state, "state": state, "parent_id": root.ID}
+		if state == "done" || state == "accepted" || state == "delivered" {
+			body["fields"] = json.RawMessage(benefitFields)
+		}
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustNode(t, p, string(raw))
+	}
+	want := []string{"open", "new", "blocked", "active", "in-progress", "qa", "accepted", "delivered", "done", "canceled", "cancelled", "archived", "mystery"}
+	get := func(path string) nodePage {
+		t.Helper()
+		status, body := call(t, &p, http.MethodGet, path, "")
+		return decode[nodePage](t, status, body, http.StatusOK)
+	}
+	statesOf := func(page nodePage) []string {
+		out := make([]string, len(page.Items))
+		for i, n := range page.Items {
+			out[i] = n.State
+		}
+		return out
+	}
+	descWant := []string{"archived", "cancelled", "canceled", "done", "delivered", "accepted", "qa", "in-progress", "active", "blocked", "new", "open", "mystery"}
+	assertSorted := func(sort, label string, expect []string) {
+		t.Helper()
+		if got := statesOf(get("/api/nodes?within=" + root.ID + "&sort=" + sort + "&limit=100")); strings.Join(got, ",") != strings.Join(expect, ",") {
+			t.Fatalf("%s order:\n got %v\nwant %v", label, got, expect)
+		}
+		var paged []string
+		cursor := ""
+		for range len(expect) + 1 {
+			path := "/api/nodes?within=" + root.ID + "&sort=" + url.QueryEscape(sort) + "&limit=2"
+			if cursor != "" {
+				path += "&cursor=" + url.QueryEscape(cursor)
+			}
+			page := get(path)
+			paged = append(paged, statesOf(page)...)
+			if page.NextCursor == nil {
+				break
+			}
+			cursor = *page.NextCursor
+		}
+		if strings.Join(paged, ",") != strings.Join(expect, ",") {
+			t.Fatalf("%s paged order:\n got %v\nwant %v", label, paged, expect)
+		}
+	}
+	assertSorted("state", "workflow", want)
+	assertSorted("-state", "descending", descWant)
+}
+
+func TestStateSortNormalisesSpellings(t *testing.T) {
+	p := newPrincipal(t, "state-sort-norm")
+	project := kindBySlug(t, p, "project")
+	ticket := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Norm sort","state":"active"}`)
+	for _, state := range []string{"mystery", " OPEN ", "done", "in--progress", " QA ", "archived", "open", "qa"} {
+		body := map[string]any{"kind_id": ticket.ID, "title": state, "state": state, "parent_id": root.ID}
+		if state == "done" {
+			body["fields"] = json.RawMessage(benefitFields)
+		}
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustNode(t, p, string(raw))
+	}
+	get := func(path string) nodePage {
+		t.Helper()
+		status, body := call(t, &p, http.MethodGet, path, "")
+		return decode[nodePage](t, status, body, http.StatusOK)
+	}
+	statesOf := func(page nodePage) []string {
+		out := make([]string, len(page.Items))
+		for i, n := range page.Items {
+			out[i] = n.State
+		}
+		return out
+	}
+	groupsOf := func(states []string) []string {
+		out := make([]string, len(states))
+		for i, state := range states {
+			switch normaliseWorkState(state) {
+			case "open", "in_progress", "qa", "done", "archived":
+				out[i] = normaliseWorkState(state)
+			default:
+				out[i] = "unknown"
+			}
+		}
+		return out
+	}
+	assertSorted := func(sort, label, groups string) {
+		t.Helper()
+		full := statesOf(get("/api/nodes?within=" + root.ID + "&sort=" + sort + "&limit=100"))
+		if strings.Join(groupsOf(full), ",") != groups {
+			t.Fatalf("%s groups:\n got %v\nwant %s\nstates %v", label, groupsOf(full), groups, full)
+		}
+		var paged []string
+		cursor := ""
+		for range len(full) + 1 {
+			path := "/api/nodes?within=" + root.ID + "&sort=" + url.QueryEscape(sort) + "&limit=2"
+			if cursor != "" {
+				path += "&cursor=" + url.QueryEscape(cursor)
+			}
+			page := get(path)
+			paged = append(paged, statesOf(page)...)
+			if page.NextCursor == nil {
+				break
+			}
+			cursor = *page.NextCursor
+		}
+		if strings.Join(paged, "\n") != strings.Join(full, "\n") {
+			t.Fatalf("%s pages disagree:\n got %q\nwant %q", label, paged, full)
+		}
+	}
+	assertSorted("state", "normalised", "open,open,in_progress,qa,qa,done,archived,unknown")
+	assertSorted("-state", "normalised descending", "archived,done,qa,qa,in_progress,open,open,unknown")
 }

@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { getProjects, listNodes, updateNode, type ProjectPerson, type ProjectSummary } from '../lib/api'
+import { projectProgressPercent } from '../lib/projectColumns'
 import { projectDescription, projectRouteKey } from '../lib/work'
 
 export interface Project extends ProjectSummary {
@@ -40,8 +41,8 @@ export const useProjects = defineStore('projects', () => {
       cancelled: summary.cancelled ?? 0,
       people: summary.people ?? [],
       nodeUpdatedAt: detail?.updatedAt ?? null,
-      // Cancelled work leaves the scope: progress is done out of what is still meant to ship.
-      percent: summary.total - (summary.cancelled ?? 0) > 0 ? Math.round((summary.done / (summary.total - (summary.cancelled ?? 0))) * 100) : 0,
+      // Cancelled and archived work leave the share: done out of open, doing and done.
+      percent: projectProgressPercent(summary.open, summary.in_progress, summary.done),
     }
   }))
 

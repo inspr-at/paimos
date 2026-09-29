@@ -30,6 +30,7 @@ import { metadataChangeText, metadataChanges } from './metadataHistory'
 import EtaCell from '../work/EtaCell.vue'
 import DeliveryRating from '../work/DeliveryRating.vue'
 import { etaFromSession } from '../../lib/eta'
+import { quickRemoval } from './sessionActions'
 
 // One session in the docked panel: who and where, the bound ticket, then two tabs:
 // Overview (now, details, work, runs, provenance) and Messages (thread and composer).
@@ -132,6 +133,11 @@ watch(() => s.value?.id, async id => {
 onMounted(() => { root.value?.focus({ preventScroll: true }); phoneMedia.addEventListener('change', syncPhone) })
 onBeforeUnmount(() => phoneMedia.removeEventListener('change', syncPhone))
 
+// AEON-291: offer Interrupt and Stop only where they work right now; a session
+// outside the product gets one quiet line instead of disabled buttons.
+const works = (kind: SessionControl['kind']) => !!props.view && !props.controlBlock(props.view, kind)
+const outside = computed(() => !!s.value && s.value.management_mode === 'unmanaged' && s.value.phase !== 'stopped' && !s.value.archived_at)
+const quick = computed(() => !!props.view && quickRemoval(props.view))
 function control(kind: SessionControl['kind']) { if (props.view && !props.controlBlock(props.view, kind)) emit('control', props.view, kind) }
 defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
@@ -156,21 +162,22 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <div v-if="view && !loading && !compactControls" class="head-actions">
         <span class="host-meta">{{ view.harness }}<template v-if="view.session.host"> on {{ view.session.host }}</template></span>
         <span class="spacer" />
-        <template v-if="view.session.phase !== 'stopped' && !reported?.watch && !view.session.advertised_capabilities.includes('managed_control_v1')">
-          <button type="button" class="btn sm ghost" :aria-disabled="!!controlBlock(view, 'interrupt')" :data-tip="controlBlock(view, 'interrupt') || 'Stop the current turn'" @click="control('interrupt')"><AppIcon name="interrupt" :size="14" />Interrupt</button>
-          <button type="button" class="btn sm ghost stop" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'End this session'" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
+        <template v-if="!reported?.watch && !view.session.advertised_capabilities.includes('managed_control_v1')">
+          <button v-if="works('interrupt')" type="button" class="btn sm ghost" data-tip="Stop the current turn" @click="control('interrupt')"><AppIcon name="interrupt" :size="14" />Interrupt</button>
+          <button v-if="works('stop')" type="button" class="btn sm ghost stop" data-tip="End this session" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
         </template>
         <SessionRecovery v-if="!reported?.watch" :session="view.session" />
-        <RemoveSessionDialog :session="view.session" :label="view.name" />
+        <RemoveSessionDialog :session="view.session" :label="view.name" :quick="quick" />
       </div>
-      <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now">
+      <p v-if="view && !loading && outside" class="outside-note">Runs outside {{ brand.short_name }} — stop it in its terminal</p>
+      <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now" :run-status="view.run?.status">
         <template v-if="compactControls" #more>
           <button v-if="showRecover" type="button" role="menuitem" class="menu-item" @click="recovery?.open()"><AppIcon name="wrench" :size="16" /><span class="mi-text"><span>Recover</span></span></button>
-          <button v-if="showRemove" type="button" role="menuitem" class="menu-item" :aria-label="`Remove ${view.name} from Agents`" @click="removal?.remove()"><AppIcon name="archive" :size="16" /><span class="mi-text"><span>Remove</span><small>Hides the record; does not stop the process</small></span></button>
+          <button v-if="showRemove" type="button" role="menuitem" class="menu-item" :aria-label="`Remove ${view.name}`" @click="removal?.remove()"><AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quick ? 'Remove' : 'Remove…' }}</span></span></button>
         </template>
       </ManagedSessionControls>
       <SessionRecovery v-if="view && !loading && compactControls" ref="recovery" hide-trigger :session="view.session" />
-      <RemoveSessionDialog v-if="view && !loading && compactControls" ref="removal" hide-trigger :session="view.session" :label="view.name" />
+      <RemoveSessionDialog v-if="view && !loading && compactControls" ref="removal" hide-trigger :session="view.session" :label="view.name" :quick="quick" />
       <SessionTabs v-if="view && !loading && !reported?.watch" :selected="tab" :unread="tab === 'messages' ? 0 : unread" @select="selectTab" />
     </header>
 
@@ -298,6 +305,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .head-top { display: flex; align-items: center; gap: 8px; min-height: 36px; }
 .head-actions { display: flex; align-items: center; gap: 4px; min-width: 0; margin-top: 6px; }
 .head-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; }
+.outside-note { margin: 2px 0 0; font-size: 12px; line-height: 1.4; color: var(--ink-3); }
 .host-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; }
 .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
 .state-text { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
@@ -382,7 +390,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .head-actions { flex-wrap: wrap; }
   .head-actions .spacer { flex-basis: 100%; height: 0; }
   /* Up to four quiet controls share one row on phones. */
-  .head-actions .btn { flex: 1 1 0; min-width: 0; padding-inline: 4px; }
+  .head-actions .btn { flex: 1 1 0; min-width: 0; min-height: 44px; padding-inline: 4px; }
   .head-top .icon-btn { width: 40px; height: 40px; }
   /* While typing (keyboard open) the thread gets the room: controls and ticket step aside. */
   .session-panel:has(#session-panel-messages textarea:focus) .head-actions,

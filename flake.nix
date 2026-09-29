@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # packages.<system>.aeon is a static CGO_ENABLED=0 client build of ./cmd/aeon
 # without the webembed tag, and installs bin/paimos as a symlink to bin/aeon.
-# packages.<system>.aeon-agentd builds ./cmd/aeon-agentd.
+# packages.<system>.aeon-agentd builds ./cmd/aeon-agentd. Darwin sets
+# CGO_ENABLED=1 so the daemon links LocalAuthentication. Linux stays at 0.
 {
   description = "PAIMOS AEON";
 
@@ -78,6 +79,9 @@
                 mainProgram = "aeon-agentd";
                 platforms = systems;
               };
+            }
+            // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+              env.CGO_ENABLED = 1;
             }
           );
           default = aeon;

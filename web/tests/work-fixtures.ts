@@ -3,6 +3,7 @@
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page } from '@playwright/test'
+import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
@@ -47,8 +48,7 @@ export interface MockOptions {
   liveTruncated?: boolean
 }
 
-const CLOSED = ['done', 'cancelled', 'archived', 'delivered', 'accepted']
-const STATE_ORDER = ['new', 'backlog', 'in_progress', 'active', 'qa', 'accepted', 'done', 'cancelled', 'archived']
+const STATE_ORDER = ['open', 'new', 'backlog', 'blocked', 'in_progress', 'active', 'qa', 'accepted', 'delivered', 'done', 'cancelled', 'archived']
 const PRIORITY_ORDER = ['high', 'medium', 'low', 'none']
 
 export function fixtures(options: MockOptions = {}) {
@@ -172,6 +172,16 @@ function projectItem(project: Fixtures['projects'][number]) {
 }
 const listParam = (query: URLSearchParams, name: string) => (query.get(name) ?? '').split(',').map(v => v.trim()).filter(Boolean)
 const normal = (state: string) => state.replace(/-/g, '_')
+// Same buckets as the project summary: a category is not modelled here.
+// Archived stays in the total only; every other non-closed state is open.
+function workBucket(state: string): 'open' | 'in_progress' | 'done' | 'cancelled' | 'archived' {
+  const norm = state.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  if (norm === 'cancelled' || norm === 'canceled') return 'cancelled'
+  if (norm === 'accepted' || norm === 'delivered' || norm === 'done') return 'done'
+  if (norm === 'in_progress' || norm === 'inprogress' || norm === 'active' || norm === 'qa') return 'in_progress'
+  if (norm === 'archived') return 'archived'
+  return 'open'
+}
 // "!" excludes: plain values are alternatives, excluded values must all not match.
 function passes(values: string[], has: (value: string) => boolean): boolean {
   const plain = values.filter(v => !v.startsWith('!')), not = values.filter(v => v.startsWith('!')).map(v => v.slice(1))
@@ -193,6 +203,13 @@ function costUnit(node: MockNode): string {
 }
 const release = (node: MockNode) => labelOf(node.fields.release)
 const personName = (data: Fixtures, id: unknown) => typeof id === 'string' ? data.people.find(p => p.id === id)?.name ?? '' : ''
+
+function completionRefusal(node: MockNode, nextState: string, fields: Record<string, unknown>): { error: string; code: string } | null {
+  if (node.kind_slug !== 'ticket' || completedTicketState(node.state) || !completedTicketState(nextState)) return null
+  const issues = benefitIssues(fields)
+  if (!issues.length) return null
+  return { error: `before done: ${issues.join('; ')}`, code: 'benefit_required' }
+}
 
 export async function mockWork(page: Page, data: Fixtures, options: MockOptions = {}) {
   const calls: Call[] = []
@@ -294,7 +311,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     if (path === '/api/nodes/bulk' && method === 'POST') {
       if (options.readOnly) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       const input = body as { ids: string[]; state?: string; priority?: string | null; assignee?: string | null; tags_add?: (string | { name: string; color?: string })[]; tags_remove?: string[]; parent_id?: string }
-      const before: MockNode[] = [], after: MockNode[] = [], skipped: { id: string; key?: string; reason: string }[] = [], unchanged: string[] = []
+      const before: MockNode[] = [], after: MockNode[] = [], skipped: { id: string; key?: string; reason: string; code?: string }[] = [], unchanged: string[] = []
       for (const id of input.ids) {
         const node = data.nodes.find(n => n.id === id)
         if (!node) { skipped.push({ id, reason: 'not found' }); continue }
@@ -312,7 +329,10 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
           }
           fields.tags = kept
         }
-        const next = { ...node, fields, state: input.state ?? node.state, parent_id: input.parent_id ?? node.parent_id }
+        const nextState = input.state ?? node.state
+        const refusal = completionRefusal(node, nextState, fields)
+        if (refusal) { skipped.push({ id, key: node.key, reason: refusal.error, code: refusal.code }); continue }
+        const next = { ...node, fields, state: nextState, parent_id: input.parent_id ?? node.parent_id }
         if (JSON.stringify(next) === JSON.stringify(node)) { unchanged.push(id); continue }
         Object.assign(node, next, { updated_at: new Date(now + 120_000 + calls.length).toISOString() })
         before.push(old); after.push(JSON.parse(JSON.stringify(node)))
@@ -421,12 +441,14 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     if (path === '/api/projects') {
       if (options.failProjects) return route.fulfill({ status: 503, json: { error: 'Projects are resting' } })
       const archived = query.get('include_archived') === 'true'
-      // B3 semantics: work kinds only; open = new/backlog, in_progress = in progress/QA,
-      // done = done/delivered/accepted, cancelled separate.
       return route.fulfill({ json: { items: data.projects.filter(p => archived || p.state !== 'archived').map(p => {
-        const inside = data.nodes.filter(n => n.project === p.id).map(n => normal(n.state))
-        const count = (states: string[]) => inside.filter(state => states.includes(state)).length
-        return { id: p.id, key: p.key, title: p.title, state: p.state, open: count(['new', 'backlog']), in_progress: count(['in_progress', 'qa']), done: count(['done', 'delivered', 'accepted']), cancelled: count(['cancelled']), total: inside.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
+        const work = data.nodes.filter(n => n.project === p.id && ['ticket', 'task', 'epic'].includes(n.kind_slug))
+        const tally = { open: 0, in_progress: 0, done: 0, cancelled: 0 }
+        for (const node of work) {
+          const bucket = workBucket(node.state)
+          if (bucket !== 'archived') tally[bucket]++
+        }
+        return { id: p.id, key: p.key, title: p.title, state: p.state, ...tally, total: work.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
       }) } })
     }
     if (path === '/api/nodes' && method === 'GET') {
@@ -460,7 +482,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         .filter(n => passes(releases, v => v === (release(n).toLowerCase() || 'none')))
         .filter(n => !dateField || (dateOf(n) !== null && (!dateFrom || dateOf(n)! >= Date.parse(dateFrom)) && (!dateTo || dateOf(n)! < Date.parse(dateTo))))
         .filter(n => !q || n.key.toLowerCase().includes(q) || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q))
-        .filter(n => query.get('hide_closed') !== 'true' || !CLOSED.includes(n.state))
+        .filter(n => query.get('hide_closed') !== 'true' || !['done', 'cancelled', 'archived'].includes(workBucket(n.state)))
       const sort = (query.get('sort') ?? 'position').split(',')
       rows = [...rows].sort((a, b) => {
         for (const raw of sort) {
@@ -527,6 +549,11 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         if (options.conflictOn === id && !node.title.endsWith('(edited elsewhere)')) { node.updated_at = new Date(now + 30_000).toISOString(); node.title = `${node.title} (edited elsewhere)` }
         const expected = request.headers()['if-unmodified-since']
         if (expected && expected !== node.updated_at) return route.fulfill({ status: 412, json: { error: 'node has changed' } })
+        const patch = body as { state?: string; fields?: Record<string, unknown> }
+        const nextState = typeof patch.state === 'string' ? patch.state : node.state
+        const nextFields = patch.fields && typeof patch.fields === 'object' && !Array.isArray(patch.fields) ? patch.fields : node.fields
+        const refusal = completionRefusal(node, nextState, nextFields)
+        if (refusal) return route.fulfill({ status: 422, json: refusal })
         Object.assign(node, body as object, { updated_at: new Date(now + 60_000 + calls.length).toISOString() })
       }
       const { kind_slug: kind, project: _project, ...rest } = node

@@ -20,7 +20,111 @@ permissions:
   actions: read
 
 jobs:
+  agentd-darwin:
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: amd64
+    runs-on: ${{ matrix.runner }}
+    # Apple signing secrets live only in this environment, which releases them
+    # to v* tag runs (synced from the markus-barta/apple-signing vault). PR and
+    # branch CI never reference it.
+    environment: release-signing
+    # Notarization waits on Apple; it usually takes a few minutes.
+    timeout-minutes: 45
+    env:
+      # Must match the signing identity; the daemon embeds it (expectedTeamID).
+      AEON_DEVELOPER_ID_TEAM: P66J39QV6V
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+      - name: Build darwin paimos-agentd with LocalAuthentication
+        env:
+          AEON_DARWIN_ARCH: ${{ matrix.arch }}
+        run: bash scripts/build-release-binaries.sh darwin-agentd
+      # Before upload: SHA256SUMS in the release job is computed over the signed
+      # binary. Bare binaries cannot be stapled; Gatekeeper checks online.
+      - name: Sign and notarize paimos-agentd
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          if [ "$APPLE_TEAM_ID" != "$AEON_DEVELOPER_ID_TEAM" ]; then
+            echo "::error::signing team does not match AEON_DEVELOPER_ID_TEAM; Mac confirmation would fail closed"
+            exit 1
+          fi
+          bash scripts/sign-notarize.sh --identifier paimos-agentd "dist/paimos-agentd-darwin-${{ matrix.arch }}"
+      # Backstop for sign-notarize.sh's EXIT trap, which a cancellation during
+      # notarization can skip: however the signing step ended, delete the
+      # temporary keychain (private key), drop it from the search list and
+      # remove every signing temp file (.p12, .p8, zip). Idempotent. Every
+      # operation is attempted; failures are collected and fail the step at
+      # the end.
+      - name: Remove signing keychain and temp files
+        if: always()
+        run: |
+          set +e +o pipefail
+          : "${RUNNER_TEMP:?RUNNER_TEMP is not set}"
+          rt="$(cd "$RUNNER_TEMP" 2>/dev/null && pwd -P)"
+          if [ -z "$rt" ] || [ "$rt" -ef / ]; then
+            echo "::error::RUNNER_TEMP is not a usable directory; refusing to clean up"
+            exit 1
+          fi
+          failed=0
+          for kc in "$rt"/sign.*/signing.keychain-db; do
+            [ -e "$kc" ] || continue
+            security delete-keychain "$kc" || { echo "::error::could not delete $kc"; failed=1; }
+          done
+          # Without a readable search list the restore is skipped rather than
+          # guessed; delete-keychain above already unlisted what it removed.
+          if current="$(security list-keychains -d user)"; then
+            kept=()
+            while IFS= read -r k; do
+              k="${k#"${k%%[![:space:]]*}"}"; k="${k#\"}"; k="${k%\"}"
+              case "$k" in ""|*/signing.keychain-db) ;; *) kept+=("$k") ;; esac
+            done <<<"$current"
+            [ ${#kept[@]} -gt 0 ] || kept=("$HOME/Library/Keychains/login.keychain-db")
+            security list-keychains -d user -s "${kept[@]}" || { echo "::error::could not restore the keychain search list"; failed=1; }
+          else
+            echo "::error::could not read the keychain search list"
+            failed=1
+          fi
+          rm -rf "$rt"/sign.* || failed=1
+          if compgen -G "$rt/sign.*" >/dev/null; then
+            echo "::error::signing temp files remain"
+            failed=1
+          fi
+          if list="$(security list-keychains -d user)"; then
+            case "$list" in *signing.keychain-db*) echo "::error::signing keychain is still on the search list"; failed=1 ;; esac
+          else
+            echo "::error::could not verify the keychain search list"
+            failed=1
+          fi
+          [ "$failed" = 0 ] || exit 1
+          echo "signing keychain and temp files removed"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agentd-darwin-${{ matrix.arch }}
+          path: dist/paimos-agentd-darwin-${{ matrix.arch }}
+          if-no-files-found: error
+
   release:
+    needs: agentd-darwin
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -68,38 +172,22 @@ jobs:
         with:
           go-version: "1.26"
 
-      # CGO off, -trimpath, and the same -X as the server image (Dockerfile).
-      # The coordinate is the version field of version.json, already matched to the tag.
-      - name: Build paimos-agentd
+      # Darwin paimos-agentd is built on the matching Mac with LocalAuthentication.
+      # Linux agentd and every CLI target stay static. -trimpath and the version
+      # -X match the server image (Dockerfile).
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: agentd-darwin-*
+          path: dist
+          merge-multiple: true
+      - name: Build linux paimos-agentd and aeon-cli
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          version="$(node -p 'JSON.parse(require("fs").readFileSync("version.json","utf8")).version')"
-          if [ "$version" != "$VERSION" ]; then
-            echo "version.json ${version} does not match tag ${VERSION}" >&2
-            exit 1
-          fi
-          mkdir -p dist
-          ldflags="-X github.com/inspr-at/paimos/internal/version.Version=${version}"
-          for pair in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
-            goos="${pair%/*}"
-            goarch="${pair#*/}"
-            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
-              -trimpath \
-              -ldflags "$ldflags" \
-              -o "dist/paimos-agentd-${goos}-${goarch}" \
-              ./cmd/aeon-agentd
-          done
-          for pair in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
-            goos="${pair%/*}"
-            goarch="${pair#*/}"
-            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
-              -trimpath \
-              -ldflags "$ldflags" \
-              -o "dist/aeon-cli-${goos}-${goarch}" \
-              ./cmd/aeon
-          done
+          bash scripts/build-release-binaries.sh linux-agentd
+          bash scripts/build-release-binaries.sh cli
+          bash scripts/build-release-binaries.sh verify-darwin
           (
             cd dist
             sha256sum \
@@ -181,6 +269,7 @@ jobs:
           tag="v${VERSION}"
           notes="$(printf '%s\n' \
             "paimos-agentd ${VERSION} for darwin-arm64, darwin-amd64, linux-arm64 and linux-amd64." \
+            "darwin paimos-agentd links LocalAuthentication (CGO enabled); linux is static." \
             "aeon-cli ${VERSION} for darwin-arm64, darwin-amd64, linux-amd64 and linux-arm64." \
             "Install aeon-cli as aeon. A symlink named paimos selects the paimos-compatible CLI (PAIMOS_URL)." \
             "Verify SHA256SUMS before installing." \

@@ -373,6 +373,52 @@ paths:
           schema:
             type: "string"
             format: "uuid"
+  /rules/comparisons:
+    get:
+      operationId: listRulesComparisons
+      description: "rules.read in the named project. Latest stored comparison per harness. Hashes, statuses and counts only; no instruction text or paths."
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Latest comparison per harness
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [comparisons]
+                properties:
+                  comparisons:
+                    type: array
+                    maxItems: 8
+                    items: {"$ref": "#/components/schemas/RulesComparison"}
+        "400": {"description":"Invalid project","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Project unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+    post:
+      operationId: createRulesComparison
+      description: "rules.write in the named project. Stores one comparison summary. The server rejects instruction text, paths and unknown fields. The person is the caller or the agent key's creator."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/RulesComparisonUpload"}
+      responses:
+        "200":
+          description: Stored comparison summary
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/RulesComparison"}
+        "400": {"description":"Comparison rejected","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or agent binding denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Project unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "413": {"description":"Comparison is larger than 256 KiB","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
   /agent-pairing/guide:
     get:
       operationId: pairingGuide
@@ -508,18 +554,18 @@ paths:
   /me/security/session-watching:
     get:
       operationId: getSessionWatchingSecurity
-      summary: Read the signed-in person's session watching consent mode
+      summary: Read the signed-in person's session watching consent and reported computers
       responses:
         '200':
-          description: Per-person setting; defaults to Aeon approval
+          description: Per-person setting, defaulting to Aeon approval, plus advisory capability for connected computers this person approved
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+              schema: {$ref: '#/components/schemas/SessionWatchingSecurityView'}
         '403': {description: Signed-in person required}
     put:
       operationId: setSessionWatchingSecurity
       summary: Change consent for future approvals without changing active watches
-      description: Same-origin person only. Local confirmation requires a signed macOS daemon with LocalAuthentication; Linux is unavailable and fails closed.
+      description: Same-origin person only. Saving local_auth is allowed when no computer can confirm; approval then fails closed. The response lists advisory daemon capability and never treats that report as confirmation.
       requestBody:
         required: true
         content:
@@ -527,10 +573,10 @@ paths:
             schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
       responses:
         '200':
-          description: Saved per-person setting
+          description: Saved per-person setting and advisory computer capability
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+              schema: {$ref: '#/components/schemas/SessionWatchingSecurityView'}
         '400': {description: Invalid mode}
         '403': {description: Same-origin signed-in person required}
   /agent-pairing/attach:
@@ -549,6 +595,8 @@ paths:
         local_auth remains approved (no session or lease) until the registered daemon
         echoes consent_digest and local_confirmed after in-process macOS authentication.
         Missing confirmation never activates; request-supplied policy overrides are refused.
+        Registration may report local_auth_capability. Omission is stored as unreported.
+        That report is advisory and never satisfies local confirmation. A later poll cannot change it.
         Text is host-redacted and relayed in memory only, never stored.
       requestBody:
         required: true
@@ -1383,7 +1431,7 @@ paths:
         - {name: include_archived, in: query, schema: {type: boolean, default: false}}
       responses:
         '200':
-          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. Open counts new/backlog, in_progress counts in_progress/qa, done counts done/delivered/accepted, and cancelled is separate. Total includes all work states.
+          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. A category on that kind's field_schema.states wins (open, doing or in_progress, done, cancelled, archived). Otherwise open is every state that is not in progress, done, cancelled or archived, including open, blocked and unknown states; in_progress is in_progress, active and qa; done is done, delivered and accepted; cancelled is cancelled. Archived work is in total only. The response fields are unchanged.
           content:
             application/json:
               schema:
@@ -1532,7 +1580,7 @@ paths:
         - {name: date_to, in: query, description: Exclusive upper bound (RFC 3339), schema: {type: string, format: date-time}}
         - {name: q, in: query, description: 'Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last', schema: {type: string}}
         - {name: within, in: query, description: 'Descendants of this node, excluding itself', schema: {type: string, format: uuid}}
-        - {name: hide_closed, in: query, schema: {type: boolean, default: false}}
+        - {name: hide_closed, in: query, description: 'When true, omits nodes whose work bucket is done, cancelled or archived. The bucket is the same one project counts use: a category on that ticket, task or epic kind wins, and spellings such as canceled are recognised. Open and in progress stay.', schema: {type: boolean, default: false}}
         - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
@@ -1563,7 +1611,14 @@ paths:
         '409':
           $ref: '#/components/responses/Error'
         '422':
-          $ref: '#/components/responses/Error'
+          description: |
+            Unprocessable node. A ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/ApiError'}
+                  - {$ref: '#/components/schemas/NodeError'}
   /tags/{tagId}:
     parameters:
       - {name: tagId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -1656,6 +1711,9 @@ paths:
                         id: {type: string, format: uuid}
                         key: {type: string}
                         reason: {type: string}
+                        code:
+                          type: string
+                          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. Omitted for other skips.
         '400':
           $ref: '#/components/responses/Error'
         '403':
@@ -1756,7 +1814,14 @@ paths:
         '412':
           $ref: '#/components/responses/Error'
         '422':
-          $ref: '#/components/responses/Error'
+          description: |
+            Unprocessable node. A ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/ApiError'}
+                  - {$ref: '#/components/schemas/NodeError'}
     delete:
       operationId: deleteNode
       description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
@@ -3004,7 +3069,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: heartbeatHarnessSession
-      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket, and only while that ticket still belongs to the session's project. Omission preserves an estimate; JSON null clears it and its report time. An instant from 30 days ago through 365 days ahead is accepted; a past instant inside that window is overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction.
+      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket, and only while that ticket still belongs to the session's project. Omission preserves an estimate; JSON null clears it and its report time. An instant from 30 days ago through 365 days ahead is accepted; a past instant inside that window is overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction. A generation the server closed as heartbeat_lost (Lost contact) is revived by its own worker's next heartbeat, unless it was removed or a newer generation registered the same session reference (AEON-291).
       requestBody:
         required: true
         content:
@@ -3085,6 +3150,43 @@ paths:
                 properties:
                   interval_minutes: {type: integer, minimum: 1, maximum: 240}
         '400': {description: Interval outside 1 to 240 minutes}
+  /settings/heartbeat-lost:
+    get:
+      operationId: getHeartbeatLost
+      description: Minutes without a heartbeat (or, before the first one, since registration) after which the server closes an unmanaged session as stop_reason heartbeat_lost, shown as Lost contact. Fifteen when the workspace has not chosen one. Managed sessions are left to their daemon. Requires settings.manage (AEON-291).
+      responses:
+        '200':
+          description: Lost-contact threshold
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [heartbeat_lost_minutes]
+                properties:
+                  heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
+    put:
+      operationId: putHeartbeatLost
+      description: Sets the lost-contact threshold for unmanaged sessions. Requires settings.manage. Five through 1440 minutes. The server sweeps once a minute; no process is signalled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [heartbeat_lost_minutes]
+              properties:
+                heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
+      responses:
+        '200':
+          description: Updated threshold
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [heartbeat_lost_minutes]
+                properties:
+                  heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
+        '400': {description: Threshold outside 5 to 1440 minutes}
   /nodes/{nodeId}/live-eta:
     parameters:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -3200,6 +3302,10 @@ paths:
         - {name: agent, in: query, schema: {type: string, format: uuid}}
         - {name: project, in: query, schema: {type: string, format: uuid}}
         - {name: ticket, in: query, schema: {type: string, format: uuid}}
+        - name: view
+          in: query
+          schema: {type: string, enum: [all, current], default: all}
+          description: current is the Agents list and omits sessions stopped or removed more than 24 hours ago; all keeps every generation (history). AEON-291.
         - {name: cursor, in: query, schema: {type: string}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
       responses:
@@ -5267,6 +5373,23 @@ components:
       required: [consent_mode]
       properties:
         consent_mode: {type: string, enum: [aeon, local_auth], default: aeon}
+    SessionWatchingSecurityView:
+      type: object
+      additionalProperties: false
+      required: [consent_mode, local_auth_computers]
+      description: Saved consent plus the advisory capability last reported by each connected computer this person approved. The report never authorizes a watch.
+      properties:
+        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon}
+        local_auth_computers:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [computer_id, name, capability]
+            properties:
+              computer_id: {type: string, format: uuid}
+              name: {type: string, maxLength: 128}
+              capability: {type: string, enum: [available, unsupported, unsigned, no_gui, policy, unreported]}
     AttachProcess:
       type: object
       additionalProperties: false
@@ -5312,6 +5435,10 @@ components:
         request_digest: {type: string, description: 'Required with the snapshot for request, activation, poll and detachment'}
         consent_digest: {type: string, description: Echo of the server-selected consent binding; required for strict activation}
         local_confirmed: {type: boolean, description: Set only by the daemon after in-process LocalAuthentication; never accepted on the local socket}
+        local_auth_capability:
+          type: string
+          enum: [available, unsupported, unsigned, no_gui, policy]
+          description: Registration only. An omitted registration is stored as unreported. A later poll cannot change it. This value never satisfies local confirmation.
         sequence: {type: integer, minimum: 1}
         text: {type: string, maxLength: 16384, description: Host-redacted new complete records only; no persistence or replay}
     AttachView:
@@ -5647,6 +5774,90 @@ components:
           type: ["string", "null"]
           format: "date-time"
       required: ["context", "versions", "version", "sha256", "body", "byte_size", "rules", "floor", "valid_until"]
+    RulesComparisonCounts:
+      type: object
+      additionalProperties: false
+      required: [both, only_local, only_merged, differs, files]
+      properties:
+        both: {type: integer, minimum: 0}
+        only_local: {type: integer, minimum: 0}
+        only_merged: {type: integer, minimum: 0}
+        differs: {type: integer, minimum: 0}
+        files: {type: integer, minimum: 0, maximum: 64}
+    RulesComparisonRule:
+      type: object
+      additionalProperties: false
+      required: [identity, status]
+      properties:
+        identity: {type: string, pattern: "^[a-z][a-z0-9._-]{0,95}$"}
+        status: {type: string, enum: [both, only_local, only_merged, differs]}
+        local_text_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        merged_text_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        changed:
+          type: array
+          maxItems: 4
+          items: {type: string, enum: [text, why, strength, enabled, local_conflict]}
+    RulesComparison:
+      type: object
+      additionalProperties: false
+      required: [id, harness, role, project_id, repo_sha256, merge_sha256, merge_version, local_set_sha256, counts, rules, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        harness: {type: string, enum: [claude-code, codex]}
+        role: {type: string, enum: [coordinator, builder, reviewer, operator]}
+        project_id: {type: string, format: uuid}
+        repo_name: {type: string, maxLength: 128}
+        repo_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        merge_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        merge_version: {type: string, maxLength: 128}
+        local_set_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        counts: {"$ref": "#/components/schemas/RulesComparisonCounts"}
+        rules:
+          type: array
+          maxItems: 500
+          items: {"$ref": "#/components/schemas/RulesComparisonRule"}
+        gaps:
+          type: array
+          maxItems: 16
+          description: "Comparison limits. Tokens only; no paths or instruction text."
+          items: {type: string, pattern: "^[a-z][a-z0-9_]{0,63}$"}
+        created_at: {type: string, format: date-time}
+    RulesComparisonUpload:
+      type: object
+      additionalProperties: false
+      required: [harness, role, project_id, repo_sha256, merged, local, rules, counts]
+      properties:
+        harness: {type: string, enum: [claude-code, codex]}
+        role: {type: string, enum: [coordinator, builder, reviewer, operator]}
+        project_id: {type: string, format: uuid}
+        agent_id: {type: string, format: uuid}
+        repo_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        repo_name: {type: string, maxLength: 128}
+        merged:
+          type: object
+          additionalProperties: false
+          required: [version, sha256, rule_count]
+          properties:
+            version: {type: string, maxLength: 128}
+            sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+            rule_count: {type: integer, minimum: 0, maximum: 500}
+        local:
+          type: object
+          additionalProperties: false
+          required: [set_sha256, rule_count]
+          properties:
+            set_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+            rule_count: {type: integer, minimum: 0, maximum: 500}
+        rules:
+          type: array
+          maxItems: 500
+          items: {"$ref": "#/components/schemas/RulesComparisonRule"}
+        counts: {"$ref": "#/components/schemas/RulesComparisonCounts"}
+        gaps:
+          type: array
+          maxItems: 16
+          description: "Comparison limits. Tokens only; no paths or instruction text."
+          items: {type: string, pattern: "^[a-z][a-z0-9_]{0,63}$"}
     PairingVerificationCapabilities:
       type: object
       description: Server-owned qualification of its matching helper release; a client cannot widen this map. Unsupported choices require explicit connect_only or exclusion.
@@ -8030,6 +8241,8 @@ components:
         message: {type: string, const: 'Record removed; process not stopped by removal.'}
         processes_signalled: {type: boolean, const: false}
         process_state: {type: string, const: unknown}
+        event_id: {type: integer, format: int64, description: 'The harness.removed event; POST /events/{eventId}/undo restores the record as it was (AEON-291). Omitted when the record was already removed.'}
+        undoable: {type: boolean, description: 'Whether the caller may undo event_id (events.undo in the project). Answered by a single removal with event_id; remove-stale items omit it.'}
     HarnessRemoveStaleResult:
       type: object
       required: [items, cutoff, more]
@@ -8191,7 +8404,7 @@ components:
         revision: {type: integer, format: int64}
         heartbeat_at: {type: [string, 'null'], format: date-time}
         stopped_at: {type: [string, 'null'], format: date-time}
-        stop_reason: {type: [string, 'null']}
+        stop_reason: {type: [string, 'null'], description: 'Why the generation closed. heartbeat_lost means the server closed a silent unmanaged session (Lost contact); its worker may still revive it with a heartbeat.'}
         process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
         process_observed_at: {type: [string, 'null'], format: date-time}
         archived_at: {type: [string, 'null'], format: date-time}
@@ -8730,6 +8943,15 @@ components:
       properties:
         error:
           type: string
+    NodeError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. Omitted for other errors.
     Principal:
       type: object
       required: [id, tenant_id, kind, name, roles]
@@ -9631,7 +9853,7 @@ components:
       in: query
       schema:
         type: string
-        description: Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state, priority, kind, assignee (by name, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions).
+        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (by name, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions).'
         default: position
     Direction:
       name: direction

@@ -248,12 +248,13 @@ test('read-only people see requests but cannot decide or control', async ({ page
   await openAgents(page)
   await expect(queue(page).locator('.item')).toHaveCount(4)
   await expect(queue(page).getByRole('button', { name: 'Approve' })).toHaveCount(0)
-  // Controls that can never work stay off the row; the menu says why.
+  // Controls that cannot work are not offered at all: no row button, no disabled item, no excuse (AEON-291).
   await expect(row(page, camy).getByRole('button', { name: 'Interrupt camy' })).toHaveCount(0)
   await row(page, camy).hover()
   await row(page, camy).getByRole('button', { name: 'Actions for camy' }).click()
-  await expect(page.getByRole('menuitem', { name: 'Interrupt' })).toHaveAttribute('aria-disabled', 'true')
-  await expect(page.getByRole('menu')).toContainText('Only people who may write can control sessions')
+  await expect(page.getByRole('menuitem', { name: /Interrupt|Stop session/ })).toHaveCount(0)
+  await expect(page.locator('[role="menuitem"][aria-disabled="true"]')).toHaveCount(0)
+  await expect(page.getByRole('menu')).not.toContainText('Only people who may write')
 })
 
 test('the session panel shows the ticket, runs, telemetry and the thread, and sends messages', async ({ page }) => {
@@ -313,8 +314,9 @@ test('interrupt goes straight out, stop asks first, and sessions outside AEON ca
   await expect(row(page, session(5)).getByRole('button', { name: 'Interrupt amy' })).toHaveCount(0)
   await row(page, session(5)).hover()
   await row(page, session(5)).getByRole('button', { name: 'Actions for amy' }).click()
-  await expect(page.getByRole('menuitem', { name: 'Interrupt' })).toHaveAttribute('aria-disabled', 'true')
-  await expect(page.getByRole('menu')).toContainText(/outside AEON/)
+  // Outside AEON: no Interrupt or Stop, one quiet line instead (AEON-291).
+  await expect(page.getByRole('menuitem', { name: /Interrupt|Stop session/ })).toHaveCount(0)
+  await expect(page.getByRole('menu')).toContainText('Runs outside AEON — stop it in its terminal')
 })
 
 test('Enter opens a session, j and k move the panel along, Escape closes it', async ({ page }) => {

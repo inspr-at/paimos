@@ -5,6 +5,9 @@
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <Security/Security.h>
 #import <Security/AuthSession.h>
+#import <mach-o/dyld.h>
+#import <stdlib.h>
+#import <string.h>
 
 @interface AeonLocalConfirmation : NSObject
 @property(nonatomic, strong) LAContext *context;
@@ -13,15 +16,55 @@
 @implementation AeonLocalConfirmation
 @end
 
-// Validate this running process, not a helper or a path selected by the caller.
+// The pairing installer writes paimos-agentd. The Nix package installs
+// bin/aeon-agentd. Release artifacts keep an architecture suffix until install
+// renames them, so those filenames are not installed names.
+static BOOL aeon_installed_daemon_name(NSString *name) {
+ return [name isEqualToString:@"paimos-agentd"] || [name isEqualToString:@"aeon-agentd"];
+}
+
+static NSString *aeon_executable_name(void) {
+ char stack[4096];
+ uint32_t size = sizeof stack;
+ char *owned = NULL;
+ char *path = stack;
+ if (_NSGetExecutablePath(path, &size) != 0) {
+  if (size < 2 || size > 1024 * 1024) return nil;
+  owned = malloc(size);
+  if (!owned) return nil;
+  path = owned;
+  if (_NSGetExecutablePath(path, &size) != 0) { free(owned); return nil; }
+ }
+ NSString *name = [[NSString stringWithUTF8String:path] lastPathComponent];
+ free(owned);
+ return name.length > 0 ? name : nil;
+}
+
+int aeon_installed_daemon_name_allowed(const char *name) {
+ if (!name) return 0;
+ @autoreleasepool {
+  NSString *value = [NSString stringWithUTF8String:name];
+  return value && aeon_installed_daemon_name(value) ? 1 : 0;
+ }
+}
+
+int aeon_running_executable_name_allowed(void) {
+ @autoreleasepool {
+  return aeon_installed_daemon_name(aeon_executable_name()) ? 1 : 0;
+ }
+}
+
+// Validate this running executable, not a helper or a path selected by the caller.
 // Ad-hoc Go builds intentionally fail closed. Hardened runtime and library
 // validation are required so ordinary same-UID injection/debugging is refused.
-static BOOL aeon_signed_daemon(void) {
- if (![NSProcessInfo.processInfo.processName isEqualToString:@"aeon-agentd"]) return NO;
+// Returns the signing team, or nil; the Go side compares it with the team the
+// build expects.
+static NSString *aeon_signed_daemon_team_id(void) {
+ if (!aeon_installed_daemon_name(aeon_executable_name())) return nil;
  SecCodeRef code = NULL;
  SecRequirementRef requirement = NULL;
  CFDictionaryRef info = NULL;
- BOOL valid = NO;
+ NSString *result = nil;
  if (SecCodeCopySelf(kSecCSDefaultFlags, &code) != errSecSuccess) goto done;
  if (SecRequirementCreateWithString(CFSTR("anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"), kSecCSDefaultFlags, &requirement) != errSecSuccess) goto done;
  if (SecCodeCheckValidity(code, kSecCSStrictValidate, requirement) != errSecSuccess) goto done;
@@ -31,16 +74,48 @@ static BOOL aeon_signed_daemon(void) {
   NSNumber *flags = signing[(__bridge NSString *)kSecCodeInfoFlags];
   NSString *team = signing[(__bridge NSString *)kSecCodeInfoTeamIdentifier];
   NSDictionary *entitlements = signing[(__bridge NSString *)kSecCodeInfoEntitlementsDict];
-  valid = team.length > 0 && (flags.unsignedIntValue & kSecCodeSignatureRuntime) != 0
+  if (team.length > 0 && (flags.unsignedIntValue & kSecCodeSignatureRuntime) != 0
     && ![entitlements[@"com.apple.security.get-task-allow"] boolValue]
     && ![entitlements[@"com.apple.security.cs.disable-library-validation"] boolValue]
-    && ![entitlements[@"com.apple.security.cs.allow-dyld-environment-variables"] boolValue];
+    && ![entitlements[@"com.apple.security.cs.allow-dyld-environment-variables"] boolValue]) {
+   result = [team copy];
+  }
  }
 done:
  if (info) CFRelease(info);
  if (requirement) CFRelease(requirement);
  if (code) CFRelease(code);
- return valid;
+ return result;
+}
+
+static BOOL aeon_signed_daemon(void) {
+ return aeon_signed_daemon_team_id() != nil;
+}
+
+int aeon_signed_daemon_team(char *team, int size) {
+ if (!team || size < 1) return 0;
+ team[0] = 0;
+ @autoreleasepool {
+  NSString *value = aeon_signed_daemon_team_id();
+  const char *utf8 = value.UTF8String;
+  if (!utf8 || strlen(utf8) >= (size_t)size) return 0;
+  strlcpy(team, utf8, (size_t)size);
+  return 1;
+ }
+}
+
+// No evaluatePolicy call: this must not open a system prompt.
+int aeon_local_auth_capability(void) {
+ @autoreleasepool {
+  if (!aeon_signed_daemon()) return 1;
+  SecuritySessionId session;
+  SessionAttributeBits attributes;
+  if (SessionGetInfo(callerSecuritySession, &session, &attributes) != errSecSuccess || !(attributes & sessionHasGraphicAccess)) return 2;
+  LAContext *context = [LAContext new];
+  context.touchIDAuthenticationAllowableReuseDuration = 0;
+  if (![context canEvaluatePolicy:LAPolicyDeviceOwnerAuthentication error:nil]) return 3;
+  return 0;
+ }
 }
 
 void *aeon_local_auth_start(const char *reason, int *failure) {

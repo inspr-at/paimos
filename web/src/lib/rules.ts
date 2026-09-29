@@ -596,6 +596,24 @@ export const getVersion = (setId: string, version: string) => send<RuleSnapshot>
 export const restoreSet = (setId: string, body: { expected_revision: number; version: string; new_version: string; note?: string }) => send<RuleSnapshot>(`/rules/sets/${encodeURIComponent(setId)}/restore`, 'POST', withNote(body)).then(cleanSnapshot)
 export const mergeRules = (query: string) => send<MergedRules>(`/rules/merged?${query}`)
 
+export interface RulesComparisonCounts {
+  both: number
+  only_local: number
+  only_merged: number
+  differs: number
+  files: number
+}
+/** Latest stored comparison for one harness. Counts only; rule text is never shown. */
+export interface RulesComparison {
+  id: string
+  harness: string
+  role: string
+  project_id: string
+  counts: RulesComparisonCounts
+  created_at: string
+}
+export const listComparisons = (projectId: string) => send<{ comparisons: RulesComparison[] }>(`/rules/comparisons?project_id=${encodeURIComponent(projectId)}`)
+
 /** One entry of a batch publication; version is 'auto' or an explicit calendar version. */
 export interface BatchItem { set_id: string; expected_revision: number; version: string }
 export interface BatchResult { batch_id: string; versions: RuleSnapshot[]; max_bytes: number }

@@ -44,7 +44,7 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var registered attachwatch.View
-	registration := map[string]string{"operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey}
+	registration := map[string]string{"operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey, "local_auth_capability": agentd.CurrentLocalAuthCapability()}
 	if err = remote.Client.Do(ctx, "POST", "/api/agent-pairing/attach", registration, &registered); err != nil || registered.State != "registered" {
 		return nil, errors.New("paired instance refused watch registration")
 	}

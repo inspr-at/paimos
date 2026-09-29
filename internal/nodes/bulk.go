@@ -86,6 +86,7 @@ type bulkSkip struct {
 	ID     string `json:"id"`
 	Key    string `json:"key,omitempty"`
 	Reason string `json:"reason"`
+	Code   string `json:"code,omitempty"`
 }
 
 type bulkResult struct {
@@ -372,7 +373,11 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 				state = *plan.state
 			}
 			if issues := ticketbenefits.Transition(target.kindSlug, current.State, state, fields); len(issues) > 0 {
-				skip("before done: " + strings.Join(issues, "; "))
+				result.Skipped = append(result.Skipped, bulkSkip{
+					ID: current.ID, Key: current.Key,
+					Reason: "before done: " + strings.Join(issues, "; "),
+					Code:   ticketbenefits.RequiredCode,
+				})
 				continue
 			}
 			edit := state != current.State || !sameJSON(fields, current.Fields)

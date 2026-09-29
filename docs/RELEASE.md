@@ -10,7 +10,7 @@ Development builds leave the linker version at `dev`. A release build sets:
 -X github.com/inspr-at/paimos/internal/version.Version=<version>
 ```
 
-with `CGO_ENABLED=0` and `-trimpath`. The server image uses the same linker setting (`Dockerfile`).
+with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `CGO_ENABLED=0` (`Dockerfile` for the image). Darwin `paimos-agentd` is built on macOS with `CGO_ENABLED=1` and links LocalAuthentication. `scripts/build-release-binaries.sh` is the build used by `.github/workflows/release.yml`.
 
 ## Workflow
 
@@ -18,7 +18,7 @@ A push of a `v*` tag runs `.github/workflows/release.yml`.
 
 1. Check out the repository with tags, so release history can see earlier coordinates.
 2. Validate the tag and run `scripts/verify-release.mjs --release`. Fail if `version.json` disagrees with the tag.
-3. Refuse a coordinate whose GitHub release already exists. Build `paimos-agentd` and `aeon-cli` for the platforms below.
+3. Refuse a coordinate whose GitHub release already exists. macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The Ubuntu job builds Linux `paimos-agentd` statically and all `aeon-cli` targets with CGO off, then checks the darwin binaries.
 4. Generate the release-history manifest embedded in the server image. That file is produced at release time. It is not committed.
 5. Run the image smoke gate. Publishing waits for it.
 6. Refuse a coordinate whose GHCR image tag already exists, including a tag left by a partial earlier run. Push the image to `ghcr.io/inspr-at/aeon:<version>`. There is no `latest` tag.
@@ -36,7 +36,7 @@ The gate needs Docker. It is a release check, not the day-to-day `just test` run
 | --- | --- |
 | Server image | `ghcr.io/inspr-at/aeon:<version>`, linux/amd64, provenance enabled |
 | `aeon-cli-darwin-arm64`, `aeon-cli-darwin-amd64`, `aeon-cli-linux-amd64`, `aeon-cli-linux-arm64` | GitHub release for the `v` tag. Install the file as `aeon`; a symlink named `paimos` selects paimos mode. |
-| `paimos-agentd-darwin-arm64`, `paimos-agentd-darwin-amd64`, `paimos-agentd-linux-arm64`, `paimos-agentd-linux-amd64` | Same GitHub release. The current Nix package is named `aeon-agentd` and builds `bin/aeon-agentd`. Both names come from `cmd/aeon-agentd`. |
+| `paimos-agentd-darwin-arm64`, `paimos-agentd-darwin-amd64`, `paimos-agentd-linux-arm64`, `paimos-agentd-linux-amd64` | Same GitHub release. Darwin binaries link LocalAuthentication. Linux binaries are static. The current Nix package is named `aeon-agentd` and builds `bin/aeon-agentd`. Both names come from `cmd/aeon-agentd`. |
 | `SHA256SUMS` | Same GitHub release, covering the CLI and agentd files above. Check it with `sha256sum -c` or `shasum -a 256 -c` before installing. |
 | Flake | `flake.nix` in this repository. `packages.<system>.aeon` is the CLI plus a `paimos` symlink. `packages.<system>.aeon-agentd` is the supervisor. The version is the `version` field of `version.json`. |
 

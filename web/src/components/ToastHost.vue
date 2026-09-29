@@ -57,5 +57,21 @@ onBeforeUnmount(() => dialogs?.disconnect())
   .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(8px); }
 }
 .toast-action + .toast-action { margin-left: -4px; }
+/* Phones: 44px targets without a heavier toast. The toast loses its vertical
+   padding and the buttons fill its height; the visible pill stays 28px. */
+@media (max-width: 600px) {
+  .toast:not(.sticky) { min-height: 44px; padding-block: 0; }
+  .toast-action, .toast-close { position: relative; height: 44px; background: transparent; }
+  .toast-close { width: 44px; margin-right: -6px; }
+  .toast-action::before, .toast-close::before { content: ''; position: absolute; inset: 8px 0; border-radius: 999px; z-index: -1; }
+  .toast-close::before { inset: 8px; }
+  .toast-action { isolation: isolate; }
+  .toast-close { isolation: isolate; }
+  .toast-action::before { background: rgba(164, 229, 223, .18); }
+  .toast-action:hover { background: transparent; }
+  .toast-action:hover::before { background: rgba(164, 229, 223, .3); }
+  .toast-close:hover { background: transparent; }
+  .toast-close:hover::before { background: rgba(255, 255, 255, .08); }
+}
 @media (max-width: 600px) { .toast-host { bottom: calc(var(--footer-h) + 10px); } .toast { font-size: 13px; } .toast.sticky { flex-wrap: wrap; justify-content: flex-end; border-radius: 20px; padding: 8px 8px 8px 16px; } .toast.sticky span { flex: 1 1 100%; } .toast.sticky:has(> svg) span { flex-basis: calc(100% - 24px); } }
 </style>

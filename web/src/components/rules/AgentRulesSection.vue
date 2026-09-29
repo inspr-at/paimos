@@ -4,6 +4,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import BizIcon from '../business/BizIcon.vue'
 import RuleHistory from './RuleHistory.vue'
 import RuleSetCard, { type SetDraft } from './RuleSetCard.vue'
+import RulesComparisonPanel from './RulesComparisonPanel.vue'
 import RuleTick from './RuleTick.vue'
 import RulesImportDialog from './RulesImportDialog.vue'
 import RulesPreview from './RulesPreview.vue'
@@ -516,6 +517,7 @@ onMounted(() => {
         <button v-if="publishable.length" type="button" class="btn primary" @click="openPublish()"><BizIcon name="seal" :size="15" />Review and publish ({{ publishable.length }} {{ publishable.length === 1 ? 'set' : 'sets' }})</button>
       </div>
     </header>
+    <RulesComparisonPanel v-if="!loading && !empty && !loadError && projectId" :project-id="projectId" />
     <p v-if="publishNote" class="publish-note"><BizIcon name="lock" :size="13" />{{ publishNote }}</p>
 
     <p v-if="loadError" class="load-error" role="alert"><BizIcon name="alert" :size="14" /><span>{{ loadError }}</span><button type="button" class="btn sm" @click="load()">Try again</button></p>

@@ -50,6 +50,7 @@ export function mergeSessionEvidence(previous: HarnessSession | undefined, incom
 
 export function stopReasonLabel(reason: string | null | undefined) {
   if (!reason) return ''
+  if (reason === 'heartbeat_lost') return 'Lost contact'
   return reason.replace(/[_-]+/g, ' ').replace(/^./, c => c.toUpperCase())
 }
 

@@ -3,7 +3,9 @@
 import { setPageTitle } from '../lib/brand'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
-import { APIError, createNode, listNodes, type ListItem, type SavedView } from '../lib/api'
+import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
+import { askDoneGate } from '../lib/doneGateAsk'
+import { benefitGateError, benefitSkip, benefitStepSummary, completionFields, needsBenefitPrompt, skippedStatusLabel } from '../lib/doneGate'
 import { can } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
@@ -19,6 +21,7 @@ import { remember } from '../lib/recents'
 import { apiParams, clearedFilters, effectiveSort, facetOptions, filtersFromQuery, filtersFromView, filtersToQuery, groupFacet, groupRows, hasFilters, orderByStatus, rowTags, sameListState, suggestName, toggleIn, toggleOut, totalFrom, valueLabel, WORK_KINDS, type DateFilter, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
 import type { TicketGraphState } from '../lib/ticketGraphRenderer'
 import { useTicketList } from '../lib/useTicketList'
+import { PROJECT_COLUMN_BY_ID, projectProgressTip } from '../lib/projectColumns'
 import { absoluteTime, cycleSort, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
@@ -635,8 +638,14 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
   try {
     const kind = (await kinds()).find(candidate => candidate.slug === draft.kind)
     if (!kind) throw new Error('this workspace has no such type')
+    let fields: Record<string, unknown> = draft.priority ? { priority: draft.priority } : {}
+    if (needsBenefitPrompt({ kind_slug: draft.kind, state: 'new', fields }, draft.state)) {
+      const text = await askDoneGate({ key: 'New ticket', title: draft.title, state: draft.state, fields })
+      if (!text) return false
+      fields = completionFields(fields, text)
+    }
     const node = await createNode({
-      kind_id: kind.id, title: draft.title, state: draft.state, fields: draft.priority ? { priority: draft.priority } : {},
+      kind_id: kind.id, title: draft.title, state: draft.state, fields,
       parent_id: draft.epic?.id ?? current.id, key_prefix: keyPrefix(current.routeKey),
     })
     const parent = draft.epic ? { ...draft.epic, kind_slug: 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
@@ -648,6 +657,10 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
     void projects.load(true)
     return true
   } catch (e) {
+    if (benefitGateError(e)) {
+      toast('The ticket was not created. Add a 2–4 word pill and a benefit in both languages.', { tone: 'error' })
+      return false
+    }
     toast(`The ticket was not created: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
     return false
   }
@@ -951,32 +964,69 @@ const bulkLabels = computed<LabelChoice[]>(() => {
   for (const choice of byName.values()) choice.on = selectedRows.value.filter(row => rowTags(row).some(tag => tag.name.toLowerCase() === choice.name.toLowerCase())).length
   return [...byName.values()].sort((a, b) => b.on - a.on || a.name.localeCompare(b.name))
 })
-async function runBulk(change: Omit<import('../lib/api').BulkChange, 'ids'>, done: (count: number) => string) {
-  const ids = [...selected.value]
+async function runBulk(change: Omit<BulkChange, 'ids'>, done: (count: number) => string, ids = [...selected.value]) {
   if (!ids.length || bulkBusy.value) return
   bulkMenu.value = null
   bulkBusy.value = true
   try {
     const result = await list.applyBulk({ ids, ...change })
+    const reported = result.skipped.filter(item => !benefitSkip(item))
+    const held = result.skipped.filter(item => benefitSkip(item))
     const changed = result.items.length
-    const skipped = result.skipped.length
+    const skipped = reported.length
     const eventId = result.event_id
     if (changed) {
       toast(`${done(changed)}${skipped ? ` · ${plural(skipped, 'ticket')} skipped` : ''}`, {
         timeout: 8000, action: eventId ? { label: 'Undo', run: () => void undoBulk(eventId) } : undefined,
       })
-    } else if (!skipped) toast(`Nothing to change: ${plural(result.unchanged.length, 'ticket is', 'tickets are')} already so`)
+    } else if (!skipped && !held.length) toast(`Nothing to change: ${plural(result.unchanged.length, 'ticket is', 'tickets are')} already so`)
     if (skipped) {
-      const first = result.skipped[0]
+      const first = reported[0]
       toast(`${first.key ?? 'A ticket'} was skipped: ${first.reason}${skipped > 1 ? ` (and ${skipped - 1} more)` : ''}`, { tone: 'error' })
     }
     if (changed) { void list.load(); void projects.load(true); for (const node of result.items) outline.refreshStatsFor(node.id) }
+    if (change.state && held.length) await offerBenefitSkips(held, change.state)
   } catch (e) {
     toast(`Nothing was changed: ${problem(e)}`, { tone: 'error' })
   } finally {
     bulkBusy.value = false
     table.value?.focusGrid()
   }
+}
+async function stepBenefitGate(rows: ListItem[], state: string) {
+  let done = 0
+  const skipped: ListItem[] = []
+  for (let index = 0; index < rows.length; index++) {
+    const row = list.rows.value.find(item => item.id === rows[index].id) ?? rows[index]
+    if (!needsBenefitPrompt(row, state)) {
+      if (await list.setStatus(row, state)) { done++; void projects.load(true); outline.refreshStatsFor(row.id) }
+      else skipped.push(row)
+      continue
+    }
+    const text = await askDoneGate({ key: row.key, title: row.title, state, fields: row.fields ?? {} }, { index: index + 1, total: rows.length })
+    if (!text) { skipped.push(row); continue }
+    if (await list.setStatus(row, state, { fields: completionFields(row.fields, text) })) {
+      done++
+      void projects.load(true)
+      outline.refreshStatsFor(row.id)
+    } else skipped.push(row)
+  }
+  return { done, skipped }
+}
+function announceBenefitStep(done: number, skipped: ListItem[]) {
+  if (!done && !skipped.length) return
+  const still = skippedStatusLabel(skipped.map(row => statusMeta(row.state).label))
+  const phone = window.matchMedia('(max-width: 700px)').matches
+  toast(benefitStepSummary(done, skipped.length, still), phone ? { sticky: true, key: 'benefit-step' } : { timeout: 8000, key: 'benefit-step' })
+}
+async function offerBenefitSkips(held: BulkResult['skipped'], state: string) {
+  const rows = held.flatMap(item => {
+    const row = list.rows.value.find(entry => entry.id === item.id)
+    return row ? [row] : []
+  })
+  if (!rows.length) return
+  const outcome = await stepBenefitGate(rows, state)
+  announceBenefitStep(outcome.done, outcome.skipped)
 }
 async function undoBulk(eventId: number) {
   try {
@@ -988,7 +1038,23 @@ async function undoBulk(eventId: number) {
   }
 }
 const count = (n: number) => plural(n, 'ticket')
-function bulkStatus(state: string) { void runBulk({ state }, n => `${count(n)} ${n === 1 ? 'is' : 'are'} now ${statusMeta(state).label}`) }
+async function bulkStatus(state: string) {
+  if (bulkBusy.value) return
+  bulkMenu.value = null
+  const gated = selectedRows.value.filter(row => needsBenefitPrompt(row, state))
+  const gatedIds = new Set(gated.map(row => row.id))
+  const ready = [...selected.value].filter(id => !gatedIds.has(id))
+  if (ready.length) await runBulk({ state }, n => `${count(n)} ${n === 1 ? 'is' : 'are'} now ${statusMeta(state).label}`, ready)
+  if (!gated.length) return
+  bulkBusy.value = true
+  try {
+    const outcome = await stepBenefitGate(gated, state)
+    announceBenefitStep(outcome.done, outcome.skipped)
+  } finally {
+    bulkBusy.value = false
+    table.value?.focusGrid()
+  }
+}
 function bulkArchive() { void runBulk({ state: 'archived' }, n => `Archived ${count(n)}`) }
 function bulkAssign(value: string) {
   const name = bulkPeople.value.find(person => person.value === value)?.label ?? 'someone'
@@ -1280,11 +1346,11 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         <HeaderGlimpse v-if="headerGraphReady && headerGraph && !graphActive" :project-id="project.id" :project-key="project.routeKey" :ticket-count="counts?.total ?? 0" :enabled="headerGraph" @active="glimpseActive = $event" />
         <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
           <div class="stat-line">
-            <span class="stat" data-tip="Open · new and backlog"><StatusIcon state="new" :size="11" /><b>{{ counts.open.toLocaleString('en-GB') }}</b> open</span>
-            <span class="stat" data-tip="In progress · in progress and QA"><StatusIcon state="in_progress" :size="11" /><b>{{ counts.progress.toLocaleString('en-GB') }}</b> doing</span>
-            <span class="stat" data-tip="Done · done, delivered and accepted"><StatusIcon state="done" :size="11" /><b>{{ counts.done.toLocaleString('en-GB') }}</b> done</span>
+            <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('open')!.tip"><StatusIcon state="open" :size="11" /><b>{{ counts.open.toLocaleString('en-GB') }}</b> open</span>
+            <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('doing')!.tip"><StatusIcon state="in_progress" :size="11" /><b>{{ counts.progress.toLocaleString('en-GB') }}</b> doing</span>
+            <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('done')!.tip"><StatusIcon state="done" :size="11" /><b>{{ counts.done.toLocaleString('en-GB') }}</b> done</span>
           </div>
-          <div class="progress-line" :data-tip="`${counts.done.toLocaleString('en-GB')} of ${(counts.total - counts.cancelled).toLocaleString('en-GB')} done${counts.cancelled ? ` · ${counts.cancelled} cancelled` : ''}`">
+          <div class="progress-line" :data-tip="projectProgressTip(counts.open, counts.progress, counts.done, counts.cancelled)">
             <span class="bar"><i :style="{ width: `${counts.percent}%` }" /></span>
             <span class="mono pct">{{ counts.percent }}%</span>
           </div>

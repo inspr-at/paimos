@@ -190,7 +190,12 @@ test('a ticket still on its way when the person or workspace changes never shows
 
 test('a toast raised in the panel stays visible and actionable after the history closes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  const { calls } = await open(page)
+  const data = fixtures()
+  Object.assign(data.nodes.find(node => node.key === 'PHAROS-11')!.fields, {
+    pill_en: 'Clear release notes', pill_de: 'Verständliche Release Notes',
+    benefit_en: 'Tickets explain what you gain.', benefit_de: 'Tickets erklären den Nutzen.',
+  })
+  const { calls } = await open(page, data)
   await chips(page).getByRole('link', { name: `PHAROS-11: ${TITLE}` }).click()
   await panel(page).getByRole('button', { name: /Status: In progress/ }).click()
   await page.getByRole('menuitemradio', { name: 'Done' }).click()
