@@ -83,7 +83,14 @@ type doctorCheck struct {
 }
 
 func (rt *runtime) cmdDoctor() *Command {
-	return &Command{Name: "doctor", Short: "Run read-only preflight checks", Use: "doctor", run: func([]string) error {
+	var options doctorRulesOptions
+	return &Command{Name: "doctor", Short: "Run read-only preflight checks", Use: "doctor [--rules-harness claude|codex --rules-out FILE.txt]", maxArgs: 0, addFlags: func(fs *flagSet) {
+		fs.string(&options.Harness, "rules-harness", 0, "harness for the explicitly delivered session file")
+		fs.string(&options.Out, "rules-out", 0, "actual delivered .txt session file to inspect")
+	}, run: func([]string) error {
+		if (options.Harness == "") != (options.Out == "") || (options.Harness != "" && options.Harness != "claude" && options.Harness != "claude-code" && options.Harness != "codex") {
+			return usagef("use --rules-harness claude|codex together with --rules-out FILE.txt")
+		}
 		checks := []doctorCheck{}
 		inst, err := rt.resolve()
 		if err != nil {
@@ -129,6 +136,7 @@ func (rt *runtime) cmdDoctor() *Command {
 		} else {
 			checks = append(checks, doctorCheck{Name: "schema", Status: "ok", Detail: fmt.Sprintf("version=%s kinds=%d", s.Version, len(s.Entities))})
 		}
+		checks = append(checks, rt.rulesChannelCheck(options))
 		return rt.renderDoctor(checks)
 	}}
 }

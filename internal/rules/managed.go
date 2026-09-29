@@ -45,5 +45,9 @@ func ForManagedSession(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 			snapshots = append(snapshots, snap)
 		}
 	}
-	return Merge(c, snapshots, time.Now().UTC())
+	cat, err := loadDoctrineCatalog(ctx, tx)
+	if err != nil {
+		return Merged{}, err
+	}
+	return MergeDelivered(c, snapshots, time.Now().UTC(), cat)
 }

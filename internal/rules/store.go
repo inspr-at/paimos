@@ -400,6 +400,9 @@ func publishSetIn(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set, rev
 	if err != pgx.ErrNoRows {
 		return Snapshot{}, err
 	}
+	if err := rejectDoctrineCopy(ctx, tx, s.Rules); err != nil {
+		return Snapshot{}, err
+	}
 	if s.PublishedVersion != "" && version <= s.PublishedVersion {
 		return Snapshot{}, fail(409, "version_conflict", "new version must be strictly later than the current publication")
 	}

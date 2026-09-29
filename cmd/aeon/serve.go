@@ -295,7 +295,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			hours.New(pool, pluginRegistry),
 			directory.New(pool, pluginRegistry),
 		},
-		Middleware: []func(http.Handler) http.Handler{authMod.Middleware},
+		Middleware: []func(http.Handler) http.Handler{authMod.Middleware, (doctrine.Credentials{Dir: cfg.DoctrineCredentialsDir}).CatalogMiddleware},
 	}
 	if messagingMod != nil {
 		api.Modules = append(api.Modules, messagingMod)

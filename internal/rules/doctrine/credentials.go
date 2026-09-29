@@ -4,9 +4,11 @@ package doctrine
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,6 +32,17 @@ var ErrCredential = errors.New("credential unavailable")
 // The operator must also provision <ref>.allowlist.json with explicit grants
 // pairing tenant_id and repository. Tenant configuration never grants access.
 type Credentials struct{ Dir string }
+
+type catalogCredentialsKey struct{}
+
+// CatalogMiddleware supplies the same host-controlled grant policy to every
+// catalog consumer, including publication and managed-session delivery. Without
+// this context, credential-backed sources are denied (never an implicit grant).
+func (c Credentials) CatalogMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), catalogCredentialsKey{}, c)))
+	})
+}
 
 // Token authorizes the tenant/repository pair before reading the token for ref.
 func (c Credentials) Token(ref, tenantID, repository string) (string, error) {

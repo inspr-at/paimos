@@ -36,6 +36,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/rules/sets/{setId}/versions":                                              "rules.read",
 	"GET /api/rules/sets/{setId}/versions/{version}":                                    "rules.read",
 	"GET /api/rules/merged":                                                             "rules.read",
+	"GET /api/rules/channels":                                                           "rules.read",
 	"GET /api/rules/comparisons":                                                        "rules.read",
 	"POST /api/rules/comparisons":                                                       "rules.write",
 	"GET /api/rules/explained":                                                          "rules.read",

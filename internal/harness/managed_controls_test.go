@@ -7,8 +7,11 @@ import (
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/jackc/pgx/v5"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -153,6 +156,47 @@ func TestManagedControlsIdentityReplayPrivacyAndExpiry(t *testing.T) {
 	}
 	expect(t, f.call(f.agent, "POST", path+"/managed-context", map[string]any{"person_id": f.foreign.ID}, lease), 400)
 	expect(t, f.call(f.agent, "POST", path+"/managed-context", map[string]any{}, "wrong-lease"), 403)
+	// The shared workorders endpoint must retain the rules error status/code.
+	const repository = "inspr-at/managed-doctrine"
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,ref,commit_sha,paths,credential_ref) VALUES($1,$2,'public','fixture',$3,ARRAY['docs/AGENTS-KERNEL.md'],'managed-read')`, f.person.TenantID, repository, strings.Repeat("a", 40))
+		return err
+	})
+	creds := t.TempDir()
+	grant := func(repository string) {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{"grants": []any{map[string]string{"tenant_id": f.person.TenantID, "repository": repository}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(creds, "managed-read.allowlist.json"), raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plainMux := f.mux
+	withCredentials := func(dir string) {
+		f.mux = http.NewServeMux()
+		f.mux.Handle("/", (doctrine.Credentials{Dir: dir}).CatalogMiddleware(plainMux))
+	}
+	grant(repository)
+	withCredentials(creds)
+	expect(t, f.call(f.agent, "POST", path+"/managed-context", map[string]any{}, lease), 200)
+	for _, mode := range []string{"revoked", "missing directory", "missing middleware"} {
+		switch mode {
+		case "revoked":
+			grant("other/repository")
+		case "missing directory":
+			grant(repository)
+			withCredentials(filepath.Join(creds, "missing"))
+		case "missing middleware":
+			f.mux = plainMux
+		}
+		w = f.call(f.agent, "POST", path+"/managed-context", map[string]any{}, lease)
+		expect(t, w, 503)
+		if decode(t, w)["code"] != "doctrine_unavailable" || strings.Contains(w.Body.String(), repository) || strings.Contains(w.Body.String(), creds) {
+			t.Fatalf("%s: unsafe or unexplained doctrine failure: %s", mode, w.Body.String())
+		}
+	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		var leaked bool
 		err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM events WHERE coalesce("before"::text,'') LIKE '%private steer%' OR coalesce("after"::text,'') LIKE '%private steer%')`).Scan(&leaked)

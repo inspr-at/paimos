@@ -377,6 +377,35 @@ identities and hashes. `--upload` stores that summary for the project.
 Instruction text is not uploaded. The command does not replace `AGENTS.md`
 or `CLAUDE.md`, and rollout stays unauthorized.
 
+`aeon doctor` also checks the two rule delivery channels. It discovers command
+hooks marked `# aeon-rules-hook-v1` in the user and current project settings,
+reads their literal `--rules-out` targets, and compares each harness file with
+the pinned doctrine index. Inbox hooks alone do not establish rules delivery.
+For a manually delivered file or a hook with a dynamic output path, use
+`aeon doctor --rules-harness claude|codex --rules-out /absolute/received.txt`.
+This explicitly checks that file and its harness file. Doctor never executes
+hooks or expands shell expressions. Missing, empty, unreadable or unverified
+files and unready/failed doctrine sources cannot earn “no rule served twice”.
+Deleted rules are detected even when their markers were deleted too.
+Doctor normalizes whitespace and follows literal Markdown `@path` imports,
+relative to each importing file (`~/` resolves to the home directory). Reads
+stay within the home and harness directories, refuse secret paths and symlinks,
+and stop at 8 import levels, 64 files, 256 KiB per file or 1 MiB total. Unresolved
+imports report “unverified” instead of drift; neither result certifies delivery.
+
+Session merges resolve precedence before omitting doctrine copies. A locked
+company rule delivered by doctrine retains its floor obligation as a reference
+to the doctrine identity and immutable commit, without repeating its text in
+the session file, cache or bootstrap. Existing independently retained floor
+pins still require explicit review when changing from text to that reference.
+Catalog reads for publication, delivery and channel reports recheck the same
+host-provisioned credential grants as the doctrine API; an inaccessible source
+fails the operation with `503 doctrine_unavailable` before cached text or
+matching identities are inspected, including managed-session delivery. A batch
+loads the catalog once for its request; later requests recheck the grants.
+Channel reports include duplicates only from sets whose exact scope the caller
+may read, including the project permission and scoped ownership checks.
+
 ## UI shell (P0.5 / AEON-10)
 
 The Vue shell includes an authenticated workspace, sign-in, a 404, an account

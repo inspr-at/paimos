@@ -22,6 +22,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -817,7 +818,7 @@ func TestBudgetCapFitsTheDeadline(t *testing.T) {
 	c := testContext()
 	c.AgentID = ""
 	render := func() {
-		if _, err := merge(c, store, time.Now(), true, nil, DefaultBudget()); err != nil {
+		if _, err := merge(c, store, time.Now(), true, nil, DefaultBudget(), doctrine.Catalog{}); err != nil {
 			var e *Error
 			if !errors.As(err, &e) || e.Code != "floor_missing" && e.Code != "rules_budget_exceeded" {
 				t.Fatal(err)
