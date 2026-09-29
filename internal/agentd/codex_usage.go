@@ -63,8 +63,10 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 				ThreadID   string `json:"threadId"`
 				TokenUsage struct {
 					Total struct {
-						Input  *int64 `json:"inputTokens"`
-						Output *int64 `json:"outputTokens"`
+						Input     *int64 `json:"inputTokens"`
+						Output    *int64 `json:"outputTokens"`
+						Cached    *int64 `json:"cachedInputTokens"`
+						Reasoning *int64 `json:"reasoningOutputTokens"`
 					} `json:"total"`
 				} `json:"tokenUsage"`
 			} `json:"params"`
@@ -73,7 +75,13 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 			total := frame.Params.TokenUsage.Total
 			if total.Input != nil && total.Output != nil && *total.Input >= p.inputTokens && *total.Output >= p.outputTokens {
 				ev := AdapterEvent{Kind: "usage", InputTokensDelta: cumulativeDelta(*total.Input, &p.inputTokens), OutputTokensDelta: cumulativeDelta(*total.Output, &p.outputTokens)}
-				if ev.InputTokensDelta != 0 || ev.OutputTokensDelta != 0 {
+				if total.Cached != nil && *total.Cached >= p.cachedTokens && *total.Cached <= *total.Input {
+					ev.CachedInputTokensDelta = cumulativeDelta(*total.Cached, &p.cachedTokens)
+				}
+				if total.Reasoning != nil && *total.Reasoning >= p.reasoningTokens && *total.Reasoning <= *total.Output {
+					ev.ReasoningTokensDelta = cumulativeDelta(*total.Reasoning, &p.reasoningTokens)
+				}
+				if ev.InputTokensDelta != 0 || ev.OutputTokensDelta != 0 || ev.CachedInputTokensDelta != 0 || ev.ReasoningTokensDelta != 0 {
 					p.observe(ev)
 				}
 			}

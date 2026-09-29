@@ -866,7 +866,8 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := s.update(ctx, entry, Telemetry{Kind: kind, InputTokensDelta: ev.InputTokensDelta,
-		OutputTokensDelta: ev.OutputTokensDelta, CostMicrosDelta: ev.CostMicrosDelta, TurnCountDelta: ev.TurnCountDelta,
+		OutputTokensDelta: ev.OutputTokensDelta, CachedInputTokensDelta: ev.CachedInputTokensDelta,
+		ReasoningTokensDelta: ev.ReasoningTokensDelta, CostMicrosDelta: ev.CostMicrosDelta, TurnCountDelta: ev.TurnCountDelta,
 		EffectiveModel: ev.EffectiveModel, ModelEvidence: ev.ModelEvidence, ErrorCode: ev.ErrorCode}); err != nil {
 		s.handleRunError(entry, err)
 	}

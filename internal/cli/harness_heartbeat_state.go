@@ -52,11 +52,12 @@ type heartbeatDisk struct {
 }
 
 type heartbeatUsageDisk struct {
-	Model    string `json:"model"`
-	Sequence int64  `json:"sequence"`
-	Input    int64  `json:"input"`
-	Output   int64  `json:"output"`
-	Cached   int64  `json:"cached"`
+	Model     string `json:"model"`
+	Sequence  int64  `json:"sequence"`
+	Input     int64  `json:"input"`
+	Output    int64  `json:"output"`
+	Cached    int64  `json:"cached"`
+	Reasoning *int64 `json:"reasoning,omitempty"`
 }
 
 // heartbeatPendingUsage is the exact report persisted before it is posted.
@@ -67,6 +68,7 @@ type heartbeatPendingUsage struct {
 	Input             int64    `json:"input"`
 	Output            int64    `json:"output"`
 	Cached            int64    `json:"cached"`
+	Reasoning         *int64   `json:"reasoning,omitempty"`
 	ReportID          string   `json:"report_id"`
 	Offset            int64    `json:"offset"`
 	Recent            []string `json:"recent,omitempty"`

@@ -98,7 +98,7 @@ func (r *sessionUsageReporter) submit(report sessionusage.UsageReport) {
 	// adapter billing metadata, costs or vendor/source identifiers.
 	report = sessionusage.UsageReport{Model: report.Model, InputTokens: cloneCount(report.InputTokens),
 		OutputTokens: cloneCount(report.OutputTokens), CachedInputTokens: cloneCount(report.CachedInputTokens),
-		Provisional: report.Provisional, BillingMode: "unknown"}
+		ReasoningTokens: cloneCount(report.ReasoningTokens), Provisional: report.Provisional, BillingMode: "unknown"}
 	before := old
 	before.ReportID, before.Sequence = "", 0
 	b, _ := json.Marshal(before)

@@ -400,6 +400,31 @@ func TestUsageMonotonicHTTPAndAccountMetadata(t *testing.T) {
 	}
 }
 
+func TestUsageReasoningRoundTrip(t *testing.T) {
+	f := fixture(t)
+	path, _, lease := usageSession(t, f, "unmanaged")
+	in := usagePayload()
+	in["reasoning_tokens"] = 6
+	out, _ := usageResult(t, f.call(f.agent, "POST", path+"/usage", in, lease))
+	if out.ReasoningTokens == nil || *out.ReasoningTokens != 6 || out.EstimatedCostUSD != nil {
+		t.Fatalf("reasoning: %+v", out)
+	}
+	down := map[string]any{}
+	for k, v := range in {
+		down[k] = v
+	}
+	down["report_id"], down["sequence"], down["reasoning_tokens"] = uid(), 2, 5
+	expect(t, f.call(f.agent, "POST", path+"/usage", down, lease), 409)
+	in["report_id"], in["sequence"], in["reasoning_tokens"] = uid(), 2, 7
+	out, _ = usageResult(t, f.call(f.agent, "POST", path+"/usage", in, lease))
+	if out.ReasoningTokens == nil || *out.ReasoningTokens != 7 {
+		t.Fatalf("growth: %+v", out)
+	}
+	over := usagePayload()
+	over["sequence"], over["reasoning_tokens"] = 3, 21
+	expect(t, f.call(f.agent, "POST", path+"/usage", over, lease), 400)
+}
+
 func TestUsagePricingIsolationAndStorageConstraints(t *testing.T) {
 	f := fixture(t)
 	expect(t, usagePrice(t, f, 1, "2.5"), 201)

@@ -11,10 +11,11 @@ import (
 // HeartbeatLine is one usage observation from a harness log. Absolute totals
 // replace the previous cumulative figure. Deltas are added.
 type HeartbeatLine struct {
-	Model                 string
-	Input, Output, Cached int64
-	ID                    string
-	Absolute              bool
+	Model                            string
+	Input, Output, Cached, Reasoning int64
+	ReasoningKnown                   bool
+	ID                               string
+	Absolute                         bool
 }
 
 // CountReport builds a provisional unknown-billing usage report from known counters.
@@ -104,7 +105,7 @@ func parseCodexHeartbeat(fields map[string]json.RawMessage, fallback string) (He
 	if cached > snap.input {
 		return HeartbeatLine{}, false, nil
 	}
-	return HeartbeatLine{Model: model, Input: snap.input, Output: snap.output, Cached: cached, Absolute: true}, true, nil
+	return HeartbeatLine{Model: model, Input: snap.input, Output: snap.output, Cached: cached, Reasoning: snap.reasoning, ReasoningKnown: snap.reasoningKnown, Absolute: true}, true, nil
 }
 
 func parseCursorHeartbeat(fields map[string]json.RawMessage, fallback string) (HeartbeatLine, bool, error) {
@@ -120,7 +121,7 @@ func parseCursorHeartbeat(fields map[string]json.RawMessage, fallback string) (H
 	if err != nil {
 		return HeartbeatLine{}, false, nil
 	}
-	return HeartbeatLine{Model: model, Input: rec.delta.input, Output: rec.delta.output, Cached: rec.delta.cached, ID: rec.id}, true, nil
+	return HeartbeatLine{Model: model, Input: rec.delta.input, Output: rec.delta.output, Cached: rec.delta.cached, Reasoning: rec.delta.reasoning, ReasoningKnown: rec.delta.reasoningKnown, ID: rec.id}, true, nil
 }
 
 // CursorPromptUsage reads a Cursor prompt result usage object. Cost-only ACP
@@ -211,11 +212,14 @@ func grokOne(model string, fields map[string]json.RawMessage) (HeartbeatLine, bo
 	if !okCreated {
 		created = 0
 	}
+	var reasoning int64
+	var reasoningKnown bool
 	if raw, ok := fields["reasoningTokens"]; ok && len(bytes.TrimSpace(raw)) > 0 && string(raw) != "null" {
-		reasoning, err := parseCount(raw)
-		if err != nil || reasoning > output {
+		parsed, err := parseCount(raw)
+		if err != nil || parsed > output {
 			return HeartbeatLine{}, false, nil
 		}
+		reasoning, reasoningKnown = parsed, true
 	}
 	if input > maxToken-read || input+read > maxToken-created {
 		return HeartbeatLine{}, false, fmt.Errorf("%w: inclusive input overflow", ErrRejected)
@@ -224,7 +228,7 @@ func grokOne(model string, fields map[string]json.RawMessage) (HeartbeatLine, bo
 	if err != nil {
 		return HeartbeatLine{}, false, nil
 	}
-	return HeartbeatLine{Model: canonical, Input: input + read + created, Output: output, Cached: read, Absolute: true}, true, nil
+	return HeartbeatLine{Model: canonical, Input: input + read + created, Output: output, Cached: read, Reasoning: reasoning, ReasoningKnown: reasoningKnown, Absolute: true}, true, nil
 }
 
 func optionalCount(fields map[string]json.RawMessage, key string) (int64, bool) {

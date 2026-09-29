@@ -324,10 +324,11 @@ func (p *grokProcess) onEvent(raw json.RawMessage) {
 func grokNativeUsage(raw json.RawMessage, model string) (sessionusage.UsageReport, bool) {
 	var params struct {
 		Update struct {
-			Input  *int64 `json:"inputTokens"`
-			Output *int64 `json:"outputTokens"`
-			Cached *int64 `json:"cachedReadTokens"`
-			Model  string `json:"model"`
+			Input     *int64 `json:"inputTokens"`
+			Output    *int64 `json:"outputTokens"`
+			Cached    *int64 `json:"cachedReadTokens"`
+			Reasoning *int64 `json:"reasoningTokens"`
+			Model     string `json:"model"`
 		} `json:"update"`
 	}
 	if json.Unmarshal(raw, &params) != nil || params.Update.Input == nil || params.Update.Output == nil || *params.Update.Input < 0 || *params.Update.Output < 0 {
@@ -341,7 +342,18 @@ func grokNativeUsage(raw json.RawMessage, model string) (sessionusage.UsageRepor
 	if params.Update.Cached != nil && *params.Update.Cached >= 0 && *params.Update.Cached <= *params.Update.Input {
 		cached, known = *params.Update.Cached, true
 	}
-	return sessionusage.CountReport(name, *params.Update.Input, *params.Update.Output, cached, known)
+	report, ok := sessionusage.CountReport(name, *params.Update.Input, *params.Update.Output, cached, known)
+	if !ok {
+		return sessionusage.UsageReport{}, false
+	}
+	if params.Update.Reasoning != nil {
+		if *params.Update.Reasoning < 0 || *params.Update.Reasoning > *params.Update.Output {
+			return sessionusage.UsageReport{}, false
+		}
+		reasoning := *params.Update.Reasoning
+		report.ReasoningTokens = &reasoning
+	}
+	return report, true
 }
 
 func safeGrokPath(path string) bool {

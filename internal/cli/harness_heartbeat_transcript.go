@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -57,29 +58,37 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 		sum := sums[model]
 		prev := usageByModel(session.disk.Usage, model)
 		input, output, cached := sum.input, sum.output, sum.cached
+		reasoning, reasoningKnown := sum.reasoning, sum.reasoningKnown
 		if sum.absolute {
 			if prev != nil && (input < prev.Input || output < prev.Output || cached < prev.Cached) {
 				continue
 			}
-			if prev != nil && input == prev.Input && output == prev.Output && cached == prev.Cached {
-				continue
-			}
 		} else if prev != nil {
-			var ok1, ok2, ok3 bool
+			var ok1, ok2, ok3, ok4 bool
 			input, ok1 = addTokens(prev.Input, sum.input)
 			output, ok2 = addTokens(prev.Output, sum.output)
 			cached, ok3 = addTokens(prev.Cached, sum.cached)
-			if !ok1 || !ok2 || !ok3 {
-				continue
+			if reasoningKnown && prev.Reasoning != nil {
+				reasoning, ok4 = addTokens(*prev.Reasoning, sum.reasoning)
+			} else if reasoningKnown && prev.Reasoning == nil {
+				reasoning, ok4 = sum.reasoning, true
+			} else if prev.Reasoning != nil {
+				reasoning, reasoningKnown, ok4 = *prev.Reasoning, true, true
+			} else {
+				ok4 = true
 			}
-			if input == prev.Input && output == prev.Output && cached == prev.Cached {
+			if !ok1 || !ok2 || !ok3 || !ok4 {
 				continue
 			}
 			if input < prev.Input || output < prev.Output || cached < prev.Cached {
 				continue
 			}
 		}
-		if input == 0 && output == 0 && cached == 0 {
+		reasoning, reasoningKnown = holdReasoning(prev, reasoning, reasoningKnown)
+		if prev != nil && input == prev.Input && output == prev.Output && cached == prev.Cached && sameReasoning(prev.Reasoning, reasoning, reasoningKnown) {
+			continue
+		}
+		if input == 0 && output == 0 && cached == 0 && (!reasoningKnown || reasoning == 0) {
 			continue
 		}
 		seq := int64(1)
@@ -89,8 +98,9 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 		mode, label := usageBilling(o)
 		created = append(created, heartbeatPendingUsage{
 			Model: model, Sequence: seq, Input: input, Output: output, Cached: cached,
-			ReportID: usageReportID(session.id, model, seq, input, output, cached),
-			Offset:   next, Recent: recent, Discard: discarding,
+			Reasoning: reasoningPointer(reasoning, reasoningKnown),
+			ReportID:  usageReportID(session.id, model, seq, input, output, cached, reasoningPointer(reasoning, reasoningKnown)),
+			Offset:    next, Recent: recent, Discard: discarding,
 			BillingMode: mode, SubscriptionLabel: label,
 		})
 	}
@@ -109,10 +119,11 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 }
 
 type usageAck struct {
-	Sequence int64
-	Input    *int64
-	Output   *int64
-	Cached   *int64
+	Sequence  int64
+	Input     *int64
+	Output    *int64
+	Cached    *int64
+	Reasoning *int64
 }
 
 func (rt *runtime) replayPendingUsage(ctx context.Context, projectID string, session *heartbeatSession) error {
@@ -137,6 +148,9 @@ func (rt *runtime) postPendingUsage(ctx context.Context, projectID string, sessi
 		"provisional":         provisional,
 		"billing_mode":        pendingBilling(pending),
 	}
+	if pending.Reasoning != nil {
+		body["reasoning_tokens"] = *pending.Reasoning
+	}
 	if pending.BillingMode == "subscription" && pending.SubscriptionLabel != "" {
 		body["subscription_label"] = pending.SubscriptionLabel
 	}
@@ -146,6 +160,7 @@ func (rt *runtime) postPendingUsage(ctx context.Context, projectID string, sessi
 			InputTokens       *int64 `json:"input_tokens"`
 			OutputTokens      *int64 `json:"output_tokens"`
 			CachedInputTokens *int64 `json:"cached_input_tokens"`
+			ReasoningTokens   *int64 `json:"reasoning_tokens"`
 		} `json:"usage"`
 	}
 	path := harnessPath(projectID, session.id) + "/usage"
@@ -160,10 +175,11 @@ func (rt *runtime) postPendingUsage(ctx context.Context, projectID string, sessi
 		return err
 	}
 	commitUsage(session, pending, usageAck{
-		Sequence: result.Usage.Sequence,
-		Input:    result.Usage.InputTokens,
-		Output:   result.Usage.OutputTokens,
-		Cached:   result.Usage.CachedInputTokens,
+		Sequence:  result.Usage.Sequence,
+		Input:     result.Usage.InputTokens,
+		Output:    result.Usage.OutputTokens,
+		Cached:    result.Usage.CachedInputTokens,
+		Reasoning: result.Usage.ReasoningTokens,
 	})
 	return nil
 }
@@ -176,6 +192,7 @@ func (rt *runtime) reconcileUsage(ctx context.Context, projectID string, session
 			InputTokens       *int64 `json:"input_tokens"`
 			OutputTokens      *int64 `json:"output_tokens"`
 			CachedInputTokens *int64 `json:"cached_input_tokens"`
+			ReasoningTokens   *int64 `json:"reasoning_tokens"`
 		} `json:"items"`
 	}
 	if err := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id)+"/usage", "", nil, &page); err != nil {
@@ -188,7 +205,10 @@ func (rt *runtime) reconcileUsage(ctx context.Context, projectID string, session
 		if item.Sequence < pending.Sequence || *item.InputTokens < pending.Input || *item.OutputTokens < pending.Output || *item.CachedInputTokens < pending.Cached {
 			continue
 		}
-		commitUsage(session, pending, usageAck{Sequence: item.Sequence, Input: item.InputTokens, Output: item.OutputTokens, Cached: item.CachedInputTokens})
+		if pending.Reasoning != nil && (item.ReasoningTokens == nil || *item.ReasoningTokens < *pending.Reasoning) {
+			continue
+		}
+		commitUsage(session, pending, usageAck{Sequence: item.Sequence, Input: item.InputTokens, Output: item.OutputTokens, Cached: item.CachedInputTokens, Reasoning: item.ReasoningTokens})
 		return nil
 	}
 	return errors.New("usage report is still unacknowledged")
@@ -196,6 +216,7 @@ func (rt *runtime) reconcileUsage(ctx context.Context, projectID string, session
 
 func commitUsage(session *heartbeatSession, pending heartbeatPendingUsage, ack usageAck) {
 	seq, input, output, cached := pending.Sequence, pending.Input, pending.Output, pending.Cached
+	reasoning := pending.Reasoning
 	if ack.Sequence > 0 {
 		seq = ack.Sequence
 	}
@@ -208,7 +229,10 @@ func commitUsage(session *heartbeatSession, pending heartbeatPendingUsage, ack u
 	if ack.Cached != nil {
 		cached = *ack.Cached
 	}
-	next := heartbeatUsageDisk{Model: pending.Model, Sequence: seq, Input: input, Output: output, Cached: cached}
+	if ack.Reasoning != nil {
+		reasoning = ack.Reasoning
+	}
+	next := heartbeatUsageDisk{Model: pending.Model, Sequence: seq, Input: input, Output: output, Cached: cached, Reasoning: reasoning}
 	if prev := usageByModel(session.disk.Usage, pending.Model); prev == nil {
 		session.disk.Usage = append(session.disk.Usage, next)
 	} else {
@@ -407,8 +431,9 @@ func findClaudeTranscript(root, sessionID string) string {
 }
 
 type usageSum struct {
-	input, output, cached int64
-	absolute              bool
+	input, output, cached, reasoning int64
+	reasoningKnown                   bool
+	absolute                         bool
 }
 
 type countingReader struct {
@@ -706,8 +731,36 @@ func usageByModel(items []heartbeatUsageDisk, model string) *heartbeatUsageDisk 
 	return nil
 }
 
-func usageReportID(session, model string, seq, input, output, cached int64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("aeon-heartbeat-usage-v1\x00%s\x00%s\x00%d\x00%d\x00%d\x00%d", session, model, seq, input, output, cached)))
+func reasoningPointer(value int64, known bool) *int64 {
+	if !known {
+		return nil
+	}
+	v := value
+	return &v
+}
+
+func sameReasoning(stored *int64, value int64, known bool) bool {
+	if stored == nil {
+		return !known
+	}
+	return known && *stored == value
+}
+
+// holdReasoning keeps a known cumulative total from moving backwards. An
+// absolute vendor snapshot can revise reasoning down while input still grows.
+func holdReasoning(prev *heartbeatUsageDisk, value int64, known bool) (int64, bool) {
+	if prev != nil && prev.Reasoning != nil && (!known || value < *prev.Reasoning) {
+		return *prev.Reasoning, true
+	}
+	return value, known
+}
+
+func usageReportID(session, model string, seq, input, output, cached int64, reasoning *int64) string {
+	reason := "unknown"
+	if reasoning != nil {
+		reason = strconv.FormatInt(*reasoning, 10)
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("aeon-heartbeat-usage-v2\x00%s\x00%s\x00%d\x00%d\x00%d\x00%d\x00%s", session, model, seq, input, output, cached, reason)))
 	sum[6] = sum[6]&0x0f | 0x50
 	sum[8] = sum[8]&0x3f | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])

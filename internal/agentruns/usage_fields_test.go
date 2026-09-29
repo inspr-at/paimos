@@ -219,3 +219,25 @@ func TestHeartbeatKeepsWaiting(t *testing.T) {
 		t.Fatalf("active %d want %d duration %d waiting %d", *v.ActiveMS, want, *v.DurationMS, waiting)
 	}
 }
+
+func TestRunStoresCachedAndReasoningTokens(t *testing.T) {
+	f := setup(t)
+	o := f.order(t, nil)
+	v := f.claim(t, f.run(t, o))
+	path := "/api/runs/" + v.ID + "/telemetry"
+	f.call(t, f.agent, "POST", path, map[string]any{
+		"sequence": 1, "kind": "usage", "input_tokens_delta": 10, "output_tokens_delta": 6,
+		"cached_input_tokens_delta": 4, "reasoning_tokens_delta": 3,
+	}, 200, &v)
+	if v.InputTokens != 10 || v.OutputTokens != 6 || v.CachedInputTokens != 4 || v.ReasoningTokens != 3 {
+		t.Fatalf("run counters: %+v", v)
+	}
+	var cached, reasoning int64
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT cached_input_tokens_delta, reasoning_tokens_delta FROM run_telemetry WHERE run_id=$1 AND sequence=1`, v.ID).Scan(&cached, &reasoning)
+	})
+	if cached != 4 || reasoning != 3 {
+		t.Fatalf("telemetry deltas cached %d reasoning %d", cached, reasoning)
+	}
+	f.call(t, f.agent, "POST", path, map[string]any{"sequence": 2, "kind": "usage", "reasoning_tokens_delta": -1}, 400, nil)
+}

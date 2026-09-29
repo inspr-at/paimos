@@ -352,19 +352,32 @@ func noteHarnessLine(source string, line []byte, fallback string, sums map[strin
 		if cur.absolute && (parsed.Input < cur.input || parsed.Output < cur.output || parsed.Cached < cur.cached) {
 			return nil
 		}
-		sums[parsed.Model] = usageSum{input: parsed.Input, output: parsed.Output, cached: parsed.Cached, absolute: true}
+		sums[parsed.Model] = usageSum{input: parsed.Input, output: parsed.Output, cached: parsed.Cached, reasoning: parsed.Reasoning, reasoningKnown: parsed.ReasoningKnown, absolute: true}
 		return nil
 	}
 	nextIn, ok1 := addTokens(cur.input, parsed.Input)
 	nextOut, ok2 := addTokens(cur.output, parsed.Output)
 	nextCached, ok3 := addTokens(cur.cached, parsed.Cached)
-	if !ok1 || !ok2 || !ok3 {
+	nextReasoning, reasoningKnown, ok4 := addUsageReasoning(cur, parsed)
+	if !ok1 || !ok2 || !ok3 || !ok4 {
 		poisoned[parsed.Model] = true
 		delete(sums, parsed.Model)
 		return nil
 	}
-	sums[parsed.Model] = usageSum{input: nextIn, output: nextOut, cached: nextCached}
+	sums[parsed.Model] = usageSum{input: nextIn, output: nextOut, cached: nextCached, reasoning: nextReasoning, reasoningKnown: reasoningKnown}
 	return nil
+}
+
+func addUsageReasoning(cur usageSum, parsed sessionusage.HeartbeatLine) (int64, bool, bool) {
+	fresh := cur.input == 0 && cur.output == 0 && cur.cached == 0 && cur.reasoning == 0 && !cur.reasoningKnown
+	if fresh {
+		return parsed.Reasoning, parsed.ReasoningKnown, true
+	}
+	if !cur.reasoningKnown || !parsed.ReasoningKnown {
+		return 0, false, true
+	}
+	next, ok := addTokens(cur.reasoning, parsed.Reasoning)
+	return next, true, ok
 }
 
 func (rt *runtime) reportSnapshotUsage(ctx context.Context, projectID string, o heartbeatOptions, session *heartbeatSession, path string) error {
@@ -384,7 +397,7 @@ func (rt *runtime) reportSnapshotUsage(ctx context.Context, projectID string, o 
 		if cur.absolute && (line.Input < cur.input || line.Output < cur.output || line.Cached < cur.cached) {
 			continue
 		}
-		sums[line.Model] = usageSum{input: line.Input, output: line.Output, cached: line.Cached, absolute: true}
+		sums[line.Model] = usageSum{input: line.Input, output: line.Output, cached: line.Cached, reasoning: line.Reasoning, reasoningKnown: line.ReasoningKnown, absolute: true}
 	}
 	models := make([]string, 0, len(sums))
 	for model := range sums {
@@ -399,10 +412,11 @@ func (rt *runtime) reportSnapshotUsage(ctx context.Context, projectID string, o 
 		if prev != nil && (sum.input < prev.Input || sum.output < prev.Output || sum.cached < prev.Cached) {
 			continue
 		}
-		if prev != nil && sum.input == prev.Input && sum.output == prev.Output && sum.cached == prev.Cached {
+		reasoning, reasoningKnown := holdReasoning(prev, sum.reasoning, sum.reasoningKnown)
+		if prev != nil && sum.input == prev.Input && sum.output == prev.Output && sum.cached == prev.Cached && sameReasoning(prev.Reasoning, reasoning, reasoningKnown) {
 			continue
 		}
-		if sum.input == 0 && sum.output == 0 && sum.cached == 0 {
+		if sum.input == 0 && sum.output == 0 && sum.cached == 0 && (!reasoningKnown || reasoning == 0) {
 			continue
 		}
 		seq := int64(1)
@@ -411,7 +425,8 @@ func (rt *runtime) reportSnapshotUsage(ctx context.Context, projectID string, o 
 		}
 		created = append(created, heartbeatPendingUsage{
 			Model: model, Sequence: seq, Input: sum.input, Output: sum.output, Cached: sum.cached,
-			ReportID:    usageReportID(session.id, model, seq, sum.input, sum.output, sum.cached),
+			Reasoning:   reasoningPointer(reasoning, reasoningKnown),
+			ReportID:    usageReportID(session.id, model, seq, sum.input, sum.output, sum.cached, reasoningPointer(reasoning, reasoningKnown)),
 			BillingMode: mode, SubscriptionLabel: label,
 		})
 	}
@@ -451,11 +466,11 @@ func snapshotCaughtUp(path, fallback string, session *heartbeatSession) bool {
 		return errors.Is(err, os.ErrNotExist)
 	}
 	for _, line := range lines {
-		if line.Input == 0 && line.Output == 0 && line.Cached == 0 {
+		if line.Input == 0 && line.Output == 0 && line.Cached == 0 && (!line.ReasoningKnown || line.Reasoning == 0) {
 			continue
 		}
 		prev := usageByModel(session.disk.Usage, line.Model)
-		if prev == nil || line.Input > prev.Input || line.Output > prev.Output || line.Cached > prev.Cached {
+		if prev == nil || line.Input > prev.Input || line.Output > prev.Output || line.Cached > prev.Cached || (line.ReasoningKnown && (prev.Reasoning == nil || line.Reasoning > *prev.Reasoning)) {
 			return false
 		}
 	}

@@ -7700,6 +7700,7 @@ components:
         input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        reasoning_tokens: {$ref: '#/components/schemas/UsageTokenCount', description: Subset of output_tokens. Null or omitted means unknown. Not added to estimated_cost_usd.}
         provisional: {type: boolean}
         account_id: {type: [string, 'null'], format: uuid}
         account_label: {type: [string, 'null'], minLength: 1, maxLength: 128, description: Public self-reported label; trimmed, valid Unicode without control characters.}
@@ -7715,7 +7716,8 @@ components:
         input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
-        provisional: {type: boolean, description: True when the reporter marks partial or any counter is unknown. Cost remains an estimate even when false.}
+        reasoning_tokens: {$ref: '#/components/schemas/UsageTokenCount', description: Subset of output_tokens. Null means unknown, not zero. Not added to estimated_cost_usd.}
+        provisional: {type: boolean, description: True when the reporter marks partial or any of input, output, or cached input is unknown. A missing reasoning count does not by itself make the row provisional. Cost remains an estimate even when false.}
         price_version: {type: [integer, 'null'], format: int64}
         estimated_cost_usd: {type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{12}$', description: 'Exact ((input-cached)*input_rate + cached*cached_rate + output*output_rate)/1000000, with no binary floats or intermediate rounding. Present only when billing_mode is api and every counter and price is known. Subscription and unknown stay null. Never actual billed cost.'}
         cost_status: {type: string, enum: [estimated, unknown]}
@@ -8054,6 +8056,8 @@ components:
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
         input_tokens: {type: integer, format: int64}
         output_tokens: {type: integer, format: int64}
+        cached_input_tokens: {type: integer, format: int64, minimum: 0, description: Cached input accumulated from telemetry deltas. A subset of input when both were reported together.}
+        reasoning_tokens: {type: integer, format: int64, minimum: 0, description: Reasoning output accumulated from telemetry deltas. A subset of output when both were reported together. Not a separate cost.}
         cost_micros: {type: integer, format: int64}
         started_at: {type: [string, 'null'], format: date-time}
         ended_at: {type: [string, 'null'], format: date-time}
@@ -8067,6 +8071,8 @@ components:
         status: {type: string, enum: [starting, running, waiting, completed, failed, cancelled, ownership_lost]}
         input_tokens_delta: {type: integer, format: int64, minimum: 0}
         output_tokens_delta: {type: integer, format: int64, minimum: 0}
+        cached_input_tokens_delta: {type: integer, format: int64, minimum: 0, maximum: 1000000000000}
+        reasoning_tokens_delta: {type: integer, format: int64, minimum: 0, maximum: 1000000000000, description: Reasoning output in this report. Not added to cost.}
         cost_micros_delta: {type: integer, format: int64, minimum: 0}
         tool_count_delta: {type: integer, minimum: 0}
         turn_count_delta: {type: integer, minimum: 0}

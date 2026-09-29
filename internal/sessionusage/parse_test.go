@@ -40,7 +40,7 @@ func TestCodexCumulativeFixture(t *testing.T) {
 	if got.Model != "gpt-6-luna" || got.Sequence != 5 || got.Provisional || got.BillingMode != "unknown" {
 		t.Fatalf("report: %+v", got)
 	}
-	if *got.InputTokens != 150 || *got.OutputTokens != 35 || *got.CachedInputTokens != 80 {
+	if *got.InputTokens != 150 || *got.OutputTokens != 35 || *got.CachedInputTokens != 80 || got.ReasoningTokens == nil || *got.ReasoningTokens != 5 {
 		t.Fatalf("counters: %+v", got)
 	}
 	obs := res.Observations[0]
@@ -53,7 +53,7 @@ func TestCodexCumulativeFixture(t *testing.T) {
 func TestCodexTurnDeltasSum(t *testing.T) {
 	res := parseFixture(t, "codex", "gpt-6-terra", "codex_turn_deltas.jsonl")
 	got := res.Reports[0]
-	if *got.InputTokens != 17 || *got.OutputTokens != 8 || *got.CachedInputTokens != 6 || got.Provisional {
+	if *got.InputTokens != 17 || *got.OutputTokens != 8 || *got.CachedInputTokens != 6 || got.ReasoningTokens == nil || *got.ReasoningTokens != 1 || got.Provisional {
 		t.Fatalf("report: %+v", got)
 	}
 	if res.Observations[0].Accounting != accountingDelta {
@@ -227,6 +227,7 @@ func TestRejects(t *testing.T) {
 		{"duplicate key", "codex", "gpt-6-luna", `{"type":"turn.completed","type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}`, ErrAmbiguous},
 		{"unknown field", "codex", "gpt-6-luna", `{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1,"prompt":"x"}}`, ErrAmbiguous},
 		{"decrease", "codex", "gpt-6-luna", "{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":9,\"output_tokens\":1}}}", ErrRejected},
+		{"reasoning decrease", "codex", "gpt-6-luna", "{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":10,\"output_tokens\":4,\"reasoning_output_tokens\":3}}}\n{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":10,\"output_tokens\":4,\"reasoning_output_tokens\":2}}}", ErrRejected},
 
 		{"last exceeds", "codex", "gpt-6-luna", `{"type":"token_count","info":{"total_token_usage":{"input_tokens":1,"output_tokens":1},"last_token_usage":{"input_tokens":2,"output_tokens":1}}}`, ErrRejected},
 		{"mixed families", "codex", "gpt-6-luna", "{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}", ErrAmbiguous},

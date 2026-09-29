@@ -162,6 +162,7 @@ func parseCursorUsage(fields map[string]json.RawMessage) (snapshot, error) {
 		if n > output {
 			return snapshot{}, fmt.Errorf("%w: reasoning exceeds output", ErrRejected)
 		}
+		snap.reasoning, snap.reasoningKnown = n, true
 	}
 	return snap, nil
 }

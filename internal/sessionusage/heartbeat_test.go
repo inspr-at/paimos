@@ -24,7 +24,7 @@ func TestHeartbeatFixtures(t *testing.T) {
 			last = got
 		}
 	}
-	if !last.Absolute || last.Model != "gpt-5" || last.Input != 150 || last.Output != 35 || last.Cached != 80 {
+	if !last.Absolute || last.Model != "gpt-5" || last.Input != 150 || last.Output != 35 || last.Cached != 80 || !last.ReasoningKnown || last.Reasoning != 4 {
 		t.Fatalf("codex cumulative: %+v", last)
 	}
 	cursor, err := os.ReadFile(filepath.Join("testdata", "cursor_result.jsonl"))
@@ -41,7 +41,7 @@ func TestHeartbeatFixtures(t *testing.T) {
 			deltas = append(deltas, got)
 		}
 	}
-	if len(deltas) != 1 || deltas[0].Absolute || deltas[0].Model != "composer-2.5" || deltas[0].Input != 42 || deltas[0].Cached != 10 || deltas[0].Output != 8 || deltas[0].ID == "" {
+	if len(deltas) != 1 || deltas[0].Absolute || deltas[0].Model != "composer-2.5" || deltas[0].Input != 42 || deltas[0].Cached != 10 || deltas[0].Output != 8 || deltas[0].ID == "" || deltas[0].ReasoningKnown {
 		t.Fatalf("cursor delta: %+v", deltas)
 	}
 	grok, err := os.ReadFile(filepath.Join("testdata", "grok_usage.json"))
@@ -56,7 +56,7 @@ func TestHeartbeatFixtures(t *testing.T) {
 	for _, line := range lines {
 		got[line.Model] = line
 	}
-	if len(got) != 2 || !got["grok-4"].Absolute || got["grok-4"].Input != 88 || got["grok-4"].Cached != 7 || got["grok-4"].Output != 15 || got["grok-4-fast"].Input != 25 || got["grok-4-fast"].Cached != 3 || got["grok-4-fast"].Output != 5 {
+	if len(got) != 2 || !got["grok-4"].Absolute || got["grok-4"].Input != 88 || got["grok-4"].Cached != 7 || got["grok-4"].Output != 15 || !got["grok-4"].ReasoningKnown || got["grok-4"].Reasoning != 2 || got["grok-4-fast"].Input != 25 || got["grok-4-fast"].Cached != 3 || got["grok-4-fast"].Output != 5 || got["grok-4-fast"].Reasoning != 2 {
 		t.Fatalf("grok models: %+v", got)
 	}
 	sessionOnly, err := ParseGrokUsage([]byte(`{"session":{"inputTokens":10,"outputTokens":4,"cachedReadTokens":2,"cacheCreationTokens":1,"primaryModelId":"grok-4","costUsdTicks":99}}`), "")

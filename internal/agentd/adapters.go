@@ -108,14 +108,14 @@ func (*CodexAdapter) Name() string                                 { return Code
 
 type codexProcess struct {
 	*wireProcess
-	done                      chan bool
-	once                      sync.Once
-	usage                     *sessionusage.ManagedCodex
-	inputTokens, outputTokens int64
-	terminal                  *sessionusage.CodexTerminal
-	terminalSeen, invalid     bool
-	acknowledged, sealed      bool
-	abandoned                 atomic.Bool // drain failure; never needs eventMu to publish
+	done                                                     chan bool
+	once                                                     sync.Once
+	usage                                                    *sessionusage.ManagedCodex
+	inputTokens, outputTokens, cachedTokens, reasoningTokens int64
+	terminal                                                 *sessionusage.CodexTerminal
+	terminalSeen, invalid                                    bool
+	acknowledged, sealed                                     bool
+	abandoned                                                atomic.Bool // drain failure; never needs eventMu to publish
 }
 
 func (p *codexProcess) Wait() error {
