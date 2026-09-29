@@ -80,7 +80,11 @@ func (a *CursorAdapter) Probe(ctx context.Context, key string) bool {
 	if expected == "" {
 		return false
 	}
-	raw, err := probeCommand(ctx, a.Path, nil, "status", "--format", "json")
+	environment, err := a.accountEnvironment(key)
+	if err != nil {
+		return false
+	}
+	raw, err := probeCommand(ctx, a.Path, environment, "status", "--format", "json")
 	if err != nil {
 		return false
 	}

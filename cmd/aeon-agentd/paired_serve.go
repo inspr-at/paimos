@@ -24,6 +24,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	codexHomes, emails, claudeHomes, cursorIDs := map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}
 	claudeEmails := map[string]string{}
 	grokBindings := map[string]agentd.GrokBinding{}
+	grokHomes, cursorHomes := map[string]string{}, map[string]string{}
 	paths := map[string]string{}
 	accounts := []agentd.EnrolledAccount{}
 	for _, a := range c.Accounts {
@@ -41,7 +42,13 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 			claudeEmails[a.Key] = a.Identity
 		case agentd.Cursor:
 			cursorIDs[a.Key] = a.Identity
+			if a.Home != "" {
+				cursorHomes[a.Key] = a.Home
+			}
 		case agentd.Grok:
+			if a.Home != "" {
+				grokHomes[a.Key] = a.Home
+			}
 			if a.Grok.BinaryPath != a.Path || a.Grok.PrincipalSHA256 != a.Identity || a.Grok.AuthPath == "" || a.Grok.ScratchRoot == "" {
 				return nil, nil, errors.New("native Grok private binding unavailable")
 			}
@@ -62,10 +69,16 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 		adapters = append(adapters, a)
 	}
 	if p := paths[agentd.Cursor]; p != "" {
-		adapters = append(adapters, agentd.NewCursorAdapter(p, cursorIDs))
+		cursor := agentd.NewCursorAdapter(p, cursorIDs)
+		if len(cursorHomes) > 0 {
+			cursor.Homes = cursorHomes
+		}
+		adapters = append(adapters, cursor)
 	}
 	if len(grokBindings) > 0 {
-		adapters = append(adapters, agentd.NewGrokAdapter(grokBindings))
+		grok := agentd.NewGrokAdapter(grokBindings)
+		grok.Homes = grokHomes
+		adapters = append(adapters, grok)
 	}
 	return accounts, adapters, nil
 }

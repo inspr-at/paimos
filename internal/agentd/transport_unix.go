@@ -91,7 +91,11 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(s.Lifecycle(r.URL.Query().Get("account_id")))
+		status := s.Lifecycle(r.URL.Query().Get("account_id"))
+		if r.URL.Query().Get("include_capacity") == "1" {
+			status.CapacityAccounts = s.CapacityAccounts(r.URL.Query().Get("account_id"))
+		}
+		_ = json.NewEncoder(w).Encode(status)
 	})
 	mux.HandleFunc("POST /v1/drain", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, token) {

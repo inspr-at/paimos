@@ -247,7 +247,7 @@ func (a *CodexAdapter) CaptureCapacity(ctx context.Context, key string) []capaci
 	if err != nil || strings.TrimSpace(a.Emails[key]) == "" {
 		return nil
 	}
-	p, err := launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, home, withEnv("CODEX_HOME", home), "jsonrpc", func(AdapterEvent) {})
+	p, err := launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, home, capacityEnvironment("CODEX_HOME", home, a.Path), "jsonrpc", func(AdapterEvent) {})
 	if err != nil {
 		return nil
 	}
@@ -326,6 +326,9 @@ func (s *Supervisor) captureIdleCapacity(ctx context.Context, now time.Time) {
 		capture, canCapture := s.adapters[a.Harness].(interface {
 			CaptureCapacity(context.Context, string) []capacity.Reading
 		})
+		if capability, ok := s.adapters[a.Harness].(interface{ CanCaptureCapacity(string) bool }); ok {
+			canCapture = canCapture && capability.CanCaptureCapacity(a.Key)
+		}
 		due := canCapture && s.probedAccounts[a.ID] && !s.blockedAccounts[a.ID] && !s.capacityCapturing && now.Sub(s.capacityLast[a.ID]) >= s.capacityInterval && now.Sub(s.capacityAttempt[a.ID]) >= s.capacityInterval
 		entries := make([]*owned, 0, len(s.runs))
 		for _, e := range s.runs {

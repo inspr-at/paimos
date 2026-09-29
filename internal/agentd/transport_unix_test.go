@@ -5,6 +5,7 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -64,6 +65,28 @@ func TestLocalSocketAuthAndBound(t *testing.T) {
 	_ = response.Body.Close()
 	if response.StatusCode != 200 {
 		t.Fatalf("authenticated status %d", response.StatusCode)
+	}
+	// Capacity is opt-in, preserving strict lifecycle decoders during upgrades.
+	for _, query := range []string{"", "?include_capacity=1", "?include_capacity=1&account_id=missing"} {
+		request, _ = http.NewRequest("GET", "http://agentd/v1/lifecycle"+query, nil)
+		request.Header.Set("Authorization", "Bearer "+string(token))
+		response, err = client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]json.RawMessage
+		err = json.NewDecoder(response.Body).Decode(&body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, present := body["capacity_accounts"]
+		if present != (query != "") {
+			t.Fatal("capacity changed the ordinary lifecycle contract")
+		}
+		if strings.Contains(query, "missing") && string(body["capacity_accounts"]) != "[]" {
+			t.Fatal("empty selection is not an empty inventory")
+		}
 	}
 	request, _ = http.NewRequest("POST", "http://agentd/v1/runs/run/control", strings.NewReader(strings.Repeat("x", 71<<10)))
 	request.Header.Set("Authorization", "Bearer "+string(token))

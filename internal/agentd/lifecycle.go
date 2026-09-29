@@ -25,18 +25,19 @@ type DrainRequest struct {
 // LifecycleStatus does not conflate telemetry acceptance with observed exit.
 // Only a drained status permits removing a pairing-owned service or credential.
 type LifecycleStatus struct {
-	LoginRequired           bool              `json:"login_required"`
-	VerificationUnavailable []string          `json:"verification_unavailable_account_ids"`
-	Ready                   bool              `json:"ready"`
-	DaemonID                string            `json:"daemon_id"`
-	Generation              string            `json:"generation"`
-	State                   string            `json:"state"`
-	ActiveRunIDs            []string          `json:"active_run_ids"`
-	UnconfirmedRunIDs       []string          `json:"unconfirmed_run_ids"`
-	SettlementPendingRunIDs []string          `json:"settlement_pending_run_ids"`
-	FencedAccountIDs        []string          `json:"fenced_account_ids"`
-	AllFenced               bool              `json:"all_fenced"`
-	VerificationResults     map[string]string `json:"verification_results"`
+	CapacityAccounts        []CapacityAccountStatus `json:"capacity_accounts,omitzero"`
+	LoginRequired           bool                    `json:"login_required"`
+	VerificationUnavailable []string                `json:"verification_unavailable_account_ids"`
+	Ready                   bool                    `json:"ready"`
+	DaemonID                string                  `json:"daemon_id"`
+	Generation              string                  `json:"generation"`
+	State                   string                  `json:"state"`
+	ActiveRunIDs            []string                `json:"active_run_ids"`
+	UnconfirmedRunIDs       []string                `json:"unconfirmed_run_ids"`
+	SettlementPendingRunIDs []string                `json:"settlement_pending_run_ids"`
+	FencedAccountIDs        []string                `json:"fenced_account_ids"`
+	AllFenced               bool                    `json:"all_fenced"`
+	VerificationResults     map[string]string       `json:"verification_results"`
 }
 
 func fenceName(account string) string {
