@@ -151,6 +151,8 @@ function ticketGroup(key: string, commits: ReleaseChange[], note?: { group?: str
 // Features or Fixes, with the pill and benefit in the viewer's language and
 // every commit that names the ticket. A told ticket without commits still gets
 // its block. Commits no told ticket claims are Other; the version bump is left out.
+// Highlights needs that told text. Compare does not: presentCompare follows
+// changes[].group even when the note is empty.
 export function presentChanges(changes: ReleaseChange[], locale?: string | null, items?: TicketText[] | null): PresentedChanges {
   const seen = new Set<string>()
   const commits = changes.filter(c => {
@@ -173,6 +175,54 @@ export function presentChanges(changes: ReleaseChange[], locale?: string | null,
 // told and their text; without one, the linked tickets do.
 export function presentRelease(r: Pick<Release, 'notes' | 'changes'>, locale?: string | null): PresentedChanges {
   return presentChanges(r.changes, locale, hasUsableNotes(r) ? r.notes.items : null)
+}
+// Compare follows the group the server already put on each change. A commit
+// is a feature or a fix without any pill or benefit. A shared commit stays in
+// that one group, so a frozen feature note does not pull a fixes commit into
+// Features. Frozen text the response already carries still labels its ticket.
+// An older manifest with no group keeps the told-ticket reading.
+export function presentCompare(changes: ReleaseChange[], locale?: string | null): PresentedChanges {
+  const seen = new Set<string>()
+  const commits = changes.filter(c => {
+    if (!changeGroup(c) || seen.has(c.commit)) return false
+    seen.add(c.commit)
+    return true
+  })
+  const implicit = commits.filter(c => c.group !== 'features' && c.group !== 'fixes' && c.group !== 'other')
+  const told = presentChanges(implicit, locale)
+  const out: PresentedChanges = { features: [...told.features], fixes: [...told.fixes], other: [] }
+  const implicitOther = new Set(told.other.map(c => c.commit))
+  const lang = noteLocale(locale)
+  const lineFor = (group: 'features' | 'fixes', key: string) => {
+    const found = out[group].find(line => line.key === key)
+    if (found) return found
+    const line: TicketChangeLine = { key, pill: '', benefit: '', pillLang: lang, benefitLang: lang, commits: [] }
+    out[group].push(line)
+    return line
+  }
+  for (const c of commits) {
+    if (c.group !== 'features' && c.group !== 'fixes') {
+      if (c.group ? true : implicitOther.has(c.commit)) out.other.push(c)
+      continue
+    }
+    const keys = [...new Set(c.tickets.map(key => key.trim()).filter(Boolean))]
+    // A grouped commit with no ticket has no block to head, so it stays listed.
+    if (!keys.length) { out.other.push(c); continue }
+    for (const key of keys) {
+      const line = lineFor(c.group, key)
+      if (!line.commits.some(item => item.commit === c.commit)) line.commits.push(c)
+      if (line.pill.trim() || line.benefit.trim()) continue
+      const note = c.linked_tickets?.find(ticket => ticket.key === key)
+      if (!note) continue
+      const text = localizedNote(note, locale)
+      if (!text.pill.trim() && !text.benefit.trim()) continue
+      line.pill = text.pill
+      line.benefit = text.benefit
+      line.pillLang = text.pillLang
+      line.benefitLang = text.benefitLang
+    }
+  }
+  return out
 }
 // ---------- Display ----------
 // Headlines and subjects as people read them, next to their ticket chips: the keys

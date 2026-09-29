@@ -17,6 +17,8 @@ const presented = computed(() => props.presented)
 const details = computed(() => props.view === 'details')
 const fellBack = (lang: ReleaseLang) => !!props.lang && lang !== props.lang
 const titleLang = (line: TicketChangeLine) => line.pill ? line.pillLang : line.benefitLang
+// A ticket the server grouped without pill or benefit text is named by its key.
+const heading = (line: TicketChangeLine) => (line.pill || line.benefit).trim()
 const ticketsShown = (c: ReleaseChange) => props.soleTicket && c.tickets.length === 1 && c.tickets[0] === props.soleTicket ? [] : c.tickets
 const GROUPS: { key: ChangeGroup; label: string; icon: IconName }[] = [
   { key: 'features', label: 'Features', icon: 'sparkle' },
@@ -82,8 +84,11 @@ function parts(text: string) {
         <li v-for="line in presented[g.key]" :key="line.key">
           <article class="ticket-line" :aria-labelledby="titleId(g.key, line.key)">
             <div class="line-head">
-              <h4 :id="titleId(g.key, line.key)" class="pill-title" :lang="titleLang(line)"><template v-for="(p, i) in parts(line.pill || line.benefit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="fellBack(titleLang(line))" :lang="titleLang(line)" /></h4>
-              <TicketLink :ticket-key="line.key" variant="inline" />
+              <template v-if="heading(line)">
+                <h4 :id="titleId(g.key, line.key)" class="pill-title" :lang="titleLang(line)"><template v-for="(p, i) in parts(line.pill || line.benefit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="fellBack(titleLang(line))" :lang="titleLang(line)" /></h4>
+                <TicketLink :ticket-key="line.key" variant="inline" />
+              </template>
+              <span v-else :id="titleId(g.key, line.key)"><TicketLink :ticket-key="line.key" variant="inline" /></span>
             </div>
             <p v-if="line.pill && showBenefit(line)" class="benefit" :lang="line.benefitLang"><template v-for="(p, i) in parts(line.benefit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="fellBack(line.benefitLang) && !fellBack(titleLang(line))" :lang="line.benefitLang" /></p>
             <ul v-if="details && line.commits.length" class="commit-list open" :aria-label="`${commitWord(line.commits.length)}`">

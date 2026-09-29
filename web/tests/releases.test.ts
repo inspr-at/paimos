@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import { withPublicNoteItems } from '../src/lib/releases.ts'
 import assert from 'node:assert/strict'
-import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, stats, technicalLine, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
+import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentCompare, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, stats, technicalLine, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
 
 const rel = (version: string, at: string, extra: Partial<Release> = {}): Release => ({
   version, tag: `v${version}`, release_channel: 'stable', release_sequence: 1, state: 'published', reserved_at: at, tagged_at: at, published_at: at,
@@ -172,6 +172,53 @@ test('each ticket is a feature or a fix of its own, also when one commit names s
   // The ticket's own group wins over a conventional prefix on a shared commit.
   const prefixed = presentChanges([{ ...change('p', 'feat', 'feat: quotes and chat (AEON-274, AEON-273)', ['AEON-274', 'AEON-273']), group: 'features' as const, linked_tickets: [note('AEON-274', 'Quotes open', 'fixes'), note('AEON-273', 'Session chat', 'features')] }])
   assert.deepEqual([prefixed.features.map(line => line.key), prefixed.fixes.map(line => line.key)], [['AEON-273'], ['AEON-274']])
+})
+
+test('compare follows the server group without note text, and a shared commit stays there (AEON-386)', () => {
+  const frozen = (key: string, group: 'features' | 'fixes', pill: string, benefit: string) => ({ key, group, pill_en: pill, pill_de: '', benefit_en: benefit, benefit_de: '' })
+  const changes = [
+    { ...change('g', 'other', 'AEON-20: frozen group', ['AEON-20']), group: 'fixes' as const, linked_tickets: [frozen('AEON-20', 'fixes', 'Frozen kept', 'Stays a fix.')] },
+    { ...change('h', 'other', 'AEON-99: outside a grouped capture', ['AEON-99']), group: 'fixes' as const },
+    { ...change('i', 'other', 'AEON-97: benefit outside a grouped capture', ['AEON-97']), group: 'features' as const },
+    { ...change('j', 'other', 'AEON-98: hidden member of a grouped capture', ['AEON-98']), group: 'fixes' as const },
+    { ...change('k', 'other', 'AEON-21: shared with a hidden bug', ['AEON-21', 'AEON-98']), group: 'fixes' as const, linked_tickets: [frozen('AEON-21', 'features', 'Frozen feature', 'Stays a feature.')] },
+    change('z', 'release', 'release: v1'),
+  ]
+  const shown = presentCompare(changes)
+  assert.deepEqual(shown.features.map(line => [line.key, line.pill, line.commits.map(c => c.commit)]), [['AEON-97', '', ['i']]])
+  assert.deepEqual(shown.fixes.map(line => [line.key, line.pill, line.commits.map(c => c.commit)]), [
+    ['AEON-20', 'Frozen kept', ['g']],
+    ['AEON-99', '', ['h']],
+    ['AEON-98', '', ['j', 'k']],
+    ['AEON-21', 'Frozen feature', ['k']],
+  ])
+  assert.equal(shown.fixes.find(line => line.key === 'AEON-21')?.benefit, 'Stays a feature.')
+  assert.deepEqual(shown.other, [])
+  assert.equal(JSON.stringify(shown).includes('LIVE'), false)
+  // German is not invented for frozen English text.
+  const de = presentCompare(changes, 'de-AT')
+  assert.equal(de.fixes.find(line => line.key === 'AEON-21')?.pillLang, 'en')
+  // Highlights still require told text, so the same payload does not move.
+  const highlights = presentChanges(changes)
+  assert.deepEqual(highlights.features.map(line => line.key), ['AEON-21'])
+  assert.deepEqual(highlights.fixes.map(line => line.key), ['AEON-20'])
+  assert.deepEqual(highlights.other.map(c => c.commit), ['h', 'i', 'j'])
+  const notes = {
+    source: 'database-snapshot', snapshot_sha256: 'ab', captured_at: '2026-09-26T12:00:00Z', release_revision: 1, gaps: [], hidden: 1,
+    items: [
+      { id: '20', key: 'AEON-20', group: 'fixes' as const, pill_en: 'Frozen kept', pill_de: '', benefit_en: 'Stays a fix.', benefit_de: '' },
+      { id: '21', key: 'AEON-21', group: 'features' as const, pill_en: 'Frozen feature', pill_de: '', benefit_en: 'Stays a feature.', benefit_de: '' },
+    ],
+  }
+  const detail = presentRelease(rel('260926120000.0.0', '2026-09-26T12:00:00Z', { notes, changes }))
+  assert.deepEqual(detail.features.map(line => [line.key, line.pill, line.commits.map(c => c.commit)]), [['AEON-21', 'Frozen feature', ['k']]])
+  assert.deepEqual(detail.other.map(c => c.commit), ['h', 'i', 'j'])
+  // No server group: Compare still reads told tickets, and a bare feat stays Other.
+  const legacy = [
+    { ...change('1', 'other', 'P0.x: session chat (AEON-273)', ['AEON-273']), linked_tickets: [{ key: 'AEON-273', pill_en: 'Session chat', pill_de: '', benefit_en: 'The chat stays put.', benefit_de: '' }] },
+    change('2', 'feat', 'feat: plain'),
+  ]
+  assert.deepEqual(presentCompare(legacy), presentChanges(legacy))
 })
 
 test('a server group wins over the commit type, and a version bump stays out', () => {
