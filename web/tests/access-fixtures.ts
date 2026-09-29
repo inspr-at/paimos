@@ -434,6 +434,28 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       event('agent_key.created', null, { id: key.id, principal_id: key.principal_id, name: key.name, prefix })
       return route.fulfill({ status: 201, json: { id: key.id, token: `aeon_${prefix}_T0k3nS3cr3tValue`, prefix, name: key.name, expires_at: key.expires_at } })
     }
+    const scopeMatch = /^\/api\/agent-keys\/([^/]+)\/scopes$/.exec(path)
+    if (scopeMatch) {
+      if (!need('keys.manage')) return fail(route, 403, 'forbidden', 'You need Manage agent keys.')
+      const key = world.keys.find(k => k.id === scopeMatch[1])
+      if (!key) return fail(route, 404, 'not_found', 'No such key.')
+      if (key.revoked_at || key.expires_at && Date.parse(key.expires_at) <= now) return fail(route, 409, 'conflict', 'Key is revoked or expired.')
+      const agent = world.agents.find(a => a.principal_id === key.principal_id)
+      const role = world.roles.find(r => r.id === agent?.workspace_role)
+      const grantable = REGISTRY.filter(p => p.agent_grantable && mine(world).has(p.key) && role?.permissions.includes(p.key)).map(p => p.key)
+      if (method === 'GET') return route.fulfill({ json: { key, grantable_scopes: grantable } })
+      if (method === 'PATCH') {
+        if (world.slow) await new Promise(resolve => setTimeout(resolve, world.slow))
+        const before = { ...key, scopes: [...key.scopes] }
+        const added = body.add as string[] ?? []
+        const removed = body.remove as string[] ?? []
+        const after = [...new Set([...key.scopes.filter(k => !removed.includes(k)), ...added])]
+        if (after.some(k => !grantable.includes(k))) return fail(route, 403, 'forbidden', 'Scopes exceed current permissions.')
+        key.scopes = after
+        event('agent_key.scopes_changed', before, { ...key })
+        return route.fulfill({ json: key })
+      }
+    }
     const keyMatch = /^\/api\/agent-keys\/([^/]+)$/.exec(path)
     if (keyMatch && method === 'DELETE') {
       const key = world.keys.find(k => k.id === keyMatch[1])

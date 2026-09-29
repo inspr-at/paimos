@@ -51,6 +51,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
@@ -506,6 +507,12 @@ type registration struct {
 func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	ctx := r.Context()
 	projectID := r.PathValue("projectId")
+	if p.Kind == tenant.Agent {
+		// A registered generation must be able to heartbeat and stop itself.
+		if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: projectID}); err != nil {
+			return nil, err
+		}
+	}
 	if err := project(ctx, tx, projectID); err != nil {
 		return nil, err
 	}

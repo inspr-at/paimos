@@ -93,6 +93,7 @@ func fixtureWithOwnershipClock(t *testing.T, now func() time.Time) *harnessFixtu
 		return err
 	})
 	f.key = "aeon_" + prefix + "_" + secret
+	f.agent.Scopes = []string{"harness.read", "harness.write", "harness.worker", "harness.control"}
 	if now == nil {
 		harness.New(f.db.App).Mount(f.mux)
 	} else {

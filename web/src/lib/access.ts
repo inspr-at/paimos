@@ -99,6 +99,8 @@ export async function getAudit(): Promise<{ items: AuditEvent[]; complete: boole
 export interface AgentKeyCreated { id: string; token: string; prefix: string; name: string; expires_at: string | null }
 export const createAgentKey = (agent: PrincipalRef, expiresAt: string | null, scopes: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { principal_id: agent.principal_id, name: agent.name, scopes, ...(expiresAt ? { expires_at: expiresAt } : {}) })
 export const revokeAgentKey = (keyId: string) => call<void>(`/agent-keys/${id(keyId)}`, 'DELETE')
+export const getAgentKeyScopes = (keyId: string) => call<{ key: AgentKey; grantable_scopes: string[] }>(`/agent-keys/${id(keyId)}/scopes`)
+export const changeAgentKeyScopes = (keyId: string, add: string[], remove: string[]) => call<AgentKey>(`/agent-keys/${id(keyId)}/scopes`, 'PATCH', { add, remove })
 // One confirmed request commits the replacement and revocation together.
 export const rotateAgentKey = (keyId: string, expiresAt: string | null) => call<AgentKeyCreated>('/agent-keys', 'POST', { rotate_key_id: keyId, expires_at: expiresAt })
 
@@ -291,6 +293,7 @@ export function auditSentence(event: AuditEvent, names: Names): { actor: string;
       return { actor, subject: personName, text: aliasName ? `${linked ? 'linked' : 'unlinked'} ${aliasName} ${linked ? 'to' : 'from'} ${personName}` : `${linked ? 'linked a classic identity to' : 'unlinked a classic identity from'} ${personName}` }
     }
     case 'agent_key.created': return { actor, subject: who, text: `created the key ${str(either.name) || 'for an agent'}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}` }
+    case 'agent_key.scopes_changed': return { actor, subject: who, text: `changed scopes for the key ${str(either.name) || ''}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}`.trim() }
     case 'agent_key.revoked': return { actor, subject: who, text: `revoked the key ${str(either.name) || ''}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}`.replace(/ +/g, ' ').trim() }
     default: return { actor, subject: '', text: event.type.replace(/[._]/g, ' ') }
   }

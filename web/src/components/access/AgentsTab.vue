@@ -13,6 +13,7 @@ import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
 import KeysTable from './KeysTable.vue'
 import NewKeySheet from './NewKeySheet.vue'
+import EditKeyScopesSheet from './EditKeyScopesSheet.vue'
 import RolePicker from './RolePicker.vue'
 import StatusChip from './StatusChip.vue'
 import { problem, undoing } from './accessText'
@@ -41,6 +42,8 @@ async function revoke(key: AgentKey) {
   try { await revokeAgentKey(key.id); await Promise.all([loadKeys(), access.load(true)]); toast(`The key ${keyHint(key.prefix)} is revoked`) }
   catch (e) { toast(problem(e, 'The key stays active'), { tone: 'error' }) }
 }
+const editing = ref<{ agent: Agent; key: AgentKey } | null>(null)
+async function scopesSaved() { await loadKeys(); toast('Key scopes updated') }
 const newKey = ref<Agent | null>(null)
 const rotateKey = ref<AgentKey | undefined>()
 function showKeySheet(agent: Agent, key?: AgentKey) { rotateKey.value = key; newKey.value = agent }
@@ -85,7 +88,7 @@ onMounted(loadKeys)
         <div v-if="open.has(agent.principal_id)" :id="`keys-${agent.principal_id}`" class="keys">
           <p v-if="keysError" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ keysError }}<button type="button" class="btn sm" @click="loadKeys">Try again</button></p>
           <div v-else-if="!keys" class="set-skeleton" role="status" aria-label="Loading keys"><span class="skeleton" /></div>
-          <KeysTable v-else-if="keysOf(agent).length" :keys="keysOf(agent)" :revocable="manageKeys" :rotatable="manageKeys" @revoke="revoke" @rotate="showKeySheet(agent, $event)" />
+          <KeysTable v-else-if="keysOf(agent).length" :keys="keysOf(agent)" :revocable="manageKeys" :rotatable="manageKeys" :editable="manageKeys" @edit="editing = { agent, key: $event }" @revoke="revoke" @rotate="showKeySheet(agent, $event)" />
           <p v-else class="empty">No keys yet.</p>
           <button type="button" class="btn sm" @click="showKeySheet(agent)"><AppIcon name="plus" :size="13" />New key</button>
         </div>
@@ -112,6 +115,7 @@ onMounted(loadKeys)
       v-if="picker" :anchor="picker.anchor" :subject="picker.agent.name" :roles="access.roles" :current="picker.agent.workspace_role?.id ?? null" :registry="access.registry"
       :mine="myPermissions()" scope="workspace" allow-none none-label="No role" :busy="busy" :can-apply="can('members.manage')" :error="roleError" @choose="chooseRole" @close="picker = null"
     />
+    <EditKeyScopesSheet v-if="editing" :agent="editing.agent" :agent-key="editing.key" @close="editing = null" @saved="scopesSaved" />
     <NewKeySheet v-if="newKey" :agent="newKey" :rotate-key="rotateKey" @close="newKey = null" @created="created" />
   </div>
 </template>
