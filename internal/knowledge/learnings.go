@@ -418,6 +418,22 @@ func parseAccept(raw map[string]json.RawMessage) (string, error) {
 
 // ---------- List ----------
 
+// owningProject is the node when it is a project, otherwise the closest project
+// above it. nearestProject starts at the parent, so a comment on a nested
+// project would otherwise belong to the project above that node.
+const (
+	owningProject    = `CASE WHEN k.slug='project' THEN n.id ELSE proj.id END`
+	owningProjectKey = `CASE WHEN k.slug='project' THEN n.key ELSE proj.key END`
+	// Decisions are dropped before the scan limit. A window of newer decided
+	// items must not hide an older open learning or leave truncated false.
+	undecidedNode = `NOT EXISTS (
+	    SELECT 1 FROM method_learning_decisions d
+	    WHERE d.tenant_id=n.tenant_id AND d.source_key='n-'||n.id::text)`
+	undecidedComment = `NOT EXISTS (
+	    SELECT 1 FROM method_learning_decisions d
+	    WHERE d.tenant_id=c.tenant_id AND d.source_key='c-'||n.id::text||'-'||c.id::text)`
+)
+
 const projectTree = `
 WITH RECURSIVE tree AS (
     SELECT id, 0 AS depth FROM nodes WHERE tenant_id=$1 AND id=$2::uuid AND deleted_at IS NULL
@@ -489,6 +505,7 @@ func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, proje
 	    AND k.slug IN ('ticket','task','epic')
 	    AND proj.id=$2::uuid
 	    AND n.fields::text ILIKE '%process-learning%'
+	    AND `+undecidedNode+`
 	  ORDER BY n.updated_at DESC
 	  LIMIT `+strconv.Itoa(learningScanLimit), tenantID, projectID)
 	if err != nil {
@@ -539,9 +556,10 @@ func listTaggedComments(ctx context.Context, tx pgx.Tx, tenantID, projectID, pro
 	      ORDER BY e.id DESC LIMIT 1
 	  ) latest ON true
 	  WHERE c.tenant_id=$1 AND c.type='comment.created'
-	    AND (proj.id=$2::uuid OR n.id=$2::uuid)
+	    AND `+owningProject+`=$2::uuid
 	    AND coalesce(latest.after->>'deleted','false')<>'true'
 	    AND coalesce(latest.after->>'body_markdown', c.after->>'body_markdown','') ILIKE '%process-learning%'
+	    AND `+undecidedComment+`
 	  ORDER BY c.at DESC
 	  LIMIT `+strconv.Itoa(learningScanLimit), tenantID, projectID)
 	if err != nil {
@@ -709,8 +727,8 @@ func loadOpen(ctx context.Context, tx pgx.Tx, tenantID, nodeID, commentID string
 	var kind, slug, projectKey, projectID string
 	var fields json.RawMessage
 	err := tx.QueryRow(ctx, `SELECT n.key, n.title, n.updated_at, n.fields, k.slug, coalesce(n.fields->>'slug',''),
-	    coalesce(proj.key, CASE WHEN k.slug='project' THEN n.key ELSE '' END),
-	    coalesce(proj.id::text, CASE WHEN k.slug='project' THEN n.id::text ELSE '' END)
+	    coalesce(`+owningProjectKey+`, ''),
+	    coalesce((`+owningProject+`)::text, '')
 	  FROM nodes n
 	  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
 	  `+nearestProject+`

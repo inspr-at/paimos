@@ -38,6 +38,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/from-classic":                       true,
 	"GET /api/knowledge":                          true,
 	"GET /api/knowledge/graph":                    true,
+	"GET /api/knowledge/learnings":                true,
 	"GET /api/knowledge/resolve":                  true,
 	"GET /api/tickets/graph":                      true,
 	"GET /api/relations":                          true,
@@ -93,6 +94,14 @@ func routeTarget(pattern string, values map[string]string) (kind, id string) {
 		return "node", values["nodeId"]
 	case strings.HasPrefix(pattern, "GET /api/knowledge/{id}") || strings.HasPrefix(pattern, "PATCH /api/knowledge/{id}") || strings.HasPrefix(pattern, "DELETE /api/knowledge/{id}"):
 		return "node", values["id"]
+	case pattern == "POST /api/knowledge/learnings/{learningId}/accept" || pattern == "POST /api/knowledge/learnings/{learningId}/dismiss":
+		// Accept and dismiss name the source item, not a project. The node's
+		// project_id is that item's project, including a project node itself.
+		nodeID, ok := learningSourceNode(values["learningId"])
+		if !ok {
+			return "", ""
+		}
+		return "node", nodeID
 	case strings.Contains(pattern, " /api/attachments/{id}"):
 		return "attachment", values["id"]
 	case values["relationId"] != "":
@@ -105,6 +114,32 @@ func routeTarget(pattern string, values map[string]string) (kind, id string) {
 		return "node_key", values["key"]
 	}
 	return "", ""
+}
+
+// learningSourceNode is the node a method-learning id names. Ticket ids are
+// "n-<uuid>"; comment ids are "c-<uuid>-<event id>". The uuid is the node the
+// comment is on, which is the project itself when the comment belongs to a project.
+func learningSourceNode(raw string) (string, bool) {
+	switch {
+	case strings.HasPrefix(raw, "n-") && uuidPattern.MatchString(raw[2:]):
+		return raw[2:], true
+	case strings.HasPrefix(raw, "c-") && len(raw) > 39 && raw[38] == '-' && uuidPattern.MatchString(raw[2:38]) && decimalID(raw[39:]):
+		return raw[2:38], true
+	default:
+		return "", false
+	}
+}
+
+func decimalID(s string) bool {
+	if s == "" || s[0] == '0' {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 type routeScopeKey struct{}

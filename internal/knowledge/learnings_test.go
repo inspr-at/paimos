@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
@@ -164,6 +165,37 @@ func TestMethodLearnings(t *testing.T) {
 	nestedPage := listLearningsHTTP(t, f, f.a, nested)
 	if len(nestedPage.Items) != 1 || nestedPage.Items[0].Key != "NEST-9" {
 		t.Fatalf("nested %+v", nestedPage.Items)
+	}
+	onNested := addComment(t, f, nested, "#process-learning Keep this inside the nested project.")
+	nestedCommentID := commentLearningID(nested, onNested)
+	if hasLearning(listLearningsHTTP(t, f, f.a, f.project).Items, nestedCommentID) {
+		t.Fatal("comment on a nested project listed under the parent")
+	}
+	nestedPage = listLearningsHTTP(t, f, f.a, nested)
+	var nestedComment Learning
+	for _, item := range nestedPage.Items {
+		if item.ID == nestedCommentID {
+			nestedComment = item
+		}
+	}
+	if nestedComment.Key != "NEST-1" || nestedComment.Href != "/p/NEST-1" || nestedComment.Text != "Keep this inside the nested project" {
+		t.Fatalf("nested project comment %+v", nestedComment)
+	}
+	parentBook := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "parent-notes", "title": "Parent notes", "body": "Parent.\n"})
+	w = call(t, f, f.a, "POST", "/api/knowledge/learnings/"+nestedCommentID+"/accept", map[string]any{"knowledge_id": parentBook.ID})
+	expect(t, w, 404)
+	if code(t, w) != "not_found" || decisionOf(t, f, nestedCommentID) != "" {
+		t.Fatalf("parent accept %s", w.Body.String())
+	}
+	if decode[Entry](t, call(t, f, f.a, "GET", "/api/knowledge/"+parentBook.ID, nil)).Body != parentBook.Body {
+		t.Fatal("parent changelog changed")
+	}
+	nestedBook := createEntry(t, f, f.a, map[string]any{"project_id": nested, "type": "runbook", "slug": "nested-notes", "title": "Nested notes", "body": "Nested.\n"})
+	w = call(t, f, f.a, "POST", "/api/knowledge/learnings/"+nestedCommentID+"/accept", map[string]any{"knowledge_id": nestedBook.ID})
+	expect(t, w, 200)
+	nestedDecision := decode[LearningDecision](t, w)
+	if !strings.Contains(nestedDecision.Line, "](/p/NEST-1).") || strings.Contains(nestedDecision.Line, "PRJ-1") || decisionProject(t, f, nestedCommentID) != nested {
+		t.Fatalf("nested accept %q project %s", nestedDecision.Line, decisionProject(t, f, nestedCommentID))
 	}
 
 	agent := tenant.Principal{TenantID: f.a.TenantID, Kind: tenant.Agent, Name: "Scout", Roles: []string{"owner"}, Scopes: []string{"knowledge.write"}}
@@ -424,6 +456,291 @@ func eventType(t *testing.T, f fixture, id int64) string {
 		t.Fatal(err)
 	}
 	return kind
+}
+
+func TestOpenLearningsSurviveDecidedWindow(t *testing.T) {
+	f := setup(t)
+	// One more decided row than the scan reads. Filtering after LIMIT would
+	// hide the older open learning and still report a short page.
+	n := learningScanLimit + 1
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `
+			WITH tagged AS (
+			  INSERT INTO nodes (tenant_id, key, kind_id, title, parent_id, fields, updated_at)
+			  SELECT $1, 'LD-'||g::text, k.id, 'Decided '||g::text, $2::uuid,
+			         '{"tags":["process-learning"]}'::jsonb, clock_timestamp()
+			  FROM generate_series(1, $3) AS g
+			  JOIN node_kinds k ON k.tenant_id=$1 AND k.slug='ticket'
+			  RETURNING id
+			), ev AS (
+			  INSERT INTO events (tenant_id, actor_principal_id, node_id, type, after)
+			  SELECT $1, $4::uuid, id, 'knowledge.learning_dismissed',
+			         jsonb_build_object('source_key', 'n-'||id::text)
+			  FROM tagged
+			  RETURNING id, node_id
+			)
+			INSERT INTO method_learning_decisions (tenant_id, project_id, source_key, decision, decided_by, event_id)
+			SELECT $1, $2::uuid, 'n-'||node_id::text, 'dismissed', $4::uuid, id FROM ev`,
+			f.a.TenantID, f.project, n, f.a.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `
+			INSERT INTO nodes (tenant_id, key, kind_id, title, parent_id, fields, updated_at)
+			SELECT $1, 'OLD-1', k.id, 'The older ticket still open', $2::uuid,
+			       '{"tags":["process-learning"]}'::jsonb, clock_timestamp() - interval '40 days'
+			FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='ticket'`,
+			f.a.TenantID, f.project); err != nil {
+			return err
+		}
+		var host string
+		if err := tx.QueryRow(t.Context(), `
+			INSERT INTO nodes (tenant_id, key, kind_id, title, parent_id)
+			SELECT $1, 'HOST-8', k.id, 'Comment host', $2::uuid
+			FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='ticket'
+			RETURNING id::text`, f.a.TenantID, f.project).Scan(&host); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `
+			WITH comments AS (
+			  INSERT INTO events (tenant_id, actor_principal_id, node_id, type, after, at)
+			  SELECT $1, $2::uuid, $3::uuid, 'comment.created',
+			         jsonb_build_object('body_markdown', '#process-learning Decided '||g::text),
+			         clock_timestamp() - make_interval(secs => g)
+			  FROM generate_series(1, $4) AS g
+			  RETURNING id, node_id
+			), ev AS (
+			  INSERT INTO events (tenant_id, actor_principal_id, node_id, type, after)
+			  SELECT $1, $2::uuid, node_id, 'knowledge.learning_dismissed',
+			         jsonb_build_object('source_key', 'c-'||node_id::text||'-'||comments.id::text)
+			  FROM comments
+			  RETURNING id, after
+			)
+			INSERT INTO method_learning_decisions (tenant_id, project_id, source_key, decision, decided_by, event_id)
+			SELECT $1, $5::uuid, after->>'source_key', 'dismissed', $2::uuid, id FROM ev`,
+			f.a.TenantID, f.a.ID, host, n, f.project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `
+			INSERT INTO events (tenant_id, actor_principal_id, node_id, type, after, at)
+			VALUES ($1, $2::uuid, $3::uuid, 'comment.created',
+			        jsonb_build_object('body_markdown', '#process-learning The older comment still open'),
+			        clock_timestamp() - interval '30 days')`,
+			f.a.TenantID, f.a.ID, host)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decisions int
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM method_learning_decisions WHERE tenant_id=$1`, f.a.TenantID).Scan(&decisions)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decisions != 2*n {
+		t.Fatalf("decisions %d", decisions)
+	}
+	page := listLearningsHTTP(t, f, f.a, f.project)
+	if page.Truncated {
+		t.Fatal("truncated")
+	}
+	got := map[string]Learning{}
+	for _, item := range page.Items {
+		got[item.Key+" "+item.Text] = item
+		if strings.HasPrefix(item.Key, "LD-") || strings.HasPrefix(item.Text, "Decided") {
+			t.Fatalf("decided item listed: %+v", item)
+		}
+	}
+	ticket := got["OLD-1 The older ticket still open"]
+	comment := got["HOST-8 The older comment still open"]
+	if len(page.Items) != 2 || ticket.Source != "ticket" || comment.Source != "comment" || decisionOf(t, f, ticket.ID) != "" || decisionOf(t, f, comment.ID) != "" {
+		t.Fatalf("page %+v", page.Items)
+	}
+}
+
+func TestLearningsProjectGrant(t *testing.T) {
+	f := setup(t)
+	setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
+	ticketComment := addComment(t, f, f.ticket, "#process-learning Quote the ticket in the changelog.")
+	onProject := addComment(t, f, f.project, "#process-learning The project speaks for itself.")
+	elsewhere := addNode(t, f, "OTH-3", "ticket", "Other learning", &f.other)
+	setFields(t, f, elsewhere, map[string]any{"tags": []any{"process-learning"}})
+	nested := addNode(t, f, "NEST-1", "project", "Nested", &f.project)
+	onNested := addComment(t, f, nested, "#process-learning Stay with the nested project.")
+
+	member := projectPerson(t, f, "Nia Project")
+	bindProjectRole(t, f, member.ID, "member", f.project)
+	guest := projectPerson(t, f, "Gus Guest")
+	bindProjectRole(t, f, guest.ID, "guest", f.project)
+
+	memberCtx := authz.BindPool(tenant.WithPrincipal(t.Context(), member), f.db.App)
+	const listRoute = "GET /api/knowledge/learnings"
+	if err := authz.RequirePattern(memberCtx, listRoute, authz.Scope{}); err == nil {
+		t.Fatal("workspace scope authorized a project member")
+	}
+	if !authz.ProjectFilteredRoutes[listRoute] {
+		t.Fatal("learnings list is not project-filtered")
+	}
+	listScope, ok, err := authz.ResolveRouteScope(memberCtx, f.db.App, listRoute, "/api/knowledge/learnings")
+	if err != nil || !ok || !listScope.AnyProject || listScope.ProjectID != "" {
+		t.Fatalf("list scope %+v ok=%v err=%v", listScope, ok, err)
+	}
+	if err := authz.RequirePattern(memberCtx, listRoute, listScope); err != nil {
+		t.Fatal(err)
+	}
+	ticketID := nodeLearningID(f.ticket)
+	page := listLearningsHTTP(t, f, member, f.project)
+	if !hasLearning(page.Items, ticketID) || !hasLearning(page.Items, commentLearningID(f.ticket, ticketComment)) || !hasLearning(page.Items, commentLearningID(f.project, onProject)) {
+		t.Fatalf("own project %+v", page.Items)
+	}
+	if hasLearning(page.Items, nodeLearningID(elsewhere)) || hasLearning(page.Items, commentLearningID(nested, onNested)) {
+		t.Fatal("project member saw another project")
+	}
+	w := call(t, f, member, "GET", "/api/knowledge/learnings?project_id="+f.other, nil)
+	expect(t, w, 404)
+
+	acceptPattern := "POST /api/knowledge/learnings/{learningId}/accept"
+	dismissPattern := "POST /api/knowledge/learnings/{learningId}/dismiss"
+	for _, pattern := range []string{acceptPattern, dismissPattern} {
+		if err := authz.RequirePattern(memberCtx, pattern, authz.Scope{}); err == nil {
+			t.Fatalf("%s allowed without a project", pattern)
+		}
+		action := "accept"
+		if strings.HasSuffix(pattern, "/dismiss") {
+			action = "dismiss"
+		}
+		scope, ok, err := authz.ResolveRouteScope(memberCtx, f.db.App, pattern, "/api/knowledge/learnings/"+ticketID+"/"+action)
+		if err != nil || !ok || scope.AnyProject || scope.ProjectID != f.project {
+			t.Fatalf("%s ticket scope %+v ok=%v err=%v", action, scope, ok, err)
+		}
+		if err := authz.RequirePattern(memberCtx, pattern, scope); err != nil {
+			t.Fatal(err)
+		}
+		commentScope, ok, err := authz.ResolveRouteScope(memberCtx, f.db.App, pattern, "/api/knowledge/learnings/"+commentLearningID(f.project, onProject)+"/"+action)
+		if err != nil || !ok || commentScope.AnyProject || commentScope.ProjectID != f.project {
+			t.Fatalf("%s project comment %+v ok=%v err=%v", action, commentScope, ok, err)
+		}
+		hidden, ok, err := authz.ResolveRouteScope(memberCtx, f.db.App, pattern, "/api/knowledge/learnings/"+nodeLearningID(elsewhere)+"/"+action)
+		if err != nil || ok {
+			t.Fatalf("%s other project %+v ok=%v err=%v", action, hidden, ok, err)
+		}
+		bad, ok, err := authz.ResolveRouteScope(memberCtx, f.db.App, pattern, "/api/knowledge/learnings/not-an-id/"+action)
+		if err != nil || ok {
+			t.Fatalf("%s bad id %+v ok=%v", action, bad, ok)
+		}
+	}
+	ownerCtx := authz.BindPool(tenant.WithPrincipal(t.Context(), f.a), f.db.App)
+	nestedScope, ok, err := authz.ResolveRouteScope(ownerCtx, f.db.App, acceptPattern, "/api/knowledge/learnings/"+commentLearningID(nested, onNested)+"/accept")
+	if err != nil || !ok || nestedScope.ProjectID != nested || nestedScope.AnyProject {
+		t.Fatalf("nested project comment %+v ok=%v err=%v", nestedScope, ok, err)
+	}
+	if _, ok, err := authz.ResolveRouteScope(memberCtx, f.db.App, acceptPattern, "/api/knowledge/learnings/"+commentLearningID(nested, onNested)+"/accept"); err != nil || ok {
+		t.Fatal("parent grant resolved a nested project comment")
+	}
+
+	guestCtx := authz.BindPool(tenant.WithPrincipal(t.Context(), guest), f.db.App)
+	if err := authz.RequirePattern(guestCtx, listRoute, authz.Scope{}); err == nil {
+		t.Fatal("guest workspace scope authorized the list")
+	}
+	if err := authz.RequirePattern(guestCtx, listRoute, authz.Scope{AnyProject: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !hasLearning(listLearningsHTTP(t, f, guest, f.project).Items, ticketID) {
+		t.Fatal("guest cannot list the project")
+	}
+	w = call(t, f, guest, "GET", "/api/knowledge/learnings?project_id="+f.other, nil)
+	expect(t, w, 404)
+	projectScope := authz.Scope{ProjectID: f.project}
+	if err := authz.RequirePattern(guestCtx, acceptPattern, projectScope); err == nil {
+		t.Fatal("guest can accept")
+	}
+	entry := createEntry(t, f, member, map[string]any{"type": "runbook", "slug": "member-notes", "title": "Member notes", "body": "Notes.\n"})
+	w = callScoped(t, f, guest, projectScope, "POST", "/api/knowledge/learnings/"+ticketID+"/accept", map[string]any{"knowledge_id": entry.ID})
+	expect(t, w, 403)
+	if code(t, w) != "forbidden" || decisionOf(t, f, ticketID) != "" {
+		t.Fatalf("guest accept %s", w.Body.String())
+	}
+	w = call(t, f, member, "POST", "/api/knowledge/learnings/"+ticketID+"/accept", map[string]any{"knowledge_id": entry.ID})
+	expect(t, w, 403)
+	if decisionOf(t, f, ticketID) != "" {
+		t.Fatal("unscoped accept wrote a decision")
+	}
+	w = callScoped(t, f, member, projectScope, "POST", "/api/knowledge/learnings/"+ticketID+"/accept", map[string]any{"knowledge_id": entry.ID})
+	expect(t, w, 200)
+	if decode[LearningDecision](t, w).Decision != "accepted" || decisionProject(t, f, ticketID) != f.project {
+		t.Fatal("member accept")
+	}
+	commentID := commentLearningID(f.ticket, ticketComment)
+	w = call(t, f, member, "POST", "/api/knowledge/learnings/"+commentID+"/dismiss", nil)
+	expect(t, w, 403)
+	if decisionOf(t, f, commentID) != "" {
+		t.Fatal("unscoped dismiss wrote a decision")
+	}
+	w = callScoped(t, f, member, projectScope, "POST", "/api/knowledge/learnings/"+commentID+"/dismiss", nil)
+	expect(t, w, 200)
+	if decode[LearningDecision](t, w).Decision != "dismissed" || decisionProject(t, f, commentID) != f.project {
+		t.Fatal("member dismiss")
+	}
+}
+
+func projectPerson(t *testing.T, f fixture, name string) tenant.Principal {
+	t.Helper()
+	p := tenant.Principal{TenantID: f.a.TenantID, Kind: tenant.Person, Name: name}
+	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person',$2) RETURNING id::text`, f.a.TenantID, name).Scan(&p.ID); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func bindProjectRole(t *testing.T, f fixture, principalID, roleKey, projectID string) {
+	t.Helper()
+	tag, err := f.db.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+	  SELECT $1,$2,id,'project',$3::uuid FROM roles WHERE tenant_id=$1 AND key=$4`, f.a.TenantID, principalID, projectID, roleKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("binding %s: %d rows", roleKey, tag.RowsAffected())
+	}
+}
+
+func callScoped(t *testing.T, f fixture, p tenant.Principal, scope authz.Scope, method, path string, body any, headers ...string) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader *strings.Reader
+	if body == nil {
+		reader = strings.NewReader("")
+	} else {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader = strings.NewReader(string(raw))
+	}
+	r := httptest.NewRequest(method, path, reader)
+	for i := 0; i+1 < len(headers); i += 2 {
+		r.Header.Set(headers[i], headers[i+1])
+	}
+	r = r.WithContext(authz.WithRouteScope(tenant.WithPrincipal(r.Context(), p), scope))
+	w := httptest.NewRecorder()
+	f.handler.ServeHTTP(w, r)
+	return w
+}
+
+func decisionProject(t *testing.T, f fixture, source string) string {
+	t.Helper()
+	var project string
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		err := tx.QueryRow(t.Context(), `SELECT project_id::text FROM method_learning_decisions WHERE tenant_id=$1 AND source_key=$2`, f.a.TenantID, source).Scan(&project)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return project
 }
 
 func decisionOf(t *testing.T, f fixture, source string) string {
