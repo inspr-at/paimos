@@ -107,6 +107,12 @@ func NewCodexAdapter(path string, homes map[string]string) *CodexAdapter {
 func (a *CodexAdapter) SetExpectedEmails(emails map[string]string) { a.Emails = emails }
 func (*CodexAdapter) Name() string                                 { return Codex }
 
+// codexShutdown carries the daemon context's done channel. Wait loads it
+// atomically and never locks eventMu: an observer callback may already hold it.
+type codexShutdown struct {
+	done <-chan struct{}
+}
+
 type codexProcess struct {
 	*wireProcess
 	persistent                bool
@@ -116,6 +122,8 @@ type codexProcess struct {
 	finishing                 bool
 	profile                   Profile
 	idlePublished             bool
+	shutdownRequested         bool
+	shutdownWait              atomic.Pointer[codexShutdown]
 	controlMu                 sync.Mutex
 	done                      chan bool
 	once                      sync.Once

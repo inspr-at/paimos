@@ -151,7 +151,9 @@ func (p *rejectingSettingProcess) Control(context.Context, string, string) error
 func TestManagedSettingRejectionCompletionRetry(t *testing.T) {
 	s, a, e, p := managedFixture(t)
 	rejecting := &rejectingSettingProcess{managedFake: p}
+	e.mu.Lock()
 	e.process = rejecting
+	e.mu.Unlock()
 	identity := p.identity
 	identity.DaemonID = s.daemonID
 	identity.Generation = s.generation

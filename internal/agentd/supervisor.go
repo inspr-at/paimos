@@ -137,6 +137,10 @@ type Supervisor struct {
 	maxRunDuration    time.Duration
 	prepareScratch    func(string) (string, error)
 	newHarnessID      func() (string, error)
+	// lifetime is the daemon context. Cancelling it ends a clean Codex idle
+	// wait so shutdown does not sit out the wake window. A busy turn is left
+	// to finish; the idle wait is not armed again afterwards.
+	lifetime context.Context
 }
 
 func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
@@ -258,7 +262,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	s := &Supervisor{maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
-		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID}
+		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx}
 	for _, rec := range j.Snapshot() {
 		// A persisted PID is never proof of ownership after a restart.
 		if !noLocalProcess(rec) && rec.State != "ownership_lost" {
@@ -769,6 +773,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		startErr = errors.Join(startErr, ErrTelemetryProtocol)
 	}
 	s.handleRunError(entry, startErr)
+	if binder, ok := proc.(interface{ bindLifetime(context.Context) }); ok {
+		binder.bindLifetime(s.lifetime)
+	}
 	go s.monitor(entry)
 	go s.heartbeat(entry)
 	return startErr
