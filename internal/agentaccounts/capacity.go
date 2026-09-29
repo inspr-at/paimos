@@ -236,19 +236,63 @@ type capacityWindow struct {
 type accountCapacity struct {
 	AccountID          string            `json:"account_id"`
 	OngoingUseApproved bool              `json:"ongoing_use_approved"`
+	ProbeFailure       string            `json:"probe_failure,omitempty"`
+	LimitingReset      *time.Time        `json:"limiting_reset,omitempty"`
 	Schedule           capacity.Schedule `json:"schedule"`
 	Windows            []capacityWindow  `json:"windows"`
 }
 
 func (m *Module) capacityList(w http.ResponseWriter, r *http.Request) {
-	m.writeCapacity(w, r, nil)
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if err := m.requirePermission(r, p, "account.read"); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var out []accountCapacity
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = projectCapacity(r.Context(), tx, p.ID, nil, 0)
+		return err
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, 200, out)
 }
 
 // capacityPreview answers "today with these settings": the same projection as
-// capacityList, paced with a draft schedule in place of each account's saved
-// schedule. Active Sprint/Hold overrides are kept, nothing is stored, and the
-// client never re-implements the pacing formula for its live preview.
+// capacityList with the draft as the person's schedule, inherited exactly as a
+// save with carry_overrides would (scheduleWithDraft/carryDraft). Nothing is
+// stored. It is rate limited per person, bounded in concurrency, time and total
+// integration work, so the editors can call it on every change.
 func (m *Module) capacityPreview(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if err := m.requirePermission(r, p, "account.read"); err != nil {
+		writeErr(w, err)
+		return
+	}
+	g := m.preview
+	if g == nil {
+		g = defaultPreviewGuard
+	}
+	if ok, wait := g.allow(p.TenantID+"/"+p.ID, time.Now()); !ok {
+		retryAfter(w, wait)
+		writeErr(w, fail(http.StatusTooManyRequests, "too many previews; try again shortly"))
+		return
+	}
+	if !g.acquire() {
+		retryAfter(w, time.Second)
+		writeErr(w, fail(http.StatusServiceUnavailable, "previews are busy; try again shortly"))
+		return
+	}
+	defer g.release()
 	var in struct {
 		Schedule *capacity.Schedule `json:"schedule"`
 	}
@@ -264,63 +308,89 @@ func (m *Module) capacityPreview(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fail(400, err.Error()))
 		return
 	}
-	m.writeCapacity(w, r, in.Schedule)
-}
-
-func (m *Module) writeCapacity(w http.ResponseWriter, r *http.Request, draft *capacity.Schedule) {
-	p, ok := principal(w, r)
-	if !ok {
-		return
-	}
-	if err := m.requirePermission(r, p, "account.read"); err != nil {
-		writeErr(w, err)
-		return
-	}
-	out := []accountCapacity{}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		accounts, err := listAccounts(r.Context(), tx)
-		if err != nil {
-			return err
-		}
-		now, err := dbNow(r.Context(), tx)
-		if err != nil {
-			return err
-		}
-		for _, a := range accounts {
-			s, err := effectiveSchedule(r.Context(), tx, p.ID, a)
-			if err != nil {
-				return err
-			}
-			if draft != nil {
-				d := *draft
-				d.Override, d.OverrideUntil = s.Override, s.OverrideUntil
-				s = d
-			}
-			item := accountCapacity{AccountID: a.ID, Schedule: s, Windows: []capacityWindow{}}
-			if err := tx.QueryRow(r.Context(), `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected'))`, a.ID).Scan(&item.OngoingUseApproved); err != nil {
-				return err
-			}
-			readings, err := readCapacity(r.Context(), tx, a.ID, true)
-			if err != nil {
-				return err
-			}
-			for _, v := range readings {
-				left := 100 - v.UsedPercent
-				pace, known, err := readingPacing(r.Context(), tx, a.ID, v, now, s)
-				if err != nil {
-					return err
-				}
-				item.Windows = append(item.Windows, capacityWindow{v, v.StartsAt(), 100, left, v.Freshness(now), pace, known})
-			}
-			out = append(out, item)
-		}
-		return nil
+	draft := *in.Schedule
+	draft.Override, draft.OverrideUntil = "", nil
+	ctx, cancel := context.WithTimeout(r.Context(), g.timeout)
+	defer cancel()
+	var out []accountCapacity
+	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = projectCapacity(ctx, tx, p.ID, &draft, g.budget)
+		return err
 	})
 	if err != nil {
+		if ctx.Err() != nil {
+			err = fail(http.StatusServiceUnavailable, "the preview took too long; try again")
+		}
 		writeErr(w, err)
 		return
 	}
 	httpapi.WriteJSON(w, 200, out)
+}
+
+// projectCapacity builds the capacity projection for person. With a draft it
+// paces every account on the schedule it would follow after saving the draft,
+// walking at most budget integration steps.
+func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *capacity.Schedule, budget int) ([]accountCapacity, error) {
+	out := []accountCapacity{}
+	accounts, err := listAccounts(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	var entries []scheduleEntry
+	var previous capacity.Schedule
+	if draft != nil {
+		if entries, err = loadScheduleEntries(ctx, tx, person); err != nil {
+			return nil, err
+		}
+		fallback, err := personDefaultSchedule(ctx, tx, person)
+		if err != nil {
+			return nil, err
+		}
+		previous = userSchedule(entries, fallback)
+	}
+	steps := 0
+	for _, a := range accounts {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var s capacity.Schedule
+		if draft != nil {
+			s = scheduleWithDraft(entries, a, previous, *draft, now)
+		} else if s, err = effectiveSchedule(ctx, tx, person, a); err != nil {
+			return nil, err
+		}
+		item := accountCapacity{AccountID: a.ID, Schedule: s, Windows: []capacityWindow{}}
+		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected'))`, a.ID).Scan(&item.OngoingUseApproved); err != nil {
+			return nil, err
+		}
+		if err := tx.QueryRow(ctx, `SELECT a.last_probe_failure,(SELECT min(w.ends_at) FROM account_allowance_windows w WHERE w.account_id=a.id AND `+currentCapacityWindows+`) FROM agent_accounts a WHERE a.id=$1`, a.ID).Scan(&item.ProbeFailure, &item.LimitingReset); err != nil {
+			return nil, err
+		}
+		readings, err := readCapacity(ctx, tx, a.ID, true)
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range readings {
+			if budget > 0 {
+				if steps += previewSteps(v.StartsAt(), v.ResetsAt); steps > budget {
+					return nil, fail(http.StatusRequestEntityTooLarge, "too many long capacity windows to preview at once")
+				}
+			}
+			left := 100 - v.UsedPercent
+			pace, known, err := readingPacing(ctx, tx, a.ID, v, now, s)
+			if err != nil {
+				return nil, err
+			}
+			item.Windows = append(item.Windows, capacityWindow{v, v.StartsAt(), 100, left, v.Freshness(now), pace, known})
+		}
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 type scheduleOverride struct {
@@ -328,6 +398,9 @@ type scheduleOverride struct {
 	Pool      string             `json:"pool,omitempty"`
 	AccountID string             `json:"account_id,omitempty"`
 	Schedule  *capacity.Schedule `json:"schedule"`
+	// CarryOverrides (user scope only) moves pool and account entries that only
+	// carry Sprint/Hold onto the new schedule in the same transaction.
+	CarryOverrides bool `json:"carry_overrides,omitempty"`
 }
 
 func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
@@ -380,6 +453,9 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 		}
 		key := ""
 		var account any
+		if in.CarryOverrides && (in.Scope != "user" || in.Schedule == nil) {
+			return fail(400, "carry_overrides needs a user schedule")
+		}
 		switch in.Scope {
 		case "user":
 			if in.Pool != "" || in.AccountID != "" {
@@ -412,7 +488,7 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 		if in.Schedule.Override == "sprint" {
 			// Sprint is literal and bounded to the next limiting reset in scope.
 			var until *time.Time
-			if err := tx.QueryRow(r.Context(), `SELECT min(w.ends_at) FROM account_allowance_windows w JOIN agent_accounts a ON a.tenant_id=w.tenant_id AND a.id=w.account_id WHERE w.capacity_read_at IS NOT NULL AND NOT w.capacity_retired AND w.ends_at>now() AND ($1='user' OR ($1='pool' AND a.harness=$2) OR ($1='account' AND a.id::text=$2))`, in.Scope, key).Scan(&until); err != nil {
+			if err := tx.QueryRow(r.Context(), `SELECT min(w.ends_at) FROM account_allowance_windows w JOIN agent_accounts a ON a.tenant_id=w.tenant_id AND a.id=w.account_id WHERE `+currentCapacityWindows+` AND ($1='user' OR ($1='pool' AND a.harness=$2) OR ($1='account' AND a.id::text=$2))`, in.Scope, key).Scan(&until); err != nil {
 				return err
 			}
 			if until == nil {
@@ -426,6 +502,9 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 			if _, err := tx.Exec(r.Context(), `UPDATE agent_accounts SET capacity_owner=COALESCE(capacity_owner,$2::uuid) WHERE id=$1`, key, p.ID); err != nil {
 				return err
 			}
+		}
+		if in.CarryOverrides {
+			return saveCarried(r.Context(), tx, p.TenantID, p.ID, *in.Schedule)
 		}
 		raw, _ := json.Marshal(in.Schedule)
 		_, err := tx.Exec(r.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,principal_id,scope,scope_key) DO UPDATE SET schedule=EXCLUDED.schedule`, p.TenantID, p.ID, in.Scope, key, account, raw)
@@ -445,12 +524,7 @@ func effectiveSchedule(ctx context.Context, tx pgx.Tx, person string, a Account)
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT schedule FROM account_capacity_schedules WHERE principal_id=$1 AND ((scope='user' AND scope_key='') OR (scope='pool' AND scope_key=$2) OR (scope='account' AND scope_key=$3)) ORDER BY CASE scope WHEN 'account' THEN 0 WHEN 'pool' THEN 1 ELSE 2 END LIMIT 1`, person, a.Harness, a.ID).Scan(&raw)
 	if isNoRows(err) {
-		var zone string
-		err = tx.QueryRow(ctx, `SELECT timezone FROM personal_profiles WHERE principal_id=$1`, person).Scan(&zone)
-		if err != nil && !isNoRows(err) {
-			return capacity.Schedule{}, err
-		}
-		return capacity.DefaultSchedule(zone), nil
+		return personDefaultSchedule(ctx, tx, person)
 	}
 	if err != nil {
 		return capacity.Schedule{}, err

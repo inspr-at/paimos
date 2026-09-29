@@ -255,6 +255,9 @@ type probeWrite struct {
 	DaemonGeneration string  `json:"daemon_generation"`
 	Available        bool    `json:"available"`
 	HostLabel        *string `json:"host_label"`
+	// Failure says why a probe failed: auth_failed only when the vendor status
+	// command confirmed a sign-out for this account, else unavailable.
+	Failure string `json:"failure,omitempty"`
 }
 
 func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string, in probeWrite) (Account, error) {
@@ -276,6 +279,18 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 		}
 		in.HostLabel = &label
 	}
+	failure := ""
+	switch {
+	case in.Available && in.Failure != "":
+		return Account{}, fail(http.StatusBadRequest, "a successful probe has no failure")
+	case in.Available:
+	case in.Failure == "" || in.Failure == "unavailable":
+		failure = "unavailable"
+	case in.Failure == "auth_failed":
+		failure = "auth_failed"
+	default:
+		return Account{}, fail(http.StatusBadRequest, "invalid probe failure")
+	}
 	if err := agentpairing.AccountFence(ctx, tx, accountID, false); err != nil {
 		return Account{}, err
 	}
@@ -291,8 +306,9 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE agent_accounts
-		SET last_probe_at = now(), last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END
-		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel); err != nil {
+		SET last_probe_at = now(), last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END,
+		    last_probe_failure = $5
+		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure); err != nil {
 		return Account{}, err
 	}
 	after, err := getAccount(ctx, tx, accountID)

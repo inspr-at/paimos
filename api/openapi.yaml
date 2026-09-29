@@ -3438,7 +3438,7 @@ paths:
     post:
       operationId: previewAccountCapacity
       summary: Capacity paced with a draft schedule, without saving it
-      description: Person account.read permission. Returns the same projection as listAccountCapacity, with the draft replacing each account's saved schedule while keeping any active Sprint or Hold override. Nothing is stored. Used by the schedule editors' live preview so clients never re-implement pacing.
+      description: Person account.read permission. Returns the same projection as listAccountCapacity, paced on the schedule each account would follow after saving the draft as the person's schedule with carry_overrides (the same server rule) - deliberate pool or account schedules stay, entries that only carry Sprint/Hold follow the draft, ended overrides fall away. Nothing is stored. Rate limited per person, bounded in concurrency, time and integration work.
       requestBody:
         required: true
         content:
@@ -3453,6 +3453,9 @@ paths:
         '200': {description: Capacity, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountCapacity'}}}}}
         '400': {description: Invalid schedule}
         '403': {description: Person account.read permission required}
+        '413': {description: Too many long capacity windows to preview at once (bounded integration work)}
+        '429': {description: Per-person preview rate exceeded; see Retry-After}
+        '503': {description: Previews busy or the preview deadline passed; see Retry-After}
   /agent-accounts/capacity/schedule:
     get:
       operationId: listCapacitySchedules
@@ -8289,6 +8292,7 @@ components:
           anyOf:
             - {$ref: '#/components/schemas/CapacitySchedule'}
             - {type: 'null'}
+        carry_overrides: {type: boolean, description: 'PUT with scope user only. In one transaction, pool and account entries that only carry Sprint/Hold on top of the previous person schedule follow the new schedule (ended overrides are removed); deliberate pool or account schedules stay.'}
     CapacityPacing:
       type: object
       required: [usable_hours, percent_per_hour, suggested_today_percent]
@@ -8312,6 +8316,8 @@ components:
       properties:
         account_id: {type: string, format: uuid}
         ongoing_use_approved: {type: boolean, description: True for unpaired accounts or a separately approved connected pairing; readings never change this approval}
+        probe_failure: {type: string, enum: [auth_failed, unavailable], description: 'Why the last probe failed; absent after a successful probe. Only auth_failed means the account needs a new sign-in.'}
+        limiting_reset: {type: string, format: date-time, description: 'Earliest reset of the account''s current measured windows (including 5-hour windows); a Sprint in scope ends at the earliest of these.'}
         schedule: {$ref: '#/components/schemas/CapacitySchedule'}
         windows:
           type: array
@@ -8436,6 +8442,7 @@ components:
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
         available: {type: boolean}
         host_label: {type: string, maxLength: 128, description: Optional display-only host name reported by the owner daemon; fills an empty label without overwriting configured metadata.}
+        failure: {type: string, enum: [auth_failed, unavailable], description: 'Only with available=false. auth_failed only when the vendor status command confirmed this account is signed out or signed in as another identity; every other failure is unavailable (the default when omitted).'}
     AllowanceWindowWrite:
       type: object
       required: [starts_at, ends_at, unit, allowance, pace_model]

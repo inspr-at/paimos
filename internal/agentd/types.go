@@ -255,6 +255,36 @@ type AccountProber interface {
 	Probe(context.Context, string) bool
 }
 
+// ProbeStatus is an account probe with its cause. Failure is ProbeAuthFailed
+// only when the vendor's own status command ran and said this account is
+// signed out or signed in as someone else; errors, timeouts and unreadable
+// output are ProbeUnavailable. Vendor output never leaves the daemon.
+type ProbeStatus struct {
+	OK      bool
+	Failure string
+}
+
+const (
+	ProbeAuthFailed  = "auth_failed"
+	ProbeUnavailable = "unavailable"
+)
+
+// AccountStatusProber is the optional richer prober; adapters without it
+// report every failed Probe as unavailable, never as a sign-in problem.
+type AccountStatusProber interface {
+	ProbeStatus(context.Context, string) ProbeStatus
+}
+
+func probeAccount(ctx context.Context, prober AccountProber, key string) ProbeStatus {
+	if status, ok := prober.(AccountStatusProber); ok {
+		return status.ProbeStatus(ctx, key)
+	}
+	if prober.Probe(ctx, key) {
+		return ProbeStatus{OK: true}
+	}
+	return ProbeStatus{Failure: ProbeUnavailable}
+}
+
 // AccountMetadata is the only publishable part of local enrollment. Home,
 // provider identity and CodexBar account selectors must never be added here.
 type AccountMetadata struct {

@@ -18,7 +18,8 @@ import (
 
 // Module serves /api/agent-accounts.
 type Module struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	preview *previewGuard
 }
 
 var _ httpapi.Module = (*Module)(nil)

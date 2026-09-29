@@ -385,13 +385,19 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			s.mu.Unlock()
 			continue
 		}
-		probe := adapters[account.Harness].(AccountProber)
-		available := probe.Probe(ctx, account.Key)
-		err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
+		status := probeAccount(ctx, adapters[account.Harness].(AccountProber), account.Key)
+		available := status.OK
+		var err error
+		if reporter, ok := s.api.(ProbeStatusReporter); ok {
+			err = reporter.ProbeStatus(ctx, account.ID, s.daemonID, s.generation, status)
+		} else {
+			err = s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
+		}
 		s.mu.Lock()
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
-		s.loginRequired[account.ID] = !available
+		// Only a confirmed sign-out asks the person to sign in again.
+		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed
 		s.mu.Unlock()
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
