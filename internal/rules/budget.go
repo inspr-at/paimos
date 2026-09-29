@@ -46,7 +46,7 @@ type BudgetView struct {
 }
 
 func viewOf(b Budget) BudgetView {
-	return BudgetView{Budget: b, DefaultBytes: MaxBytes, MinBytes: MinBudgetBytes, CeilingBytes: CeilingBytes, MinLayerBytes: MinLayerBytes}
+	return BudgetView{Budget: b, DefaultBytes: MaxBytes, MinBytes: MinBudgetBytes, CeilingBytes: MaxBytes, MinLayerBytes: MinLayerBytes}
 }
 
 func (m *Module) getBudget(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {

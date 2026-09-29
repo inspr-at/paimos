@@ -35,7 +35,7 @@ func ValidateMerged(m Merged, c Context, now time.Time) error {
 	if err := ValidateContext(c); err != nil {
 		return err
 	}
-	if m.Context != c || !utf8.ValidString(m.Body) || m.ByteSize != len(m.Body) || m.ByteSize > CeilingBytes || m.ByteSize == 0 || m.SHA256 != digest([]byte(m.Body)) || m.Floor == "" || !containsFloor(m.Body, m.Floor) {
+	if m.Context != c || !utf8.ValidString(m.Body) || m.ByteSize != len(m.Body) || m.ByteSize > MaxBytes || m.ByteSize == 0 || m.SHA256 != digest([]byte(m.Body)) || m.Floor == "" || !containsFloor(m.Body, m.Floor) {
 		return errors.New("rules response context, digest, byte budget or floor does not match")
 	}
 	if m.ValidUntil != nil && !now.Before(*m.ValidUntil) {
@@ -133,7 +133,7 @@ func Offline(raw []byte, instance string, c Context, floor string, now time.Time
 		return m, nil
 	}
 	body := "# Aeon locked floor (offline; full rules unavailable)\n\n" + floor
-	if floor == "" || !utf8.ValidString(floor) || len(body) > CeilingBytes {
+	if floor == "" || !utf8.ValidString(floor) || len(body) > MaxBytes {
 		return Merged{}, errors.New("valid bounded independent safety floor required")
 	}
 	return Merged{Context: c, Versions: []VersionRef{}, Version: "floor-only", Body: body, ByteSize: len(body), SHA256: digest([]byte(body)), Floor: floor, Rules: []Rule{}}, err
@@ -152,7 +152,7 @@ func containsFloor(body, floor string) bool {
 
 // VerifyFloor validates a floor against a separately provided trusted digest.
 func VerifyFloor(raw []byte, pin string) (string, error) {
-	if len(raw) == 0 || len(raw) > CeilingBytes-256 || !utf8.Valid(raw) || digest(raw) != pin || strings.ContainsRune(string(raw), 0) {
+	if len(raw) == 0 || len(raw) > MaxBytes-256 || !utf8.Valid(raw) || digest(raw) != pin || strings.ContainsRune(string(raw), 0) {
 		return "", errors.New("floor digest or byte bound mismatch")
 	}
 	return string(raw), nil

@@ -176,7 +176,7 @@ func (rt *runtime) sessionRulesReceive(project, agent string, o rulesOptions, r 
 		paths[abs] = true
 	}
 	output, _ := filepath.Abs(o.Out)
-	raw, err := rules.ReadFile(o.Floor, rules.CeilingBytes)
+	raw, err := rules.ReadFile(o.Floor, rules.MaxBytes)
 	if err != nil {
 		return err
 	}
@@ -270,7 +270,7 @@ func (rt *runtime) sessionRulesReceive(project, agent string, o rulesOptions, r 
 		}
 	}
 	if r.Retry {
-		raw, err = rules.ReadFile(o.Out, rules.CeilingBytes)
+		raw, err = rules.ReadFile(o.Out, rules.MaxBytes)
 		if err == nil && !bytes.Equal(raw, []byte(rendered.Body)) {
 			return errors.New("existing output differs from checkpoint; refusing overwrite or receipt")
 		}

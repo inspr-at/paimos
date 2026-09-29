@@ -73,7 +73,7 @@ func (m *Module) recordRulesReceipt(r *http.Request, tx pgx.Tx, p tenant.Princip
 	}
 	if !workorders.UUID(in.RequestID) || strings.ToLower(in.RequestID) != in.RequestID ||
 		in.ExpectedRevision == nil || *in.ExpectedRevision < 0 || *in.ExpectedRevision == math.MaxInt64 ||
-		!provenanceSHA256.MatchString(in.BodySHA256) || in.ByteSize == nil || *in.ByteSize < 1 || *in.ByteSize > rules.CeilingBytes ||
+		!provenanceSHA256.MatchString(in.BodySHA256) || in.ByteSize == nil || *in.ByteSize < 1 || *in.ByteSize > rules.MaxBytes ||
 		(in.Version != "floor-only" && !releasehistory.ValidVersion(in.Version)) ||
 		(in.Source != "online" && in.Source != "cache" && in.Source != "floor-only") ||
 		(in.Source == "floor-only") != (in.Version == "floor-only") || rules.ValidateContext(in.Context) != nil {

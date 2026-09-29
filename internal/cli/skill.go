@@ -721,7 +721,7 @@ func compareRendered(rendered, existing string) checkResult {
 // server's exact bounded bytes intact. This is an always-on rules artifact, not
 // a command or SKILL.md. It returns only a suggested name; installation is opt-in.
 func renderRulesThroughHarness(m rules.Merged) (skillRender, error) {
-	if !slices.Contains(rules.Harnesses, m.Context.Harness) || len(m.Body) > rules.CeilingBytes || len(m.Body) != m.ByteSize {
+	if !slices.Contains(rules.Harnesses, m.Context.Harness) || len(m.Body) > rules.MaxBytes || len(m.Body) != m.ByteSize {
 		return skillRender{}, fmt.Errorf("invalid bounded rules artifact")
 	}
 	name := "AGENTS.md"

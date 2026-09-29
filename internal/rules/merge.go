@@ -192,11 +192,11 @@ func (l LayerBytes) Of(layer string) int { return *l.ref(layer) }
 func DefaultBudget() Budget { return Budget{MaxBytes: MaxBytes} }
 
 // Validate keeps a budget inside the product bounds: the total between
-// MinBudgetBytes and CeilingBytes, and every layer cap between 500 bytes and
+// MinBudgetBytes and MaxBytes, and every layer cap between 500 bytes and
 // the total.
 func (b Budget) Validate() error {
-	if b.MaxBytes < MinBudgetBytes || b.MaxBytes > CeilingBytes {
-		return fail(400, "invalid_budget", fmt.Sprintf("the session file budget must be between %d and %d bytes", MinBudgetBytes, CeilingBytes))
+	if b.MaxBytes < MinBudgetBytes || b.MaxBytes > MaxBytes {
+		return fail(400, "invalid_budget", fmt.Sprintf("the session file budget must be between %d and %d bytes", MinBudgetBytes, MaxBytes))
 	}
 	for _, layer := range LayerNames {
 		if v := b.Layers.Of(layer); v != 0 && (v < MinLayerBytes || v > b.MaxBytes) {
@@ -246,12 +246,12 @@ func SnapshotDigest(s Snapshot) string {
 // Stub is a reusable opt-in preview for AR6. The caller chooses installation;
 // generating it never changes a harness file or claims instructions executed.
 func Stub(m Merged) (string, error) {
-	if m.Floor == "" || m.SHA256 != digest([]byte(m.Body)) || !containsFloor(m.Body, m.Floor) || len(m.Body) > CeilingBytes {
+	if m.Floor == "" || m.SHA256 != digest([]byte(m.Body)) || !containsFloor(m.Body, m.Floor) || len(m.Body) > MaxBytes {
 		return "", fail(400, "invalid_floor", "verified company floor is required")
 	}
 	text := "Register this session with Aeon and explicitly load its returned rules. If unavailable, use the verified context-bound cache marked stale. Keep this locked company floor in force:\n\n" + m.Floor
-	if len(text) > CeilingBytes {
-		return "", fail(422, "rules_budget_exceeded", "stub plus company floor exceeds 64000 UTF-8 bytes")
+	if len(text) > MaxBytes {
+		return "", fail(422, "rules_budget_exceeded", "stub plus company floor exceeds 12000 UTF-8 bytes")
 	}
 	return text, nil
 }

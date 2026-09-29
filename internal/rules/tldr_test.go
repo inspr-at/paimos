@@ -145,12 +145,12 @@ func isCode(err error, code string) bool {
 }
 
 func TestBudgetBoundsAndLayerCaps(t *testing.T) {
-	for _, b := range []Budget{{MaxBytes: 1999}, {MaxBytes: 64001}, {MaxBytes: 12000, Layers: LayerBytes{Company: 499}}, {MaxBytes: 12000, Layers: LayerBytes{Agent: 12001}}} {
+	for _, b := range []Budget{{MaxBytes: 1999}, {MaxBytes: 12001}, {MaxBytes: 12000, Layers: LayerBytes{Company: 499}}, {MaxBytes: 12000, Layers: LayerBytes{Agent: 12001}}} {
 		if err := b.Validate(); !isCode(err, "invalid_budget") {
 			t.Fatalf("%+v: %v", b, err)
 		}
 	}
-	for _, b := range []Budget{DefaultBudget(), {MaxBytes: 2000}, {MaxBytes: 64000, Layers: LayerBytes{Company: 500, Project: 64000}}} {
+	for _, b := range []Budget{DefaultBudget(), {MaxBytes: 2000}, {MaxBytes: 12000, Layers: LayerBytes{Company: 500, Project: 12000}}} {
 		if err := b.Validate(); err != nil {
 			t.Fatalf("%+v: %v", b, err)
 		}
@@ -179,17 +179,19 @@ func TestBudgetBoundsAndLayerCaps(t *testing.T) {
 	if !errors.As(err, &e) || e.Layer != "" || e.ActualBytes != m.ByteSize || e.MaxBytes != m.ByteSize-1 {
 		t.Fatalf("total: %v", err)
 	}
-	// Above the old fixed 12,000 bytes a larger budget serves the file.
+	// The ceiling stays 12,000 bytes: deployed clients accept exactly that and
+	// refuse one byte more, whatever the workspace budget says.
 	big := []Snapshot{floorSnapshot(), testSnapshot("p", Scope{Layer: "project", ProjectID: testProject}, bulky("proj", 40)...)}
 	if _, err = Merge(testContext(), big, now); !isCode(err, "rules_budget_exceeded") {
 		t.Fatalf("default budget: %v", err)
 	}
-	large, err := MergeWithin(testContext(), big, now, Budget{MaxBytes: 32000})
-	if err != nil || large.ByteSize <= MaxBytes {
-		t.Fatalf("configured budget: %v %d", err, large.ByteSize)
-	}
-	if err = ValidateMerged(large, testContext(), now); err != nil {
-		t.Fatalf("clients accept files up to the ceiling: %v", err)
+	for size, ok := range map[int]bool{MaxBytes: true, MaxBytes + 1: false} {
+		padded := m
+		padded.Body = m.Body + strings.Repeat("x", size-len(m.Body)-1) + "\n"
+		padded.ByteSize, padded.SHA256 = len(padded.Body), digest([]byte(padded.Body))
+		if err = ValidateMerged(padded, testContext(), now); (err == nil) != ok {
+			t.Fatalf("client bound at %d bytes: %v", size, err)
+		}
 	}
 }
 
@@ -357,44 +359,53 @@ func TestWorkspaceBudgetSetting(t *testing.T) {
 	company := w.floor(admin)
 	var view BudgetView
 	json.Unmarshal(w.call(member, "GET", "/api/rules/budget", nil, 200), &view)
-	if view.MaxBytes != MaxBytes || view.DefaultBytes != MaxBytes || view.MinBytes != MinBudgetBytes || view.CeilingBytes != CeilingBytes || view.Layers != (LayerBytes{}) {
+	if view.MaxBytes != MaxBytes || view.DefaultBytes != MaxBytes || view.MinBytes != MinBudgetBytes || view.CeilingBytes != MaxBytes || view.Layers != (LayerBytes{}) {
 		t.Fatalf("default: %+v", view)
 	}
-	w.call(member, "PUT", "/api/rules/budget", Budget{MaxBytes: 20000}, 403)
+	w.call(member, "PUT", "/api/rules/budget", Budget{MaxBytes: 8000}, 403)
 	agent := w.agentFor(admin, "setter")
 	agent.KeyCreatorID = admin.ID
 	agent.Scopes = []string{"rules.read", "settings.manage"}
-	w.call(agent, "PUT", "/api/rules/budget", Budget{MaxBytes: 20000}, 403)
+	w.call(agent, "PUT", "/api/rules/budget", Budget{MaxBytes: 8000}, 403)
 	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 1000}, 400)
+	// 12,000 bytes is the ceiling deployed clients enforce; a budget never raises it.
+	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBytes + 1}, 400)
 	w.call(admin, "PUT", "/api/rules/budget", map[string]any{"max_bytes": 12000, "layer_max_bytes": map[string]int{"robots": 600}}, 400)
 
-	// A bigger budget lets a bigger file through publication and session start.
+	// A smaller budget refuses a file the default would serve.
 	project := w.layer(admin, Scope{Layer: "project", ProjectID: w.project})
-	big := w.set(admin, project, "Big", bulky("big", 30)...)
-	w.refusedOwn(admin, "default budget", big)
-	json.Unmarshal(w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 20000, Layers: LayerBytes{Project: 16000}}, 200), &view)
-	if view.MaxBytes != 20000 || view.Layers.Project != 16000 {
+	mid := w.set(admin, project, "Mid", bulky("mid", 12)...)
+	json.Unmarshal(w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 5000}, 200), &view)
+	if view.MaxBytes != 5000 || view.CeilingBytes != MaxBytes {
 		t.Fatalf("saved: %+v", view)
 	}
-	w.call(admin, "POST", "/api/rules/publish", batch("", item(big, "auto")), 200)
+	body := w.call(admin, "POST", "/api/rules/publish", batch("", item(mid, "auto")), 422)
+	var e Error
+	if json.Unmarshal(body, &e) != nil || e.Code != "rules_budget_exceeded" || e.MaxBytes != 5000 || e.ActualBytes <= 5000 || w.published(mid.ID) != "" {
+		t.Fatalf("smaller budget: %s", body)
+	}
+	json.Unmarshal(w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 12000, Layers: LayerBytes{Project: 8000}}, 200), &view)
+	if view.MaxBytes != 12000 || view.Layers.Project != 8000 {
+		t.Fatalf("saved: %+v", view)
+	}
+	w.call(admin, "POST", "/api/rules/publish", batch("", item(mid, "auto")), 200)
 	q := url.Values{"project_id": {w.project}, "person_id": {admin.ID}, "role": {"builder"}, "harness": {"codex"}}
 	var m Merged
 	json.Unmarshal(w.call(admin, "GET", "/api/rules/merged?"+q.Encode(), nil, 200), &m)
-	if m.ByteSize <= MaxBytes {
-		t.Fatalf("file above the default: %d", m.ByteSize)
+	if m.ByteSize <= 5000 || m.ByteSize > MaxBytes {
+		t.Fatalf("served file: %d", m.ByteSize)
 	}
 	// Lowering the budget below a served file is refused, total or per layer.
-	body := w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 12000}, 422)
+	body = w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 5000}, 422)
 	if !strings.Contains(string(body), "Published rules would not fit") {
 		t.Fatalf("refusal: %s", body)
 	}
-	body = w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 20000, Layers: LayerBytes{Project: 8000}}, 422)
-	var e Error
-	if json.Unmarshal(body, &e) != nil || e.Layer != "project" || e.MaxBytes != 8000 {
+	body = w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 12000, Layers: LayerBytes{Project: 4000}}, 422)
+	if json.Unmarshal(body, &e) != nil || e.Layer != "project" || e.MaxBytes != 4000 {
 		t.Fatalf("layer refusal: %s", body)
 	}
 	// A layer cap refuses a publication that would cross it, and says which.
-	json.Unmarshal(w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 20000, Layers: LayerBytes{Project: 16000, Company: 1000}}, 200), &view)
+	json.Unmarshal(w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 12000, Layers: LayerBytes{Project: 8000, Company: 1000}}, 200), &view)
 	grow := w.set(admin, company, "Grow", bulky("grow", 3)...)
 	body = w.call(admin, "POST", "/api/rules/publish", batch("", item(grow, "auto")), 422)
 	if json.Unmarshal(body, &e) != nil || e.Code != "rules_budget_exceeded" || e.Layer != "company" || e.MaxBytes != 1000 {
@@ -402,12 +413,60 @@ func TestWorkspaceBudgetSetting(t *testing.T) {
 	}
 	var x Explained
 	json.Unmarshal(w.call(admin, "GET", "/api/rules/explained?"+q.Encode(), nil, 200), &x)
-	if x.Budget != (Budget{MaxBytes: 20000, Layers: LayerBytes{Project: 16000, Company: 1000}}) || x.Usage.Project == 0 || x.Problem != nil {
+	if x.Budget != (Budget{MaxBytes: 12000, Layers: LayerBytes{Project: 8000, Company: 1000}}) || x.Usage.Project == 0 || x.Problem != nil {
 		t.Fatalf("explained budget: %+v", x)
 	}
-	if w.settingsEvents() != 2 {
+	if w.settingsEvents() != 3 {
 		t.Fatalf("budget changes are events: %d", w.settingsEvents())
 	}
+}
+
+// Single-set publication and restoration run the batch's budget check (total
+// and per-layer caps) before commit: over the cap they fail and write nothing.
+func TestSingleSetPublishAndRestoreKeepTheBudget(t *testing.T) {
+	w := newBatchWorld(t, "rules-budget-single")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	w.floor(admin)
+	project := w.layer(admin, Scope{Layer: "project", ProjectID: w.project})
+	big := w.set(admin, project, "Project", bulky("big", 2)...)
+	w.publish(admin, big, "260929110000.0.0")
+	get := func() Set {
+		var s Set
+		json.Unmarshal(w.call(admin, "GET", "/api/rules/sets/"+big.ID, nil, 200), &s)
+		return s
+	}
+	s := get()
+	json.Unmarshal(w.call(admin, "PUT", "/api/rules/sets/"+s.ID+"/draft", draftInput{ExpectedRevision: s.Revision, Name: s.Name, Rules: []Rule{testRule("tone", "Be brief.")}}, 200), &s)
+	w.publish(admin, s, "260929110001.0.0")
+	json.Unmarshal(w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBytes, Layers: LayerBytes{Project: 500}}, 200), new(BudgetView))
+	versions := func() int {
+		var list struct{ Versions []Snapshot }
+		json.Unmarshal(w.call(admin, "GET", "/api/rules/sets/"+big.ID+"/versions", nil, 200), &list)
+		return len(list.Versions)
+	}
+	refused := func(label string, body []byte, before Set) {
+		t.Helper()
+		var e Error
+		if json.Unmarshal(body, &e) != nil || e.Code != "rules_budget_exceeded" || e.Layer != "project" || e.MaxBytes != 500 || e.ActualBytes <= 500 {
+			t.Fatalf("%s: %s", label, body)
+		}
+		after := get()
+		if after.PublishedVersion != "260929110001.0.0" || after.Revision != before.Revision || versions() != 2 {
+			t.Fatalf("%s committed: %+v, %d versions", label, after, versions())
+		}
+	}
+	// Restoring the big version would cross the project cap.
+	before := get()
+	refused("restore", w.call(admin, "POST", "/api/rules/sets/"+big.ID+"/restore", map[string]any{"expected_revision": before.Revision, "version": "260929110000.0.0", "new_version": "260929110002.0.0"}, 422), before)
+	// So would publishing a big draft.
+	json.Unmarshal(w.call(admin, "PUT", "/api/rules/sets/"+big.ID+"/draft", draftInput{ExpectedRevision: before.Revision, Name: before.Name, Rules: bulky("big", 2)}, 200), &s)
+	before = get()
+	refused("publish", w.call(admin, "POST", "/api/rules/sets/"+big.ID+"/publish", map[string]any{"expected_revision": before.Revision, "version": "260929110003.0.0"}, 422), before)
+	// Within the cap both still work.
+	json.Unmarshal(w.call(admin, "PUT", "/api/rules/sets/"+big.ID+"/draft", draftInput{ExpectedRevision: before.Revision, Name: before.Name, Rules: []Rule{testRule("tone", "Be briefer.")}}, 200), &s)
+	w.publish(admin, s, "260929110004.0.0")
+	s = get()
+	w.call(admin, "POST", "/api/rules/sets/"+big.ID+"/restore", map[string]any{"expected_revision": s.Revision, "version": "260929110001.0.0", "new_version": "260929110005.0.0"}, 200)
 }
 
 func (w *batchWorld) settingsEvents() int {

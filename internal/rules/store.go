@@ -442,7 +442,30 @@ func (m *Module) publish(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if err != nil {
 		return nil, err
 	}
-	return publishSet(r.Context(), tx, p, s, in.ExpectedRevision, in.Version, note)
+	snap, err := publishSet(r.Context(), tx, p, s, in.ExpectedRevision, in.Version, note)
+	if err != nil {
+		return nil, err
+	}
+	if err = publishedWithinBudget(r.Context(), tx, p, s); err != nil {
+		return nil, err
+	}
+	return snap, nil
+}
+
+// publishedWithinBudget runs the batch publication's budget check (total and
+// per-layer caps) for one set after its new version is written, so a single
+// publication or restoration that no longer fits fails and rolls back whole.
+func publishedWithinBudget(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set) error {
+	owner, err := actorOwner(ctx, tx, p)
+	if err != nil {
+		return err
+	}
+	limits, err := LoadBudget(ctx, tx)
+	if err != nil {
+		return err
+	}
+	_, err = budgetCheck(ctx, tx, p, owner, []Set{s}, time.Now().UTC(), limits)
+	return err
 }
 func (m *Module) restore(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
@@ -478,6 +501,9 @@ func (m *Module) restore(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	}
 	snap, err := publishSet(r.Context(), tx, p, s, s.Revision, in.NewVersion, note)
 	if err != nil {
+		return nil, err
+	}
+	if err = publishedWithinBudget(r.Context(), tx, p, s); err != nil {
 		return nil, err
 	}
 	restored := map[string]string{"version": snap.Version, "sha256": snap.SHA256}

@@ -295,8 +295,8 @@ func loadBinding(root string, o options) (binding, []byte, error) {
 		max       int
 		optional  bool
 	}{
-		{b.Floor, ".txt", rules.CeilingBytes, false}, {b.Cache, ".json", rules.MaxCacheBytes, true},
-		{b.Output, ".txt", rules.CeilingBytes, true}, {b.State, ".json", rules.MaxCacheBytes, true},
+		{b.Floor, ".txt", rules.MaxBytes, false}, {b.Cache, ".json", rules.MaxCacheBytes, true},
+		{b.Output, ".txt", rules.MaxBytes, true}, {b.State, ".json", rules.MaxCacheBytes, true},
 		{b.LeaseFile, ".txt", 64 * 1024, false},
 	} {
 		if !absolute(a.path) || filepath.Dir(a.path) != dir || filepath.Ext(a.path) != a.ext || seen[a.path] || privateFile(a.path, a.max, a.optional) != nil {
@@ -307,7 +307,7 @@ func loadBinding(root string, o options) (binding, []byte, error) {
 	if b.Output != filepath.Join(dir, "received.txt") {
 		return b, nil, rejected
 	}
-	raw, err = rules.ReadFile(b.Floor, rules.CeilingBytes)
+	raw, err = rules.ReadFile(b.Floor, rules.MaxBytes)
 	if err != nil {
 		return b, nil, rejected
 	}
@@ -411,7 +411,7 @@ func verifyResult(b binding, floor, raw []byte, success bool) (metadata, []byte,
 			return m, nil, rejected
 		}
 	}
-	body, err := rules.ReadFile(b.Output, rules.CeilingBytes)
+	body, err := rules.ReadFile(b.Output, rules.MaxBytes)
 	if err != nil || len(body) != m.ByteSize || digest(body) != m.SHA256 || !bytes.Equal(body, []byte(s.Bundle.Body)) {
 		return m, nil, rejected
 	}

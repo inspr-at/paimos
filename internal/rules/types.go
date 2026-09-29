@@ -19,13 +19,13 @@ import (
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
-// MaxBytes is the default always-on budget of one merged session file. A
-// workspace may configure its own budget between MinBudgetBytes and
-// CeilingBytes (AEON-314); clients that only check a received file's size use
-// CeilingBytes, the largest file any workspace can be served.
+// MaxBytes is the always-on ceiling of one merged session file and the
+// default budget. A workspace may lower its budget to MinBudgetBytes
+// (AEON-314) but never raise it: deployed agentd/CLI binaries, managed
+// delivery and the Claude bridge all refuse larger files, so a higher ceiling
+// needs its own version-gated rollout.
 const MaxBytes = 12000
 const MinBudgetBytes = 2000
-const CeilingBytes = 64000
 const MaxRules = 100
 
 // MaxTLDRBytes bounds one explanation line in one language.

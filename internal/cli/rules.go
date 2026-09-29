@@ -69,7 +69,7 @@ func (rt *runtime) sessionRules(project string, o rulesOptions) error {
 	if o.Cache == "" || o.Floor == "" || o.FloorSHA == "" {
 		return usagef("rules preview requires --rules-cache, --rules-floor and --rules-floor-sha256")
 	}
-	raw, err := rules.ReadFile(o.Floor, rules.CeilingBytes)
+	raw, err := rules.ReadFile(o.Floor, rules.MaxBytes)
 	if err != nil {
 		return err
 	}
