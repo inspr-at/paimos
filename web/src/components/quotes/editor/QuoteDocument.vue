@@ -31,7 +31,7 @@ import { fitClassicBlocks, fitWholeBlocks, type PaginationResult, type PagePlan 
 import { MARK_DEFAULT_MM } from '../../../lib/quotes/inspector'
 import { contentUrl } from '../../../lib/attachments'
 import { quoteQr } from '../../../lib/quotes/qr'
-import { loadProfileFonts, pageNumber, profileAssetUrl, profileDate, profileStyle } from '../../../lib/quotes/profile'
+import { loadProfileFonts, normalizeProfile, pageNumber, profileAssetUrl, profileDate, profileStyle } from '../../../lib/quotes/profile'
 import type { QuoteDocumentData, DocumentSettings, ListMode, MarkName, NumberingOptions, OffsetPatch, QuoteMarker, QuoteSection, SectionNumberingStyle, SectionSettingsPatch, TextSelection } from '../../../lib/quotes/types'
 const props = withDefaults(defineProps<{ document: QuoteDocumentData; offerNo?: string; editable?: boolean; accepted?: { name: string; company?: string; at: string; digest: string } | null; editor?: QuoteEditor | null; publicLink?: string; draftPreview?: boolean }>(), { editable: false, offerNo: '', editor: null, publicLink: '', draftPreview: false })
 const emit = defineEmits<{ 'update:document': [document: QuoteDocumentData]; change: [document: QuoteDocumentData]; 'render-state': [state: PaginationResult]; overflow: [message: string | null]; mark: [page: number] }>()
@@ -67,7 +67,7 @@ let resize: ResizeObserver | null = null
 let scheduled = false
 let generation = 0
 const sections = computed(() => state.value.sections)
-const profile = computed(() => state.value.profile)
+const profile = computed(() => normalizeProfile(state.value.profile))
 const classic = computed(() => profile.value?.definition.layout_variant === 'classic-v1')
 const paperStyle = computed(() => profileStyle(profile.value))
 const footerNumber = (page: number) => pageNumber(profile.value, page, pages.value.length)

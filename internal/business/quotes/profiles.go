@@ -275,7 +275,11 @@ func readProfile(ctx context.Context, tx pgx.Tx, id string, revision int) (profi
 	if err != nil {
 		return out, err
 	}
-	return out, json.Unmarshal(raw, &out.Definition)
+	if err := json.Unmarshal(raw, &out.Definition); err != nil {
+		return out, err
+	}
+	out.Definition = out.Definition.normalized()
+	return out, nil
 }
 func (m *Module) profileList(w http.ResponseWriter, r *http.Request) {
 	p, e := caller(r)
@@ -303,6 +307,7 @@ func (m *Module) profileList(w http.ResponseWriter, r *http.Request) {
 			if err = json.Unmarshal(raw, &item.Definition); err != nil {
 				return err
 			}
+			item.Definition = item.Definition.normalized()
 			out = append(out, item)
 		}
 		return rows.Err()
@@ -368,10 +373,11 @@ func (m *Module) profileWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	var out profileRow
 	e = m.tx(r.Context(), p, fence.PermNodesContribute, true, func(tx pgx.Tx) error {
+		in.Definition = in.Definition.normalized()
 		if err := validateProfile(r.Context(), tx, in.Definition); err != nil {
 			return err
 		}
-		raw, err := json.Marshal(in.Definition)
+		raw, err := marshalProfile(in.Definition)
 		if err != nil {
 			return err
 		}
@@ -527,7 +533,7 @@ func (m *Module) profileUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		raw, err := json.Marshal(previous.Definition)
+		raw, err := marshalProfile(previous.Definition)
 		if err != nil {
 			return err
 		}
@@ -840,7 +846,7 @@ func (m *Module) selectProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		before := doc.Profile
 		doc.Profile = profile
-		raw, err := json.Marshal(doc)
+		raw, err := marshalDraft(doc)
 		if err != nil {
 			return err
 		}
