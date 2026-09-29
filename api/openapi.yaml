@@ -9396,7 +9396,7 @@ components:
           description: Non-blocking ticket benefit guidance returned on creation.
         fields:
           type: object
-          description: Tenant-configured fields. TicketBenefitFields describes the default ticket properties; other kinds retain their own schema.
+          description: Tenant-configured fields. TicketBenefitFields describes the default ticket properties; TicketRouteFields is the route_role and area classification. Other kinds retain their own schema.
         state:
           type: string
         parent_id:
@@ -9424,6 +9424,19 @@ components:
         benefit_en: {type: string, description: "English benefit, one or two plain-language sentences"}
         benefit_de: {type: string, description: "German benefit, one or two plain-language sentences, neutral without direct address"}
         hide_from_release_notes: {type: boolean, default: false, description: Omit from public notes; does not waive completion requirements}
+    TicketRouteFields:
+      type: object
+      additionalProperties: true
+      description: Classification of who should build a ticket or task. route_role is scout, mechanical, build, build-hard, or review-gate. area is backend, frontend, full-stack, infra, design, or docs. The server derives source from the authenticated principal (person or agent) and sets by and at. A supplied source must match the caller. by and at cannot impersonate another principal. Null clears one field and its provenance; an unchanged value keeps its provenance. Model names are not stored. Display resolves the pair through the model registry, and a missing route is null.
+      properties:
+        route_role: {type: [string, 'null'], enum: [scout, mechanical, build, build-hard, review-gate, null]}
+        route_role_source: {type: [string, 'null'], enum: [agent, person, null]}
+        route_role_by: {type: [string, 'null'], format: uuid, readOnly: true}
+        route_role_at: {type: [string, 'null'], format: date-time, readOnly: true}
+        area: {type: [string, 'null'], enum: [backend, frontend, full-stack, infra, design, docs, null]}
+        area_source: {type: [string, 'null'], enum: [agent, person, null]}
+        area_by: {type: [string, 'null'], format: uuid, readOnly: true}
+        area_at: {type: [string, 'null'], format: date-time, readOnly: true}
     NodeCreate:
       type: object
       required: [kind_id, title]
@@ -9445,7 +9458,7 @@ components:
           default: ''
         fields:
           type: object
-          description: Tenant-configured fields. TicketBenefitFields describes the default ticket properties; other kinds retain their own schema.
+          description: Tenant-configured fields. TicketBenefitFields describes the default ticket properties; TicketRouteFields is the route_role and area classification. Other kinds retain their own schema.
           default: {}
         state:
           type: string
@@ -9468,7 +9481,7 @@ components:
           type: string
         fields:
           type: object
-          description: Tenant-configured fields. TicketBenefitFields describes the default ticket properties; other kinds retain their own schema.
+          description: Tenant-configured fields. TicketBenefitFields describes the default ticket properties; TicketRouteFields is the route_role and area classification. Other kinds retain their own schema.
         state:
           type: string
     TagPatch:

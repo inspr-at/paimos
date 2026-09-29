@@ -165,6 +165,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 	var title, typ, status, priority, parent, assignee, project string
 	var description, descriptionFile, ac, acFile, notes, notesFile string
 	var closeNote, closeNoteFile string
+	var role, area string
 	var addTag, removeTag []string
 	var dryRun bool
 	var benefits benefitFlags
@@ -177,6 +178,8 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 		addFlags: func(fs *flagSet) {
 			benefits.flags(fs)
 			fs.string(&title, "title", 0, "new title")
+			fs.string(&role, "role", 0, "route role: scout, mechanical, build, build-hard, or review-gate")
+			fs.string(&area, "area", 0, "route area: backend, frontend, full-stack, infra, design, or docs")
 			fs.string(&typ, "type", 0, "new type")
 			fs.string(&status, "status", 0, "new status")
 			fs.string(&priority, "priority", 0, "new priority")
@@ -220,7 +223,10 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 			if err != nil {
 				return err
 			}
-			changed := strings.TrimSpace(title+typ+status+priority+parent+assignee+project+description+descriptionFile+ac+acFile+notes+notesFile+closeNote+closeNoteFile) != "" ||
+			if err := validateRouteFlags(role, area); err != nil {
+				return err
+			}
+			changed := strings.TrimSpace(title+typ+status+priority+parent+assignee+project+description+descriptionFile+ac+acFile+notes+notesFile+closeNote+closeNoteFile+role+area) != "" ||
 				len(addTag) > 0 || len(removeTag) > 0 || benefits.changed()
 			if !changed {
 				return usagef("nothing to update")
@@ -233,6 +239,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 				Benefits: benefits, Ref: args[0], Title: title, Type: typ, Status: status, Priority: priority,
 				Parent: parent, Assignee: assignee, Project: project, Description: desc,
 				AC: acText, Notes: notesText, CloseNote: closeText, AddTag: addTag, RemoveTag: removeTag,
+				RouteRole: role, Area: area,
 			})
 		},
 	}
