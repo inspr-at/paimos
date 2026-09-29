@@ -73,6 +73,7 @@ for (const regenerated of [false, true]) {
     await expect(options.first()).toContainText('AEON-75')
     await expect(detail.locator('.headline')).toHaveText('Time entry editing')
     await expect(detail.getByText('Historical tag headline')).toBeVisible()
+    await expect(detail.getByText('Notes written after release')).toHaveCount(0)
     await expect(detail.locator('.tickets')).toContainText('AEON-75')
     await expect(detail.locator('.changes-block')).toContainText('Correct and delete time entries in the Hours view')
     await expect(detail.locator('#release-evidence')).toHaveCount(0)
@@ -124,6 +125,7 @@ test('release notes use benefit text and do not fall back to the Git headline', 
   await expect(notes).toContainText('benefit_de is required')
   await expect(notes).toContainText('One ticket is hidden from release notes.')
   await expect(notes).not.toContainText(current.headline)
+  await expect(notes.getByText('Notes written after release')).toHaveCount(0)
   await expect(notes.getByRole('button', { name: 'Deutsch', exact: true })).toHaveCount(0)
 })
 
@@ -166,6 +168,78 @@ for (const width of [1600, 390]) {
       await page.screenshot({ path: `${process.env.SHOTS}/${width}-dark.png` })
       await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
       await page.screenshot({ path: `${process.env.SHOTS}/${width}-light.png` })
+    }
+  })
+}
+
+for (const width of [1600, 390]) {
+  test(`backfilled notes say they were written after the release at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    const notesBody = benefitNotes()
+    Object.assign(notesBody, { written_after_release: true })
+    await openNotedRelease(page, notesBody)
+    const sheet = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
+    const detail = page.locator('article.detail')
+    const hint = detail.getByRole('region', { name: 'Release notes' }).getByText('Notes written after release', { exact: true })
+    await expect(hint).toBeVisible()
+    await expect(hint).toBeInViewport({ ratio: 1 })
+    await expect(detail.getByText('Historical tag headline')).toHaveCount(0)
+    const detailStyle = await hint.evaluate(el => {
+      const s = getComputedStyle(el)
+      return { size: s.fontSize, transform: s.textTransform }
+    })
+    expect(detailStyle).toEqual({ size: '12.5px', transform: 'none' })
+    if (width === 1600) {
+      const rowHint = page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').first().getByText('Notes written after release', { exact: true })
+      await expect(rowHint).toBeVisible()
+      await expect(rowHint).toBeInViewport({ ratio: 1 })
+      const rowStyle = await rowHint.evaluate(el => getComputedStyle(el).fontSize)
+      expect(rowStyle).toBe('12px')
+    }
+    const overflow = await sheet.evaluate(el => el.scrollWidth > el.clientWidth + 1)
+    expect(overflow).toBeFalsy()
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+    await expect(hint).toBeVisible()
+    if (process.env.SHOTS) {
+      await page.screenshot({ path: `${process.env.SHOTS}/backfill-${width}-dark.png` })
+      await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
+      await page.screenshot({ path: `${process.env.SHOTS}/backfill-${width}-light.png` })
+    }
+  })
+}
+
+for (const width of [1600, 390]) {
+  test(`internal-only releases keep the tag headline and quiet detail at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    // Cover both a hidden-only capture and an empty internal capture.
+    for (const hidden of [2, 0]) {
+      await openNotedRelease(page, { ...benefitNotes(), hidden, items: [], gaps: [] })
+      const sheet = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
+      const row = page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').first()
+      const notes = page.getByRole('region', { name: 'Release notes' })
+      await expect(notes.getByText('Internal changes only.', { exact: true })).toBeVisible()
+      await expect(notes.locator('.note-item')).toHaveCount(0)
+      await expect(sheet).not.toContainText('No public release notes')
+      await expect(notes).not.toContainText('is required')
+      if (width === 390) await sheet.getByRole('button', { name: 'All releases' }).click()
+      await expect(row.locator('.headline')).toHaveText('Time entry editing (AEON-75)')
+      await expect(row.locator('.headline')).not.toBeEmpty()
+      await expect(row.getByText('Historical tag headline')).toHaveCount(0)
+      if (process.env.SHOTS && hidden && width === 390) {
+        for (const theme of ['light', 'dark']) {
+          await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+          await page.screenshot({ path: `${process.env.SHOTS}/internal-list-${width}-${theme}.png` })
+        }
+      }
+      if (width === 390) await row.click()
+      for (const theme of ['light', 'dark']) {
+        await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+        await expect(notes.getByText('Internal changes only.', { exact: true })).toBeVisible()
+        expect(await sheet.evaluate(el => el.scrollWidth > el.clientWidth + 1)).toBeFalsy()
+        if (process.env.SHOTS && hidden) {
+          await page.screenshot({ path: `${process.env.SHOTS}/internal-${width}-${theme}.png` })
+        }
+      }
     }
   })
 }

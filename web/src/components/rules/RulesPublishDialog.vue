@@ -42,7 +42,7 @@ const KIND = { added: 'Added', changed: 'Changed', removed: 'Removed' } as const
             <span class="names"><span class="name">{{ item.name }}</span><span class="where">{{ item.where }}</span></span>
             <span class="what">{{ summary(item) }}</span>
           </summary>
-          <ul v-if="item.state === 'new'" class="rules"><RuleItem v-for="rule in item.rules" :key="rule.identity" :rule="rule" /></ul>
+          <ul v-if="item.state === 'new'" class="rules"><RuleItem v-for="rule in item.rules" :key="rule.identity" :set-name="item.name" :rule="rule" /></ul>
           <ul v-else class="changes">
             <li v-for="change in item.changes" :key="change.kind + change.label" :class="change.kind">
               <span class="kind">{{ KIND[change.kind] }}</span>

@@ -13,9 +13,10 @@ import (
 // Options default to a local preview. Apply is intent, never authorization.
 // The configured API client is obtained lazily, only after local checks pass.
 type Options struct {
-	Request Request
-	Apply   bool
-	Target  Target
+	Request   Request
+	Apply     bool
+	Target    Target
+	ReportDir string
 }
 
 // Run prints the complete local proposal before any API call, followed by a
@@ -26,6 +27,11 @@ func Run(ctx context.Context, options Options, stdout io.Writer, connect func() 
 	p, err := Build(ctx, options.Request)
 	if err != nil {
 		return err
+	}
+	if options.ReportDir != "" {
+		if err := WriteReport(options.ReportDir, p); err != nil {
+			return err
+		}
 	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")

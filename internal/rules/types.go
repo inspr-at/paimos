@@ -242,7 +242,33 @@ func (s Scope) rank() int {
 func (s Scope) matches(c Context) bool {
 	return (s.ProjectID == "" || s.ProjectID == c.ProjectID) && (s.OwnerID == "" || s.OwnerID == c.PersonID) && (s.AgentID == "" || s.AgentID == c.AgentID) && (s.Role == "" || s.Role == c.Role) && (s.TaskID == "" || s.TaskID == c.TaskID)
 }
+
+// SessionHeader is the prefix Merge writes on every session file.
+const SessionHeader = "# Aeon session rules\n\n"
+
 func ruleLine(r Rule) string { return fmt.Sprintf("- [%s] %s\n", r.Identity, r.Text) }
+
+// RenderedBody is the session file Merge writes for these rules: the header
+// plus one identity line per enabled rule, sorted by identity. Details are
+// omitted. Disabled rules are omitted. An empty enabled set renders nothing.
+func RenderedBody(rules []Rule) string {
+	enabled := make([]Rule, 0, len(rules))
+	for _, r := range rules {
+		if r.Enabled {
+			enabled = append(enabled, r)
+		}
+	}
+	if len(enabled) == 0 {
+		return ""
+	}
+	slices.SortFunc(enabled, func(a, b Rule) int { return strings.Compare(a.Identity, b.Identity) })
+	var body strings.Builder
+	body.WriteString(SessionHeader)
+	for _, r := range enabled {
+		body.WriteString(ruleLine(r))
+	}
+	return body.String()
+}
 
 // UnmarshalJSON requires an explicit on/off decision. An omitted enabled field
 // must never silently become an off rule that suppresses a lower identity.

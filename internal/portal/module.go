@@ -44,6 +44,7 @@ type Module struct {
 }
 
 var _ httpapi.Module = (*Module)(nil)
+var _ httpapi.PublicModule = (*Module)(nil)
 
 // New returns the portal module. secureCookies is true outside local dev, matching session cookies.
 // macKey is the server session key used to HMAC public limiter buckets. It is copied and never logged.
@@ -75,9 +76,19 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/portal/pace", m.writePace)
 	mux.HandleFunc("PUT /api/portal/wishes/{wishId}/fulfillment", m.writeFulfillment)
 	mux.HandleFunc("GET /api/public/portal/{tenantSlug}", m.read)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/catalog.json", m.catalogFile)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/llms.txt", m.llms)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/releases", m.releases)
 	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/wishes", m.submitWish)
 	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/wishes/{wishKey}/votes", m.vote)
 	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/corrections", m.submitCorrection)
+}
+
+// MountPublic serves the same public files at the site root. The patterns are
+// exact, so the Vue page at /portal/{tenantSlug} stays on the SPA.
+func (m *Module) MountPublic(mux *http.ServeMux) {
+	mux.HandleFunc("GET /portal/{tenantSlug}/llms.txt", m.llms)
+	mux.HandleFunc("GET /portal/{tenantSlug}/catalog.json", m.catalogFile)
 }
 
 func write(w http.ResponseWriter, status int, value any) {

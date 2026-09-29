@@ -20,7 +20,7 @@ export interface RulesMock {
   releaseDraftFailure: () => void
 }
 
-export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'; conflict?: boolean; publish?: boolean; draftFailAt?: number; draftFailStatus?: number; holdDraftFailure?: boolean; setAbortAt?: number } = {}): Promise<RulesMock> {
+export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'; conflict?: boolean; publish?: boolean; draftFailAt?: number; draftFailStatus?: number; holdDraftFailure?: boolean; rejectNextDraft?: boolean; setAbortAt?: number } = {}): Promise<RulesMock> {
   const calls: RulesMock['calls'] = []
   let releaseDraftFailure = () => {}
   const draftGate = options.holdDraftFailure ? new Promise<void>(resolve => { releaseDraftFailure = () => resolve() }) : null
@@ -28,6 +28,7 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
   let layerPosts = 0
   let setPosts = 0
   let draftPuts = 0
+  let rejectDrafts = options.rejectNextDraft ? 1 : 0
   const createdLayers: { id: string; scope: unknown }[] = []
   const createdSets = new Map<string, { id: string; layer_id: string; scope: unknown; name: string; revision: number; rules: unknown[]; published_version: string }>()
   const layerScope = (id: string) => {
@@ -110,6 +111,11 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
     if (setPath && method === 'GET') return route.fulfill({ json: sets()[setPath[1]] ?? createdSets.get(setPath[1]) ?? { error: 'missing' } })
     const draft = /^\/api\/rules\/sets\/([^/]+)\/draft$/.exec(path)
     if (draft && method === 'PUT') {
+      if (rejectDrafts > 0) {
+        rejectDrafts -= 1
+        if (draftGate) await draftGate
+        return route.fulfill({ status: options.draftFailStatus ?? 500, json: { error: 'The draft was not saved.', code: 'unavailable' } })
+      }
       const created = createdSets.get(draft[1])
       if (created) {
         draftPuts += 1

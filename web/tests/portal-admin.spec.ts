@@ -60,10 +60,13 @@ async function install(page: Page) {
   const pace: {
     project_id?: string
     project_title?: string
+    revision?: number
+    release_history?: boolean
     releases_30d?: number
     median_release_gap_days?: number
     fulfillments: { wish_id: string; feature_id: string }[]
-  } = { fulfillments: [] }
+  } = { fulfillments: [], release_history: false }
+  let historyWrites = 0
   const add = (partial: Pick<PortalNode, 'kind_id' | 'kind_slug' | 'kind_label' | 'title' | 'body' | 'state' | 'parent_id'> & { fields?: Record<string, string> }) => {
     const kind = kinds.find(item => item.id === partial.kind_id)!
     const node: PortalNode = {
@@ -258,17 +261,36 @@ async function install(page: Page) {
       return
     }
     if (path === '/api/portal/pace' && method === 'PUT') {
-      const input = request.postDataJSON() as { project_id?: string | null }
-      if (!input.project_id) {
-        pace.project_id = undefined
-        pace.project_title = undefined
-        pace.releases_30d = undefined
-        pace.median_release_gap_days = undefined
-      } else {
-        pace.project_id = input.project_id
-        pace.project_title = input.project_id === 'p-pharos' ? 'Pharos' : 'Project'
-        pace.releases_30d = 4
-        pace.median_release_gap_days = 21
+      const input = request.postDataJSON() as { project_id?: string | null; release_history?: boolean; revision?: number }
+      if (typeof input.release_history === 'boolean') {
+        historyWrites += 1
+        const linked = typeof pace.project_id === 'string' && typeof pace.revision === 'number'
+        if (!linked || input.project_id !== pace.project_id || input.revision !== pace.revision) {
+          await route.fulfill({ status: 409, json: { error: 'The linked project changed, so release history was not changed.' } })
+          return
+        }
+        pace.release_history = input.release_history
+        pace.revision += 1
+        await route.fulfill({ json: pace })
+        return
+      }
+      if ('project_id' in input) {
+        if (!input.project_id) {
+          pace.project_id = undefined
+          pace.project_title = undefined
+          pace.releases_30d = undefined
+          pace.median_release_gap_days = undefined
+          pace.release_history = false
+          pace.revision = undefined
+        } else {
+          const changed = pace.project_id !== input.project_id
+          pace.project_id = input.project_id
+          pace.project_title = input.project_id === 'p-pharos' ? 'Pharos' : 'Project'
+          pace.releases_30d = 4
+          pace.median_release_gap_days = 21
+          if (changed) pace.release_history = false
+          pace.revision = (pace.revision ?? 0) + 1
+        }
       }
       await route.fulfill({ json: pace })
       return
@@ -299,7 +321,17 @@ async function install(page: Page) {
     }
     await route.fallback()
   })
-  return settings
+  return {
+    retarget(projectId: string, title: string) {
+      pace.project_id = projectId
+      pace.project_title = title
+      pace.release_history = false
+      pace.releases_30d = 2
+      pace.median_release_gap_days = 11
+      pace.revision = (pace.revision ?? 0) + 1
+    },
+    historyWrites: () => historyWrites,
+  }
 }
 
 async function expectFits(page: Page) {
@@ -366,6 +398,11 @@ for (const width of [1600, 390]) {
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
     await expect(page.getByText('Approved.')).toBeVisible()
     await page.getByLabel('Releases from').selectOption({ label: 'Pharos' })
+    const history = page.getByRole('checkbox', { name: 'Publish release history' })
+    await expect(history).toBeEnabled()
+    await expect(history).not.toBeChecked()
+    await history.check()
+    await expect(history).toBeChecked()
     await expect(page.getByText('releases in 30 days')).toBeVisible()
     await expect(page.getByText('4', { exact: true }).first()).toBeVisible()
     await expectFits(page)
@@ -377,3 +414,31 @@ for (const width of [1600, 390]) {
     await capture(page, `admin-${width}-dark.png`)
   })
 }
+
+test('a stale release-history publish reloads the link that is there now', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockWork(page, fixtures())
+  await mockBusiness(page, businessData({ role: 'admin' }), { role: 'admin' })
+  await mockSettings(page, settingsData())
+  const portal = await install(page)
+  await page.goto('/settings/portal')
+  await page.getByRole('checkbox', { name: /Product portal/ }).check()
+  await page.getByRole('button', { name: 'Publish product' }).click()
+  await page.getByLabel('Title').fill('Harbour office')
+  await page.getByLabel('Summary').fill('Work that is ready before the morning opens.')
+  await page.getByRole('button', { name: 'Publish', exact: true }).click()
+  await expect(page.getByText('Harbour office', { exact: true })).toBeVisible()
+  await page.getByLabel('Releases from').selectOption({ label: 'Pharos' })
+  const history = page.getByRole('checkbox', { name: 'Publish release history' })
+  await expect(history).toBeEnabled()
+  await expect(history).not.toBeChecked()
+  portal.retarget('p-aeon', 'Aeon')
+  const sent = page.waitForRequest(request => request.method() === 'PUT' && request.url().includes('/api/portal/pace') && (request.postData() ?? '').includes('release_history'))
+  await history.click()
+  expect((await sent).postDataJSON()).toEqual({ release_history: true, project_id: 'p-pharos', revision: 1 })
+  await expect(page.getByRole('alert').filter({ hasText: 'The linked project changed, so release history was not changed.' })).toBeVisible()
+  await expect(page.getByLabel('Releases from')).toHaveValue('p-aeon')
+  await expect(history).toBeEnabled()
+  await expect(history).not.toBeChecked()
+  expect(portal.historyWrites()).toBe(1)
+})

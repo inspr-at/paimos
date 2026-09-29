@@ -4,12 +4,13 @@ import { computed, ref, useId } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import BizIcon from '../business/BizIcon.vue'
 import MarkdownBody from '../MarkdownBody.vue'
-import { HARNESS_LABEL, HARNESSES, ROLE_LABEL, ROLES, type AgentRule } from '../../lib/rules'
+import { HARNESS_LABEL, HARNESSES, ROLE_LABEL, ROLES, ruleSwitchLabel, type AgentRule } from '../../lib/rules'
 
 // One rule as agents read it: the text rendered as Markdown, a lock when it is
 // locked, and only the exceptions as quiet tags. Everything technical (reason,
 // details, source, identity) waits behind the row's own disclosure.
-const props = defineProps<{ rule: AgentRule; heldBy?: string; pending?: boolean }>()
+const props = defineProps<{ rule: AgentRule; heldBy?: string; pending?: boolean; switchable?: boolean; switchDisabled?: boolean; setName?: string }>()
+const emit = defineEmits<{ toggle: [enabled: boolean] }>()
 const open = ref(false)
 const id = useId()
 
@@ -22,6 +23,7 @@ const tags = computed(() => {
   const out: string[] = []
   if (props.pending) out.push('Not live yet')
   if (!props.rule.enabled && props.rule.strength !== 'locked') out.push('Off')
+  if (props.rule.source.edited_here) out.push('Edited here')
   if (roles.value) out.push(`${roles.value} only`)
   if (harnesses.value) out.push(`${harnesses.value} only`)
   if (props.rule.expires_at) out.push(`Until ${date(props.rule.expires_at)}`)
@@ -30,12 +32,23 @@ const tags = computed(() => {
 const lockTip = computed(() => props.heldBy
   ? `Locked in ${props.heldBy} rules, which win over this one.`
   : props.rule.strength === 'locked' ? 'Locked: always on, and lower layers cannot switch it off.' : '')
+const switchLabel = computed(() => ruleSwitchLabel(props.rule.text, props.setName ?? '', props.rule.enabled))
+
+function onSwitch(event: Event) {
+  const input = event.target as HTMLInputElement
+  const next = input.checked
+  input.checked = props.rule.enabled
+  if (!props.switchDisabled) emit('toggle', next)
+}
 </script>
 
 <template>
   <li class="rule" :class="{ off: !rule.enabled && rule.strength !== 'locked', held: !!heldBy }">
     <span class="lead">
-      <span v-if="lockTip" class="lock" role="img" :aria-label="heldBy ? `Locked in ${heldBy} rules` : 'Locked'" :data-tip="lockTip"><BizIcon name="lock" :size="13" /></span>
+      <label v-if="switchable" class="switch">
+        <input type="checkbox" :checked="rule.enabled" :disabled="switchDisabled" :aria-label="switchLabel" @change="onSwitch">
+      </label>
+      <span v-else-if="lockTip" class="lock" role="img" :aria-label="heldBy ? `Locked in ${heldBy} rules` : 'Locked'" :data-tip="lockTip"><BizIcon name="lock" :size="13" /></span>
       <span v-else class="dot" aria-hidden="true"></span>
     </span>
     <div class="main">
@@ -59,9 +72,10 @@ const lockTip = computed(() => props.heldBy
 </template>
 
 <style scoped>
-.rule { display: grid; grid-template-columns: 18px minmax(0, 1fr) 28px; gap: 2px 10px; align-items: start; padding: 7px 8px 7px 10px; border-radius: 10px; }
+.rule { display: grid; grid-template-columns: 34px minmax(0, 1fr) 28px; gap: 2px 10px; align-items: start; padding: 7px 8px 7px 10px; border-radius: 10px; }
 @media (hover: hover) { .rule:hover { background: var(--row-hover); } }
-.lead { display: grid; place-items: center; height: 23px; }
+.lead { display: grid; place-items: center; width: 34px; height: 22px; }
+.lead .switch { width: 34px; height: 20px; min-width: 0; min-height: 0; line-height: 0; }
 .lock { display: grid; place-items: center; width: 18px; height: 18px; color: var(--teal-ink); cursor: default; }
 .held .lock { color: var(--ink-3); }
 .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--line-2); }
@@ -85,5 +99,7 @@ dd { margin: 0; min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   dd + dt { margin-top: 6px; }
+  .lead .switch { position: relative; }
+  .lead .switch::before { content: ''; position: absolute; top: 50%; left: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
 }
 </style>
