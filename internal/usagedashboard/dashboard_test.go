@@ -362,10 +362,22 @@ func TestDashboardAggregatesVisibleSessionsOnly(t *testing.T) {
 	if page.Tickets[0].Key != "VIS-3" || page.Tickets[0].Sessions != 1 || usd(t, page.Tickets[0].EstimatedCostUSD) != "0.000000000001" {
 		t.Fatalf("rank %+v", page.Tickets)
 	}
-	for _, forbidden := range []string{"Hidden beacon", "HID-2", "Foreign spend", "FOR-2", "Foreign Sub", "ud1-opaque-key", "ud1-measured-key", "ud1-mixed-key", "Pacing window", "Measured window", "Mixed window", "session-model-decoy", "ghost-model", "session-account-decoy", "1.250000000000", "0.250000000000", "99.000000000000", "9.000000000000", "8.000000000000", "list_cost_micros", "covered"} {
+	for _, forbidden := range []string{"Hidden beacon", "HID-2", "Foreign spend", "FOR-2", "Foreign Sub", "ud1-opaque-key", "ud1-measured-key", "ud1-mixed-key", "Pacing window", "Measured window", "Mixed window", "session-account-decoy", "1.250000000000", "0.250000000000", "99.000000000000", "9.000000000000", "8.000000000000", "list_cost_micros", "covered"} {
 		if bytes.Contains([]byte(body), []byte(forbidden)) {
 			t.Fatalf("member response leaked %s", forbidden)
 		}
+	}
+	// Usage models come from usage rows only. The registered session model
+	// appears only in the work breakdown (AEON-301), which is about sessions.
+	for _, usage := range [][]usagedashboard.UsageGroup{page.ByModel, page.ByHarness, page.BySubscription, page.ByProject} {
+		for _, g := range usage {
+			if g.Label == "session-model-decoy" || g.Label == "ghost-model" {
+				t.Fatalf("usage breakdown used the session model: %+v", g)
+			}
+		}
+	}
+	if len(page.Work.ByModel) != 2 || page.Work.ByModel[0].Label != "session-model-decoy" || page.Work.ByModel[0].Sessions != 4 {
+		t.Fatalf("work models %+v", page.Work.ByModel)
 	}
 	if page.Allowance.State != "withheld" || len(page.Allowance.Windows) != 0 {
 		t.Fatalf("allowance %+v", page.Allowance)
@@ -483,8 +495,19 @@ func TestDashboardRatesByVoteSnapshot(t *testing.T) {
 	if len(page.Ratings.ByHarness) != 1 || page.Ratings.ByHarness[0].Label != "codex" || page.Ratings.ByHarness[0].Votes != 2 || page.Ratings.ByHarness[0].Exceptions != 1 {
 		t.Fatalf("rating harness %+v", page.Ratings.ByHarness)
 	}
-	if strings.Contains(body, "vote-model") || strings.Contains(body, "session-model-decoy") {
-		t.Fatalf("rate followed a vote snapshot or the session model instead of the delivery: %s", body)
+	if strings.Contains(body, "vote-model") {
+		t.Fatalf("rate followed a vote snapshot instead of the delivery: %s", body)
+	}
+	// The registered session model is only a work group (AEON-301), never a rating or usage label.
+	for _, g := range append(append([]usagedashboard.RatingGroup{}, page.Ratings.ByModel...), page.Ratings.ByHarness...) {
+		if g.Label == "session-model-decoy" {
+			t.Fatalf("rate followed the session model instead of the delivery: %+v", g)
+		}
+	}
+	for _, g := range page.ByModel {
+		if g.Label == "session-model-decoy" {
+			t.Fatalf("usage model followed the session model: %+v", g)
+		}
 	}
 }
 

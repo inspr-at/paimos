@@ -12,15 +12,24 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 )
 
 // CodexIdentity uses only the documented account/read RPC. It starts no
 // thread, turn, tool or model and never opens the vendor's auth/config files.
 func CodexIdentity(ctx context.Context, path, home string) (string, error) {
+	return codexIdentity(ctx, path, home, "")
+}
+
+func codexIdentity(ctx context.Context, path, home, nodePath string) (string, error) {
+	if err := harnesslaunch.Validate(path, nodePath); err != nil {
+		return "", err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "app-server", "--listen", "stdio://")
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + os.Getenv("HOME"), "CODEX_HOME=" + home}
+	cmd.Env = harnesslaunch.Environment([]string{"HOME=" + os.Getenv("HOME"), "CODEX_HOME=" + home}, nodePath)
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		return "", errors.New("account identity unavailable")

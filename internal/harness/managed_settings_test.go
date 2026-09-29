@@ -73,6 +73,9 @@ func TestManagedSettingsCatalogLifecycleAndFencing(t *testing.T) {
 		if len(offered) != 1 || offered[0].(map[string]any)["value"] != tc.value {
 			t.Fatal(w.Body.String())
 		}
+		if ttl, ok := offered[0].(map[string]any)["expires_in_ms"].(float64); !ok || ttl <= 0 || ttl > 45000 {
+			t.Fatalf("yield missing bounded database lifetime: %s", w.Body.String())
+		}
 		completion := map[string]any{"outcome": tc.outcome, "reason": "setting_" + tc.outcome}
 		expect(t, f.call(f.agent, "POST", path+"/controls/"+control+"/complete", completion, lease), 200)
 		expect(t, f.call(f.agent, "POST", path+"/controls/"+control+"/complete", completion, lease), 200)

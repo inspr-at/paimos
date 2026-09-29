@@ -6,8 +6,9 @@ import "errors"
 
 const (
 	// AlwaysOnBudget is the UTF-8 byte ceiling for the always-on projection.
-	// It matches the shipped session-file cap (rules.MaxBytes, the AEON-263
-	// publish budget). Packs over this size stay on demand in details. An
+	// It stays at the default session-file budget (rules.LegacyMaxBytes).
+	// Tenant/client rollout does not enlarge offline imports. Packs over this
+	// size stay on demand in details. An
 	// always-on projection past the ceiling is refused whole; rule text is not
 	// trimmed to fit.
 	AlwaysOnBudget = 12000

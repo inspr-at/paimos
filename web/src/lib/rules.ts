@@ -671,6 +671,7 @@ export function rulesMessage(error: unknown): string {
   if (error.code === 'outcome_unknown') return error.message || 'The result is unknown. Reload to see the current state before trying again.'
   if (error.code === 'busy') return 'The rules are busy right now. Nothing was changed; try again in a moment.'
   if (error.code === 'ambiguous_identity') return 'Two rules of the same rank share an identity, so the merge stops.'
+  if (error.code === 'doctrine_duplicate') return error.message || 'That rule is already in the doctrine. Propose a change instead of publishing a second copy.'
   if (error.code === 'forbidden') return 'You do not have permission for that.'
   if (error.code === 'not_found') return 'That rules record is no longer there.'
   if (error.code === 'invalid_rule' || error.code === 'invalid_scope' || error.code === 'invalid_version' || error.code === 'invalid_tldr' || error.code === 'invalid_budget' || error.code === 'unknown_rule') return error.message || 'The rules request was not accepted.'
@@ -739,7 +740,8 @@ export const listComparisons = (projectId: string) => send<{ comparisons: RulesC
 // ---------- Budget and the explained file (AEON-314) ----------
 export type LayerBytes = Partial<Record<LayerName, number>>
 export interface RuleBudget { max_bytes: number; layer_max_bytes: LayerBytes }
-export interface RuleBudgetView extends RuleBudget { default_bytes: number; min_bytes: number; ceiling_bytes: number; min_layer_bytes: number }
+export interface RuleBudgetBlocker { host: string; harness: string; version?: string; max_session_file_bytes: number }
+export interface RuleBudgetView extends RuleBudget { default_bytes: number; min_bytes: number; ceiling_bytes: number; min_layer_bytes: number; blocking_clients?: RuleBudgetBlocker[]; blocking_clients_more?: number }
 export const DEFAULT_BUDGET: RuleBudgetView = { max_bytes: RULES_BUDGET, layer_max_bytes: {}, default_bytes: RULES_BUDGET, min_bytes: 2000, ceiling_bytes: 12000, min_layer_bytes: 500 }
 export const getBudget = () => send<RuleBudgetView>('/rules/budget').then(view => ({ ...view, layer_max_bytes: view.layer_max_bytes ?? {} }))
 export const putBudget = (budget: RuleBudget) => send<RuleBudgetView>('/rules/budget', 'PUT', budget).then(view => ({ ...view, layer_max_bytes: view.layer_max_bytes ?? {} }))

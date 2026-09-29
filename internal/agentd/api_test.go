@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/deploytarget"
+	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/version"
 )
 
 func TestRemoteTelemetryErrorClassification(t *testing.T) {
@@ -126,16 +128,19 @@ func TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields(t *testing.T) {
 		{Model: "model-b"},
 		{Activity: "idle"},
 	} {
-		update.ID, update.ProjectID, update.Lease = session.ID, session.ProjectID, session.Lease
+		update.ID, update.ProjectID, update.Lease, update.Harness = session.ID, session.ProjectID, session.Lease, session.Harness
 		update.ActivitySequence = int64(i + 1)
 		if err := remote.HeartbeatHarness(t.Context(), update, "working"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	stopping := HarnessSession{ID: session.ID, ProjectID: session.ProjectID, Lease: session.Lease,
+	stopping := HarnessSession{ID: session.ID, ProjectID: session.ProjectID, Lease: session.Lease, Harness: session.Harness,
 		ActivitySequence: 4, Model: "model-final", ReasoningEffort: "xhigh"}
 	if err := remote.HeartbeatHarness(t.Context(), stopping, "stopping"); err != nil {
 		t.Fatal(err)
+	}
+	if session.Harness != Codex || registration["max_session_file_bytes"] != float64(rules.SessionFileLimit(Codex)) || registration["rules_client_version"] != version.Version {
+		t.Fatal("registration lacks rules capability")
 	}
 	if _, ok := registration["model"]; ok {
 		t.Fatal("unknown registration model was sent")
@@ -147,6 +152,9 @@ func TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields(t *testing.T) {
 		t.Fatalf("verified metadata missing from heartbeat: %+v", beats)
 	}
 	for i, beat := range beats {
+		if beat["max_session_file_bytes"] != float64(rules.SessionFileLimit(Codex)) || beat["rules_client_version"] != version.Version {
+			t.Fatal("heartbeat lacks rules capability")
+		}
 		if beat["activity_sequence"] != float64(i+1) {
 			t.Fatalf("heartbeat %d lost sequence: %+v", i, beat)
 		}
@@ -385,6 +393,39 @@ func TestRemoteManagedHarnessContract(t *testing.T) {
 		if !seen[path] {
 			t.Errorf("missing %s", path)
 		}
+	}
+}
+
+func TestRemoteTerminalControlCompletion(t *testing.T) {
+	for _, tc := range []struct {
+		message  string
+		terminal bool
+	}{
+		{"divergent control completion", true},
+		{"setting authorization expired", true},
+		{"control must be claimed", false},
+		{"process generation changed; setting outcome is fenced", false},
+	} {
+		t.Run(tc.message, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				raw, err := json.Marshal(map[string]string{"error": tc.message})
+				if err != nil {
+					t.Error(err)
+				}
+				_, _ = w.Write(raw)
+			}))
+			t.Cleanup(server.Close)
+			remote := NewRemote(server.URL, "scoped-key")
+			err := remote.CompleteHarnessControl(t.Context(), HarnessSession{ID: "session", ProjectID: "project", Lease: "private-worker-lease-32-characters-minimum"}, "control", "applied", "setting_applied")
+			if tc.terminal && !errors.Is(err, ErrControlTerminal) {
+				t.Fatalf("got %v", err)
+			}
+			if !tc.terminal && (err == nil || errors.Is(err, ErrControlTerminal)) {
+				t.Fatalf("got %v", err)
+			}
+		})
 	}
 }
 

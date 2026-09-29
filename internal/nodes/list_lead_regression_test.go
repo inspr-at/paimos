@@ -95,6 +95,64 @@ func TestListLeadKeepsTheSortSnapshot(t *testing.T) {
 		t.Errorf("new snapshot ignored stop: %v", after)
 	}
 }
+
+// A stored person is the sort key, so that row's live lead is read on the
+// page. It still belongs to the list statement: stopping the lead as the
+// statement ends must not reveal the other worker.
+func TestListAssignedLeadUsesTheSameStatement(t *testing.T) {
+	p := newPrincipal(t, "lead-assigned-snapshot")
+	project := kindBySlug(t, p, "project")
+	kind := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Assigned snapshot"}`)
+	nia := addPrincipalIn(t, p.TenantID, "Nia")
+	raw, _ := json.Marshal(map[string]any{"kind_id": kind.ID, "key": "REV-3", "title": "Assigned", "state": "new", "parent_id": root.ID, "fields": map[string]any{"assignee": nia.ID}})
+	assigned := mustNode(t, p, string(raw))
+	only := leadRegressionTicket(t, p, root.ID, kind.ID, "REV-4")
+	a := insertNamedAgent(t, p.TenantID, "Ada")
+	at := time.Now().UTC()
+	ada := insertLiveSessionStamp(t, p.TenantID, root.ID, a, assigned.ID, "claude", "worker", "Ada", "working", "busy", at.Add(-30*time.Minute), at)
+	insertLiveSessionStamp(t, p.TenantID, root.ID, a, assigned.ID, "claude", "worker", "Zed", "working", "busy", at.Add(-time.Minute), at)
+	insertLiveSessionStamp(t, p.TenantID, root.ID, a, only.ID, "claude", "worker", "Mia", "working", "busy", at.Add(-time.Minute), at)
+	var hookErr error
+	trace := &stopAfterListQuery{hook: func() {
+		_, hookErr = adminPool.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp(),stop_reason='completed' WHERE id=$1::uuid`, ada)
+	}}
+	cfg := appPool.Config()
+	cfg.ConnConfig.Tracer = trace
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	status, body := callAs(t, New(pool, nil), &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee", "")
+	page := decode[nodePage](t, status, body, http.StatusOK)
+	if hookErr != nil {
+		t.Fatal(hookErr)
+	}
+	if !trace.ran {
+		t.Fatal("query hook did not fire")
+	}
+	var shown []string
+	for _, item := range page.Items {
+		if item.LeadWorker == nil {
+			t.Fatal("missing lead")
+		}
+		shown = append(shown, item.LeadWorker.Name)
+	}
+	// Mia is the unassigned lead and the sort key. Nia sorts after, and her
+	// row still shows Ada from this statement, not Zed.
+	if strings.Join(shown, ",") != "Mia,Ada" {
+		t.Errorf("assigned lead left the list statement: %v", shown)
+	}
+	next := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee")
+	var after []string
+	for _, item := range next.Items {
+		after = append(after, item.LeadWorker.Name)
+	}
+	if strings.Join(after, ",") != "Mia,Zed" {
+		t.Errorf("new snapshot ignored stop: %v", after)
+	}
+}
 func TestListLeadExactPublicTiesIgnoreHiddenRenames(t *testing.T) {
 	p := newPrincipal(t, "lead-exact-ties")
 	project := kindBySlug(t, p, "project")

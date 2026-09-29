@@ -3,6 +3,7 @@ import { expect, test, type Browser, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
+import { usageDashboard } from './usage-data'
 
 const shots = '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-218'
 const sessionId = '5e000000-0000-4000-8000-000000000001'
@@ -213,25 +214,14 @@ test('usage shows the rework rate by harness', async ({ browser }) => {
   const group = (label: string, exceptions: number, deliveries: number) => ({
     label, votes: exceptions, average: null, exceptions, deliveries, rework_rate: `${exceptions}/${deliveries}`,
   })
-  const dashboard = {
-    from: '2026-08-29T00:00:00Z', to: '2026-09-28T00:00:00Z', generated_at: '2026-09-27T10:00:00Z',
-    attribution: 'lifetime_for_sessions_started_in_range', trend_basis: 'session_started_utc_day', list_price_currency: 'USD',
-    truncated: false,
-    totals: blank('All visible sessions', 3, '1.250000000000'),
-    by_project: [blank('Pharos', 3, '1.250000000000')],
-    by_model: [blank('gpt-4.1', 2, '1.250000000000')],
-    by_harness: [blank('codex', 2, '1.250000000000'), blank('claude', 1, '0.250000000000')],
-    by_subscription: [blank('Codex Pro', 2, '1.250000000000', { billing_mode: 'subscription' })],
-    trend: [],
-    tickets: [],
-    tickets_cost_unknown: 0,
-    allowance: { state: 'none', windows: [] },
-    ratings: {
-      votes: 2, average: null, exceptions: 1, deliveries: 3, rework_rate: '1/3',
-      by_model: [group('gpt-4.1', 1, 2)],
-      by_harness: [group('codex', 1, 2)],
-    },
+  // AEON-301: the merged Usage page shows rework on the done tile and per harness.
+  const dashboard = usageDashboard('unreported')
+  dashboard.ratings = {
+    votes: 2, average: null, exceptions: 1, deliveries: 3, rework_rate: '1/3',
+    by_model: [group('gpt-4.1', 1, 2)],
+    by_harness: [group('codex', 1, 2)],
   }
+  dashboard.work.by_harness = dashboard.work.by_harness.filter(g => g.key === 'codex' || g.key === 'claude')
   for (const width of [1600, 390]) {
     for (const theme of ['light', 'dark'] as const) {
       await shot(browser, width, theme, async page => {
@@ -241,16 +231,15 @@ test('usage shows the rework rate by harness', async ({ browser }) => {
         await page.route('**/api/usage/dashboard**', route => route.fulfill({ json: dashboard }))
         await page.goto('/agents/usage')
         await expect(page.getByRole('heading', { name: 'Usage', level: 1 })).toBeVisible()
-        const summary = page.locator('.summary-card')
-        await expect(summary.getByText('Rework', { exact: true })).toBeVisible()
-        await expect(summary).toContainText('33%')
-        await expect(summary).toContainText('1 of 3')
-        await expect(summary).not.toContainText('4.5')
+        const done = page.locator('.tile-done')
+        await expect(done).toContainText('33% rework')
+        await expect(done).toHaveAttribute('data-tip', /1 of 3 deliveries/)
+        await expect(done).not.toContainText('4.5')
         await page.getByRole('button', { name: 'Harness' }).click()
         const table = page.getByRole('table', { name: 'By harness' })
-        await expect(table.getByRole('columnheader', { name: 'Rework' })).toBeVisible()
-        await expect(table.getByRole('row', { name: /Codex/ })).toContainText('50%')
-        await expect(table.getByRole('row', { name: /Claude/ }).locator('td').last()).toHaveText('')
+        if (width > 600) await expect(table.getByRole('columnheader', { name: 'Rework' })).toBeVisible()
+        if (width > 600) await expect(table.getByRole('row', { name: /Codex/ })).toContainText('50%')
+        if (width > 600) await expect(table.getByRole('row', { name: /Claude/ }).locator('td').last()).toHaveText('')
         await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).resolves.toBe(true)
         await page.locator('.breakdown').screenshot({ path: `${shots}/usage-${theme}-${width}.png` })
       })

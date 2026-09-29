@@ -1,7 +1,138 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test } from '@playwright/test'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
-import { SETUP_COMMAND, mockAnonymousGuide, mockPairing } from './agent-pairing-fixtures'
+import { NIX_PAIR_COMMAND, SETUP_COMMAND, mockAnonymousGuide, mockPairing, pairingGuide } from './agent-pairing-fixtures'
+
+test('Homebrew offers two commands and removal after draining', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await mockAnonymousGuide(page)
+  await page.goto('/agents/register-agent')
+  await expect(page.getByText('Open this address on the computer, or give it to the agent setting it up.')).toBeVisible()
+  await expect(page.getByLabel('Install on this computer')).toBeVisible()
+  await page.getByRole('button', { name: 'Copy guide address' }).click()
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('https://aeon.example/agents/register-agent')
+  const commands = `brew install inspr-at/tap/aeon-agentd\n${SETUP_COMMAND}`
+  await expect(page.locator('.install-guide pre')).toHaveText(commands)
+  await page.getByRole('button', { name: 'Copy commands', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(commands)
+  await expect(page.getByText(/approve the code below to start the service/)).toBeVisible()
+  await page.getByText('Release and upgrades', { exact: true }).click()
+  await expect(page.getByText(/Homebrew installs the tap’s current signed release/)).toBeVisible()
+  await expect(page.getByText(/reports a helper\/instance version mismatch/)).toBeVisible()
+  await expect(page.getByText(/does not drain or restart an existing daemon/)).toBeVisible()
+  await page.getByText('Disconnect and uninstall', { exact: true }).click()
+  await expect(page.getByText('aeon-agentd disconnect', { exact: true })).toBeVisible()
+  await expect(page.getByText('brew uninstall aeon-agentd', { exact: true })).toBeVisible()
+  await expect(page.getByText(/Wait for “disconnected”/)).toBeVisible()
+  await expect(page.getByText(/Vendor sign-ins and project files stay/)).toBeVisible()
+  expect(await page.locator('pre').allTextContents()).not.toEqual(expect.arrayContaining([expect.stringMatching(/<verified|<absolute|Cellar/)]))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByText('Manual and agent setup', { exact: true }).click()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+test('checksum installation uses the selected platform and the same pair command', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await mockAnonymousGuide(page)
+  const targets = ['darwin/arm64', 'linux/amd64'].map(platform => ({
+    platform: platform.split('/')[0], arch: platform.split('/')[1],
+    service: platform.startsWith('darwin') ? 'launchd-user' : 'systemd-user',
+    qualification: 'candidate', artifact_url: `https://release.example/${platform}`, checksums_url: 'https://release.example/SHA256SUMS',
+    command: `# checksum installer for ${platform}\ninstall-verified-release`,
+  }))
+  await page.route('**/api/agent-pairing/guide', route => route.fulfill({ json: { ...pairingGuide(), install_available: true, install_targets: targets } }))
+  await page.goto('/agents/register-agent')
+  await page.getByLabel('Install on this computer').selectOption('manual')
+  await page.getByLabel('Install platform').selectOption('linux/amd64')
+  await page.getByRole('button', { name: 'Copy checksum installer' }).click()
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(targets[1]!.command)
+  await page.getByRole('button', { name: 'Copy pairing command' }).click()
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(`export PATH="$HOME/.local/bin:$PATH"\n${SETUP_COMMAND}`)
+  await page.getByText('Disconnect and uninstall', { exact: true }).click()
+  await expect(page.getByText(/Remove the aeon-agentd link in/)).toBeVisible()
+  await expect(page.getByText('brew uninstall aeon-agentd', { exact: true })).toHaveCount(0)
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+test('Nix pairing offers the short instance command and preserves person approval', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await mockAnonymousGuide(page)
+  await page.goto('/agents/register-agent')
+  await page.getByLabel('Install on this computer').selectOption('nix')
+  await expect(page.getByText(NIX_PAIR_COMMAND, { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Copy pairing command' })).toBeVisible()
+  await page.getByRole('button', { name: 'Copy pairing command' }).click()
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(NIX_PAIR_COMMAND)
+  await expect(page.getByText('Confirm the folder and accounts, then enter the code below.')).toBeVisible()
+  await expect(page.getByText(/Service module: macOS only/)).toBeVisible()
+  await expect(page.getByText(/PATH from a reviewed release pin/)).toBeVisible()
+  await expect(page.getByText(/project folder, not your home folder/)).toBeVisible()
+  await page.getByText('Declarative service', { exact: true }).click()
+  await expect(page.getByRole('link', { name: 'services.aeon.enable' })).toHaveAttribute('href', 'https://example.test/instance/module.nix')
+  await expect(page.getByText(/needs a paired-service update/)).toBeVisible()
+  await expect(page.getByText(/Entering the code does not grant access/)).toBeVisible()
+  await page.getByText('Disconnect and uninstall', { exact: true }).click()
+  await expect(page.getByText(/Disable the service and remove the package in your Nix/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Connect computer', exact: true })).toHaveCount(0)
+  expect(NIX_PAIR_COMMAND).not.toMatch(/mkdir|\/nix\/store|--state-root|--harness|--workspace/)
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+test('an unconfigured instance omits the Nix module without losing the public guide', async ({ page }) => {
+  await mockAnonymousGuide(page)
+  const { managed_setup: _managed, ...unconfigured } = pairingGuide()
+  await page.route('**/api/agent-pairing/guide', route => route.fulfill({ json: unconfigured }))
+  await page.goto('/agents/register-agent')
+  await expect(page.getByRole('heading', { name: 'Connect a computer' })).toBeVisible()
+  await expect(page.getByText('Nix / Home Manager', { exact: true })).toHaveCount(0)
+  await page.getByText('Manual and agent setup', { exact: true }).click()
+  await expect(page.locator('pre').filter({ hasText: 'brew install' })).toHaveText(`brew install inspr-at/tap/aeon-agentd\n${SETUP_COMMAND}`)
+  await expect(page.getByText(/Use the owning Nix or Home Manager configuration/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Sign in to review the code' })).toBeVisible()
+  await expect(page.getByRole('link', { name: /uzumaki|services.aeon/ })).toHaveCount(0)
+})
+
+test('pi pairing names the local provider, shows its SVG and connects without verification', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-27T20:00:00.000Z') })
+  await mockWork(page, fixtures())
+  const reason = 'pi verification has no qualified no-tools policy for extensions and provider configuration.'
+  const calls = await mockPairing(page, {
+    requested_accounts: [{ account_key: 'pi-1', harness: 'pi', provider: 'anthropic', label: 'pi / anthropic (local profile)' }],
+    verification_capabilities: { pi: { supported: false, policy: 'unavailable', reason } },
+  })
+  await page.goto('/agents/register-agent')
+  await page.getByText('Manual and agent setup').click()
+  await expect(page.getByText(/For pi, use \/login and \/model/)).toBeVisible()
+  // AEON-333: the guide's pair command discovers harnesses, pi included, so it names none.
+  await expect(page.getByText(SETUP_COMMAND, { exact: false }).first()).toBeVisible()
+  await page.getByLabel('Pairing code').fill('123-456-789')
+  await page.getByRole('button', { name: 'Look up code' }).click()
+  const review = page.getByRole('region', { name: 'Pairing review' })
+  await expect(review.getByLabel('Connect Pi')).toBeChecked()
+  await expect(review.getByLabel('Account for Pi').locator('option:checked')).toHaveText('pi / anthropic (local profile)')
+  await expect(review.locator('.harness .mark svg path')).toHaveCount(3)
+  await expect(review.getByRole('checkbox', { name: 'Verify selected harnesses' })).toBeDisabled()
+  await expect(review.getByText('Pi can’t be verified.')).toHaveAttribute('title', reason)
+
+  if (process.env.PI_PAIRING_SHOTS) {
+    mkdirSync(process.env.PI_PAIRING_SHOTS, { recursive: true })
+    for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.getByRole('button', { name: 'Connect computer', exact: true }).scrollIntoViewIfNeeded()
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      await page.screenshot({ path: join(process.env.PI_PAIRING_SHOTS, `pi-pairing__${width}__${theme}.png`), fullPage: true })
+    }
+  }
+  await page.getByRole('button', { name: 'Connect computer', exact: true }).click()
+  await expect.poll(() => calls.find(call => call.path.endsWith('/approve'))?.body).toEqual({
+    request_digest: 'ab'.repeat(32), verification: 'connect_only', selected_account_keys: ['pi-1'],
+  })
+})
 
 test('a qualified helper removes Connect only without a harness-name special case', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-09-27T20:00:00.000Z') })
@@ -35,9 +166,8 @@ test('the public guide is readable without sign-in and keeps only the human code
   await page.goto('/agents/register-agent')
   await expect(page).toHaveURL('/agents/register-agent')
   await expect(page.getByRole('heading', { name: 'Connect a computer' })).toBeVisible()
-  await expect(page.getByText(SETUP_COMMAND, { exact: false })).toBeHidden()
+  await expect(page.locator('pre').filter({ hasText: 'brew install' })).toBeVisible()
   await page.getByText('Manual and agent setup').click()
-  await expect(page.getByText(SETUP_COMMAND, { exact: false })).toBeVisible()
   await expect(page.getByText('This AEON has not published a verified installer.')).toBeVisible()
   await expect(page.getByText(/curl\|sh|aeon\.barta\.cm/)).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Sign in to review the code' })).toBeVisible()

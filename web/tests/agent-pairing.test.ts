@@ -96,12 +96,39 @@ function guidePayload(overrides: Record<string, unknown> = {}): PairingGuide {
     platforms: ['darwin/arm64', 'linux/amd64'],
     version: '260927181849.0.0',
     platform_qualification: 'candidate; consult the exact release service qualification evidence',
-    setup_command: "<verified absolute paimos-agentd path> setup --url 'https://aeon.example' --workspace <absolute approved folder> --state-root <absolute private folder outside repos> --harness <codex|claude|cursor|grok> --start-service",
+    setup_command: "aeon-agentd pair --url 'https://aeon.example'",
     install_available: false,
     install_targets: [],
     ...overrides,
   }
 }
+
+test('the Nix guide is additive, parsed as published, and never guesses a paired service option', async () => {
+  const managed = {
+    command: "aeon-agentd pair --url 'https://other.example'",
+    service_option: 'uzumaki.aeon.agentd.enable',
+    module_url: 'https://github.com/markus-barta/nixcfg/blob/main/modules/uzumaki/aeon-agentd.nix',
+    service_note: 'NIX-583 still needs paired-mode support.',
+  }
+  globalThis.fetch = async () => jsonResponse(guidePayload({ managed_setup: managed }))
+  const guide = await getPairingGuide()
+  assert.deepEqual(presentPublicGuide(guide).managedSetup, managed)
+  assert.match(presentPublicGuide(guide).note, /signed-in person/)
+  assert.equal(presentPublicGuide(guidePayload()).managedSetup, null)
+  const annotated = {
+    ...managed,
+    platform_note: 'Module supports macOS only; it does not configure a Linux service.',
+    prerequisite_note: 'Use a reviewed release pin with pair and aeon-agentd on PATH.',
+  }
+  globalThis.fetch = async () => jsonResponse(guidePayload({ managed_setup: annotated }))
+  assert.deepEqual(presentPublicGuide(await getPairingGuide()).managedSetup, annotated)
+  for (const field of ['platform_note', 'prerequisite_note']) {
+    globalThis.fetch = async () => jsonResponse(guidePayload({ managed_setup: { ...annotated, [field]: ['invalid'] } }))
+    await assert.rejects(getPairingGuide(), PairingError)
+  }
+  globalThis.fetch = async () => jsonResponse(guidePayload({ managed_setup: { ...managed, module_url: 'javascript:alert(1)' } }))
+  await assert.rejects(getPairingGuide(), PairingError)
+})
 
 test('the public guide is not a session route and stays usable after sign-out', () => {
   assert.equal(agentRouteKind('/agents/register-agent'), 'register-agent')
@@ -129,6 +156,16 @@ test('the guide uses the server origin and stays available when the session is f
   assert.equal(registerAgentUrl(guide), 'https://aeon.example/agents/register-agent')
   assert.equal(JSON.stringify(guide).includes('aeon.barta.cm'), false)
   assert.equal(guide.version, '260927181849.0.0')
+})
+
+test('pi provider binding survives lookup without widening verification', async () => {
+  const requested = account({ harness: 'pi', provider: 'anthropic', label: 'pi / anthropic (local profile)' })
+  globalThis.fetch = async () => jsonResponse(view({ requested_accounts: [requested], verification_capabilities: {
+    pi: { supported: false, policy: 'unavailable', reason: 'No qualified no-tools policy.' },
+  } }))
+  const found = await lookupPairing('123456789')
+  assert.equal(found.requested_accounts[0]?.provider, 'anthropic')
+  assert.equal(unsupportedVerification(found, [requested.account_key])[0]?.harness, 'pi')
 })
 
 test('lookup sends only the code and does not approve', async () => {
@@ -457,7 +494,7 @@ test('the public guide uses the server address and stores only a human code', ()
   const presented = presentPublicGuide(published)
   const lead = [...presented.steps, presented.address, presented.note].join('\n')
   assert.match(presented.address, /https:\/\/aeon\.example\/agents\/register-agent/)
-  assert.match(presented.setupCommand, /setup --url 'https:\/\/aeon\.example'/)
+  assert.match(presented.setupCommand, /pair --url 'https:\/\/aeon\.example'/)
   assert.match(presented.installNote, /not published a verified installer/)
   assert.equal(lead.includes(presented.setupCommand), false)
   assert.equal(lead.includes('aeon.barta.cm'), false)
@@ -756,3 +793,14 @@ function enrollment(overrides: Record<string, unknown> = {}) {
     ...overrides,
   }
 }
+
+test('Homebrew commands are additive, bounded and published by this instance', async () => {
+  const command = "brew install inspr-at/tap/aeon-agentd\naeon-agentd pair --url 'https://other.example'"
+  globalThis.fetch = async () => jsonResponse(guidePayload({ homebrew_command: command }))
+  assert.equal(presentPublicGuide(await getPairingGuide()).homebrewCommand, command)
+  assert.equal(presentPublicGuide(guidePayload()).homebrewCommand, '')
+  for (const bad of [[], 'x'.repeat(4001)]) {
+    globalThis.fetch = async () => jsonResponse(guidePayload({ homebrew_command: bad }))
+    await assert.rejects(getPairingGuide)
+  }
+})

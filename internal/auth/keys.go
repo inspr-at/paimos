@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -157,7 +158,7 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, "principal_id must be a UUID")
 		return
 	}
-	if (principalID == "" && name == "") || len(name) > 200 || strings.ContainsRune(name, 0) {
+	if (principalID == "" && name == "") || utf8.RuneCountInString(name) > 200 || strings.ContainsRune(name, 0) {
 		writeBadRequest(w, "name is required")
 		return
 	}

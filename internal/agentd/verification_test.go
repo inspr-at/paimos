@@ -94,6 +94,8 @@ func testUnsupportedVerificationBlocksBeforeAnyVendorProcess(t *testing.T, harne
 		codex := NewCodexAdapter(path, map[string]string{"account": home})
 		codex.SetExpectedEmails(map[string]string{"account": "agent@example.test"})
 		a = codex
+	} else if harness == Pi {
+		a = NewPiAdapter(path, map[string]string{"account": home})
 	} else {
 		a = NewCursorAdapter(path, map[string]string{"account": "42"})
 	}
@@ -199,4 +201,8 @@ func TestApprovedDeadlineDoesNotWaitForTelemetryLock(t *testing.T) {
 		t.Fatal("deadline lacked truthful stop attribution")
 	}
 	entry.mu.Unlock()
+}
+
+func TestPiVerificationBlocksBeforeAnyVendorProcess(t *testing.T) {
+	testUnsupportedVerificationBlocksBeforeAnyVendorProcess(t, Pi)
 }

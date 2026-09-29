@@ -4,6 +4,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/inbox"
 )
@@ -105,7 +107,10 @@ func TestRunHeartbeatRecordsVendorSessionRef(t *testing.T) {
 	rt, stdout, stderr := heartbeatRuntime(t, srv)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", vendor)
 	opts := heartbeatTestOptions(dir)
-	if err := rt.runHeartbeat(t.Context(), opts, heartbeatDeps{alive: func(int) bool { return false }}); err != nil {
+	if err := rt.runHeartbeat(t.Context(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait:  func(context.Context, int, time.Duration) error { return errOwnerExited },
+	}); err != nil {
 		t.Fatal(err)
 	}
 	var body map[string]any
@@ -232,8 +237,10 @@ func TestTellFillsResolvedSenderSession(t *testing.T) {
 		sessionID = "00000000-0000-4000-8000-000000000091"
 		vendor    = "claude-session-tell-00001"
 	)
+	const callerID = "00000000-0000-4000-8000-000000000003"
 	type sessionFixture struct {
 		projectID string
+		agent     string
 		status    int
 		stopped   bool
 		archived  bool
@@ -255,7 +262,7 @@ func TestTellFillsResolvedSenderSession(t *testing.T) {
 			case r.URL.Path == "/api/kinds":
 				fmt.Fprint(w, `{"items":[{"id":"00000000-0000-4000-8000-000000000001","slug":"project"}]}`)
 			case r.URL.Path == "/api/me":
-				fmt.Fprint(w, `{"principal":{"id":"00000000-0000-4000-8000-000000000003","name":"receiver"}}`)
+				fmt.Fprintf(w, `{"principal":{"id":%q,"name":"receiver"}}`, callerID)
 			case strings.HasPrefix(r.URL.Path, "/api/nodes"):
 				fmt.Fprint(w, `{"items":[{"id":"`+projectID+`","kind_id":"00000000-0000-4000-8000-000000000001","key":"AEON-1","title":"AEON","fields":{"project_key":"AEON"}}]}`)
 			case r.URL.Path == "/api/inbox/session-binding":
@@ -266,7 +273,7 @@ func TestTellFillsResolvedSenderSession(t *testing.T) {
 					return
 				}
 				fmt.Fprintf(w, `{"session_id":%q}`, sessionID)
-			case r.Method == http.MethodGet && r.URL.Path == "/api/projects/"+projectID+"/harness-sessions/"+sessionID:
+			case r.Method == http.MethodGet && r.URL.Path == "/api/projects/"+projectID+"/harness-sessions/"+sessionID+"/lookup":
 				seen = append(seen, "session check")
 				if session.status != http.StatusOK || session.projectID != projectID {
 					status := session.status
@@ -277,7 +284,11 @@ func TestTellFillsResolvedSenderSession(t *testing.T) {
 					fmt.Fprint(w, `{"error":"session unavailable"}`)
 					return
 				}
-				out := map[string]any{"id": sessionID, "project_id": session.projectID, "stopped_at": nil, "archived_at": nil}
+				agent := session.agent
+				if agent == "" {
+					agent = callerID
+				}
+				out := map[string]any{"id": sessionID, "project_id": session.projectID, "agent_principal_id": agent, "stopped_at": nil, "archived_at": nil}
 				if session.stopped {
 					out["stopped_at"] = "2026-09-29T12:00:00Z"
 				}
@@ -376,20 +387,20 @@ func TestTellFillsResolvedSenderSession(t *testing.T) {
 				bound = false
 			case "invalid-id":
 				t.Setenv("AEON_SESSION_ID", "invalid")
-				fail = true
+				bound = false
 			case "invalid-file":
 				if err := os.WriteFile(file, []byte("invalid"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 				t.Setenv("AEON_SESSION_FILE", file)
-				fail = true
+				bound = false
 			case "symlink":
 				link := filepath.Join(dir, "link")
 				if err := os.Symlink(file, link); err != nil {
 					t.Fatal(err)
 				}
 				t.Setenv("AEON_SESSION_FILE", link)
-				fail = true
+				bound = false
 			case "unavailable":
 				bindingStatus, lookup, fail = http.StatusServiceUnavailable, true, true
 			}
@@ -407,6 +418,9 @@ func TestTellFillsResolvedSenderSession(t *testing.T) {
 			} else if strings.Contains(joined, `"sender_session_id":"`+sessionID+`"`) != bound {
 				t.Fatalf("wrong attribution for %s", source)
 			}
+			if (source == "invalid-id" || source == "invalid-file" || source == "symlink") && (!strings.Contains(errOut.String(), "source is unusable") || strings.Count(errOut.String(), "\n") != 1 || strings.Contains(joined, "session check") || strings.Contains(joined, "binding ")) {
+				t.Fatalf("corrupt ambient source: exit %d err %q calls %q", code, errOut.String(), *seen)
+			}
 		})
 	}
 	for _, state := range []struct {
@@ -420,7 +434,8 @@ func TestTellFillsResolvedSenderSession(t *testing.T) {
 		{"stopped", sessionFixture{projectID: projectID, status: http.StatusOK, stopped: true}, "has ended", false},
 		{"archived", sessionFixture{projectID: projectID, status: http.StatusOK, archived: true}, "has ended", false},
 		{"missing", sessionFixture{projectID: projectID, status: http.StatusNotFound}, "unavailable in the target project", false},
-		{"read-forbidden", sessionFixture{projectID: projectID, status: http.StatusForbidden}, "unavailable in the target project", false},
+		{"read-forbidden", sessionFixture{projectID: projectID, status: http.StatusForbidden}, "not readable", false},
+		{"other-agent", sessionFixture{projectID: projectID, status: http.StatusOK, agent: "00000000-0000-4000-8000-0000000000aa"}, "another agent", false},
 		{"read-failed", sessionFixture{projectID: projectID, status: http.StatusServiceUnavailable}, "", true},
 	} {
 		for _, source := range []string{"id", "file", "state-dir", "claude", "codex-session", "codex-thread", "flag"} {

@@ -110,3 +110,19 @@ func findLabel(groups []UsageGroup, label string) UsageGroup {
 }
 
 func i64p(v int64) *int64 { return &v }
+
+func TestPiUsageRetainsReportedAndUnavailableReadings(t *testing.T) {
+	model := "anthropic/test-model"
+	rows := []sessionRow{
+		{id: "pi-reported", harness: "pi", reported: true, model: &model, input: i64p(12), output: i64p(3)},
+		{id: "pi-unreported", harness: "pi"},
+	}
+	_, _, _, harnesses, _, _, _, _, err := aggregate(rows)
+	if err != nil || len(harnesses) != 1 {
+		t.Fatal("pi usage group unavailable", err)
+	}
+	pi := harnesses[0]
+	if pi.Label != "pi" || pi.Sessions != 2 || pi.UsageRows != 1 || pi.UnreportedSessions != 1 || pi.InputTokens == nil || *pi.InputTokens != "12" || pi.InputUnknownRows != 1 || pi.OutputUnknownRows != 1 || pi.EstimatedCostUSD != nil || pi.CostState != "unknown" {
+		t.Fatalf("pi usage invented missing readings: %+v", pi)
+	}
+}

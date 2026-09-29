@@ -179,7 +179,7 @@ try {
   process.exit(1);
 }
 if ((start?.capabilities !== undefined && (!Array.isArray(start.capabilities) || start.capabilities.some(c => typeof c !== "string"))) ||
-    (start?.rules !== undefined && (typeof start.rules !== "string" || Buffer.byteLength(start.rules) > 12000)) ||
+    (start?.rules !== undefined && (typeof start.rules !== "string" || Buffer.byteLength(start.rules) > 64000)) ||
     (start?.max_turns !== undefined && (!Number.isSafeInteger(start.max_turns) || start.max_turns < 0)) ||
     (start?.max_tokens !== undefined && (!Number.isSafeInteger(start.max_tokens) || start.max_tokens < 0)) ||
     start?.op !== "start" || typeof start.prompt !== "string" || start.prompt.length === 0 ||

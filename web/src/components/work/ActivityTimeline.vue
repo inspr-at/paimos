@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { commentEditable, describeChange, parseWorkerMarker, shortRole, type TimelineEntry } from '../../lib/activity'
+import { brand } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
@@ -24,6 +25,37 @@ const draft = ref('')
 const saving = ref(false)
 const expanded = ref(new Set<string>())
 const editor = ref<InstanceType<typeof MarkdownEditor>[]>()
+const historyOptions = [
+  { id: 'all', label: 'All' },
+  { id: 'people', label: 'People and agents' },
+  { id: 'automatic', label: 'Automatic' },
+] as const
+type HistoryFilter = (typeof historyOptions)[number]['id']
+const history = ref<HistoryFilter>('all')
+const visible = computed(() => props.entries.filter(entry => {
+  if (history.value === 'automatic') return entry.author.automatic === true
+  if (history.value === 'people') return entry.author.automatic !== true
+  return true
+}))
+const emptyLine = computed(() => {
+  if (!props.entries.length || history.value === 'all') return 'No activity yet.'
+  return history.value === 'automatic' ? 'No automatic activity.' : 'No activity from people or agents.'
+})
+function isAutomatic(entry: TimelineEntry) { return entry.author.automatic === true }
+function changesOf(entry: TimelineEntry) { return entry.kind === 'changes' ? entry.changes : [] }
+function actorLabel(entry: TimelineEntry) { return isAutomatic(entry) ? `${brand.value.short_name} (automatic)` : entry.author.name }
+function actorTip(entry: TimelineEntry) {
+  if (!isAutomatic(entry)) return undefined
+  const parts = [entry.author.job, entry.author.reason].filter((part): part is string => !!part)
+  return parts.length ? parts.join(' · ') : undefined
+}
+function historyKey(event: KeyboardEvent) {
+  if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+  event.preventDefault()
+  const index = historyOptions.findIndex(option => option.id === history.value)
+  const step = event.key === 'ArrowRight' ? 1 : -1
+  history.value = historyOptions[(index + step + historyOptions.length) % historyOptions.length].id
+}
 
 function marker(entry: TimelineEntry) { return entry.kind === 'comment' ? parseWorkerMarker(entry.body) : null }
 function toggle(id: string) { const next = new Set(expanded.value); if (next.has(id)) next.delete(id); else next.add(id); expanded.value = next }
@@ -51,7 +83,12 @@ defineExpose({ isDirty })
 
 <template>
   <section class="activity" aria-label="Activity">
-    <h3 class="eyebrow">Activity</h3>
+    <div class="activity-head">
+      <h3 class="eyebrow">Activity</h3>
+      <div v-if="entries.length" class="seg history-filter" role="radiogroup" aria-label="History" @keydown="historyKey">
+        <button v-for="option in historyOptions" :key="option.id" type="button" role="radio" :aria-checked="history === option.id" :tabindex="history === option.id ? 0 : -1" @click="history = option.id">{{ option.label }}</button>
+      </div>
+    </div>
     <button v-if="hasOlder" type="button" class="older" :disabled="loadingOlder" @click="emit('older')">
       <AppIcon name="chevron-up" :size="13" />{{ loadingOlder ? 'Loading older activity…' : 'Show older activity' }}
     </button>
@@ -60,7 +97,7 @@ defineExpose({ isDirty })
     </div>
     <p v-else-if="error" class="activity-error" role="alert">Activity could not be loaded. <button type="button" class="btn sm" @click="emit('retry')">Try again</button></p>
     <ol v-else class="timeline">
-      <template v-for="entry in entries" :key="entry.id">
+      <template v-for="entry in visible" :key="entry.id">
         <!-- Comment, possibly led by an agent work marker -->
         <template v-if="entry.kind === 'comment'">
           <li v-if="marker(entry) && editingId !== entry.id" class="entry marker">
@@ -106,35 +143,39 @@ defineExpose({ isDirty })
             </div>
           </li>
         </template>
-        <li v-else-if="entry.kind === 'changes'" class="entry changes">
-          <span class="node dot" aria-hidden="true" />
+        <li v-else class="entry" :class="[entry.kind, { automatic: isAutomatic(entry) }]">
+          <span v-if="isAutomatic(entry)" class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span>
+          <span v-else class="node dot" :class="{ 'created-dot': entry.kind === 'created' }" aria-hidden="true" />
           <p class="change-line">
-            <strong>{{ entry.author.name }}</strong>
-            <template v-for="(change, index) in entry.changes" :key="change.field">
-              <span v-if="index > 0" class="sep">,</span>
-              {{ ' ' }}{{ describeChange(change).label }}
-              <template v-if="describeChange(change).from">
-                <span class="value"><StatusIcon v-if="change.field === 'status' && change.from" :state="change.from" :size="11" />{{ describeChange(change).from }}</span>
-                <AppIcon name="arrow" :size="11" class="arrow" /><span class="sr-only"> to </span>
+            <strong :data-tip="actorTip(entry)">{{ actorLabel(entry) }}</strong>
+            <template v-if="entry.kind === 'changes'">
+              <template v-for="(change, index) in changesOf(entry)" :key="change.field">
+                <span v-if="index > 0" class="sep">,</span>
+                {{ ' ' }}{{ describeChange(change).label }}
+                <template v-if="describeChange(change).from">
+                  <span class="value"><StatusIcon v-if="change.field === 'status' && change.from" :state="change.from" :size="11" />{{ describeChange(change).from }}</span>
+                  <AppIcon name="arrow" :size="11" class="arrow" /><span class="sr-only"> to </span>
+                </template>
+                <span v-if="describeChange(change).to" class="value"><StatusIcon v-if="change.field === 'status' && change.to" :state="change.to" :size="11" />{{ describeChange(change).to }}</span>
               </template>
-              <span v-if="describeChange(change).to" class="value"><StatusIcon v-if="change.field === 'status' && change.to" :state="change.to" :size="11" />{{ describeChange(change).to }}</span>
             </template>
+            <template v-else> created this</template>
             <span class="sep">·</span>
             <time :datetime="entry.at" :data-tip="absoluteTime(entry.at)">{{ relativeTime(entry.at, { now }) }}</time>
           </p>
         </li>
-        <li v-else class="entry created">
-          <span class="node dot created-dot" aria-hidden="true" />
-          <p class="change-line"><strong>{{ entry.author.name }}</strong> created this <span class="sep">·</span> <time :datetime="entry.at" :data-tip="absoluteTime(entry.at)">{{ relativeTime(entry.at, { now }) }}</time></p>
-        </li>
       </template>
-      <li v-if="!entries.length && !loading" class="entry empty"><span class="node dot" aria-hidden="true" /><p class="change-line">No activity yet.</p></li>
+      <li v-if="!visible.length && !loading" class="entry empty"><span class="node dot" aria-hidden="true" /><p class="change-line">{{ emptyLine }}</p></li>
     </ol>
   </section>
 </template>
 
 <style scoped>
-.activity .eyebrow { margin: 0 0 12px; }
+.activity { min-width: 0; }
+.activity-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 0 0 12px; }
+.activity-head .eyebrow { margin: 0; }
+.history-filter { flex-wrap: wrap; max-width: 100%; }
+.auto { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line-2), 0 0 0 3px var(--surface-raised); color: var(--teal-ink); }
 .older { display: inline-flex; align-items: center; gap: 6px; height: 28px; margin: 0 0 10px -8px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
 .older:hover { background: var(--row-hover); }
 .older:focus-visible { box-shadow: var(--focus-ring); }

@@ -24,7 +24,7 @@ func TestImportedPackDetailsStayOutsideSessionBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !proposal.AlwaysOn.Insert || proposal.AlwaysOn.Budget != MaxBytes || strings.Contains(proposal.AlwaysOn.Explanation, "PACKTOKEN") {
+	if !proposal.AlwaysOn.Insert || proposal.AlwaysOn.Budget != LegacyMaxBytes || strings.Contains(proposal.AlwaysOn.Explanation, "PACKTOKEN") {
 		t.Fatalf("always-on %+v", proposal.AlwaysOn)
 	}
 	mapped, err := rulesimport.MapDraft(proposal)

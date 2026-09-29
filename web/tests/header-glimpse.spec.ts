@@ -15,6 +15,19 @@ test.setTimeout(60_000)
 
 const surface = (page: Page) => page.locator('.header-glimpse-canvas')
 const ready = (page: Page) => expect(surface(page)).toHaveAttribute('data-ready', 'true', { timeout: 20_000 })
+// Fixed 60fps steps, released after layout, so the contrast shot pauses on one
+// orbit angle. 17ms stays above the renderer's frame gate. Do not relax 0.78.
+const GLIMPSE_PIN_FRAMES = 192
+async function releasePinnedGlimpse(page: Page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    const release = (window as unknown as { __aeonReleaseGlimpsePin?: () => void }).__aeonReleaseGlimpsePin
+    if (!release) throw new Error('glimpse pin was not installed')
+    release()
+  })
+  await expect(surface(page)).toHaveAttribute('data-glimpse-pin', String(GLIMPSE_PIN_FRAMES), { timeout: 20_000 })
+}
 
 const protectedSelectors = ['.title-line > *', '.description', '.head-stats', '.project-tabs', '.view-bar .view-tab', '.view-bar .tab', '.view-bar .changes', '.toolbar-wrap']
 async function protectedBoxes(page: Page) {
@@ -370,10 +383,11 @@ async function textContrast(page: Page, selector: string) {
 }
 
 async function expectSoftFittedGraph(page: Page, checkExtent = false) {
+  const pinned = await surface(page).getAttribute('data-glimpse-pin')
   await page.locator('.project-head').hover()
   await page.getByRole('button', { name: 'Pause motion', exact: true }).click()
   await page.mouse.move(0, 0)
-  await page.waitForTimeout(400)
+  if (!pinned) await page.waitForTimeout(400)
   await expect(surface(page)).toHaveAttribute('data-motion', 'still')
   const layer = page.locator('.glimpse-canvas'), clip = (await layer.boundingBox())!
   // Isolate painted graph pixels from browser text antialiasing: hiding an
@@ -427,12 +441,13 @@ for (const scheme of ['light', 'dark'] as const) {
       await page.route('**/api/projects/p-pharos/journey', route => route.fulfill({ json: journeyWorld('plan').journey }))
       const dir = `../.agent-shots/${process.env.HG2_SHOT_PASS ?? 'pass-1'}`
       mkdirSync(dir, { recursive: true })
+      if (width >= 1280) await page.addInitScript(`window.__aeonGlimpsePin = { frames: ${GLIMPSE_PIN_FRAMES} }`)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.goto('/p/PHAROS/tickets')
       if (width >= 1280) await ready(page)
       else await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
-      await page.waitForTimeout(width >= 1280 ? 3200 : 200)
       await expect(page.locator('.journey-chip')).toBeVisible()
+      if (width >= 1280) await releasePinnedGlimpse(page)
       if (width >= 1280) {
         await expectClearOfText(page)
         await expect(surface(page)).toHaveAttribute('data-dimension', '3d')

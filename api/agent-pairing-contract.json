@@ -132,7 +132,13 @@
         "install_targets": "release-only per-platform artifact_url, checksums_url, verified download/check/install command; [] in dev",
         "install_available": "boolean",
         "platform_qualification": "candidate; consult exact release service qualification evidence",
-        "setup_command": "verified absolute binary path setup --url configured origin --workspace approved absolute folder --state-root private absolute folder outside repos --harness chosen harness --start-service; default tenant slug from guide",
+        "setup_command": "verified absolute binary path pair --url configured origin; confirms current folder and detected signed-in harnesses, creates default private state, waits for person approval; default tenant slug from guide",
+        "managed_setup": {
+          "command": "aeon-agentd pair --url configured origin",
+          "service_option": "actual owning Home Manager option",
+          "module_url": "HTTPS link to owning module",
+          "service_note": "current paired-service support or explicit owning dependency; no implied service activation"
+        },
         "verification_capabilities": {
           "claude": {
             "supported": true,
