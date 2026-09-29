@@ -25,7 +25,11 @@ async function setup(page: Page) {
   // Unmanaged and fresh.
   Object.assign(live!, { display_label: 'codex-outside', management_mode: 'unmanaged', advertised_capabilities: ['inbox', 'status'] })
   // Managed with settings.
-  Object.assign(lead!, { display_label: 'claude-lead', advertised_capabilities: ['inbox', 'status', 'steer', 'interrupt', 'stop', 'managed_control_v1', 'rename', 'model', 'effort'] })
+  Object.assign(lead!, { display_label: 'claude-lead', advertised_capabilities: ['inbox', 'status', 'steer', 'interrupt', 'stop', 'managed_control_v1', 'rename', 'model', 'effort'],
+    process_ownership: { daemon_id: 'imac0-daemon', generation: 'a'.repeat(32), process_id: 'b'.repeat(32), root_pid: 4242, group_id: 4242, started_at: minutes(70) } })
+  // The daemon confirms ownership with every heartbeat; keep it fresh on each read.
+  const touch = () => { lead!.process_observed_at = new Date().toISOString() }
+  touch()
   // Ended more than a day ago: only History shows it.
   Object.assign(old!, { display_label: 'old-run', stopped_at: minutes(26 * 60), heartbeat_at: minutes(26 * 60 + 5) })
   const views: string[] = []
@@ -33,6 +37,7 @@ async function setup(page: Page) {
     const q = new URL(route.request().url()).searchParams
     if (q.get('ticket') || q.get('agent') || q.get('project')) return route.fallback()
     views.push(q.get('view') ?? '')
+    touch()
     const cutoff = Date.now() - 24 * 3_600_000
     const ended = (s: Record<string, unknown>) => Math.max(Date.parse(String(s.stopped_at ?? '')) || 0, Date.parse(String(s.archived_at ?? '')) || 0)
     const items = data.sessions.filter(s => q.get('view') !== 'current' || !(ended(s) && ended(s) < cutoff))
@@ -56,7 +61,14 @@ async function setup(page: Page) {
     const after = restore.get(id)!()
     await route.fulfill({ status: 201, json: { id: id + 1000, type: 'harness.restored', undo_of: id, after } })
   })
-  return { data, lost, silent: silent!, live: live!, lead: lead!, old: old!, views, undone }
+  const managed: Record<string, unknown>[] = [], legacy: string[] = []
+  await page.route('**/harness-sessions/*/managed-controls', async route => {
+    const body = route.request().postDataJSON() as Record<string, unknown>
+    managed.push(body)
+    await route.fulfill({ status: 201, json: { id: body.request_id, session_id: lead!.id, kind: body.kind, state: 'pending', sequence: 1, outcome: null, reason: null, created_at: new Date().toISOString(), claimed_at: null, completed_at: null, expires_at: new Date(Date.now() + 45_000).toISOString() } })
+  })
+  await page.route(/\/harness-sessions\/[^/]+\/controls\/(interrupt|stop)$/, async route => { legacy.push(route.request().url()); await route.fulfill({ status: 409, json: { error: 'use managed controls' } }) })
+  return { data, lost, silent: silent!, live: live!, lead: lead!, old: old!, views, undone, managed, legacy }
 }
 
 test('Lost contact is an ended row with a bin; one click removes, Undo brings it back', async ({ page }) => {
@@ -111,15 +123,33 @@ test('an unmanaged session menu offers only what works, with one quiet line', as
 })
 
 test('a managed session menu offers Interrupt, Stop, settings and Remove', async ({ page }) => {
-  const { lead } = await setup(page)
+  const { lead, managed, legacy } = await setup(page)
   await page.goto('/agents')
   await row(page, lead.id).hover()
   await row(page, lead.id).getByRole('button', { name: 'Actions for claude-lead' }).click()
   const menu = page.getByRole('menu', { name: 'Actions for claude-lead' })
   await expect(menu.getByRole('menuitem')).toHaveText([/^Interrupt/, 'Stop session…', 'Name, model, effort', /^Open PHAROS-11/, 'Copy session id', 'Remove…'])
   await expect(menu).not.toContainText('Runs outside')
-  await menu.getByRole('menuitem', { name: 'Name, model, effort' }).click()
+  // managed_control_v1: Interrupt goes through the ownership-aware route, bound to the process generation.
+  await menu.getByRole('menuitem', { name: /^Interrupt/ }).click()
+  await expect.poll(() => managed.length).toBe(1)
+  expect(managed[0]).toMatchObject({ kind: 'interrupt', expected_ownership: { daemon_id: 'imac0-daemon', root_pid: 4242 } })
+  expect(legacy).toEqual([])
+  await row(page, lead.id).hover()
+  await row(page, lead.id).getByRole('button', { name: 'Actions for claude-lead' }).click()
+  await page.getByRole('menu', { name: 'Actions for claude-lead' }).getByRole('menuitem', { name: 'Name, model, effort' }).click()
   await expect(page).toHaveURL(new RegExp(`/agents/${lead.id}$`))
+})
+
+test('a managed_control_v1 session without fresh ownership offers no Interrupt or Stop', async ({ page }) => {
+  const { lead } = await setup(page)
+  await page.route(/\/api\/harness-sessions\?/, async route => route.fallback())
+  lead.process_observed_at = new Date(Date.now() - 5 * 60_000).toISOString()
+  delete (lead as Record<string, unknown>).process_ownership
+  await page.goto('/agents')
+  await row(page, lead.id).hover()
+  await row(page, lead.id).getByRole('button', { name: 'Actions for claude-lead' }).click()
+  await expect(page.getByRole('menu', { name: 'Actions for claude-lead' }).getByRole('menuitem', { name: /Interrupt|Stop session/ })).toHaveCount(0)
 })
 
 test('sessions that ended over a day ago leave the list and stay in History', async ({ page }) => {

@@ -129,7 +129,7 @@ watch([() => props.selected, () => props.history?.length, () => current.value.le
 // sessions get a bin right in the row: one click, then an undo toast. The
 // overflow holds the rest; it is hidden when the bin already says it all.
 const live = (view: SessionView) => view.session.phase !== 'stopped' && !view.session.archived_at
-const menuOf = (view: SessionView): SessionMenu => sessionMenu(view, { canControl: props.canControl, canRemove: removal.canRemove(view.session), pending: props.controls[view.session.id], product: brand.value.short_name })
+const menuOf = (view: SessionView): SessionMenu => sessionMenu(view, { canControl: props.canControl, canRemove: removal.canRemove(view.session), pending: props.controls[view.session.id], product: brand.value.short_name, now: props.now })
 const bin = (view: SessionView) => removal.canRemove(view.session) && quickRemoval(view)
 const hasMenu = (view: SessionView) => { const m = menuOf(view); return m.control.length > 0 || m.other.length > 0 || !!m.note || (m.remove && !bin(view)) }
 // The bound ticket's estimate sits under its key while the session runs; an ended

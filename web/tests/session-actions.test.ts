@@ -22,7 +22,7 @@ function view(session: Partial<SessionView['session']> = {}, state: SessionView[
     ticket: ticket ? { id: 'n1', key: 'AEON-275', title: 'Worker', href: '/p/AEON/AEON-275' } : null,
   }
 }
-const access = { canControl: true, canRemove: true, product: 'Aeon' }
+const access = { canControl: true, canRemove: true, product: 'Aeon', now }
 
 test('Lost contact is an ended session, never a problem', () => {
   assert.equal(problemReason('heartbeat_lost'), false)
@@ -44,15 +44,29 @@ test('an unmanaged session offers Remove, Open ticket and Copy id, with one quie
 })
 
 test('a managed session offers Interrupt, Stop and settings only when they work', () => {
-  const caps = ['interrupt', 'stop', 'managed_control_v1', 'rename', 'model']
-  assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps }), access).control, ['interrupt', 'stop', 'settings'])
+  // Legacy managed sessions use the typed /controls route.
+  const caps = ['interrupt', 'stop']
+  assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps }), access).control, ['interrupt', 'stop'])
   assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: ['stop'] }), access).control, ['stop'])
-  assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps }), { ...access, pending: { state: 'claimed' } }).control, ['settings'])
+  assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps }), { ...access, pending: { state: 'claimed' } }).control, [])
   assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps }), { ...access, canControl: false }).control, [])
   assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps, phase: 'stopped', stopped_at: ago(0) }, 'stopped'), access).control, [])
   assert.equal(sessionMenu(view({ management_mode: 'managed' }), access).note, '')
   assert.equal(sessionMenu(view(), { ...access, canRemove: false }).remove, false)
   assert.equal(sessionMenu(view({ archived_at: ago(0), phase: 'stopped', stopped_at: ago(0) }, 'stopped'), access).remove, false)
+})
+
+test('managed_control_v1 offers Interrupt and Stop only with fresh process ownership', () => {
+  const ownership = { daemon_id: 'd', generation: 'g', process_id: 'p', root_pid: 9, group_id: 9, started_at: ago(60_000) }
+  const caps = ['interrupt', 'stop', 'managed_control_v1', 'rename']
+  const fresh = view({ harness: 'claude', management_mode: 'managed', advertised_capabilities: caps, process_ownership: ownership, process_observed_at: ago(10_000) })
+  assert.deepEqual(sessionMenu(fresh, access).control, ['interrupt', 'stop', 'settings'])
+  const stale = view({ harness: 'claude', management_mode: 'managed', advertised_capabilities: caps, process_ownership: ownership, process_observed_at: ago(60_000) })
+  assert.deepEqual(sessionMenu(stale, access).control, ['settings'])
+  const unowned = view({ harness: 'claude', management_mode: 'managed', advertised_capabilities: caps })
+  assert.deepEqual(sessionMenu(unowned, access).control, ['settings'])
+  const other = view({ harness: 'codex', management_mode: 'managed', advertised_capabilities: caps, process_ownership: ownership, process_observed_at: ago(10_000) })
+  assert.deepEqual(sessionMenu(other, access).control, ['settings'])
 })
 
 test('No heartbeat, Lost contact and stopped rows remove in one click; live rows ask', () => {

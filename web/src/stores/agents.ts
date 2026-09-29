@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { APIError, getNode } from '../lib/api'
 import {
-  decideApproval, getControl, listAccounts, listAllSessions, listApprovals, listMessages, listModels, listRuns, listTargets,
+  decideApproval, getControl, listAccounts, listAllSessions, listApprovals, listMessages, listModels, listRuns, listTargets, requestManagedControl,
   requestControl, resolveMessage, revokeApproval, sendMessage, setAccountState,
   type AgentAccount, type AgentRun, type Approval, type HarnessSession, type ModelProfile, type ProjectMessage, type SessionControl,
 } from '../lib/agents'
@@ -299,7 +299,8 @@ export const useAgents = defineStore('agents', () => {
   }
   async function control(view: SessionView, kind: SessionControl['kind']) {
     const { session } = view
-    const issued = await requestControl(session.project_id, session.id, kind)
+    // managed_control_v1 sessions refuse the legacy route; use the ownership-aware one.
+    const issued = session.advertised_capabilities.includes('managed_control_v1') ? await requestManagedControl(session, kind) : await requestControl(session.project_id, session.id, kind)
     controls.value = { ...controls.value, [session.id]: issued }
     void follow(session, issued, view.name)
     return issued

@@ -13,10 +13,12 @@ export interface MetadataChange {
   value: string | null
   at: string
 }
+export interface ProcessOwnership { daemon_id: string; generation: string; process_id: string; root_pid: number; group_id: number; started_at: string }
 export interface HarnessSession {
   watch?: import("./attachWatch").AttachStatus
   id: string; project_id: string; agent_principal_id: string
   archived_at?: string | null; recovery_process_state?: 'unknown' | null
+  process_ownership?: ProcessOwnership | null; process_observed_at?: string | null
   display_label?: string | null
   model?: string | null; reasoning_effort?: string | null; account_label?: string | null; harness_version?: string | null
   brief?: string | null; worktree?: string | null; branch?: string | null; commits?: { sha: string; subject: string }[]
@@ -126,6 +128,10 @@ export const removeSession = (session: HarnessSession, reason: string) => reques
 export const undoRemoval = (eventId: number) => request<{ after: HarnessSession }>(`/events/${enc(String(eventId))}/undo`, 'POST').then(event => event.after)
 export const removeStaleSessions = (projectId: string, reason: string) => request<{ items: RemoveSessionResult[]; cutoff: string; more: boolean }>(`${sessionPath(projectId)}/remove-stale`, 'POST', { reason })
 export const requestControl = (projectId: string, sessionId: string, kind: SessionControl['kind']) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${kind}`, 'POST', {})
+// A managed_control_v1 session takes Interrupt and Stop through the
+// ownership-aware route, bound to the exact process generation (AEON-291).
+export const requestManagedControl = (session: HarnessSession, kind: SessionControl['kind']) =>
+  request<SessionControl>(`${sessionPath(session.project_id, session.id)}/managed-controls`, 'POST', { request_id: crypto.randomUUID(), kind, expected_ownership: { ...session.process_ownership } })
 export const getControl = (projectId: string, sessionId: string, controlId: string) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${enc(controlId)}`)
 export const listAccounts = () => request<AgentAccount[]>('/agent-accounts')
 export const setAccountState = (id: string, state: AgentAccount['state']) => request<AgentAccount>(`/agent-accounts/${enc(id)}`, 'PATCH', { state })
