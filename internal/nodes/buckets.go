@@ -85,16 +85,19 @@ func workNotClosedSQL(stateExpr, categoryAlias string) string {
 
 // workStateKnownSQL is 0 for a workflow state and 1 otherwise. It stays
 // ascending in both sort directions, so an unknown spelling stays after the
-// workflow. The list is a plain CASE, the same shape as the previous sort.
+// workflow. The state is normalised the same way as the buckets, so " OPEN ",
+// " QA " and "in--progress" stay in the workflow.
 func workStateKnownSQL(stateExpr string) string {
-	return `CASE WHEN ` + stateExpr + ` IN ('open','new','backlog','blocked','in_progress','in-progress','in progress','active','qa','accepted','delivered','done','cancelled','canceled','archived') THEN 0 ELSE 1 END`
+	return `CASE WHEN ` + workStateNormSQL(stateExpr) + ` IN ('open','new','backlog','blocked','in_progress','active','qa','accepted','delivered','done','cancelled','canceled','archived') THEN 0 ELSE 1 END`
 }
 
 // workStateOrderSQL ranks a known state in workflow order: open, new, backlog,
 // blocked, in progress and active, qa, accepted, delivered, done, cancelled,
 // archived. Any other spelling ties and the known/unknown CASE separates it.
+// Ranking reads the normalised state, so spaced and hyphenated spellings share
+// a rank with the canonical word.
 func workStateOrderSQL(stateExpr string) string {
-	return `CASE ` + stateExpr + ` WHEN 'open' THEN 0 WHEN 'new' THEN 1 WHEN 'backlog' THEN 2 WHEN 'blocked' THEN 3 WHEN 'in_progress' THEN 4 WHEN 'in-progress' THEN 4 WHEN 'in progress' THEN 4 WHEN 'active' THEN 4 WHEN 'qa' THEN 5 WHEN 'accepted' THEN 6 WHEN 'delivered' THEN 7 WHEN 'done' THEN 8 WHEN 'cancelled' THEN 9 WHEN 'canceled' THEN 9 WHEN 'archived' THEN 10 ELSE 11 END`
+	return `CASE ` + workStateNormSQL(stateExpr) + ` WHEN 'open' THEN 0 WHEN 'new' THEN 1 WHEN 'backlog' THEN 2 WHEN 'blocked' THEN 3 WHEN 'in_progress' THEN 4 WHEN 'active' THEN 4 WHEN 'qa' THEN 5 WHEN 'accepted' THEN 6 WHEN 'delivered' THEN 7 WHEN 'done' THEN 8 WHEN 'cancelled' THEN 9 WHEN 'canceled' THEN 9 WHEN 'archived' THEN 10 ELSE 11 END`
 }
 
 // compileStateCatalog checks field_schema.states: objects with a distinct state

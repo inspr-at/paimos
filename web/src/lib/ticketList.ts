@@ -403,8 +403,13 @@ export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => numb
   const missing = (row: ListItem, field: SortKey['field']) => field === 'eta_ready' ? !row.eta?.eta_ready_at : field === 'progress' ? typeof row.eta?.progress_pct !== 'number' : false
   return (a, b) => {
     for (const key of keys) {
-      // Unassigned work, and estimates nobody reported, come last in both directions.
+      // Unassigned work, estimates nobody reported, and unknown states come last in both directions.
       if (key.field === 'assignee' && !a.assignee !== !b.assignee) return a.assignee ? -1 : 1
+      if (key.field === 'state') {
+        const unknownA = statusMeta(a.state).key === 'other'
+        const unknownB = statusMeta(b.state).key === 'other'
+        if (unknownA !== unknownB) return unknownA ? 1 : -1
+      }
       if (missing(a, key.field) !== missing(b, key.field)) return missing(a, key.field) ? 1 : -1
       const x = value(a, key.field), y = value(b, key.field)
       if (x !== y) return (x < y ? -1 : 1) * (key.desc ? -1 : 1)
@@ -413,11 +418,15 @@ export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => numb
   }
 }
 
-// Stable status ordering by workflow. The server keeps an unknown spelling after that workflow.
+// Stable status ordering by workflow. An unknown spelling stays after that
+// workflow in both directions, matching the list API.
 export function orderByStatus(rows: ListItem[], desc = false): ListItem[] {
   return rows
-    .map((row, index) => ({ row, index, order: statusMeta(row.state).order }))
-    .sort((a, b) => (desc ? b.order - a.order : a.order - b.order) || a.index - b.index)
+    .map((row, index) => ({ row, index, meta: statusMeta(row.state) }))
+    .sort((a, b) => {
+      if ((a.meta.key === 'other') !== (b.meta.key === 'other')) return a.meta.key === 'other' ? 1 : -1
+      return (desc ? b.meta.order - a.meta.order : a.meta.order - b.meta.order) || a.index - b.index
+    })
     .map(entry => entry.row)
 }
 

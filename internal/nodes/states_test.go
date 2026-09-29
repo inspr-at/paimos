@@ -389,28 +389,98 @@ func TestStateSortFollowsWorkflow(t *testing.T) {
 		}
 		return out
 	}
-	if got := statesOf(get("/api/nodes?within=" + root.ID + "&sort=state&limit=100")); strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("workflow order:\n got %v\nwant %v", got, want)
-	}
-	var paged []string
-	cursor := ""
-	for range len(want) + 1 {
-		path := "/api/nodes?within=" + root.ID + "&sort=state&limit=2"
-		if cursor != "" {
-			path += "&cursor=" + url.QueryEscape(cursor)
+	descWant := []string{"archived", "cancelled", "canceled", "done", "delivered", "accepted", "qa", "in-progress", "active", "blocked", "new", "open", "mystery"}
+	assertSorted := func(sort, label string, expect []string) {
+		t.Helper()
+		if got := statesOf(get("/api/nodes?within=" + root.ID + "&sort=" + sort + "&limit=100")); strings.Join(got, ",") != strings.Join(expect, ",") {
+			t.Fatalf("%s order:\n got %v\nwant %v", label, got, expect)
 		}
-		page := get(path)
-		paged = append(paged, statesOf(page)...)
-		if page.NextCursor == nil {
-			break
+		var paged []string
+		cursor := ""
+		for range len(expect) + 1 {
+			path := "/api/nodes?within=" + root.ID + "&sort=" + url.QueryEscape(sort) + "&limit=2"
+			if cursor != "" {
+				path += "&cursor=" + url.QueryEscape(cursor)
+			}
+			page := get(path)
+			paged = append(paged, statesOf(page)...)
+			if page.NextCursor == nil {
+				break
+			}
+			cursor = *page.NextCursor
 		}
-		cursor = *page.NextCursor
+		if strings.Join(paged, ",") != strings.Join(expect, ",") {
+			t.Fatalf("%s paged order:\n got %v\nwant %v", label, paged, expect)
+		}
 	}
-	if strings.Join(paged, ",") != strings.Join(want, ",") {
-		t.Fatalf("paged order:\n got %v\nwant %v", paged, want)
+	assertSorted("state", "workflow", want)
+	assertSorted("-state", "descending", descWant)
+}
+
+func TestStateSortNormalisesSpellings(t *testing.T) {
+	p := newPrincipal(t, "state-sort-norm")
+	project := kindBySlug(t, p, "project")
+	ticket := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Norm sort","state":"active"}`)
+	for _, state := range []string{"mystery", " OPEN ", "done", "in--progress", " QA ", "archived", "open", "qa"} {
+		body := map[string]any{"kind_id": ticket.ID, "title": state, "state": state, "parent_id": root.ID}
+		if state == "done" {
+			body["fields"] = json.RawMessage(benefitFields)
+		}
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustNode(t, p, string(raw))
 	}
-	desc := get("/api/nodes?within=" + root.ID + "&sort=-state&limit=100")
-	if len(desc.Items) != len(want) || desc.Items[0].State != "archived" || desc.Items[len(desc.Items)-1].State != "mystery" {
-		t.Fatalf("descending ends: %v", statesOf(desc))
+	get := func(path string) nodePage {
+		t.Helper()
+		status, body := call(t, &p, http.MethodGet, path, "")
+		return decode[nodePage](t, status, body, http.StatusOK)
 	}
+	statesOf := func(page nodePage) []string {
+		out := make([]string, len(page.Items))
+		for i, n := range page.Items {
+			out[i] = n.State
+		}
+		return out
+	}
+	groupsOf := func(states []string) []string {
+		out := make([]string, len(states))
+		for i, state := range states {
+			switch normaliseWorkState(state) {
+			case "open", "in_progress", "qa", "done", "archived":
+				out[i] = normaliseWorkState(state)
+			default:
+				out[i] = "unknown"
+			}
+		}
+		return out
+	}
+	assertSorted := func(sort, label, groups string) {
+		t.Helper()
+		full := statesOf(get("/api/nodes?within=" + root.ID + "&sort=" + sort + "&limit=100"))
+		if strings.Join(groupsOf(full), ",") != groups {
+			t.Fatalf("%s groups:\n got %v\nwant %s\nstates %v", label, groupsOf(full), groups, full)
+		}
+		var paged []string
+		cursor := ""
+		for range len(full) + 1 {
+			path := "/api/nodes?within=" + root.ID + "&sort=" + url.QueryEscape(sort) + "&limit=2"
+			if cursor != "" {
+				path += "&cursor=" + url.QueryEscape(cursor)
+			}
+			page := get(path)
+			paged = append(paged, statesOf(page)...)
+			if page.NextCursor == nil {
+				break
+			}
+			cursor = *page.NextCursor
+		}
+		if strings.Join(paged, "\n") != strings.Join(full, "\n") {
+			t.Fatalf("%s pages disagree:\n got %q\nwant %q", label, paged, full)
+		}
+	}
+	assertSorted("state", "normalised", "open,open,in_progress,qa,qa,done,archived,unknown")
+	assertSorted("-state", "normalised descending", "archived,done,qa,qa,in_progress,open,open,unknown")
 }
