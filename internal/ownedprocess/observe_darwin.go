@@ -4,9 +4,11 @@
 package ownedprocess
 
 import (
-	"golang.org/x/sys/unix"
+	"errors"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 const waitObservationSupported = true
@@ -25,4 +27,24 @@ func observeExit(pid int) error {
 		}
 		return nil
 	}
+}
+
+// Darwin returns EPERM (not ESRCH) when a group contains only zombies. Only
+// accept that result after inspecting this still-reserved, verified group.
+// This queries process state, never process arguments or environment.
+func emptyExitedGroup(pid int, signalErr error) bool {
+	if !errors.Is(signalErr, syscall.EPERM) {
+		return false
+	}
+	members, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", pid)
+	if err != nil {
+		return false
+	}
+	const zombie = 5 // Darwin sys/proc.h: SZOMB
+	for _, member := range members {
+		if member.Proc.P_stat != zombie {
+			return false
+		}
+	}
+	return true
 }

@@ -52,15 +52,11 @@ func (m *Module) requestControl(r *http.Request, tx pgx.Tx, p tenant.Principal, 
 	if err != nil {
 		return nil, err
 	}
-	if p.Kind == tenant.Agent {
-		var approved bool
-		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_permission_grants WHERE agent_principal_id=$1 AND scope='harness.control' AND resource_kind='node' AND resource_id=$2 AND revoked_at IS NULL AND valid_until>clock_timestamp())`, p.ID, s.ProjectID).Scan(&approved)
-		if err != nil {
-			return nil, err
-		}
-		if !approved {
-			return nil, workorders.Fail(403, "live person-approved harness.control grant required")
-		}
+	if p.Kind != tenant.Person {
+		return nil, workorders.Fail(403, "only a person may control a managed session")
+	}
+	if has(s, managedControlCapability) {
+		return nil, workorders.Fail(409, "use managed-controls with request id and exact ownership")
 	}
 	if s.StoppedAt != nil || s.Management != "managed" || !has(s, kind) {
 		return nil, workorders.Fail(409, "owned control unavailable")
@@ -85,6 +81,9 @@ func (m *Module) control(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if !workorders.UUID(id) {
 		return nil, workorders.Fail(400, "invalid control id")
 	}
+	if err := m.expireControls(r, tx, p, s); err != nil {
+		return nil, err
+	}
 	return scanControl(tx.QueryRow(r.Context(), `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND id=$2`, s.ID, id))
 }
 func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -95,6 +94,12 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	ctx := r.Context()
 	s, err := worker(ctx, tx, r, p)
 	if err != nil {
+		return nil, err
+	}
+	if s.Management != "managed" {
+		return nil, workorders.Fail(409, "managed worker required")
+	}
+	if err := m.expireControls(r, tx, p, s); err != nil {
 		return nil, err
 	}
 	rows, err := tx.Query(ctx, `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND state='pending' ORDER BY sequence FOR UPDATE`, s.ID)
@@ -115,7 +120,11 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err != nil {
 		return nil, err
 	}
-	claimed := []Control{}
+	type offered struct {
+		Control
+		Text string `json:"text,omitempty"`
+	}
+	claimed := []offered{}
 	for _, old := range pending {
 		c, e := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='claimed',claimed_at=clock_timestamp() WHERE id=$1 RETURNING `+controlColumns, old.ID))
 		if e != nil {
@@ -124,7 +133,36 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		if e = record(ctx, tx, p, s, "control_claimed", old, c); e != nil {
 			return nil, e
 		}
-		claimed = append(claimed, c)
+		authorized, e := controlRequesterAuthorized(r, tx, p, s, c)
+		if e != nil {
+			return nil, e
+		}
+		if !authorized {
+			m.controlText.take(relayKey(p.TenantID, s.ID, c.ID))
+			c, e = scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='completed',outcome='rejected',reason='authorization_revoked',completed_at=clock_timestamp() WHERE id=$1 RETURNING `+controlColumns, c.ID))
+			if e != nil {
+				return nil, e
+			}
+			if e = record(ctx, tx, p, s, "control_completed", nil, c); e != nil {
+				return nil, e
+			}
+			continue
+		}
+		text := ""
+		if c.Kind == "steer" {
+			text = m.controlText.take(relayKey(p.TenantID, s.ID, c.ID))
+			if text == "" {
+				c, e = scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='completed',outcome='rejected',reason='transient_input_unavailable',completed_at=clock_timestamp() WHERE id=$1 RETURNING `+controlColumns, c.ID))
+				if e != nil {
+					return nil, e
+				}
+				if e = record(ctx, tx, p, s, "control_completed", nil, c); e != nil {
+					return nil, e
+				}
+				continue
+			}
+		}
+		claimed = append(claimed, offered{c, text})
 	}
 	if s.Phase != "yielded" {
 		before := s

@@ -16,3 +16,5 @@ func observeExit(pid int) error {
 		}
 	}
 }
+
+func emptyExitedGroup(int, error) bool { return false }
