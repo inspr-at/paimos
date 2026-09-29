@@ -792,7 +792,7 @@ paths:
                       role_id: {type: string, format: uuid}
       responses:
         '201': {description: Agent ready for its first key, content: {application/json: {schema: {$ref: '#/components/schemas/AgentMember'}}}}
-        '400': {description: Invalid name, description or role selection}
+        '400': {description: 'Invalid name, description or role selection'}
         '403': {description: Requires a person with keys.manage and authority to grant the requested roles}
         '404': {description: Role or project not found in this workspace}
         '409': {description: Name already used in this workspace}
