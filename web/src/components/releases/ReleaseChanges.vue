@@ -26,6 +26,22 @@ const shown = computed(() => GROUPS.filter(g => countOf(g.key)))
 const commitUrl = (sha: string) => props.repository ? `https://github.com/${props.repository}/commit/${sha}` : ''
 const titleId = (group: string, key: string) => `change-${group}-${key}`
 const commitWord = (n: number) => n === 1 ? '1 commit' : `${n} commits`
+// A subject hit is painted inside the disclosure. Open it for this query, then
+// leave it alone so a later render does not slam a reader-closed disclosure shut.
+const revealed = new WeakMap<HTMLDetailsElement, string>()
+function commitsMatch(line: TicketChangeLine) {
+  const q = props.query?.trim().toLowerCase()
+  return !!q && line.commits.some(c => plainSubject(c.subject, c.tickets).toLowerCase().includes(q))
+}
+function revealCommits(el: unknown, line: TicketChangeLine) {
+  if (!(el instanceof HTMLDetailsElement)) return
+  const q = props.query?.trim().toLowerCase() ?? ''
+  const hit = commitsMatch(line)
+  const stamp = hit ? q : ''
+  if (revealed.get(el) === stamp) return
+  revealed.set(el, stamp)
+  if (hit) el.open = true
+}
 const showBenefit = (line: TicketChangeLine) => {
   const benefit = line.benefit.trim()
   return !!benefit && benefit.toLowerCase() !== line.pill.trim().toLowerCase()
@@ -59,7 +75,7 @@ function parts(text: string) {
               <TicketLink :ticket-key="line.key" variant="inline" />
             </div>
             <p v-if="line.pill && showBenefit(line)" class="benefit" :lang="line.benefitLang"><template v-for="(p, i) in parts(line.benefit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
-            <details class="commits">
+            <details :ref="el => revealCommits(el, line)" class="commits">
               <summary><AppIcon name="chevron-right" :size="12" class="chev" />{{ commitWord(line.commits.length) }}</summary>
               <ul class="commit-list">
                 <li v-for="c in line.commits" :key="c.commit">

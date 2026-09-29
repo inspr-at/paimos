@@ -154,19 +154,22 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(sheet(page)).toHaveCount(0)
 })
 
-test('filters keep releases with features, fixes or tickets', async ({ page }) => {
+test('filters follow visible feature and fix lines, and still keep releases with tickets', async ({ page }) => {
   await setup(page)
   await page.goto('/releases')
   await expect(options(page)).toHaveCount(7)
   const toggles = sheet(page).getByRole('group', { name: 'Show only releases with' })
+  // These commits name tickets but carry no visible benefit line, so the rows show other, not features or fixes.
   await toggles.getByRole('button', { name: 'Features' }).click()
-  await expect(options(page)).toHaveCount(5)
+  await expect(sheet(page).getByText('0 of 7')).toBeVisible()
+  await expect(sheet(page).getByRole('heading', { name: 'No release matches' })).toBeVisible()
   await toggles.getByRole('button', { name: 'Features' }).click()
   await toggles.getByRole('button', { name: 'Fixes' }).click()
   await expect(toggles.getByRole('button', { name: 'Fixes' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(options(page)).toHaveCount(4)
+  await expect(sheet(page).getByText('0 of 7')).toBeVisible()
+  await toggles.getByRole('button', { name: 'Fixes' }).click()
   await toggles.getByRole('button', { name: 'Tickets' }).click()
-  await expect(options(page)).toHaveCount(4)
+  await expect(options(page)).toHaveCount(5)
   await sheet(page).getByRole('searchbox', { name: 'Search releases' }).fill('nothing like this')
   await expect(sheet(page).getByRole('heading', { name: 'No release matches' })).toBeVisible()
   await sheet(page).getByRole('button', { name: 'Clear search and filters' }).click()

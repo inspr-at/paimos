@@ -256,10 +256,12 @@ export function naturalKey(a: string, b: string) { return a.localeCompare(b, 'en
 // ---------- Search and filters ----------
 export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; tickets: boolean }
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
-export function matches(r: Release, f: ReleaseFilter) {
-  const groups = groupChanges(r.changes)
-  if (f.features && !groups.features.length) return false
-  if (f.fixes && !groups.fixes.length) return false
+// The same lines the row counts. A feature or fix commit with no visible
+// ticket is Other, so it must not pass the Features or Fixes filter.
+export function matches(r: Release, f: ReleaseFilter, locale?: string | null) {
+  const presented = presentChanges(r.changes, locale)
+  if (f.features && !presented.features.length) return false
+  if (f.fixes && !presented.fixes.length) return false
   if (f.tickets && !ticketsOf(r).length) return false
   const q = f.q.trim().toLowerCase()
   if (!q) return true

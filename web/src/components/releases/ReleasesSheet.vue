@@ -50,7 +50,7 @@ const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
 
 const history = computed(() => store.history)
 const releases = computed(() => [...(history.value?.releases ?? [])].sort((a, b) => b.version.localeCompare(a.version)))
-const visible = computed(() => releases.value.filter(r => matches(r, filter)))
+const visible = computed(() => releases.value.filter(r => matches(r, filter, locale.value)))
 const days = computed(() => groupByDay(visible.value, now.value))
 const order = computed(() => days.value.flatMap(d => d.releases))
 const indexOf = computed(() => new Map(order.value.map((r, i) => [r.version, i])))
@@ -197,7 +197,7 @@ function keydown(event: KeyboardEvent) {
   }
   if (typing(event.target) || event.metaKey || event.ctrlKey || event.altKey) return
   if (inPeek(event.target)) { peekKeys(event); return }
-  const onControl = event.target instanceof HTMLElement && !!event.target.closest('button, a') && event.target !== listbox.value
+  const onControl = event.target instanceof HTMLElement && !!event.target.closest('button, a, summary') && event.target !== listbox.value
   switch (event.key) {
     case 'j': case 'ArrowDown': event.preventDefault(); step(1); break
     case 'k': case 'ArrowUp': event.preventDefault(); step(-1); break

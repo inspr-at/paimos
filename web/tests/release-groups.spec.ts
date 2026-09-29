@@ -179,12 +179,46 @@ for (const width of [1600, 390]) {
       const selected = sheet(page).getByRole('option', { selected: true })
       await expect(selected.getByRole('img', { name: '3 features' })).toBeVisible()
       await expect(selected.getByRole('img', { name: '1 fix' })).toBeVisible()
+      await sheet(page).getByRole('button', { name: 'Features', exact: true }).click()
+      await expect(sheet(page).getByText('1 of 2')).toBeVisible()
+      await expect(features).toBeVisible()
+      await sheet(page).getByRole('button', { name: 'Features', exact: true }).click()
       await sheet(page).getByRole('button', { name: 'Fixes', exact: true }).click()
       await expect(sheet(page).getByText('1 of 2')).toBeVisible()
       await expect(quotes).toBeVisible()
     }
   })
 }
+
+test('Enter and Space expand the commit disclosure and leave the release where it is', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await open(page, true)
+  const chat = sheet(page).locator('.changes').getByRole('article', { name: 'Session chat on iPhone' })
+  const summary = chat.locator('summary')
+  const subject = 'Reserve stable100 session chat on iPhone'
+  await summary.focus()
+  await page.keyboard.press('Enter')
+  await expect(chat.getByText(subject)).toBeVisible()
+  await expect(summary).toBeFocused()
+  await page.keyboard.press('Space')
+  await expect(chat.getByText(subject)).toBeHidden()
+  await expect(summary).toBeFocused()
+})
+
+test('a search that matches only a commit subject opens that disclosure', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await open(page, true)
+  const changes = sheet(page).locator('.changes')
+  const chat = changes.getByRole('article', { name: 'Session chat on iPhone' })
+  const requests = changes.getByRole('article', { name: 'Session requests' })
+  const search = sheet(page).getByRole('searchbox', { name: 'Search releases' })
+  await search.fill('scroll position')
+  await expect(chat.getByText('unread messages and scroll position')).toBeVisible()
+  await expect(chat.getByText('Reserve stable100 session chat on iPhone')).toBeHidden()
+  await search.fill('viewport-fit')
+  await expect(chat.getByText('safe-area padding for the shell and phone sheet')).toBeVisible()
+  await expect(requests.getByText('Harden session requests and preserve reporter payloads')).toBeHidden()
+})
 
 test('a German locale uses the German pill and benefit, and an empty German field falls back to English', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
