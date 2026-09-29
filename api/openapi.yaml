@@ -8798,7 +8798,7 @@ components:
         payload:
           type: object
           additionalProperties: true
-          description: review_verdict requires verdict pass or fail and may include reviewer_model, route, round, findings and summary. fix_round requires round. ci_result requires result pass or fail and may include name and summary. revert requires summary and may include target.
+          description: "review_verdict requires verdict ok or changes and may include reviewer_model, route, author_family, round, blocking_count, findings and summary. fix_round requires round. ci_result requires result pass or fail, repo and number (the pull request) and may include name and summary. revert requires summary and may include target."
     Error:
       type: object
       required: [error]

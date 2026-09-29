@@ -42,7 +42,7 @@ export function outcomeLine(item: OutcomeEvent): OutcomeLine {
 function lineTitle(kind: string, payload: Record<string, unknown>, releaseTitle: string | null): string {
   switch (kind) {
     case 'review_verdict':
-      return payload.verdict === 'fail' ? 'Review failed' : payload.verdict === 'pass' ? 'Review passed' : 'Review'
+      return verdictTitle(text(payload.verdict))
     case 'fix_round': {
       const round = whole(payload.round)
       return round == null ? 'Fix round' : `Fix round ${round}`
@@ -67,16 +67,33 @@ function lineTitle(kind: string, payload: Record<string, unknown>, releaseTitle:
 function detailParts(kind: string, payload: Record<string, unknown>): string[] {
   switch (kind) {
     case 'review_verdict':
-      return [text(payload.route), text(payload.reviewer_model), counted('round', payload.round), counted('finding', payload.findings), text(payload.summary)]
+      return [text(payload.route), text(payload.reviewer_model), text(payload.author_family), counted('round', payload.round), counted('blocking', payload.blocking_count), counted('finding', payload.findings), text(payload.summary)]
     case 'fix_round':
       return [text(payload.summary)]
     case 'ci_result':
-      return [text(payload.name), text(payload.summary)]
+      return [pullRequest(payload), text(payload.name), text(payload.summary)]
     case 'revert':
       return [text(payload.target), text(payload.summary)]
     default:
       return []
   }
+}
+
+function verdictTitle(verdict: string): string {
+  switch (verdict) {
+    case 'ok': return 'Review ok'
+    case 'changes': return 'Changes requested'
+    case 'pass': return 'Review passed'
+    case 'fail': return 'Review failed'
+    default: return 'Review'
+  }
+}
+
+function pullRequest(payload: Record<string, unknown>): string {
+  const repo = text(payload.repo)
+  const number = whole(payload.number)
+  if (repo && number != null) return `${repo} #${number}`
+  return repo
 }
 
 function marked(state: string): string {
@@ -92,6 +109,7 @@ function counted(label: string, value: unknown): string {
   const n = whole(value)
   if (n == null) return ''
   if (label === 'finding') return n === 1 ? '1 finding' : `${n} findings`
+  if (label === 'blocking') return n === 1 ? '1 blocking' : `${n} blocking`
   return `${label} ${n}`
 }
 

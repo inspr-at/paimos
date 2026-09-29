@@ -359,9 +359,9 @@ Review verdicts, fix rounds, CI results and reverts are outcome events. Record o
 
 ```
 aeon outcome record --ticket AEON-286 --kind review_verdict \
-  --idempotency-key review-aeon-286-r1 --verdict pass \
-  --reviewer-model codex --route backend --round 1 --findings 0 \
+  --idempotency-key review-aeon-286-r1 --verdict ok \
+  --reviewer-model codex --route backend --author-family grok --round 1 --blocking-count 0 \
   --session "$SESSION" --rules-version "$RULES"
 ```
 
-`--kind` is `review_verdict`, `fix_round`, `ci_result` or `revert`. A fix round needs `--round`. A CI result needs `--result pass` or `--result fail` and may name the check with `--name`. A revert needs `--summary`. `--session` is the harness session UUID when the work had one. `--rules-version` may be omitted; it stays empty until a rules version is recorded. Marking a ticket done, accepted or delivered, and including it in a release, are recorded automatically. Do not post those two kinds.
+`--kind` is `review_verdict`, `fix_round`, `ci_result` or `revert`. A review verdict is `--verdict ok` or `--verdict changes`, and may name `--author-family` and `--blocking-count`. A fix round needs `--round`. A CI result needs `--result pass` or `--result fail`, `--repo` and `--pr`, and may name the check with `--name`. A revert needs `--summary`. `--session` is the harness session UUID when the work had one. `--rules-version` may be omitted; it stays empty until a rules version is recorded. Marking a ticket done, accepted or delivered, and publishing a release, are recorded automatically. Do not post those two kinds.

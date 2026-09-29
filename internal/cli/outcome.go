@@ -20,11 +20,11 @@ func (rt *runtime) cmdOutcome() *Command {
 }
 
 func (rt *runtime) cmdOutcomeRecord() *Command {
-	var ticket, kind, idem, session, rules, verdict, model, route, round, findings, summary, result, name, target string
+	var ticket, kind, idem, session, rules, verdict, model, route, authorFamily, round, blocking, findings, summary, result, repo, pr, name, target string
 	return &Command{
 		Name:  "record",
 		Short: "Record a review verdict, fix round, CI result or revert",
-		Long:  "The same idempotency key and body replay the original outcome. A different body conflicts. Keys starting with auto: are reserved. Marking a ticket done and including it in a release are recorded automatically.",
+		Long:  "The same idempotency key and body replay the original outcome. A different body conflicts. Keys starting with auto: are reserved. Marking a ticket done and publishing a release are recorded automatically.",
 		Use:   "outcome record --ticket <key> --kind <kind> --idempotency-key <key>",
 		addFlags: func(fs *flagSet) {
 			fs.string(&ticket, "ticket", 0, "ticket key or node id")
@@ -32,18 +32,22 @@ func (rt *runtime) cmdOutcomeRecord() *Command {
 			fs.string(&idem, "idempotency-key", 0, "retry key for this outcome")
 			fs.string(&session, "session", 0, "harness session UUID")
 			fs.string(&rules, "rules-version", 0, "rules version, when one is known")
-			fs.string(&verdict, "verdict", 0, "pass or fail")
+			fs.string(&verdict, "verdict", 0, "ok or changes")
 			fs.string(&model, "reviewer-model", 0, "reviewer model")
 			fs.string(&route, "route", 0, "review route")
+			fs.string(&authorFamily, "author-family", 0, "author model family")
 			fs.string(&round, "round", 0, "round number")
+			fs.string(&blocking, "blocking-count", 0, "blocking finding count")
 			fs.string(&findings, "findings", 0, "finding count")
 			fs.string(&summary, "summary", 0, "short summary")
 			fs.string(&result, "result", 0, "pass or fail")
+			fs.string(&repo, "repo", 0, "repository of the pull request")
+			fs.string(&pr, "pr", 0, "pull request number")
 			fs.string(&name, "name", 0, "CI check name")
 			fs.string(&target, "target", 0, "what was reverted")
 		},
 		run: func(args []string) error {
-			return rt.recordOutcome(ticket, kind, idem, session, rules, verdict, model, route, round, findings, summary, result, name, target)
+			return rt.recordOutcome(ticket, kind, idem, session, rules, verdict, model, route, authorFamily, round, blocking, findings, summary, result, repo, pr, name, target)
 		},
 	}
 }
@@ -56,7 +60,7 @@ type outcomeWire struct {
 	Payload      map[string]any `json:"payload"`
 }
 
-func (rt *runtime) recordOutcome(ticket, kind, idem, session, rules, verdict, model, route, round, findings, summary, result, name, target string) error {
+func (rt *runtime) recordOutcome(ticket, kind, idem, session, rules, verdict, model, route, authorFamily, round, blocking, findings, summary, result, repo, pr, name, target string) error {
 	ticket = strings.TrimSpace(ticket)
 	kind = strings.TrimSpace(kind)
 	idem = strings.TrimSpace(idem)
@@ -83,12 +87,12 @@ func (rt *runtime) recordOutcome(ticket, kind, idem, session, rules, verdict, mo
 	payload := map[string]any{}
 	switch kind {
 	case "review_verdict":
-		if err := unused(kind, map[string]string{"result": result, "name": name, "target": target}); err != nil {
+		if err := unused(kind, map[string]string{"result": result, "repo": repo, "pr": pr, "name": name, "target": target}); err != nil {
 			return err
 		}
 		verdict = strings.TrimSpace(verdict)
-		if verdict != "pass" && verdict != "fail" {
-			return usagef("--verdict must be pass or fail")
+		if verdict != "ok" && verdict != "changes" {
+			return usagef("--verdict must be ok or changes")
 		}
 		payload["verdict"] = verdict
 		if err := putOutcomeText(payload, "reviewer_model", model, 80); err != nil {
@@ -97,7 +101,13 @@ func (rt *runtime) recordOutcome(ticket, kind, idem, session, rules, verdict, mo
 		if err := putOutcomeText(payload, "route", route, 64); err != nil {
 			return err
 		}
+		if err := putOutcomeText(payload, "author_family", authorFamily, 64); err != nil {
+			return err
+		}
 		if err := putRound(payload, round, false); err != nil {
+			return err
+		}
+		if err := putCount(payload, "blocking_count", blocking, 0, 999, false); err != nil {
 			return err
 		}
 		if err := putFindings(payload, findings); err != nil {
@@ -107,7 +117,7 @@ func (rt *runtime) recordOutcome(ticket, kind, idem, session, rules, verdict, mo
 			return err
 		}
 	case "fix_round":
-		if err := unused(kind, map[string]string{"verdict": verdict, "reviewer-model": model, "route": route, "findings": findings, "result": result, "name": name, "target": target}); err != nil {
+		if err := unused(kind, map[string]string{"verdict": verdict, "reviewer-model": model, "route": route, "author-family": authorFamily, "blocking-count": blocking, "findings": findings, "result": result, "repo": repo, "pr": pr, "name": name, "target": target}); err != nil {
 			return err
 		}
 		if err := putRound(payload, round, true); err != nil {
@@ -117,7 +127,7 @@ func (rt *runtime) recordOutcome(ticket, kind, idem, session, rules, verdict, mo
 			return err
 		}
 	case "ci_result":
-		if err := unused(kind, map[string]string{"verdict": verdict, "reviewer-model": model, "route": route, "round": round, "findings": findings, "target": target}); err != nil {
+		if err := unused(kind, map[string]string{"verdict": verdict, "reviewer-model": model, "route": route, "author-family": authorFamily, "round": round, "blocking-count": blocking, "findings": findings, "target": target}); err != nil {
 			return err
 		}
 		result = strings.TrimSpace(result)
@@ -125,6 +135,15 @@ func (rt *runtime) recordOutcome(ticket, kind, idem, session, rules, verdict, mo
 			return usagef("--result must be pass or fail")
 		}
 		payload["result"] = result
+		if err := putOutcomeText(payload, "repo", repo, 200); err != nil {
+			return err
+		}
+		if payload["repo"] == nil {
+			return usagef("--repo is required")
+		}
+		if err := putCount(payload, "number", pr, 1, 99999999, true); err != nil {
+			return err
+		}
 		if err := putOutcomeText(payload, "name", name, 80); err != nil {
 			return err
 		}
@@ -132,7 +151,7 @@ func (rt *runtime) recordOutcome(ticket, kind, idem, session, rules, verdict, mo
 			return err
 		}
 	default:
-		if err := unused(kind, map[string]string{"verdict": verdict, "reviewer-model": model, "route": route, "round": round, "findings": findings, "result": result, "name": name}); err != nil {
+		if err := unused(kind, map[string]string{"verdict": verdict, "reviewer-model": model, "route": route, "author-family": authorFamily, "round": round, "blocking-count": blocking, "findings": findings, "result": result, "repo": repo, "pr": pr, "name": name}); err != nil {
 			return err
 		}
 		if err := putOutcomeText(payload, "summary", summary, 280); err != nil {
@@ -220,14 +239,25 @@ func putRound(payload map[string]any, raw string, required bool) error {
 }
 
 func putFindings(payload map[string]any, raw string) error {
+	return putCount(payload, "findings", raw, 0, 999, false)
+}
+
+func putCount(payload map[string]any, field, raw string, min, max int, required bool) error {
 	raw = strings.TrimSpace(raw)
+	flag := strings.ReplaceAll(field, "_", "-")
+	if field == "number" {
+		flag = "pr"
+	}
 	if raw == "" {
+		if required {
+			return usagef("--%s is required", flag)
+		}
 		return nil
 	}
 	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 || n > 999 {
-		return usagef("--findings must be from 0 to 999")
+	if err != nil || n < min || n > max {
+		return usagef("--%s must be from %d to %d", flag, min, max)
 	}
-	payload["findings"] = n
+	payload[field] = n
 	return nil
 }

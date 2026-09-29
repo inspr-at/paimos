@@ -46,7 +46,9 @@ type reviewPayload struct {
 	Verdict       string `json:"verdict"`
 	ReviewerModel string `json:"reviewer_model,omitempty"`
 	Route         string `json:"route,omitempty"`
+	AuthorFamily  string `json:"author_family,omitempty"`
 	Round         *int   `json:"round,omitempty"`
+	BlockingCount *int   `json:"blocking_count,omitempty"`
 	Findings      *int   `json:"findings,omitempty"`
 	Summary       string `json:"summary,omitempty"`
 }
@@ -58,6 +60,8 @@ type fixPayload struct {
 
 type ciPayload struct {
 	Result  string `json:"result"`
+	Repo    string `json:"repo"`
+	Number  *int   `json:"number"`
 	Name    string `json:"name,omitempty"`
 	Summary string `json:"summary,omitempty"`
 }
@@ -95,7 +99,7 @@ func canonicalPayload(kind string, raw json.RawMessage) (json.RawMessage, error)
 		if err := oneValue(dec); err != nil {
 			return nil, err
 		}
-		verdict, err := oneOf("verdict", body.Verdict, "pass", "fail")
+		verdict, err := oneOf("verdict", body.Verdict, "ok", "changes")
 		if err != nil {
 			return nil, err
 		}
@@ -106,7 +110,13 @@ func canonicalPayload(kind string, raw json.RawMessage) (json.RawMessage, error)
 		if body.Route, err = plain("route", body.Route, maxRoute, false); err != nil {
 			return nil, err
 		}
+		if body.AuthorFamily, err = plain("author_family", body.AuthorFamily, maxRoute, false); err != nil {
+			return nil, err
+		}
 		if err = bounded("round", body.Round, 1, 99, false); err != nil {
+			return nil, err
+		}
+		if err = bounded("blocking_count", body.BlockingCount, 0, 999, false); err != nil {
 			return nil, err
 		}
 		if err = bounded("findings", body.Findings, 0, 999, false); err != nil {
@@ -146,6 +156,12 @@ func canonicalPayload(kind string, raw json.RawMessage) (json.RawMessage, error)
 			return nil, err
 		}
 		body.Result = result
+		if body.Repo, err = plain("repo", body.Repo, maxKeyLen, true); err != nil {
+			return nil, err
+		}
+		if err = bounded("number", body.Number, 1, 99999999, true); err != nil {
+			return nil, err
+		}
 		if body.Name, err = plain("name", body.Name, maxName, false); err != nil {
 			return nil, err
 		}

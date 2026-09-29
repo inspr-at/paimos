@@ -59,7 +59,7 @@ func testOutcomeAPI(t *testing.T, d *dbtest.DB) {
 	}
 
 	api := outcomesAPI{t: t, auth: mod, mod: New(d.App)}
-	body := `{"kind":"review_verdict","ticket":"OUT-2","session_id":"` + sessionID + `","rules_version":"rules-1","payload":{"verdict":"pass","reviewer_model":"codex","route":"backend","round":1,"findings":0,"summary":"Clean"}}`
+	body := `{"kind":"review_verdict","ticket":"OUT-2","session_id":"` + sessionID + `","rules_version":"rules-1","payload":{"verdict":"ok","reviewer_model":"codex","route":"backend","author_family":"grok","round":1,"blocking_count":2,"findings":0,"summary":"Clean"}}`
 	first := api.call(writerToken, http.MethodPost, "/api/outcomes", body, "review-out-2")
 	if first.Code != http.StatusCreated || first.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("create: %d %s", first.Code, first.Body.String())
@@ -67,6 +67,25 @@ func testOutcomeAPI(t *testing.T, d *dbtest.DB) {
 	created := decodeOutcome(t, first.Body.Bytes())
 	if created.TicketKey != "OUT-2" || created.Kind != "review_verdict" || created.Source != "recorded" {
 		t.Fatalf("created: %+v", created)
+	}
+	var review map[string]any
+	if err := json.Unmarshal(created.Payload, &review); err != nil || review["verdict"] != "ok" || review["author_family"] != "grok" || review["blocking_count"] != float64(2) {
+		t.Fatalf("review payload %s %v", created.Payload, err)
+	}
+	if got := api.call(writerToken, http.MethodPost, "/api/outcomes", strings.Replace(body, `"ok"`, `"pass"`, 1), "review-pass-old"); got.Code != http.StatusBadRequest {
+		t.Fatalf("pass verdict: %d %s", got.Code, got.Body.String())
+	}
+	ciBody := `{"kind":"ci_result","ticket":"OUT-2","payload":{"result":"fail","repo":"inspr-at/paimos","number":286,"name":"web"}}`
+	ci := api.call(writerToken, http.MethodPost, "/api/outcomes", ciBody, "ci-out-286")
+	if ci.Code != http.StatusCreated {
+		t.Fatalf("ci: %d %s", ci.Code, ci.Body.String())
+	}
+	var ciPayload map[string]any
+	if err := json.Unmarshal(decodeOutcome(t, ci.Body.Bytes()).Payload, &ciPayload); err != nil || ciPayload["repo"] != "inspr-at/paimos" || ciPayload["number"] != float64(286) || ciPayload["name"] != "web" {
+		t.Fatalf("ci payload %s %v", decodeOutcome(t, ci.Body.Bytes()).Payload, err)
+	}
+	if got := api.call(writerToken, http.MethodPost, "/api/outcomes", `{"kind":"ci_result","ticket":"OUT-2","payload":{"result":"fail","name":"web"}}`, "ci-no-pr"); got.Code != http.StatusBadRequest {
+		t.Fatalf("ci without pull request: %d %s", got.Code, got.Body.String())
 	}
 	replayBody := strings.Replace(body, `"ticket":"OUT-2"`, `"ticket":"`+ticket+`"`, 1)
 	replay := api.call(writerToken, http.MethodPost, "/api/outcomes", replayBody, "review-out-2")

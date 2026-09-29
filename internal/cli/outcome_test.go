@@ -51,12 +51,21 @@ func TestOutcomeRecordCommand(t *testing.T) {
 	t.Setenv("AEON_URL", srv.URL)
 	t.Setenv("AEON_API_KEY", testKey)
 
-	args := []string{"aeon", "outcome", "record", "--ticket", "AEON-286", "--kind", "ci_result", "--idempotency-key", "ci-aeon-286", "--result", "fail", "--name", "web", "--summary", "lint failed"}
+	code, _, errOut = runCLI([]string{"aeon", "outcome", "record", "--ticket", "AEON-286", "--kind", "ci_result", "--idempotency-key", "ci-aeon-286", "--result", "fail", "--name", "web"}, "")
+	if code != 2 || !strings.Contains(errOut, "--repo") {
+		t.Fatalf("missing repo code %d err %q", code, errOut)
+	}
+	code, _, errOut = runCLI([]string{"aeon", "outcome", "record", "--ticket", "AEON-286", "--kind", "review_verdict", "--idempotency-key", "review-old-pass", "--verdict", "pass"}, "")
+	if code != 2 || !strings.Contains(errOut, "ok or changes") {
+		t.Fatalf("old verdict code %d err %q", code, errOut)
+	}
+
+	args := []string{"aeon", "outcome", "record", "--ticket", "AEON-286", "--kind", "ci_result", "--idempotency-key", "ci-aeon-286", "--result", "fail", "--repo", "inspr-at/paimos", "--pr", "286", "--name", "web", "--summary", "lint failed"}
 	code, out, errOut = runCLI(args, "")
 	if code != 0 || errOut != "" || strings.TrimSpace(out) != "recorded ci_result AEON-286 8f000000-0000-4000-8000-000000000001" {
 		t.Fatalf("record code %d out %q err %q", code, out, errOut)
 	}
-	if header != "ci-aeon-286" || kind != "ci_result" || payload["result"] != "fail" || payload["name"] != "web" {
+	if header != "ci-aeon-286" || kind != "ci_result" || payload["result"] != "fail" || payload["name"] != "web" || payload["repo"] != "inspr-at/paimos" || payload["number"] != float64(286) {
 		t.Fatalf("request header %q kind %q payload %#v", header, kind, payload)
 	}
 	assertNoSecret(t, out+"\n"+errOut)
