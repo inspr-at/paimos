@@ -369,10 +369,11 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .pool { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; padding: 16px 18px 16px 20px; }
 .pool + .pool { border-top: 1px solid var(--line); }
 .pool-info { min-width: 0; }
-.pool-head { display: flex; align-items: center; gap: 10px; min-height: 32px; }
+.pool-head { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 32px; }
 .vendor { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(32, 60, 61, .06); color: var(--ink); }
-.pool-name { min-width: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 15px; font-weight: 650; }
-.pool-plan { min-width: 0; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
+/* Provider names stay one line. The plan label shrinks; free-form names wrap in .plan, .nm and .host. */
+.pool-name { flex: none; min-width: min-content; white-space: nowrap; color: var(--ink); font-size: 15px; font-weight: 650; }
+.pool-plan { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
 .pool-head .more { flex: none; width: 32px; height: 32px; margin-left: auto; }
 .override { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 2px 0 9px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .override.hold { background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); }
@@ -400,14 +401,14 @@ button.left { cursor: pointer; }
 button.left:focus-visible { box-shadow: var(--focus-ring); }
 .left b { color: var(--ink); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .left span { margin-left: 3px; color: var(--ink-3); font-size: 12px; }
-.today { min-width: 0; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+.today { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
 .today b { color: var(--teal-ink); font-weight: 700; }
 .today.ahead b { color: var(--gold-ink); }
 .today.quiet, .today .quiet { color: var(--ink-3); }
 .today .btn { height: 26px; max-width: 100%; padding: 0 10px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
 .resets { min-width: 0; overflow: hidden; color: var(--ink-2); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
 .gauge-cell { min-width: 0; }
-.source { min-width: 0; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; text-align: right; }
+.source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; text-align: right; }
 .acct.dim .gauge, .acct.dim .left, .acct.dim .resets { opacity: .6; }
 .win5 { margin-top: 5px; color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .win5 b { color: var(--ink-2); font-weight: 600; }
@@ -440,7 +441,7 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
 .menu button:hover, .menu button:focus-visible { background: var(--row-hover); box-shadow: none; outline: none; }
 .menu button svg { grid-row: span 2; margin-top: 2px; color: var(--ink-2); }
 .menu .t { color: var(--ink); font-size: 13.5px; font-weight: 600; }
-.menu .d { overflow-wrap: anywhere; color: var(--ink-3); font-size: 12px; line-height: 1.4; }
+.menu .d { color: var(--ink-3); font-size: 12px; line-height: 1.4; }
 .sheet-host { position: fixed; inset: 0; z-index: 80; }
 .scrim { position: absolute; inset: 0; background: var(--scrim); }
 @media (prefers-reduced-motion: reduce) { .tog::after { transition: none; } }

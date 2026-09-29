@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-355: the Accounts card stays inside itself from 390 to 2560, with the
-// session panel open and closed. Long names, one unbroken account name, one
-// pool of three accounts and pools of one, including an account with no
-// reading yet. The card, main and the document have no horizontal overflow.
+// session panel open and closed, and with Sprint or Hold on every pool. Long
+// names, one unbroken account name, one pool of three accounts and pools of
+// one, including an account with no reading yet. Claude and Grok stay on one
+// line. The card, main and the document have no horizontal overflow.
 import { mkdirSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
-import { NOW, TZ, capacityWorld } from './capacity-fixtures'
+import { NOW, TZ, capacityWorld, defaultSchedule, type CapacityWorld } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 
@@ -25,7 +26,7 @@ const shots = process.env.AEON355_SHOTS
 // Email-shaped account name with no spaces, so the plan sentence has to break inside it.
 const UNBROKEN = 'productionreleaseautomation@engineering.example.org'
 
-async function setup(page: Page) {
+async function setup(page: Page): Promise<CapacityWorld> {
   await page.clock.setSystemTime(NOW)
   await mockWork(page, fixtures(), { admin: true })
   const data = agentData(world)
@@ -42,6 +43,21 @@ async function setup(page: Page) {
     answer.workspace.permissions = [...answer.workspace.permissions, 'account.read', 'account.manage', 'run.create', 'run.read', 'models.read', 'work_orders.read']
     return route.fulfill({ json: answer })
   })
+  return capacity
+}
+
+/** Sprint or Hold on every pool, so the badge shares the header with the name. */
+function setBadges(capacity: CapacityWorld, override: '' | 'sprint' | 'hold') {
+  for (let i = capacity.schedules.length - 1; i >= 0; i--) {
+    if (capacity.schedules[i].scope === 'pool') capacity.schedules.splice(i, 1)
+  }
+  if (!override) return
+  for (const pool of ['codex', 'claude', 'grok', 'cursor', 'pi']) {
+    const schedule = defaultSchedule()
+    schedule.override = override
+    if (override === 'sprint') schedule.override_until = '2026-10-06T11:10:00Z'
+    capacity.schedules.push({ scope: 'pool', pool, schedule })
+  }
 }
 
 function widths() {
@@ -84,14 +100,23 @@ async function fit(page: Page) {
         }
       }
     }
-    return { missing: false as const, offenders: offenders.slice(0, 4), documentOver, mainOver, pageOffender, card: Math.round(edge) }
+    // A flex item's own box is one rect even when its text wraps, so the line
+    // count comes from the text range.
+    const names = [...card.querySelectorAll('.pool-name')].map(el => {
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      const rects = [...range.getClientRects()].filter(r => r.width > 0.5 && r.height > 0.5)
+      const lines = new Set(rects.map(r => Math.round(r.top))).size
+      return { name: (el.textContent || '').trim(), lines }
+    })
+    return { missing: false as const, offenders: offenders.slice(0, 4), documentOver, mainOver, pageOffender, card: Math.round(edge), names }
   })
 }
 
 test('accounts card fits every width, panel open and closed', async ({ page }) => {
-  test.setTimeout(300_000)
+  test.setTimeout(600_000)
   const errors = watchErrors(page)
-  await setup(page)
+  const capacity = await setup(page)
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
@@ -121,12 +146,37 @@ test('accounts card fits every width, panel open and closed', async ({ page }) =
       if ((result.documentOver ?? 0) > 1) problems.push(`${label} ${width}px document scrolls by ${result.documentOver}px via ${result.pageOffender}`)
       if (result.mainOver == null) problems.push(`${label} ${width}px has no main`)
       else if (result.mainOver > 1) problems.push(`${label} ${width}px main scrolls by ${Math.round(result.mainOver * 10) / 10}px`)
+      if (!result.missing) {
+        for (const n of result.names) {
+          if ((n.name === 'Claude' || n.name === 'Grok') && n.lines !== 1) problems.push(`${label} ${width}px ${n.name} is ${n.lines} lines`)
+        }
+      }
     }
   }
-  await sweep('closed')
-  await page.goto('/agents/5e000000-0000-4000-8000-000000000001')
-  await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
-  await sweep('panel')
+  const pass = async (label: string) => {
+    await page.goto('/agents')
+    await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
+    const badge = label.startsWith('sprint') ? 'Sprint' : label.startsWith('hold') ? 'On hold' : ''
+    if (badge) {
+      await expect(card.locator('.pool[data-pool="claude"] .override')).toContainText(badge)
+      await expect(card.locator('.pool[data-pool="grok"] .override')).toContainText(badge)
+    } else {
+      await expect(card.locator('.override')).toHaveCount(0)
+    }
+    await sweep(label ? `${label}-closed` : 'closed')
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000001')
+    await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
+    if (badge) {
+      await expect(card.locator('.pool[data-pool="claude"] .override')).toContainText(badge)
+      await expect(card.locator('.pool[data-pool="grok"] .override')).toContainText(badge)
+    }
+    await sweep(label ? `${label}-panel` : 'panel')
+  }
+  await pass('')
+  setBadges(capacity, 'sprint')
+  await pass('sprint')
+  setBadges(capacity, 'hold')
+  await pass('hold')
   expect(problems, problems.join('\n')).toEqual([])
   expect(errors).toEqual([])
 })
