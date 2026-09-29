@@ -243,28 +243,50 @@ test('a late server read marker opens the thread at the first unread message', a
   } finally { release() }
 })
 
-test('scrolling away before a late read marker arrives keeps that position', async ({ page }) => {
-  const seen = '3e000000-0000-4000-8000-000000000120'
-  const { worker } = await setup(page, { count: 40, storage: { 'aeon.session-tab': 'messages' }, readMark: { event: 220, id: seen } })
-  let release: () => void = () => {}
-  const gate = new Promise<void>(resolve => { release = resolve })
-  await page.route('**/read-marker', async route => {
-    if (route.request().method() === 'GET') await gate
-    await route.fallback()
+// Hold every scroll notification until after the marker is handled. This forces
+// the input/scroll gap instead of relying on route and browser frame timing.
+for (const intent of ['wheel', 'touchstart', 'pointerdown', 'keydown', 'displacement'] as const) {
+  test(`${intent} before a late read marker preserves the reader's position before scroll dispatch`, async ({ page }) => {
+    const seen = '3e000000-0000-4000-8000-000000000120'
+    const { worker } = await setup(page, { count: 40, storage: { 'aeon.session-tab': 'messages' }, readMark: { event: 220, id: seen } })
+    let release: () => void = () => {}
+    const gate = new Promise<void>(resolve => { release = resolve })
+    await page.route('**/read-marker', async route => {
+      if (route.request().method() === 'GET') await gate
+      await route.fallback()
+    })
+    await page.setViewportSize({ width: 1600, height: 800 })
+    try {
+      const opened = page.goto(`/agents/${worker.id}`)
+      const panel = panelOf(page)
+      const thread = scroller(page)
+      await expect(panel.locator('.msg').last()).toBeInViewport()
+      const top = await thread.evaluate((el, intent) => {
+        // Divider insertion must not add browser scroll anchoring to this race.
+        el.style.overflowAnchor = 'none'
+        // Suppress the notification, not the scroll or input itself.
+        window.addEventListener('scroll', event => {
+          if (event.target === el) event.stopImmediatePropagation()
+        }, { capture: true })
+        if (intent === 'wheel') el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }))
+        else if (intent === 'touchstart') el.dispatchEvent(new Event('touchstart', { bubbles: true }))
+        else if (intent === 'pointerdown') el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+        else if (intent === 'keydown') el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'PageUp' }))
+        // The displacement case models a scrollbar/accessibility scroll that
+        // changes scrollTop without a preceding input event on this element.
+        else el.scrollTop = 0
+        return el.scrollTop
+      }, intent)
+      release()
+      await opened
+      await expect(panel.getByRole('separator', { name: /new/ })).toBeVisible()
+      await expect.poll(() => localEvent(page, worker.id)).toBeGreaterThanOrEqual(220)
+      await page.clock.runFor(100)
+      expect(await thread.evaluate(el => el.scrollTop)).toBe(top)
+      if (intent === 'displacement') expect(await localEvent(page, worker.id)).toBe(220)
+    } finally { release() }
   })
-  await page.setViewportSize({ width: 1600, height: 800 })
-  try {
-    const opened = page.goto(`/agents/${worker.id}`)
-    const panel = panelOf(page)
-    await expect(panel.locator('.msg').last()).toBeInViewport()
-    await scroller(page).evaluate(el => { el.scrollTop = 0 })
-    await expect.poll(() => scroller(page).evaluate(el => el.scrollTop)).toBe(0)
-    release()
-    await opened
-    await expect.poll(() => localEvent(page, worker.id)).toBe(220)
-    expect(await scroller(page).evaluate(el => el.scrollTop)).toBe(0)
-  } finally { release() }
-})
+}
 
 test('focusing the window picks up a read from another device', async ({ page }) => {
   const seen = '3e000000-0000-4000-8000-000000000101'

@@ -132,7 +132,7 @@ function releaseMarkerHold(generation: number) {
   awaitingServerPlacement = false
   if (!entered || generation !== readGeneration) return
   syncDivider()
-  if (waiting && !userMoved) void schedulePlace(generation)
+  if (waiting && !readerMoved()) void schedulePlace(generation)
   else observe()
 }
 async function pullReadMark(projectId: string, sessionId: string, viewer: string, generation: number) {
@@ -149,7 +149,7 @@ async function pullReadMark(projectId: string, sessionId: string, viewer: string
     const waiting = awaitingServerPlacement && generation === readGeneration
     const held = markerHold === generation
     if (held) markerHold = 0
-    if (waiting && entered && !userMoved && advanced) {
+    if (waiting && entered && !readerMoved() && advanced) {
       awaitingServerPlacement = false
       await schedulePlace(generation)
     } else if (waiting || advanced) {
@@ -184,6 +184,28 @@ const below = computed(() => props.active ? unread.value.length : 0)
 const jump = computed(() => distance.value > 160 || (below.value > 0 && distance.value > 32))
 let stick = true, lastTop = 0, entered = false, loaded = false
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+// Input events run before the browser queues scroll. A marker resolved between
+// those events must not reclaim the reader's position (or the pinned bottom).
+function onScrollIntent() {
+  if (!props.active || !entered) return
+  userMoved = true
+  awaitingServerPlacement = false
+  stick = false
+}
+function onScrollKey(event: KeyboardEvent) {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
+  if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) return
+  const target = event.target
+  if (target instanceof HTMLElement && target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return
+  onScrollIntent()
+}
+function readerMoved() {
+  // Also cover scrollbar/accessibility/programmatic scrolling whose scroll
+  // event has not yet run. Our own placements update anchorTop synchronously.
+  const el = scroller.value
+  if (placed && el && !adjusting && Math.abs(el.scrollTop - anchorTop) > 2) onScrollIntent()
+  return userMoved
+}
 function onScroll() {
   const el = scroller.value
   if (!el) return
@@ -233,6 +255,10 @@ function schedulePlace(generation: number) {
 // arrives after that provisional landing moves the reader unless they scrolled.
 async function placeThread(generation: number) {
   if (generation !== readGeneration || !entered || !props.active) return
+  // Read displacement before inserting the divider: browser scroll anchoring
+  // from that DOM change is not user intent. Input handlers remain synchronous
+  // across the nextTick boundaries below.
+  readerMoved()
   // The server mark can arrive while the thread paints. Sync again so the
   // divider and the scroll use that mark, not the provisional bottom.
   syncDivider()
@@ -431,7 +457,9 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 <template>
   <div class="session-chat">
     <div class="thread-wrap">
-      <div ref="scroller" class="thread-scroll" @scroll.passive="onScroll">
+      <div ref="scroller" class="thread-scroll" @scroll.passive="onScroll"
+        @wheel.capture.passive="onScrollIntent" @touchstart.capture.passive="onScrollIntent"
+        @pointerdown.capture.passive="onScrollIntent" @keydown.capture="onScrollKey">
         <SessionMessages :messages="messages" :principal-id="s.agent_principal_id" :now="now"
           :can-reply="canWrite && !composeBlock && !managed" :new-from="newFrom" :new-count="newCount" :statuses="statuses" @reply="reply" />
       </div>
