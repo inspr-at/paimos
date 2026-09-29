@@ -339,6 +339,7 @@ test('an upward gesture on a thread that fits still follows the next post', asyn
     const moved = new Touch({ identifier: 1, target: el, clientX: 30, clientY: 280 })
     el.dispatchEvent(new TouchEvent('touchmove', { bubbles: true, touches: [moved], changedTouches: [moved] }))
     for (const key of ['ArrowUp', 'PageUp', 'Home']) el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key }))
+    el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: ' ', shiftKey: true }))
   })
   const tail = 'Short-thread tail stays on screen after an upward gesture.'
   const template = messages.at(-1)!
@@ -398,6 +399,9 @@ test('a wheel-up unpins the thread from new posts', async ({ page }) => {
   })
   await leave(5, 'Home tail stays below the fold.', el => {
     el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Home' }))
+  })
+  await leave(6, 'Shift-space tail stays below the fold.', el => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: ' ', shiftKey: true }))
   })
 })
 
