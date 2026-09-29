@@ -134,6 +134,7 @@ type Supervisor struct {
 	loginRequired     map[string]bool
 	harnessHolds      map[string]string
 	dependencyErrors  map[string]string
+	harnessFailed     map[string]bool
 	mu                sync.Mutex
 	api               API
 	journal           *localjournal.Journal[Record]
@@ -406,12 +407,25 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		s.mu.Unlock()
 		// A held harness (AEON-342) is not probed and reports unavailable.
 		status := probeUnavailable
-		var dependencyErr error
+		var dependencyErr, probeErr error
 		if hold == "" {
 			if detailed, ok := probe.(interface {
 				ProbeAccountStatus(context.Context, string) (ProbeStatus, error)
 			}); ok {
 				status, dependencyErr = detailed.ProbeAccountStatus(ctx, account.Key)
+			} else if started, ok := probe.(interface {
+				ProbeStatus(context.Context, string) (bool, error)
+			}); ok {
+				// AEON-334 (pi): a start failure is a harness failure; a missing
+				// provider with a running harness is a sign-in problem.
+				var available bool
+				available, probeErr = started.ProbeStatus(ctx, account.Key)
+				switch {
+				case available:
+					status = probeOK
+				case probeErr == nil:
+					status = probeAuthFailed
+				}
 			} else {
 				status = probeAccount(ctx, probe, account.Key)
 			}
@@ -436,8 +450,15 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		s.probedAccounts[account.ID] = err == nil && available
 		// Only a confirmed sign-out asks the person to sign in again; a hold or a
 		// local dependency failure never does (AEON-342).
-		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed && hold == "" && dependencyErr == nil
+		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed && hold == "" && dependencyErr == nil && probeErr == nil
+		if s.harnessFailed == nil {
+			s.harnessFailed = map[string]bool{}
+		}
+		s.harnessFailed[account.ID] = probeErr != nil
 		s.mu.Unlock()
+		if probeErr != nil {
+			failures = append(failures, errors.New("harness failed to start"))
+		}
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
 		}

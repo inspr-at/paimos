@@ -15,11 +15,19 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []agentd.Adapter, error) {
+	// Non-Claude interpreter pins fail closed as before (AEON-334); Claude's
+	// dependencies hold only Claude (AEON-342, refreshPairedRuntime).
+	if err := agentsetup.ValidateHarnessRuntimeDependencies(c); err != nil {
+		return nil, nil, err
+	}
 	codexHomes, emails, claudeHomes, cursorIDs := map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}
 	claudeEmails := map[string]string{}
+	piHomes, piProviders := map[string]string{}, map[string]string{}
+	piNodes := map[string]piprobe.Node{}
 	grokBindings := map[string]agentd.GrokBinding{}
 	grokHomes, cursorHomes := map[string]string{}, map[string]string{}
 	paths := map[string]string{}
@@ -42,6 +50,12 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 			if a.Home != "" {
 				cursorHomes[a.Key] = a.Home
 			}
+		case agentd.Pi:
+			if !piprobe.ValidProvider(a.Identity) || !filepath.IsAbs(a.Home) {
+				return nil, nil, errors.New("pi private provider binding unavailable")
+			}
+			piHomes[a.Key], piProviders[a.Key] = a.Home, a.Identity
+			piNodes[a.Key] = a.PiNode
 		case agentd.Grok:
 			if a.Home != "" {
 				grokHomes[a.Key] = a.Home
@@ -72,6 +86,12 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 			cursor.Homes = cursorHomes
 		}
 		adapters = append(adapters, cursor)
+	}
+	if p := paths[agentd.Pi]; p != "" {
+		a := agentd.NewPiAdapter(p, piHomes)
+		a.SetExpectedProviders(piProviders)
+		a.Nodes = piNodes
+		adapters = append(adapters, a)
 	}
 	if len(grokBindings) > 0 {
 		grok := agentd.NewGrokAdapter(grokBindings)
@@ -237,7 +257,7 @@ func refreshPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root s
 		}
 		if next.ClaudeRepinID != c.ClaudeRepinID {
 			s.SetHarnessHold(agentd.Claude, "Claude repin pending: waiting for active Claude runs to exit")
-			if err := agentsetup.ValidateRuntimeDependencies(next); err != nil {
+			if err := agentsetup.ValidateClaudeRuntimeDependencies(next); err != nil {
 				s.SetHarnessHold(agentd.Claude, err.Error())
 				return c, nil
 			}
@@ -252,7 +272,7 @@ func refreshPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root s
 		}
 		c = next
 	}
-	if err := agentsetup.ValidateRuntimeDependencies(c); err != nil {
+	if err := agentsetup.ValidateClaudeRuntimeDependencies(c); err != nil {
 		s.SetHarnessHold(agentd.Claude, err.Error())
 		return c, nil
 	}

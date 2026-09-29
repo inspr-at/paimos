@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 // probeCapture keeps at most max bytes of a probe stream. It deliberately has
@@ -181,12 +183,53 @@ func (a *CodexAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus 
 	return probeUnavailable
 }
 
-func (a *PiAdapter) Probe(_ context.Context, key string) bool {
-	if _, err := localHome(a.Homes, key); err != nil {
-		return false
+func (a *PiAdapter) Probe(ctx context.Context, key string) bool {
+	available, _ := a.ProbeStatus(ctx, key)
+	return available
+}
+
+// ProbeStatus distinguishes startup failures from missing provider configuration.
+// Polls reuse results for one minute; a launch always requests a fresh check.
+func (a *PiAdapter) ProbeStatus(ctx context.Context, key string) (bool, error) {
+	return a.probe(ctx, key, false)
+}
+
+func (a *PiAdapter) probe(ctx context.Context, key string, fresh bool) (bool, error) {
+	a.probeMu.Lock()
+	defer a.probeMu.Unlock()
+	home, err := localHome(a.Homes, key)
+	if err != nil {
+		return false, piprobe.ErrStart
 	}
-	_, err := pinnedExecutable(a.Path)
-	return err == nil
+	if _, err := pinnedExecutable(a.Path); err != nil {
+		return false, piprobe.ErrStart
+	}
+	node := a.Nodes[key]
+	if node.Path != "" {
+		if _, err := pinnedExecutable(node.Path); err != nil {
+			return false, piprobe.ErrStart
+		}
+	}
+	if a.Providers != nil {
+		expected := a.Providers[key]
+		if !piprobe.ValidProvider(expected) {
+			return false, piprobe.ErrStart
+		}
+		if cached, ok := a.probes[key]; !fresh && ok && time.Now().Before(cached.expires) && cached.path == a.Path && cached.home == home && cached.provider == expected && cached.node == node {
+			return cached.available, cached.err
+		}
+		provider, err := piprobe.Provider(ctx, a.Path, home, expected, node.Path)
+		available := err == nil && provider == expected
+		if errors.Is(err, piprobe.ErrProviderUnavailable) {
+			err = nil
+		}
+		if a.probes == nil {
+			a.probes = map[string]piProbeResult{}
+		}
+		a.probes[key] = piProbeResult{path: a.Path, home: home, provider: expected, node: node, expires: time.Now().Add(time.Minute), available: available, err: err}
+		return available, err
+	}
+	return true, nil
 }
 
 func (a *CursorAdapter) Probe(ctx context.Context, key string) bool {

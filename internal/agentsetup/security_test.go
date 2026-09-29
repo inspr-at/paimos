@@ -306,6 +306,14 @@ func TestTypedProgressDistinguishesMissingLoginAndUnsafeVerification(t *testing.
 	if err != nil || p.Stage != "login_required" {
 		t.Fatal("missing login hidden")
 	}
+	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", HarnessFailed: true, LoginRequired: true}
+	p, err = e.Status(t.Context())
+	if err != nil || p.Stage != "blocked" || !strings.Contains(p.Action, "harness failed to start") {
+		t.Fatal("startup failure presented as login required", err)
+	}
+	if err = e.SyncFences(t.Context()); err != nil || a.progress == nil || a.progress.State != "setup_failed" || a.progress.ErrorCode != "installation_failed" {
+		t.Fatal("startup failure lost during reconciliation", err)
+	}
 	a.view.Enrollments[0].VerificationRunID = otherAccount
 	a.view.Enrollments[0].VerificationState = "queued"
 	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", Ready: true, VerificationUnavailable: []string{testAccount}}

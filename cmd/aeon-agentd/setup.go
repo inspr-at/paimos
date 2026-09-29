@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentdwire"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/version"
 )
 
@@ -38,7 +39,7 @@ func (l localPairing) client() (agentdwire.Client, error) {
 	return agentdwire.OpenClient(filepath.Join(l.root, "daemon"))
 }
 func localStatus(s agentd.LifecycleStatus) agentsetup.LocalStatus {
-	return agentsetup.LocalStatus{HarnessErrors: s.HarnessErrors, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults}
+	return agentsetup.LocalStatus{HarnessErrors: s.HarnessErrors, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults}
 }
 func (l localPairing) Status(ctx context.Context, account string) (agentsetup.LocalStatus, error) {
 	if l.supervisor != nil {
@@ -105,9 +106,9 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	f.StringVar(&workspace, "workspace", "", "approved physical working folder")
 	f.StringVar(&computer, "computer-name", "", "computer display name")
 	f.Var(&harnesses, "harness", "selected harness; repeat for another harness")
-	f.StringVar(&contextLabel, "account-context", "", "Codex signed-in account email")
+	f.StringVar(&contextLabel, "account-context", "", "Expected account identity (pi: configured provider ID)")
 	f.StringVar(&account, "account-id", "", "remove only this enrolled account")
-	f.StringVar(&nodePath, "node-path", "", "pinned Node executable for Claude")
+	f.StringVar(&nodePath, "node-path", "", "pinned Node executable for Claude or pi")
 	f.StringVar(&sdkPath, "claude-sdk-path", "", "pinned Claude Agent SDK module")
 	f.BoolVar(&jsonOutput, "json", false, "safe progress as JSON")
 	f.BoolVar(&startService, "start-service", false, "request user service installation after authenticated Connect approval")
@@ -236,7 +237,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	}
 	var candidates []agentsetup.Candidate
 	if savedErr != nil || command == "add-harness" {
-		d := agentsetup.Discovery{Home: home}
+		d := agentsetup.Discovery{Home: home, NodePath: nodePath, Workspace: workspace}
 		if len(harnesses) == 0 && (command == "setup" || command == "add-harness") {
 			if jsonOutput {
 				return errors.New("--harness is required with --json")
@@ -249,7 +250,11 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		for _, h := range harnesses {
 			c, e := d.Detect(ctx, h, contextLabel)
 			if e != nil {
-				_ = printSetupProgress(out, jsonOutput, agentsetup.Progress{Schema: "aeon.agent-setup.v1", Stage: "login_required", Action: e.Error()})
+				stage := "login_required"
+				if errors.Is(e, piprobe.ErrStart) || errors.Is(e, piprobe.ErrPrivateProfile) {
+					stage = "blocked"
+				}
+				_ = printSetupProgress(out, jsonOutput, agentsetup.Progress{Schema: "aeon.agent-setup.v1", Stage: stage, Action: e.Error()})
 				return e
 			}
 			candidates = append(candidates, c)
@@ -292,6 +297,11 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		}
 		defer store.Close()
 		engine.Store = store
+	}
+	// The shared Node/SDK options belong to Claude. Pi retains its own private
+	// per-account interpreter binding even when --node-path was supplied.
+	if nodePath, err = claudeNodeOption(nodePath, candidates, saved.Candidates); err != nil {
+		return err
 	}
 	engine.ClaudeDependencies = agentsetup.ClaudeDependencies{NodePath: nodePath, SDKPath: sdkPath}
 	if computer == "" {
@@ -405,6 +415,32 @@ func setupNeedsPoll(command string, p agentsetup.Progress) bool {
 		return p.Stage == "draining"
 	}
 	return (command == "setup" || command == "add-harness") && (p.Stage == "awaiting_approval" || p.Stage == "requesting" || p.Stage == "provisioning" || p.Stage == "verification_pending")
+}
+
+func claudeNodeOption(requested string, discovered, saved []agentsetup.Candidate) (string, error) {
+	choices := discovered
+	if len(choices) == 0 {
+		choices = saved
+	}
+	var pi *agentsetup.Candidate
+	for i := range choices {
+		if choices[i].Harness == "claude" {
+			return requested, nil
+		}
+		if choices[i].Harness == "pi" {
+			pi = &choices[i]
+		}
+	}
+	if pi == nil {
+		return requested, nil
+	}
+	if len(discovered) == 0 && requested != "" {
+		physical, err := filepath.EvalSymlinks(requested)
+		if err != nil || physical != pi.PiNode.Path {
+			return "", errors.New("--node-path conflicts with saved pi interpreter; no enrollment was changed")
+		}
+	}
+	return "", nil
 }
 
 func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) error {

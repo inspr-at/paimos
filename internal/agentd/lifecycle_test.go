@@ -115,6 +115,32 @@ func TestRevokedProbeDoesNotStarveOtherAccount(t *testing.T) {
 	}
 }
 
+type detailedProbeAdapter struct {
+	fakeAdapter
+	err error
+}
+
+func (a *detailedProbeAdapter) ProbeStatus(context.Context, string) (bool, error) {
+	return false, a.err
+}
+
+func TestProbeStartupFailureIsNotLoginRequired(t *testing.T) {
+	s, api, process := testSupervisor(t)
+	adapter := &detailedProbeAdapter{fakeAdapter: fakeAdapter{proc: process}, err: errors.New("synthetic startup failure")}
+	s.adapters[Codex] = adapter
+	_ = s.PollOnce(t.Context())
+	status := s.Lifecycle("")
+	if !status.HarnessFailed || status.LoginRequired || status.Ready || api.claims != 0 {
+		t.Fatal("startup failure reported as login required or allowed work")
+	}
+	adapter.err = nil
+	_ = s.PollOnce(t.Context())
+	status = s.Lifecycle("")
+	if status.HarnessFailed || !status.LoginRequired || status.Ready || api.claims != 0 {
+		t.Fatal("missing login not distinguished from startup failure")
+	}
+}
+
 type verificationFakeAdapter struct {
 	fakeAdapter
 	starts  int

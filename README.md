@@ -481,6 +481,35 @@ sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 
 Licence: AGPL-3.0-only.
 
+### Pi guided setup
+
+`paimos-agentd setup --harness pi` and `add-harness --harness pi` use the same
+person-approved pairing flow as the other harnesses. Install pi normally and use
+its `/login` and `/model` commands first. Setup pins the executable and reads its
+version. For npm's `#!/usr/bin/env node` entrypoint it also resolves Node (or
+uses `--node-path`), pins its physical path and version privately, and prepends
+its directory to the probe and runtime PATH. Node must be installed outside the
+workspace; missing or changed interpreter pins block startup. Setup then checks
+the selected provider/model against pi's public RPC
+`get_available_models` response. `--account-context anthropic` selects a specific
+configured provider instead. The local profile is `~/.pi/agent`; Aeon never
+opens its credential files, inherits provider keys for this check, or sends a
+prompt. This establishes configured authentication, not remote credential
+validity or a person's identity. The approval label names the provider and local
+profile; the server selects an enabled pi model profile for that provider, and
+only the computer keeps the profile path. The profile directory must be private
+(no group or other access), as required by the daemon. Managed installations stay
+with their owning Nix/Home Manager configuration.
+
+The paired daemon rechecks that provider at most once a minute during polling
+and afresh before each run, and refuses a model profile from a different
+provider. Probe startup failures report a harness startup problem; only missing
+provider configuration requests vendor login. Pi verification is explicitly
+unavailable: its managed adapter has no qualified no-tools boundary. Connect without verification, then
+set request limits for ongoing work. Pi retains its existing SVG harness icon and
+account allowance pipeline; missing vendor token, cost or capacity readings
+remain unreported, never inferred from a provider name or a successful probe.
+
 ### Session metadata
 
 `scripts/session-metadata.py --codex-index` requires an explicit `session_index.jsonl`

@@ -105,7 +105,7 @@ func newFixture(t *testing.T) *fixture {
 	decodeResult(t, login, &me)
 	f.person = me.Principal.ID
 	err = db.InTenant(dbtest.Seed(t.Context()), d.App, id, func(tx pgx.Tx) error {
-		for _, h := range []string{"codex", "cursor", "claude", "grok"} {
+		for _, h := range []string{"codex", "cursor", "claude", "grok", "pi"} {
 			var profile string
 			err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'1',$2,'openai','test-model','low','fast') RETURNING id::text`, id, h).Scan(&profile)
 			if err != nil {

@@ -705,7 +705,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
           <input v-model="verify" type="checkbox" :disabled="verifyLocked" />
           <span>
             <strong>Verify selected harnesses</strong>
-            <span v-if="verifyNote" class="sub">{{ verifyNote }}</span>
+            <span v-if="verifyNote" class="sub" :title="blockedHarnesses.map(harness => harnessCapability(harness)[0]?.reason).filter(Boolean).join(' ')">{{ verifyNote }}</span>
             <span v-if="verify && terms && !blockedLabels.length" class="sub">{{ formatVerification(terms) }}</span>
           </span>
           <time v-if="verify && terms && !blockedLabels.length" class="expiry" :datetime="terms.expires_at"><AppIcon name="clock" :size="14" />until {{ formatAllowanceMoment(terms.expires_at) }}</time>

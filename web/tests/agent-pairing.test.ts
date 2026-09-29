@@ -158,6 +158,16 @@ test('the guide uses the server origin and stays available when the session is f
   assert.equal(guide.version, '260927181849.0.0')
 })
 
+test('pi provider binding survives lookup without widening verification', async () => {
+  const requested = account({ harness: 'pi', provider: 'anthropic', label: 'pi / anthropic (local profile)' })
+  globalThis.fetch = async () => jsonResponse(view({ requested_accounts: [requested], verification_capabilities: {
+    pi: { supported: false, policy: 'unavailable', reason: 'No qualified no-tools policy.' },
+  } }))
+  const found = await lookupPairing('123456789')
+  assert.equal(found.requested_accounts[0]?.provider, 'anthropic')
+  assert.equal(unsupportedVerification(found, [requested.account_key])[0]?.harness, 'pi')
+})
+
 test('lookup sends only the code and does not approve', async () => {
   assert.equal(canonicalUserCode('123 456 789'), '123-456-789')
   assert.equal(canonicalUserCode('123456789'), '123-456-789')

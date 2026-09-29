@@ -22,6 +22,7 @@ export function pairingGuide() {
     platform_qualification: 'candidate; consult the exact release service qualification evidence',
     setup_command: SETUP_COMMAND,
     homebrew_command: `brew install inspr-at/tap/aeon-agentd\n${SETUP_COMMAND}`,
+    verification_capabilities: { pi: { supported: false, policy: 'unavailable', reason: 'pi verification has no qualified no-tools policy for extensions and provider configuration.' } },
     install_available: false,
     install_targets: [],
     managed_installation: 'Use the owning Nix or Home Manager configuration.',

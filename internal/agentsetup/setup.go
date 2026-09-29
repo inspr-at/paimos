@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/grokprobe"
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 const snapshotName = "pairing.json"
@@ -32,20 +33,23 @@ func (c LocalCandidate) MarshalJSON() ([]byte, error) {
 	type plain LocalCandidate
 	return json.Marshal(struct {
 		plain
-		Grok grokprobe.Binding `json:"grok,omitempty"`
-	}{plain(c), c.Candidate.Grok})
+		Grok   grokprobe.Binding `json:"grok,omitempty"`
+		PiNode piprobe.Node      `json:"pi_node,omitempty"`
+	}{plain(c), c.Candidate.Grok, c.Candidate.PiNode})
 }
 func (c *LocalCandidate) UnmarshalJSON(raw []byte) error {
 	type plain LocalCandidate
 	var v struct {
 		plain
-		Grok grokprobe.Binding `json:"grok"`
+		Grok   grokprobe.Binding `json:"grok"`
+		PiNode piprobe.Node      `json:"pi_node"`
 	}
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return err
 	}
 	*c = LocalCandidate(v.plain)
 	c.Candidate.Grok = v.Grok
+	c.Candidate.PiNode = v.PiNode
 	return nil
 }
 
@@ -57,6 +61,7 @@ type RuntimeAccount struct {
 	Identity  string            `json:"identity,omitempty"`
 	Path      string            `json:"path"`
 	Grok      grokprobe.Binding `json:"grok,omitempty"`
+	PiNode    piprobe.Node      `json:"pi_node,omitempty"`
 }
 type RuntimeConfig struct {
 	Schema        string           `json:"schema"`
@@ -119,6 +124,7 @@ type Progress struct {
 }
 type LocalStatus struct {
 	HarnessErrors                          map[string]string
+	HarnessFailed                          bool
 	LoginRequired                          bool
 	VerificationUnavailable                []string
 	Ready                                  bool
@@ -237,8 +243,8 @@ func validateOptions(o Options) error {
 	if info, err := os.Stat(p); err != nil || !info.IsDir() {
 		return ErrUnsafePath
 	}
-	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 4 {
-		return errors.New("select one to four signed-in harness accounts and a computer name")
+	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 5 {
+		return errors.New("select one to five signed-in harness accounts and a computer name")
 	}
 	seen := map[string]bool{}
 	for _, c := range o.Candidates {
@@ -250,6 +256,11 @@ func validateOptions(o Options) error {
 		// their installation. Service ownership is enforced separately below.
 		if c.Harness == "claude" && (!filepath.IsAbs(o.NodePath) || !filepath.IsAbs(o.ClaudeSDKPath)) {
 			return errors.New("Claude requires pinned Node and Agent SDK paths")
+		}
+		if c.Harness == "pi" {
+			if err := validatePiNode(c.Path, o.Workspace, c.PiNode); err != nil {
+				return err
+			}
 		}
 		if c.Harness == "grok" {
 			if o.Platform.OS != "darwin" || o.Platform.Arch != "arm64" {
@@ -456,6 +467,11 @@ func (e *Engine) Step(ctx context.Context) (Progress, error) {
 	if err = validateView(s, v, true); err != nil {
 		return e.progress(s), err
 	}
+	// The server fills an omitted profile at device creation. Pin its first
+	// digest-bound projection so later polls cannot substitute a different one.
+	for i := range s.Request.Accounts {
+		s.Request.Accounts[i].ProfileID = v.Requested[i].ProfileID
+	}
 	// A pending/denied Add harness request has no new computer projection.
 	// Preserve the healthy shared computer while this separate request waits.
 	if s.Request.ExistingComputerID == "" || v.ComputerID != "" {
@@ -602,7 +618,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 						return e.progress(s), err
 					}
 				}
-				config.Accounts = append(config.Accounts, RuntimeAccount{a.Harness, a.AccountKey, a.AccountID, c.Home, c.Identity, c.Path, c.Candidate.Grok})
+				config.Accounts = append(config.Accounts, RuntimeAccount{a.Harness, a.AccountKey, a.AccountID, c.Home, c.Identity, c.Path, c.Candidate.Grok, c.Candidate.PiNode})
 				found = true
 				break
 			}
@@ -685,6 +701,37 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 // or the credential needed to revoke this computer. Removed harnesses do not
 // block the remaining accounts merely because their old dependency pins remain.
 func ValidateRuntimeDependencies(c RuntimeConfig) error {
+	if err := ValidateHarnessRuntimeDependencies(c); err != nil {
+		return err
+	}
+	return ValidateClaudeRuntimeDependencies(c)
+}
+
+// ValidateHarnessRuntimeDependencies checks the pinned interpreters of every
+// harness except Claude (AEON-334). A failure still stops execution on this
+// computer; Claude's dependencies are checked on their own so that a Claude
+// repin or repair holds only Claude (AEON-342).
+func ValidateHarnessRuntimeDependencies(c RuntimeConfig) error {
+	for _, a := range c.Accounts {
+		if a.Harness == "pi" {
+			if err := validatePiNode(a.Path, c.Workspace, a.PiNode); err != nil {
+				return err
+			}
+			if a.PiNode.Path != "" {
+				raw, err := (OSExecutor{}).Run(context.Background(), Command{Path: a.PiNode.Path, Args: []string{"--version"}, Env: piprobe.Environment(a.Home, a.PiNode.Path)})
+				match := safeVersion.FindSubmatch(raw)
+				if err != nil || len(match) != 2 || string(match[1]) != a.PiNode.Version {
+					return piprobe.ErrStart
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateClaudeRuntimeDependencies checks the approved Claude CLI and its
+// pinned Node/SDK links (AEON-342).
+func ValidateClaudeRuntimeDependencies(c RuntimeConfig) error {
 	claude := false
 	for _, a := range c.Accounts {
 		claude = claude || a.Harness == "claude"
@@ -732,6 +779,15 @@ func (e *Engine) DispatchPermitted() (bool, error) {
 }
 
 func sameChoices(a, b []Candidate) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	b = append([]Candidate(nil), b...)
+	for i := range b {
+		if b[i].ProfileID == "" && uuidPattern.MatchString(a[i].ProfileID) {
+			b[i].ProfileID = a[i].ProfileID
+		}
+	}
 	left, _ := json.Marshal(a)
 	right, _ := json.Marshal(b)
 	return string(left) == string(right)

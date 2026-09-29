@@ -333,6 +333,11 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 				return p, nil
 			}
 			observed := observedProgress(v, local)
+			if local.HarnessFailed {
+				p.Stage = "blocked"
+				p.Action = "An approved harness failed to start. Restore its pinned installation and interpreter, then resume setup."
+				return p, nil
+			}
 			if observed.State == "login_required" {
 				p.Stage = "login_required"
 				p.Action = "An approved vendor account is no longer signed in with its approved identity. Use normal vendor login, then resume setup."
@@ -427,7 +432,7 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 	if s.DisconnectAll || s.View.ComputerState != "connected" {
 		return e.progress(s), errors.New("Add harness requires a connected computer")
 	}
-	if len(candidates) == 0 || len(candidates) > 4 {
+	if len(candidates) == 0 || len(candidates) > 5 {
 		return e.progress(s), errors.New("select a signed-in harness account")
 	}
 	selected := map[string]bool{}
@@ -436,6 +441,11 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 			return e.progress(s), errors.New("invalid Add harness account choice")
 		}
 		selected[c.Harness] = true
+		if c.Harness == "pi" {
+			if err := validatePiNode(c.Path, s.Request.Workspace, c.PiNode); err != nil {
+				return Progress{Stage: "blocked", Action: err.Error()}, err
+			}
+		}
 		for _, a := range s.View.Enrollments {
 			if a.State == "connected" && a.Harness == c.Harness && a.Label == c.Label {
 				return e.progress(s), errors.New("this harness account is already connected; no new request was created")
@@ -485,7 +495,7 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 
 func observedProgress(v View, local LocalStatus) *SetupProgress {
 	p := &SetupProgress{State: "provisioning"}
-	if len(local.HarnessErrors) > 0 {
+	if len(local.HarnessErrors) > 0 || local.HarnessFailed {
 		// Keep the existing public progress vocabulary. The specific, value-free
 		// local diagnostic is rendered by the setup status command above.
 		p.State, p.ErrorCode = "setup_failed", "installation_failed"
