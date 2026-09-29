@@ -126,7 +126,8 @@ type Rule struct {
 }
 
 // Contradiction records same-identity differences or conflicting directives for
-// one topic across layers. Both rules stay in the proposal.
+// one action across layers. Headings are provenance for directive conflicts.
+// Both rules stay in the proposal.
 type Contradiction struct {
 	Identity string   `json:"identity"`
 	Kind     string   `json:"kind"`
@@ -135,6 +136,7 @@ type Contradiction struct {
 	Note     string   `json:"note"`
 	Topic    string   `json:"topic,omitempty"`
 	Layers   []string `json:"layers,omitempty"`
+	Headings []string `json:"headings,omitempty"`
 }
 
 // Duplicate records an identical replay. Every source lineage is kept.

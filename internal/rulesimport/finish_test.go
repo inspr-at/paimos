@@ -110,7 +110,6 @@ func TestUnrepresentableDraftKeepsPlan(t *testing.T) {
 		{"role", "- Keep the checks.\n  Why: evidence.\n  roles: sysop\n", "AGENTS.md"},
 		{"text bound", "- " + strings.Repeat("x", 513) + "\n  Why: evidence.\n", "AGENTS.md"},
 		{"details bound", "- Keep the checks.\n  Why: evidence.\n  " + strings.Repeat("d", 16384) + "\n", "AGENTS.md"},
-		{"on demand", "- Keep the checks.\n  Why: evidence.\n", "AGENTS-DOMAIN-DEV.md"},
 		{"two sets", "## A\n- Keep A.\n  Why: evidence.\n## B\n- Keep B.\n  Why: evidence.\n", "AGENTS.md"},
 		{"contradiction", "## A\n<!-- aeon-rule: keep -->\n- Keep A.\n  Why: evidence.\n\n## A\n<!-- aeon-rule: keep -->\n- Keep B.\n  Why: other evidence.\n", "AGENTS.md"},
 	} {

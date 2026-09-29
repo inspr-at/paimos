@@ -54,6 +54,9 @@ func (r ContradictionReport) Markdown() string {
 		if len(item.Layers) > 0 {
 			fmt.Fprintf(&b, "- Layers: %s\n", strings.Join(item.Layers, ", "))
 		}
+		if len(item.Headings) > 0 {
+			fmt.Fprintf(&b, "- Headings: %s\n", strings.Join(item.Headings, "; "))
+		}
 		if len(item.Fields) > 0 {
 			fmt.Fprintf(&b, "- Fields: %s\n", strings.Join(item.Fields, ", "))
 		}

@@ -91,11 +91,21 @@ func TestGoldenPersonalSectionAndPackDetails(t *testing.T) {
 	if !strings.Contains(secret.Details, "PACK-BODY-START") || !strings.Contains(secret.Details, "PACK-BODY-END") {
 		t.Fatalf("pack details %q", secret.Details)
 	}
-	if strings.Contains(alwaysOnDocument(pack.Rules, pack.Files), "PACK-BODY-START") {
+	if strings.Contains(alwaysOnDocument(pack.Rules), "PACK-BODY-START") {
 		t.Fatal("pack body entered the always-on projection")
 	}
 	if pack.AlwaysOn.Bytes > AlwaysOnBudget || !pack.AlwaysOn.Insert {
 		t.Fatalf("pack budget %+v", pack.AlwaysOn)
+	}
+	if !pack.Adapter.Ready {
+		t.Fatalf("pack was not draftable: %s", pack.Adapter.Reason)
+	}
+	mapped, err := MapDraft(pack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mapped) != 1 || mapped[0].Text != secret.Text || !strings.Contains(mapped[0].Details, "PACK-BODY-START") || !strings.Contains(mapped[0].Details, "PACK-BODY-END") || strings.Contains(mapped[0].Text, "PACK-BODY") {
+		t.Fatalf("pack was not attached as draft details: %+v", mapped)
 	}
 }
 
@@ -109,10 +119,10 @@ func TestGoldenContradictionsReport(t *testing.T) {
 			found = item
 		}
 	}
-	if found.Kind == "" || found.Topic != "git | force-push the default branch" {
+	if found.Kind == "" || found.Topic != "force-push the default branch" {
 		t.Fatalf("contradiction %+v", got.Contradictions)
 	}
-	if strings.Join(found.Layers, ",") != "company,project" || len(found.RuleIDs) != 2 {
+	if strings.Join(found.Layers, ",") != "company,project" || len(found.RuleIDs) != 2 || strings.Join(found.Headings, ",") != "Git" {
 		t.Fatalf("layers/rules %+v", found)
 	}
 	if got.Adapter.Ready {

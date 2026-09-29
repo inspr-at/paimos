@@ -34,6 +34,10 @@ func TestImportedPackDetailsStayOutsideSessionBudget(t *testing.T) {
 	if len(mapped) != 1 || !strings.Contains(mapped[0].Details, "PACKTOKEN") || strings.Contains(mapped[0].Text, "PACKTOKEN") {
 		t.Fatal("pack was not attached as details")
 	}
+	rendered := RenderedBody([]Rule{{Identity: mapped[0].Identity, Text: mapped[0].Text, Enabled: mapped[0].Enabled}})
+	if proposal.AlwaysOn.Bytes != len(rendered) || !strings.Contains(rendered, "["+mapped[0].Identity+"]") || strings.Contains(rendered, "PACKTOKEN") {
+		t.Fatalf("preview %d is not the session renderer (%d)", proposal.AlwaysOn.Bytes, len(rendered))
+	}
 	rule := Rule{
 		Identity: mapped[0].Identity, Text: mapped[0].Text, Why: mapped[0].Why, Details: mapped[0].Details,
 		Strength: mapped[0].Strength, Enabled: mapped[0].Enabled,

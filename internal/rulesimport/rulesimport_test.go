@@ -291,9 +291,12 @@ func TestRolePackAndSecretsFilename(t *testing.T) {
 	if !ok || secret.Placement != PlacementOnDemand || len(secret.Details) != 20000 {
 		t.Fatalf("pack placement %s details %d", secret.Placement, len(secret.Details))
 	}
-	want := len("on-demand: AGENTS-DOMAIN-SECRETS.md (1 rules)\n") + len("## limits\n- Stay inside the ticket.\n")
-	if !got.AlwaysOn.Insert || got.AlwaysOn.Bytes != want {
-		t.Fatalf("always-on %+v want %d", got.AlwaysOn, want)
+	doc := alwaysOnDocument(got.Rules)
+	if strings.Contains(doc, strings.Repeat("d", 80)) || strings.Contains(doc, "on-demand:") || !strings.Contains(doc, "Stay inside the ticket.") || !strings.Contains(doc, "Keep the pack on demand.") || !strings.Contains(doc, "[import-") {
+		t.Fatalf("session projection %q", doc)
+	}
+	if !got.AlwaysOn.Insert || got.AlwaysOn.Bytes != len(doc) || got.AlwaysOn.Bytes > AlwaysOnBudget {
+		t.Fatalf("always-on %+v doc %d", got.AlwaysOn, len(doc))
 	}
 	if secret.Details != strings.Repeat("d", 20000) {
 		t.Fatal("pack details were truncated or altered")
@@ -301,7 +304,8 @@ func TestRolePackAndSecretsFilename(t *testing.T) {
 }
 
 func TestAlwaysOnBudgetRefusesWithoutTruncation(t *testing.T) {
-	overhead := len("## preamble\n- \n")
+	id := "import-" + strings.Repeat("a", 64)
+	overhead := len(sessionHeader) + len(sessionRuleLine(id, ""))
 	dir := t.TempDir()
 	fit := writeDoc(t, dir, "fit/AGENTS-KERNEL.md", "- "+strings.Repeat("x", AlwaysOnBudget-overhead)+"\n")
 	over := writeDoc(t, dir, "over/AGENTS-KERNEL.md", "- "+strings.Repeat("x", AlwaysOnBudget-overhead+1)+"\n")

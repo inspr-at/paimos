@@ -83,23 +83,27 @@ type DraftResult struct {
 // Lineage is appended as JSON in details, the only AR1 on-demand field capable
 // of retaining every source range. No content is shortened to fit wire limits.
 type draftLineage struct {
-	Schema      string      `json:"schema"`
-	Identity    string      `json:"identity"`
-	ExplicitID  string      `json:"explicit_id,omitempty"`
-	Layer       Layer       `json:"layer"`
-	Set         string      `json:"set"`
-	SetTitle    string      `json:"set_title"`
-	Placement   string      `json:"placement"`
-	Source      string      `json:"source,omitempty"`
-	Coordinates string      `json:"coordinates"`
-	Sources     []SourceRef `json:"sources"`
+	Schema        string      `json:"schema"`
+	Identity      string      `json:"identity"`
+	ExplicitID    string      `json:"explicit_id,omitempty"`
+	Layer         Layer       `json:"layer"`
+	Set           string      `json:"set"`
+	SetTitle      string      `json:"set_title"`
+	Placement     string      `json:"placement"`
+	Source        string      `json:"source,omitempty"`
+	Coordinates   string      `json:"coordinates"`
+	Sources       []SourceRef `json:"sources"`
+	ContentSHA256 string      `json:"content_sha256"`
 }
 
 func digest(raw []byte) string { s := sha256.Sum256(raw); return hex.EncodeToString(s[:]) }
 
+func importedIdentity(identity string) string { return "import-" + digest([]byte(identity)) }
+
 // MapDraft is pure: one local group maps to one AR1 draft. AR1 cannot encode
-// unresolved choices, on-demand-only rules or mixed groups; refusal retains the
-// complete Proposal. Apply never selects an alternative or invents a rationale.
+// unresolved choices or mixed groups. On-demand packs are attached as draft
+// details; their bodies are not session-file text. Refusal retains the complete
+// Proposal. Apply never selects an alternative or invents a rationale.
 func MapDraft(p Proposal) ([]DraftRule, error) {
 	if !validContext(p.Context) || len(p.Rules) == 0 || len(p.Rules) > 100 {
 		return nil, draftRefusal("one explicit context and 1..100 rules are required")
@@ -116,9 +120,6 @@ func MapDraft(p Proposal) ([]DraftRule, error) {
 	for _, r := range p.Rules {
 		if r.Layer != first.Layer || r.Set != first.Set {
 			return nil, draftRefusal("AR1 replaces one set at a time; split this proposal into explicit layer/set groups")
-		}
-		if r.Placement != PlacementAlwaysOn {
-			return nil, draftRefusal("AR1 has no on-demand rule placement; local proposal retained")
 		}
 		if r.Identity == "" || seen[r.Identity] {
 			return nil, draftRefusal("rule identities must be unique")
@@ -137,35 +138,37 @@ func MapDraft(p Proposal) ([]DraftRule, error) {
 			}
 			expires = &at
 		}
-		id := "import-" + digest([]byte(r.Identity))
-		lineage, err := json.Marshal(draftLineage{
-			Schema: "aeon.doctrine-lineage.v1", Identity: r.Identity, ExplicitID: r.ExplicitID,
-			Layer: r.Layer, Set: r.Set, SetTitle: r.SetTitle, Placement: r.Placement, Source: r.Source,
-			Coordinates: "1-based normalized lines: BOM removed, CR/CRLF to LF; file_sha256 hashes raw bytes",
-			Sources:     r.Sources,
-		})
-		if err != nil {
-			return nil, draftRefusal("cannot encode source lineage")
-		}
+		id := importedIdentity(r.Identity)
 		reference := r.Source
 		if reference == "" {
 			reference = "doctrine:" + id
-		}
-		revision := r.Sources[0].FileSHA256
-		if len(r.Sources) > 1 {
-			revision = digest(lineage)
 		}
 		sourceID := r.ExplicitID
 		if sourceID == "" {
 			sourceID = id
 		}
 		rule := DraftRule{
-			Identity: id, Text: r.Text, Why: r.Why,
-			Details:  r.Details + "\n\n[aeon doctrine lineage]\n" + string(lineage),
+			Identity: id, Text: r.Text, Why: r.Why, Details: r.Details,
 			Strength: r.Strength, Enabled: r.Enabled, ExpiresAt: expires,
 			Roles: slices.Clone(r.Roles), Harnesses: slices.Clone(r.Harnesses),
-			Source: DraftSource{Reference: reference, Revision: revision, Identity: sourceID, EditedHere: false},
+			Source: DraftSource{Reference: reference, Identity: sourceID, EditedHere: false},
 		}
+		lineage, err := json.Marshal(draftLineage{
+			Schema: "aeon.doctrine-lineage.v1", Identity: r.Identity, ExplicitID: r.ExplicitID,
+			Layer: r.Layer, Set: r.Set, SetTitle: r.SetTitle, Placement: r.Placement, Source: r.Source,
+			Coordinates:   "1-based normalized lines: BOM removed, CR/CRLF to LF; file_sha256 hashes raw bytes",
+			Sources:       r.Sources,
+			ContentSHA256: contentFingerprint(rule),
+		})
+		if err != nil {
+			return nil, draftRefusal("cannot encode source lineage")
+		}
+		revision := r.Sources[0].FileSHA256
+		if len(r.Sources) > 1 {
+			revision = digest(lineage)
+		}
+		rule.Source.Revision = revision
+		rule.Details = r.Details + "\n\n[aeon doctrine lineage]\n" + string(lineage)
 		if err := validateDraftRule(rule); err != nil {
 			return nil, err
 		}
@@ -264,24 +267,9 @@ func ApplyDraft(ctx context.Context, c *client.Client, p Proposal, target Target
 		}
 		index[r.Identity] = i
 	}
-	added, updated, unchanged := 0, 0, 0
-	for _, r := range imported {
-		if i, ok := index[r.Identity]; ok {
-			if sameDraftRule(merged[i], r) {
-				unchanged++
-				continue
-			}
-			// A person marked this draft edited here. Re-import must not replace it.
-			if merged[i].Source.EditedHere {
-				return DraftResult{}, fmt.Errorf("%w: existing identity was edited here; resolve it explicitly", ErrDraftConflict)
-			}
-			merged[i] = r
-			updated++
-			continue
-		}
-		merged = append(merged, r)
-		index[r.Identity] = len(merged) - 1
-		added++
+	merged, added, updated, unchanged, err := mergeImported(merged, imported)
+	if err != nil {
+		return DraftResult{}, err
 	}
 	result := DraftResult{Mode: "unchanged", PlanID: p.PlanID, SetID: current.ID, Revision: current.Revision, Added: added, Updated: updated, Unchanged: unchanged}
 	if added == 0 && updated == 0 {

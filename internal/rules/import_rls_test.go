@@ -5,6 +5,7 @@ package rules
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -126,6 +127,29 @@ func TestImportDraftOnlyIdempotentAndTenantIsolated(t *testing.T) {
 	if stored.Rules[0].Why != "secrets stay inside the tenant boundary." || !strings.Contains(stored.Rules[0].Details, "PACKTOKEN") || !strings.Contains(stored.Rules[0].Details, "heading_path") {
 		t.Fatalf("updated draft lost lineage or details: %+v", stored.Rules[0])
 	}
+	if stored.Rules[0].Source.EditedHere {
+		t.Fatal("import set edited_here")
+	}
+	edited := stored.Rules[0]
+	edited.Why = "Edited in Aeon after import."
+	var editedSet Set
+	if err := json.Unmarshal(call(admin, "PUT", "/api/rules/sets/"+set.ID+"/draft", map[string]any{
+		"expected_revision": stored.Revision,
+		"name":              stored.Name,
+		"rules":             []Rule{edited},
+	}, 200), &editedSet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rulesimport.ApplyDraft(ctx, api, changed, rulesimport.Target{SetID: set.ID, Revision: editedSet.Revision}); !errors.Is(err, rulesimport.ErrDraftConflict) {
+		t.Fatalf("diverged Aeon edit was overwritten: %v", err)
+	}
+	var kept Set
+	if err := json.Unmarshal(call(admin, "GET", "/api/rules/sets/"+set.ID, nil, 200), &kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept.Revision != editedSet.Revision || len(kept.Rules) != 1 || kept.Rules[0].Why != "Edited in Aeon after import." || !strings.Contains(kept.Rules[0].Details, "PACKTOKEN") {
+		t.Fatalf("Aeon edit was not kept: %+v", kept.Rules)
+	}
 
 	var foreign string
 	if err := d.App.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('rules-import-foreign','Foreign') RETURNING id::text`).Scan(&foreign); err != nil {
@@ -156,7 +180,7 @@ func TestImportDraftOnlyIdempotentAndTenantIsolated(t *testing.T) {
 		t.Fatal("draft import published", err, published)
 	}
 	var replaced int
-	if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1 AND type='rules.draft_replaced'`, tid).Scan(&replaced); err != nil || replaced != 2 {
+	if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1 AND type='rules.draft_replaced'`, tid).Scan(&replaced); err != nil || replaced != 3 {
 		t.Fatal("draft writes", err, replaced)
 	}
 }

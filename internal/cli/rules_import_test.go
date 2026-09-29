@@ -206,7 +206,7 @@ func TestRulesImportHTTPDraftMappingAndFailures(t *testing.T) {
 			if !reflect.DeepEqual(plan, retained) {
 				t.Fatal("apply/error changed local proposal")
 			}
-			if scenario == "authorized" || scenario == "unchanged" || scenario == "hash update" {
+			if scenario == "authorized" || scenario == "unchanged" {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -232,10 +232,6 @@ func TestRulesImportHTTPDraftMappingAndFailures(t *testing.T) {
 					if receipt.Added != 0 || receipt.Updated != 0 || receipt.Unchanged != 1 {
 						t.Fatalf("receipt counts %+v", receipt)
 					}
-				case "hash update":
-					if receipt.Added != 0 || receipt.Updated != 1 || receipt.Unchanged != 0 {
-						t.Fatalf("receipt counts %+v", receipt)
-					}
 				}
 			} else {
 				if err == nil {
@@ -247,6 +243,9 @@ func TestRulesImportHTTPDraftMappingAndFailures(t *testing.T) {
 				var receipt any
 				if e := dec.Decode(&receipt); e != io.EOF {
 					t.Fatal("failure printed a success receipt")
+				}
+				if scenario == "hash update" && !errors.Is(err, rulesimport.ErrDraftConflict) {
+					t.Fatalf("Aeon edit was overwritten or not reported: %v", err)
 				}
 				if scenario == "put403" || scenario == "get403" || scenario == "put409" {
 					var se *client.StatusError
@@ -260,7 +259,7 @@ func TestRulesImportHTTPDraftMappingAndFailures(t *testing.T) {
 				}
 			}
 			expected := 1
-			if scenario == "authorized" || scenario == "put403" || scenario == "put409" || scenario == "hash update" {
+			if scenario == "authorized" || scenario == "put403" || scenario == "put409" {
 				expected = 2
 			}
 			if len(calls) != expected {
