@@ -53,6 +53,7 @@ type AttachLocalRequest struct {
 	ProjectID  string `json:"project_id,omitempty"`
 	TicketID   string `json:"ticket_id,omitempty"`
 	Transcript string `json:"transcript,omitempty"`
+	StatusOnly bool   `json:"status_only,omitempty"`
 }
 type AttachLocalView struct {
 	ConsentMode string               `json:"consent_mode,omitempty"`
@@ -135,10 +136,16 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		if err != nil || approved == "" || observed.Executable != physical {
 			return AttachLocalView{}, reject
 		}
-		// No path means metadata-only attach. Do not discover or open any transcript.
+		// Status-only must be explicit; a missing transcript never downgrades watch consent.
+		if !in.StatusOnly && in.Transcript == "" {
+			return AttachLocalView{}, errors.New("watch requires --transcript PATH; choose --status-only for no conversation text")
+		}
+		if in.StatusOnly && in.Transcript != "" {
+			return AttachLocalView{}, errors.New("status-only attach must not include a transcript")
+		}
 		mode, fileID := attachwatch.ModeLease, ""
 		var tail *attachTail
-		if in.Transcript != "" { // Preserve explicitly requested legacy watches.
+		if !in.StatusOnly {
 			tail, err = openAttachTail(in.Transcript, observed.UID)
 			if err != nil {
 				return AttachLocalView{}, reject
@@ -173,7 +180,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		return m.localView(in.ID, s), nil
 	}
 	observed, err := m.observe(s.snapshot.Process.PID)
-	if errors.Is(err, errAttachExited) && s.snapshot.Mode == attachwatch.ModeLease {
+	if errors.Is(err, errAttachExited) {
 		m.endAs(ctx, in.ID, s, "exited")
 		s.view.State = "confirmed_exited"
 		return m.localView(in.ID, s), nil
@@ -195,8 +202,12 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 			m.end(ctx, in.ID, s)
 			return AttachLocalView{}, errors.New("paired instance snapshot mismatch")
 		}
-		s.view = view
 		s.requested = true
+		if !attachwatch.ConsentModeValid(view.ConsentMode) || view.ConsentDigest != attachwatch.ConsentDigest(in.ID, view.Digest, view.ConsentMode) {
+			m.end(ctx, in.ID, s)
+			return AttachLocalView{}, errors.New("paired instance lacks attach consent binding; update Aeon and agentd")
+		}
+		s.view = view
 		s.touched = time.Now()
 		return m.localView(in.ID, s), nil
 	}
@@ -258,9 +269,8 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("watch binding changed")
 	}
-	// Missing fields are the legacy mode-A server. A new consent binding may
-	// change while pending, but never after approval or activation.
-	if view.ConsentMode != "" && (!attachwatch.ConsentModeValid(view.ConsentMode) || view.ConsentDigest != attachwatch.ConsentDigest(in.ID, view.Digest, view.ConsentMode)) ||
+	// A new consent binding may change while pending, never after approval.
+	if !attachwatch.ConsentModeValid(view.ConsentMode) || view.ConsentDigest != attachwatch.ConsentDigest(in.ID, view.Digest, view.ConsentMode) ||
 		s.view.State != "pending" && (view.ConsentMode != s.view.ConsentMode || view.ConsentDigest != s.view.ConsentDigest) ||
 		view.State == "active" && view.ConsentMode == attachwatch.ConsentLocalAuth && s.confirmedDigest != view.ConsentDigest {
 		m.end(ctx, in.ID, s)
@@ -273,7 +283,11 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		s.cancelConfirmation = cancel
 		result := make(chan error, 1)
 		s.confirmation = result
-		reason := fmt.Sprintf("Allow watching %s session PID %d on %s", s.snapshot.Harness, s.snapshot.Process.PID, s.snapshot.Host)
+		action := "watching the conversation"
+		if s.snapshot.Mode == attachwatch.ModeLease {
+			action = "status only (no conversation text) for"
+		}
+		reason := fmt.Sprintf("Allow %s %s session PID %d on %s", action, s.snapshot.Harness, s.snapshot.Process.PID, s.snapshot.Host)
 		go func() { result <- m.cfg.LocalAuth.Confirm(authCtx, reason) }()
 	}
 	if view.State != "pending" && view.State != "active" && view.State != "approved" {

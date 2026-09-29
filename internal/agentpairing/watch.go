@@ -29,6 +29,9 @@ type watchPollKeys struct {
 }
 
 func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in attachwatch.DeviceRequest) error {
+	if in.AttachProtocol != attachwatch.Protocol {
+		return fail(409, "update_agentd", "update agentd to attach protocol 2; fresh approval required")
+	}
 	if !hashRE.MatchString(in.PollKey) || !hashRE.MatchString(in.DeviceProof) || in.PollKey == in.DeviceProof || in.Text != "" {
 		return fail(403, "forbidden", "fresh daemon poll key required")
 	}
@@ -248,7 +251,7 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 				if v.Digest != s.Digest() {
 					return fail(409, "conflict", "attach snapshot is immutable")
 				}
-				if s.Mode == attachwatch.ModeLease && v.State != "pending" {
+				if v.State != "pending" {
 					return fail(409, "conflict", "attach request already consumed; create a new request")
 				}
 				out = v
@@ -296,19 +299,16 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			rejected = fail(409, "conflict", "process or approval snapshot changed")
 			return attachEnd(ctx, tx, &out, "detached")
 		}
-		if in.Operation == "poll" && (out.State == "approved" || out.State == "active") && out.Snapshot.Mode == attachwatch.ModeLease && in.ConsentDigest != out.ConsentDigest {
+		if in.Operation == "poll" && (out.State == "approved" || out.State == "active") && in.ConsentDigest != out.ConsentDigest {
 			// First pending poll may discover approval, but cannot activate it yet.
-			if out.State == "approved" && in.ConsentDigest == "" {
+			if out.State == "approved" && in.ConsentDigest == "" && !in.LocalConfirmed {
 				if in.Text != "" {
-					return fail(400, "invalid_request", "metadata-only attach rejects conversation text")
+					rejected = fail(400, "invalid_request", "approval discovery rejects conversation text")
+					return attachEnd(ctx, tx, &out, "detached")
 				}
 				return nil
 			}
-			rejected = fail(409, "conflict", "consent binding mismatch")
-			return attachEnd(ctx, tx, &out, "detached")
-		}
-		if in.Operation == "poll" && out.State == "active" && out.ConsentMode == attachwatch.ConsentLocalAuth && in.ConsentDigest != out.ConsentDigest {
-			rejected = fail(409, "conflict", "consent binding mismatch")
+			rejected = fail(409, "conflict", "consent binding required or mismatched; update agentd and attach again")
 			return attachEnd(ctx, tx, &out, "detached")
 		}
 		// Bind the content prohibition to the saved approval, never just a client flag.
@@ -320,9 +320,6 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			return attachEnd(ctx, tx, &out, "detached")
 		}
 		if in.Operation == "exited" {
-			if out.Snapshot.Mode != attachwatch.ModeLease {
-				return fail(400, "invalid_request", "exit confirmation requires metadata-only attach")
-			}
 			return attachEnd(ctx, tx, &out, "confirmed_exited")
 		}
 		if err = attachScope(ctx, tx, p.TenantID, owner, out.Snapshot); err != nil {
@@ -483,7 +480,7 @@ func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant
 			rejected = fail(410, "attach_ended", "attach expired")
 			return nil
 		}
-		if (consentDigest != "" || out.ConsentMode == attachwatch.ConsentLocalAuth || out.Snapshot.Mode == attachwatch.ModeLease) && consentDigest != out.ConsentDigest {
+		if consentDigest != out.ConsentDigest {
 			return fail(409, "conflict", "consent setting changed; review the request again")
 		}
 		if out.ConsentMode == attachwatch.ConsentLocalAuth && out.Snapshot.Platform != "darwin" {
@@ -499,7 +496,7 @@ func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant
 		if err = attachScope(r.Context(), tx, p.TenantID, owner, out.Snapshot); err != nil {
 			return err
 		}
-		if out.Snapshot.Mode == attachwatch.ModeLease && out.State != "pending" {
+		if out.State != "pending" {
 			return fail(409, "conflict", "approval already consumed")
 		}
 		if out.State == "pending" {

@@ -40,19 +40,20 @@ func TestPairedAttachRegistersFreshMemoryOnlyKeyAtEveryStart(t *testing.T) {
 	lifecycle := hex.EncodeToString(fixture[:])
 	var registrations []string
 	var mu sync.Mutex
-	refuse := false
+	refuse := 0
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 		var in attachwatch.DeviceRequest
-		if r.Method != "POST" || r.URL.Path != "/api/agent-pairing/attach" || json.NewDecoder(r.Body).Decode(&in) != nil || in.Operation != "register" || in.ComputerID != computer || in.DeviceProof != lifecycle || len(in.PollKey) != 64 || in.PollKey == lifecycle || in.Text != "" || !attachwatch.LocalAuthCapabilityReported(in.LocalAuthCapability) {
+		if r.Method != "POST" || r.URL.Path != "/api/agent-pairing/attach" || json.NewDecoder(r.Body).Decode(&in) != nil || in.Operation != "register" || in.AttachProtocol != attachwatch.Protocol || in.ComputerID != computer || in.DeviceProof != lifecycle || len(in.PollKey) != 64 || in.PollKey == lifecycle || in.Text != "" || !attachwatch.LocalAuthCapabilityReported(in.LocalAuthCapability) {
 			t.Error("invalid daemon-start registration")
 			w.WriteHeader(403)
 			return
 		}
 		registrations = append(registrations, in.PollKey)
-		if refuse {
-			w.WriteHeader(403)
+		if refuse != 0 {
+			w.Header().Set("Location", "/must-not-follow")
+			w.WriteHeader(refuse)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]string{"state": "registered"})
@@ -81,13 +82,21 @@ func TestPairedAttachRegistersFreshMemoryOnlyKeyAtEveryStart(t *testing.T) {
 	}
 	mu.Lock()
 	distinct := len(registrations) == 2 && registrations[0] != registrations[1]
-	refuse = true
+	refuse = 403
 	mu.Unlock()
 	if !distinct {
 		t.Fatal("daemon restart reused poll key")
 	}
 	if manager, err := pairedAttach(root, c, remote); err == nil || manager != nil {
 		t.Fatal("registration failure left attach enabled")
+	}
+	for _, code := range []int{301, 302, 303, 307, 308} {
+		mu.Lock()
+		refuse = code
+		mu.Unlock()
+		if manager, err := pairedAttach(root, c, remote); err == nil || manager != nil {
+			t.Fatal("redirect retained attach authority")
+		}
 	}
 	// Inspect only this generated fixture, never the operator's setup store.
 	mu.Lock()

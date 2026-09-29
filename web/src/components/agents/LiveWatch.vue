@@ -78,6 +78,8 @@ onBeforeUnmount(() => { stop(); stopAccess(); document.removeEventListener('visi
     </template>
     <p v-else-if="session.watch.process_state === 'confirmed_exited'" class="waiting" role="status">Process exit confirmed.</p>
     <p v-else-if="metadataOnly && !available" class="waiting" role="status">{{ session.watch.state === 'unreachable' ? 'Session unreachable. Process exit is unconfirmed.' : 'Session detached. Process exit is unconfirmed.' }}</p>
+    <p v-else-if="revoked || session.watch.state === 'detached'" class="waiting" role="status">Watch detached. Process exit is unconfirmed.</p>
+    <p v-else-if="session.watch.state === 'unreachable'" class="waiting" role="status">Watch unreachable. Process exit is unconfirmed.</p>
     <p v-else-if="state === 'ended' || !available" class="waiting" role="status">Watch ended or unreachable. Process exit is unconfirmed.</p>
     <details v-if="!metadataOnly" class="limits"><summary><AppIcon name="chevron-right" class="disclosure-chev" :size="12" />Privacy and trust</summary><p>Only new turns are shared. Redaction is best effort; processes running as the same user are not isolated.</p></details>
     <button v-if="owner && available" class="revoke" type="button" :disabled="revoking" @click="revoke">{{ revoking ? 'Revoking…' : metadataOnly ? 'Detach session' : 'Revoke watch for everyone' }}</button>

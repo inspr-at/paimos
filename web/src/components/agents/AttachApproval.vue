@@ -65,9 +65,10 @@ onBeforeUnmount(() => { close(); stopAccess() })
         <footer><button type="submit" class="btn primary" :disabled="busy">{{ busy ? 'Checking…' : 'Review session' }}</button></footer>
       </form>
       <template v-else>
-        <p class="request-warning"><template v-if="!metadataOnly">Requested by a process on {{ review.snapshot.host }}. </template><strong>{{ metadataOnly ? 'Only allow if you started this attach yourself.' : 'Only allow if you started this watch yourself.' }}</strong></p>
+        <p class="request-warning">Requested by a process on {{ review.snapshot.host }}. <strong>{{ metadataOnly ? 'Only allow if you started this attach yourself.' : 'Only allow if you started this watch yourself.' }}</strong></p>
         <p class="host">{{ review.snapshot.host }} <span>· {{ review.snapshot.harness }}</span></p>
         <dl>
+          <dt>Mode</dt><dd class="mode">{{ metadataOnly ? 'Status only (no conversation text)' : 'Watch the conversation' }}</dd>
           <dt>Project</dt><dd :title="review.snapshot.project_id">{{ project }}</dd>
           <dt>Ticket</dt><dd :title="review.snapshot.ticket_id">{{ ticket }}</dd>
           <dt>Folder</dt><dd class="path">{{ review.snapshot.process.cwd }}</dd>
@@ -114,6 +115,7 @@ input { box-sizing: border-box; width: 100%; padding: 12px; font: 22px/1.3 ui-mo
 .host span, dt, .limits { color: var(--ink-2); font-weight: 400; }
 dl { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 9px 12px; font-size: 13px; line-height: 1.5; }
 dd { margin: 0; overflow-wrap: anywhere; }
+.mode { font-weight: 600; }
 .path { font: 12px/1.6 ui-monospace, monospace; }
 summary::-webkit-details-marker { display: none; }
 summary::marker { content: ""; }

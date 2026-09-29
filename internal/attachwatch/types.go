@@ -18,6 +18,10 @@ import (
 // ModeLease binds content-free attachment into the immutable approval snapshot.
 const ModeLease = "lease"
 
+// Protocol requires origin pinning, redirect refusal and kernel identity checks
+// for both conversation watches and status-only leases.
+const Protocol = 2
+
 const ConsentAeon = "aeon"
 const ConsentLocalAuth = "local_auth"
 
@@ -87,6 +91,7 @@ func (s Snapshot) Valid() bool {
 }
 
 type DeviceRequest struct {
+	AttachProtocol      int      `json:"attach_protocol,omitempty"`
 	ConsentDigest       string   `json:"consent_digest,omitempty"`
 	LocalConfirmed      bool     `json:"local_confirmed,omitempty"`
 	Operation           string   `json:"operation"`
@@ -101,8 +106,8 @@ type DeviceRequest struct {
 	LocalAuthCapability string   `json:"local_auth_capability,omitempty"`
 }
 
-// ConsentDigest preserves the v1 snapshot digest for old mode-A clients while
-// binding new approvals to this request and the mode selected by the server.
+// ConsentDigest binds approval to this request, its snapshot (including the
+// chosen content mode) and the consent policy selected by the server.
 func ConsentDigest(requestID, snapshotDigest, mode string) string {
 	h := sha256.Sum256([]byte("aeon.attach.consent.v1\x00" + requestID + "\x00" + snapshotDigest + "\x00" + mode))
 	return hex.EncodeToString(h[:])

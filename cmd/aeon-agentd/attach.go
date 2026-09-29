@@ -55,9 +55,9 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var registered attachwatch.View
-	registration := map[string]string{"operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey, "local_auth_capability": agentd.CurrentLocalAuthCapability()}
+	registration := map[string]any{"attach_protocol": attachwatch.Protocol, "operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey, "local_auth_capability": agentd.CurrentLocalAuthCapability()}
 	if err = pairedClient.Do(ctx, "POST", "/api/agent-pairing/attach", registration, &registered); err != nil || registered.State != "registered" {
-		return nil, errors.New("paired instance refused watch registration")
+		return nil, errors.New("paired instance refused attach registration; update agentd and Aeon")
 	}
 	return agentd.NewAttachManager(agentd.AttachConfig{Origin: c.Origin, ComputerID: c.ComputerID, Host: host, Workspace: c.Workspace, Executables: paths,
 		Exchange: func(ctx context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
@@ -77,9 +77,10 @@ func attachCommand(args []string, out io.Writer) error {
 	f.StringVar(&in.Harness, "harness", "", "paired harness name")
 	f.StringVar(&in.ProjectID, "project-id", "", "project UUID")
 	f.StringVar(&in.TicketID, "ticket-id", "", "ticket UUID")
-	f.StringVar(&in.Transcript, "transcript", "", "legacy watch only: physical transcript file path")
+	f.StringVar(&in.Transcript, "transcript", "", "physical transcript file path for the default conversation watch")
+	f.BoolVar(&in.StatusOnly, "status-only", false, "report status without reading or sharing conversation text")
 	if f.Parse(args) != nil || len(f.Args()) != 0 || !filepath.IsAbs(root) || in.PID < 1 || in.Transcript != "" && !filepath.IsAbs(in.Transcript) {
-		return errors.New("usage: aeon-agentd attach --setup-root PATH --pid PID --harness NAME --project-id UUID --ticket-id UUID [--transcript PATH]")
+		return errors.New("usage: aeon-agentd attach --setup-root PATH --pid PID --harness NAME --project-id UUID --ticket-id UUID [--transcript PATH] [--status-only]")
 	}
 	// Never read confirmation from stdin, an agent pipe, a flag or fetched text.
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
@@ -96,6 +97,16 @@ func attachCommand(args []string, out io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	reader := bufio.NewReader(io.LimitReader(tty, 4096))
+	in.StatusOnly, err = promptAttachMode(ctx, reader, tty, in.StatusOnly)
+	if err != nil {
+		return err
+	}
+	if in.StatusOnly {
+		in.Transcript = ""
+	} else if in.Transcript == "" {
+		return errors.New("watch requires --transcript PATH; choose --status-only for no conversation text")
+	}
 	view, err := client.Attach(ctx, in)
 	if err != nil {
 		return err
@@ -108,31 +119,23 @@ func attachCommand(args []string, out io.Writer) error {
 	}()
 	p := view.Snapshot.Process
 	verb, confirmation := "Attach", "ATTACH"
-	if in.Transcript != "" {
+	if !in.StatusOnly {
 		verb, confirmation = "Watch", "WATCH"
 	}
 	fmt.Fprintf(tty, "%s this running session on %s\nHost: %s · %s · PID %d · UID %d\nStarted: %s\nExecutable: %s\nFolder: %s\nProject: %s · Ticket: %s\n", verb, view.Origin, view.Snapshot.Host, view.Snapshot.Harness, p.PID, p.UID, p.Started, p.Executable, p.CWD, view.Snapshot.ProjectID, view.Snapshot.TicketID)
-	if in.Transcript == "" {
-		fmt.Fprintln(tty, "Session status only. No conversation text is read or shared.")
+	if in.StatusOnly {
+		fmt.Fprintln(tty, "Status only (no conversation text). No conversation text is read or shared.")
 	} else {
-		fmt.Fprintf(tty, "Transcript: %s (%s)\nOnly new turns after approval. Audience: people explicitly granted harness.watch in this project.\n", view.Snapshot.Transcript, view.Snapshot.FileID)
+		fmt.Fprintf(tty, "Watch the conversation.\nTranscript: %s (%s)\nOnly new turns after approval. Audience: people explicitly granted harness.watch in this project.\n", view.Snapshot.Transcript, view.Snapshot.FileID)
 	}
 	fmt.Fprintln(tty, "Only attach a single trust context. Same-user processes are not isolated.")
 	fmt.Fprintf(tty, "Type %s for the local check, then approve in your paired browser: ", confirmation)
-	// Bound input and handle Ctrl-C without leaving a background attach running.
-	answers := make(chan string, 1)
-	go func() {
-		reader := bufio.NewReader(io.LimitReader(tty, 64))
-		line, _ := reader.ReadString('\n')
-		answers <- strings.TrimSpace(line)
-	}()
-	select {
-	case <-ctx.Done():
-		return nil
-	case answer := <-answers:
-		if answer != confirmation {
-			return errors.New("attach cancelled")
-		}
+	answer, err := readAttachAnswer(ctx, reader)
+	if err != nil {
+		return err
+	}
+	if answer != confirmation {
+		return errors.New("attach cancelled")
 	}
 	view, err = client.Attach(ctx, agentd.AttachLocalRequest{Operation: "confirm", ID: view.ID, Digest: view.Digest})
 	if err != nil {
@@ -166,5 +169,46 @@ func attachCommand(args []string, out io.Writer) error {
 				previous = next.State
 			}
 		}
+	}
+}
+
+// Both choices are made on /dev/tty before any request leaves the daemon.
+// --status-only pins the private choice; an empty menu answer keeps watch default.
+func promptAttachMode(ctx context.Context, reader *bufio.Reader, out io.Writer, statusOnly bool) (bool, error) {
+	if statusOnly {
+		fmt.Fprintln(out, "Selected: Status only (no conversation text).")
+		return true, nil
+	}
+	fmt.Fprintln(out, "1. Watch the conversation (default)")
+	fmt.Fprintln(out, "2. Status only (no conversation text)")
+	fmt.Fprint(out, "Choose mode [1]: ")
+	answer, err := readAttachAnswer(ctx, reader)
+	if err != nil {
+		return false, err
+	}
+	switch answer {
+	case "", "1":
+		return false, nil
+	case "2":
+		return true, nil
+	default:
+		return false, errors.New("attach cancelled; choose 1 or 2")
+	}
+}
+func readAttachAnswer(ctx context.Context, reader *bufio.Reader) (string, error) {
+	type result struct {
+		line string
+		err  error
+	}
+	answers := make(chan result, 1)
+	go func() {
+		line, err := reader.ReadString('\n')
+		answers <- result{strings.TrimSpace(line), err}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case answer := <-answers:
+		return answer.line, answer.err
 	}
 }

@@ -711,7 +711,8 @@ paths:
       summary: Paired daemon requests, activates, renews or ends an attached session
       description: >-
         The single paired-runtime attach route. At daemon startup, register requires the
-        paired bearer, computer lifecycle proof and a fresh memory-only poll_key. Registration
+        paired bearer, computer lifecycle proof, attach_protocol=2 and a fresh memory-only poll_key.
+        Older daemons are refused with an update agentd error before registration. Registration
         invalidates all earlier watches on that computer, requiring new owner approval.
         All other operations require the paired bearer and registered poll_key; lifecycle
         proof alone is rejected. Neither daemon nor server persists the poll key. Codes never
@@ -724,10 +725,11 @@ paths:
         Registration may report local_auth_capability. Omission is stored as unreported.
         That report is advisory and never satisfies local confirmation. A later poll cannot change it.
         A snapshot with mode=lease attaches metadata only: transcript and file_id must be
-        empty, text is rejected, and no conversation stream is available. Its approval is
-        single-use and requires consent_digest. The exited operation is only for a kernel
-        confirmation that the pinned process has exited; loss of contact is unreachable.
-        Legacy snapshots without mode retain the existing live-watch protocol.
+        empty, text is rejected, and no conversation stream is available. Both modes require
+        consent_digest at approval, activation and every active poll; approval is single-use.
+        The exited operation is only for a kernel confirmation that the pinned process
+        has exited; loss of contact is unreachable.
+        Snapshots without mode select the default conversation watch; status-only is an explicit local choice.
       requestBody:
         required: true
         content:
@@ -747,7 +749,7 @@ paths:
                     properties:
                       state: {type: string, const: registered}
         '403': {description: Registered memory-only poll key required; lifecycle proof only authorizes registration}
-        '409': {description: Snapshot mismatch or poll sequence rejected}
+        '409': {description: Snapshot or consent mismatch, poll sequence rejected, or update agentd required}
         '410': {description: Expired or revoked; new owner approval required}
         '429': {description: Attempt or stream quota exceeded}
   /agent-pairing/attach/lookup:
@@ -786,14 +788,14 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [request_digest]
+              required: [request_digest, consent_digest]
               properties:
                 request_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
-                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Required for local_auth and mode=lease; binds the consent the person reviewed}
+                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Required for both watch and status-only; binds the consent the person reviewed}
       responses:
         '200': {description: 'Approved snapshot; activation requires the registered daemon poll key and, for local_auth, its local confirmation'}
         '403': {description: Same-origin paired owner required}
-        '409': {description: Digest differs from reviewed snapshot or lease approval already consumed}
+        '409': {description: Digest differs from reviewed snapshot or approval already consumed}
         '410': {description: Approval expired or revoked}
   /agent-pairing/attach/{requestId}/revoke:
     parameters:
@@ -5919,7 +5921,7 @@ components:
       type: object
       additionalProperties: false
       required: [computer_id, project_id, ticket_id, host, harness, process, transcript, file_id]
-      description: Mode lease is metadata only; omitted mode preserves the legacy watch contract.
+      description: Mode lease is the explicit status-only option; omitted mode selects the default conversation watch.
       allOf:
         - if:
             required: [mode]
@@ -5947,7 +5949,7 @@ components:
       oneOf:
         - properties:
             operation: {const: register}
-          required: [device_proof]
+          required: [device_proof, attach_protocol]
         - properties:
             operation: {enum: [request, poll, detach, exited]}
           required: [request_id, snapshot, request_digest]
@@ -5955,18 +5957,19 @@ components:
         operation: {type: string, enum: [register, request, poll, detach, exited]}
         request_id: {type: string, format: uuid}
         computer_id: {type: string, format: uuid}
+        attach_protocol: {type: integer, const: 2, description: Required at registration; declares support for paired-origin pinning, redirect refusal and kernel checks in both modes. Older agentd must be updated.}
         device_proof: {type: string, writeOnly: true, description: 'Existing computer lifecycle proof; registration only, never watch authority'}
         poll_key: {type: string, pattern: '^[a-f0-9]{64}$', writeOnly: true, description: Fresh daemon-start random key held only in memory; required for every operation}
         snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
         request_digest: {type: string, description: 'Required with the snapshot for request, activation, poll and detachment'}
-        consent_digest: {type: string, description: Echo of the server-selected consent binding; required for strict activation}
+        consent_digest: {type: string, description: Echo of the server-selected consent binding; required for activation and every active poll in both modes}
         local_confirmed: {type: boolean, description: Set only by the daemon after in-process LocalAuthentication; never accepted on the local socket}
         local_auth_capability:
           type: string
           enum: [available, unsupported, unsigned, no_gui, policy]
           description: Registration only. An omitted registration is stored as unreported. A later poll cannot change it. This value never satisfies local confirmation.
         sequence: {type: integer, minimum: 1}
-        text: {type: string, maxLength: 16384, description: Legacy watch only; rejected for mode=lease}
+        text: {type: string, maxLength: 16384, description: Default conversation watch only; rejected for mode=lease}
     AttachView:
       type: object
       required: [request_id, request_digest, snapshot, state, expires_at]

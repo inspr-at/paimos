@@ -524,28 +524,38 @@ accepts an optional `--target-file JSON`. Verify handoffs retain the preceding
 deploy handoff's recorded target internally when present; neither handoff body
 emits target fields.
 
-### Attach session status (AEON-352)
+### Attach a running session (AEON-352)
 
 From a separate interactive terminal on a paired computer, run
-`aeon-agentd attach --setup-root PATH --pid PID --harness codex --project-id UUID --ticket-id UUID`.
-Review the kernel-observed process and physical folder, type `ATTACH`, then enter
-its nine-digit code under **Agents → Attach session** on the paired instance.
-The computer owner approves the exact snapshot; the code expires in ten minutes.
-Keep that terminal open: peer-checked polls renew a 60-second server lease.
-Revocation, identity changes and lease expiry require a fresh approval. Losing
-contact means unreachable; only a kernel check can confirm process exit.
+`aeon-agentd attach --setup-root PATH --pid PID --harness codex --project-id UUID --ticket-id UUID --transcript PATH`.
+**Watch the conversation** is the default; the transcript must be a resolvable
+physical file, as in the AEON-258 mirror. Choose **Status only (no conversation
+text)** at the local prompt, or pass `--status-only` (no transcript needed), to
+report status without reading or sharing conversation text. Missing or unsafe
+transcripts never silently select status-only.
 
-This default attaches metadata only (`snapshot.mode=lease`): it opens no
-transcript, sends no conversation text, and has no conversation viewer. Existing
-explicit `--transcript PATH` watches remain compatible, with their separate
-`WATCH` consent. The existing `harness.watch` project permission remains off for
-all built-in roles and is never implied by `harness.read` or `nodes.read`.
+Review the kernel-observed process, physical folder and chosen mode, type `WATCH`
+or `ATTACH` as shown, then enter its nine-digit code under **Agents → Attach
+session** on the paired instance. The approval screen shows the selected mode.
+The computer owner approves the exact snapshot; the code expires in ten minutes.
+Both modes require a consent digest and single-use approval (repeat approval
+returns 409). Keep the terminal open: peer-checked polls renew a 60-second lease.
+Revocation, identity changes and lease expiry require a fresh approval. A stopped
+watch is detached; lost contact is unreachable; only a kernel check confirms exit.
+
+Conversation watching shares only new turns after activation with people
+explicitly granted `harness.watch` in the project. Status-only (`snapshot.mode=lease`)
+opens no transcript, rejects conversation text and has no conversation viewer.
+The project permission remains off for all built-in roles and is never implied
+by `harness.read` or `nodes.read`. Protocol 2 registration is required in both
+modes: older daemons receive an **update agentd** error and need fresh approval.
 The paired computer's tenant-scoped workspace is the hard cwd allowlist; neither
 `AEON_URL` nor local request fields can override the paired origin. Same-user
 processes are not isolated by this feature.
 
 Security regressions live in `internal/agentd/attach_lease_test.go` (injected
-commands, PID/executable/cwd changes, no transcript I/O and offline teardown),
+commands, PID/executable/cwd changes, explicit mode choice, status-only without
+transcript I/O, expiry and offline teardown in both modes),
 `internal/agentpairing/attach_lease_test.go` (atomic approval, isolated session
 leases, expiry/revocation, text refusal and cross-tenant RLS/404), and the
 platform-specific process tests (native macOS/Linux kernel identity and exit).

@@ -123,6 +123,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByText('Requested by a process on Markus’s MacBook.', { exact: false })).toBeVisible()
     await expect(dialog.getByText('Only allow if you started this watch yourself.')).toBeVisible()
+    await expect(dialog.getByText('Watch the conversation', { exact: true })).toBeVisible()
+    await expect(dialog.getByText('Status only (no conversation text)', { exact: true })).toHaveCount(0)
     await expect(dialog.getByText('PID 4812 · UID 501')).toBeVisible()
     // The actual bytes being approved must be visible without opening details.
     await expect(dialog.locator('details')).not.toHaveAttribute('open', '')
@@ -202,6 +204,9 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await expect(dialog.getByRole('heading', { name: 'Attach a running session' })).toBeVisible()
     await expect(dialog).toContainText('PDF worker image')
     await expect(dialog).toContainText('Session status only; no conversation text is read or shared.')
+    await expect(dialog.getByText('Status only (no conversation text)', { exact: true })).toBeVisible()
+    await expect(dialog.getByText('Watch the conversation', { exact: true })).toHaveCount(0)
+    await expect(dialog).toContainText('Requested by a process on Markus’s MacBook.')
     await expect(dialog.getByText('Transcript', { exact: true })).toHaveCount(0)
     await expect(dialog.getByText('New turns will be visible', { exact: false })).toHaveCount(0)
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
@@ -225,5 +230,16 @@ for (const state of ['detached', 'unreachable', 'confirmed_exited'] as const) {
     await expect(page.getByText(state === 'confirmed_exited' ? 'Process exit confirmed.' : `Session ${state}. Process exit is unconfirmed.`)).toBeVisible()
     await expect(page.getByRole('button', { name: 'Watch live', exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Detach session', exact: true })).toHaveCount(0)
+  })
+}
+
+for (const state of ['detached', 'unreachable', 'confirmed_exited'] as const) {
+  test(`conversation watch terminal state ${state}`, async ({ page }) => {
+    const worker = await setup(page, true)
+    Object.assign(worker.watch!, { state: state === 'confirmed_exited' ? 'detached' : state, ...(state === 'confirmed_exited' ? { process_state: 'confirmed_exited' } : {}) })
+    await page.goto(`/agents/${worker.id}`)
+    await expect(page.getByRole('heading', { name: 'Live conversation' })).toBeVisible()
+    await expect(page.getByText(state === 'confirmed_exited' ? 'Process exit confirmed.' : `Watch ${state}. Process exit is unconfirmed.`)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Watch live', exact: true })).toHaveCount(0)
   })
 }
