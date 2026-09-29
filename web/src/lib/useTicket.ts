@@ -100,12 +100,17 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     try {
       const node = await getNode(target.id)
       if (request !== generation) return
+      // An editor opened while this read ran: a newer version waits like a
+      // live change, so a save still sends the revision the editor started from.
+      if (busy() && compareRevision(node.updated_at, target.updated_at) > 0) { hold(target, { ...reread(target), revision: node.updated_at }, node); return }
       merge(target, node)
       gone.value = false
     } catch (e) {
       if (request !== generation) return
-      if (e instanceof APIError && (e.status === 404 || e.status === 410)) gone.value = true
-      else error.value = message(e)
+      if (e instanceof APIError && (e.status === 404 || e.status === 410)) {
+        if (busy()) hold(target, { ...reread(target), change: 'deleted' }, null)
+        else gone.value = true
+      } else error.value = message(e)
     } finally {
       if (request === generation) loading.value = false
     }
@@ -320,10 +325,22 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   // A node that left this project (a project move) is gone from here, like a deleted one.
   const leftProject = (target: ListItem, change: NodeChange) =>
     change.fields.includes('project_id') && !!target.project && change.projectId !== target.project.id
+  // A read of the whole ticket (a load or a resync), as a change of unknown fields.
+  const reread = (target: ListItem): NodeChange => ({
+    eventId: 0, type: 'resync', actorId: '', id: target.id, projectId: target.project?.id ?? null, change: 'updated', fields: [], revision: null,
+  })
+  // A change waiting while the viewer edits.
+  function hold(target: ListItem, change: NodeChange, node: WorkNode | null) {
+    held = { change, node }
+    liveHeld.value = !node || leftProject(target, change) ? 'deleted' : 'changed'
+  }
 
   function applyLive(target: ListItem, change: NodeChange, node: WorkNode | null) {
     if (!node || leftProject(target, change)) { gone.value = true; return }
-    if (compareRevision(node.updated_at, target.updated_at) <= 0) return
+    // Restored, or back in this project: here again.
+    const back = gone.value
+    gone.value = false
+    if (compareRevision(node.updated_at, target.updated_at) <= 0 && !back) return
     const parentChanged = node.parent_id !== target.parent_id
     merge(target, node)
     if (parentChanged) void resolveParent(target)
@@ -358,9 +375,13 @@ export function useTicket(item: Ref<ListItem | null>, context: {
         return
       }
       if (busy()) {
-        if (mine(change) || (node && compareRevision(node.updated_at, target.updated_at) <= 0)) return
-        held = { change, node }
-        liveHeld.value = !node || leftProject(target, change) ? 'deleted' : 'changed'
+        if (mine(change)) return
+        if (node && !leftProject(target, change) && compareRevision(node.updated_at, target.updated_at) <= 0) {
+          // Restored to what the editor started from: nothing waits any more.
+          if (liveHeld.value === 'deleted') { held = null; liveHeld.value = null }
+          return
+        }
+        hold(target, change, node)
         return
       }
       applyLive(target, change, node)

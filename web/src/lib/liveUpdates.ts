@@ -28,7 +28,9 @@ export function compareRevision(a: string | null | undefined, b: string | null |
 }
 
 // ---------- Classification ----------
-export type Structural = 'closed' | 'no_longer_matches' | 'deleted' | 'new' | 'moved'
+// changed: a field change to a row the person works with (selected, or open
+// in an editor); it waits so their next change still meets it as a conflict.
+export type Structural = 'closed' | 'no_longer_matches' | 'deleted' | 'new' | 'moved' | 'changed'
 export type Classification = 'patch' | 'ignore' | Structural
 
 export interface ClassifyInput<N extends { state: string }> {
@@ -64,38 +66,56 @@ export function classifyChange<N extends { state: string }>({ change, shown, nod
 // ---------- Pending structural updates ----------
 export const PENDING_CAP = 200
 const LABELS: Record<Structural, string> = {
-  closed: 'Closed', no_longer_matches: 'No longer matches', deleted: 'Deleted', moved: 'Moved', new: 'New',
+  closed: 'Closed', no_longer_matches: 'No longer matches', deleted: 'Deleted', moved: 'Moved', new: 'New', changed: 'Changed',
 }
+// Past the cap the oldest entries go in this order: new rows first (nothing
+// shows them yet), deletions last (a selection learns of them).
+const DROP_ORDER: readonly Structural[] = ['new', 'moved', 'changed', 'no_longer_matches', 'closed', 'deleted']
 
-// Per view, keyed by node id; the latest classification wins.
+// Per view, keyed by node id; the latest classification wins. It keeps at
+// most cap entries: once one had to go, the pill offers to reload the view.
 export class PendingUpdates {
   private entries = new Map<string, Structural>()
+  private dropped = false
+  private readonly cap: number
+  constructor(cap = PENDING_CAP) { this.cap = cap }
 
   // A patch or an ignore settles a pending entry: the node is back to what
   // the view shows (reopened, say). A node that was only pending as new and
-  // is deleted again never appears.
-  note(id: string, kind: Classification) {
+  // is deleted again never appears. Returns the ids dropped past the cap.
+  note(id: string, kind: Classification): string[] {
     const prior = this.entries.get(id)
-    if (kind === 'patch' || kind === 'ignore' || (kind === 'deleted' && prior === 'new')) this.entries.delete(id)
-    else this.entries.set(id, kind)
+    this.entries.delete(id)
+    if (kind === 'patch' || kind === 'ignore' || (kind === 'deleted' && prior === 'new')) return []
+    this.entries.set(id, kind)
+    if (this.entries.size <= this.cap) return []
+    this.dropped = true
+    const out: string[] = []
+    for (const drop of DROP_ORDER) {
+      for (const [other, entry] of this.entries) {
+        if (this.entries.size <= this.cap) return out
+        if (entry === drop) { this.entries.delete(other); out.push(other) }
+      }
+    }
+    return out
   }
   get count() { return this.entries.size }
-  // More than the cap: the pill offers to reload the view instead.
-  get overflow() { return this.entries.size > PENDING_CAP }
+  // Updates were dropped past the cap: the pill offers to reload the view instead.
+  get overflow() { return this.dropped }
   kind(id: string): Structural | undefined { return this.entries.get(id) }
   // The small label a marked row carries ("Closed", "Deleted", ...).
   label(id: string): string | null { const kind = this.entries.get(id); return kind ? LABELS[kind] : null }
   // Ids among these (a selection, say) that were deleted meanwhile.
   deletedAmong(ids: Iterable<string>): string[] { return [...ids].filter(id => this.entries.get(id) === 'deleted') }
   // Everything pending, cleared: the caller applies it at once.
-  take(): Map<string, Structural> { const all = this.entries; this.entries = new Map(); return all }
-  clear() { this.entries.clear() }
+  take(): Map<string, Structural> { const all = this.entries; this.entries = new Map(); this.dropped = false; return all }
+  clear() { this.entries.clear(); this.dropped = false }
 }
 
 // The pill's words; null when nothing is pending.
 export function pillText(pending: { count: number; overflow: boolean }): string | null {
-  if (!pending.count) return null
   if (pending.overflow) return 'Many updates · Reload view'
+  if (!pending.count) return null
   return `${pending.count} ${pending.count === 1 ? 'update' : 'updates'} · Show`
 }
 

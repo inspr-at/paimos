@@ -195,6 +195,12 @@ const liveList = useLiveList({
   projectId, filters, rows: list.rows, loading: list.loading, loads: list.loads, loadedOnce: list.loadedOnce,
   more: () => !!list.cursor.value, active: listActive, me: () => session.identity?.principal.id ?? null,
   quiet: id => !!ticketKey.value && panelItem.value?.id === id,
+  // Rows the person works with keep the version they see, so an edit, a bulk
+  // change or a status choice still meets a newer one as a conflict. The open
+  // ticket holds changes itself while its editor is open, and shows them otherwise.
+  holds: id => ticketKey.value && panelItem.value?.id === id
+    ? !!panel.value?.busy() || !!panel.value?.isDirty()
+    : selected.value.has(id) || statusMenu.value?.row.id === id,
   blockers: () => ({
     selected: selected.value.size + (phonePicking.value ? 1 : 0),
     editing: creating.value || !!outline.createUnder.value || !!panel.value?.busy() || !!panel.value?.isDirty() || !!table.value?.createDirty(),

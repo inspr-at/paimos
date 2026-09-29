@@ -9,7 +9,7 @@ import type { ListItem, ListPage, ListQuery } from '../src/lib/api'
 import { LiveNodeStore, type NodeChange } from '../src/lib/liveNodes'
 import { PENDING_CAP } from '../src/lib/liveUpdates'
 import { filtersFromQuery, type ListFilters } from '../src/lib/ticketList'
-import { placeKey, useLiveList, type LiveList, type LiveListBlockers } from '../src/lib/useLiveList'
+import { placeKey, RETRY_MS, useLiveList, type LiveList, type LiveListBlockers } from '../src/lib/useLiveList'
 
 const ME = 'me-1', MIRA = 'mira-2', PROJECT = 'p-1'
 let clock = 0
@@ -42,7 +42,10 @@ interface Harness {
   live: LiveList; rows: ReturnType<typeof ref<ListItem[]>>; store: LiveNodeStore; srv: ReturnType<typeof server>
   blockers: LiveListBlockers; loading: ReturnType<typeof ref<boolean>>; loads: ReturnType<typeof ref<number>>
   filters: ReturnType<typeof ref<ListFilters>>; reload: ReturnType<typeof vi.fn>; applied: ReturnType<typeof vi.fn>
+  // Rows the person works with (selected, open in an editor).
+  holding: Set<string>
   send(change: Partial<NodeChange> & Pick<NodeChange, 'id'>): void
+  views(): { resync?: (reason: 'initial' | 'gap') => void; resumed?: () => void }[]
   settle(): Promise<void>
 }
 let scope: EffectScope | undefined
@@ -54,15 +57,17 @@ function setup(initial: ListItem[], query: Record<string, string> = {}, extra: L
   const loading = ref(false), loads = ref(1)
   const blockers: LiveListBlockers = { selected: 0, editing: false, menuOpen: false, dialogOpen: false, dragging: false }
   const reload = vi.fn(), applied = vi.fn()
+  const holding = new Set<string>()
   scope = effectScope()
   const live = scope.run(() => useLiveList({
     projectId: ref(PROJECT), filters, rows, loading, loads, loadedOnce: ref(true), more: () => false, active: ref(true),
-    me: () => ME, blockers: () => blockers, reload, applied, store, fetchList: srv.fetchList,
+    me: () => ME, blockers: () => blockers, reload, applied, store, fetchList: srv.fetchList, holds: id => holding.has(id),
     env: { now: () => clock, hidden: () => false, listen: () => () => {} },
   }))!
   let event = 1000
   return {
-    live, rows, store, srv, blockers, loading, loads, filters, reload, applied,
+    live, rows, store, srv, blockers, loading, loads, filters, reload, applied, holding,
+    views: () => [...(store as unknown as { views: Set<{ resync?: () => void; resumed?: () => void }> }).views],
     send(change) {
       store.apply({ eventId: ++event, type: 'node.updated', actorId: MIRA, projectId: PROJECT, change: 'updated', fields: [], revision: null, ...change })
     },
@@ -121,8 +126,70 @@ describe('useLiveList: field changes', () => {
     expect(h.srv.fetchList).toHaveBeenCalledTimes(1)
     release()
     await vi.advanceTimersByTimeAsync(300)
-    expect(h.srv.fetchList).toHaveBeenCalledTimes(2)
+    // The first answer already carries the second change: no second request.
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(1)
     expect(h.rows.value![0].title).toBe('Second')
+  })
+
+  it('a failed read keeps the rows waiting and reads them again after a growing wait', async () => {
+    const h = setup([item('n1')])
+    const plain = h.srv.fetchList.getMockImplementation()!
+    h.srv.fetchList.mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline'))
+    const node = edit(h, 'n1', { title: 'Read at last' })
+    h.send({ id: 'n1', fields: ['title'], revision: node.updated_at })
+    await vi.advanceTimersByTimeAsync(150)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(1)
+    expect(h.rows.value![0].title).toBe('Ticket n1')
+    await vi.advanceTimersByTimeAsync(RETRY_MS[0] + 150)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(2)
+    h.srv.fetchList.mockImplementation(plain)
+    await vi.advanceTimersByTimeAsync(RETRY_MS[1] + 150)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(3)
+    expect(h.rows.value![0].title).toBe('Read at last')
+    expect(h.live.message.value).toBe('K-1 was updated elsewhere: title.')
+  })
+
+  it('after the retries the rows wait for a resumed stream', async () => {
+    const h = setup([item('n1')])
+    const plain = h.srv.fetchList.getMockImplementation()!
+    h.srv.fetchList.mockRejectedValue(new Error('offline'))
+    const node = edit(h, 'n1', { title: 'After the resume' })
+    h.send({ id: 'n1', fields: ['title'], revision: node.updated_at })
+    await vi.advanceTimersByTimeAsync(RETRY_MS.reduce((a, b) => a + b + 150, 150) + 60_000)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(RETRY_MS.length + 1)
+    h.srv.fetchList.mockImplementation(plain)
+    for (const view of h.views()) view.resumed?.()
+    await vi.advanceTimersByTimeAsync(150)
+    expect(h.rows.value![0].title).toBe('After the resume')
+  })
+
+  it('an answer a deletion overtook is not used: the row is marked deleted, never patched', async () => {
+    const h = setup([item('n1'), item('n2')])
+    let release!: () => void
+    const slow = new Promise<void>(resolve => { release = resolve })
+    const plain = h.srv.fetchList.getMockImplementation()!
+    const node = edit(h, 'n1', { title: 'Before the deletion' })
+    const answer = plain({ within: PROJECT, ids: ['n1'], hide_closed: true })
+    h.srv.fetchList.mockImplementationOnce(async () => { await slow; return answer })
+    h.send({ id: 'n1', fields: ['title'], revision: node.updated_at })
+    await vi.advanceTimersByTimeAsync(150)
+    h.srv.nodes.splice(0, 1)
+    h.send({ id: 'n1', change: 'deleted', fields: ['deleted_at'] })
+    release()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(h.rows.value![0].title).toBe('Ticket n1')
+    expect(h.live.labels.value.get('n1')).toBe('Deleted')
+  })
+
+  it('a deletion and a restore before the list looked leave the row as it is', async () => {
+    const h = setup([item('n1')])
+    const node = edit(h, 'n1', { title: 'Restored' })
+    h.send({ id: 'n1', change: 'deleted', fields: ['deleted_at'] })
+    h.send({ id: 'n1', change: 'created', fields: [], revision: node.updated_at })
+    await h.settle()
+    expect(h.live.labels.value.size).toBe(0)
+    expect(h.live.pill.value).toBeNull()
+    expect(h.rows.value![0].title).toBe('Restored')
   })
 
   it('leaves the person’s own changes to the code that made them', async () => {
@@ -216,6 +283,73 @@ describe('useLiveList: structural changes wait', () => {
     await h.settle()
     expect(h.live.pill.value).toBeNull()
     expect(h.live.labels.value.size).toBe(0)
+  })
+
+  it('a selected row, or one open in an editor, keeps the version the person sees until Show', async () => {
+    const h = setup([item('n1'), item('n2')])
+    const selected = h.rows.value![0], seen = selected.updated_at
+    h.holding.add('n1')
+    const node = edit(h, 'n1', { priority: 'high', fields: { priority: 'high' } })
+    h.send({ id: 'n1', fields: ['fields.priority'], revision: node.updated_at })
+    await h.settle()
+    // Not patched: a bulk change or a save still sends the revision the person saw.
+    expect(selected.priority).toBeNull()
+    expect(selected.updated_at).toBe(seen)
+    expect(h.live.labels.value.get('n1')).toBe('Changed')
+    expect(h.live.pill.value).toBe('1 update · Show')
+    expect(h.live.message.value).toBe('K-1 was updated elsewhere: priority. Press U to show updates.')
+    expect(h.live.flash.value.has('n1')).toBe(false)
+    // A row nobody works with patches in place as before.
+    const other = edit(h, 'n2', { title: 'In place' })
+    h.send({ id: 'n2', fields: ['title'], revision: other.updated_at })
+    await h.settle()
+    expect(h.rows.value![1].title).toBe('In place')
+    // Show brings the newer version in, tinted.
+    h.live.apply()
+    expect(selected.priority).toBe('high')
+    expect(selected.updated_at).toBe(node.updated_at)
+    expect(h.live.flash.value.has('n1')).toBe(true)
+    expect(h.live.labels.value.size).toBe(0)
+  })
+
+  it('a held row that someone else closed keeps its values until it leaves', async () => {
+    const h = setup([item('n1', { state: 'backlog' }), item('n2')])
+    const row = h.rows.value![0], seen = row.updated_at
+    h.holding.add('n1')
+    const node = edit(h, 'n1', { state: 'cancelled' })
+    h.send({ id: 'n1', fields: ['state'], revision: node.updated_at })
+    await h.settle()
+    expect(h.live.labels.value.get('n1')).toBe('Closed')
+    expect(row.state).toBe('backlog')
+    expect(row.updated_at).toBe(seen)
+  })
+
+  it('a newer version already on the row (the panel saved it) is not replaced by an older held one', async () => {
+    const h = setup([item('n1')])
+    const row = h.rows.value![0]
+    h.holding.add('n1')
+    const node = edit(h, 'n1', { title: 'Theirs' })
+    h.send({ id: 'n1', fields: ['title'], revision: node.updated_at })
+    await h.settle()
+    Object.assign(row, { title: 'Mine, after the conflict', updated_at: at(90) })
+    h.live.apply()
+    expect(row.title).toBe('Mine, after the conflict')
+  })
+
+  it('keeps no more than the cap of new rows past it, and still names selected deletions', async () => {
+    const shown = [item('n1'), item('n2')]
+    const extra = Array.from({ length: PENDING_CAP + 50 }, (_, i) => item(`x${i}`, { updated_at: at(40 + i) }))
+    const h = setup(shown, {}, extra)
+    h.srv.nodes.splice(h.srv.nodes.findIndex(n => n.id === 'n1'), 1)
+    h.send({ id: 'n1', change: 'deleted', fields: ['deleted_at'] })
+    await h.settle()
+    for (const row of extra) h.send({ id: row.id, change: 'created' })
+    await h.settle()
+    expect(h.live.pending.count).toBe(PENDING_CAP)
+    expect(h.live.pill.value).toBe('Many updates · Reload view')
+    expect(h.live.deletedAmong(['n1', 'n2'])).toEqual(['n1'])
+    h.live.apply()
+    expect(h.reload).toHaveBeenCalledTimes(1)
   })
 
   it('offers to reload the view past the cap instead of applying', async () => {

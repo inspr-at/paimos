@@ -23,6 +23,8 @@ export interface LiveView {
   // After a gap: refetch what you show. 'initial' on the first connection
   // (anything loaded before it may have missed a change), 'gap' later.
   resync?(reason: 'initial' | 'gap'): void
+  // The stream resumed without a gap: retry reads that failed meanwhile.
+  resumed?(): void
 }
 
 export interface LiveEntry { revision: string | null; projectId: string | null; deleted: boolean; node: WorkNode | null }
@@ -57,6 +59,20 @@ export function parseNodeChanges(data: string): NodeChange[] {
   return out
 }
 
+// Two changes to one node, the older first: the fields of both, the newer
+// revision. A deletion ends what came before, a restore after it reads as
+// created again, and a later update keeps a new node new.
+export function mergeChanges(a: NodeChange, b: NodeChange): NodeChange {
+  return {
+    ...b, change: b.change === 'updated' && a.change !== 'deleted' ? a.change : b.change,
+    fields: [...new Set([...a.fields, ...b.fields])],
+    revision: compareRevision(a.revision, b.revision) > 0 ? a.revision : b.revision,
+    projectId: b.projectId ?? a.projectId,
+    // Someone else's change among them is not the viewer's own.
+    actorId: a.actorId === b.actorId ? b.actorId : '',
+  }
+}
+
 async function fetchLive(id: string): Promise<WorkNode | null> {
   try { return await getNode(id) }
   catch (error) {
@@ -74,7 +90,11 @@ export interface LiveOptions {
   graceMs?: number
   // Waits before reopening a stream the browser gave up on.
   retryMs?: readonly number[]
+  // Waits before reading a node again after a failed read.
+  refetchMs?: readonly number[]
 }
+
+interface Reading { superseded: boolean; run: Promise<void> }
 
 export class LiveNodeStore {
   state: LiveState = 'off'
@@ -86,8 +106,10 @@ export class LiveNodeStore {
   private closeTimer: ReturnType<typeof setTimeout> | undefined
   private retryTimer: ReturnType<typeof setTimeout> | undefined
   private retries = 0
-  private fetching = new Map<string, Promise<void>>()
-  private refetchAgain = new Map<string, NodeChange>()
+  private fetching = new Map<string, Reading>()
+  // Shown nodes with a change not read yet (a read running or failed).
+  private dirty = new Map<string, { change: NodeChange; attempts: number }>()
+  private retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private stateListeners = new Set<(state: LiveState) => void>()
   private readonly options: Required<LiveOptions>
 
@@ -98,6 +120,7 @@ export class LiveNodeStore {
       fetchNode: fetchLive,
       graceMs: 30_000,
       retryMs: [2_000, 5_000, 15_000, 30_000],
+      refetchMs: [1_000, 3_000, 10_000, 30_000],
       ...options,
     }
   }
@@ -126,6 +149,8 @@ export class LiveNodeStore {
     for (const node of nodes) {
       const entry = this.entries.get(node.id)
       if (entry?.node && compareRevision(node.updated_at, entry.node.updated_at) < 0) continue
+      // A copy from before a deletion never brings the node back.
+      if (entry?.deleted && !node.deleted_at && compareRevision(node.updated_at, entry.revision) <= 0) continue
       this.remember(node.id, {
         revision: entry && compareRevision(entry.revision, node.updated_at) > 0 ? entry.revision : node.updated_at,
         projectId: entry?.projectId ?? null, deleted: !!node.deleted_at, node,
@@ -177,6 +202,7 @@ export class LiveNodeStore {
     this.source?.close(); this.source = null
     // A later stream starts fresh: views load again anyway when they open.
     this.lastEventId = null; this.connectedOnce = false; this.retries = 0
+    this.forgetDirty()
     this.setState('off')
   }
   private ready(event: MessageEvent) {
@@ -190,8 +216,11 @@ export class LiveNodeStore {
     this.lastEventId = data.after
     this.connectedOnce = true; this.retries = 0
     this.setState('live')
-    if (continued) return
+    // Nothing was missed, but a read that failed meanwhile is tried again now.
+    if (continued) { this.readDirty(); for (const view of [...this.views]) view.resumed?.(); return }
     // What the views show may predate this stream: nodes they cached too.
+    // They read everything again, dirty nodes included.
+    this.forgetDirty()
     for (const entry of this.entries.values()) entry.node = null
     for (const view of [...this.views]) view.resync?.(first ? 'initial' : 'gap')
   }
@@ -214,38 +243,84 @@ export class LiveNodeStore {
       revision: change.revision ?? entry?.revision ?? null, projectId: change.projectId ?? entry?.projectId ?? null,
       deleted: change.change === 'deleted', node: change.change === 'deleted' ? null : entry?.node ?? null,
     })
-    const showing = [...this.views].filter(view => view.shows(change.id))
+    // A read already running answers for an older state now.
+    const reading = this.fetching.get(change.id)
+    if (reading) reading.superseded = true
+    const showing = this.showing(change.id)
     for (const view of [...this.views]) if (!showing.includes(view)) view.changed(change, undefined)
-    if (!showing.length) return
-    if (change.change === 'deleted') { for (const view of showing) view.changed(change, null); return }
-    const cached = this.entries.get(change.id)?.node
-    if (cached && compareRevision(cached.updated_at, change.revision) >= 0) { for (const view of showing) view.changed(change, cached); return }
-    void this.refetch(change)
+    if (!showing.length) { this.settled(change.id); return }
+    if (change.change === 'deleted') { this.settled(change.id); for (const view of showing) view.changed(change, null); return }
+    // Changes not read yet add up: the views get every field and kind at once.
+    const prior = this.dirty.get(change.id)
+    this.dirty.set(change.id, { change: prior ? mergeChanges(prior.change, change) : change, attempts: 0 })
+    clearTimeout(this.retryTimers.get(change.id)); this.retryTimers.delete(change.id)
+    void this.read(change.id)
   }
-  // Refetch through the normal API; changes that arrive meanwhile coalesce
-  // into one more request.
-  private refetch(change: NodeChange): Promise<void> {
-    const running = this.fetching.get(change.id)
-    if (running) { this.refetchAgain.set(change.id, change); return running }
-    const run = (async () => {
+  private showing(id: string) { return [...this.views].filter(view => view.shows(id)) }
+  private settled(id: string) {
+    this.dirty.delete(id)
+    clearTimeout(this.retryTimers.get(id)); this.retryTimers.delete(id)
+  }
+  // Refetch a dirty node through the normal API, one read per node at a
+  // time. An answer that a change arriving meanwhile made stale is not
+  // handed on: the node is read once more for it, and after a deletion not
+  // at all. A failed read keeps the node dirty and tries again later.
+  private read(id: string): Promise<void> {
+    const running = this.fetching.get(id)
+    if (running) return running.run
+    const reading: Reading = { superseded: false, run: Promise.resolve() }
+    this.fetching.set(id, reading)
+    reading.run = this.readLoop(id, reading).finally(() => { if (this.fetching.get(id) === reading) this.fetching.delete(id) })
+    return reading.run
+  }
+  private async readLoop(id: string, reading: Reading) {
+    for (;;) {
+      const dirty = this.dirty.get(id)
+      if (!dirty) return
+      const showing = this.showing(id)
+      if (!showing.length) { this.settled(id); return }
+      const cached = this.entries.get(id)?.node
+      if (cached && compareRevision(cached.updated_at, dirty.change.revision) >= 0) {
+        this.settled(id)
+        for (const view of showing) view.changed(dirty.change, cached)
+        return
+      }
+      reading.superseded = false
       let node: WorkNode | null
-      try { node = await this.options.fetchNode(change.id) }
-      catch { return } // A failed read leaves the view as it was; the next change or resync catches up.
-      finally { this.fetching.delete(change.id) }
-      const entry = this.entries.get(change.id)
+      try { node = await this.options.fetchNode(id) }
+      catch { this.retry(id); return }
+      const entry = this.entries.get(id)
+      if (reading.superseded && (!node || entry?.deleted || compareRevision(node.updated_at, entry?.revision) < 0)) continue
+      const change = this.dirty.get(id)?.change
+      if (!change) return
+      this.settled(id)
       if (node) this.put([node])
-      else if (entry) this.remember(change.id, { ...entry, deleted: true, node: null })
-      for (const view of [...this.views]) if (view.shows(change.id)) view.changed(change, node)
-    })()
-    this.fetching.set(change.id, run)
-    return run.then(() => {
-      const again = this.refetchAgain.get(change.id)
-      if (!again) return
-      this.refetchAgain.delete(change.id)
-      const cached = this.entries.get(change.id)?.node
-      if (cached && compareRevision(cached.updated_at, again.revision) >= 0) return
-      return this.refetch(again)
-    })
+      else if (entry) this.remember(id, { ...entry, deleted: true, node: null })
+      for (const view of this.showing(id)) view.changed(change, node)
+      return
+    }
+  }
+  // A failed read tries again after a growing wait, a few times; then the
+  // node waits for its next change or a resumed stream.
+  private retry(id: string) {
+    const dirty = this.dirty.get(id)
+    const waits = this.options.refetchMs
+    if (!dirty || dirty.attempts >= waits.length) return
+    const wait = waits[dirty.attempts++]
+    clearTimeout(this.retryTimers.get(id))
+    this.retryTimers.set(id, setTimeout(() => { this.retryTimers.delete(id); void this.read(id) }, wait))
+  }
+  // After a stream resumed: read every node still dirty now.
+  private readDirty() {
+    for (const [id, dirty] of this.dirty) {
+      dirty.attempts = 0
+      clearTimeout(this.retryTimers.get(id)); this.retryTimers.delete(id)
+      void this.read(id)
+    }
+  }
+  private forgetDirty() {
+    for (const timer of this.retryTimers.values()) clearTimeout(timer)
+    this.retryTimers.clear(); this.dirty.clear()
   }
   // A view can ask for any node (a list checking whether a new node matches).
   async fetch(id: string): Promise<WorkNode | null> {

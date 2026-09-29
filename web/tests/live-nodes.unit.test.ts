@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkNode } from '../src/lib/api'
-import { LiveNodeStore, parseNodeChanges, type LiveView, type NodeChange } from '../src/lib/liveNodes'
+import { LiveNodeStore, mergeChanges, parseNodeChanges, type LiveView, type NodeChange } from '../src/lib/liveNodes'
 import {
   autoApplyDelay, canAutoApply, classifyChange, compareRevision, describeFields, PendingUpdates, PENDING_CAP, pillText, type ApplyGuard,
 } from '../src/lib/liveUpdates'
@@ -100,6 +100,39 @@ describe('PendingUpdates', () => {
     pending.note('d', 'moved'); pending.clear()
     expect(pending.count).toBe(0)
   })
+  it('keeps at most the cap: 10,000 updates hold the newest 200 and offer a reload', () => {
+    const pending = new PendingUpdates()
+    const dropped: string[] = []
+    for (let i = 0; i < 10_000; i++) dropped.push(...pending.note(`n${i}`, 'new'))
+    expect(pending.count).toBe(PENDING_CAP)
+    expect(dropped).toHaveLength(10_000 - PENDING_CAP)
+    expect(pending.kind('n9999')).toBe('new')
+    expect(pending.kind('n0')).toBeUndefined()
+    expect(pending.overflow).toBe(true)
+    expect(pillText(pending)).toBe('Many updates · Reload view')
+  })
+  it('drops new rows before marked ones and deletions last, so a selection still learns of them', () => {
+    const pending = new PendingUpdates(3)
+    pending.note('deleted', 'deleted'); pending.note('closed', 'closed'); pending.note('moved', 'moved')
+    expect(pending.note('new', 'new')).toEqual(['new'])
+    expect(pending.note('changed', 'changed')).toEqual(['moved'])
+    expect(pending.note('closed-2', 'closed')).toEqual(['changed'])
+    expect(pending.note('closed-3', 'closed')).toEqual(['closed'])
+    expect(pending.deletedAmong(['deleted', 'closed-2'])).toEqual(['deleted'])
+    expect(pending.label('closed-3')).toBe('Closed')
+  })
+  it('still offers the reload when what it kept settles, until the updates are taken', () => {
+    const pending = new PendingUpdates(1)
+    pending.note('a', 'moved'); pending.note('b', 'moved')
+    pending.note('b', 'patch')
+    expect(pending.count).toBe(0)
+    expect(pillText(pending)).toBe('Many updates · Reload view')
+    pending.take()
+    expect(pending.overflow).toBe(false)
+    expect(pillText(pending)).toBeNull()
+    pending.note('a', 'moved'); pending.note('b', 'moved'); pending.clear()
+    expect(pending.overflow).toBe(false)
+  })
   it('overflows past the cap and says so in the pill', () => {
     const pending = new PendingUpdates()
     for (let i = 0; i < PENDING_CAP; i++) pending.note(`n${i}`, 'new')
@@ -136,6 +169,24 @@ describe('describeFields', () => {
     expect(describeFields(['title', 'state', 'fields.priority'])).toBe('title, status and priority')
     expect(describeFields(['fields.custom_thing', 'position'])).toBe('details')
     expect(describeFields(['position'])).toBe('')
+  })
+})
+
+describe('mergeChanges', () => {
+  const change = (over: Partial<NodeChange>): NodeChange => ({ eventId: 1, type: 'node.updated', actorId: 'mira', id: 'n1', projectId: 'A', change: 'updated', fields: [], revision: null, ...over })
+  it('adds up the fields and keeps the newer revision', () => {
+    const merged = mergeChanges(change({ fields: ['title'], revision: '2026-09-29T10:00:01Z' }), change({ fields: ['fields.priority'], revision: '2026-09-29T10:00:02Z' }))
+    expect(merged).toMatchObject({ change: 'updated', fields: ['title', 'fields.priority'], revision: '2026-09-29T10:00:02Z' })
+  })
+  it('keeps a new node new, ends it with a deletion and brings it back with a restore', () => {
+    expect(mergeChanges(change({ change: 'created' }), change({})).change).toBe('created')
+    expect(mergeChanges(change({ change: 'created' }), change({ change: 'deleted' })).change).toBe('deleted')
+    expect(mergeChanges(change({ change: 'deleted' }), change({ change: 'created' })).change).toBe('created')
+    expect(mergeChanges(change({ change: 'deleted' }), change({})).change).toBe('updated')
+  })
+  it('is only the viewer’s own when every change was', () => {
+    expect(mergeChanges(change({ actorId: 'me' }), change({ actorId: 'me' })).actorId).toBe('me')
+    expect(mergeChanges(change({ actorId: 'me' }), change({ actorId: 'mira' })).actorId).toBe('')
   })
 })
 
@@ -196,7 +247,7 @@ describe('LiveNodeStore', () => {
     vi.useFakeTimers()
     FakeSource.all = []
     fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>()
-    store = new LiveNodeStore({ open: url => new FakeSource(url) as never, fetchNode, graceMs: 1000, retryMs: [100, 200] })
+    store = new LiveNodeStore({ open: url => new FakeSource(url) as never, fetchNode, graceMs: 1000, retryMs: [100, 200], refetchMs: [10, 20] })
   })
   afterEach(() => vi.useRealTimers())
 
@@ -259,7 +310,7 @@ describe('LiveNodeStore', () => {
     expect(fetchNode).toHaveBeenCalledTimes(1)
   })
 
-  it('coalesces changes that arrive during a refetch into one more request', async () => {
+  it('coalesces changes that arrive during a refetch into one more request; the stale answer is not handed on', async () => {
     const panel = view(['n1'])
     store.subscribe(panel.v)
     let release!: (n: WorkNode) => void
@@ -270,8 +321,46 @@ describe('LiveNodeStore', () => {
     latest().node(43, [{ id: 'n1', revision: '2026-09-29T10:00:03Z' }])
     expect(fetchNode).toHaveBeenCalledTimes(1)
     release(node('n1', '2026-09-29T10:00:01Z', { title: 'First' }))
-    await vi.waitFor(() => expect(panel.calls.map(c => c.node?.title)).toEqual(['First', 'Third']))
+    await vi.waitFor(() => expect(panel.calls.map(c => c.node?.title)).toEqual(['Third']))
     expect(fetchNode).toHaveBeenCalledTimes(2)
+  })
+
+  it('hands on every field and kind of coalesced changes, so ordering changes still classify', async () => {
+    const panel = view(['n1'])
+    store.subscribe(panel.v)
+    let release!: (n: WorkNode) => void
+    fetchNode.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    latest().node(41, [{ id: 'n1', fields: ['title'], revision: '2026-09-29T10:00:01Z' }])
+    latest().node(42, [{ id: 'n1', fields: ['fields.priority'], revision: '2026-09-29T10:00:02Z' }])
+    release(node('n1', '2026-09-29T10:00:02Z', { fields: { priority: 'high' } }))
+    await vi.waitFor(() => expect(panel.calls).toHaveLength(1))
+    const [{ change, node: fresh }] = panel.calls
+    expect(change.fields).toEqual(['title', 'fields.priority'])
+    expect(classifyChange({ change, shown: { state: 'new' }, node: fresh!, matches: () => true, orderFields: ['fields.priority'] })).toBe('moved')
+    expect(fetchNode).toHaveBeenCalledTimes(1)
+  })
+
+  it('a read that a deletion overtook never brings the node back', async () => {
+    const panel = view(['n1'])
+    store.subscribe(panel.v)
+    store.put([node('n1', '2026-09-29T10:00:00Z')])
+    let release!: (n: WorkNode) => void
+    fetchNode.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    latest().node(41, [{ id: 'n1', revision: '2026-09-29T10:00:01Z' }])
+    latest().node(42, [{ id: 'n1', change: 'deleted', fields: ['deleted_at'], revision: '2026-09-29T10:00:02Z' }], 'node.deleted')
+    expect(panel.calls.map(c => c.node)).toEqual([null])
+    release(node('n1', '2026-09-29T10:00:01Z', { title: 'Stale' }))
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    expect(panel.calls.map(c => c.node)).toEqual([null])
+    expect(store.get('n1')).toMatchObject({ deleted: true, node: null })
+    // A copy a view still holds from before does not bring it back either.
+    store.put([node('n1', '2026-09-29T10:00:01Z')])
+    expect(store.get('n1')).toMatchObject({ deleted: true, node: null })
+    // A restore does.
+    fetchNode.mockResolvedValueOnce(node('n1', '2026-09-29T10:00:03Z', { title: 'Back' }))
+    latest().node(43, [{ id: 'n1', change: 'created', fields: [], revision: '2026-09-29T10:00:03Z' }], 'node.updated')
+    await vi.waitFor(() => expect(panel.calls.map(c => c.node?.title ?? null)).toEqual([null, 'Back']))
+    expect(store.get('n1')).toMatchObject({ deleted: false })
   })
 
   it('a refetch that already returned the newest version needs no second request', async () => {
@@ -287,14 +376,53 @@ describe('LiveNodeStore', () => {
     expect(fetchNode).toHaveBeenCalledTimes(1)
   })
 
-  it('a failed refetch leaves the view as it was', async () => {
+  it('a failed refetch leaves the view as it was and tries again after a growing wait', async () => {
     const panel = view(['n1'])
     store.subscribe(panel.v)
-    fetchNode.mockRejectedValueOnce(new Error('offline'))
-    latest().node(41, [{ id: 'n1', revision: '2026-09-29T10:00:01Z' }])
+    fetchNode.mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline'))
+    fetchNode.mockResolvedValueOnce(node('n1', '2026-09-29T10:00:02Z', { title: 'Later' }))
+    latest().node(41, [{ id: 'n1', fields: ['title'], revision: '2026-09-29T10:00:01Z' }])
     await vi.waitFor(() => expect(fetchNode).toHaveBeenCalledTimes(1))
     await Promise.resolve()
     expect(panel.calls).toEqual([])
+    await vi.advanceTimersByTimeAsync(10)
+    expect(fetchNode).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(20)
+    expect(fetchNode).toHaveBeenCalledTimes(3)
+    expect(panel.calls.map(c => [c.node?.title, c.change.fields])).toEqual([['Later', ['title']]])
+  })
+
+  it('after the retries a dirty node waits for a resumed stream, which reads it again', async () => {
+    const panel = view(['n1'])
+    store.subscribe(panel.v)
+    const source = latest()
+    source.ready(40, false)
+    fetchNode.mockRejectedValue(new Error('offline'))
+    source.node(41, [{ id: 'n1', revision: '2026-09-29T10:00:01Z' }])
+    await vi.advanceTimersByTimeAsync(1000)
+    // One read and one retry per wait, then nothing more.
+    expect(fetchNode).toHaveBeenCalledTimes(3)
+    fetchNode.mockReset()
+    fetchNode.mockResolvedValue(node('n1', '2026-09-29T10:00:01Z', { title: 'Back online' }))
+    source.fail(false)
+    source.ready(41, true)
+    await vi.waitFor(() => expect(panel.calls.map(c => c.node?.title)).toEqual(['Back online']))
+    expect(panel.resyncs).toEqual(['initial'])
+  })
+
+  it('a gap asks the views to read again and forgets dirty nodes', async () => {
+    const panel = view(['n1'])
+    store.subscribe(panel.v)
+    const source = latest()
+    source.ready(40, false)
+    fetchNode.mockRejectedValue(new Error('offline'))
+    source.node(41, [{ id: 'n1', revision: '2026-09-29T10:00:01Z' }])
+    await vi.waitFor(() => expect(fetchNode).toHaveBeenCalledTimes(1))
+    source.fail(false)
+    source.ready(900, false)
+    expect(panel.resyncs).toEqual(['initial', 'gap'])
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(fetchNode).toHaveBeenCalledTimes(1)
   })
 
   it('a browser reconnect that resumes where it left off needs no refetch; a restart does', () => {
