@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import { clearSessionRating, loadSessionRating, saveSessionRating, signalLine, type SessionRating } from '../../lib/deliveryRating'
 
@@ -20,6 +20,9 @@ const tags = ref<string[]>([...(props.initial?.mine?.tags ?? [])])
 const comment = ref(props.initial?.mine?.comment ?? '')
 const saving = ref(false)
 const error = ref('')
+const reasonField = ref<HTMLTextAreaElement | null>(null)
+const editButton = ref<HTMLButtonElement | null>(null)
+const needsButton = ref<HTMLButtonElement | null>(null)
 let generation = 0
 let abort: AbortController | undefined
 
@@ -50,16 +53,30 @@ function apply(next: SessionRating) {
   error.value = ''
 }
 
+function focusEl(el: HTMLElement | null | undefined) {
+  el?.focus({ preventScroll: true })
+}
+
+function focusReason() {
+  void nextTick(() => focusEl(reasonField.value))
+}
+
+function focusMark() {
+  void nextTick(() => focusEl(rating.value?.mine ? editButton.value : needsButton.value))
+}
+
 function openForm() {
   if (!rating.value) return
   apply(rating.value)
   scoreOpen.value = rating.value.mine?.score != null
   editing.value = true
+  focusReason()
 }
 
 function cancel() {
   if (rating.value) apply(rating.value)
   editing.value = false
+  focusMark()
 }
 
 function toggle(tag: string) {
@@ -87,6 +104,7 @@ async function save() {
   try {
     apply(await saveSessionRating(props.sessionId, { score: score.value, tags: tags.value, comment: comment.value.trim() }))
     editing.value = false
+    focusMark()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Could not save the mark'
   } finally {
@@ -101,6 +119,7 @@ async function undo() {
   try {
     apply(await clearSessionRating(props.sessionId))
     editing.value = false
+    focusMark()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Could not undo the mark'
   } finally {
@@ -123,16 +142,17 @@ function onScoreToggle(event: Event) {
         <span class="reason" :title="reason">{{ reason }}</span>
       </p>
       <div class="links">
-        <button type="button" class="ask" @click="openForm">Edit</button>
+        <button ref="editButton" type="button" class="ask" @click="openForm">Edit</button>
         <button type="button" class="ask" :disabled="saving" @click="undo">Undo</button>
       </div>
     </div>
 
     <form v-else-if="editing" class="form" @submit.prevent="save">
       <label class="reason-field">Reason
-        <textarea v-model="comment" class="field" name="reason" maxlength="2000" rows="2" required />
+        <textarea ref="reasonField" v-model="comment" class="field" name="reason" maxlength="2000" rows="2" required />
       </label>
-      <div class="tags" role="group" aria-label="Tags">
+      <div class="tags" role="group" aria-label="Tags, optional">
+        <span class="optional">optional</span>
         <button v-for="tag in tagOptions" :key="tag.id" type="button" class="tag" :aria-pressed="tags.includes(tag.id)" @click="toggle(tag.id)">{{ tag.label }}</button>
       </div>
       <details class="score" :open="scoreOpen" @toggle="onScoreToggle">
@@ -147,7 +167,7 @@ function onScoreToggle(event: Event) {
       </div>
     </form>
 
-    <button v-else type="button" class="ask needs" @click="openForm">
+    <button v-else ref="needsButton" type="button" class="ask needs" @click="openForm">
       <AppIcon name="thumbs-down" :size="14" />
       Needs rework
     </button>
@@ -178,7 +198,8 @@ function onScoreToggle(event: Event) {
 .form { display: grid; gap: 8px; min-width: 0; }
 .reason-field { display: grid; gap: 4px; min-width: 0; color: var(--ink-3); font-size: 12px; font-weight: 600; }
 .reason-field textarea { width: 100%; min-height: 52px; resize: vertical; font-weight: 400; color: var(--ink); }
-.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.optional { color: var(--ink-3); font-size: 12px; font-weight: 500; }
 .tag { display: inline-flex; align-items: center; justify-content: center; height: 26px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-2); font: 600 12px/1 var(--font); }
 .tag[aria-pressed="true"] { background: var(--seg-on); color: var(--teal-ink); border-color: transparent; }
 .score { min-width: 0; }
