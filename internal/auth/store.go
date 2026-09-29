@@ -477,6 +477,12 @@ func (m *Module) createAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&tenantLock); err != nil {
 				return err
 			}
+			if p.Kind != tenant.Person {
+				return authz.ErrForbidden
+			}
+			if err := authz.RequireTx(ctx, tx, p, "keys.manage", authz.Scope{}); err != nil {
+				return err
+			}
 		}
 		var err error
 		if principalID != "" {
@@ -663,6 +669,22 @@ func ensureAgentBinding(ctx context.Context, tx pgx.Tx, creator tenant.Principal
 			}
 		}
 	}
+	var configured bool
+	if err := tx.QueryRow(ctx, `SELECT agent_access_configured FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid`, creator.TenantID, agentID).Scan(&configured); err != nil {
+		return err
+	}
+	if configured {
+		ceiling, err := authz.AgentKeyCeilingTx(ctx, tx, tenant.Principal{ID: agentID, TenantID: creator.TenantID, Kind: tenant.Agent})
+		if err != nil {
+			return err
+		}
+		for key := range requested {
+			if !slices.Contains(ceiling, key) {
+				return authz.ErrForbidden
+			}
+		}
+		return nil
+	}
 	var roleID, roleKey string
 	var builtin bool
 	err := tx.QueryRow(ctx, `SELECT r.id::text,r.key,r.builtin FROM role_bindings b
@@ -679,6 +701,9 @@ func ensureAgentBinding(ctx context.Context, tx pgx.Tx, creator tenant.Principal
 			return err
 		}
 		for key := range requested {
+			if !workspaceRolePermission(scopes, key) {
+				continue
+			}
 			if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission)
 				VALUES($1::uuid,$2::uuid,$3)`, creator.TenantID, roleID, key); err != nil {
 				return err
@@ -699,7 +724,7 @@ func ensureAgentBinding(ctx context.Context, tx pgx.Tx, creator tenant.Principal
 	}
 	if !builtin && roleKey == "agent_"+strings.ReplaceAll(agentID, "-", "") {
 		for key := range requested {
-			if slices.Contains(effective.Workspace.Permissions, key) {
+			if !workspaceRolePermission(scopes, key) || slices.Contains(effective.Workspace.Permissions, key) {
 				continue
 			}
 			if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission)
@@ -714,11 +739,20 @@ func ensureAgentBinding(ctx context.Context, tx pgx.Tx, creator tenant.Principal
 		return nil
 	}
 	for key := range requested {
+		if !workspaceRolePermission(scopes, key) {
+			continue
+		}
 		if !slices.Contains(effective.Workspace.Permissions, key) {
 			return authz.ErrForbidden
 		}
 	}
 	return nil
+}
+
+// workspaceRolePermission keeps rules.read off a coordinator key's workspace
+// role. The ceiling may include it; project reads are decided in authz.
+func workspaceRolePermission(scopes []string, key string) bool {
+	return key != "rules.read" || !authz.IsCoordinatorKey(scopes)
 }
 
 func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecord, error) {

@@ -13,7 +13,7 @@ const access = useAccess()
 const projects = useProjects()
 const term = ref('')
 const project = computed(() => props.detail ? projects.byId(props.detail) ?? null : null)
-const bound = (id: string) => [...access.people.filter(p => p.status === 'active'), ...access.agents].filter(p => 'project_roles' in p && p.project_roles.some(r => r.project_id === id)).length
+const bound = (id: string) => [...access.people.filter(p => p.status === 'active'), ...access.agents].filter(p => p.project_roles?.some(r => r.project_id === id)).length
 const shown = computed(() => {
   const needle = term.value.trim().toLowerCase()
   return projects.projects.filter(p => !needle || `${p.routeKey} ${p.title}`.toLowerCase().includes(needle)).sort((a, b) => Number(a.archived) - Number(b.archived) || a.title.localeCompare(b.title))

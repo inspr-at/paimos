@@ -53,27 +53,6 @@ export function byLead(a: LiveAgent, b: LiveAgent) {
     || (a.session_id ?? a.since).localeCompare(b.session_id ?? b.since)
 }
 
-// The list API's lead, after attention rank: a worker before a coordinator,
-// then start, then heartbeat, then public session facts. A withheld session
-// id is not a tie-break. Other views keep byLead.
-export function compareServerLead(a: LiveAgent, b: LiveAgent) {
-  const rank = (agent: LiveAgent) => STATE_PRIORITY[agent.state ?? 'working']
-  const beat = (agent: LiveAgent) => {
-    const parsed = Date.parse(agent.heartbeat_at ?? '')
-    return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
-  }
-  return rank(a) - rank(b)
-    || Number(a.role === 'coordinator') - Number(b.role === 'coordinator')
-    || Date.parse(a.since) - Date.parse(b.since)
-    || beat(a) - beat(b)
-    || a.harness.localeCompare(b.harness)
-    || (a.activity_sequence ?? 0) - (b.activity_sequence ?? 0)
-    || a.phase.localeCompare(b.phase)
-    || a.activity.localeCompare(b.activity)
-    || who(a).localeCompare(who(b))
-    || leadWorkerKey(a).localeCompare(leadWorkerKey(b))
-}
-
 // Same token the list API returns as lead_worker.key. A session id is used
 // only when this feed already includes one. Otherwise use immutable public
 // facts; changing telemetry or names must not create a second worker.

@@ -18,6 +18,69 @@ import (
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
+func TestAttachLeaseUsesServerDecisionUnderClockSkew(t *testing.T) {
+	for _, year := range []int{2001, 2099} {
+		for _, expired := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%d/expired=%v", year, expired), func(t *testing.T) {
+				path := attachFixtureFile(t, "history\n")
+				exe, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				exe, err = filepath.EvalSymlinks(exe)
+				if err != nil {
+					t.Fatal(err)
+				}
+				root := filepath.Dir(path)
+				peer := attachObservation{Process: attachwatch.Process{PID: 30, UID: os.Getuid(), Started: "helper", Executable: exe, CWD: root}, Parent: 20, Session: 20, TTY: true}
+				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid()}, Parent: 1, Session: 20, TTY: true}
+				target := attachObservation{Process: attachwatch.Process{PID: 40, UID: os.Getuid(), Started: "target", Executable: exe, CWD: root}, Parent: 1}
+				lease := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
+				polls := 0
+				m, err := NewAttachManager(AttachConfig{Origin: "https://paired.test", ComputerID: "11111111-1111-4111-8111-111111111111", Host: "fixture", Workspace: root, Executables: map[string]string{"codex": exe}, Exchange: func(_ context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
+					state := "approved"
+					if in.Operation == "poll" {
+						polls++
+						state = "active"
+						if expired {
+							state = "unreachable"
+						}
+					}
+					return attachwatch.View{RequestID: in.RequestID, Digest: in.Digest, Snapshot: in.Snapshot, State: state, LeaseUntil: &lease}, nil
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer m.Close(t.Context())
+				m.observe = func(pid int) (attachObservation, error) {
+					for _, v := range []attachObservation{peer, leader, target} {
+						if v.PID == pid {
+							return v, nil
+						}
+					}
+					return attachObservation{}, errors.New("unknown PID")
+				}
+				v, err := m.handle(t.Context(), peer, AttachLocalRequest{Operation: "preview", PID: target.PID, Harness: "codex", ProjectID: "22222222-2222-4222-8222-222222222222", TicketID: "33333333-3333-4333-8333-333333333333", Transcript: path})
+				if err != nil {
+					t.Fatal(err)
+				}
+				v, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: "confirm", ID: v.ID, Digest: v.Digest})
+				if err != nil {
+					t.Fatal(err)
+				}
+				m.sessions[v.ID].touched = time.Now().Add(-2 * time.Second)
+				got, err := m.handle(t.Context(), peer, AttachLocalRequest{Operation: "poll", ID: v.ID, Digest: v.Digest})
+				if polls != 1 || (err != nil) != expired || !expired && got.State != "active" {
+					t.Fatalf("lease decision used daemon clock: polls=%d state=%s err=%v", polls, got.State, err)
+				}
+				if expired && len(m.sessions) != 0 {
+					t.Fatal("server-expired watch retained")
+				}
+			})
+		}
+	}
+}
+
 type fakeLocalAuth struct {
 	called chan string
 	answer chan error

@@ -22,7 +22,9 @@
 // to stage handoffs and records typed built evidence.
 // harness run-heartbeat registers or resumes one session from a private state
 // directory and posts known heartbeat fields while its owner process lives.
-// Owner exit and SIGTERM mark that session stopped. A Claude transcript path
+// Owner exit and SIGTERM mark that session stopped. A failed owner check at
+// start exits non-zero and does not leave a new session starting. A closed
+// generation explains itself and does not resume. A Claude transcript path
 // posts cumulative usage to the existing session usage route.
 // CP3 adds relation add, project create/show/update and resource reads, tag
 // catalog commands, attachment upload/list/get/rm, declarative apply, schema,

@@ -71,7 +71,7 @@ export interface AccessWorld {
   me: string
   roles: MockRole[]
   people: { principal_id: string; name: string; avatar_url: string | null; email: string | null; status: 'active' | 'deactivated'; identity: 'inspr_id' | null; workspace_role: string | null; aliases: { principal_id: string; name: string; source: 'classic' }[]; classic_role: string | null; last_active_at: string | null }[]
-  agents: { principal_id: string; name: string; workspace_role: string | null; last_seen_at: string | null; service: boolean }[]
+  agents: { description?: string; principal_id: string; name: string; workspace_role: string | null; last_seen_at: string | null; service: boolean }[]
   imported: { principal_id: string; name: string; classic_role: string | null }[]
   bindings: { principal_id: string; project_id: string; role_id: string }[]
   invites: { id: string; email: string; workspace_role: string | null; project_roles: { project_id: string; role_id: string }[]; status: 'pending' | 'expired' | 'revoked' | 'accepted'; created_by: string; created_at: string; expires_at: string }[]
@@ -168,7 +168,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
   const person = (p: AccessWorld['people'][number]) => ({ ...p, has_avatar: false, workspace_role: roleRef(p.workspace_role), project_roles: projectRoles(p.principal_id), last_owner: lastOwner(p.principal_id) })
   const nameOf = (id: string) => world.people.find(p => p.principal_id === id)?.name ?? world.agents.find(a => a.principal_id === id)?.name ?? world.imported.find(i => i.principal_id === id)?.name ?? world.people.flatMap(p => p.aliases).find(a => a.principal_id === id)?.name ?? ''
   const principalRef = (id: string) => ({ principal_id: id, name: nameOf(id) })
-  const agent = (a: AccessWorld['agents'][number]) => ({ ...a, has_avatar: false, workspace_role: roleRef(a.workspace_role), key_count: world.keys.filter(k => k.principal_id === a.principal_id && !k.revoked_at && (!k.expires_at || Date.parse(k.expires_at) > now)).length })
+  const agent = (a: AccessWorld['agents'][number]) => ({ ...a, has_avatar: false, project_roles: projectRoles(a.principal_id), workspace_role: roleRef(a.workspace_role), key_count: world.keys.filter(k => k.principal_id === a.principal_id && !k.revoked_at && (!k.expires_at || Date.parse(k.expires_at) > now)).length })
   const invite = (i: AccessWorld['invites'][number]) => ({ ...i, created_by: principalRef(i.created_by), accepted_by: i.status === 'accepted' ? principalRef(JONAS) : null, accepted_at: i.status === 'accepted' ? ago(24 * 59) : null, workspace_role: roleRef(i.workspace_role), project_roles: i.project_roles.map(pr => ({ project_id: pr.project_id, project_key: world.projects[pr.project_id]?.key ?? '', project_title: world.projects[pr.project_id]?.title ?? '', role: roleRef(pr.role_id)! })) })
   const role = (r: MockRole) => ({ ...r, member_count: world.people.filter(p => p.workspace_role === r.id).length + world.agents.filter(a => a.workspace_role === r.id).length + world.bindings.filter(b => b.role_id === r.id).length })
 
@@ -235,6 +235,20 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
         event('role.deleted', { id: target.id, name: target.name }, reassign ? { reassigned_to: roleRef(reassign) } : null)
         return route.fulfill({ status: 204 })
       }
+    }
+    if (path === '/api/members/agents' && method === 'POST') {
+      if (!need('keys.manage')) return fail(route, 403, 'forbidden', 'You need Manage agent keys.')
+      const name = String(body.name ?? '').trim()
+      if (!name) return fail(route, 400, 'invalid', 'Enter a name.', 'name')
+      if (world.agents.some(a => a.name.toLowerCase() === name.toLowerCase())) return fail(route, 409, 'name_taken', 'This name is already in use; choose another name', 'name')
+      const bindings = (body.project_roles ?? []) as { project_id: string; role_id: string }[]
+      const roleIds = [body.workspace_role_id, ...bindings.map(b => b.role_id)].filter(Boolean)
+      if (!roleIds.length || roleIds.some(id => !world.roles.find(r => r.id === id)?.permissions.every(k => mine(world).has(k)))) return fail(route, 403, 'forbidden', 'Role exceeds your permissions.')
+      const created = { principal_id: `new-agent-${nextId++}`, name, description: String(body.description ?? ''), workspace_role: body.workspace_role_id as string ?? null, last_seen_at: null, service: false }
+      world.agents.push(created)
+      for (const b of bindings) world.bindings.push({ ...b, principal_id: created.principal_id })
+      event('principal.agent_created', null, { principal_id: created.principal_id, name })
+      return route.fulfill({ status: 201, json: agent(created) })
     }
     // ---------- Members ----------
     if (path === '/api/members' && method === 'GET') {
@@ -422,6 +436,8 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       if (scopes.length > 32 || scopes.some(k => !REGISTRY.find(p => p.key === k)?.agent_grantable)) return route.fulfill({ status: 400, json: { error: 'invalid scopes' } })
       // Never more than the creator holds, nor (on a shared role) than the agent's role.
       const agentRole = world.roles.find(r => r.id === agentRow.workspace_role)
+      const projectScopes = world.bindings.filter(b => b.principal_id === agentRow.principal_id).flatMap(b => world.roles.find(r => r.id === b.role_id)?.permissions ?? []).filter(k => REGISTRY.find(p => p.key === k)?.grantable_at.includes('project'))
+      if (projectScopes.length && scopes.some(k => !projectScopes.includes(k))) return fail(route, 403, 'forbidden', 'Beyond project role.')
       if (scopes.some(k => !mine(world).has(k) || (agentRole && !agentRole.permissions.includes(k)))) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       const prefix = `n${String(nextId++).slice(-3)}`
       const key = { id: `k-${prefix}`, principal_id: agentRow?.principal_id ?? `agent-${prefix}`, name: old?.name ?? String(body.name), prefix, scopes, created_at: new Date(now).toISOString(), expires_at: (body.expires_at as string | undefined) ?? null, last_used_at: null, revoked_at: null }
@@ -433,6 +449,28 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       world.keys.unshift(key)
       event('agent_key.created', null, { id: key.id, principal_id: key.principal_id, name: key.name, prefix })
       return route.fulfill({ status: 201, json: { id: key.id, token: `aeon_${prefix}_T0k3nS3cr3tValue`, prefix, name: key.name, expires_at: key.expires_at } })
+    }
+    const scopeMatch = /^\/api\/agent-keys\/([^/]+)\/scopes$/.exec(path)
+    if (scopeMatch) {
+      if (!need('keys.manage')) return fail(route, 403, 'forbidden', 'You need Manage agent keys.')
+      const key = world.keys.find(k => k.id === scopeMatch[1])
+      if (!key) return fail(route, 404, 'not_found', 'No such key.')
+      if (key.revoked_at || key.expires_at && Date.parse(key.expires_at) <= now) return fail(route, 409, 'conflict', 'Key is revoked or expired.')
+      const agent = world.agents.find(a => a.principal_id === key.principal_id)
+      const role = world.roles.find(r => r.id === agent?.workspace_role)
+      const grantable = REGISTRY.filter(p => p.agent_grantable && mine(world).has(p.key) && role?.permissions.includes(p.key)).map(p => p.key)
+      if (method === 'GET') return route.fulfill({ json: { key, grantable_scopes: grantable } })
+      if (method === 'PATCH') {
+        if (world.slow) await new Promise(resolve => setTimeout(resolve, world.slow))
+        const before = { ...key, scopes: [...key.scopes] }
+        const added = body.add as string[] ?? []
+        const removed = body.remove as string[] ?? []
+        const after = [...new Set([...key.scopes.filter(k => !removed.includes(k)), ...added])]
+        if (after.some(k => !grantable.includes(k))) return fail(route, 403, 'forbidden', 'Scopes exceed current permissions.')
+        key.scopes = after
+        event('agent_key.scopes_changed', before, { ...key })
+        return route.fulfill({ json: key })
+      }
     }
     const keyMatch = /^\/api\/agent-keys\/([^/]+)$/.exec(path)
     if (keyMatch && method === 'DELETE') {

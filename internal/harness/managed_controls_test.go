@@ -7,8 +7,11 @@ import (
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/jackc/pgx/v5"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -153,6 +156,47 @@ func TestManagedControlsIdentityReplayPrivacyAndExpiry(t *testing.T) {
 	}
 	expect(t, f.call(f.agent, "POST", path+"/managed-context", map[string]any{"person_id": f.foreign.ID}, lease), 400)
 	expect(t, f.call(f.agent, "POST", path+"/managed-context", map[string]any{}, "wrong-lease"), 403)
+	// The shared workorders endpoint must retain the rules error status/code.
+	const repository = "inspr-at/managed-doctrine"
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,ref,commit_sha,paths,credential_ref) VALUES($1,$2,'public','fixture',$3,ARRAY['docs/AGENTS-KERNEL.md'],'managed-read')`, f.person.TenantID, repository, strings.Repeat("a", 40))
+		return err
+	})
+	creds := t.TempDir()
+	grant := func(repository string) {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{"grants": []any{map[string]string{"tenant_id": f.person.TenantID, "repository": repository}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(creds, "managed-read.allowlist.json"), raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plainMux := f.mux
+	withCredentials := func(dir string) {
+		f.mux = http.NewServeMux()
+		f.mux.Handle("/", (doctrine.Credentials{Dir: dir}).CatalogMiddleware(plainMux))
+	}
+	grant(repository)
+	withCredentials(creds)
+	expect(t, f.call(f.agent, "POST", path+"/managed-context", map[string]any{}, lease), 200)
+	for _, mode := range []string{"revoked", "missing directory", "missing middleware"} {
+		switch mode {
+		case "revoked":
+			grant("other/repository")
+		case "missing directory":
+			grant(repository)
+			withCredentials(filepath.Join(creds, "missing"))
+		case "missing middleware":
+			f.mux = plainMux
+		}
+		w = f.call(f.agent, "POST", path+"/managed-context", map[string]any{}, lease)
+		expect(t, w, 503)
+		if decode(t, w)["code"] != "doctrine_unavailable" || strings.Contains(w.Body.String(), repository) || strings.Contains(w.Body.String(), creds) {
+			t.Fatalf("%s: unsafe or unexplained doctrine failure: %s", mode, w.Body.String())
+		}
+	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		var leaked bool
 		err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM events WHERE coalesce("before"::text,'') LIKE '%private steer%' OR coalesce("after"::text,'') LIKE '%private steer%')`).Scan(&leaked)
@@ -161,6 +205,41 @@ func TestManagedControlsIdentityReplayPrivacyAndExpiry(t *testing.T) {
 		}
 		return err
 	})
+}
+
+func TestManagedControlFreshnessUsesDatabaseClock(t *testing.T) {
+	// Same contract as force-stop freshness: the observation window is the
+	// database clock, including when that clock is nowhere near the host wall clock.
+	now := time.Date(2099, time.January, 1, 11, 0, 0, 0, time.UTC)
+	f := fixtureWithOwnershipClock(t, func() time.Time { return now })
+	order, run := stateRun(t, f, f.project, "running", "MCT-11")
+	lease := "managed-clock-lease-000000000000000001"
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "managed-clock-ref-0000000000000001", "worker_lease": lease, "management_mode": "managed", "role": "worker", "run_id": run, "work_order_id": order, "ticket_node_id": order, "work_shape": "ship", "advertised_capabilities": []string{"managed_control_v1", "steer", "stop"}}, "")
+	expect(t, w, 201)
+	path := base + "/" + decode(t, w)["id"].(string)
+	identity := ownedprocess.Identity{DaemonID: "fixture", Generation: strings.Repeat("a", 32), ProcessID: strings.Repeat("b", 32), RootPID: 1234, GroupID: 1234, StartedAt: now.Add(-time.Hour)}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET daemon_id=$2,daemon_generation=$3 WHERE id=$1`, run, identity.DaemonID, identity.Generation)
+		return err
+	})
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1, "process_ownership": identity}, lease), 200)
+	body := map[string]any{"request_id": uid(), "kind": "steer", "text": "clock fixture", "expected_ownership": identity}
+	w = f.call(f.person, "POST", path+"/managed-controls", body, "")
+	expect(t, w, 201)
+	if strings.Contains(w.Body.String(), "clock fixture") {
+		t.Fatal("text in public response")
+	}
+	now = now.Add(46 * time.Second)
+	body["request_id"] = uid()
+	w = f.call(f.person, "POST", path+"/managed-controls", body, "")
+	expect(t, w, 409)
+	if !strings.Contains(w.Body.String(), "live sandboxed managed control unavailable") {
+		t.Fatal(w.Body.String())
+	}
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 2, "process_ownership": identity}, lease), 200)
+	body["request_id"] = uid()
+	expect(t, f.call(f.person, "POST", path+"/managed-controls", body, ""), 201)
 }
 
 func TestManagedControlsRefuseUnmanagedAndUnknownPolicy(t *testing.T) {

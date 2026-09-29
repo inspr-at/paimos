@@ -506,8 +506,7 @@ export function liveServer(historyCurrent: string, available?: string | null): s
 // A page older than the server already says a newer version is live. That
 // version missing from this build's history is the same fact, so the history
 // shows one notice, never both.
-export function releaseNotice(pageVersion: string | null | undefined, serverVersion: string, missingVersion: string, available?: string | null): 'update' | 'missing' | null {
-  const server = liveServer(serverVersion, available)
-  if (isCalendarVersion(pageVersion) && isCalendarVersion(server) && server > pageVersion) return 'update'
+export function releaseNotice(pageVersion: string | null | undefined, serverVersion: string, missingVersion: string): 'update' | 'missing' | null {
+  if (isCalendarVersion(pageVersion) && isCalendarVersion(serverVersion) && serverVersion > pageVersion) return 'update'
   return missingVersion ? 'missing' : null
 }

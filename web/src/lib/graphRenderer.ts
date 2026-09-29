@@ -136,6 +136,10 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   let settleTimer: ReturnType<typeof setTimeout> | undefined, pickTimer: ReturnType<typeof setTimeout> | undefined
   let cameraTaken = false, fitOnSettle = true
   let glimpseLaidOut = false
+  // Header contrast runs Vite with `--mode test` and releases a fixed orbit.
+  // Production builds fold that branch away, so the window hook is not emitted.
+  type GlimpseTestPin = { pending(): boolean; pinned(): boolean; afterData(): void; afterLayout(): void; dispose(): void }
+  let glimpsePin: GlimpseTestPin | null = null
   let anchorStride = 1
   let pointerNode: LayoutNode | null = null, openedAt = -Infinity
   let lastPick: { node: LayoutNode; x: number; y: number; at: number } | null = null
@@ -378,6 +382,14 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   }
   function interact() { cameraTaken = true; resumeAt = performance.now() + 5000; clearTimeout(settleTimer) }
   function motion(value: boolean) {
+    // The pinned pose ignores later play, occlusion and visibility.
+    if (import.meta.env.MODE === 'test' && glimpsePin?.pinned()) {
+      paused = true
+      ;(g3 ?? g2)?.cooldownTicks(0).linkDirectionalParticles(particles)
+      publishPhase()
+      redraw()
+      return
+    }
     paused = value
     if (!value) resumeAt = 0 // Explicit play takes effect immediately, including reduced-motion opt-in.
     const graph = g3 ?? g2
@@ -495,9 +507,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   // schedules a RAF; pause cancels that RAF. Own just one clock so 30 FPS caps
   // physics, WebGL, labels and picking together, rather than only the camera.
   graph.pauseAnimation()
-  function tick(now: number) {
-    if (disposed) return
-    frame = requestAnimationFrame(tick)
+  function renderFrame(now: number, synthetic = false) {
     // Phase follows the click even when this tab is hidden or the frame budget
     // skips the draw. The orbit itself still waits for a visible frame.
     publishPhase(now)
@@ -510,7 +520,12 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       controls.autoRotate = phase === 'orbiting' && pace > 0 && !glimpse
       controls.autoRotateSpeed = pace
     }
-    if (document.hidden || (glimpse && (!nodes.length || nodes.some(n => n.x === undefined))) || now - lastFrame < 1000 / fps - .5) return
+    // Real frames hold until the test releases the pin, and after that pose is drawn.
+    if (import.meta.env.MODE === 'test') {
+      if (!synthetic && (document.hidden || glimpsePin?.pending() || glimpsePin?.pinned())) return
+    } else if (document.hidden) return
+    if (glimpse && (!nodes.length || nodes.some(n => n.x === undefined))) return
+    if (now - lastFrame < 1000 / fps - .5) return
     const dt = Math.min(.1, (now - (lastFrame || now)) / 1000); lastFrame = now
     // Pace 1 matches the old drift. Default (120s) is half of that; Off adds none.
     if (phase === 'orbiting' && pace > 0) {
@@ -535,6 +550,74 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     if (disposed) return
     sizeGlimpseOrbs()
     clearGlimpse(); graph.resumeAnimation(); if (disposed) return; graph.pauseAnimation(); publishLabels()
+  }
+  function tick(now: number) {
+    if (disposed) return
+    frame = requestAnimationFrame(tick)
+    renderFrame(now)
+  }
+  if (import.meta.env.MODE === 'test') {
+    type GlimpsePinWindow = Window & { __aeonGlimpsePin?: { frames?: number }; __aeonReleaseGlimpsePin?: () => void }
+    glimpsePin = (() => {
+      let pinned = false, pending = false, released = false, layoutReady = false, installed = false
+      const pinWindow = () => window as GlimpsePinWindow
+      const framesOf = () => {
+        if (!glimpse || typeof window === 'undefined') return 0
+        const requested = pinWindow().__aeonGlimpsePin?.frames
+        const frames = typeof requested === 'number' ? Math.floor(requested) : 0
+        return Number.isFinite(frames) && frames > 0 ? Math.min(frames, 600) : 0
+      }
+      const run = (frames: number) => {
+        if (pinned || disposed) return
+        cancelAnimationFrame(fitFrame)
+        clearTimeout(settleTimer)
+        lastFrame = 0
+        driftTime = 0
+        const sim = g3 ?? g2
+        // Same pose the glimpse camera is created with, so the scripted orbit does not
+        // depend on how many real frames ran before the test released the pin.
+        if (g3) g3.cameraPosition({ x: 90, y: 150, z: 750 }, { x: 0, y: 0, z: 0 }, 0)
+        // The engine also stops on a wall-clock cooldown. A pinned run must stop on tick count alone.
+        sim?.cooldownTime(3_600_000)
+        sim?.d3ReheatSimulation()
+        for (let i = 1; i <= frames; i++) renderFrame(17 * i, true)
+        sim?.cooldownTime(15_000)
+        pending = false
+        pinned = true
+        sim?.cooldownTicks(0)
+        host.dataset.glimpsePin = String(frames)
+        motion(true)
+      }
+      const maybeRun = () => {
+        const frames = framesOf()
+        if (!frames || !released || !layoutReady || pinned || disposed) return
+        run(frames)
+      }
+      pending = framesOf() > 0
+      if (pending) {
+        installed = true
+        pinWindow().__aeonReleaseGlimpsePin = () => {
+          released = true
+          maybeRun()
+        }
+      }
+      return {
+        pending: () => pending,
+        pinned: () => pinned,
+        afterData() {
+          layoutReady = false
+          pinned = false
+          if (framesOf()) { pending = true; delete host.dataset.glimpsePin }
+        },
+        afterLayout() {
+          layoutReady = true
+          maybeRun()
+        },
+        dispose() {
+          if (installed && typeof window !== 'undefined') delete pinWindow().__aeonReleaseGlimpsePin
+        },
+      }
+    })()
   }
   frame = requestAnimationFrame(tick)
   // Fit fills about 80% of the stage along its tighter side, bubbles included.
@@ -631,6 +714,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     data(value) {
       pointerNode = null; lastPick = null; cameraTaken = false; fitOnSettle = true
       glimpseLaidOut = false
+      if (import.meta.env.MODE === 'test') glimpsePin?.afterData()
       if (glimpse) host.style.visibility = 'hidden'
       objects.clear()
       const layout = graphLayout(value); nodes = layout.nodes; links = layout.links
@@ -645,8 +729,9 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       whenLaidOut(() => {
         if (glimpse) glimpseLaidOut = true
         redraw(); if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit(); publishLabels()
+        if (import.meta.env.MODE === 'test') glimpsePin?.afterLayout()
       })
-      if (!paused) settleTimer = setTimeout(() => { if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit() }, 1200)
+      if (!paused && !(import.meta.env.MODE === 'test' && glimpsePin?.pending())) settleTimer = setTimeout(() => { if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit() }, 1200)
     },
     emphasis(value) { emphasis = value; redraw() },
     theme() {
@@ -656,10 +741,10 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     resize(width, height) {
       const changed = graph.width() !== width || graph.height() !== height
       graph.width(Math.max(1, width)).height(Math.max(1, height)); cancelAnimationFrame(fitFrame)
-      if (changed && options.layoutBias === 'elliptic' && glimpseLaidOut) { fitOnSettle = true; graph.d3ReheatSimulation() }
+      if (changed && options.layoutBias === 'elliptic' && glimpseLaidOut && !(import.meta.env.MODE === 'test' && (glimpsePin?.pending() || glimpsePin?.pinned()))) { fitOnSettle = true; graph.d3ReheatSimulation() }
       const node = g2 && emphasis.selected ? nodes.find(n => n.id === emphasis.selected) : undefined
       if (node) fitFrame = requestAnimationFrame(() => { g2?.centerAt(node.x ?? 0, node.y ?? 0); refreshPicking(0) })
-      else if (!cameraTaken && !emphasis.selected) fitFrame = requestAnimationFrame(fit)
+      else if (!(import.meta.env.MODE === 'test' && glimpsePin?.pinned()) && !cameraTaken && !emphasis.selected) fitFrame = requestAnimationFrame(fit)
     },
     fit, focus, motion, interact,
     labels(mode) { if (glimpse) return; labelMode = mode; labelsWereSettled = undefined; publishLabels() },
@@ -667,6 +752,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     dispose() {
       if (disposed) return
       disposed = true
+      if (import.meta.env.MODE === 'test') glimpsePin?.dispose()
       cancelAnimationFrame(frame); cancelAnimationFrame(paintFrame); cancelAnimationFrame(fitFrame); clearTimeout(settleTimer); clearTimeout(pickTimer)
       host.removeEventListener('dblclick', doubleClick); host.removeEventListener('pointerdown', pointerDown); host.removeEventListener('wheel', interact)
       window.removeEventListener('pointermove', pointerMove); window.removeEventListener('pointerup', pointerUp); window.removeEventListener('pointercancel', pointerUp)

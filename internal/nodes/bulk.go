@@ -293,10 +293,7 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			}
 		}
 		if plan.setAssign && plan.assignee != nil {
-			canonical, _, err := principallink.Resolve(ctx, tx, p.TenantID, *plan.assignee)
-			if errors.Is(err, pgx.ErrNoRows) {
-				return badRequest("assignee not found in tenant")
-			}
+			canonical, _, err := resolveAssignee(ctx, tx, p.TenantID, *plan.assignee)
 			if err != nil {
 				return err
 			}
@@ -360,7 +357,7 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 					return err
 				}
 				if next, err = validateFields(schema, next); err == nil {
-					next, err = canonicalAssignments(ctx, tx, p.TenantID, next)
+					next, err = canonicalAssignments(ctx, tx, p.TenantID, next, current.Fields)
 				}
 				if err != nil {
 					skip("its fields do not allow this change")

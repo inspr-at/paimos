@@ -19,4 +19,7 @@
 // command template is rendered from the built-in harness text and is never
 // executed. Nothing is selected when every candidate was skipped; review-gate
 // then sets owner_required.
+//
+// ResolveTicketRoute is the read-only helper for a ticket's role and area.
+// The ladder is still keyed by role. A missing selection returns nil.
 package modelregistry

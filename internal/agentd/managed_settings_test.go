@@ -20,7 +20,7 @@ func TestManagedSettingsFencedReceiptsAndHeartbeat(t *testing.T) {
 	identity.DaemonID = s.daemonID
 	identity.Generation = s.generation
 	expiry := time.Now().Add(time.Minute)
-	req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: a.run.ID, Generation: s.generation, CorrelationID: "setting-1", Operation: "model", Value: "changed-model", ExpectedOwnership: &identity, ExpiresAt: &expiry}
+	req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: a.run.ID, Generation: s.generation, CorrelationID: "setting-1", Operation: "model", Value: "changed-model", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}
 	if _, err := s.Control(t.Context(), req); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("local bypass: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestManagedSettingRejectionCompletionRetry(t *testing.T) {
 	identity.Generation = s.generation
 	expiry := time.Now().Add(time.Minute)
 	a.harnessCompletionFailures = 1
-	a.harnessControls = []HarnessControl{{ID: "rejected-setting", Kind: "model", Value: "fixture-model", ExpectedOwnership: &identity, ExpiresAt: &expiry}}
+	a.harnessControls = []HarnessControl{{ID: "rejected-setting", Kind: "model", Value: "fixture-model", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}}
 	if err := s.serviceHarness(t.Context(), e); !errors.Is(err, ErrControlUnconfirmed) {
 		t.Fatal(err)
 	}

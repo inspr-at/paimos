@@ -52,7 +52,9 @@
 //     rule draft and records knowledge.learning_drafted. It does not publish.
 //     Agents may tag candidates; they cannot accept, dismiss, draft or undo.
 //     A daily tagger nominates closed tickets, review verdicts and incident
-//     comments. It never accepts them. paimos serve starts it.
+//     comments. It never accepts them. Merging the process-learning tag into
+//     a ticket appends node.updated under that tenant's System principal, in
+//     the same transaction as the tag. paimos serve starts it.
 //   - Principals with a viewer or read-only role cannot write (403).
 //
 // Every write runs in db.InTenant and appends one event in the same

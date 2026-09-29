@@ -134,7 +134,8 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	type offered struct {
 		Control
-		Text string `json:"text,omitempty"`
+		Text        string `json:"text,omitempty"`
+		ExpiresInMS int64  `json:"expires_in_ms"`
 	}
 	claimed := []offered{}
 	for _, old := range pending {
@@ -188,7 +189,7 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 				continue
 			}
 		}
-		claimed = append(claimed, offered{c, text})
+		claimed = append(claimed, offered{Control: c, Text: text})
 	}
 	if s.Phase != "yielded" {
 		before := s
@@ -199,6 +200,15 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		if err = record(ctx, tx, p, s, "yielded", before, s); err != nil {
 			return nil, err
 		}
+	}
+	// Sample after claiming and recording the batch. The worker subtracts the
+	// entire request round trip before using this budget on its monotonic clock.
+	now, err := m.ownershipNow(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range claimed {
+		claimed[i].ExpiresInMS = controlTTL(claimed[i].ExpiresAt, now).Milliseconds()
 	}
 	return map[string]any{"session": s, "controls": claimed}, nil
 }
@@ -254,7 +264,11 @@ func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal)
 		if c.ExpectedOwnership == nil || s.ProcessOwnership == nil || *c.ExpectedOwnership != *s.ProcessOwnership {
 			return nil, workorders.Fail(409, "process generation changed; setting outcome is fenced")
 		}
-		if c.ExpiresAt == nil || !c.ExpiresAt.After(time.Now()) {
+		now, err := m.ownershipNow(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		if c.ExpiresAt == nil || !c.ExpiresAt.After(now) {
 			return nil, workorders.Fail(409, "setting authorization expired")
 		}
 		if c.Kind == "rename" {

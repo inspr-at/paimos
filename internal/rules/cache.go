@@ -12,7 +12,10 @@ import (
 	"github.com/inspr-at/paimos/internal/releasehistory"
 )
 
-const MaxCacheBytes = 512 * 1024
+// The store admits 2 MiB of rule text plus at most 2,000 rules' bounded source
+// fields/selectors. Escaping expands a byte sixfold; body/floor and version
+// evidence add more copies. 32 MiB covers that envelope, below the HTTP bound.
+const MaxCacheBytes = 32 * 1024 * 1024
 
 // Cache is content-addressed as an envelope, binding ALL selectors, immutable
 // version references and rendered bytes. It contains no credentials or details.
@@ -152,7 +155,7 @@ func containsFloor(body, floor string) bool {
 
 // VerifyFloor validates a floor against a separately provided trusted digest.
 func VerifyFloor(raw []byte, pin string) (string, error) {
-	if len(raw) == 0 || len(raw) > MaxBytes-256 || !utf8.Valid(raw) || digest(raw) != pin || strings.ContainsRune(string(raw), 0) {
+	if len(raw) == 0 || len(raw) > MaxBytes-len(SessionHeader) || !utf8.Valid(raw) || digest(raw) != pin || strings.ContainsRune(string(raw), 0) {
 		return "", errors.New("floor digest or byte bound mismatch")
 	}
 	return string(raw), nil

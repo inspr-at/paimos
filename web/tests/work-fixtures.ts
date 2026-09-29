@@ -3,9 +3,9 @@
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page } from '@playwright/test'
-import { deriveAgentState, normalizeAgentState } from '../src/lib/agentSignals.ts'
+import { deriveAgentState, normalizeAgentState, STATE_PRIORITY } from '../src/lib/agentSignals.ts'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
-import { compareServerLead, leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
+import { leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
@@ -78,7 +78,7 @@ export function fixtures(options: MockOptions = {}) {
   for (let index = 0; index < (options.bigProject ?? 0); index++) {
     add({ id: `n-big-${index}`, key: `AEON-${100 + index}`, kind_slug: 'ticket', title: `Generated ticket ${index + 1}`, state: 'backlog', project: 'p-aeon', fields: { priority: 'medium' }, updated_at: ago(index + 1) })
   }
-  const activity: Record<string, { id: string; at: string; type: 'comment' | 'change' | 'created'; author: { id: string | null; name: string }; body_markdown?: string; changes?: { field: string; from: string | null; to: string | null }[] }[]> = {
+  const activity: Record<string, { id: string; at: string; type: 'comment' | 'change' | 'created'; author: { id: string | null; name: string; automatic?: boolean; job?: string; reason?: string }; body_markdown?: string; changes?: { field: string; from: string | null; to: string | null }[] }[]> = {
     // Newest first, like the API.
     'n-1': [
       { id: '9', at: ago(0.5), type: 'comment', author: { id: mira.id, name: mira.name }, body_markdown: 'Token rotation is **done**; cleanup next.' },
@@ -211,8 +211,27 @@ function costUnit(node: MockNode): string {
 }
 const release = (node: MockNode) => labelOf(node.fields.release)
 const personName = (data: Fixtures, id: unknown) => typeof id === 'string' ? data.people.find(p => p.id === id)?.name ?? '' : ''
-// Live workers on one ticket, in the server's lead order (attention at the
-// viewer's thresholds, then start, heartbeat and public facts — not a session id).
+// Mock stand-in for the list query's lead order. The server chooses; this
+// only keeps fixture rows in that order (attention at the viewer's thresholds,
+// then a worker before a coordinator, then start, heartbeat and public facts).
+function compareServerLead(a: LiveAgent, b: LiveAgent) {
+  const rank = (agent: LiveAgent) => STATE_PRIORITY[agent.state ?? 'working']
+  const beat = (agent: LiveAgent) => {
+    const parsed = Date.parse(agent.heartbeat_at ?? '')
+    return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
+  }
+  return rank(a) - rank(b)
+    || Number(a.role === 'coordinator') - Number(b.role === 'coordinator')
+    || Date.parse(a.since) - Date.parse(b.since)
+    || beat(a) - beat(b)
+    || a.harness.localeCompare(b.harness)
+    || (a.activity_sequence ?? 0) - (b.activity_sequence ?? 0)
+    || a.phase.localeCompare(b.phase)
+    || a.activity.localeCompare(b.activity)
+    || who(a).localeCompare(who(b))
+    || leadWorkerKey(a).localeCompare(leadWorkerKey(b))
+}
+// Live workers on one ticket, in the server's lead order.
 function liveOn(data: Fixtures, node: MockNode): LiveAgent[] {
   const preferences = normalizeAgentState(data.preferences['agent-state'])
   return data.live.flatMap(agent => {

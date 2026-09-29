@@ -42,9 +42,15 @@ func ambientVendorSessionRef() string {
 }
 
 // Use the inbox hook's source precedence, but only attach an active session in
-// the target project. A configured file never falls through to another generation.
-func (rt *runtime) ambientSenderSession(ctx context.Context, projectID string) (string, error) {
+// the target project that belongs to callerID. A configured source never falls
+// through to another generation. A corrupt source is ignored so an ordinary
+// tell still sends.
+func (rt *runtime) ambientSenderSession(ctx context.Context, projectID, callerID string) (string, error) {
 	id, err := inboxHookSession()
+	if errors.Is(err, errSessionFileUnavailable) || errors.Is(err, errInvalidSessionFile) || errors.Is(err, errInvalidAeonSessionID) {
+		fmt.Fprintln(rt.stderr, "note: ambient sender session source is unusable; sending without it")
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
@@ -61,21 +67,30 @@ func (rt *runtime) ambientSenderSession(ctx context.Context, projectID string) (
 		return "", err
 	}
 	var session struct {
-		ProjectID  string     `json:"project_id"`
-		StoppedAt  *time.Time `json:"stopped_at"`
-		ArchivedAt *time.Time `json:"archived_at"`
+		ProjectID        string     `json:"project_id"`
+		AgentPrincipalID string     `json:"agent_principal_id"`
+		StoppedAt        *time.Time `json:"stopped_at"`
+		ArchivedAt       *time.Time `json:"archived_at"`
 	}
-	err = c.DoWithHeaders(ctx, http.MethodGet, "/api/projects/"+url.PathEscape(projectID)+"/harness-sessions/"+url.PathEscape(id), nil, &session, nil)
+	err = c.DoWithHeaders(ctx, http.MethodGet, "/api/projects/"+url.PathEscape(projectID)+"/harness-sessions/"+url.PathEscape(id)+"/lookup", nil, &session, nil)
 	if err != nil {
 		var status *client.StatusError
-		if errors.As(err, &status) && (status.Status == http.StatusNotFound || status.Status == http.StatusForbidden) {
+		if errors.As(err, &status) && status.Status == http.StatusNotFound {
 			fmt.Fprintln(rt.stderr, "note: ambient sender session unavailable in the target project; sending without it")
+			return "", nil
+		}
+		if errors.As(err, &status) && status.Status == http.StatusForbidden {
+			fmt.Fprintln(rt.stderr, "note: ambient sender session is not readable; sending without it")
 			return "", nil
 		}
 		return "", err
 	}
 	if !strings.EqualFold(session.ProjectID, projectID) {
 		fmt.Fprintln(rt.stderr, "note: ambient sender session belongs to another project; sending without it")
+		return "", nil
+	}
+	if !strings.EqualFold(session.AgentPrincipalID, callerID) {
+		fmt.Fprintln(rt.stderr, "note: ambient sender session belongs to another agent; sending without it")
 		return "", nil
 	}
 	if session.StoppedAt != nil || session.ArchivedAt != nil {

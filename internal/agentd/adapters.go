@@ -17,8 +17,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
@@ -40,21 +43,6 @@ func localHome(homes map[string]string, key string) (string, error) {
 		return "", errors.New("local account home is not private")
 	}
 	return home, nil
-}
-
-func pinnedFile(path string) error {
-	if path == "" || !filepath.IsAbs(path) {
-		return errors.New("adapter file must be absolute")
-	}
-	physical, err := filepath.EvalSymlinks(path)
-	if err != nil || physical != path {
-		return errors.New("adapter file is not pinned")
-	}
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
-		return errors.New("adapter file unavailable")
-	}
-	return nil
 }
 
 func withEnv(name, value string) []string {
@@ -101,6 +89,7 @@ type CodexAdapter struct {
 	Path        string
 	Homes       map[string]string
 	Emails      map[string]string
+	Nodes       map[string]harnesslaunch.Node
 }
 
 func NewCodexAdapter(path string, homes map[string]string) *CodexAdapter {
@@ -203,14 +192,16 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		return nil, err
 	}
 
-	if !a.Probe(ctx, r.AccountKey) {
+	if status, err := a.ProbeHarness(ctx, r.AccountKey); err != nil {
+		return nil, err
+	} else if !status.OK {
 		return nil, errors.New("Codex account probe unavailable")
 	}
 	home, err := localHome(a.Homes, r.AccountKey)
 	if err != nil {
 		return nil, err
 	}
-	p, err := launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, r.Workspace, withEnv("CODEX_HOME", home), "jsonrpc", observe)
+	p, err := launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, r.Workspace, harnesslaunch.Environment(withEnv("CODEX_HOME", home), a.Nodes[r.AccountKey].Path), "jsonrpc", observe)
 	if err != nil {
 		return nil, err
 	}
@@ -278,14 +269,31 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 // PiAdapter speaks Pi's JSONL RPC and verifies the effective state before
 // sending the first prompt or any steer.
 type PiAdapter struct {
-	Path  string
-	Homes map[string]string
+	Path       string
+	Homes      map[string]string
+	Providers  map[string]string
+	Nodes      map[string]piprobe.Node
+	probeMu    sync.Mutex
+	probes     map[string]piProbeResult
+	probeLocks map[string]*sync.Mutex
+}
+
+type piProbeResult struct {
+	path, home, provider string
+	node                 piprobe.Node
+	expires              time.Time
+	available            bool
+	err                  error
 }
 
 func NewPiAdapter(path string, homes map[string]string) *PiAdapter {
 	return &PiAdapter{Path: path, Homes: homes}
 }
 func (*PiAdapter) Name() string { return Pi }
+
+// SetExpectedProviders binds guided enrollments to their reviewed local profile
+// and configured provider. Existing manually configured adapters remain valid.
+func (a *PiAdapter) SetExpectedProviders(providers map[string]string) { a.Providers = providers }
 
 type piProcess struct {
 	*wireProcess
@@ -391,7 +399,9 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 		return nil, err
 	}
 
-	if !a.Probe(ctx, r.AccountKey) {
+	if available, err := a.probe(ctx, r.AccountKey, true); err != nil {
+		return nil, err
+	} else if !available {
 		return nil, errors.New("Pi account context unavailable")
 	}
 	home, err := localHome(a.Homes, r.AccountKey)
@@ -402,6 +412,9 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 	if !ok || provider == "" || model == "" {
 		return nil, errors.New("Pi model requires provider/model")
 	}
+	if a.Providers != nil && provider != a.Providers[r.AccountKey] {
+		return nil, errors.New("Pi model provider differs from the enrolled account")
+	}
 	queue, err := openPiQueue(r)
 	if err != nil {
 		return nil, err
@@ -409,7 +422,11 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 	if len(queue.Snapshot()) != 0 {
 		return nil, errors.New("Pi held queue requires explicit operator reconciliation")
 	}
-	p, err := launchWire(a.Path, []string{"--mode", "rpc", "--no-session", "--provider", provider, "--model", model, "--thinking", r.Profile.Effort}, r.Workspace, withEnv("PI_CODING_AGENT_DIR", home), "pi", observe)
+	childEnv := harnesslaunch.Environment(withEnv("PI_CODING_AGENT_DIR", home), a.Nodes[r.AccountKey].Path)
+	if a.Providers != nil {
+		childEnv = piprobe.Environment(home, a.Nodes[r.AccountKey].Path)
+	}
+	p, err := launchWire(a.Path, []string{"--mode", "rpc", "--no-session", "--provider", provider, "--model", model, "--thinking", r.Profile.Effort}, r.Workspace, childEnv, "pi", observe)
 	if err != nil {
 		return nil, err
 	}
@@ -446,6 +463,7 @@ type CursorAdapter struct {
 	Homes      map[string]string
 	Path       string
 	Identities map[string]string
+	Nodes      map[string]harnesslaunch.Node
 }
 
 func NewCursorAdapter(path string, identities map[string]string) *CursorAdapter {
@@ -504,7 +522,9 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		return nil, err
 	}
 
-	if !a.Probe(ctx, r.AccountKey) {
+	if status, err := a.ProbeHarness(ctx, r.AccountKey); err != nil {
+		return nil, err
+	} else if !status.OK {
 		return nil, errors.New("Cursor account identity unavailable")
 	}
 	path, err := pinnedExecutable(a.Path)
@@ -514,7 +534,7 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	op, cancel := operationContext(ctx)
 	defer cancel()
 	args := []string{"--trust", "--model", r.Profile.Model, "acp"}
-	environment, err := a.accountEnvironment(r.AccountKey)
+	environment, err := a.launchEnvironment(r.AccountKey)
 	if err != nil {
 		return nil, err
 	}
@@ -622,6 +642,7 @@ var claudeAssets embed.FS
 
 type ClaudeAdapter struct {
 	NodePath, SDKPath, ClaudePath string
+	Workspace                     string
 	Homes                         map[string]string
 	Emails                        map[string]string
 }
@@ -631,6 +652,36 @@ func NewClaudeAdapter(nodePath, sdkPath, claudePath string, homes map[string]str
 }
 func (*ClaudeAdapter) Name() string                                 { return Claude }
 func (a *ClaudeAdapter) SetExpectedEmails(emails map[string]string) { a.Emails = emails }
+
+func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
+	var configured *ClaudeAdapter
+	if a.Workspace != "" && workspace != a.Workspace {
+		bound := *a
+		bound.Workspace = ""
+		var err error
+		configured, err = bound.resolved(a.Workspace)
+		if err != nil {
+			return nil, err
+		}
+		if workspace == "" {
+			return configured, nil
+		}
+	}
+	deps, err := agentsetup.ResolveClaudeRuntime(agentsetup.ClaudeDependencies{NodePath: a.NodePath, SDKPath: a.SDKPath}, workspace)
+	if err != nil {
+		return nil, errors.New("Claude dependencies changed/invalid: run aeon-agentd repin --harness claude; " + err.Error())
+	}
+	cli, err := agentsetup.ResolveClaudeExecutable(a.ClaudePath, workspace)
+	if err != nil {
+		return nil, err
+	}
+	if configured != nil && (configured.NodePath != deps.NodePath || configured.SDKPath != deps.SDKPath || configured.ClaudePath != cli) {
+		return nil, errors.New("Claude dependency links changed during launch validation")
+	}
+	resolved := *a
+	resolved.NodePath, resolved.SDKPath, resolved.ClaudePath = deps.NodePath, deps.SDKPath, cli
+	return &resolved, nil
+}
 
 type claudeProcess struct {
 	managedPolicy bool
@@ -673,7 +724,7 @@ func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
 	} else {
 		frame["text"] = text
 	}
-	if err := p.send(frame); err != nil {
+	if err := p.sendContext(ctx, frame); err != nil {
 		return err
 	}
 	select {
@@ -705,19 +756,17 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		return nil, err
 	}
 
-	if !a.Probe(ctx, r.AccountKey) {
+	// Resolve once for this start, then use only the checked physical paths in
+	// the probe, sanitized PATH and child arguments. The saved links stay intact.
+	resolved, err := a.resolved(r.Workspace)
+	if err != nil {
+		return nil, err
+	}
+	if !resolved.probeResolved(ctx, r.AccountKey).OK {
 		return nil, errors.New("Claude account probe unavailable")
 	}
 	home, err := localHome(a.Homes, r.AccountKey)
 	if err != nil {
-		return nil, err
-	}
-	for _, path := range []string{a.NodePath, a.ClaudePath} {
-		if _, err := pinnedExecutable(path); err != nil {
-			return nil, err
-		}
-	}
-	if err := pinnedFile(a.SDKPath); err != nil {
 		return nil, err
 	}
 	dir, err := os.MkdirTemp("", "aeon-claude-bridge-")
@@ -743,7 +792,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			return nil, e
 		}
 	}
-	p, err := launchWire(a.NodePath, []string{filepath.Join(dir, "bridge.mjs"), a.SDKPath, a.ClaudePath, r.Workspace}, r.Workspace, claudeEnvironment(home, a.NodePath, a.ClaudePath), "bridge", observe)
+	p, err := launchWire(resolved.NodePath, []string{filepath.Join(dir, "bridge.mjs"), resolved.SDKPath, resolved.ClaudePath, r.Workspace}, r.Workspace, claudeEnvironment(home, resolved.NodePath, resolved.ClaudePath), "bridge", observe)
 	if err != nil {
 		return nil, err
 	}

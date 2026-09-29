@@ -217,7 +217,9 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	if time.Since(s.touched) < time.Second {
 		return AttachLocalView{}, errors.New("attach poll too frequent")
 	}
-	if time.Since(s.touched) > 15*time.Second || s.view.LeaseUntil != nil && !time.Now().Before(*s.view.LeaseUntil) {
+	// LeaseUntil belongs to the DB clock. The server checks it before accepting
+	// each poll; only local foreground inactivity uses our monotonic clock.
+	if time.Since(s.touched) > 15*time.Second {
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("watch unreachable; attach again")
 	}

@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/inspr-at/paimos/internal/rules"
 )
 
 func TestGoldenSplitLineageAndCaution(t *testing.T) {
@@ -167,14 +165,13 @@ func TestGoldenContradictionsReport(t *testing.T) {
 	}
 }
 
-func TestAlwaysOnBudgetMatchesShippedCap(t *testing.T) {
-	if AlwaysOnBudget != rules.MaxBytes {
-		t.Fatalf("importer budget %d, shipped cap %d", AlwaysOnBudget, rules.MaxBytes)
-	}
+// The importer budget equals rules.LegacyMaxBytes; that equality is checked in
+// cap_external_test.go, because rules imports this package through doctrine.
+func TestAlwaysOnBudgetRejectsOverCap(t *testing.T) {
 	over := mustBuild(t, Request{Context: ContextTemplate, Files: []string{
 		writeDoc(t, t.TempDir(), "AGENTS-KERNEL.md", "- "+strings.Repeat("x", AlwaysOnBudget)+"\n  Why: too long for the session file.\n"),
 	}})
-	if over.AlwaysOn.Insert || over.AlwaysOn.Budget != rules.MaxBytes || over.Adapter.Ready {
+	if over.AlwaysOn.Insert || over.AlwaysOn.Budget != AlwaysOnBudget || over.Adapter.Ready {
 		t.Fatalf("over-cap proposal was acceptable: %+v ready %v", over.AlwaysOn, over.Adapter.Ready)
 	}
 	if _, err := MapDraft(over); err == nil {
