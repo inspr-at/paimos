@@ -254,7 +254,20 @@ type Pacing struct {
 	ReservePercent          float64    `json:"reserve_percent"`
 	ReserveEffectivePercent float64    `json:"reserve_effective_percent"`
 	ReserveUntil            *time.Time `json:"reserve_until,omitempty"`
+	// shareNow is what agents could take now without the reserve, set only
+	// when the reserve lowered it.
+	shareNow *float64
 }
+
+// ReserveBinds reports whether Keep for you, not the schedule, limits what
+// agents may take now, and what they could take without it.
+func (p Pacing) ReserveBinds() (float64, bool) {
+	if p.shareNow == nil {
+		return 0, false
+	}
+	return *p.shareNow, true
+}
+
 type PlanInput struct {
 	Now, Reset, WindowStart time.Time
 	Remaining, UsedToday    float64
@@ -328,8 +341,9 @@ func Plan(in PlanInput, s Schedule) (Pacing, error) {
 	// Run now once take everything; Hold already leaves agents nothing.
 	if p.ReservePercent = s.ReserveLevel(in.AutoReserve); p.ReservePercent > 0 && !literal {
 		p.ReserveEffectivePercent, p.ReserveUntil = s.Runway(in.Now, in.Reset, in.WindowLength, p.ReservePercent)
-		if p.ReserveEffectivePercent > 0 {
-			p.AvailableNowPercent = math.Max(0, math.Min(p.AvailableNowPercent, in.Remaining-p.ReserveEffectivePercent))
+		if capped := math.Max(0, math.Min(p.AvailableNowPercent, in.Remaining-p.ReserveEffectivePercent)); p.ReserveEffectivePercent > 0 && capped < p.AvailableNowPercent {
+			share := p.AvailableNowPercent
+			p.shareNow, p.AvailableNowPercent = &share, capped
 		}
 	}
 	p.Ahead = in.UsedToday > p.BudgetPercent+.5
