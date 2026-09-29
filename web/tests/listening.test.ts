@@ -13,6 +13,13 @@ test('a recent pull is Listening, with how it pulled in the tooltip (AEON-280)',
   assert.equal(listeningState({ ...live, inbox_seen_at: at(LISTENING_WINDOW_MS - 1), inbox_seen_via: 'hook' }, now)?.listening, true)
 })
 
+test('a hook pull shows the Listening label, not an acknowledgement (AEON-307)', () => {
+  const state = listeningState({ ...live, inbox_seen_at: at(1_000), inbox_seen_via: 'hook' }, now)
+  assert.equal(state?.label, 'Listening')
+  assert.equal(state?.detail, '')
+  assert.equal(state?.tip, 'Pulled its inbox just now through a turn hook.')
+})
+
 test('an old pull or none is Not listening with a plain detail', () => {
   const old = listeningState({ ...live, inbox_seen_at: at(12 * 60_000), inbox_seen_via: 'drain' }, now)
   assert.equal(old?.listening, false)

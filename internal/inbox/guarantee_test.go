@@ -503,3 +503,74 @@ func TestExactSessionLeavesOutBroadcasts(t *testing.T) {
 		t.Fatalf("exact stream frame %s %s", kind, data)
 	}
 }
+
+// AEON-307: the hook that delivers a message is the pull path. The acknowledgement
+// milliseconds later must not make /agents say the session was seen via ack.
+func TestHookPullWinsOverTheFollowingAck(t *testing.T) {
+	w, m, project, srv := messagingWorld(t)
+	session := messageTestSession(t, w, project, w.agent, "Hook listener")
+	in := compatInput("codex:worker", "hook-then-ack")
+	in.RecipientSessionID = &session
+	msg := mustCompatSend(t, m, w.sender, project, in)
+
+	pull := "/api/inbox/messages?wait_ms=0&exact_session=true&session=" + session
+	status, body := do(t, srv, w.agent.ID, "GET", pull, "", nil)
+	if status != 200 || len(mustJSON[Page](t, body).Items) != 1 {
+		t.Fatalf("hook pull %d %s", status, body)
+	}
+	var via string
+	var seen time.Time
+	guaranteeRow(t, w, `SELECT inbox_seen_via,inbox_seen_at FROM harness_sessions WHERE id=$1::uuid`, []any{session}, &via, &seen)
+	if via != SeenHook || seen.IsZero() {
+		t.Fatalf("hook not recorded: %q %v", via, seen)
+	}
+	status, body = do(t, srv, w.agent.ID, "POST", "/api/inbox/messages/"+msg.ID+"/ack", "", nil)
+	if status != 200 {
+		t.Fatalf("ack %d %s", status, body)
+	}
+	var after string
+	var seenAfter time.Time
+	guaranteeRow(t, w, `SELECT inbox_seen_via,inbox_seen_at FROM harness_sessions WHERE id=$1::uuid`, []any{session}, &after, &seenAfter)
+	if after != SeenHook || !seenAfter.Equal(seen) {
+		t.Fatalf("ack replaced the hook pull on the same beat: %q %v (was %v)", after, seenAfter, seen)
+	}
+
+	// A later beat still refreshes the timestamp and keeps the pull path.
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE harness_sessions SET inbox_seen_at=clock_timestamp()-interval '6 seconds' WHERE id=$1::uuid`, session); err != nil {
+		t.Fatal(err)
+	}
+	in = compatInput("codex:worker", "later-ack")
+	in.RecipientSessionID = &session
+	later := mustCompatSend(t, m, w.sender, project, in)
+	status, body = do(t, srv, w.agent.ID, "POST", "/api/inbox/messages/"+later.ID+"/ack", "", nil)
+	if status != 200 {
+		t.Fatalf("later ack %d %s", status, body)
+	}
+	guaranteeRow(t, w, `SELECT inbox_seen_via,inbox_seen_at FROM harness_sessions WHERE id=$1::uuid`, []any{session}, &after, &seenAfter)
+	if after != SeenHook || !seenAfter.After(seen) {
+		t.Fatalf("later ack lost the pull path or the refresh: %q %v", after, seenAfter)
+	}
+
+	// With no pull, the acknowledgement itself is the listening signal.
+	quiet := messageTestSession(t, w, project, w.agent, "Ack only")
+	in = compatInput("codex:worker", "ack-only")
+	in.RecipientSessionID = &quiet
+	only := mustCompatSend(t, m, w.sender, project, in)
+	status, body = do(t, srv, w.agent.ID, "POST", "/api/inbox/messages/"+only.ID+"/ack", "", nil)
+	if status != 200 {
+		t.Fatalf("ack-only %d %s", status, body)
+	}
+	guaranteeRow(t, w, `SELECT inbox_seen_via FROM harness_sessions WHERE id=$1::uuid`, []any{quiet}, &via)
+	if via != SeenAck {
+		t.Fatalf("ack without a pull: %q", via)
+	}
+	// A following pull replaces that acknowledgement.
+	status, body = do(t, srv, w.agent.ID, "GET", "/api/inbox/messages?wait_ms=0&exact_session=true&session="+quiet, "", nil)
+	if status != 200 {
+		t.Fatalf("pull after ack %d %s", status, body)
+	}
+	guaranteeRow(t, w, `SELECT inbox_seen_via FROM harness_sessions WHERE id=$1::uuid`, []any{quiet}, &via)
+	if via != SeenHook {
+		t.Fatalf("pull did not replace ack: %q", via)
+	}
+}
