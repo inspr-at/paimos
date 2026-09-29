@@ -103,6 +103,7 @@ type snapshot struct {
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
+	VersionStatus     string       `json:"version_status,omitempty"`
 	AccountingState   string       `json:"accounting_state,omitempty"`
 	Schema            string       `json:"schema"`
 	Stage             string       `json:"stage"`

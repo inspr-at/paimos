@@ -15,7 +15,7 @@ import { fixtures, liveAgent, me, mockWork, type Fixtures } from './work-fixture
 import { mockEffectivePermissions } from './authz-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { mockStartAgent } from './start-agent-fixtures'
-import { mockAnonymousGuide, mockPairing } from './agent-pairing-fixtures'
+import { mockAnonymousGuide, mockChecksumGuide, mockPairing } from './agent-pairing-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { RULE_PERSON, RULE_PROJECT, mockRules } from './rules-fixtures'
 import { journeyWorld, mockJourney, PROJECT, retryJourneyWorld, type JourneyWorld } from './journey-fixtures'
@@ -529,8 +529,23 @@ const shots: Shot[] = [
   { screen: 'pairing', state: 'nix-guide', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')
     await heading(page, 'Connect a computer')
-    await page.getByText('Nix / Home Manager', { exact: true }).click()
+    await page.getByLabel('Install on this computer').selectOption('nix')
     await page.getByText('Declarative service', { exact: true }).click()
+  } },
+  { screen: 'pairing', state: 'homebrew-guide', setup: mockAnonymousGuide, act: async page => {
+    await page.goto('/agents/register-agent')
+    await heading(page, 'Connect a computer')
+  } },
+  { screen: 'pairing', state: 'homebrew-upgrades', setup: mockAnonymousGuide, act: async page => {
+    await page.goto('/agents/register-agent')
+    await heading(page, 'Connect a computer')
+    await page.getByText('Release and upgrades', { exact: true }).click()
+  } },
+  { screen: 'pairing', state: 'fallback-guide', setup: mockChecksumGuide, act: async page => {
+    await page.goto('/agents/register-agent')
+    await heading(page, 'Connect a computer')
+    await page.getByLabel('Install on this computer').selectOption('manual')
+    await page.getByText('Disconnect and uninstall', { exact: true }).click()
   } },
   { screen: 'pairing', state: 'public-guide', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')

@@ -77,6 +77,7 @@ func (m *Module) guide(w http.ResponseWriter, r *http.Request) {
 	if m.managed != nil {
 		guide["managed_setup"] = m.managed
 	}
+	guide["homebrew_command"] = homebrewCommand(m.origin)
 	reply(w, guide)
 }
 
