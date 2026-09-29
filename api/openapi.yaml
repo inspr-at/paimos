@@ -373,6 +373,52 @@ paths:
           schema:
             type: "string"
             format: "uuid"
+  /rules/comparisons:
+    get:
+      operationId: listRulesComparisons
+      description: "rules.read in the named project. Latest stored comparison per harness. Hashes, statuses and counts only; no instruction text or paths."
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Latest comparison per harness
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [comparisons]
+                properties:
+                  comparisons:
+                    type: array
+                    maxItems: 8
+                    items: {"$ref": "#/components/schemas/RulesComparison"}
+        "400": {"description":"Invalid project","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Project unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+    post:
+      operationId: createRulesComparison
+      description: "rules.write in the named project. Stores one comparison summary. The server rejects instruction text, paths and unknown fields. The person is the caller or the agent key's creator."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/RulesComparisonUpload"}
+      responses:
+        "200":
+          description: Stored comparison summary
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/RulesComparison"}
+        "400": {"description":"Comparison rejected","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or agent binding denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Project unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "413": {"description":"Comparison is larger than 256 KiB","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
   /agent-pairing/guide:
     get:
       operationId: pairingGuide
@@ -5405,6 +5451,80 @@ components:
           type: ["string", "null"]
           format: "date-time"
       required: ["context", "versions", "version", "sha256", "body", "byte_size", "rules", "floor", "valid_until"]
+    RulesComparisonCounts:
+      type: object
+      additionalProperties: false
+      required: [both, only_local, only_merged, differs, files]
+      properties:
+        both: {type: integer, minimum: 0}
+        only_local: {type: integer, minimum: 0}
+        only_merged: {type: integer, minimum: 0}
+        differs: {type: integer, minimum: 0}
+        files: {type: integer, minimum: 0, maximum: 64}
+    RulesComparisonRule:
+      type: object
+      additionalProperties: false
+      required: [identity, status]
+      properties:
+        identity: {type: string, pattern: "^[a-z][a-z0-9._-]{0,95}$"}
+        status: {type: string, enum: [both, only_local, only_merged, differs]}
+        local_text_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        merged_text_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        changed:
+          type: array
+          maxItems: 4
+          items: {type: string, enum: [text, why, strength, enabled, local_conflict]}
+    RulesComparison:
+      type: object
+      additionalProperties: false
+      required: [id, harness, role, project_id, repo_sha256, merge_sha256, merge_version, local_set_sha256, counts, rules, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        harness: {type: string, enum: [claude-code, codex]}
+        role: {type: string, enum: [coordinator, builder, reviewer, operator]}
+        project_id: {type: string, format: uuid}
+        repo_name: {type: string, maxLength: 128}
+        repo_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        merge_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        merge_version: {type: string, maxLength: 128}
+        local_set_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        counts: {"$ref": "#/components/schemas/RulesComparisonCounts"}
+        rules:
+          type: array
+          maxItems: 500
+          items: {"$ref": "#/components/schemas/RulesComparisonRule"}
+        created_at: {type: string, format: date-time}
+    RulesComparisonUpload:
+      type: object
+      additionalProperties: false
+      required: [harness, role, project_id, repo_sha256, merged, local, rules, counts]
+      properties:
+        harness: {type: string, enum: [claude-code, codex]}
+        role: {type: string, enum: [coordinator, builder, reviewer, operator]}
+        project_id: {type: string, format: uuid}
+        agent_id: {type: string, format: uuid}
+        repo_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        repo_name: {type: string, maxLength: 128}
+        merged:
+          type: object
+          additionalProperties: false
+          required: [version, sha256, rule_count]
+          properties:
+            version: {type: string, maxLength: 128}
+            sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+            rule_count: {type: integer, minimum: 0, maximum: 500}
+        local:
+          type: object
+          additionalProperties: false
+          required: [set_sha256, rule_count]
+          properties:
+            set_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+            rule_count: {type: integer, minimum: 0, maximum: 500}
+        rules:
+          type: array
+          maxItems: 500
+          items: {"$ref": "#/components/schemas/RulesComparisonRule"}
+        counts: {"$ref": "#/components/schemas/RulesComparisonCounts"}
     PairingVerificationCapabilities:
       type: object
       description: Server-owned qualification of its matching helper release; a client cannot widen this map. Unsupported choices require explicit connect_only or exclusion.

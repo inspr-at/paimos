@@ -244,7 +244,8 @@ harness history from project readers; the audit event is transactional, not the
 CAS source of truth. No company rules are seeded or published.
 
 Stub installation, automatic registration,
-rollout comparison, template import/export and UI are separate coordinator-owned work.
+template import/export and the rules editor are separate coordinator-owned work.
+`aeon rules compare` is the one-time comparison of loaded harness files with the merged rules.
 
 `aeon rules-compare` (the same verb on `paimos`) is a one-time offline check.
 Pass explicit instruction files with `--file` and `--context`. Optional
@@ -258,6 +259,14 @@ API observation, snapshot publication, a trusted floor, runtime execution,
 model load or obedience. Expired or malformed merge metadata remains useful
 for historical differences only. Rollout stays unauthorized; the command
 never waits or replaces `AGENTS.md` or `CLAUDE.md`.
+
+`aeon rules compare` reads the `CLAUDE.md` or `AGENTS.md` chain one harness
+loads for `--repo` and diffs it against `GET /api/rules/merged` for that
+project, person, role and harness. `--harness` is `claude`, `claude-code` or
+`codex`. It runs once, with no waiting period. The report lists statuses,
+identities and hashes. `--upload` stores that summary for the project.
+Instruction text is not uploaded. The command does not replace `AGENTS.md`
+or `CLAUDE.md`, and rollout stays unauthorized.
 
 ## UI shell (P0.5 / AEON-10)
 

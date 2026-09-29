@@ -5,4 +5,5 @@ package rulesimport
 
 import "os"
 
-func openNoFollow(string) (*os.File, error) { return nil, ErrUnsupported }
+func openNoFollow(string) (*os.File, error)            { return nil, ErrUnsupported }
+func openInstructionNoFollow(string) (*os.File, error) { return nil, ErrUnsupported }
