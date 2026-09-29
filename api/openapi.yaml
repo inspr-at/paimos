@@ -851,7 +851,7 @@ paths:
                     additionalProperties: false
                     properties:
                       state: {type: string, const: registered}
-        '400': {description: Invalid attach request; forbidden conversation text detaches an existing pending or approved attach}
+        '400': {description: Invalid attach request; conversation text on status-only or pre-activation polls detaches the attach}
         '403': {description: Registered memory-only poll key required; lifecycle proof only authorizes registration}
         '409': {description: 'Snapshot or consent mismatch, poll sequence rejected, or update agentd required'}
         '410': {description: Expired or revoked; new owner approval required}

@@ -697,13 +697,15 @@ The project permission remains off for all built-in roles and is never implied
 by `harness.read` or `nodes.read`. Both attach modes require protocol 2. An older
 daemon connecting to a newer server still registers and keeps serving work; its
 attach requests receive HTTP 409 `update_agentd` and cannot create a watch or
-lease. Older terminal helpers may show their generic attach failure instead of
+lease. The released older terminal helper shows `local lifecycle request rejected`
+(the daemon's local refusal is `paired instance refused attach`), rather than
 the server's update message. Update agentd, restart it and give fresh approval.
 A newer daemon connecting to an older server receives HTTP 400 on attach
 registration because that server rejects the unknown `attach_protocol` field.
 The daemon logs the server's refusal, disables attach and keeps serving work
-and local control. After updating the server, restart agentd to retry attach
-registration; there is no in-process registration retry.
+and local control. An attach attempt through that daemon shows
+`local lifecycle request rejected`. After updating the server, restart agentd
+to retry attach registration; there is no in-process registration retry.
 The paired computer's tenant-scoped workspace is the hard cwd allowlist; neither
 `AEON_URL` nor local request fields can override the paired origin. Same-user
 processes are not isolated by this feature.
@@ -716,9 +718,16 @@ leases, expiry/revocation, text refusal and cross-tenant RLS/404), and the
 platform-specific process tests (native macOS/Linux kernel identity and exit).
 `cmd/aeon-agentd/paired_serve_test.go` verifies the paired-origin pin against an
 alternate remote, `AEON_URL` and HTTP redirects before either mode
-can attach. `TestAttachModesProtectionMatrix` checks consent, mode tampering,
-terminal states and old-daemon refusal for both modes. The status-only text
-regression backdates the poll clock and observes the relay directly, so rate
+can attach. It also runs the real serve loop through registration refusals,
+checks that work polling and local control continue with attach disabled, and
+restarts against an updated server to recover attach. Server regressions verify
+that protocol-less registrations keep daemon identity usable while every attach
+operation requires an update, even if later requests claim protocol 2.
+`TestAttachModesProtectionMatrix` checks consent, mode tampering and terminal
+states in both modes, sending text on refused watch polls. Early text at pending,
+discovery, local-confirmation and activation stages detaches without a session.
+Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
+The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
 The reporter contract is `harness-session/1.4`:
