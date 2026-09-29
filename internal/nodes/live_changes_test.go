@@ -4,9 +4,11 @@ package nodes
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -83,5 +85,54 @@ func TestNodeChangesNameProjectFieldsAndRevisionForVisibleNodesOnly(t *testing.T
 	all := changes(read(owner))
 	if len(all) != 3 || all[1].ID != secret.ID || all[1].ProjectID == nil || *all[1].ProjectID != hidden.ID {
 		t.Fatalf("owner reads %+v", all)
+	}
+}
+
+// AEON-326: a delete answers the revision its node.deleted event carries,
+// so the tab that deleted knows exactly that event as its own, and the
+// deletion is newer than the update before it.
+func TestDeleteAnswersTheRevisionOfItsEvent(t *testing.T) {
+	owner := newPrincipal(t, "live-delete-revision")
+	project := kindBySlug(t, owner, "project")
+	ticket := kindBySlug(t, owner, "ticket")
+	parent := mustNode(t, owner, `{"kind_id":"`+project.ID+`","title":"Project"}`)
+	node := mustNode(t, owner, `{"kind_id":"`+ticket.ID+`","parent_id":"`+parent.ID+`","title":"Doomed","state":"new"}`)
+	status, raw := call(t, &owner, http.MethodPatch, "/api/nodes/"+node.ID, `{"title":"Doomed, renamed"}`)
+	updated := decode[nodeJSON](t, status, raw, http.StatusOK)
+	var mark int64
+	if err := testDB.Admin.QueryRow(t.Context(), `SELECT coalesce(max(id),0) FROM events WHERE tenant_id=$1`, owner.TenantID).Scan(&mark); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	New(appPool, nil).Mount(mux)
+	r := httptest.NewRequest(http.MethodDelete, "/api/nodes/"+node.ID, nil)
+	r = r.WithContext(tenant.WithPrincipal(r.Context(), owner))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, r)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
+	}
+	revision, err := time.Parse(time.RFC3339Nano, rec.Header().Get("Aeon-Revision"))
+	if err != nil {
+		t.Fatalf("Aeon-Revision %q: %v", rec.Header().Get("Aeon-Revision"), err)
+	}
+	if !revision.After(updated.UpdatedAt) {
+		t.Fatalf("delete revision %v is not after the update %v", revision, updated.UpdatedAt)
+	}
+
+	status, raw = callAs(t, events.New(appPool), &owner, http.MethodGet, "/api/events?after="+strconv.FormatInt(mark, 10), "")
+	page := decode[struct {
+		Items []events.Event `json:"items"`
+	}](t, status, raw, http.StatusOK)
+	if len(page.Items) != 1 || len(page.Items[0].NodeChanges) != 1 {
+		t.Fatalf("events after the update: %+v", page.Items)
+	}
+	change := page.Items[0].NodeChanges[0]
+	if change.Change != "deleted" || change.Revision == nil {
+		t.Fatalf("delete summary %+v", change)
+	}
+	if evented, err := time.Parse(time.RFC3339Nano, *change.Revision); err != nil || !evented.Equal(revision) {
+		t.Fatalf("event revision %v, header %v", *change.Revision, revision)
 	}
 }
