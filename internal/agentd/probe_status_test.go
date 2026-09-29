@@ -74,6 +74,19 @@ func TestProbeStatusSeparatesSignOutFromUnavailable(t *testing.T) {
 		{"cursor signed out", cursor(`{"status":"unauthenticated","isAuthenticated":false}`, 1), ProbeStatus{Failure: ProbeAuthFailed}},
 		{"cursor other user", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":"7"}}`, 0), ProbeStatus{Failure: ProbeAuthFailed}},
 		{"cursor empty object", cursor(`{}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		// AEON-299 re-review: incomplete or unknown answers are never a sign-out.
+		{"claude signed in without email", claude(`{"loggedIn":true}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"claude signed in with empty email", claude(`{"loggedIn":true,"email":"","authMethod":"claude.ai"}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"claude api key login", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"api_key"}`, 0), ProbeStatus{Failure: ProbeAuthFailed}},
+		{"claude loggedIn null", claude(`{"loggedIn":null}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"cursor unknown status", cursor(`{"status":"refreshing","isAuthenticated":false}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"cursor logged out word", cursor(`{"status":"logged_out","isAuthenticated":false}`, 1), ProbeStatus{Failure: ProbeAuthFailed}},
+		{"cursor contradictory signed in", cursor(`{"status":"unauthenticated","isAuthenticated":true,"userInfo":{"userId":"42"}}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"cursor contradictory signed out", cursor(`{"status":"authenticated","isAuthenticated":false}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"cursor null identity", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":null}}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"cursor missing identity", cursor(`{"status":"authenticated","isAuthenticated":true}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"cursor empty identity", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":""}}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"codex other message", codex("Logged in using an API key", 0), ProbeStatus{Failure: ProbeUnavailable}},
 	}
 	for _, c := range cases {
 		if c.got != c.want {

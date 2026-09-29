@@ -133,13 +133,23 @@ func (a *CursorAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus
 	if json.Unmarshal(raw, &status) != nil || status.Status == nil || status.IsAuthenticated == nil {
 		return probeUnavailable
 	}
-	if *status.Status != "authenticated" || !*status.IsAuthenticated {
-		return probeAuthFailed
-	}
-	if status.UserInfo == nil || len(status.UserInfo.UserID) == 0 {
+	// Only an explicit, consistent answer counts: signed out, or signed in as
+	// another user. Unknown status words, contradictions and a missing or null
+	// identity are unavailable.
+	if !*status.IsAuthenticated {
+		if cursorSignedOut[*status.Status] {
+			return probeAuthFailed
+		}
 		return probeUnavailable
 	}
-	if strings.Trim(string(status.UserInfo.UserID), "\"") != expected {
+	if *status.Status != "authenticated" || status.UserInfo == nil {
+		return probeUnavailable
+	}
+	id := strings.Trim(string(status.UserInfo.UserID), "\"")
+	if id == "" || id == "null" {
+		return probeUnavailable
+	}
+	if id != expected {
 		return probeAuthFailed
 	}
 	if code != 0 {
@@ -147,6 +157,10 @@ func (a *CursorAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus
 	}
 	return probeOK
 }
+
+// cursorSignedOut lists the status words cursor-agent uses for a signed-out
+// session; any other word with isAuthenticated false is not a confirmed sign-out.
+var cursorSignedOut = map[string]bool{"unauthenticated": true, "not_authenticated": true, "logged_out": true, "signed_out": true}
 
 func (a *ClaudeAdapter) Probe(ctx context.Context, key string) bool {
 	return a.ProbeStatus(ctx, key).OK
@@ -178,7 +192,15 @@ func (a *ClaudeAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus
 		if a.Emails[key] == "" {
 			return probeUnavailable
 		}
-		if status.AuthMethod == "api_key" || !strings.EqualFold(status.Email, a.Emails[key]) {
+		// An API-key login or a different email is explicitly another account;
+		// a login without an email says nothing about which account it is.
+		if status.AuthMethod == "api_key" {
+			return probeAuthFailed
+		}
+		if strings.TrimSpace(status.Email) == "" {
+			return probeUnavailable
+		}
+		if !strings.EqualFold(status.Email, a.Emails[key]) {
 			return probeAuthFailed
 		}
 	}
