@@ -4,6 +4,7 @@
 // or replaced by the sentence that says what is missing, never by a dash.
 // Pure, so every partial state is unit tested (tests/usageWork.test.ts).
 import { accountPlan, gauge, pct, when, whenFull, type AccountRow, type Gauge, type PoolView } from './capacity.ts'
+import { reworkDetail, reworkPercent } from './deliveryRating.ts'
 import { compactCount, formatCount, formatUSD, type UsageDashboard, type UsageWork, type WasteItem, type WorkGroup } from './usageFormat.ts'
 
 export const HARNESS: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi' }
@@ -51,13 +52,16 @@ export interface Tile {
   tip?: string
 }
 
-export function tiles(d: Pick<UsageDashboard, 'totals' | 'work'>): Tile[] {
+export function tiles(d: Pick<UsageDashboard, 'totals' | 'work' | 'ratings'>): Tile[] {
   const w = d.work
+  // Rework by exception (AEON-218): shown only when someone flagged a delivery.
+  const r = d.ratings
+  const rework = r ? reworkPercent(r.exceptions, r.deliveries) : ''
   const done: Tile = {
     key: 'done', value: formatCount(w.done), label: w.done === 1 ? 'ticket done' : 'tickets done',
-    detail: w.released ? `${formatCount(w.released)} released` : '',
+    detail: [w.released ? `${formatCount(w.released)} released` : '', rework ? `${rework} rework` : ''].filter(Boolean).join(' · '),
     note: w.tickets_worked ? `${plural(w.tickets_worked, 'ticket')} worked on` : '',
-    tip: 'Tickets finished in this range that an agent worked on.',
+    tip: `Tickets finished in this range that an agent worked on.${rework ? ` Rework: ${reworkDetail(r!.exceptions, r!.deliveries)} deliveries were flagged.` : ''}`,
   }
   const tokens = sumTokens(w.by_harness.map(g => g.tokens))
   const api = d.totals.cost_known_rows > 0 && d.totals.estimated_cost_usd !== null ? formatUSD(d.totals.estimated_cost_usd) : ''
@@ -108,7 +112,7 @@ export function wasteWords(item: WasteItem, now: number): WasteWords {
     case 'failed': return { title: 'Failed', detail: 'ended in an error', action: 'session' }
     case 'lost': return { title: 'Lost contact', detail: 'went silent, no commit', action: 'session' }
     case 'no_result': return { title: 'Nothing to show', detail: 'no commit', action: 'session' }
-    case 'retried': return { title: `Tried ${item.sessions}×`, detail: 'not done yet', action: 'ticket' }
+    case 'retried': return { title: `Tried ${item.sessions} times`, detail: 'not done yet', action: 'ticket' }
   }
 }
 

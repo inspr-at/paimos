@@ -253,7 +253,7 @@ const showRework = computed(() => groups.value.rows.some(g => rework(g)))
           </section>
         </div>
 
-        <section class="glass-card card" aria-labelledby="breakdown-title">
+        <section class="glass-card card breakdown" aria-labelledby="breakdown-title">
           <header class="card-head">
             <h2 id="breakdown-title" class="card-title">Breakdown</h2>
             <div class="seg" role="group" aria-label="Group by">

@@ -29,7 +29,8 @@ test('coverage says how many reported, and never divides by nothing', () => {
 
 test('nothing reported: the cost tile becomes its reason, the other tiles stay figures', () => {
   const [done, cost, time, waste] = tiles(usageDashboard('unreported'))
-  assert.deepEqual([done.value, done.label, done.detail, done.note], ['41', 'tickets done', '6 released', '64 tickets worked on'])
+  assert.deepEqual([done.value, done.label, done.detail, done.note], ['41', 'tickets done', '6 released · 1% rework', '64 tickets worked on'])
+  assert.match(done.tip ?? '', /Rework: 3 of 280 deliveries were flagged/)
   assert.equal(cost.value, null)
   assert.equal(cost.label, 'Cost is not measured yet')
   assert.equal(cost.detail, 'reported by 0 of 357 sessions')
@@ -58,6 +59,8 @@ test('a quiet range: zero is a known zero, and waste says none', () => {
   const [done, , time, waste] = tiles(d)
   assert.equal(done.value, '0')
   assert.equal(done.note, '')
+  d.ratings = undefined
+  assert.equal(tiles(d)[0].detail, '')
   assert.equal(time.value, null)
   assert.equal(waste.value, '0')
   assert.equal(waste.detail, 'none stuck, failed or empty')
@@ -66,7 +69,7 @@ test('a quiet range: zero is a known zero, and waste says none', () => {
 
 test('waste words name the reason and the one place to fix it', () => {
   const rows = usageDashboard('unreported').work.waste.rows
-  assert.deepEqual(wasteWords(rows[0]!, NOW), { title: 'Tried 4×', detail: 'not done yet', action: 'ticket' })
+  assert.deepEqual(wasteWords(rows[0]!, NOW), { title: 'Tried 4 times', detail: 'not done yet', action: 'ticket' })
   assert.deepEqual(wasteWords(rows[2]!, NOW), { title: 'Stuck', detail: 'silent for 42 min', action: 'session' })
   assert.equal(wasteWords(rows[1]!, NOW).title, 'Nothing to show')
   assert.equal(wasteWords(rows[5]!, NOW).title, 'Lost contact')

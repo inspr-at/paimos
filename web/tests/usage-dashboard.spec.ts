@@ -44,7 +44,7 @@ test('nothing reported yet: capacity now, then done, agent time and waste — no
 
   // So far: four tiles, the cost tile is its reason with coverage.
   await expect(tile(page, 'done')).toContainText('41 tickets done')
-  await expect(tile(page, 'done')).toContainText('6 released')
+  await expect(tile(page, 'done')).toContainText('6 released · 1% rework')
   await expect(tile(page, 'cost')).toContainText('Cost is not measured yet')
   await expect(tile(page, 'cost')).toContainText('reported by 0 of 357 sessions')
   await expect(tile(page, 'time')).toContainText('612 h agent time')
@@ -66,7 +66,7 @@ test('nothing reported yet: capacity now, then done, agent time and waste — no
 
   const waste = page.getByRole('region', { name: 'Waste' })
   await expect(waste.locator('.waste')).toHaveCount(9)
-  await expect(waste.locator('.waste').first()).toContainText('Tried 4× not done yet')
+  await expect(waste.locator('.waste').first()).toContainText('Tried 4 times not done yet')
   await expect(waste.locator('.waste').nth(2)).toContainText('Stuck silent for 42 min')
   await expect(waste.getByRole('link', { name: /^Open session: Stuck, AEON-301/ })).toHaveAttribute('href', '/agents/5e000000-0000-4000-8000-000000000042')
   await expect(waste.getByRole('link', { name: 'Open ticket PHAROS-12' })).toHaveAttribute('href', /^\/p\/[A-Z0-9-]+\/PHAROS-12$/)
