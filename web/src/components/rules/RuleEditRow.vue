@@ -2,11 +2,11 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue'
 import BizIcon from '../business/BizIcon.vue'
-import { HARNESS_LABEL, HARNESSES, ROLE_LABEL, ROLES, resetAvailability, resetRule, touchRule, type AgentRule, type HarnessName, type RoleName, type RulePatch } from '../../lib/rules'
+import { HARNESS_LABEL, HARNESSES, ROLE_LABEL, ROLES, resetAvailability, resetRule, ruleSwitchLabel, touchRule, type AgentRule, type HarnessName, type RoleName, type RulePatch } from '../../lib/rules'
 
 // One rule while its set is being edited: the text and its reason in view, the
 // on/off switch and the lock beside them, everything rarer under "More".
-const props = defineProps<{ rule: AgentRule; heldBy?: string; canLock: boolean; lockReason?: string; original?: AgentRule | null }>()
+const props = defineProps<{ rule: AgentRule; heldBy?: string; canLock: boolean; lockReason?: string; original?: AgentRule | null; setName?: string }>()
 const emit = defineEmits<{ change: [rule: AgentRule]; remove: []; duplicate: [] }>()
 const reset = computed(() => resetAvailability(props.rule, props.original))
 const resetReady = computed(() => reset.value.available && props.rule.source.edited_here)
@@ -19,6 +19,7 @@ function applyReset() {
 const id = useId()
 const locked = computed(() => props.rule.strength === 'locked')
 const label = computed(() => props.rule.text.trim() || 'New rule')
+const switchLabel = computed(() => ruleSwitchLabel(props.rule.text, props.setName ?? '', props.rule.enabled || props.rule.strength === 'locked', 'New rule'))
 
 function patch(change: RulePatch) { emit('change', touchRule(props.rule, change)) }
 const oneLine = (value: string) => value.replace(/[\r\n\u2028\u2029]+/g, ' ')
@@ -55,7 +56,7 @@ function toggleHarness(harness: HarnessName) {
   <li class="edit-rule" :aria-label="label">
     <div class="top">
       <label class="switch" :data-tip="locked ? 'Locked rules are always on.' : heldBy ? `Locked in ${heldBy} rules.` : undefined">
-        <input type="checkbox" :checked="rule.enabled || locked" :disabled="locked || !!heldBy" :aria-label="`${label} is on`" @change="patch({ enabled: ($event.target as HTMLInputElement).checked })">
+        <input type="checkbox" :checked="rule.enabled || locked" :disabled="locked || !!heldBy" :aria-label="switchLabel" @change="patch({ enabled: ($event.target as HTMLInputElement).checked })">
       </label>
       <div class="texts">
         <textarea class="field text" rows="1" maxlength="512" :value="rule.text" placeholder="What agents must do, in one line" :aria-label="`Rule text`" data-autofocus @input="patch({ text: oneLine(($event.target as HTMLTextAreaElement).value) })"></textarea>

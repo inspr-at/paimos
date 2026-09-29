@@ -5,7 +5,7 @@ import { RequestFailure } from '../src/lib/api.ts'
 import {
   IMPORT_MAX_BYTES, RulesError, applyEnabled, blankRule, calendarVersion, copyName, diffRules, duplicateRule, groupState, groupsState, hasMovable, heldIdentities,
   identityFromText, layerInColumn, mergeQuery, parseDraftImport, publishBlock, replyUncertain, resetAvailability, resetRule, rulePayload, rulesEqual, tickTarget,
-  runDraftImport, scopeFor, touchRule, validVersion, validateDraft, validateRule, writeBlock, importWrites, draftImportProjects,
+  runDraftImport, ruleSwitchLabel, scopeFor, touchRule, validVersion, validateDraft, validateRule, writeBlock, importWrites, draftImportProjects,
   setState, projectedRules, projectedBytes, largestProjected,
   type AgentRule, type Caller, type ImportIO, type RuleScope, type RuleSet,
 } from '../src/lib/rules.ts'
@@ -119,8 +119,16 @@ test('draft validation and payloads stay inside the contract', () => {
   assert.match(validateRule(locked, new Set()) ?? '', /stays on/)
   assert.equal(rulePayload(touchRule(locked, { strength: 'locked' })).enabled, true)
   assert.equal(rulePayload(touchRule(locked, { strength: 'locked' })).expires_at, undefined)
-  assert.match(validateDraft('Secrets', [rule({ text: '' })]) ?? '', /one line/)
-  assert.match(validateDraft('Secrets', [rule({ source: { reference: '', edited_here: false } })]) ?? '', /source/)
+  assert.match(validateDraft('Secrets', [rule({ text: '' })]).error ?? '', /one line/)
+  assert.equal(validateDraft('Secrets', [rule({ text: '' })]).warning, null)
+  assert.match(validateDraft('Secrets', [rule({ source: { reference: '', edited_here: false } })]).error ?? '', /source/)
+  const doubled = validateDraft('Secrets', [rule(), rule({ identity: 'keep-secrets-2' })])
+  assert.equal(doubled.error, null)
+  assert.equal(doubled.warning, 'This rule appears twice in this set; agents would get it twice.')
+  assert.equal(validateDraft('Secrets', [rule(), rule({ identity: 'other', text: 'Say which tests ran.' })]).warning, null)
+  assert.equal(ruleSwitchLabel('Record the source.', 'Secrets', true), 'Record the source. in Secrets is on')
+  assert.equal(ruleSwitchLabel('Record the source.', 'Secrets', false), 'Record the source. in Secrets is off')
+  assert.equal(ruleSwitchLabel('  ', 'Secrets (copy)', false), 'Untitled rule in Secrets (copy) is off')
   const edited = touchRule(rule({ source: { reference: 'AEON-252', identity: 'keep-secrets', edited_here: false } }), { text: 'Never print env.' })
   assert.equal(edited.source.edited_here, true)
   const payload = rulePayload(rule())
@@ -227,6 +235,8 @@ test('draft import accepts a person file and rejects anything it must not write'
   assert.match('error' in dupSet ? dupSet.error : '', /listed twice/)
   const dupId = parseDraftImport(draftFile([{ scope: { layer: 'person', owner_id: SELF }, sets: [{ name: 'Desk', rules: [importRule('same', 'One.'), importRule('same', 'Two.')] }] }]), 300, TENANT, admin)
   assert.match('error' in dupId ? dupId.error : '', /already used in this set/)
+  const dupText = parseDraftImport(draftFile([{ scope: { layer: 'person', owner_id: SELF }, sets: [{ name: 'Desk', rules: [importRule('one', 'Same line.'), importRule('two', 'Same line.')] }] }]), 300, TENANT, admin)
+  assert.equal('plan' in dupText, true)
   const dupAcross = parseDraftImport(draftFile([{ scope: { layer: 'person', owner_id: SELF }, sets: [
     { name: 'Desk', rules: [importRule('same', 'One.')] },
     { name: 'Hours', rules: [importRule('same', 'Two.')] },

@@ -258,9 +258,9 @@ async function persistRules(setId: string, rules: AgentRule[], options?: { quiet
   const previous = found.set.remote
   if (rulesEqual(rules, previous.rules)) return { status: 'same' }
   const issue = validateDraft(previous.name, rules)
-  if (issue) {
-    if (!options?.quiet) toast(issue, { tone: 'error' })
-    return { status: 'failed', message: issue }
+  if (issue.error) {
+    if (!options?.quiet) toast(issue.error, { tone: 'error' })
+    return { status: 'failed', message: issue.error }
   }
   // Show the new ticks immediately. A failed save puts the previous draft back.
   found.set.remote = { ...previous, rules }
@@ -342,7 +342,7 @@ async function duplicateSet(setId: string) {
     return copy
   })
   const issue = validateDraft(name, rules)
-  if (issue) { toast(issue, { tone: 'error' }); return }
+  if (issue.error) { toast(issue.error, { tone: 'error' }); return }
   saving.value = true
   try {
     const created = await createSet(found.bundle.layer.id, name)
@@ -381,7 +381,7 @@ async function save() {
   if (!draft || !found) return
   const name = draft.name.trim()
   const issue = validateDraft(name, draft.rules)
-  if (issue) { draft.error = issue; return }
+  if (issue.error) { draft.error = issue.error; return }
   saving.value = true
   draft.error = ''
   try {
@@ -404,7 +404,7 @@ async function add() {
   if (!form || !section?.scope) return
   const scope: RuleScope = form.section === 'agent' ? { layer: 'agent', role: form.role } : section.scope
   const name = form.name.trim()
-  const issue = validateDraft(name, []) ?? writeBlock(caller.value, scope)
+  const issue = validateDraft(name, []).error ?? writeBlock(caller.value, scope)
   if (issue) { form.error = issue; return }
   form.busy = true
   try {

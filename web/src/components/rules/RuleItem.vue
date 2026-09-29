@@ -4,12 +4,12 @@ import { computed, ref, useId } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import BizIcon from '../business/BizIcon.vue'
 import MarkdownBody from '../MarkdownBody.vue'
-import { HARNESS_LABEL, HARNESSES, ROLE_LABEL, ROLES, type AgentRule } from '../../lib/rules'
+import { HARNESS_LABEL, HARNESSES, ROLE_LABEL, ROLES, ruleSwitchLabel, type AgentRule } from '../../lib/rules'
 
 // One rule as agents read it: the text rendered as Markdown, a lock when it is
 // locked, and only the exceptions as quiet tags. Everything technical (reason,
 // details, source, identity) waits behind the row's own disclosure.
-const props = defineProps<{ rule: AgentRule; heldBy?: string; pending?: boolean; switchable?: boolean; switchDisabled?: boolean }>()
+const props = defineProps<{ rule: AgentRule; heldBy?: string; pending?: boolean; switchable?: boolean; switchDisabled?: boolean; setName?: string }>()
 const emit = defineEmits<{ toggle: [enabled: boolean] }>()
 const open = ref(false)
 const id = useId()
@@ -32,6 +32,7 @@ const tags = computed(() => {
 const lockTip = computed(() => props.heldBy
   ? `Locked in ${props.heldBy} rules, which win over this one.`
   : props.rule.strength === 'locked' ? 'Locked: always on, and lower layers cannot switch it off.' : '')
+const switchLabel = computed(() => ruleSwitchLabel(props.rule.text, props.setName ?? '', props.rule.enabled))
 
 function onSwitch(event: Event) {
   const input = event.target as HTMLInputElement
@@ -45,7 +46,7 @@ function onSwitch(event: Event) {
   <li class="rule" :class="{ off: !rule.enabled && rule.strength !== 'locked', held: !!heldBy }">
     <span class="lead">
       <label v-if="switchable" class="switch">
-        <input type="checkbox" :checked="rule.enabled" :disabled="switchDisabled" :aria-label="`${rule.text.trim() || 'Untitled rule'} is on`" @change="onSwitch">
+        <input type="checkbox" :checked="rule.enabled" :disabled="switchDisabled" :aria-label="switchLabel" @change="onSwitch">
       </label>
       <span v-else-if="lockTip" class="lock" role="img" :aria-label="heldBy ? `Locked in ${heldBy} rules` : 'Locked'" :data-tip="lockTip"><BizIcon name="lock" :size="13" /></span>
       <span v-else class="dot" aria-hidden="true"></span>

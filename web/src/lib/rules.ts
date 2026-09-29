@@ -442,16 +442,40 @@ export function validateRule(rule: AgentRule, seen: ReadonlySet<string>): string
   return null
 }
 
-export function validateDraft(name: string, rules: AgentRule[]): string | null {
-  if (oneLine(name, 128, true)) return 'The set name is one line, up to 128 bytes.'
-  if (rules.length > MAX_RULES) return 'A set holds at most 100 rules.'
+export interface DraftCheck { error: string | null; warning: string | null }
+
+/** Accessible name for one rule switch. The set distinguishes copies that keep the same wording. */
+export function ruleSwitchLabel(text: string, setName: string, enabled: boolean, empty = 'Untitled rule'): string {
+  const name = text.trim() || empty
+  const set = setName.trim()
+  const state = enabled ? 'on' : 'off'
+  return set ? `${name} in ${set} is ${state}` : `${name} is ${state}`
+}
+
+function duplicateTextWarning(rules: AgentRule[]): string | null {
   const seen = new Set<string>()
   for (const rule of rules) {
-    const issue = validateRule(rule, seen)
-    if (issue) return issue
-    seen.add(rule.identity)
+    if (rule.text.trim() === '') continue
+    if (seen.has(rule.text)) return 'This rule appears twice in this set; agents would get it twice.'
+    seen.add(rule.text)
   }
   return null
+}
+
+export function validateDraft(name: string, rules: AgentRule[]): DraftCheck {
+  let error: string | null = null
+  if (oneLine(name, 128, true)) error = 'The set name is one line, up to 128 bytes.'
+  else if (rules.length > MAX_RULES) error = 'A set holds at most 100 rules.'
+  else {
+    const seen = new Set<string>()
+    for (const rule of rules) {
+      const issue = validateRule(rule, seen)
+      if (issue) { error = issue; break }
+      seen.add(rule.identity)
+    }
+  }
+  // Identical wording warns and still saves: agents would receive that line twice.
+  return { error, warning: duplicateTextWarning(rules) }
 }
 
 export interface RuleChange { kind: 'added' | 'removed' | 'changed'; label: string }
@@ -964,7 +988,7 @@ export function parseDraftImport(
         rules.push(parsed.rule)
       }
       const issue = validateDraft(entry.name, rules)
-      if (issue) return { error: issue }
+      if (issue.error) return { error: issue.error }
       sets.push({ name: entry.name, rules })
     }
     layers.push({ scope: scope.scope, sets })

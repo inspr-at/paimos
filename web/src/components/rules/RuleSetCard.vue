@@ -7,7 +7,7 @@ import RuleEditRow from './RuleEditRow.vue'
 import RuleItem from './RuleItem.vue'
 import RuleTick from './RuleTick.vue'
 import type { RowAction } from '../../lib/rowActions'
-import { canFlip, type AgentRule, type CheckState, type RuleSet, type SetState } from '../../lib/rules'
+import { canFlip, validateDraft, type AgentRule, type CheckState, type RuleSet, type SetState } from '../../lib/rules'
 
 // One rule set as a quiet collapsible card: its name, how many rules and locks,
 // a chip only when it is not live yet, and one menu for the rarer actions.
@@ -50,6 +50,8 @@ const emit = defineEmits<{
 const id = useId()
 const menuAnchor = ref<HTMLElement | null>(null)
 const rules = computed(() => props.draft?.rules ?? props.set.rules)
+const draftWarning = computed(() => props.draft ? validateDraft(props.draft.name, props.draft.rules).warning ?? '' : '')
+const savedWarning = computed(() => !props.draft && props.open ? validateDraft(props.set.name, props.set.rules).warning ?? '' : '')
 const locked = computed(() => rules.value.filter(rule => rule.strength === 'locked').length)
 const summary = computed(() => {
   const count = rules.value.length
@@ -108,21 +110,23 @@ function removeRule(index: number) {
     </header>
 
     <ul v-if="!draft && open" :id="`${id}-rules`" class="rules">
-      <RuleItem v-for="rule in set.rules" :key="rule.identity" :rule="rule" :held-by="held.get(rule.identity)" :pending="pending?.has(rule.identity)" :switchable="switchable(rule)" :switch-disabled="saving || tickDisabled" @toggle="emit('tick-rule', rule.identity, $event)" />
+      <RuleItem v-for="rule in set.rules" :key="rule.identity" :rule="rule" :set-name="set.name" :held-by="held.get(rule.identity)" :pending="pending?.has(rule.identity)" :switchable="switchable(rule)" :switch-disabled="saving || tickDisabled" @toggle="emit('tick-rule', rule.identity, $event)" />
       <li v-if="!set.rules.length" class="empty">No rules in this set yet.</li>
     </ul>
+    <p v-if="savedWarning" class="wording" role="status">{{ savedWarning }}</p>
 
     <template v-if="draft">
       <ul class="edit-rules">
         <RuleEditRow
-          v-for="(rule, index) in draft.rules" :key="index" :rule="rule" :held-by="held.get(rule.identity)"
+          v-for="(rule, index) in draft.rules" :key="index" :rule="rule" :set-name="draft.name" :held-by="held.get(rule.identity)"
           :can-lock="!lockReason" :lock-reason="lockReason ?? undefined" @change="changeRule(index, $event)" @remove="removeRule(index)" @duplicate="emit('duplicate-rule', index)"
         />
       </ul>
       <button type="button" class="add" @click="emit('add-rule')"><BizIcon name="plus" :size="14" />Add rule</button>
       <footer class="foot">
         <p v-if="error" class="error" role="alert"><BizIcon name="alert" :size="14" /><span>{{ error }}</span></p>
-        <p v-else class="hint">Saved as a draft. Agents keep the published version until you publish.</p>
+        <p v-if="draftWarning" class="wording" role="status">{{ draftWarning }}</p>
+        <p v-if="!error" class="hint">Saved as a draft. Agents keep the published version until you publish.</p>
         <div class="buttons">
           <button type="button" class="btn sm ghost" :disabled="saving" @click="emit('cancel')">Cancel</button>
           <button type="button" class="btn sm primary" :disabled="saving" @click="emit('save')">{{ saving ? 'Saving…' : 'Save draft' }}</button>
@@ -163,12 +167,15 @@ function removeRule(index: number) {
 .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--line); }
 .foot .hint, .foot .error { flex: 1 1 240px; margin: 0; font-size: 12.5px; }
 .hint { color: var(--ink-3); }
+.wording { margin: 0 16px 10px 40px; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.foot .wording { flex: 1 1 240px; margin: 0; }
 .error { display: flex; gap: 6px; align-items: flex-start; color: var(--danger); }
 .error svg { flex: none; margin-top: 2px; }
 .buttons { display: flex; gap: 8px; margin-left: auto; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 600px) {
   .rules { padding-left: 8px; }
+  .wording { margin-left: 8px; margin-right: 8px; }
   .toggle { min-height: 52px; }
   .names { flex-direction: column; align-items: flex-start; gap: 1px; max-width: 100%; overflow: hidden; }
   .name, .subtitle, .summary { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
