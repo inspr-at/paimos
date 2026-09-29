@@ -3,6 +3,7 @@
 package harness
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 )
 
 type Control struct {
+	Value             string                 `json:"value,omitempty"`
 	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
 	ExpectedOwnership *ownedprocess.Identity `json:"expected_ownership,omitempty"`
 	requestDigest     []byte
@@ -29,11 +31,11 @@ type Control struct {
 	CompletedAt       *time.Time `json:"completed_at"`
 }
 
-const controlColumns = `id::text,session_id::text,kind,state,sequence,outcome,reason,created_at,claimed_at,completed_at,expected_ownership,request_digest,expires_at`
+const controlColumns = `id::text,session_id::text,kind,state,sequence,outcome,reason,created_at,claimed_at,completed_at,expected_ownership,request_digest,expires_at,coalesce(value,'')`
 
 func scanControl(row pgx.Row) (Control, error) {
 	var c Control
-	err := row.Scan(&c.ID, &c.SessionID, &c.Kind, &c.State, &c.Sequence, &c.Outcome, &c.Reason, &c.CreatedAt, &c.ClaimedAt, &c.CompletedAt, &c.ExpectedOwnership, &c.requestDigest, &c.ExpiresAt)
+	err := row.Scan(&c.ID, &c.SessionID, &c.Kind, &c.State, &c.Sequence, &c.Outcome, &c.Reason, &c.CreatedAt, &c.ClaimedAt, &c.CompletedAt, &c.ExpectedOwnership, &c.requestDigest, &c.ExpiresAt, &c.Value)
 	return c, err
 }
 func (m *Module) interrupt(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -148,6 +150,20 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			}
 			continue
 		}
+		if err := validateSettingCatalog(ctx, tx, s, c.Kind, c.Value); err != nil {
+			var invalid *workorders.Error
+			if !errors.As(err, &invalid) {
+				return nil, err
+			}
+			c, e = scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='completed',outcome='rejected',reason='setting_catalog_changed',completed_at=clock_timestamp() WHERE id=$1 RETURNING `+controlColumns, c.ID))
+			if e != nil {
+				return nil, e
+			}
+			if e = record(ctx, tx, p, s, "control_completed", nil, c); e != nil {
+				return nil, e
+			}
+			continue
+		}
 		text := ""
 		if c.Kind == "steer" {
 			text = m.controlText.take(relayKey(p.TenantID, s.ID, c.ID))
@@ -214,6 +230,27 @@ func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal)
 	}
 	if c.State != "claimed" {
 		return nil, workorders.Fail(409, "control must be claimed")
+	}
+	if settingKind(c.Kind) && in.Outcome == "applied" {
+		if c.ExpectedOwnership == nil || s.ProcessOwnership == nil || *c.ExpectedOwnership != *s.ProcessOwnership {
+			return nil, workorders.Fail(409, "process generation changed; setting outcome is fenced")
+		}
+		if c.ExpiresAt == nil || !c.ExpiresAt.After(time.Now()) {
+			return nil, workorders.Fail(409, "setting authorization expired")
+		}
+		if c.Kind == "rename" {
+			old := s
+			s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET display_label=$2 WHERE id=$1 RETURNING `+sessionColumns, s.ID, c.Value))
+			if err != nil {
+				return nil, err
+			}
+			if err = recordMetadataChanges(ctx, tx, p.TenantID, old, s); err != nil {
+				return nil, err
+			}
+			if err = record(ctx, tx, p, s, "metadata_changed", old, s); err != nil {
+				return nil, err
+			}
+		}
 	}
 	before := c
 	c, err = scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='completed',outcome=$2,reason=$3,completed_at=clock_timestamp() WHERE id=$1 RETURNING `+controlColumns, c.ID, in.Outcome, in.Reason))

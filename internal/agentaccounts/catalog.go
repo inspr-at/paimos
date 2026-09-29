@@ -4,6 +4,7 @@ package agentaccounts
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"sort"
@@ -13,6 +14,30 @@ import (
 
 	"github.com/inspr-at/paimos/internal/httpapi"
 )
+
+// ModelsForRun projects the same catalog as /agent-accounts/catalog, scoped to
+// the exact enrolled account of a run. It exposes no account credentials or keys.
+func ModelsForRun(ctx context.Context, tx pgx.Tx, runID, harness string) ([]CatalogModel, error) {
+	var account Account
+	err := tx.QueryRow(ctx, `SELECT a.harness,a.allowed_model_profile_ids::text[]
+		FROM agent_runs r JOIN agent_accounts a ON a.id=r.account_id AND a.tenant_id=r.tenant_id
+		WHERE r.id=$1 AND a.harness=$2 AND a.daemon_id=r.daemon_id`, runID, harness).Scan(&account.Harness, &account.AllowedProfileIDs)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return []CatalogModel{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	profiles, err := catalogProfiles(ctx, tx, "build", "", now)
+	if err != nil {
+		return nil, err
+	}
+	return catalogAccount(account, profiles, 0, now).Models, nil
+}
 
 // Catalog is a projection of existing enrollments and registry profiles, never
 // a second source of model IDs or an assertion of provider entitlements.

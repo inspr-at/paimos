@@ -77,6 +77,7 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	var in struct {
 		RequestID string                `json:"request_id"`
 		Kind      string                `json:"kind"`
+		Value     string                `json:"value,omitempty"`
 		Text      string                `json:"text"`
 		Ownership ownedprocess.Identity `json:"expected_ownership"`
 	}
@@ -84,8 +85,8 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
-	if !workorders.UUID(in.RequestID) || (in.Kind != "steer" && in.Kind != "interrupt" && in.Kind != "stop") || len(in.Text) > 8192 || !utf8.ValidString(in.Text) || strings.ContainsRune(in.Text, 0) || (in.Kind == "steer" && strings.TrimSpace(in.Text) == "") || (in.Kind != "steer" && in.Text != "") {
-		return nil, workorders.Fail(400, "request id, typed operation and bounded steer text required")
+	if !workorders.UUID(in.RequestID) || (in.Kind != "steer" && in.Kind != "interrupt" && in.Kind != "stop" && !settingKind(in.Kind)) || !validSetting(in.Kind, in.Value) || len(in.Text) > 8192 || !utf8.ValidString(in.Text) || strings.ContainsRune(in.Text, 0) || (in.Kind == "steer" && strings.TrimSpace(in.Text) == "") || (in.Kind != "steer" && in.Text != "") {
+		return nil, workorders.Fail(400, "request id, typed operation and bounded text or setting value required")
 	}
 	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), true)
 	if err != nil {
@@ -119,6 +120,21 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if !liveRun {
 		return nil, workorders.Fail(409, "run is not owned by this live daemon generation")
 	}
+	if err = validateSettingCatalog(r.Context(), tx, s, in.Kind, in.Value); err != nil {
+		return nil, err
+	}
+	if settingKind(in.Kind) {
+		if err = m.expireControls(r, tx, p, s); err != nil {
+			return nil, err
+		}
+		var pending bool
+		if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM harness_controls WHERE session_id=$1 AND kind IN ('rename','model','effort') AND state<>'completed')`, s.ID).Scan(&pending); err != nil {
+			return nil, err
+		}
+		if pending {
+			return nil, workorders.Fail(409, "a session setting is still pending")
+		}
+	}
 	var count int
 	if err = tx.QueryRow(r.Context(), `SELECT count(*) FROM harness_controls WHERE session_id=$1 AND (state<>'completed' OR created_at>clock_timestamp()-interval '1 minute')`, s.ID).Scan(&count); err != nil {
 		return nil, err
@@ -127,7 +143,7 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 		return nil, workorders.Fail(429, "session control quota reached")
 	}
 	identity, _ := json.Marshal(in.Ownership)
-	c, err := scanControl(tx.QueryRow(r.Context(), `INSERT INTO harness_controls(tenant_id,id,session_id,kind,sequence,requested_by_principal_id,expected_ownership,request_digest,expires_at) SELECT $1,$2,$3,$4,coalesce(max(sequence),0)+1,$5,$6::jsonb,$7,clock_timestamp()+interval '45 seconds' FROM harness_controls WHERE session_id=$3 RETURNING `+controlColumns, p.TenantID, in.RequestID, s.ID, in.Kind, p.ID, string(identity), dg))
+	c, err := scanControl(tx.QueryRow(r.Context(), `INSERT INTO harness_controls(tenant_id,id,session_id,kind,sequence,requested_by_principal_id,expected_ownership,request_digest,expires_at,value) SELECT $1,$2,$3,$4,coalesce(max(sequence),0)+1,$5,$6::jsonb,$7,clock_timestamp()+interval '45 seconds',nullif($8,'') FROM harness_controls WHERE session_id=$3 RETURNING `+controlColumns, p.TenantID, in.RequestID, s.ID, in.Kind, p.ID, string(identity), dg, in.Value))
 	if err != nil {
 		return nil, err
 	}

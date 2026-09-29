@@ -289,6 +289,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery":   "harness.worker",
 
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-controls": "harness.control",
+	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/managed-settings":  "harness.control",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-context":  "harness.worker",
 
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/interrupt":            "harness.control",
