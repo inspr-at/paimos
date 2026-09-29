@@ -1,0 +1,6 @@
+{
+  "session_id": "vendor-session-not-aeon-id",
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "Ready."
+}
