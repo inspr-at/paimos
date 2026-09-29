@@ -27,18 +27,21 @@ type History struct {
 
 // Release is one reserved or published version.
 type Release struct {
-	Notes           *Notes     `json:"notes,omitempty"`
-	Version         string     `json:"version"`
-	Tag             string     `json:"tag"`
-	ReleaseChannel  string     `json:"release_channel"`
-	ReleaseSequence int        `json:"release_sequence"`
-	State           string     `json:"state"`
-	ReservedAt      *time.Time `json:"reserved_at"`
-	TaggedAt        *time.Time `json:"tagged_at"`
-	PublishedAt     *time.Time `json:"published_at"`
-	Headline        string     `json:"headline"`
-	Tickets         []string   `json:"tickets"`
-	Changes         []Change   `json:"changes"`
+	Notes *Notes `json:"notes,omitempty"`
+	// Presentation is the release's theme, headline and intro (AEON-305),
+	// read from the database per request. Absent when none was written.
+	Presentation    *Presentation `json:"presentation,omitempty"`
+	Version         string        `json:"version"`
+	Tag             string        `json:"tag"`
+	ReleaseChannel  string        `json:"release_channel"`
+	ReleaseSequence int           `json:"release_sequence"`
+	State           string        `json:"state"`
+	ReservedAt      *time.Time    `json:"reserved_at"`
+	TaggedAt        *time.Time    `json:"tagged_at"`
+	PublishedAt     *time.Time    `json:"published_at"`
+	Headline        string        `json:"headline"`
+	Tickets         []string      `json:"tickets"`
+	Changes         []Change      `json:"changes"`
 	// ChangesOmitted counts changes beyond MaxChanges that are not listed.
 	ChangesOmitted int      `json:"changes_omitted"`
 	Evidence       Evidence `json:"evidence"`

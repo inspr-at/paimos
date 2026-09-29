@@ -984,6 +984,46 @@ paths:
         '401': {description: Authentication required}
         '500': {description: Stored release notes could not be read}
         '404': {description: No such release in this build's history}
+  /releases/{version}/presentation:
+    parameters:
+      - {name: version, in: path, required: true, schema: {type: string}, description: 'The calendar version, with or without the leading v. It need not be in this build yet, so the release agent can write it before deploying.'}
+    put:
+      operationId: putReleasePresentation
+      summary: Set how a release introduces itself (theme, headline, intro)
+      description: "AEON-305. Stores the theme (kicker), headline and intro in English and German for the served product project, keyed by version. Requires releases.deploy on that project from an active person. English theme and headline are required; German fields may be empty and readers fall back to English. Theme and headline are one line. Writing identical text changes nothing. Every change records one release.presentation_set event with before and after. The offline equivalent is aeon release-notes present."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReleasePresentationInput'}
+      responses:
+        '200':
+          description: The change (changed is false when the text was already stored)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReleasePresentationChange'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteReleasePresentation
+      summary: Remove a release's presentation
+      description: Requires releases.deploy on the served product project. Records one release.presentation_cleared event; removing nothing records nothing.
+      responses:
+        '200':
+          description: The change
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReleasePresentationChange'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
   /auth/login:
     get:
       operationId: authLogin
@@ -6031,6 +6071,40 @@ components:
               pill_de: {type: string}
               benefit_en: {type: string}
               benefit_de: {type: string}
+    ReleasePresentation:
+      type: object
+      description: "Additive (AEON-305). How a release introduces itself, read per request for the caller's tenant and visible product project. Absent when none was written; the release is then shown by version and date only. German fields may be empty; show English then."
+      required: [theme_en, theme_de, headline_en, headline_de, intro_en, intro_de, revision, updated_at]
+      properties:
+        theme_en: {type: string, maxLength: 80, description: Short name shown as the kicker}
+        theme_de: {type: string, maxLength: 80}
+        headline_en: {type: string, maxLength: 200, description: One sentence}
+        headline_de: {type: string, maxLength: 200}
+        intro_en: {type: string, maxLength: 600, description: Two or three sentences}
+        intro_de: {type: string, maxLength: 600}
+        revision: {type: integer, minimum: 1}
+        updated_at: {type: string, format: date-time}
+    ReleasePresentationInput:
+      type: object
+      additionalProperties: false
+      required: [theme_en, headline_en]
+      properties:
+        theme_en: {type: string, minLength: 1, maxLength: 80}
+        theme_de: {type: string, maxLength: 80}
+        headline_en: {type: string, minLength: 1, maxLength: 200}
+        headline_de: {type: string, maxLength: 200}
+        intro_en: {type: string, maxLength: 600}
+        intro_de: {type: string, maxLength: 600}
+        expected_revision: {type: integer, minimum: 0, description: Optional guard; 0 means no presentation exists yet. A mismatch answers 409.}
+    ReleasePresentationChange:
+      type: object
+      required: [version, project_node_id, changed, before, after]
+      properties:
+        version: {type: string}
+        project_node_id: {type: string, format: uuid}
+        changed: {type: boolean}
+        before: {oneOf: [{$ref: '#/components/schemas/ReleasePresentation'}, {type: 'null'}]}
+        after: {oneOf: [{$ref: '#/components/schemas/ReleasePresentation'}, {type: 'null'}]}
     ReleaseHistory:
       description: inspr.release-history.v1 (see internal/releasehistory), newest release first, plus the running version.
       type: object
@@ -6059,6 +6133,7 @@ components:
         published_at: {type: [string, 'null'], format: date-time}
         headline: {type: string, description: Original Git headline; source evidence when notes is present}
         notes: {$ref: "#/components/schemas/ReleaseNotes"}
+        presentation: {$ref: "#/components/schemas/ReleasePresentation"}
         tickets: {type: array, items: {type: string}, description: Legacy Git references; captured visible release members are in notes.items}
         changes:
           type: array
