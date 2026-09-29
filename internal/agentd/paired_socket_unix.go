@@ -6,12 +6,10 @@ package agentd
 import (
 	"encoding/json"
 	"errors"
-	"net"
 	"os"
 	"path/filepath"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 )
@@ -94,7 +92,7 @@ func ServePairedLocal(s *Supervisor, socket string, attachments ...*AttachManage
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
-	} else if err := recoverUnrecordedSocket(socket); err != nil {
+	} else if err := store.RecoverUnrecordedSocket(filepath.Base(socket)); err != nil {
 		return nil, err
 	}
 	local, err := ServeLocal(s, socket, attachments...)
@@ -125,51 +123,4 @@ func ServePairedLocal(s *Supervisor, socket string, attachments ...*AttachManage
 	}
 	keep = true
 	return local, nil
-}
-
-// Called only with the lifetime lock held and no owner record. A token alone
-// is never adopted: only a private, owned socket that refuses a real connect
-// establishes the bind-before-owner crash window. Validate both artifacts and
-// recheck their identities after the connect before removing either one.
-func recoverUnrecordedSocket(socket string) error {
-	want, err := privateSocketInode(socket, os.ModeSocket)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	token, tokenErr := privateSocketInode(socket+".token", 0)
-	if tokenErr != nil && !errors.Is(tokenErr, os.ErrNotExist) {
-		return tokenErr
-	}
-	conn, err := net.DialTimeout("unix", socket, 250*time.Millisecond)
-	if conn != nil {
-		conn.Close()
-	}
-	if !errors.Is(err, syscall.ECONNREFUSED) {
-		return agentsetup.ErrCollision
-	}
-	if _, err := os.Lstat(socket + ".owner.json"); !errors.Is(err, os.ErrNotExist) {
-		return agentsetup.ErrCollision
-	}
-	if got, err := privateSocketInode(socket, os.ModeSocket); err != nil || got != want {
-		return agentsetup.ErrCollision
-	}
-	got, err := privateSocketInode(socket+".token", 0)
-	if tokenErr == nil {
-		if err != nil || got != token {
-			return agentsetup.ErrCollision
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return agentsetup.ErrCollision
-	}
-	// Leave the recoverable socket until last: another crash must not turn
-	// this pair into an unrecorded token with no socket to prove staleness.
-	if tokenErr == nil {
-		if err := os.Remove(socket + ".token"); err != nil {
-			return err
-		}
-	}
-	return os.Remove(socket)
 }

@@ -512,9 +512,13 @@ protects the stable listener. Crash recovery checks the socket and token inodes
 recorded for that setup and daemon. If a crash happens between bind and publishing
 the owner record, recovery requires an owned mode-0600 socket with one link, no
 symlink and a connection refused by the kernel. Any accompanying token must also
-be an owned mode-0600 regular file with one link. Both identities are rechecked
-before cleanup; a token without a socket, an unsafe artifact or a live listener
-is left untouched.
+be an owned mode-0600 regular file with one link. Recovery renames the socket to
+a unique aside name through the private directory handle and probes that moved
+inode before removal; a new listener at the original path survives. A live
+socket is restored with an exclusive rename. If the original path has been
+recreated, both sockets are kept and startup refuses. Both artifact identities
+are rechecked and only quarantined names are removed; a token without a socket
+or an unsafe artifact is left untouched.
 The private token and local control authorization rules remain unchanged.
 
 ### Harness interpreter pins

@@ -112,7 +112,7 @@ func TestPairedSocketRecoversCrashBeforeOwnerRecord(t *testing.T) {
 }
 
 func TestPairedSocketUnrecordedRecoveryRefusesUnsafeArtifacts(t *testing.T) {
-	for _, kind := range []string{"live", "socket-mode", "socket-file", "socket-symlink", "socket-hardlink", "token-mode", "token-symlink", "token-hardlink", "owner-invalid", "owner-symlink"} {
+	for _, kind := range []string{"live", "socket-mode", "socket-world-writable", "socket-file", "socket-symlink", "socket-hardlink", "token-mode", "token-symlink", "token-hardlink", "owner-invalid", "owner-symlink"} {
 		t.Run(kind, func(t *testing.T) {
 			s, _, _ := testSupervisor(t)
 			defer s.Close(context.Background())
@@ -134,6 +134,8 @@ func TestPairedSocketUnrecordedRecoveryRefusesUnsafeArtifacts(t *testing.T) {
 			switch kind {
 			case "socket-mode", "token-mode":
 				err = os.Chmod(target, 0644)
+			case "socket-world-writable":
+				err = os.Chmod(target, 0666)
 			case "socket-file", "socket-symlink", "token-symlink":
 				if err := os.Rename(target, target+".original"); err != nil {
 					t.Fatal(err)
