@@ -114,31 +114,33 @@ type harnessMetadata struct {
 type Supervisor struct {
 	maxTokens, maxTurns int64
 
-	dispatchMu        sync.Mutex
-	state             *agentsetup.Store
-	closing           bool
-	blockedAccounts   map[string]bool
-	probedAccounts    map[string]bool
-	loginRequired     map[string]bool
-	harnessHolds      map[string]string
-	dependencyErrors  map[string]string
-	mu                sync.Mutex
-	api               API
-	journal           *localjournal.Journal[Record]
-	lock              *os.File
-	adapters          map[string]Adapter
-	runs              map[string]*owned
-	tenantID          string
-	principalID       string
-	daemonID          string
-	generation        string
-	workspace         string
-	estimates         map[string]int64
-	accounts          []EnrolledAccount
-	heartbeatInterval time.Duration
-	maxRunDuration    time.Duration
-	prepareScratch    func(string) (string, error)
-	newHarnessID      func() (string, error)
+	dispatchMu         sync.Mutex
+	state              *agentsetup.Store
+	closing            bool
+	blockedAccounts    map[string]bool
+	probedAccounts     map[string]bool
+	loginRequired      map[string]bool
+	harnessHoldReasons map[string]string
+	dependencyReasons  map[string]string
+	harnessHolds       map[string]string
+	dependencyErrors   map[string]string
+	mu                 sync.Mutex
+	api                API
+	journal            *localjournal.Journal[Record]
+	lock               *os.File
+	adapters           map[string]Adapter
+	runs               map[string]*owned
+	tenantID           string
+	principalID        string
+	daemonID           string
+	generation         string
+	workspace          string
+	estimates          map[string]int64
+	accounts           []EnrolledAccount
+	heartbeatInterval  time.Duration
+	maxRunDuration     time.Duration
+	prepareScratch     func(string) (string, error)
+	newHarnessID       func() (string, error)
 }
 
 func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
@@ -394,8 +396,18 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 		if dependencyErr != nil {
 			s.dependencyErrors[account.Harness] = dependencyErr.Error()
+			if s.dependencyReasons == nil {
+				s.dependencyReasons = map[string]string{}
+			}
+			reason := "dependency_invalid"
+			var issue *agentsetup.HarnessIssue
+			if errors.As(dependencyErr, &issue) {
+				reason = issue.Reason
+			}
+			s.dependencyReasons[account.Harness] = reason
 		} else if hold == "" {
 			delete(s.dependencyErrors, account.Harness)
+			delete(s.dependencyReasons, account.Harness)
 		}
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available

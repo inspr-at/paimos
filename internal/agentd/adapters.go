@@ -620,7 +620,7 @@ func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
 	}
 	cli, err := agentsetup.ResolveClaudeExecutable(a.ClaudePath, workspace)
 	if err != nil {
-		return nil, err
+		return nil, &agentsetup.HarnessIssue{Reason: "cli_unavailable", Err: err}
 	}
 	if configured != nil && (configured.NodePath != deps.NodePath || configured.SDKPath != deps.SDKPath || configured.ClaudePath != cli) {
 		return nil, errors.New("Claude dependency links changed during launch validation")

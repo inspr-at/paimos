@@ -103,20 +103,23 @@ type snapshot struct {
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
-	AccountingState   string       `json:"accounting_state,omitempty"`
-	Schema            string       `json:"schema"`
-	Stage             string       `json:"stage"`
-	RequestID         string       `json:"request_id,omitempty"`
-	ComputerID        string       `json:"computer_id,omitempty"`
-	UserCode          string       `json:"user_code,omitempty"`
-	VerificationURI   string       `json:"verification_uri,omitempty"`
-	Accounts          []Enrollment `json:"accounts,omitempty"`
-	LocalProcesses    string       `json:"local_processes"`
-	ServerRevocation  string       `json:"server_revocation,omitempty"`
-	Action            string       `json:"action,omitempty"`
-	RetryAfterSeconds int          `json:"retry_after_seconds,omitempty"`
+	HarnessDetails    map[string]HarnessDetail `json:"harness_details,omitempty"`
+	HarnessStatuses   map[string]string        `json:"harness_statuses,omitempty"`
+	AccountingState   string                   `json:"accounting_state,omitempty"`
+	Schema            string                   `json:"schema"`
+	Stage             string                   `json:"stage"`
+	RequestID         string                   `json:"request_id,omitempty"`
+	ComputerID        string                   `json:"computer_id,omitempty"`
+	UserCode          string                   `json:"user_code,omitempty"`
+	VerificationURI   string                   `json:"verification_uri,omitempty"`
+	Accounts          []Enrollment             `json:"accounts,omitempty"`
+	LocalProcesses    string                   `json:"local_processes"`
+	ServerRevocation  string                   `json:"server_revocation,omitempty"`
+	Action            string                   `json:"action,omitempty"`
+	RetryAfterSeconds int                      `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
+	HarnessDetails                         map[string]HarnessDetail
 	HarnessStatuses                        map[string]string
 	HarnessErrors                          map[string]string
 	LoginRequired                          bool

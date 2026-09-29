@@ -25,20 +25,21 @@ type DrainRequest struct {
 // LifecycleStatus does not conflate telemetry acceptance with observed exit.
 // Only a drained status permits removing a pairing-owned service or credential.
 type LifecycleStatus struct {
-	HarnessStatuses         map[string]string `json:"harness_statuses,omitempty"`
-	HarnessErrors           map[string]string `json:"harness_errors,omitempty"`
-	LoginRequired           bool              `json:"login_required"`
-	VerificationUnavailable []string          `json:"verification_unavailable_account_ids"`
-	Ready                   bool              `json:"ready"`
-	DaemonID                string            `json:"daemon_id"`
-	Generation              string            `json:"generation"`
-	State                   string            `json:"state"`
-	ActiveRunIDs            []string          `json:"active_run_ids"`
-	UnconfirmedRunIDs       []string          `json:"unconfirmed_run_ids"`
-	SettlementPendingRunIDs []string          `json:"settlement_pending_run_ids"`
-	FencedAccountIDs        []string          `json:"fenced_account_ids"`
-	AllFenced               bool              `json:"all_fenced"`
-	VerificationResults     map[string]string `json:"verification_results"`
+	HarnessDetails          map[string]agentsetup.HarnessDetail `json:"harness_details,omitempty"`
+	HarnessStatuses         map[string]string                   `json:"harness_statuses,omitempty"`
+	HarnessErrors           map[string]string                   `json:"harness_errors,omitempty"`
+	LoginRequired           bool                                `json:"login_required"`
+	VerificationUnavailable []string                            `json:"verification_unavailable_account_ids"`
+	Ready                   bool                                `json:"ready"`
+	DaemonID                string                              `json:"daemon_id"`
+	Generation              string                              `json:"generation"`
+	State                   string                              `json:"state"`
+	ActiveRunIDs            []string                            `json:"active_run_ids"`
+	UnconfirmedRunIDs       []string                            `json:"unconfirmed_run_ids"`
+	SettlementPendingRunIDs []string                            `json:"settlement_pending_run_ids"`
+	FencedAccountIDs        []string                            `json:"fenced_account_ids"`
+	AllFenced               bool                                `json:"all_fenced"`
+	VerificationResults     map[string]string                   `json:"verification_results"`
 }
 
 func fenceName(account string) string {
@@ -133,29 +134,37 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	v := LifecycleStatus{DaemonID: s.daemonID, Generation: s.generation, State: "drained", ActiveRunIDs: []string{}, UnconfirmedRunIDs: []string{}, SettlementPendingRunIDs: []string{}, FencedAccountIDs: []string{}, VerificationResults: map[string]string{}, HarnessErrors: map[string]string{}}
 	s.mu.Lock()
 	v.HarnessStatuses = map[string]string{}
+	v.HarnessDetails = map[string]agentsetup.HarnessDetail{}
 	v.AllFenced, _ = s.readFence("")
 	for _, a := range s.accounts {
-		status := "checking"
+		status, reason := "checking", "starting"
 		fenced, e := s.readFence(a.ID)
 		if fenced || e != nil {
 			v.FencedAccountIDs = append(v.FencedAccountIDs, a.ID)
 		}
 		if v.AllFenced || fenced || e != nil {
-			status = "draining"
+			status, reason = "draining", ""
 		} else {
 			issue := s.harnessHolds[a.Harness]
+			reason = s.harnessHoldReasons[a.Harness]
 			if issue == "" {
 				issue = s.dependencyErrors[a.Harness]
+				reason = s.dependencyReasons[a.Harness]
 			}
 			if issue != "" {
 				v.HarnessErrors[a.Harness] = issue
 				status = "blocked"
+				if reason == "" {
+					reason = "dependency_invalid"
+				}
 			} else if s.loginRequired[a.ID] {
-				status = "login_required"
+				status, reason = "login_required", "login_required"
 				v.LoginRequired = true
 			} else if s.probedAccounts[a.ID] && !s.blockedAccounts[a.ID] {
-				status = "ready"
+				status, reason = "ready", ""
 				v.Ready = true
+			} else {
+				reason = "starting"
 			}
 			if adapter, ok := s.adapters[a.Harness].(VerificationAdapter); !ok || !adapter.VerificationSupported() {
 				v.VerificationUnavailable = append(v.VerificationUnavailable, a.ID)
@@ -166,6 +175,9 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 		priority := map[string]int{"draining": 1, "checking": 2, "login_required": 3, "blocked": 4, "ready": 5}
 		if priority[status] > priority[v.HarnessStatuses[a.Harness]] {
 			v.HarnessStatuses[a.Harness] = status
+			if detail, ok := agentsetup.HarnessReport(a.Harness, status, reason); ok {
+				v.HarnessDetails[a.Harness] = detail
+			}
 		}
 	}
 	entries := make([]*owned, 0, len(s.runs))
@@ -265,6 +277,11 @@ func (s *Supervisor) accountAvailable(account string) bool {
 // lifecycle fences or touching processes. An empty reason releases the hold;
 // a successful account probe is still required before dispatch resumes.
 func (s *Supervisor) SetHarnessHold(harness, reason string) {
+	s.SetHarnessHoldWithReason(harness, "dependency_invalid", reason)
+}
+
+// SetHarnessHoldWithReason keeps wire reason codes independent of local diagnostics.
+func (s *Supervisor) SetHarnessHoldWithReason(harness, code, reason string) {
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
 	s.mu.Lock()
@@ -272,11 +289,16 @@ func (s *Supervisor) SetHarnessHold(harness, reason string) {
 	if s.harnessHolds == nil {
 		s.harnessHolds = map[string]string{}
 	}
+	if s.harnessHoldReasons == nil {
+		s.harnessHoldReasons = map[string]string{}
+	}
 	if reason == "" {
 		delete(s.harnessHolds, harness)
+		delete(s.harnessHoldReasons, harness)
 		return
 	}
 	s.harnessHolds[harness] = reason
+	s.harnessHoldReasons[harness] = code
 	for _, a := range s.accounts {
 		if a.Harness == harness {
 			delete(s.probedAccounts, a.ID)

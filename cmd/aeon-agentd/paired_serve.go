@@ -187,7 +187,7 @@ func restartPairedClaude(ctx context.Context, s pairedRuntimeSupervisor, old, ne
 }
 
 type pairedRuntimeSupervisor interface {
-	SetHarnessHold(string, string)
+	SetHarnessHoldWithReason(string, string, string)
 	RefreshAccounts([]agentd.EnrolledAccount, []agentd.Adapter) error
 	RestartClaude(context.Context, *agentd.ClaudeAdapter) error
 	PollOnce(context.Context) error
@@ -220,14 +220,14 @@ func refreshPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root s
 			return c, err
 		}
 		if next.ClaudeRepinID != c.ClaudeRepinID {
-			s.SetHarnessHold(agentd.Claude, "Claude repin pending: waiting for active Claude runs to exit")
+			s.SetHarnessHoldWithReason(agentd.Claude, "repin_pending", "Claude repin pending: waiting for active Claude runs to exit")
 			if err := agentsetup.ValidateRuntimeDependencies(next); err != nil {
-				s.SetHarnessHold(agentd.Claude, err.Error())
+				s.SetHarnessHoldWithReason(agentd.Claude, "dependency_invalid", err.Error())
 				return c, nil
 			}
 			if err := restartPairedClaude(ctx, s, c, next, ad); err != nil {
 				if !errors.Is(err, agentd.ErrDraining) {
-					s.SetHarnessHold(agentd.Claude, "Claude repin failed: "+err.Error())
+					s.SetHarnessHoldWithReason(agentd.Claude, "dependency_invalid", "Claude repin failed: "+err.Error())
 				}
 				return c, nil
 			}
@@ -237,16 +237,16 @@ func refreshPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root s
 		c = next
 	}
 	if err := agentsetup.ValidateRuntimeDependencies(c); err != nil {
-		s.SetHarnessHold(agentd.Claude, err.Error())
+		s.SetHarnessHoldWithReason(agentd.Claude, "dependency_invalid", err.Error())
 		return c, nil
 	}
 	// c describes the adapter already installed above or at cold start. A
 	// receipt retry must not replace it again or depend on historical runs.
 	if err := acknowledgePairedClaude(root, c); err != nil {
-		s.SetHarnessHold(agentd.Claude, "Claude repin pending: acknowledgement unavailable; retrying automatically")
+		s.SetHarnessHoldWithReason(agentd.Claude, "repin_pending", "Claude repin pending: acknowledgement unavailable; retrying automatically")
 		return c, nil
 	}
-	s.SetHarnessHold(agentd.Claude, "")
+	s.SetHarnessHoldWithReason(agentd.Claude, "dependency_invalid", "")
 	return c, nil
 }
 

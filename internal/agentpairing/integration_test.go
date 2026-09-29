@@ -20,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
@@ -1175,9 +1176,20 @@ func TestPairingHarnessStatusesStayScopedAndRecover(t *testing.T) {
 			t.Fatal("computer detail lost status")
 		}
 	}
-	reconcile(map[string]string{"claude": "local diagnostic text"}, 400)
-	reconcile(map[string]string{"arbitrary-local-path": "ready"}, 400)
-	reconcile(map[string]string{"cursor": "ready"}, 400)
+	for _, unsupported := range []map[string]string{
+		{"claude": "local diagnostic text", "codex": "ready"},
+		{"arbitrary-local-path": "ready", "codex": "ready"},
+		{"cursor": "ready", "codex": "ready"},
+		{"pi": "future_state", "codex": "ready"},
+	} {
+		result := reconcile(unsupported, 200)
+		if len(result.HarnessStatuses) != 1 || result.HarnessStatuses["codex"] != "ready" {
+			t.Fatal("unsupported telemetry was persisted or hid a valid report")
+		}
+	}
+	for _, malformed := range []any{[]string{"ready"}, map[string]any{"claude": 4}} {
+		f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": map[string]any{"state": "connected", "harness_statuses": malformed}}, false, "", 400)
+	}
 	if result := reconcile(nil, 200); len(result.HarnessStatuses) != 0 || result.SetupState != "connected" {
 		t.Fatal("legacy progress retained stale harness status")
 	}
@@ -1185,5 +1197,74 @@ func TestPairingHarnessStatusesStayScopedAndRecover(t *testing.T) {
 	other := f.propose("cursor")
 	f.approve(other, "connect_only")
 	f.redeem(other)
-	f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": other.id, "lifecycle_secret": other.lifecycle, "progress": agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "ready"}}}, false, "", 400)
+	f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": other.id, "lifecycle_secret": other.lifecycle, "progress": agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "ready"}}}, false, "", 200)
+}
+
+func TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude", "codex")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	progress := agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "blocked", "codex": "ready"}, HarnessDetails: map[string]agentsetup.HarnessDetail{
+		"claude": {State: "blocked", Reason: "dependency_invalid", Fix: "arbitrary local diagnostic"},
+		"codex":  {State: "ready"},
+		"pi":     {State: "blocked", Reason: "pin_missing"},
+	}}
+	proof := map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": progress}
+	var report agentpairing.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if len(report.HarnessDetails) != 2 || report.HarnessDetails["claude"].Fix != "aeon-agentd repin --harness claude" || report.HarnessDetails["claude"].Reason != "dependency_invalid" {
+		t.Fatal("details leaked untrusted data or lost the canonical repair command")
+	}
+	var listed struct {
+		Computers []agentpairing.View `json:"computers"`
+	}
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers", nil, true, "", 200), &listed)
+	report = agentpairing.View{}
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &report)
+	if len(listed.Computers) != 1 || listed.Computers[0].HarnessDetails["claude"] != report.HarnessDetails["claude"] {
+		t.Fatal("list/detail lost harness repair details")
+	}
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "blocked", Reason: "repin_pending", Fix: "must not be retained"}
+	proof["progress"] = progress
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if report.HarnessDetails["claude"].Reason != "repin_pending" || report.HarnessDetails["claude"].Fix != "" {
+		t.Fatal("pending repin requires a repair")
+	}
+	for _, detail := range []agentsetup.HarnessDetail{{State: "blocked", Reason: "future_reason"}, {State: "ready"}, {State: "blocked", Reason: "local diagnostic text"}} {
+		progress.HarnessDetails["claude"] = detail
+		proof["progress"] = progress
+		report = agentpairing.View{}
+		decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+		if _, ok := report.HarnessDetails["claude"]; ok {
+			t.Fatal("invalid or inconsistent detail persisted")
+		}
+	}
+	for _, e := range v.Enrollments {
+		if e.Harness != "claude" {
+			continue
+		}
+		f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/enrollments/"+e.AccountID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "", 200)
+		proof["cleanup_confirmed_account_ids"] = []string{e.AccountID}
+	}
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "blocked", Reason: "dependency_invalid"}
+	progress.HarnessStatuses["pi"] = "future_state"
+	proof["progress"] = progress
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if len(report.HarnessStatuses) != 1 || report.HarnessStatuses["codex"] != "ready" || len(report.HarnessDetails) != 1 {
+		t.Fatal("revoked or unknown enrollment counted as enrolled")
+	}
+	for _, e := range report.Enrollments {
+		if e.Harness == "claude" && (e.State != "revoked" || e.Cleanup != "confirmed") {
+			t.Fatal("unknown telemetry prevented fence/cleanup acknowledgement")
+		}
+	}
+	proof["progress"] = agentpairing.SetupProgress{State: "connected"}
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if len(report.HarnessDetails) != 0 || len(report.HarnessStatuses) != 0 {
+		t.Fatal("legacy report retained stale details")
+	}
 }

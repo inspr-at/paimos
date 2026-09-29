@@ -104,6 +104,9 @@ export interface PairingEnrollment {
   accounting_state?: AccountingState
 }
 
+export type HarnessReason = 'repin_pending' | 'dependency_invalid' | 'pin_missing' | 'login_required' | 'starting' | 'cli_unavailable'
+export interface HarnessDetail { state: HarnessStatus; reason?: HarnessReason; fix?: string }
+
 /** Public pairing projection. Secret-bearing keys are not part of this type. */
 export interface PairingView {
   request_id: string
@@ -134,6 +137,7 @@ export interface PairingView {
   setup_state?: SetupState
   /** Status codes only. An absent report does not imply harness readiness. */
   harness_statuses?: Partial<Record<string, HarnessStatus>>
+  harness_details?: Partial<Record<string, HarnessDetail>>
   setup_error?: string | null
   last_seen_at?: string | null
   /** Recent probe evidence. Unknown and offline do not prove that local work stopped. */
@@ -914,12 +918,36 @@ export interface ComputerStatusCopy {
   next: string
 }
 
-export function describeHarnessStatus(view: Pick<PairingView, 'computer_state' | 'connectivity' | 'harness_statuses'>, harness: string): string {
+type HarnessView = Pick<PairingView, 'computer_state' | 'connectivity' | 'harness_statuses' | 'harness_details'>
+
+function harnessDetail(view: HarnessView, harness: string): HarnessDetail | undefined {
+  const detail = view.harness_details?.[harness]
+  return detail && (!view.harness_statuses?.[harness] || detail.state === view.harness_statuses[harness]) ? detail : undefined
+}
+
+// Never show a daemon-supplied command. This fixed vocabulary is shared with
+// agentsetup.HarnessReport; local paths and diagnostics stay on the computer.
+function harnessFix(harness: string, reason?: HarnessReason): string {
+  if (!['claude', 'codex', 'cursor', 'grok', 'pi'].includes(harness)) return ''
+  if (reason === 'dependency_invalid' && harness === 'claude') return 'aeon-agentd repin --harness claude'
+  if (reason === 'dependency_invalid' || reason === 'pin_missing' || reason === 'cli_unavailable') return `aeon-agentd add-harness --harness ${harness}`
+  if (reason === 'login_required') return harness === 'claude' ? 'claude auth login' : `${harness === 'cursor' ? 'cursor-agent' : harness} login`
+  return ''
+}
+
+export function describeHarnessFix(view: HarnessView, harness: string): string {
+  return view.computer_state === 'connected' ? harnessFix(harness, harnessDetail(view, harness)?.reason) : ''
+}
+
+export function describeHarnessStatus(view: HarnessView, harness: string): string {
   if (view.computer_state !== 'connected') return ''
-  const status = view.harness_statuses?.[harness]
+  const detail = harnessDetail(view, harness)
+  const status = view.harness_statuses?.[harness] ?? detail?.state
   if (!status) return ''
   const labels: Record<HarnessStatus, string> = { ready: 'Ready', blocked: 'Needs attention', login_required: 'Sign in required', checking: 'Checking', draining: 'Draining' }
-  return view.connectivity === 'online' ? labels[status] : `Last reported: ${labels[status].toLowerCase()}`
+  const reasons: Record<HarnessReason, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable' }
+  const label = detail?.reason ? reasons[detail.reason] : labels[status]
+  return view.connectivity === 'online' ? label : `Last reported: ${label.toLowerCase()}`
 }
 
 export function describeComputerStatus(view: Pick<PairingView, 'computer_state' | 'local_cleanup' | 'local_processes' | 'enrollments' | 'setup_state' | 'connectivity' | 'accounting_state'>, hints: { httpStatus?: number; heartbeatMissing?: boolean } = {}): ComputerStatusCopy {
@@ -1402,6 +1430,21 @@ function parseView(data: unknown): PairingView {
     for (const harness of ['claude', 'codex', 'cursor', 'grok']) {
       const status = optionalEnum(statuses[harness], HARNESS_STATES)
       if (status) view.harness_statuses[harness] = status
+    }
+  }
+  if (record.harness_details != null) {
+    const details = asRecord(record.harness_details, 'harness_details')
+    view.harness_details = {}
+    for (const harness of ['claude', 'codex', 'cursor', 'grok', 'pi']) {
+      const raw = details[harness]
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+      const item = raw as Record<string, unknown>
+      const state = optionalEnum(item.state, HARNESS_STATES)
+      if (!state || view.harness_statuses?.[harness] && view.harness_statuses[harness] !== state) continue
+      const allowed: Partial<Record<HarnessStatus, readonly HarnessReason[]>> = { blocked: ['repin_pending', 'dependency_invalid', 'pin_missing', 'cli_unavailable'], login_required: ['login_required'], checking: ['starting'] }
+      const reason = optionalEnum(item.reason, allowed[state] ?? [])
+      if (item.reason && !reason) continue
+      view.harness_details[harness] = { state, ...(reason ? { reason, fix: harnessFix(harness, reason) } : {}) }
     }
   }
   if (typeof record.setup_error === 'string' && record.setup_error) view.setup_error = record.setup_error.slice(0, 500)

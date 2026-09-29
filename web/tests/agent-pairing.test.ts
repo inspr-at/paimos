@@ -5,7 +5,7 @@ import { sessionEnded } from '../src/lib/api.ts'
 import {
   DEFAULT_REVIEW_CHOICE, LOOKUP_DEBOUNCE_MS, MIN_POLL_INTERVAL_MS, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
   agentRouteKind, canonicalUserCode, clearPairingClientState, createOngoingLimits, denyPairing,
-  describeComputerStatus, describeHarnessStatus, describeProgress, disconnectComputer, disconnectConfirm, disconnectEnrollment,
+  describeComputerStatus, describeHarnessStatus, describeHarnessFix, describeProgress, disconnectComputer, disconnectConfirm, disconnectEnrollment,
   formatVerification, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
   ongoingLimitError, pairingPermissions, planApproval, planLookup, planOngoingLimits, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
@@ -800,4 +800,27 @@ test('harness status is scoped, optional and never claims readiness from stale e
   assert.deepEqual((await listPairingComputers())[0]?.harness_statuses, { codex: 'ready' })
   globalThis.fetch = async () => jsonResponse({ computers: [view()] })
   assert.equal((await listPairingComputers())[0]?.harness_statuses, undefined)
+})
+
+test('harness details whitelist reasons and derive fixed commands without exposing diagnostics', async () => {
+  const report = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { claude: 'blocked', codex: 'ready' }, harness_details: { claude: { state: 'blocked', reason: 'repin_pending', fix: 'local-only command' }, codex: { state: 'ready' } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [report] })
+  let parsed = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Waiting for repin')
+  assert.equal(describeHarnessFix(parsed, 'claude'), '')
+  assert.equal(describeHarnessStatus({ ...parsed, connectivity: 'offline' }, 'claude'), 'Last reported: waiting for repin')
+  assert.equal(JSON.stringify(parsed).includes('local-only'), false)
+  report.harness_details = { claude: { state: 'blocked', reason: 'dependency_invalid', fix: 'local-only command' } }
+  parsed = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessFix(parsed, 'claude'), 'aeon-agentd repin --harness claude')
+  assert.equal(describeHarnessFix({ ...parsed, computer_state: 'revoked' }, 'claude'), '')
+  report.harness_details = { claude: { state: 'blocked', reason: 'future-code', fix: 'local-only command' }, codex: { state: 'ready', reason: 'dependency_invalid' }, future: { state: 'ready' } }
+  parsed = (await listPairingComputers())[0]!
+  assert.deepEqual(parsed.harness_details, {})
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Needs attention')
+  report.harness_statuses = { claude: 'ready' }
+  report.harness_details = { claude: { state: 'blocked', reason: 'dependency_invalid' } }
+  parsed = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Ready')
+  assert.equal(describeHarnessFix(parsed, 'claude'), '')
 })

@@ -8,6 +8,7 @@ import { mockPairing } from './agent-pairing-fixtures'
 function computerReport() {
   return {
     harness_statuses: { claude: 'blocked', codex: 'ready' },
+    harness_details: { claude: { state: 'blocked', reason: 'dependency_invalid', fix: 'ignored daemon-supplied command' }, codex: { state: 'ready' } },
     enrollments: ['claude', 'codex'].map((harness, i) => ({
       account_id: i ? '55555555-5555-4555-8555-555555555555' : '44444444-4444-4444-8444-444444444444',
       account_key: `${harness}-1`, harness, label: `${harness === 'claude' ? 'Claude' : 'Codex'} work`,
@@ -29,12 +30,13 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.goto('/agents')
     const computers = page.getByRole('region', { name: 'Connected computers' })
     await expect(computers).toBeVisible()
-    await expect(computers.locator('.harness-report').filter({ hasText: 'Claude' })).toContainText('Needs attention')
+    await expect(computers.locator('.harness-report').filter({ hasText: 'Claude' })).toContainText('Dependency needs repair')
     await expect(computers.locator('.harness-report').filter({ hasText: 'Codex' })).toContainText('Ready')
     await expect(computers.locator('.status')).toHaveText('Connected')
     await expect(computers).not.toContainText('Setup unconfirmed')
     await page.getByRole('button', { name: 'Show details for studio' }).click()
-    await expect(computers).toContainText('aeon-agentd setup status')
+    await expect(computers.locator('.harness-report').filter({ hasText: 'Claude' })).toContainText('aeon-agentd repin --harness claude')
+    await expect(computers).not.toContainText('ignored daemon-supplied command')
     await expect(computers).toContainText('unconfirmed local processes')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     if (width === 390) {
@@ -44,10 +46,19 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
       mkdirSync(process.env.HARNESS_STATUS_SHOTS, { recursive: true })
       await computers.screenshot({ path: join(process.env.HARNESS_STATUS_SHOTS, `agents-harnesses-${width}-${theme}.png`), animations: 'disabled' })
     }
+    report.harness_details.claude = { state: 'blocked', reason: 'repin_pending', fix: 'must not be shown' }
+    await page.getByRole('button', { name: 'Refresh computers' }).click()
+    await expect(computers.locator('.harness-report').filter({ hasText: 'Claude' })).toContainText('Waiting for repin')
+    await expect(computers).toContainText('Retries automatically.')
+    await expect(computers.locator('.harness-fix')).toHaveCount(0)
+    await expect(computers).not.toContainText('Needs attention')
+    if (process.env.HARNESS_STATUS_SHOTS) {
+      await computers.screenshot({ path: join(process.env.HARNESS_STATUS_SHOTS, `agents-repin-pending-${width}-${theme}.png`), animations: 'disabled' })
+    }
     report.harness_statuses.claude = 'ready'
     await page.getByRole('button', { name: 'Refresh computers' }).click()
     await expect(computers.locator('.harness-report').filter({ hasText: 'Claude' })).toContainText('Ready')
-    await expect(computers).not.toContainText('Needs attention')
+    await expect(computers).not.toContainText('Dependency needs repair')
     await expect(computers).not.toContainText('aeon-agentd setup status')
     expect(calls.every(call => call.method === 'GET')).toBe(true)
     expect(errors).toEqual([])
@@ -66,4 +77,20 @@ test('offline and revoked computers do not present prior harness reports as live
   await page.getByRole('button', { name: 'Refresh computers' }).click()
   await expect(computers.locator('.status')).toHaveText('Revoked')
   await expect(computers.locator('.harness-report')).toHaveCount(0)
+})
+
+for (const [reason, command] of [
+  ['pin_missing', 'aeon-agentd add-harness --harness claude'],
+  ['login_required', 'claude auth login'],
+  ['cli_unavailable', 'aeon-agentd add-harness --harness claude'],
+]) test(`harness row shows the specific ${reason} command`, async ({ page }) => {
+  await mockWork(page, fixtures())
+  const report = computerReport()
+  if (reason === 'login_required') report.harness_statuses.claude = 'login_required'
+  report.harness_details.claude = { state: report.harness_statuses.claude, reason: reason!, fix: 'untrusted' }
+  await mockPairing(page, {}, report)
+  await page.goto('/agents')
+  const row = page.getByRole('region', { name: 'Connected computers' }).locator('.harness-report').filter({ hasText: 'Claude' })
+  await expect(row.locator('code')).toHaveText(command!)
+  await expect(row).not.toContainText('untrusted')
 })

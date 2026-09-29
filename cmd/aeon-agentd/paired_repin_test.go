@@ -18,15 +18,18 @@ import (
 
 type repinSupervisor struct {
 	holds           map[string]string
+	reasons         map[string]string
 	restartErr      error
 	restarts, polls int
 }
 
-func (s *repinSupervisor) SetHarnessHold(harness, reason string) {
+func (s *repinSupervisor) SetHarnessHoldWithReason(harness, code, reason string) {
 	if s.holds == nil {
 		s.holds = map[string]string{}
+		s.reasons = map[string]string{}
 	}
 	s.holds[harness] = reason
+	s.reasons[harness] = code
 }
 func (*repinSupervisor) RefreshAccounts([]agentd.EnrolledAccount, []agentd.Adapter) error { return nil }
 func (s *repinSupervisor) RestartClaude(context.Context, *agentd.ClaudeAdapter) error {
@@ -63,6 +66,13 @@ func TestPendingOrFailedClaudeRepinKeepsPollingAndRetries(t *testing.T) {
 		current, err := pollPairedRuntime(t.Context(), s, e.Store.Path(), old, next)
 		if err != nil || current.ClaudeRepinID != old.ClaudeRepinID || s.polls != 1 || s.holds[agentd.Claude] == "" || len(s.holds) != 1 {
 			t.Fatal("pending repin stopped polling or lost its Claude hold", err)
+		}
+		wantReason := "dependency_invalid"
+		if errors.Is(restartErr, agentd.ErrDraining) {
+			wantReason = "repin_pending"
+		}
+		if s.reasons[agentd.Claude] != wantReason {
+			t.Fatal("repin wait classified as fault")
 		}
 		if applied, err := agentsetup.ClaudeRepinApplied(e.Store, next.ClaudeRepinID); err != nil || applied {
 			t.Fatal("busy/failed adapter falsely acknowledged", err)
@@ -177,5 +187,13 @@ func TestRepinDoesNotPermitIdentityChanges(t *testing.T) {
 	s := &repinSupervisor{}
 	if _, err := pollPairedRuntime(t.Context(), s, e.Store.Path(), old, next); err == nil || s.polls != 0 || s.restarts != 0 {
 		t.Fatal("repin bypassed identity binding")
+	}
+}
+
+func TestLocalStatusPreservesHarnessDetails(t *testing.T) {
+	detail := agentsetup.HarnessDetail{State: "blocked", Reason: "pin_missing", Fix: "aeon-agentd add-harness --harness codex"}
+	local := localStatus(agentd.LifecycleStatus{Ready: true, HarnessDetails: map[string]agentsetup.HarnessDetail{"codex": detail}})
+	if !local.Ready || local.HarnessDetails["codex"] != detail {
+		t.Fatal("CLI status discarded harness reason/fix")
 	}
 }

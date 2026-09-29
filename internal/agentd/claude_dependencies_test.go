@@ -165,7 +165,11 @@ func TestClaudeDependencyBreakAndRepinHoldDoNotStarveCodex(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "pending", "failed":
-				s.SetHarnessHold(Claude, "Claude repin "+failure)
+				reason := "dependency_invalid"
+				if failure == "pending" {
+					reason = "repin_pending"
+				}
+				s.SetHarnessHoldWithReason(Claude, reason, "Claude repin "+failure)
 			}
 			if err := s.PollOnce(t.Context()); err != nil {
 				t.Fatal(err)
@@ -177,6 +181,17 @@ func TestClaudeDependencyBreakAndRepinHoldDoNotStarveCodex(t *testing.T) {
 			issue := status.HarnessErrors[Claude]
 			if !status.Ready || status.LoginRequired || issue == "" || len(status.HarnessErrors) != 1 || status.HarnessStatuses[Claude] != "blocked" || status.HarnessStatuses[Codex] != "ready" {
 				t.Fatalf("failure hidden or treated as login: %+v", status)
+			}
+			detail := status.HarnessDetails[Claude]
+			wantReason, wantFix := "dependency_invalid", "aeon-agentd repin --harness claude"
+			if failure == "pending" {
+				wantReason, wantFix = "repin_pending", ""
+			}
+			if failure == "cli" {
+				wantReason, wantFix = "cli_unavailable", "aeon-agentd add-harness --harness claude"
+			}
+			if detail.State != "blocked" || detail.Reason != wantReason || detail.Fix != wantFix {
+				t.Fatalf("wrong reason/fix: %+v", detail)
 			}
 			if (failure == "node" || failure == "sdk") && !strings.Contains(issue, "repin") {
 				t.Fatal("dependency diagnostic has no repair action")
@@ -202,7 +217,7 @@ func TestClaudeDependencyBreakAndRepinHoldDoNotStarveCodex(t *testing.T) {
 			if err := s.PollOnce(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			if status := s.Lifecycle(""); !status.Ready || status.LoginRequired || len(status.HarnessErrors) != 0 || status.HarnessStatuses[Claude] != "ready" || status.HarnessStatuses[Codex] != "ready" {
+			if status := s.Lifecycle(""); !status.Ready || status.LoginRequired || len(status.HarnessErrors) != 0 || status.HarnessDetails[Claude].Reason != "" || status.HarnessDetails[Claude].Fix != "" || status.HarnessStatuses[Claude] != "ready" || status.HarnessStatuses[Codex] != "ready" {
 				t.Fatalf("repaired Claude did not recover: %+v", status)
 			}
 		})

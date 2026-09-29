@@ -3,7 +3,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import {
-  PairingError, activeRunIds, applyComputerListRefresh, describeComputerStatus, describeHarnessStatus, disconnectComputer, disconnectConfirm,
+  PairingError, activeRunIds, applyComputerListRefresh, describeComputerStatus, describeHarnessStatus, describeHarnessFix, disconnectComputer, disconnectConfirm,
   disconnectEnrollment, getPairingComputer, lastActiveLabel, listPairingComputers, pairingReadGeneration, pairingScopeKey,
   platformCaption, type DisconnectMode, type PairingPermissions, type PairingView,
 } from '../../lib/agentPairing'
@@ -129,9 +129,6 @@ function reportedHarnesses(computer: PairingView) {
 function hasHarnessReports(computer: PairingView) {
   return reportedHarnesses(computer).some(harness => describeHarnessStatus(computer, harness))
 }
-function needsHarnessAttention(computer: PairingView) {
-  return computer.computer_state === 'connected' && reportedHarnesses(computer).some(harness => computer.harness_statuses?.[harness] === 'blocked')
-}
 function canChange(computer: PairingView) {
   return props.permissions.canDisconnect && (computer.computer_state === 'connected' || computer.computer_state === 'draining')
 }
@@ -238,7 +235,11 @@ function assign(error: unknown, fallback: string) {
         <div v-if="hasHarnessReports(computer)" class="harness-line reported">
           <span v-for="harness in reportedHarnesses(computer)" :key="harness" class="harness-report">
             <HarnessMark :harness="harness" :size="14" />
-            <span class="harness-report-text" :title="[harnessLabel(harness), describeHarnessStatus(computer, harness)].filter(Boolean).join(' · ')">{{ harnessLabel(harness) }}<span v-if="describeHarnessStatus(computer, harness)" class="harness-state"> · {{ describeHarnessStatus(computer, harness) }}</span></span>
+            <span class="harness-report-text" :title="[harnessLabel(harness), describeHarnessStatus(computer, harness)].filter(Boolean).join(' · ')">
+              <span>{{ harnessLabel(harness) }}<span v-if="describeHarnessStatus(computer, harness)" class="harness-state"> · {{ describeHarnessStatus(computer, harness) }}</span></span>
+              <code v-if="describeHarnessFix(computer, harness)" class="harness-fix">{{ describeHarnessFix(computer, harness) }}</code>
+              <span v-else-if="computer.harness_details?.[harness]?.reason === 'repin_pending' && computer.harness_statuses?.[harness] === 'blocked'" class="harness-hint">Retries automatically.</span>
+            </span>
           </span>
         </div>
         <p v-else class="harness-line">
@@ -256,7 +257,6 @@ function assign(error: unknown, fallback: string) {
         </div>
         <div v-if="openId === keyOf(computer)" class="detail">
           <p>{{ statusOf(computer).detail }} {{ statusOf(computer).next }}</p>
-          <p v-if="needsHarnessAttention(computer)">Run <code>aeon-agentd setup status</code> on this computer for the repair step.</p>
           <ul>
             <li v-for="enrollment in computer.enrollments" :key="enrollment.account_id">
               <HarnessMark :harness="enrollment.harness" :size="14" />
@@ -327,9 +327,13 @@ function assign(error: unknown, fallback: string) {
 .path-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .path-tail { flex: none; white-space: nowrap; }
 .harness-line, .status { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink); font-size: 13px; white-space: nowrap; }
-.harness-line.reported { display: grid; gap: 4px; }
-.harness-report { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.harness-report-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.harness-line.reported { display: grid; gap: 10px; }
+.harness-report { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.harness-report-text { display: grid; gap: 3px; min-width: 0; white-space: normal; }
+.harness-report-text > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.harness-report :deep(svg) { flex-shrink: 0; margin-top: 2px; }
+.harness-fix, .harness-hint { font-size: 12px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
+.harness-fix { font-family: var(--mono); }
 .harness-state { color: var(--ink-2); }
 .last-active { font-size: 12.5px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st-backlog); }

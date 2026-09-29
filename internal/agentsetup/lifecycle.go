@@ -326,7 +326,14 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 	if e.Local != nil {
 		local, err := e.Local.Status(ctx, "")
 		if err == nil && local.DaemonID == v.DaemonID {
+			p.HarnessDetails, p.HarnessStatuses = local.HarnessDetails, local.HarnessStatuses
 			if issue := local.HarnessErrors["claude"]; issue != "" {
+				if local.HarnessDetails["claude"].Reason == "repin_pending" {
+					p.Stage = "repin_pending"
+					p.LocalProcesses = local.State
+					p.Action = "Waiting for repin; the daemon retries automatically after active runs finish."
+					return p, nil
+				}
 				p.Stage = "blocked"
 				p.LocalProcesses = local.State
 				p.Action = issue
@@ -484,7 +491,7 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 }
 
 func observedProgress(v View, local LocalStatus) *SetupProgress {
-	p := &SetupProgress{State: "provisioning", HarnessStatuses: local.HarnessStatuses}
+	p := &SetupProgress{State: "provisioning", HarnessStatuses: local.HarnessStatuses, HarnessDetails: local.HarnessDetails}
 	if local.LoginRequired && !local.Ready {
 		p.State = "login_required"
 		p.ErrorCode = "login_required"

@@ -359,3 +359,29 @@ func TestReadyHarnessKeepsComputerConnectedDuringOtherLogin(t *testing.T) {
 		t.Fatalf("one login hid healthy harness: %+v", p)
 	}
 }
+
+func TestHarnessDetailsSurviveSetupStatusAndReconcile(t *testing.T) {
+	for _, reason := range []string{"repin_pending", "dependency_invalid", "pin_missing"} {
+		e, a, l, o, _ := engineFixture(t)
+		approveFixture(t, e, a, o)
+		detail, ok := HarnessReport("claude", "blocked", reason)
+		if !ok {
+			t.Fatal("unsupported shared reason")
+		}
+		l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "unconfirmed", Ready: true, HarnessErrors: map[string]string{"claude": "local-only diagnostic"}, HarnessStatuses: map[string]string{"claude": "blocked", "codex": "ready"}, HarnessDetails: map[string]HarnessDetail{"claude": detail, "codex": {State: "ready"}}}
+		p, err := e.Status(t.Context())
+		if err != nil || p.HarnessDetails["claude"] != detail || p.HarnessStatuses["codex"] != "ready" {
+			t.Fatal("setup status lost details", err)
+		}
+		if reason == "repin_pending" && (p.Stage != "repin_pending" || !strings.Contains(p.Action, "Waiting for repin")) {
+			t.Fatal("normal repin wait presented as fault")
+		}
+		if err := e.SyncFences(t.Context()); err != nil || a.progress == nil || a.progress.State != "connected" || a.progress.HarnessDetails["claude"] != detail {
+			t.Fatal("reconcile lost harness reason/fix", err)
+		}
+		raw, err := json.Marshal(a.progress)
+		if err != nil || strings.Contains(string(raw), "local-only diagnostic") {
+			t.Fatal("local diagnostics escaped into pairing progress")
+		}
+	}
+}

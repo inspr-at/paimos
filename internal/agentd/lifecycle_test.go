@@ -197,20 +197,20 @@ var _ = time.Second
 // Readiness describes usable accounts, never cleanup or process ownership.
 func TestLifecycleReadinessIsPerHarness(t *testing.T) {
 	s, _, _ := testSupervisor(t)
-	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "checking" {
+	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "checking" || status.HarnessDetails[Codex].Reason != "starting" {
 		t.Fatalf("unprobed account is ready: %+v", status)
 	}
 	s.probedAccounts["account"] = true
 	if status := s.Lifecycle(""); !status.Ready || status.HarnessStatuses[Codex] != "ready" {
 		t.Fatalf("healthy account not ready: %+v", status)
 	}
-	s.SetHarnessHold(Codex, "waiting for active runs")
-	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "blocked" {
+	s.SetHarnessHoldWithReason(Codex, "repin_pending", "waiting for active runs")
+	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "blocked" || status.HarnessDetails[Codex].Reason != "repin_pending" || status.HarnessDetails[Codex].Fix != "" {
 		t.Fatalf("held account is ready: %+v", status)
 	}
 	s.SetHarnessHold(Codex, "")
 	s.loginRequired["account"] = true
-	if status := s.Lifecycle(""); status.Ready || !status.LoginRequired || status.HarnessStatuses[Codex] != "login_required" {
+	if status := s.Lifecycle(""); status.Ready || !status.LoginRequired || status.HarnessStatuses[Codex] != "login_required" || status.HarnessDetails[Codex].Fix != "codex login" {
 		t.Fatalf("unsigned account is ready: %+v", status)
 	}
 	s.loginRequired["account"] = false
