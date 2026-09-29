@@ -261,32 +261,55 @@ func PlanPresentation(ctx context.Context, tx pgx.Tx, projectID, version string,
 // SavePresentation writes a presentation and one release.presentation_set
 // event, inside the caller's tenant transaction. An identical write changes
 // nothing and records no event. The caller must already have authorized actor.
+//
+// Creation is atomic: of two concurrent first writes, one inserts and the other
+// finds the row. A guarded write (expected_revision set) then fails with
+// ErrPresentationConflict; an unguarded one becomes an edit of the stored row.
+// Edits hold the row lock taken while planning and check its revision.
 func SavePresentation(ctx context.Context, tx pgx.Tx, actor tenant.Principal, projectID, version string, in PresentationInput) (PresentationChange, error) {
-	change, in, err := PlanPresentation(ctx, tx, projectID, version, in, true)
-	if err != nil || !change.Changed {
-		return change, err
-	}
-	var saved Presentation
-	err = scanPresentation(tx.QueryRow(ctx, `INSERT INTO release_presentations
+	for attempt := 0; ; attempt++ {
+		change, norm, err := PlanPresentation(ctx, tx, projectID, version, in, true)
+		if err != nil || !change.Changed {
+			return change, err
+		}
+		var saved Presentation
+		if change.Before == nil {
+			err = scanPresentation(tx.QueryRow(ctx, `INSERT INTO release_presentations
   (tenant_id,project_node_id,version,theme_en,theme_de,headline_en,headline_de,intro_en,intro_de,revision,updated_by)
   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10)
-  ON CONFLICT (tenant_id,project_node_id,version) DO UPDATE SET
-   theme_en=EXCLUDED.theme_en, theme_de=EXCLUDED.theme_de, headline_en=EXCLUDED.headline_en,
-   headline_de=EXCLUDED.headline_de, intro_en=EXCLUDED.intro_en, intro_de=EXCLUDED.intro_de,
-   revision=release_presentations.revision+1, updated_by=EXCLUDED.updated_by, updated_at=now()
+  ON CONFLICT (tenant_id,project_node_id,version) DO NOTHING
   RETURNING `+presentationColumns,
-		actor.TenantID, projectID, change.Version, in.ThemeEN, in.ThemeDE, in.HeadlineEN, in.HeadlineDE, in.IntroEN, in.IntroDE, actor.ID), &saved)
-	if err != nil {
-		return change, err
+				actor.TenantID, projectID, change.Version, norm.ThemeEN, norm.ThemeDE, norm.HeadlineEN, norm.HeadlineDE, norm.IntroEN, norm.IntroDE, actor.ID), &saved)
+			if errors.Is(err, pgx.ErrNoRows) {
+				// Another writer created it after we planned.
+				if in.ExpectedRevision != nil || attempt > 0 {
+					return PresentationChange{}, ErrPresentationConflict
+				}
+				continue
+			}
+		} else {
+			err = scanPresentation(tx.QueryRow(ctx, `UPDATE release_presentations SET
+   theme_en=$4, theme_de=$5, headline_en=$6, headline_de=$7, intro_en=$8, intro_de=$9,
+   revision=revision+1, updated_by=$10, updated_at=now()
+  WHERE project_node_id=$1 AND version=$2 AND revision=$3
+  RETURNING `+presentationColumns,
+				projectID, change.Version, change.Before.Revision, norm.ThemeEN, norm.ThemeDE, norm.HeadlineEN, norm.HeadlineDE, norm.IntroEN, norm.IntroDE, actor.ID), &saved)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return PresentationChange{}, ErrPresentationConflict
+			}
+		}
+		if err != nil {
+			return change, err
+		}
+		saved.UpdatedAt = saved.UpdatedAt.UTC()
+		change.After = &saved
+		nodeID := projectID
+		if _, err := events.Append(ctx, tx, actor, events.Change{NodeID: &nodeID, Type: PresentationSetEvent,
+			Before: presentationEvent(change.Version, projectID, change.Before), After: presentationEvent(change.Version, projectID, &saved)}); err != nil {
+			return change, err
+		}
+		return change, nil
 	}
-	saved.UpdatedAt = saved.UpdatedAt.UTC()
-	change.After = &saved
-	nodeID := projectID
-	if _, err := events.Append(ctx, tx, actor, events.Change{NodeID: &nodeID, Type: PresentationSetEvent,
-		Before: presentationEvent(change.Version, projectID, change.Before), After: presentationEvent(change.Version, projectID, &saved)}); err != nil {
-		return change, err
-	}
-	return change, nil
 }
 
 // ClearPresentation removes a presentation and records one

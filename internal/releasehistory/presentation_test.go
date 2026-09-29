@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -256,5 +257,76 @@ func TestPresentationRowsAreTenantIsolated(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("cross-tenant insert succeeded")
+	}
+}
+
+// Two first writes race: the one that commits second must not overwrite the
+// first as if it were new. Guarded, it conflicts; unguarded, it edits.
+func TestPresentationConcurrentCreate(t *testing.T) {
+	f := newPresentationFixture(t)
+	ctx := tenant.WithPrincipal(dbtest.Seed(t.Context()), f.admin)
+	zero := 0
+	first := releasehistory.PresentationInput{ThemeEN: "First", HeadlineEN: "First writer.", ExpectedRevision: &zero}
+	second := releasehistory.PresentationInput{ThemeEN: "Second", HeadlineEN: "Second writer.", ExpectedRevision: &zero}
+	race := func(version string, in releasehistory.PresentationInput) (releasehistory.PresentationChange, error) {
+		t.Helper()
+		saved := make(chan struct{})
+		type result struct {
+			change releasehistory.PresentationChange
+			err    error
+		}
+		done := make(chan result, 1)
+		go func() {
+			<-saved
+			var r result
+			r.err = db.InTenant(ctx, f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+				var err error
+				r.change, err = releasehistory.SavePresentation(ctx, tx, f.admin, f.project, version, in)
+				return err
+			})
+			done <- r
+		}()
+		if err := db.InTenant(ctx, f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+			if _, err := releasehistory.SavePresentation(ctx, tx, f.admin, f.project, version, first); err != nil {
+				return err
+			}
+			close(saved)
+			// Hold the uncommitted row while the second writer plans and inserts.
+			time.Sleep(400 * time.Millisecond)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		r := <-done
+		return r.change, r.err
+	}
+	stored := func(version string) (theme string, revision, events int) {
+		t.Helper()
+		if err := db.InTenant(ctx, f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+			if err := tx.QueryRow(ctx, `SELECT theme_en,revision FROM release_presentations WHERE version=$1`, version).Scan(&theme, &revision); err != nil {
+				return err
+			}
+			return tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type=$1 AND after->>'version'=$2`, releasehistory.PresentationSetEvent, version).Scan(&events)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	if _, err := race("260101120000.0.0", second); !errors.Is(err, releasehistory.ErrPresentationConflict) {
+		t.Fatalf("guarded second create: %v", err)
+	}
+	if theme, revision, n := stored("260101120000.0.0"); theme != "First" || revision != 1 || n != 1 {
+		t.Fatalf("after guarded race: %q rev %d, %d events", theme, revision, n)
+	}
+
+	unguarded := second
+	unguarded.ExpectedRevision = nil
+	change, err := race("260101130000.0.0", unguarded)
+	if err != nil || change.Before == nil || change.Before.ThemeEN != "First" || change.After.Revision != 2 {
+		t.Fatalf("unguarded second create: %+v %v", change, err)
+	}
+	if theme, revision, n := stored("260101130000.0.0"); theme != "Second" || revision != 2 || n != 2 {
+		t.Fatalf("after unguarded race: %q rev %d, %d events", theme, revision, n)
 	}
 }
