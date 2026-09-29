@@ -540,8 +540,42 @@ export function heldIdentities(sets: { scope: RuleScope; rules: AgentRule[] }[],
   return held
 }
 
+export type PreviewReason = 'not_key_creator' | 'key_revoked' | 'key_expired' | 'agent_inactive'
+export interface NamedAgent {
+  id: string
+  name: string
+  preview?: { allowed: boolean; reason?: PreviewReason; creator_name?: string }
+}
+
+/** Plain sentence for a named-agent preview denial. A creator name is included only when the server sent one. */
+export function previewDenial(reason: string, creatorName = ''): string {
+  const creator = creatorName.trim()
+  if (reason === 'not_key_creator' && creator) return `${creator} created this agent's key.`
+  switch (reason) {
+    case 'not_key_creator': return "You didn't create a key for this agent."
+    case 'key_revoked': return 'Your key for this agent was revoked.'
+    case 'key_expired': return 'Your key for this agent has expired.'
+    case 'agent_inactive': return 'This agent is deactivated.'
+    default: return ''
+  }
+}
+
+/** Agents this person can preview come first. Anyone else stays in the list, named, so the reason is visible. */
+export function orderPreviewAgents<T extends { name: string; preview?: { allowed: boolean } }>(agents: T[]): T[] {
+  const allowed = (agent: T) => agent.preview?.allowed !== false
+  return [...agents].sort((a, b) => Number(allowed(b)) - Number(allowed(a)) || a.name.localeCompare(b.name))
+}
+
+export function previewOptionLabel(agent: NamedAgent): string {
+  if (agent.preview?.allowed !== false) return agent.name
+  const why = previewDenial(agent.preview?.reason ?? '', agent.preview?.creator_name)
+  return why ? `${agent.name} · ${why}` : agent.name
+}
+
 export function rulesMessage(error: unknown): string {
   if (!(error instanceof RulesError)) return error instanceof Error ? error.message : 'The rules request failed.'
+  const preview = previewDenial(error.code)
+  if (preview) return preview
   if (error.code === 'revision_conflict') return 'This set was saved elsewhere. Your draft is still here; save again to replace that version.'
   if (error.code === 'version_conflict') return 'That version is already used. Confirm again to take a new one.'
   if (error.code === 'rules_budget_exceeded') {

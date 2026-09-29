@@ -20,7 +20,7 @@ export interface RulesMock {
   releaseDraftFailure: () => void
 }
 
-export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'; conflict?: boolean; publish?: boolean; draftFailAt?: number; draftFailStatus?: number; holdDraftFailure?: boolean; rejectNextDraft?: boolean; setAbortAt?: number } = {}): Promise<RulesMock> {
+export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'; conflict?: boolean; publish?: boolean; draftFailAt?: number; draftFailStatus?: number; holdDraftFailure?: boolean; rejectNextDraft?: boolean; setAbortAt?: number; denyNamedPreview?: boolean; agents?: { principal_id: string; name: string; preview?: { allowed: boolean; reason?: string; creator_name?: string } }[] } = {}): Promise<RulesMock> {
   const calls: RulesMock['calls'] = []
   let releaseDraftFailure = () => {}
   const draftGate = options.holdDraftFailure ? new Promise<void>(resolve => { releaseDraftFailure = () => resolve() }) : null
@@ -77,7 +77,7 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
     if (path === '/api/members' && method === 'GET') {
       return route.fulfill({ json: {
         people: [{ principal_id: RULE_PERSON, name: 'Markus Barta', avatar_url: null, has_avatar: false, email: 'markus@barta.com', status: 'active', identity: 'inspr_id', workspace_role: null, project_roles: [], aliases: [], classic_role: null, last_active_at: null, last_owner: true }],
-        agents: [{ principal_id: RULE_AGENT, name: 'Worker', has_avatar: false, workspace_role: null, key_count: 1, last_seen_at: null, service: false }],
+        agents: (options.agents ?? [{ principal_id: RULE_AGENT, name: 'Worker' }]).map(agent => ({ principal_id: agent.principal_id, name: agent.name, has_avatar: false, workspace_role: null, key_count: 1, last_seen_at: null, service: false, ...(agent.preview ? { preview: agent.preview } : {}) })),
         invites: [], imported: [], owner_count: 1,
       } })
     }
@@ -178,6 +178,9 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
     const history = /^\/api\/rules\/sets\/([^/]+)\/versions$/.exec(path)
     if (history && method === 'GET') return route.fulfill({ json: { versions: history[1] === COMPANY_SET ? versions : [] } })
     if (path === '/api/rules/merged' && method === 'GET') {
+      if (options.denyNamedPreview && url.searchParams.get('agent_id')) {
+        return route.fulfill({ status: 403, json: { error: "You didn't create a key for this agent.", code: 'not_key_creator' } })
+      }
       return route.fulfill({ json: {
         context: { tenant_id: 't1', project_id: url.searchParams.get('project_id'), person_id: url.searchParams.get('person_id'), role: url.searchParams.get('role'), harness: url.searchParams.get('harness') },
         versions: [{ set_id: COMPANY_SET, version: '260920100000.0.0', sha256: 'ab'.repeat(32) }],

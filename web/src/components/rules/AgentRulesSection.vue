@@ -17,7 +17,7 @@ import {
   MAX_RULES, ROLE_LABEL, ROLES, RulesError, applyEnabled, blankRule, copyName, createLayer, createSet, diffRules, duplicateRule, getVersion, groupsState, hasMovable, importBlock, largestProjected,
   listLayers, listSets, publishBlock, publishSets, replyUncertain, rulesEqual, rulesMessage, saveDraft, scopeKey, scopeRank,
   setState, validateDraft, writeBlock,
-  type AgentRule, type Caller, type CheckGroup, type CheckState, type ImportReport, type MergeInput, type RoleName, type RuleLayer, type RuleScope, type RuleSet, type RuleSnapshot, type SetState,
+  type AgentRule, type Caller, type CheckGroup, type CheckState, type ImportReport, type MergeInput, type NamedAgent, type RoleName, type RuleLayer, type RuleScope, type RuleSet, type RuleSnapshot, type SetState,
 } from '../../lib/rules'
 
 // Agent rules answer three questions at a glance: what applies, what waits to
@@ -31,7 +31,7 @@ const model = ref<Bundle[]>([])
 const loading = ref(true)
 const loadError = ref('')
 const projects = ref<{ id: string; title: string }[]>([])
-const agents = ref<{ id: string; name: string }[]>([])
+const agents = ref<NamedAgent[]>([])
 const projectId = ref('')
 const openSets = ref(new Set<string>())
 const editing = ref<(SetDraft & { setId: string; error: string }) | null>(null)
@@ -106,7 +106,7 @@ async function loadContext() {
     pickProject()
   } catch { /* the project section falls back to the rules' own project ids */ }
   if (!can('members.read')) return
-  try { agents.value = (await getMembers()).agents.map(agent => ({ id: agent.principal_id, name: agent.name })) } catch { /* names fall back */ }
+  try { agents.value = (await getMembers()).agents.map(agent => ({ id: agent.principal_id, name: agent.name, preview: agent.preview })) } catch { /* names fall back */ }
 }
 // The page opens on the project the rules actually target, not the first one listed.
 // Nothing is picked before the rules have loaded: an early pick would fall back

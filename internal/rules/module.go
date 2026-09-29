@@ -358,6 +358,15 @@ func permission(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Scope, act
 				return err
 			}
 			if !controlled {
+				// The EXISTS above stays the allow rule. A reason only explains the denial
+				// and never grants access when the two disagree.
+				allowed, reason, classErr := authz.ClassifyAgentControl(ctx, tx, p.TenantID, owner, s.AgentID)
+				if classErr != nil {
+					return classErr
+				}
+				if !allowed && reason != "" {
+					return fail(403, reason, authz.PreviewDenialMessage(reason))
+				}
 				return authz.ErrForbidden
 			}
 		}

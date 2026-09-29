@@ -523,3 +523,20 @@ test('budget refusals keep another person’s size private in the message', asyn
   assert.equal(rulesMessage(new RulesError(503, 'outcome_unknown', 'The set may have been created. Reload and check before creating it again.')), 'The set may have been created. Reload and check before creating it again.')
   assert.doesNotMatch(rulesMessage(new RulesError(503, 'outcome_unknown', '')), /safe/)
 })
+
+test('named agents you can preview come first, and a denial code is a plain sentence', async () => {
+  const { orderPreviewAgents, previewOptionLabel, previewDenial, rulesMessage, RulesError } = await import('../src/lib/rules.ts')
+  const agents = [
+    { id: 'b', name: 'Zebra', preview: { allowed: true } },
+    { id: 'c', name: 'Middle', preview: { allowed: false as const, reason: 'key_revoked' as const } },
+    { id: 'a', name: 'Able', preview: { allowed: true } },
+    { id: 'd', name: 'Principal link operator', preview: { allowed: false as const, reason: 'not_key_creator' as const, creator_name: 'Ada Lovelace' } },
+  ]
+  assert.deepEqual(orderPreviewAgents(agents).map(agent => agent.name), ['Able', 'Zebra', 'Middle', 'Principal link operator'])
+  assert.equal(previewOptionLabel(agents[3]!), "Principal link operator · Ada Lovelace created this agent's key.")
+  assert.equal(previewOptionLabel(agents[1]!), 'Middle · Your key for this agent was revoked.')
+  assert.equal(previewDenial('not_key_creator'), "You didn't create a key for this agent.")
+  assert.equal(rulesMessage(new RulesError(403, 'key_expired', 'ignored')), 'Your key for this agent has expired.')
+  assert.equal(rulesMessage(new RulesError(403, 'agent_inactive', 'ignored')), 'This agent is deactivated.')
+  assert.equal(rulesMessage(new RulesError(403, 'forbidden', 'ignored')), 'You do not have permission for that.')
+})
