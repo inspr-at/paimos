@@ -14,7 +14,7 @@ const (
 	GroupOther    = "other"
 )
 
-// TicketNote is one linked ticket's current release-note text. Hidden tickets
+// TicketNote is one linked ticket's release-note text. Hidden tickets
 // are not noted. Empty strings stay empty; the client picks the language.
 // Group is this ticket's own fixes or features, so a commit shared by several
 // tickets does not decide it for all of them (AEON-305).

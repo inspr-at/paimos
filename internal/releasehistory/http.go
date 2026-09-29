@@ -146,10 +146,13 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteError(w, http.StatusNotFound, "no such release in this build's history")
 }
 
-// annotated adds group and linked ticket benefits to h (the embedded history
-// with any note backfills applied). A lookup error, or no source, returns h
-// unchanged.
+// annotated derives Aeon's groups from the selected frozen capture. Other
+// products retain their optional legacy ticket source; lookup errors leave
+// their embedded history unchanged.
 func (m *Module) annotated(ctx context.Context, h History) History {
+	if h.Product == "PAIMOS AEON" || h.Repository == "inspr-at/aeon" {
+		return withFrozenGroups(h)
+	}
 	if m.tickets == nil {
 		return h
 	}

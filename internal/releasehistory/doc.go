@@ -24,6 +24,9 @@
 //     a source digest and gaps; hidden text is excluded. Missing snapshots do
 //     not turn Git headlines into benefits. See docs/RELEASE.md for the capture
 //     and publication boundary. Older manifests without notes remain readable.
+//   - data/product-notes.json: the reviewed, insert-only public projection of
+//     Aeon's frozen snapshots. packnotes writes it during reservation or from
+//     explicit historical exports. It contains no tenant IDs or hidden text.
 //   - GitHub (optional, with a token): the release's published_at, the image
 //     reference and digest the release workflow writes into the release notes
 //     ("Container: …" and "Digest: …"), and the CI and Release workflow runs for
@@ -55,14 +58,14 @@
 //	                   features, and anything else is other. Several tickets take
 //	                   the strongest group and the commit is listed once. The
 //	                   version bump omits group. Older manifests without it stay
-//	                   valid; clients then derive the group from type. Group uses
-//	                   current ticket metadata, so past releases follow it
-//	                   without a migration. A features or fixes change also
+//	                   valid; clients then derive the group from type. Aeon uses
+//	                   the selected frozen capture, never live ticket metadata.
+//	                   A features or fixes change also
 //	                   carries linked_tickets: key plus pill and benefit in
 //	                   English and German, and the ticket's own group (fixes
 //	                   for a bug, else features). Hidden tickets, and tickets with no
-//	                   pill or benefit, are omitted. The text is read when the
-//	                   history is served, so a later edit shows on past releases.
+//	                   pill or benefit, are omitted. Later ticket edits cannot
+//	                   change the captured text or classification.
 //	changes_omitted    how many more changes there were beyond the listed ones
 //	evidence           source_commit and its URL, the OCI image reference and
 //	                   digest, the CI and Release runs (URL, conclusion), the
@@ -87,10 +90,10 @@
 // Reads attach the stored presentation as the additive presentation member. The manifest is embedded in the
 // binary (data/history.json when generated, else data/empty.json). WithBackfills
 // adds immutable database snapshots for the caller's tenant and visible product
-// project. Tagged snapshots win, followed by native journey snapshots, then
-// explicit manifest backfills; missing rows retain the historical fallback.
+// project. Native journey snapshots win, followed by explicit manifest backfills,
+// then embedded tag/public notes; empty and hidden-only captures also win.
 // Note reads never capture live ticket fields and never contact the network.
-// Separately, serving reads linked-ticket kind and benefit fields for the
-// caller's tenant when a ticket source is configured to group the change list
-// (AEON-289); without one the changes are served unchanged.
+// Portable notes use the additive notes.public_items without tenant-local UUIDs;
+// notes.items retains its original API contract. Other products can still opt
+// into the legacy TicketSource annotation; Aeon's handler never calls it.
 package releasehistory

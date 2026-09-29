@@ -3,6 +3,7 @@ package releases
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -23,6 +24,66 @@ import (
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
+
+func TestProductNotesFallbackIsTenantScopedAndFrozen(t *testing.T) {
+	f := ticketSetup(t)
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	const version = "260115100000.0.0"
+	const emptyVersion = "260115110000.0.0"
+	at := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	snapshot := releasehistory.NoteSnapshot{Schema: releasehistory.SnapshotSchema, TenantID: f.person.TenantID, ProjectID: f.project, Version: version, VersionScheme: releasehistory.SchemeCalVer2, Revision: 1, CapturedAt: at, MembershipSource: releasehistory.ManifestMembershipSource, FieldSource: releasehistory.FieldSource, Frozen: true, Backfilled: true, Label: releasehistory.BackfillLabel, ActorID: f.person.ID, ReleasedAt: &at, Tickets: []releasehistory.NoteTicket{{ID: f.feature, Key: "AEON-7", Group: releasehistory.GroupFixes, UpdatedAt: &at, Fields: json.RawMessage(`{"pill_en":"Tenant frozen notes","pill_de":"Eingefrorene Release Notizen","benefit_en":"Tenant capture wins.","benefit_de":"Die gespeicherte Fassung gewinnt."}`)}}}
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"project_key":"AEON"}'::jsonb WHERE id=$1`, f.project); err != nil {
+			return err
+		}
+		for _, v := range []string{version, emptyVersion} {
+			snapshot.Version = v
+			if v == emptyVersion {
+				snapshot.Tickets = []releasehistory.NoteTicket{}
+			}
+			raw, _ := json.Marshal(snapshot)
+			if _, err := tx.Exec(t.Context(), `INSERT INTO release_manifest_note_snapshots(tenant_id,project_node_id,version,snapshot) VALUES($1,$2,$3,$4)`, f.person.TenantID, f.project, v, raw); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	history := releasehistory.History{Product: "PAIMOS AEON", Repository: "inspr-at/aeon", Releases: []releasehistory.Release{}}
+	for _, v := range []string{version, emptyVersion} {
+		history.Releases = append(history.Releases, releasehistory.Release{Version: v, Notes: &releasehistory.Notes{Source: releasehistory.ProductNotesSource, Items: []releasehistory.NoteItem{}, PublicItems: []releasehistory.TicketNote{{Key: "AEON-7", Group: releasehistory.GroupFeatures, PillEN: "Portable release notes", BenefitEN: "Public product benefit."}}}})
+	}
+	mod := releasehistory.NewWith(history, version).WithBackfills(f.db.App, "AEON")
+	mod.UseTickets(func(context.Context, string, []string) (map[string]releasehistory.TicketMeta, error) {
+		t.Fatal("read live tickets")
+		return nil, nil
+	})
+	mux := http.NewServeMux()
+	mod.Mount(mux)
+	get := func(p tenant.Principal, v string) releasehistory.Release {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/releases/"+v, nil).WithContext(tenant.WithPrincipal(t.Context(), p)))
+		var rel releasehistory.Release
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &rel) != nil {
+			t.Fatalf("read: %d %s", w.Code, w.Body)
+		}
+		return rel
+	}
+	// Alternate tenants repeatedly: overlays must not mutate the shared history.
+	for range 2 {
+		if rel := get(f.person, version); rel.Notes.Source != "database-snapshot" || rel.Notes.Items[0].PillEN != "Tenant frozen notes" || rel.Notes.Items[0].Group != releasehistory.GroupFixes {
+			t.Fatal(rel)
+		}
+		if rel := get(f.other, version); rel.Notes.Source != releasehistory.ProductNotesSource || rel.Notes.PublicItems[0].PillEN != "Portable release notes" {
+			t.Fatal(rel)
+		}
+		if rel := get(f.person, emptyVersion); rel.Notes.Source != "database-snapshot" || len(rel.Notes.Items) != 0 {
+			t.Fatal("empty capture did not win", rel)
+		}
+		if rel := get(f.other, emptyVersion); len(rel.Notes.PublicItems) != 1 {
+			t.Fatal("cross-tenant cache mutation", rel)
+		}
+	}
+}
 
 func TestManifestBackfillServedScopedImmutableAndIdempotent(t *testing.T) {
 	f := ticketSetup(t)
@@ -120,12 +181,12 @@ func TestManifestBackfillServedScopedImmutableAndIdempotent(t *testing.T) {
 	if body := request(f.other, "/api/releases/"+version); strings.Contains(body, "You see what changed.") || strings.Contains(body, "written_after_release") {
 		t.Fatal(body)
 	}
-	// Tag capture wins even when the store contains an older operator capture.
+	// AEON-372: the tenant's stored capture takes precedence over embedded notes.
 	f.tx(func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO release_manifest_note_snapshots(tenant_id,project_node_id,version,snapshot) SELECT tenant_id,project_node_id,$2,jsonb_set(snapshot,'{version}',to_jsonb($2::text)) FROM release_manifest_note_snapshots WHERE version=$1`, version, tagged)
 		return err
 	})
-	if body := request(f.person, "/api/releases/"+tagged); !strings.Contains(body, "Original tag wins") || strings.Contains(body, "You see what changed") {
+	if body := request(f.person, "/api/releases/"+tagged); strings.Contains(body, "Original tag wins") || !strings.Contains(body, "You see what changed") {
 		t.Fatal(body)
 	}
 	f.tx(func(tx pgx.Tx) error {

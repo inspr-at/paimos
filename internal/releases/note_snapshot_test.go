@@ -40,6 +40,9 @@ func TestNoteSnapshotUsesExactMembershipAndFields(t *testing.T) {
 	if s.Frozen || s.MembershipSource != releasehistory.MembershipSource || s.FieldSource != releasehistory.FieldSource || s.Revision != 2 || len(s.Tickets) != 1 || s.Tickets[0].ID != id || !strings.Contains(string(s.Tickets[0].Fields), "Änderungen werden verständlich.") || strings.Contains(w.Body.String(), "private_other_field") {
 		t.Fatalf("snapshot: %s", w.Body.String())
 	}
+	if s.Tickets[0].Group != releasehistory.GroupFeatures {
+		t.Fatal("classification was not captured")
+	}
 	// Version-less export records that the tagged path supplies the version binding.
 	if notes, err := releasehistory.NotesFromSnapshot(w.Body.Bytes(), "260928120000.0.0", "test"); err != nil || len(notes.Gaps) != 1 || !strings.Contains(notes.Gaps[0], "no assigned version") {
 		t.Fatalf("missing version binding gap: %+v %v", notes, err)
@@ -137,6 +140,7 @@ func TestPublishedNoteSnapshotIgnoresLaterTicketEdits(t *testing.T) {
 		t.Fatal("planning release froze notes")
 	}
 	edited := strings.Replace(visibleFields, "Know what changed.", "Edited before publication.", 1)
+	edited = strings.Replace(edited, `{`, `{"tags":[{"name":"bug"}],`, 1)
 	f.tx(func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, visible, edited)
 		return err
@@ -152,6 +156,7 @@ func TestPublishedNoteSnapshotIgnoresLaterTicketEdits(t *testing.T) {
 		return nil
 	})
 	afterEdit := strings.Replace(edited, "Edited before publication.", "Edited after publication.", 1)
+	afterEdit = strings.Replace(afterEdit, `"tags":[{"name":"bug"}],`, "", 1)
 	f.tx(func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, visible, afterEdit)
 		return err
@@ -168,7 +173,7 @@ func TestPublishedNoteSnapshotIgnoresLaterTicketEdits(t *testing.T) {
 		t.Fatal("published snapshot is not frozen")
 	}
 	notes, err := releasehistory.NotesFromSnapshot(frozen.Body.Bytes(), "260928120000.0.0", "test")
-	if err != nil || notes.Hidden != 1 || len(notes.Items) != 1 || notes.Items[0].ID != visible || notes.Items[0].BenefitEN != "Edited before publication." || notes.Fallback != "" {
+	if err != nil || notes.Hidden != 1 || len(notes.Items) != 1 || notes.Items[0].ID != visible || notes.Items[0].Group != releasehistory.GroupFixes || notes.Items[0].BenefitEN != "Edited before publication." || notes.Fallback != "" {
 		t.Fatalf("notes from benefits: %+v %v body %s", notes, err, frozen.Body.String())
 	}
 	encoded := string(mustNotes(t, notes))
