@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { accountName } from '../../lib/accountCascade'
-import type { AgentAccount } from '../../lib/agents'
+import { approveAccountCapacity, type AgentAccount } from '../../lib/agents'
 import { confirmAction } from '../../lib/confirm'
 import { useAgents } from '../../stores/agents'
 import AccountsCard from '../agents/AccountsCard.vue'
@@ -18,6 +18,7 @@ async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
     const ok = await confirmAction({ title: `Drain ${accountName(account)}?`, body: 'Running work finishes; no new runs start on this account until you resume it.', confirmLabel: 'Drain account' })
     if (!ok) return
   }
+  if (state === 'available') await approveAccountCapacity(account.id)
   await agents.setAccount(account, state)
 }
 async function refresh() {

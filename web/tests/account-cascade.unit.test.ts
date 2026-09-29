@@ -51,6 +51,14 @@ describe('account catalog contract', () => {
     expect(isAccountCatalog({ hosts: [{ id: 'mac', harnesses: [{ harness: 'codex', installed: true }] }], models: [] })).toBe(false)
   })
 
+  it('accepts percent readings and structured first-run waits without inventing headroom', () => {
+    const waiting = account({ available: false, remaining_fraction: null, windows: [{ ...window(5), unit: 'percent', provisional: true }], wait: { code: 'reading', run_now_allowed: false } })
+    expect(isAccountCatalog(catalog([waiting]))).toBe(true)
+    const view = presented(catalog([waiting])).view
+    expect(view.status.label).toBe('Waiting for the first run’s reading')
+    expect(view.status.detail).toContain('queue')
+  })
+
   it('fails closed when the catalog is missing, forbidden, or the wrong shape', async () => {
     expect(await fetchAccountCatalog('review-gate', '')).toMatchObject({ catalog: null, gap: 'family' })
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'Permission denied' }), { status: 403 })))

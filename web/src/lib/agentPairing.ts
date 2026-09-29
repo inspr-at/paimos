@@ -822,7 +822,7 @@ function setupProgress(view: PairingView): PairingProgress {
     return { phase: 'verify', title: 'Verification did not succeed', detail: reason || 'The verification run did not succeed.', next: 'The one-time allowance was not refilled. A new verification needs a new pairing approval.', renewsAuthority: false }
   }
   if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state))) {
-    return { phase: 'verify', title: 'Verification is running', detail: 'One short read-only run was approved for each selected harness. A later run on the computer is not a verification.', next: 'Further work needs a separate ongoing allowance. This page will not start another verification.', renewsAuthority: false }
+    return { phase: 'verify', title: 'Verification is running', detail: 'One short read-only run was approved for each selected harness. A later run on the computer is not a verification.', next: 'Ongoing work follows your account approval. This page will not start another verification.', renewsAuthority: false }
   }
   if (progress === 'provisioning' || progress === 'approved' || progress === 'not_started') {
     const consumed = view.state === 'redeemed'
@@ -1039,6 +1039,28 @@ export async function submitApproval(input: {
   if (!plan.ok) throw new PairingError(0, plan.message, { code: 'blocked', next: plan.next })
   const key = `approve:${input.view.request_id}:${JSON.stringify(plan.body)}`
   return oneFlight(key, () => personJson(`/agent-pairing/requests/${pathId(input.view.request_id)}/approve`, 'POST', plan.body, input.signal).then(parseView))
+}
+
+// Separate, idempotent permission grants. The pairing grant itself never
+// invents allowance windows or silently opts in on a later page visit.
+export async function approvePairedAccounts(view: PairingView, keys: readonly string[], permissions: PairingPermissions): Promise<string[]> {
+  if (!permissions.canSetOngoingLimits) throw new PairingError(403, 'Only a person who can manage accounts can allow agents.', { code: 'forbidden' })
+  const started = readEpoch
+  const saved: string[] = []
+  for (const key of keys) {
+    if (started !== readEpoch) throw sessionResetError()
+    const enrollment = view.enrollments.find(item => item.account_key === key && item.state === 'connected')
+    if (!enrollment) throw new PairingError(409, 'This account is not connected yet.', { code: 'blocked', savedAccountIds: saved, next: 'Retry account approval after setup finishes.' })
+    try {
+      await personJson(`/agent-accounts/${pathId(enrollment.account_id)}/capacity/approve`, 'POST', {})
+      if (started !== readEpoch) throw sessionResetError()
+      saved.push(enrollment.account_id)
+    } catch (error) {
+      if (started !== readEpoch) throw sessionResetError()
+      throw new PairingError(error instanceof PairingError ? error.status : 0, `Agent access for ${enrollment.label} was not confirmed.`, { code: 'approval_failed', savedAccountIds: saved, next: 'Retry account approval; the computer is already approved.' })
+    }
+  }
+  return saved
 }
 
 export async function denyPairing(view: PairingView, permissions: PairingPermissions, signal?: AbortSignal): Promise<PairingView> {

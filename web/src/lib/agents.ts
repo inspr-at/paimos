@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import type { CapacityWait } from './capacityWait.ts'
 import type { DeployTarget } from './deployTarget'
 // The agents workspace HTTP surface for a person's session: harness sessions and
 // their typed controls, runs, approvals, accounts with allowance windows, models
@@ -59,6 +60,7 @@ export interface AllowanceWindow extends AllowanceWrite {
   provisional?: boolean
 }
 export interface AgentAccount {
+  ongoing_use_approved?: boolean
   id: string; account_key: string; harness: string; daemon_id: string; label: string
   registered_by_principal_id: string; state: 'available' | 'draining' | 'unavailable'
   max_parallel_runs?: number; last_probe_at?: string | null; last_probe_ok?: boolean | null; created_at: string
@@ -70,6 +72,8 @@ export interface AgentAccount {
   windows?: AllowanceWindow[]
 }
 export interface AgentRun {
+  capacity_override?: '' | 'now'
+  wait?: CapacityWait
   id: string; work_order_id: string; agent_principal_id: string; model_profile_id?: string | null
   account_id?: string | null; status: 'queued' | 'starting' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'ownership_lost'
   requested_account_id?: string | null
@@ -108,6 +112,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
     const data = await response.json().catch(() => ({}))
     throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`, data)
   }
+  if (response.status === 204) return undefined as T
   return response.json()
 }
 const enc = encodeURIComponent
@@ -194,3 +199,6 @@ export function subscribeAgents(changed: () => void, connection: (live: boolean)
   for (const name of DELIVERY_EVENTS) stream.addEventListener(name, () => delivery())
   return () => stream.close()
 }
+
+export const approveAccountCapacity = (id: string) => request<void>(`/agent-accounts/${enc(id)}/capacity/approve`, 'POST', {})
+export const runNowOnce = (id: string) => request<AgentRun>(`/runs/${enc(id)}/capacity-override`, 'POST', { capacity_override: 'now' })

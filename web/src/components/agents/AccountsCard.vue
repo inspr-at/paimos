@@ -35,9 +35,10 @@ function allowanceRank(window: ReturnType<typeof bindingWindow>) {
   if (window.window.provisional) return 1.5
   return window.left
 }
+function agentsAllowed(account: AgentAccount) { return account.state === 'available' && account.ongoing_use_approved !== false }
 async function toggle(account: AgentAccount) {
   busy.value = account.id; error.value = ''
-  try { await props.set(account, account.state === 'draining' ? 'available' : 'draining') }
+  try { await props.set(account, agentsAllowed(account) ? 'draining' : 'available') }
   catch (e) { error.value = e instanceof Error ? e.message : 'The account did not change. Please try again.' }
   finally { busy.value = '' }
 }
@@ -151,7 +152,7 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
           <span class="spacer" />
           <span v-if="account.state !== 'available'" class="state-text">{{ stateLabel[account.state] }}</span>
           <button v-if="mayManage && editingId !== account.id" type="button" class="btn sm add-window" :aria-label="`Add allowance window for ${accountName(account)}`" :disabled="flight !== null || busy === account.id" @click="openAllowance(account.id)">Add allowance window</button>
-          <button v-if="admin && account.state !== 'unavailable'" type="button" class="btn sm ghost toggle" :disabled="busy === account.id" @click="toggle(account)">{{ account.state === 'draining' ? 'Resume' : 'Drain' }}</button>
+          <button v-if="mayManage" type="button" role="switch" class="btn sm toggle" :aria-label="`Agents may use it · ${accountName(account)}`" :aria-checked="agentsAllowed(account)" :disabled="busy === account.id" @click="toggle(account)"><span>Agents may use it</span><span class="switch-state">{{ agentsAllowed(account) ? 'On' : 'Off' }}</span></button>
         </div>
         <template v-if="window?.window.provisional">
           <p class="facts">
@@ -197,6 +198,9 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
 .account.unavailable .label { color: var(--ink-2); }
 .top { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-height: 24px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }
+.toggle { min-height: 44px; gap: 8px; }
+.switch-state { min-width: 30px; font-weight: 650; }
+.toggle[aria-checked="true"] { background: var(--row-selected); }
 .dot.draining { background: var(--gold); }
 .dot.unavailable { background: var(--st-closed); }
 .label { font-size: 13px; font-weight: 600; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
@@ -207,8 +211,8 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
 .account.unavailable .state-text { color: var(--ink-3); }
 .toggle, .add-window { height: 24px; padding: 0 8px; font-size: 12px; }
 .add-window { border-color: transparent; background: transparent; color: var(--teal-ink); }
-/* Per-account actions appear on the account the pointer or keyboard is on. */
-@media (hover: hover) { .account .toggle, .account .add-window { opacity: 0; } .account:hover .toggle, .account:focus-within .toggle, .account:hover .add-window, .account:focus-within .add-window { opacity: 1; } }
+/* Permission is always visible. The secondary manual editor stays on hover. */
+@media (hover: hover) and (min-width: 601px) { .account .add-window { opacity: 0; } .account:hover .add-window, .account:focus-within .add-window { opacity: 1; } }
 .meter { position: relative; height: 6px; margin: 9px 0 7px; border-radius: 999px; background: var(--skeleton); }
 .fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, var(--teal), var(--st-qa-fill)); }
 .fill.ahead { background: linear-gradient(90deg, var(--gold), var(--gold-2)); }

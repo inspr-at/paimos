@@ -593,11 +593,12 @@ const shots: Shot[] = [
     await page.waitForTimeout(300)
   } },
   { screen: 'pairing', state: 'review', setup: pairingSetup, act: pairingReview },
-  { screen: 'pairing', state: 'ongoing-limits', setup: pairingSetup, act: async page => {
+  { screen: 'pairing', state: 'ongoing-use', setup: pairingSetup, act: async page => {
     await pairingReview(page)
     await page.getByRole('checkbox', { name: 'Connect Cursor' }).uncheck()
-    await page.getByRole('radio', { name: /Set ongoing limits/ }).check()
-    await expect(page.getByRole('spinbutton', { name: 'Requests', exact: true })).toBeVisible()
+    await expect(page.getByRole('radio', { name: /Let agents use these accounts/ })).toBeChecked()
+    await expect(page.getByRole('spinbutton', { name: 'Requests', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Connect computer', exact: true }).scrollIntoViewIfNeeded()
   } },
   { screen: 'pairing', state: 'setting-up', setup: pairingSetup, act: async page => {
     await pairingReview(page)
