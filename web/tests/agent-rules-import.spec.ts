@@ -162,7 +162,7 @@ test('import stays off while a set is being edited', async ({ page }) => {
   const rules = await setup(page)
   await page.getByRole('button', { name: 'Actions for Secrets' }).click()
   await page.getByRole('menuitem', { name: 'Edit rules' }).click()
-  await page.getByRole('checkbox', { name: 'Record the source. is on' }).uncheck()
+  await page.getByRole('checkbox', { name: 'Record the source. in Secrets is on' }).uncheck()
   const importButton = page.getByRole('button', { name: 'Import' })
   await expect(importButton).toHaveAttribute('aria-disabled', 'true')
   await expect(importButton).toHaveAttribute('data-tip', 'Save or cancel the set you are editing before importing.')
