@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/deploytarget"
 )
 
 func TestRemoteTelemetryErrorClassification(t *testing.T) {
@@ -277,7 +279,7 @@ func TestRemoteRunToolsUseScopedExistingRoutes(t *testing.T) {
 	if err := r.Evidence(ctx, "order", "run", "criterion", "tests pass"); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RequestApproval(ctx, "run", "git.push", "reason", "2026-09-26T18:00:00Z"); err != nil {
+	if err := r.RequestApproval(ctx, "run", ApprovalRequest{Scope: "git.push", Rationale: "reason", ExpiresAt: "2026-09-26T18:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.ReplyInbox(ctx, "message", "sender", "answer", "reply-1"); err != nil {
@@ -380,5 +382,47 @@ func TestRemoteManagedHarnessContract(t *testing.T) {
 		if !seen[path] {
 			t.Errorf("missing %s", path)
 		}
+	}
+}
+
+func TestRemoteDeployApprovalBinding(t *testing.T) {
+	const release = "55555555-5555-4555-8555-555555555555"
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/approvals" {
+			t.Errorf("unexpected route %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	remote := NewRemote(server.URL, "scoped-key")
+	for _, scope := range []string{"journey.deploy", "stage.deploy"} {
+		in := ApprovalRequest{Scope: scope, Rationale: "upgrade", ExpiresAt: "2999-01-01T00:00:00Z", ReleaseNodeID: release, Target: &deploytarget.Target{Environment: "production", Service: "aeon", Change: "upgrade", Image: "aeon:v2"}}
+		if err := remote.RequestApproval(t.Context(), "bound-run", in); err != nil {
+			t.Fatal(err)
+		}
+		body := bodies[len(bodies)-1]
+		target, ok := body["target"].(map[string]any)
+		if !ok || target["environment"] != "production" || target["image"] != "aeon:v2" || body["run_id"] != "bound-run" || body["resource_kind"] != "node" || body["resource_id"] != release || body["scope"] != scope {
+			t.Fatalf("deploy approval wire binding: %+v", body)
+		}
+		in.Target = nil
+		in.ReleaseNodeID = ""
+		if err := remote.RequestApproval(t.Context(), "bound-run", in); err != nil {
+			t.Fatal("targetless approval rejected", err)
+		}
+		legacy := bodies[len(bodies)-1]
+		if legacy["resource_kind"] != "run" || legacy["resource_id"] != "bound-run" || legacy["target"] != nil {
+			t.Fatalf("legacy request changed: %+v", legacy)
+		}
+	}
+	if len(bodies) != 4 {
+		t.Fatalf("unexpected requests: %d", len(bodies))
 	}
 }

@@ -20,12 +20,13 @@ import (
 )
 
 type fakeRunTools struct {
-	comments  []string
-	status    string
-	criterion string
-	evidence  string
-	approval  string
-	reply     string
+	comments        []string
+	status          string
+	criterion       string
+	evidence        string
+	approval        string
+	approvalRequest ApprovalRequest
+	reply           string
 }
 
 func (f *fakeRunTools) WorkOrder(context.Context, string) (WorkOrder, error) {
@@ -48,8 +49,9 @@ func (f *fakeRunTools) Evidence(_ context.Context, id, run, criterion, ref strin
 	f.evidence = id + ":" + run + ":" + criterion + ":" + ref
 	return nil
 }
-func (f *fakeRunTools) RequestApproval(_ context.Context, run, scope, rationale, expiry string) error {
-	f.approval = run + ":" + scope
+func (f *fakeRunTools) RequestApproval(_ context.Context, run string, in ApprovalRequest) error {
+	f.approval = run + ":" + in.Scope
+	f.approvalRequest = in
 	return nil
 }
 func (f *fakeRunTools) ReplyInbox(_ context.Context, id, recipient, body, key string) error {
@@ -124,6 +126,16 @@ func TestManagedToolsRunBinding(t *testing.T) {
 	if len(f.comments) != 1 || f.comments[0] != "order-a:progress" || f.status != "order-a:blocked" || !doneRequested || f.evidence != "order-a:run-a:11111111-1111-1111-1111-111111111111:tests pass" {
 		t.Fatalf("wrong binding: %+v", f)
 	}
+	for _, scope := range []string{"journey.deploy", "stage.deploy"} {
+		call("aeon_request_approval", map[string]any{"scope": scope, "rationale": "Deploy"}, false)
+		if f.approval != "run-a:"+scope || f.approvalRequest.Target != nil {
+			t.Fatal("targetless MCP request changed")
+		}
+		call("aeon_request_approval", map[string]any{"scope": scope, "rationale": "Deploy", "release_node_id": "55555555-5555-4555-8555-555555555555", "target": map[string]any{"hosts": []string{"edge-1"}, "service": "aeon", "change": "Update"}}, false)
+		if f.approvalRequest.Target == nil || f.approvalRequest.Target.Hosts[0] != "edge-1" || f.approvalRequest.ReleaseNodeID == "" {
+			t.Fatal("MCP target lost")
+		}
+	}
 	active = false
 	call("aeon_write", map[string]any{"file_path": "source.txt", "content": "late"}, true)
 	call("aeon_read", map[string]any{"file_path": "source.txt"}, true)
@@ -177,7 +189,7 @@ func (a *doneToolAPI) SetWorkStatus(_ context.Context, id string, rev int64, sta
 }
 func (*doneToolAPI) CheckCriterion(context.Context, string, string, bool) error     { return nil }
 func (*doneToolAPI) Evidence(context.Context, string, string, string, string) error { return nil }
-func (*doneToolAPI) RequestApproval(context.Context, string, string, string, string) error {
+func (*doneToolAPI) RequestApproval(context.Context, string, ApprovalRequest) error {
 	return nil
 }
 func (*doneToolAPI) ReplyInbox(context.Context, string, string, string, string) error { return nil }

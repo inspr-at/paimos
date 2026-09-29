@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -24,25 +25,29 @@ type Approval struct {
 	AgentPrincipalID     string  `json:"agent_principal_id"`
 	AgentName            *string `json:"agent_name,omitempty"`
 	projectID            *string
-	Risk                 string    `json:"risk"`
-	Scope                string    `json:"scope"`
-	ResourceKind         string    `json:"resource_kind"`
-	ResourceID           *string   `json:"resource_id"`
-	RunID                *string   `json:"run_id"`
-	Rationale            string    `json:"rationale"`
-	ExpiresAt            time.Time `json:"expires_at"`
-	ProposedAt           time.Time `json:"proposed_at"`
-	Decision             *string   `json:"decision"`
-	DecidedByPrincipalID *string   `json:"decided_by_principal_id"`
+	Risk                 string               `json:"risk"`
+	Scope                string               `json:"scope"`
+	ResourceKind         string               `json:"resource_kind"`
+	ResourceID           *string              `json:"resource_id"`
+	RunID                *string              `json:"run_id"`
+	Rationale            string               `json:"rationale"`
+	ExpiresAt            time.Time            `json:"expires_at"`
+	ProposedAt           time.Time            `json:"proposed_at"`
+	Decision             *string              `json:"decision"`
+	DecidedByPrincipalID *string              `json:"decided_by_principal_id"`
+	Target               *deploytarget.Target `json:"target,omitempty"`
+	TargetDigestSHA256   string               `json:"target_digest_sha256,omitempty"`
 }
 
 type proposal struct {
-	Scope        string    `json:"scope"`
-	ResourceKind string    `json:"resource_kind"`
-	ResourceID   *string   `json:"resource_id"`
-	RunID        *string   `json:"run_id"`
-	Rationale    string    `json:"rationale"`
-	ExpiresAt    time.Time `json:"expires_at"`
+	Scope              string               `json:"scope"`
+	ResourceKind       string               `json:"resource_kind"`
+	ResourceID         *string              `json:"resource_id"`
+	RunID              *string              `json:"run_id"`
+	Rationale          string               `json:"rationale"`
+	ExpiresAt          time.Time            `json:"expires_at"`
+	Target             *deploytarget.Target `json:"target,omitempty"`
+	TargetDigestSHA256 string               `json:"-"`
 }
 
 type decisionWrite struct {
@@ -188,6 +193,15 @@ func validateProposal(in *proposal) error {
 	}
 	if in.ResourceKind == "run" && in.RunID != nil && *in.RunID != *in.ResourceID {
 		return fail(http.StatusBadRequest, "run_id does not match resource_id")
+	}
+	if in.Target != nil && (in.Scope == "journey.deploy" || in.Scope == "stage.deploy") {
+		var err error
+		in.Target, in.TargetDigestSHA256, err = deploytarget.Normalize(in.Target)
+		if err != nil {
+			return fail(http.StatusBadRequest, err.Error())
+		}
+	} else if in.Target != nil {
+		return fail(http.StatusBadRequest, "target is only used for deploy approvals")
 	}
 	return nil
 }

@@ -4,9 +4,13 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
+	"strings"
+
+	"github.com/inspr-at/paimos/internal/deploytarget"
 )
 
 // Aeon stage handoffs are server-owned and fenced. The classic credential,
@@ -14,8 +18,8 @@ import (
 func (rt *runtime) cmdExternalStage() *Command {
 	var project, release, stage, operation, key string
 	var revision int
-	var reportFile string
-	request := &Command{Name: "request", Short: "Request a server-fenced stage handoff", Use: "external-stage request --project KEY --release KEY --stage deploy|access --operation OP --expected-journey-revision N --idempotency-key KEY",
+	var reportFile, targetFile string
+	request := &Command{Name: "request", Short: "Request a server-fenced stage handoff", Use: "external-stage request --project KEY --release KEY --stage deploy|access --operation OP --expected-journey-revision N --idempotency-key KEY [--target-file JSON]",
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "project key")
 			fs.string(&release, "release", 0, "release node key")
@@ -23,6 +27,7 @@ func (rt *runtime) cmdExternalStage() *Command {
 			fs.string(&operation, "operation", 0, "prepare, apply, deploy, or verify")
 			fs.int(&revision, "expected-journey-revision", "journey revision")
 			fs.string(&key, "idempotency-key", 0, "request idempotency key")
+			fs.string(&targetFile, "target-file", 0, "explicit DeployTarget JSON file or - for stdin; optional for deploy, omitted otherwise")
 		}, run: func([]string) error {
 			if project == "" || release == "" || key == "" || revision < 1 {
 				return usagef("--project, --release, --expected-journey-revision and --idempotency-key are required")
@@ -35,6 +40,16 @@ func (rt *runtime) cmdExternalStage() *Command {
 			default:
 				return usagef("invalid --operation")
 			}
+			var target *deploytarget.Target
+			if operation == "deploy" && targetFile != "" {
+				var err error
+				target, err = rt.readDeployTarget(targetFile)
+				if err != nil {
+					return err
+				}
+			} else if targetFile != "" {
+				return usagef("--target-file is only valid for deploy")
+			}
 			p, err := rt.projectNode(project)
 			if err != nil {
 				return err
@@ -44,6 +59,9 @@ func (rt *runtime) cmdExternalStage() *Command {
 				return err
 			}
 			body := map[string]any{"project_node_id": p.ID, "release_node_id": r.ID, "stage": stage, "operation": operation, "expected_journey_revision": revision, "idempotency_key": key}
+			if target != nil {
+				body["target"] = target
+			}
 			var result map[string]any
 			if err := rt.do(http.MethodPost, "/api/stage-handoffs", body, &result); err != nil {
 				return err
@@ -149,4 +167,39 @@ func (rt *runtime) cmdExternalStage() *Command {
 			return notYet("Aeon resolves the stage owner from the installed first-party plugin")
 		}},
 	}}
+}
+
+// readDeployTarget accepts only a bounded explicit document. Unknown fields are
+// errors so misspelled destination or change fields cannot silently disappear.
+func (rt *runtime) readDeployTarget(path string) (*deploytarget.Target, error) {
+	var input io.Reader = rt.stdin
+	if path != "-" {
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, rt.fail(err, "")
+		}
+		defer file.Close()
+		input = file
+	}
+	raw, err := io.ReadAll(io.LimitReader(input, (32<<10)+1))
+	if err != nil {
+		return nil, rt.fail(err, "")
+	}
+	if len(raw) > 32<<10 {
+		return nil, usagef("target is too large")
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	var target *deploytarget.Target
+	if err := decoder.Decode(&target); err != nil {
+		return nil, usagef("invalid target JSON: %v", err)
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return nil, usagef("target must contain one JSON object")
+	}
+	normalized, _, err := deploytarget.Normalize(target)
+	if err != nil {
+		return nil, usagef("%v", err)
+	}
+	return normalized, nil
 }

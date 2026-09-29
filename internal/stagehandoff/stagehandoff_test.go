@@ -17,6 +17,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/plugins/fence"
@@ -351,6 +352,10 @@ func TestRegistryRejectsInvalidManifests(t *testing.T) {
 	}
 }
 func TestPharosAdmissionAndTenantFence(t *testing.T) {
+	t.Run("legacy", func(t *testing.T) { testPharosOptionalTarget(t, false) })
+	t.Run("named", func(t *testing.T) { testPharosOptionalTarget(t, true) })
+}
+func testPharosOptionalTarget(t *testing.T, named bool) {
 	m, p, project, release, bearer := fixture(t)
 	handler := (&httpapi.Server{Modules: []httpapi.Module{m}}).Handler()
 	ctx := context.Background()
@@ -421,6 +426,13 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 		t.Fatalf("Janus prepare result: %d %s", resp.Code, resp.Body.String())
 	}
 	in := RequestWrite{ProjectNodeID: project, ReleaseNodeID: release, Stage: "deploy", Operation: "deploy", ExpectedJourneyRevision: 1, IdempotencyKey: "deploy-1"}
+	if named {
+		in.Target, in.TargetDigestSHA256, err = deploytarget.Normalize(&deploytarget.Target{Hosts: []string{"edge-1"}, Environment: "production", Service: "pharos", Change: "Update image"})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	var h Handoff
 	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
@@ -511,6 +523,15 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if verification.TargetDigestSHA256 != h.TargetDigestSHA256 {
+		t.Fatal("verify lost deploy digest")
+	}
+	if named && (verification.Target == nil || verification.Target.Hosts[0] != "edge-1") {
+		t.Fatal("verify lost deploy target")
+	}
+	if !named && verification.Target != nil {
+		t.Fatal("invented verify target")
 	}
 	verificationEvidence := EvidenceWrite{Sequence: 1, Kind: "verification", Outcome: "succeeded", ObservedAt: time.Now().UTC(), AuthorityEpoch: verification.AuthorityEpoch, Workflow: stringPtr("verify"), Environment: stringPtr("production"), Artifact: &a}
 	if resp := routedTestRequest(t, handler, p, bearer, "/api/stage-handoffs/"+verification.ID+"/evidence", verificationEvidence); resp.Code != http.StatusCreated {

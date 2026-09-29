@@ -15,28 +15,31 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/requirements"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 type eventSnap struct {
-	ProjectNodeID              string   `json:"project_node_id"`
-	Profile                    string   `json:"profile"`
-	Revision                   int64    `json:"revision"`
-	Decision                   string   `json:"decision"`
-	BriefConfirmed             bool     `json:"brief_confirmed"`
-	Disposable                 bool     `json:"disposable"`
-	RequirementsRevision       int64    `json:"requirements_revision"`
-	AgreedRequirementsRevision int64    `json:"agreed_requirements_revision"`
-	CurrentReleaseID           *string  `json:"current_release_id"`
-	ReleaseState               string   `json:"release_state,omitempty"`
-	Stage                      string   `json:"stage"`
-	Action                     string   `json:"action,omitempty"`
-	ApprovalRequestID          *string  `json:"approval_request_id,omitempty"`
-	ApprovedCapHours           string   `json:"approved_cap_hours,omitempty"`
-	Reason                     string   `json:"reason,omitempty"`
-	SupersededReleaseIDs       []string `json:"superseded_release_ids,omitempty"`
+	ProjectNodeID              string               `json:"project_node_id"`
+	Profile                    string               `json:"profile"`
+	Revision                   int64                `json:"revision"`
+	Decision                   string               `json:"decision"`
+	BriefConfirmed             bool                 `json:"brief_confirmed"`
+	Disposable                 bool                 `json:"disposable"`
+	RequirementsRevision       int64                `json:"requirements_revision"`
+	AgreedRequirementsRevision int64                `json:"agreed_requirements_revision"`
+	CurrentReleaseID           *string              `json:"current_release_id"`
+	ReleaseState               string               `json:"release_state,omitempty"`
+	Stage                      string               `json:"stage"`
+	Action                     string               `json:"action,omitempty"`
+	ApprovalRequestID          *string              `json:"approval_request_id,omitempty"`
+	ApprovedCapHours           string               `json:"approved_cap_hours,omitempty"`
+	Reason                     string               `json:"reason,omitempty"`
+	SupersededReleaseIDs       []string             `json:"superseded_release_ids,omitempty"`
+	DeployTarget               *deploytarget.Target `json:"deploy_target,omitempty"`
+	DeployTargetDigestSHA256   string               `json:"deploy_target_digest_sha256,omitempty"`
 }
 
 type approvalRow struct {
@@ -477,7 +480,7 @@ func loadGates(ctx context.Context, tx pgx.Tx, f *facts) error {
 	// decision, unexpired request, and an unrevoked, unexpired grant. Prefer the
 	// live gate's identity over newer expired or revoked history.
 	rows, err := tx.Query(ctx, `
-		SELECT g.gate, coalesce(g.release_node_id::text, ''), g.approval_request_id::text,
+		SELECT g.gate, coalesce(g.release_node_id::text, ''), g.approval_request_id::text, a_target.target, a_target.target_digest_sha256,
 		       EXISTS (
 		         SELECT 1 FROM journey_gates live_gate
 		         JOIN approval_requests a ON a.tenant_id=live_gate.tenant_id AND a.id=live_gate.approval_request_id
@@ -492,6 +495,7 @@ func loadGates(ctx context.Context, tx pgx.Tx, f *facts) error {
 		           AND grant_row.revoked_at IS NULL AND grant_row.valid_until>now()
 		       ) AS live
 		FROM journey_gates g
+		JOIN approval_requests a_target ON a_target.tenant_id=g.tenant_id AND a_target.id=g.approval_request_id
 		WHERE g.project_node_id = $1::uuid
 		ORDER BY g.gate, g.release_node_id, live DESC, g.created_at DESC, g.id DESC`, f.ProjectID, requirementsScope(f.Revision, f.RequirementsDigest))
 	if err != nil {
@@ -506,8 +510,10 @@ func loadGates(ctx context.Context, tx pgx.Tx, f *facts) error {
 	}
 	for rows.Next() {
 		var gate, release, approval string
+		var target *deploytarget.Target
+		var targetDigest *string
 		var live bool
-		if err := rows.Scan(&gate, &release, &approval, &live); err != nil {
+		if err := rows.Scan(&gate, &release, &approval, &target, &targetDigest, &live); err != nil {
 			return err
 		}
 		if seen[gate+"\x00"+release] {
@@ -539,6 +545,10 @@ func loadGates(ctx context.Context, tx pgx.Tx, f *facts) error {
 		case GateDeploy:
 			if release == current && f.DeployGateID == "" {
 				f.DeployGateID = approval
+				f.DeployTarget = target
+				if targetDigest != nil {
+					f.DeployTargetDigestSHA256 = *targetDigest
+				}
 			}
 		case GateAccess:
 			if release == current && f.AccessGateID == "" {
@@ -555,7 +565,7 @@ func loadOffers(ctx context.Context, tx pgx.Tx, f *facts) error {
 		ids = append(ids, f.Release.ID)
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT r.scope, r.resource_id::text, r.id::text,
+		SELECT r.scope, r.resource_id::text, r.id::text, r.target, r.target_digest_sha256,
 		       coalesce(d.decision, ''), coalesce(d.decided_by_principal_id::text, ''),
 		       r.expires_at, g.valid_until,
 		       r.expires_at > now(),
@@ -581,10 +591,12 @@ func loadOffers(ctx context.Context, tx pgx.Tx, f *facts) error {
 	seen := map[string]int{}
 	for rows.Next() {
 		var scope, resource, id, decision, decider string
+		var target *deploytarget.Target
+		var targetDigest *string
 		var requestExpiry time.Time
 		var grantExpiry *time.Time
 		var open, grantExists, revoked, grantLive, consumed bool
-		if err := rows.Scan(&scope, &resource, &id, &decision, &decider, &requestExpiry, &grantExpiry, &open, &grantExists, &revoked, &grantLive, &consumed); err != nil {
+		if err := rows.Scan(&scope, &resource, &id, &target, &targetDigest, &decision, &decider, &requestExpiry, &grantExpiry, &open, &grantExists, &revoked, &grantLive, &consumed); err != nil {
 			return err
 		}
 		// loadGates owns consumed standing evidence. It must never hide a
@@ -599,6 +611,12 @@ func loadOffers(ctx context.Context, tx pgx.Tx, f *facts) error {
 			expires = *grantExpiry
 		}
 		offer := gateOffer{ID: id, DecidedBy: decider, Live: state == "approved_live", Consumed: consumed, State: state, ExpiresAt: expires.UTC().Format(time.RFC3339)}
+		if scope == ScopeDeploy {
+			offer.Target = target
+			if targetDigest != nil {
+				offer.TargetDigestSHA256 = *targetDigest
+			}
+		}
 		// The newest unconsumed request wins within each class.
 		rank := 1
 		switch {
@@ -910,6 +928,8 @@ func snapFrom(f facts, view Journey, action, approvalID, cap, reason string, sup
 		ApprovedCapHours:           cap,
 		Reason:                     reason,
 		SupersededReleaseIDs:       superseded,
+		DeployTarget:               f.DeployTarget,
+		DeployTargetDigestSHA256:   f.DeployTargetDigestSHA256,
 	}
 }
 

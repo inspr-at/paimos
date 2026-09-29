@@ -4865,14 +4865,14 @@ components:
   # Additive optional response fields require a minor bump; removals, type changes,
   # and newly required fields require a major bump. Never add a version body field.
   headers:
-    StageHandoffsContract: {description: Stage handoff response contract, schema: {type: string, enum: ['stage-handoffs/1.0']}}
+    StageHandoffsContract: {description: Stage handoff response contract, schema: {type: string, enum: ['stage-handoffs/1.1']}}
     StageEvidenceContract: {description: Stage evidence response contract, schema: {type: string, enum: ['stage-evidence/1.0']}}
     StageResultContract: {description: Stage result response contract, schema: {type: string, enum: ['stage-result/1.0']}}
     StageLaunchContract: {description: Stage launch response contract, schema: {type: string, enum: ['stage-launch/1.0']}}
-    JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.2']}}
+    JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.3']}}
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
-    ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.0']}}
+    ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
     HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.1']}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
@@ -5740,6 +5740,8 @@ components:
         handoff_id: {type: [string, 'null'], format: uuid}
         handoff_attempt: {type: [integer, 'null'], minimum: 1}
         handoff_authority_epoch: {type: [integer, 'null'], minimum: 1}
+        target: {$ref: '#/components/schemas/DeployTarget', description: Recorded deployment target metadata}
+        target_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Informational target digest}
     JourneyNextAction:
       type: object
       required: [key, label, stage, available]
@@ -5989,6 +5991,7 @@ components:
         operation: {type: string, enum: [prepare, apply, deploy, verify]}
         expected_journey_revision: {type: integer, minimum: 1}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
+        target: {$ref: '#/components/schemas/DeployTarget', description: Optional for operation deploy; omit for other operations}
     StageHandoff:
       type: object
       required: [id, project_node_id, release_node_id, stage, operation, plugin_id, attempt, authority_epoch, superseded_by, authority_open, state, expires_at, evidence_ceiling, plan_digest, predecessor_digest, context_digest, prerequisite_seal_sha256]
@@ -6021,6 +6024,8 @@ components:
             it as authority.
         result: {$ref: '#/components/schemas/StageResult'}
         admission: {$ref: '#/components/schemas/StageHandoffAdmissionState'}
+        target: {$ref: '#/components/schemas/DeployTarget', description: Recorded deployment target metadata}
+        target_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Informational target digest}
     StageHandoffAdmissionState:
       type: object
       required: [admission_id, epoch, expires_at]
@@ -7847,6 +7852,21 @@ components:
         effective_model: {type: string}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
         error_code: {type: string, enum: [event_stream_bound, app_server_protocol, child_exit_failed, turn_failed, child_stop_failed, ownership_lost, reporter_unavailable, workspace_conflict, decision_refused]}
+    DeployTarget:
+      type: object
+      additionalProperties: false
+      required: [service, change]
+      description: When supplied, a target requires a nonempty hosts array or environment. Canonical hosts are sorted before digesting. All fields are explicit caller input; no destination is inferred.
+      anyOf:
+        - required: [hosts]
+          properties: {hosts: {minItems: 1}}
+        - required: [environment]
+      properties:
+        hosts: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 255}}
+        environment: {type: string, minLength: 1, maxLength: 128}
+        service: {type: string, minLength: 1, maxLength: 128}
+        image: {type: string, minLength: 1, maxLength: 512}
+        change: {type: string, minLength: 1, maxLength: 1000}
     ApprovalProposal:
       type: object
       required: [scope, resource_kind, rationale, expires_at]
@@ -7857,6 +7877,7 @@ components:
         run_id: {type: string, format: uuid}
         rationale: {type: string, minLength: 1}
         expires_at: {type: string, format: date-time}
+        target: {$ref: '#/components/schemas/DeployTarget', description: Optional for journey.deploy and stage.deploy; omit for other scopes. Omission preserves existing approval behavior}
     ApprovalDecisionWrite:
       type: object
       required: [decision]
@@ -7876,6 +7897,7 @@ components:
             proposed_at: {type: string, format: date-time}
             decision: {type: [string, 'null'], enum: [approved, denied, null]}
             decided_by_principal_id: {type: [string, 'null'], format: uuid}
+            target_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Digest of the recorded target; informational only}
     ModelProfileWrite:
       type: object
       required: [slug, version, harness, family, model, effort, tier]

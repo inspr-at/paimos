@@ -35,6 +35,12 @@ func testPtr(s *string) string {
 }
 
 func TestJourneyGateKeyPharosHandoffRoundtrip(t *testing.T) {
+	for _, named := range []bool{false, true} {
+		t.Run(fmt.Sprint("target=", named), func(t *testing.T) { testJourneyTargetRoundtrip(t, named) })
+	}
+}
+func testJourneyTargetRoundtrip(t *testing.T, named bool) {
+	const targetJSON = `{"hosts":["edge-1"],"environment":"production","service":"pharos","change":"Update image"}`
 	f := newFixture(t)
 	project := f.node(t, "project", "PRJ-36", "Disposable Pharos fixture")
 	release := f.node(t, "release", "REL-1", "Release")
@@ -93,6 +99,9 @@ func TestJourneyGateKeyPharosHandoffRoundtrip(t *testing.T) {
 	}
 	for _, gate := range []struct{ scope, action string }{{"journey.candidate", "approve_candidate"}, {"journey.deploy", "approve_deploy"}} {
 		body := fmt.Sprintf(`{"scope":%q,"resource_kind":"node","resource_id":%q,"rationale":"Disposable Pharos roundtrip gate","expires_at":%q}`, gate.scope, release, time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
+		if named && gate.scope == "journey.deploy" {
+			body = strings.TrimSuffix(body, "}") + `,"target":` + targetJSON + `}`
+		}
 		proposed := callAgent(http.MethodPost, "/api/approvals", body)
 		if proposed.Code != http.StatusCreated {
 			t.Fatalf("propose %s: %d %s", gate.scope, proposed.Code, proposed.Body.String())
@@ -122,7 +131,15 @@ func TestJourneyGateKeyPharosHandoffRoundtrip(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	for _, stage := range view.Stages {
+		if stage.Key == "deploy" && named && (stage.Target == nil || stage.Target.Hosts[0] != "edge-1" || len(stage.TargetDigestSHA256) != 64) {
+			t.Fatalf("stage lost approved target: %+v", stage)
+		}
+	}
 	request := fmt.Sprintf(`{"project_node_id":%q,"release_node_id":%q,"stage":"deploy","operation":"deploy","expected_journey_revision":%d,"idempotency_key":"pharos-roundtrip"}`, project, release, view.Revision)
+	if named {
+		request = strings.TrimSuffix(request, "}") + `,"target":` + targetJSON + `}`
+	}
 	handoff := callAgent(http.MethodPost, "/api/stage-handoffs", request)
 	if handoff.Code != http.StatusCreated {
 		t.Fatalf("Pharos deploy handoff: %d %s", handoff.Code, handoff.Body.String())
@@ -130,6 +147,12 @@ func TestJourneyGateKeyPharosHandoffRoundtrip(t *testing.T) {
 	var created stagehandoff.Handoff
 	if err := json.Unmarshal(handoff.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
+	}
+	if named && (created.Target == nil || created.Target.Hosts[0] != "edge-1" || len(created.TargetDigestSHA256) != 64) {
+		t.Fatalf("handoff lost target: %+v", created)
+	}
+	if !named && (created.Target != nil || created.TargetDigestSHA256 != "") {
+		t.Fatal("invented target")
 	}
 	if created.ID == "" || created.PluginID != "pharos" || created.Stage != "deploy" || created.Operation != "deploy" {
 		t.Fatalf("wrong handoff: %+v", created)

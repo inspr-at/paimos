@@ -4,6 +4,7 @@
 // face only shows them and sends the one action with the journey's revision.
 import { api, APIError, getKinds, listNodes, type ListItem, type WorkNode } from './api.ts'
 import type { Approval } from './agents.ts'
+import type { DeployTarget } from './deployTarget.ts'
 import { statusMeta } from './work.ts'
 
 export const STAGES = ['inspire', 'shape', 'requirements', 'plan', 'build', 'deploy', 'access', 'live'] as const
@@ -29,6 +30,8 @@ export type GateOfferState = 'pending' | 'approved_live' | 'expired' | 'revoked'
 export interface JourneyStage {
   key: Stage; state: StageState; gate_scope: string; gate_approval_id: string | null; gate_live: boolean; handoff_id: string | null
   gate_offer_id?: string; gate_offer_state?: GateOfferState; gate_offer_expires_at?: string
+  target?: DeployTarget | null
+  target_digest_sha256?: string
 }
 export type ActionKey = 'confirm_brief' | 'go' | 'reduce_scope' | 'park' | 'drop' | 'reopen' | 'open_first_release' | 'start_build' | 'mark_candidate'
   | 'approve_candidate' | 'reject_candidate' | 'approve_deploy' | 'renew_candidate' | 'renew_deploy' | 'retry_deploy' | 'approve_permit' | 'plan_next_release'
@@ -83,6 +86,8 @@ export interface Handoff {
   id: string; project_node_id: string; release_node_id: string; stage: 'deploy' | 'access'; operation: 'prepare' | 'apply' | 'deploy' | 'verify'
   plugin_id: string; attempt: number; authority_epoch: number; state: 'requested' | 'active' | 'blocked' | 'succeeded' | 'failed' | 'revoked'
   expires_at: string; result?: { outcome: 'succeeded' | 'failed'; blocker_code?: string; completed_at: string }
+  target?: DeployTarget | null
+  target_digest_sha256?: string
 }
 
 // ---------- Requests ----------
@@ -315,20 +320,25 @@ export interface JourneyConfirmation<Action extends ActionKey | 'approve_require
   projectId: string; revision: number; releaseId: string | null; action: Action; nextKey: NextKey
   identity: string; approval: Approval | null
 }
+function targetIdentity(target: DeployTarget | null | undefined, digest: string | null | undefined) {
+  return [target?.hosts ?? [], target?.environment ?? '', target?.service ?? '', target?.image ?? '', target?.change ?? '', digest ?? '']
+}
 function decisionIdentity(journey: Journey): string {
+  const deploy = journey.next_action.stage === 'deploy' ? journey.stages.find(stage => stage.key === 'deploy') : undefined
   return JSON.stringify([
     journey.project_node_id, journey.revision, journey.profile, journey.stage, journey.current_release_id,
     journey.requirements_revision, journey.requirements_digest_sha256, journey.requirements_approval_scope,
+    targetIdentity(deploy?.target, deploy?.target_digest_sha256),
     journey.next_action.key, journey.next_action.renewal_action, journey.next_action.stage, journey.next_action.approval_request_id,
   ])
 }
 function requestIdentity(approval: Approval): string {
-  return JSON.stringify([approval.id, approval.scope, approval.resource_kind, approval.resource_id, approval.agent_principal_id, approval.run_id ?? null])
+  return JSON.stringify([approval.id, approval.scope, approval.resource_kind, approval.resource_id, approval.agent_principal_id, approval.run_id ?? null, targetIdentity(approval.target, approval.target_digest_sha256)])
 }
 export function captureJourneyConfirmation<Action extends ActionKey | 'approve_requirements'>(journey: Journey, action: Action, approval: Approval | null): JourneyConfirmation<Action> {
   return {
     projectId: journey.project_node_id, revision: journey.revision, releaseId: journey.current_release_id,
-    action, nextKey: journey.next_action.key, identity: decisionIdentity(journey), approval: approval ? { ...approval } : null,
+    action, nextKey: journey.next_action.key, identity: decisionIdentity(journey), approval: approval ? { ...approval, target: approval.target ? { ...approval.target, hosts: approval.target.hosts ? [...approval.target.hosts] : undefined } : approval.target } : null,
   }
 }
 export function matchesJourneyConfirmation(confirmation: JourneyConfirmation, journey: Journey | null | undefined, approvals: Approval[]): boolean {

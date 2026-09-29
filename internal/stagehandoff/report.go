@@ -180,7 +180,7 @@ func (m *Module) appendEvidence(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	if err != nil {
 		return Evidence{}, err
 	}
-	_, err = events.Append(ctx, tx, p, events.Change{Type: "stage_handoff.evidence_added", NodeID: &h.ReleaseNodeID, After: map[string]any{"handoff_id": id, "sequence": in.Sequence, "kind": in.Kind, "outcome": in.Outcome}})
+	_, err = events.Append(ctx, tx, p, events.Change{Type: "stage_handoff.evidence_added", NodeID: &h.ReleaseNodeID, After: withTargetEvidence(h, map[string]any{"handoff_id": id, "sequence": in.Sequence, "kind": in.Kind, "outcome": in.Outcome})})
 	return out, err
 }
 func contains(set []string, value string) bool {
@@ -318,7 +318,7 @@ func (m *Module) close(ctx context.Context, tx pgx.Tx, p tenant.Principal, autho
 		if err != nil {
 			return Result{}, err
 		}
-		_, err = events.Append(ctx, tx, p, events.Change{Type: "journey.release_transitioned", NodeID: &h.ReleaseNodeID, After: map[string]any{"release_node_id": h.ReleaseNodeID, "state": nextState, "handoff_id": h.ID}})
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "journey.release_transitioned", NodeID: &h.ReleaseNodeID, After: withTargetEvidence(h, map[string]any{"release_node_id": h.ReleaseNodeID, "state": nextState, "handoff_id": h.ID})})
 		if err != nil {
 			return Result{}, err
 		}
@@ -327,7 +327,7 @@ func (m *Module) close(ctx context.Context, tx pgx.Tx, p tenant.Principal, autho
 	if err != nil {
 		return Result{}, err
 	}
-	_, err = events.Append(ctx, tx, p, events.Change{Type: "stage_handoff.completed", NodeID: &h.ReleaseNodeID, After: map[string]any{"handoff_id": id, "outcome": in.Outcome, "terminal_sequence": in.TerminalSequence, "blocker_code": in.BlockerCode}})
+	_, err = events.Append(ctx, tx, p, events.Change{Type: "stage_handoff.completed", NodeID: &h.ReleaseNodeID, After: withTargetEvidence(h, map[string]any{"handoff_id": id, "outcome": in.Outcome, "terminal_sequence": in.TerminalSequence, "blocker_code": in.BlockerCode})})
 	if err != nil {
 		return Result{}, err
 	}
