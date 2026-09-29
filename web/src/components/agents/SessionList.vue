@@ -46,6 +46,7 @@ function toggleHistory() {
 const removal = useSessionRemoval()
 const current = computed(() => GROUPS.flatMap(g => props.groups[g.id]))
 const stale = computed(() => current.value.map(v => v.session).filter(s => isStale(s, props.now) && removal.canRemove(s)))
+const lineageName = (id: string) => [...current.value, ...(props.history ?? [])].find(v => v.session.id === id)?.name || 'lead session'
 const total = computed(() => GROUPS.reduce((sum, g) => sum + props.groups[g.id].length, 0))
 type Branch = SessionBranch<SessionView>
 const forest = computed(() => sessionForest(showRemoved.value ? props.history ?? [] : current.value, props.now))
@@ -259,7 +260,11 @@ function rowClick(event: MouseEvent, id: string) {
                 </span>
               </span>
             </RouterLink>
-            <span v-if="branch.children.length" class="worker-tools">
+            <span v-if="view.session.stopped_at && view.session.handed_over_to_id" class="lineage">
+              <RouterLink :to="`/agents/${view.session.handed_over_to_id}`" :title="`Handed over to ${lineageName(view.session.handed_over_to_id)}`">Handed over to {{ lineageName(view.session.handed_over_to_id) }}</RouterLink>
+              <button v-if="stoppedChildren(branch)" type="button" class="worker-toggle history-toggle" :aria-expanded="!!history[view.session.id]" :aria-label="`Show stopped workers of ${view.name}`" @click="toggleStopped(branch)">{{ stoppedChildren(branch) }} stopped</button>
+            </span>
+            <span v-else-if="branch.children.length" class="worker-tools">
               <button type="button" class="worker-toggle" :disabled="!candidates(branch).length" :aria-expanded="open" :aria-label="`${open ? 'Collapse' : 'Expand'} ${workerLabel(branch)} of ${view.name}: ${workingChildren(branch)} working`" @click="toggle(branch)">
                 <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: open }" />{{ workingChildren(branch) }} working
               </button>
@@ -267,6 +272,7 @@ function rowClick(event: MouseEvent, id: string) {
               <span aria-hidden="true"> · </span>
               <button type="button" class="worker-toggle history-toggle" :disabled="!stoppedChildren(branch)" :aria-expanded="!!history[view.session.id]" :aria-label="`${history[view.session.id] ? 'Hide' : 'Show'} stopped workers of ${view.name}: ${stoppedChildren(branch)} stopped`" @click="toggleStopped(branch)">{{ stoppedChildren(branch) }} stopped</button>
             </span>
+            <RouterLink v-if="view.session.adopted_from_id" class="lineage adopted" :to="`/agents/${view.session.adopted_from_id}`" :title="`Adopted from ${lineageName(view.session.adopted_from_id)}`">Adopted from {{ lineageName(view.session.adopted_from_id) }}</RouterLink>
           </span>
           <span role="cell" class="c-ticket">
             <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
@@ -339,6 +345,10 @@ function rowClick(event: MouseEvent, id: string) {
 </template>
 
 <style scoped>
+.lineage { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 3px 38px; font-size: 11px; color: var(--ink-2); }
+.lineage a, .lineage.adopted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lineage a:hover, .lineage.adopted:hover { text-decoration: underline; }
+.lineage .history-toggle { flex-shrink: 0; }
 .sessions { overflow: clip; container: sessions / inline-size; }
 .card-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 10px; }
 .card-head h2 { font-size: 15px; font-weight: 650; }
