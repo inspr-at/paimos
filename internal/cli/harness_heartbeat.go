@@ -292,7 +292,9 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 
 // noteHeartbeatSources records hashes of AGENTS.md and CLAUDE.md in the
 // registered worktree. Missing files record nothing. Refused files are skipped.
-// The request body is logical names, digests and sizes, never paths or contents.
+// The request carries only those root kinds, so the server keeps skills and
+// prompt templates from an earlier report. The body is logical names, digests
+// and sizes, never paths or contents.
 func (rt *runtime) noteHeartbeatSources(ctx context.Context, o heartbeatOptions, session *heartbeatSession) {
 	if session == nil || session.disk.SourcesRecorded || strings.TrimSpace(o.Worktree) == "" {
 		return

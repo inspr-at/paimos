@@ -18,20 +18,27 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 // Instruction provenance is append-only on the session. A worker may still post
-// allowlisted file and prompt-template identities. A rules receipt and heartbeat
-// registration also append: the merged rules version, published set versions
-// when that merge still matches, and hashes of AGENTS.md or CLAUDE.md when
-// those files are present. Rows never store file contents, rule text, secrets,
-// local paths, or a hash of a version identifier. rules_merged and rules_set
-// are server-recorded; the worker POST rejects them.
+// allowlisted file and prompt-template identities. A report replaces only the
+// kinds it carries, so a heartbeat of root files keeps skills and prompt
+// templates from an earlier report. A rules receipt appends the merged rules
+// version and, when one served manifest proves them, that manifest's set
+// versions. Rows never store file contents, rule text, secrets, local paths,
+// or a hash of a version identifier. rules_merged and rules_set are
+// server-recorded; the worker POST rejects them.
 
 const maxProvenanceItems = 16
-const maxAutomaticProvenanceItems = 64
+
+// A worker post holds at most maxProvenanceItems identities. Root files and
+// the prompt template can be recorded by a later report that does not replace
+// a skill-only post, so a revision can also carry those three singleton kinds.
+const maxLocalProvenanceItems = maxProvenanceItems + 3
+
 const maxProvenanceRevisions = 32
 const maxProvenanceBytes int64 = 1 << 20
 const maxInstructionSourceHits = 200
@@ -105,11 +112,23 @@ func (m *Module) recordProvenance(r *http.Request, tx pgx.Tx, p tenant.Principal
 	if err != nil {
 		return nil, err
 	}
-	// File posts replace file and prompt identities and keep server-recorded
-	// rule versions, so a later heartbeat cannot drop a receipt's sources.
-	return appendInstructionSources(ctx, tx, p, s, items, map[string]bool{
-		"agents": true, "claude": true, "skill": true, "prompt_template": true,
-	})
+	// Replace only the kinds this report carries. A heartbeat of AGENTS.md and
+	// CLAUDE.md keeps skills and prompt templates, and a later full report
+	// still replaces the kinds it names. Server-recorded rule versions stay
+	// until a receipt replaces them.
+	kinds := map[string]bool{}
+	for _, item := range items {
+		kinds[item.Kind] = true
+	}
+	return appendInstructionSources(ctx, tx, p, s, items, kinds)
+}
+
+// automaticProvenanceLimit is one merged identity, every set the rules budget
+// allows in one serve, and the local instruction files that can share the
+// revision. A valid receipt must fit; the merged identity is kept if a
+// combined set still overflows.
+func automaticProvenanceLimit() int {
+	return maxLocalProvenanceItems + 1 + rules.MaxApplicableSets()
 }
 
 // insertProvenanceRevision appends one immutable set, or returns the latest
@@ -270,11 +289,34 @@ func normalizeProvenanceItems(in []ProvenanceItem) ([]ProvenanceItem, error) {
 }
 
 func normalizeAutomaticProvenance(in []ProvenanceItem) ([]ProvenanceItem, error) {
-	items, err := normalizeProvenance(in, maxAutomaticProvenanceItems, true)
+	items, err := normalizeProvenance(keepMergedWithinLimit(in, automaticProvenanceLimit()), automaticProvenanceLimit(), true)
 	if err != nil {
 		return nil, errors.New("instruction provenance could not be recorded")
 	}
 	return items, nil
+}
+
+// keepMergedWithinLimit drops excess identities but never the merged-rules
+// row. The publication budget plus local files is the cap; this is the
+// backstop so a full receipt still commits its merged identity.
+func keepMergedWithinLimit(in []ProvenanceItem, limit int) []ProvenanceItem {
+	if len(in) <= limit || limit < 1 {
+		return in
+	}
+	merged := make([]ProvenanceItem, 0, 1)
+	rest := make([]ProvenanceItem, 0, len(in))
+	for _, item := range in {
+		if item.Kind == "rules_merged" && item.LogicalName == "merged-rules" && len(merged) == 0 {
+			merged = append(merged, item)
+			continue
+		}
+		rest = append(rest, item)
+	}
+	room := limit - len(merged)
+	if room < len(rest) {
+		rest = rest[:room]
+	}
+	return append(merged, rest...)
 }
 
 func normalizeProvenance(in []ProvenanceItem, limit int, serverKinds bool) ([]ProvenanceItem, error) {

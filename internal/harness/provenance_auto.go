@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -19,9 +18,11 @@ import (
 
 // recordReceiptProvenance appends the instruction sources attested by one new
 // receipt. The merged version and body hash always come from that receipt.
-// Published set versions are added only when the current merge still has that
-// exact version, digest and size. Replay of a receipt never reaches here.
-// Rule text is not stored.
+// Constituent set versions are copied only from the single manifest recorded
+// when those bytes were served. The merged version is the maximum constituent
+// version, so a later lower-version set that leaves the rendered bytes
+// unchanged is not proof of what this session received. Replay of a receipt
+// never reaches here. Rule text is not stored.
 func recordReceiptProvenance(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, in RulesReceiptWrite) error {
 	if in.ByteSize == nil {
 		return errors.New("instruction provenance could not be recorded")
@@ -37,14 +38,12 @@ func recordReceiptProvenance(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		Version:       &version,
 		ByteSize:      &size,
 	}}
-	sources, err := rules.SourcesForContext(ctx, tx, p, in.Context)
+	sets, proven, err := rules.ServedSetVersions(ctx, tx, in.Context, in.Version, in.BodySHA256, *in.ByteSize)
 	if err != nil {
-		var pg *pgconn.PgError
-		if errors.As(err, &pg) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return err
-		}
-	} else if sources.SHA256 == in.BodySHA256 && sources.Version == in.Version && sources.ByteSize == *in.ByteSize {
-		for _, set := range sources.Sets {
+		return err
+	}
+	if proven {
+		for _, set := range sets {
 			setVersion := set.Version
 			setHash := set.SHA256
 			setID := strings.ToLower(set.SetID)

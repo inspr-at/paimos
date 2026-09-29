@@ -258,8 +258,9 @@ paths:
       description: >-
         Explicit worker report of receiving particular merged bytes; never publishes rules or proves
         model load, obedience or execution, and grants no authority. A newly appended receipt also
-        appends session instruction provenance for that merged version and body hash, plus published
-        set versions when the current merge still matches. Replay does not append another provenance
+        appends session instruction provenance for that merged version and body hash, plus constituent
+        set versions from the one manifest served with those bytes. When that serve was not recorded, or
+        more than one set list was served for the same bytes, only the merged identity is stored. Replay does not append another provenance
         revision. The receipt row itself stays free of rule text.
         Requires harness.worker and the exact active owning generation lease. Server verifies tenant,
         project, agent, canonical key creator, registered harness and any task's current session/project
