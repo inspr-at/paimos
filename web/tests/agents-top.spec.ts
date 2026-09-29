@@ -603,3 +603,29 @@ test.describe('screenshots', () => {
     for (const theme of ['light', 'dark'] as const) for (const width of widths) await shoot(browser, shot, width, theme)
   })
 })
+
+
+for (const width of [390, 1600]) for (const theme of ['light', 'dark'] as const) {
+  test(`server routing order and parallel advice at ${width} ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1100 })
+    await page.emulateMedia({ colorScheme: theme })
+    const { capacity } = await setup(page, { reserve: 'off' })
+    // Reverse both API enumeration and the displayed reset order. The plan
+    // must follow the server rank instead of deriving its own recommendation.
+    await page.route('**/api/agent-accounts/capacity', async route => {
+      const data = capacity.handle('/api/agent-accounts/capacity', 'GET', null)!.json as { account_id: string; routing?: { rank: number; available_slots: number } }[]
+      for (const item of data) item.routing = { rank: item.account_id === ACCOUNTS.main ? 1 : item.account_id === ACCOUNTS.spare ? 2 : 0, available_slots: [ACCOUNTS.main, ACCOUNTS.spare].includes(item.account_id) ? 1 : 0 }
+      await route.fulfill({ json: data.reverse() })
+    })
+    await open(page)
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await expect(pool(page, 'codex').locator('.acct .nm')).toHaveText(['Main', 'Spare', 'Studio'])
+    await expect(pool(page, 'codex').locator('.plan')).toContainText('~15% of Main, then ~6% of Spare')
+    await expect(pool(page, 'codex').locator('.plan')).toContainText('2 agents can run in parallel on Codex right now.')
+    expect(await noScroll(page)).toBe(true)
+    if (process.env.AEON383_SHOTS) {
+      mkdirSync(process.env.AEON383_SHOTS, { recursive: true })
+      await cap(page).screenshot({ path: `${process.env.AEON383_SHOTS}/routing-${width}-${theme}.png` })
+    }
+  })
+}

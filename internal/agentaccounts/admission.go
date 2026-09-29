@@ -291,7 +291,7 @@ func loadVendorBlock(ctx context.Context, tx pgx.Tx, a Account, blindHarness boo
 	if err != nil {
 		return vendorBlock{}, err
 	}
-	if !block.active && blindHarness {
+	if !block.active {
 		block, err = blindDenial(ctx, tx, a.ID)
 		if err != nil {
 			return vendorBlock{}, err
@@ -513,6 +513,6 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 
 func loadWaitRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 	var r runRow
-	err := tx.QueryRow(ctx, `SELECT id::text,agent_principal_id::text,model_profile_id::text,account_id::text,requested_account_id::text,status,purpose,capacity_override FROM agent_runs WHERE id=$1`, id).Scan(&r.ID, &r.AgentID, &r.ProfileID, &r.AccountID, &r.RequestedAccountID, &r.Status, &r.Purpose, &r.CapacityOverride)
+	err := tx.QueryRow(ctx, `SELECT id::text,agent_principal_id::text,model_profile_id::text,account_id::text,COALESCE(requested_account_id,retry_account_id)::text,status,purpose,capacity_override FROM agent_runs WHERE id=$1`, id).Scan(&r.ID, &r.AgentID, &r.ProfileID, &r.AccountID, &r.RequestedAccountID, &r.Status, &r.Purpose, &r.CapacityOverride)
 	return r, err
 }

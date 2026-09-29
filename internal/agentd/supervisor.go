@@ -63,6 +63,7 @@ type Record struct {
 	ExitObserved  bool   `json:"exit_observed,omitempty"`
 	// LaunchRev and LaunchDefaultRev are the workspace HEAD and the default
 	// branch's commit at launch, the base of the run's commit evidence.
+	LaunchBranch     string            `json:"launch_branch,omitempty"`
 	LaunchRev        string            `json:"launch_rev,omitempty"`
 	LaunchDefaultRev string            `json:"launch_default_rev,omitempty"`
 	Pending          []Telemetry       `json:"pending,omitempty"`
@@ -614,6 +615,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		if output, branchErr := exec.CommandContext(ctx, "git", "-C", s.workspace, "branch", "--show-current").Output(); branchErr == nil {
 			branch = strings.TrimSpace(string(output))
 		}
+		if run.CapacityHandoff {
+			if err := s.validateCapacityHandoff(run, branch); err != nil {
+				return err
+			}
+			prompt += "\n\nContinue the stopped attempt " + run.RetryOfRunID + ". Inspect its existing work and local changes before continuing; do not redo completed work."
+		}
 		prompt += "\n\nRun contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Use the Aeon tools to comment, check criteria, attach evidence, request approval, reply, and set status. Use aeon_terminal for tests and a local commit; never push without person approval. Report the commit ID and remaining blockers in your final reply."
 	}
 	if verification {
@@ -825,6 +832,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	intent := entry.record
 	intent.LaunchState, intent.State = launchAttempted, "starting"
 	intent.LaunchRev, intent.LaunchDefaultRev = launchRev, launchDefault
+	intent.LaunchBranch = branch
 	err = s.journal.Put(intent)
 	if err == nil {
 		entry.record = intent

@@ -87,6 +87,12 @@ func (m *module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	rows.Close()
 	for i := range out.Items {
+		if out.Items[i].Status == "failed" {
+			out.Items[i].Wait, err = vendorWait(r.Context(), tx, out.Items[i])
+			if err != nil {
+				return nil, err
+			}
+		}
 		if out.Items[i].Status != "queued" || out.Items[i].Purpose != "managed" {
 			continue
 		}

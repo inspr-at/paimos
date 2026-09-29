@@ -19,6 +19,7 @@ import (
 )
 
 type Run struct {
+	CapacityHandoff           bool                        `json:"capacity_handoff,omitempty"`
 	CapacityOverride          string                      `json:"capacity_override"`
 	Wait                      *agentaccounts.CapacityWait `json:"wait,omitempty"`
 	Purpose                   string                      `json:"purpose"`
@@ -105,11 +106,11 @@ func (m *module) Mount(mux *http.ServeMux) {
 }
 
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
- requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text,capacity_override`
+ requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text,capacity_override,(retry_account_id IS NOT NULL)`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff)
 
 	v.RepositoryMutationAllowed = true
 	if v.Purpose == "pairing_verification" {
@@ -160,10 +161,15 @@ func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error
 	}
 	if v.Status == "queued" && v.Purpose == "managed" {
 		v.Wait, err = agentaccounts.WaitForRun(r.Context(), tx, v.ID)
+	} else if v.Status == "failed" {
+		v.Wait, err = vendorWait(r.Context(), tx, v)
 	}
 	return v, err
 }
 func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	if err := retryVendorStops(r.Context(), tx, p); err != nil {
+		return nil, err
+	}
 	if err := agentpairing.ExpireUnclaimedVerifications(r.Context(), tx); err != nil {
 		return nil, err
 	}

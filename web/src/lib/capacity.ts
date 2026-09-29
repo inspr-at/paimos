@@ -50,7 +50,9 @@ export interface CapacityWindow {
   reading: CapacityReading; starts_at: string; allowance: number; remaining_percent: number
   freshness: 'fresh' | 'aging' | 'stale' | 'expired'; usage_today_known?: boolean; pacing: CapacityPacing
 }
+export interface CapacityRouting { rank: number; available_slots: number; resets_at?: string; cap_percent?: number; wait?: { code: string; until?: string } }
 export interface AccountCapacity {
+  routing?: CapacityRouting
   account_id: string; ongoing_use_approved?: boolean; schedule: CapacitySchedule; windows: CapacityWindow[]
   /** Why the last probe failed; only auth_failed is a confirmed sign-out. */
   probe_failure?: 'auth_failed' | 'unavailable'
@@ -313,6 +315,7 @@ export interface AccountRow {
   id: string; name: string; host: string; harness: string; state: AccountState
   primary: CapacityWindow | null; five: CapacityWindow | null; schedule: CapacitySchedule | null; plan: string
   limitingReset: string
+  routing?: CapacityRouting
 }
 export const HARNESS_NAME: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi' }
 export const POOL_ORDER = ['codex', 'claude', 'grok', 'cursor', 'pi']
@@ -344,13 +347,14 @@ export function buildRows(accounts: AccountInput[], capacity: AccountCapacity[])
     const cap = byId.get(a.id)
     const { primary, five } = pickWindows(cap?.windows ?? [])
     const state = accountState({ ...a, probeFailure: cap?.probe_failure ?? a.probeFailure }, !!primary)
-    return { id: a.id, name: a.label, host: a.host, harness: a.harness, state, primary, five, schedule: cap?.schedule ?? null, plan: primary?.reading.plan || a.plan || '', limitingReset: cap?.limiting_reset ?? '' }
+    return { id: a.id, name: a.label, host: a.host, harness: a.harness, state, primary, five, schedule: cap?.schedule ?? null, plan: primary?.reading.plan || a.plan || '', limitingReset: cap?.limiting_reset ?? '', routing: cap?.routing }
   })
 }
 export interface PoolView {
   id: string; name: string; plan: string; rows: AccountRow[]; override: Override; overrideUntil: string
   /** Where a Sprint on this pool would end: the server's earliest limiting reset in the pool. */
   sprintEnd: string
+  parallelRuns: number
 }
 /** The override in force now: Sprint ends at its reset, Away and a dated Hold at their date. */
 export function activeOverride(s: CapacitySchedule | null, now: number): Override {
@@ -367,16 +371,17 @@ function windowWords(rows: AccountRow[]): string {
 export function buildPools(rows: AccountRow[], now: number): PoolView[] {
   const groups = new Map<string, AccountRow[]>()
   for (const row of rows) groups.set(row.harness, [...(groups.get(row.harness) ?? []), row])
-  const reset = (r: AccountRow) => (r.primary ? Date.parse(r.primary.reading.resets_at) : Infinity)
   const order = (h: string) => { const i = POOL_ORDER.indexOf(h); return i < 0 ? 99 : i }
   return [...groups.entries()].sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b)).map(([id, list]) => {
-    // Routing order: live accounts by soonest reset, then the rest.
-    const sorted = [...list].sort((x, y) => (x.state === 'live' ? 0 : 1) - (y.state === 'live' ? 0 : 1) || reset(x) - reset(y) || x.name.localeCompare(y.name))
+    // Only the server knows which accounts fit. Missing advice is no claim
+    // about routing; retain the incoming order during a rolling upgrade.
+    const rank = (r: AccountRow) => r.routing?.rank || Infinity
+    const sorted = [...list].sort((x, y) => rank(x) - rank(y))
     const plans = [...new Set(sorted.map(r => r.plan).filter(Boolean))]
     const plan = [plans.length === 1 ? plans[0] : '', windowWords(sorted)].filter(Boolean).join(' · ')
     const schedule = sorted.find(r => r.schedule)?.schedule ?? null
     const limits = sorted.map(r => r.limitingReset).filter(Boolean).sort((x, y) => Date.parse(x) - Date.parse(y))
-    return { id, name: HARNESS_NAME[id] ?? id, plan, rows: sorted, override: activeOverride(schedule, now), overrideUntil: schedule?.override_until ?? '', sprintEnd: limits[0] ?? '' }
+    return { id, name: HARNESS_NAME[id] ?? id, plan, rows: sorted, override: activeOverride(schedule, now), overrideUntil: schedule?.override_until ?? '', sprintEnd: limits[0] ?? '', parallelRuns: sorted.reduce((n, r) => n + (r.routing?.available_slots ?? 0), 0) }
   })
 }
 
@@ -503,6 +508,11 @@ function reserveClause(live: { r: AccountRow; p: AccountPlan }[], at: (iso: stri
   return [t(' Keeps '), ...joinList(kept.map(x => [n(`~${pct(x.p.reserve)}`), t(` of ${x.r.name}`)])), t(' for you.')]
 }
 export function poolSentence(pool: PoolView, now: number, timezone?: string): Sentence {
+  const sentence = planSentence(pool, now, timezone)
+  if (pool.parallelRuns > 1) sentence.segs.push(t(` ${pool.parallelRuns} agents can run in parallel on ${pool.name} right now.`))
+  return sentence
+}
+function planSentence(pool: PoolView, now: number, timezone?: string): Sentence {
   const at = (iso: string) => when(iso, now, timezone)
   const live = pool.rows.filter(r => r.state === 'live' && r.primary).map(r => ({ r, p: accountPlan(r, now)! }))
   if (!live.length) {
@@ -577,7 +587,7 @@ export function poolSentence(pool: PoolView, now: number, timezone?: string): Se
   }
   const parts = working.map(x => [bn(`~${pct(x.p.budget)}`), b(` of ${x.r.name}`)])
   const lead: Seg[] = [b(`Today${night}: `), ...parts.flatMap((part, i) => (i === 0 ? part : [b(i === parts.length - 1 ? ', then ' : ', '), ...part]))]
-  return { segs: [...lead, t(' — soonest reset first, so each lands at 0% as it resets.'), ...reserveClause(working, at), ...held] }
+  return { segs: [...lead, t(working.every(x => (x.r.routing?.rank ?? 0) > 0) ? ' — soonest reset first.' : '.'), ...reserveClause(working, at), ...held] }
 }
 
 // ---------- Gauge preference ----------

@@ -38,7 +38,7 @@ func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 	var run runRow
 	err := tx.QueryRow(ctx, `
 		SELECT r.id::text, r.agent_principal_id::text, r.model_profile_id::text, r.account_id::text,
-         r.status, r.daemon_id, r.daemon_generation, r.requested_account_id::text,
+         r.status, r.daemon_id, r.daemon_generation, COALESCE(r.requested_account_id,r.retry_account_id)::text,
          r.purpose, e.account_id::text, e.verification_expires_at, r.capacity_override
   FROM agent_runs r LEFT JOIN agent_pairing_enrollments e
    ON e.tenant_id=r.tenant_id AND e.verification_run_id=r.id
@@ -320,7 +320,9 @@ func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemon
 type ranked struct {
 	account Account
 	windows []Window
-	ratio   float64
+	cap     float64
+	reset   *time.Time
+	slots   int
 }
 
 func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harness, profileID, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, error) {
@@ -392,7 +394,6 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 			continue
 		}
 		ok := true
-		ratio := 0.0
 		for _, window := range active {
 			estimate := windowEstimate(window, estimates)
 			exists := estimate > 0
@@ -400,30 +401,21 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 				ok = false
 				break
 			}
-			projected, fitsWindow := fits(window, now, estimate)
+			_, fitsWindow := fits(window, now, estimate)
 			if !fitsWindow || window.Allowance < 1 {
 				ok = false
 				break
-			}
-			next := float64(projected) / float64(window.Allowance)
-			if next > ratio {
-				ratio = next
 			}
 		}
 		if !ok {
 			continue
 		}
-		picks = append(picks, ranked{account: account, windows: active, ratio: ratio})
+		picks = append(picks, routeRank(account, active, usedSlots[account.ID], estimates, now))
 	}
 	if len(picks) == 0 {
 		return Account{}, nil, fail(http.StatusConflict, "no eligible account")
 	}
-	sort.Slice(picks, func(i, j int) bool {
-		if picks[i].ratio != picks[j].ratio {
-			return picks[i].ratio < picks[j].ratio
-		}
-		return picks[i].account.ID < picks[j].account.ID
-	})
+	orderPicks(picks)
 	// Materialize a provisional grant only for the selected account; losing
 	// candidates must not consume their single refresh opportunity.
 	for i := range picks[0].windows {

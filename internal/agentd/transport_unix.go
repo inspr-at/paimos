@@ -85,6 +85,20 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	if len(attachments) == 1 && attachments[0] != nil {
 		mux.HandleFunc("POST /v1/attach", func(w http.ResponseWriter, r *http.Request) { attachments[0].serve(w, r, token) })
 	}
+	mux.HandleFunc("GET /v1/account-environment", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		q := r.URL.Query()
+		value, err := s.AccountEnvironment(q.Get("account_id"), q.Get("daemon_id"), q.Get("harness"))
+		if err != nil {
+			http.Error(w, "local account unavailable", http.StatusConflict)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(value)
+	})
 	mux.HandleFunc("GET /v1/lifecycle", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, token) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

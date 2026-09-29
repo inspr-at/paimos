@@ -36,6 +36,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agent-accounts", m.list)
 	mux.HandleFunc("GET /api/agent-accounts/catalog", m.catalog)
 	mux.HandleFunc("GET /api/agent-accounts/capacity", m.capacityList)
+	mux.HandleFunc("GET /api/agent-accounts/capacity/next", m.capacityNext)
 	mux.HandleFunc("POST /api/agent-accounts/{accountId}/capacity/approve", m.approveCapacity)
 	mux.HandleFunc("POST /api/agent-accounts/capacity/preview", m.capacityPreview)
 	mux.HandleFunc("GET /api/agent-accounts/capacity/schedule", m.capacitySchedule)

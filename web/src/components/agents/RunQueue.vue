@@ -24,7 +24,7 @@ async function runNow(run: AgentRun) {
   finally { busy.value = '' }
 }
 const titles = ref<Record<string, string>>({})
-const pending = computed(() => Object.values(agents.runs).filter(run => activeRun(run) && !agents.sessions.some(s => s.run_id === run.id && s.management_mode === 'managed')))
+const pending = computed(() => Object.values(agents.runs).filter(run => (run.status === 'failed' && run.wait?.code === 'vendor') || (activeRun(run) && !agents.sessions.some(s => s.run_id === run.id && s.management_mode === 'managed'))))
 watch(() => pending.value.map(r => r.work_order_id), async ids => {
   for (const id of new Set(ids)) {
     if (titles.value[id]) continue
@@ -40,7 +40,7 @@ watch(() => pending.value.map(r => r.work_order_id), async ids => {
     </header>
     <ul>
       <li v-for="run in pending" :key="run.id">
-        <AppIcon :name="run.status === 'queued' ? 'clock' : 'check'" :size="14" class="run-icon" />
+        <AppIcon :name="run.status === 'queued' || run.wait ? 'clock' : 'check'" :size="14" class="run-icon" />
         <strong class="run-title" :title="titles[run.work_order_id] || `Run ${run.id}`">{{ titles[run.work_order_id] || 'Run' }}</strong>
         <time class="run-when" :datetime="run.created_at">{{ relativeTime(run.created_at, { now: agents.now }) }}</time>
         <span v-if="run.requested_model" class="run-model mono">{{ run.requested_model }}</span>

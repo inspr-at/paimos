@@ -40,6 +40,8 @@ var (
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
+	RetryOfRunID              string `json:"retry_of_run_id"`
+	CapacityHandoff           bool   `json:"capacity_handoff,omitempty"`
 	Purpose                   string `json:"purpose,omitempty"`
 	VerificationTask          string `json:"verification_task,omitempty"`
 	MaxDurationSeconds        *int64 `json:"max_duration_seconds,omitempty"`

@@ -234,6 +234,7 @@ type capacityWindow struct {
 	UsageTodayKnown bool             `json:"usage_today_known"`
 }
 type accountCapacity struct {
+	Routing            *CapacityRouting  `json:"routing,omitempty"`
 	AccountID          string            `json:"account_id"`
 	OngoingUseApproved bool              `json:"ongoing_use_approved"`
 	ProbeFailure       string            `json:"probe_failure,omitempty"`
@@ -417,6 +418,19 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 		}
 		out = append(out, item)
 	}
+	// The live plan consumes the exact admission and ordering rules as routing.
+	// Draft previews do not claim to predict current dispatch eligibility.
+	if draft == nil {
+		advice, err := routingAdvice(ctx, tx, accounts, "", runRow{Purpose: "managed"}, now)
+		if err != nil {
+			return nil, err
+		}
+		for i := range out {
+			value := advice[out[i].AccountID]
+			out[i].Routing = &value
+		}
+	}
+
 	return out, nil
 }
 

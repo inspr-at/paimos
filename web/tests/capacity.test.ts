@@ -113,11 +113,11 @@ test('account states: sign-in only on a confirmed sign-out; other failed checks 
 test('two Codex accounts: soonest reset first, one plan sentence, gauges from server pacing', () => {
   const [codex] = pools(
     [acct('main', 'Main', 'codex', { plan: 'Pro' }), acct('spare', 'Spare', 'codex', { plan: 'Pro' }), acct('studio', 'Studio', 'codex', { host: 'studio', connectivity: 'offline', plan: 'Pro' })],
-    [cap('main', [win({ used: 58, usedToday: 3, budget: 15, reset: '2026-10-02T07:14:00Z' })]), cap('spare', [win({ used: 91, usedToday: 2, budget: 6, reset: '2026-09-30T16:02:00Z', source: 'harness', readMin: 9 })]), cap('studio', [win({ used: 22, budget: 0, reset: '2026-10-05T05:40:00Z', source: 'agentd', readMin: 180, freshness: 'stale' })])],
+    [{ ...cap('main', [win({ used: 58, usedToday: 3, budget: 15, reset: '2026-10-02T07:14:00Z' })]), routing: { rank: 2, available_slots: 1 } }, { ...cap('spare', [win({ used: 91, usedToday: 2, budget: 6, reset: '2026-09-30T16:02:00Z', source: 'harness', readMin: 9 })]), routing: { rank: 1, available_slots: 1 } }, cap('studio', [win({ used: 22, budget: 0, reset: '2026-10-05T05:40:00Z', source: 'agentd', readMin: 180, freshness: 'stale' })])],
   )
   assert.deepEqual(codex.rows.map(r => r.name), ['Spare', 'Main', 'Studio'])
   assert.equal(codex.plan, 'Pro · weekly')
-  assert.equal(plainText(poolSentence(codex, now, TZ)), 'Today: ~6% of Spare, then ~15% of Main — soonest reset first, so each lands at 0% as it resets.')
+  assert.equal(plainText(poolSentence(codex, now, TZ)), 'Today: ~6% of Spare, then ~15% of Main — soonest reset first. 2 agents can run in parallel on Codex right now.')
   const spare = codex.rows[0]
   const plan = accountPlan(spare, now)!
   assert.deepEqual(gauge(spare, plan), { yours: 0, later: 5, today: 4, spent: 2, tick: 5, frozen: false })
@@ -254,7 +254,7 @@ test('Keep for you: an account at your reserve leaves today\'s plan and reads ke
     [acct('main', 'Main', 'codex'), acct('spare', 'Spare', 'codex')],
     [cap('main', [win({ used: 58, usedToday: 3, budget: 15, reset: '2026-10-02T07:14:00Z', kept: 30 })]), cap('spare', [win({ used: 91, usedToday: 2, budget: 6, reset: '2026-09-30T16:02:00Z', kept: 30, keptUntil: '2026-09-30T16:02:00Z' })])],
   )
-  const spare = codex.rows[0]
+  const spare = codex.rows.find(r => r.id === 'spare')!
   const plan = accountPlan(spare, now)!
   assert.equal(plan.atReserve, true)
   assert.equal(plan.reserve, 9, 'what is kept is never more than what is left')
@@ -303,4 +303,19 @@ test('Keep for you: wall times in the schedule zone, and saves confirm reserve a
   assert.equal(confirmsSave([{ scope: 'user', schedule: { ...away, override_until: '2026-10-05T06:00:00.000Z' } }], away), true)
   assert.equal(confirmsSave([{ scope: 'user', schedule: sent }], away), false)
   assert.equal(sameShape(sent, s), true, 'Keep for you is not the shape')
+})
+
+
+test('the server rank wins over displayed reset times and names', () => {
+ const accounts = [acct('a', 'Soon', 'codex'), acct('b', 'Later', 'codex')]
+ const capacity = [
+  { ...cap('a', [win({ budget: 10, reset: '2026-09-30T12:00:00Z' })]), routing: { rank: 2, available_slots: 1 } },
+  { ...cap('b', [win({ budget: 10, reset: '2026-10-02T12:00:00Z' })]), routing: { rank: 1, available_slots: 1 } },
+ ]
+ const [pool] = pools(accounts, capacity)
+ assert.deepEqual(pool.rows.map(r => r.name), ['Later', 'Soon'])
+ assert.match(plainText(poolSentence(pool, now, TZ)), /of Later, then .*of Soon/)
+ assert.match(plainText(poolSentence(pool, now, TZ)), /2 agents can run in parallel/)
+ const [legacy] = pools(accounts, capacity.map(({ routing: _, ...c }) => c))
+ assert.doesNotMatch(plainText(poolSentence(legacy, now, TZ)), /soonest reset|can run in parallel/)
 })
