@@ -470,6 +470,11 @@ func coreAgentScope(r *http.Request) (string, bool) {
 }
 
 func harnessScope(parts []string, read bool) string {
+	// The session read marker is a person's own watermark. No agent key scope
+	// reaches it; an empty scope is denied by the agent ceiling.
+	if len(parts) > 0 && parts[len(parts)-1] == "read-marker" {
+		return ""
+	}
 	if len(parts) > 0 && parts[len(parts)-1] == "managed-settings" {
 		return "harness.control"
 	}

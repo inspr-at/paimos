@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Per-viewer chat state for the session panel (AEON-273): the last tab, a read
-// watermark per session, and delivery receipt wording. The watermark is the highest
-// sent_event_id this person has had in view; it lives in this browser only until
-// the server offers a per-person read marker.
+// Per-viewer chat state for the session panel (AEON-273, AEON-276): the last tab,
+// a read watermark per session, and delivery receipt wording. The watermark is the
+// highest sent_event_id this person has had in view. The server marker follows the
+// person across devices; this browser's copy is the offline fallback.
 import type { MessageGroup } from './sessionMessages.ts'
 
 export type SessionTab = 'overview' | 'messages'
@@ -35,6 +35,39 @@ function readAll(store: Store | null): Record<string, ReadMark> {
   } catch { return {} }
 }
 const markKey = (viewer: string, sessionId: string) => `${viewer}:${sessionId}`
+export interface ServerReadMarker {
+  session_id?: string
+  last_read_message_id: string | null
+  last_read_event_id: number | null
+  read_at: string | null
+}
+
+export function markerFromServer(body: unknown): ReadMark | null {
+  if (!body || typeof body !== 'object') return null
+  const marker = body as Partial<ServerReadMarker>
+  if (typeof marker.last_read_event_id !== 'number' || !Number.isFinite(marker.last_read_event_id)) return null
+  if (typeof marker.last_read_message_id !== 'string' || !marker.last_read_message_id) return null
+  const at = Date.parse(marker.read_at ?? '')
+  return { event: marker.last_read_event_id, id: marker.last_read_message_id, at: Number.isFinite(at) ? at : 0 }
+}
+
+// The further watermark wins. A missing server marker leaves the local one.
+export function preferReadMark(local: ReadMark | null, server: ReadMark | null): ReadMark | null {
+  if (!server) return local
+  if (!local || server.event > local.event) return server
+  return local
+}
+
+// One trailing flush sends only the furthest mark. A failed send stays queued
+// until the next flush, unless a later mark has already replaced it.
+export const readMarkFlushDelay = 1500
+export function queueReadMark(pending: ReadMark | null, next: ReadMark): ReadMark {
+  return pending && pending.event >= next.event ? pending : next
+}
+export function keepFailedReadMark(pending: ReadMark | null, failed: ReadMark): ReadMark {
+  return pending && pending.event >= failed.event ? pending : failed
+}
+
 export function loadReadMark(viewer: string, sessionId: string, store: Store | null = storage()): ReadMark | null {
   const mark = readAll(store)[markKey(viewer, sessionId)]
   return mark && Number.isFinite(mark.event) ? mark : null
