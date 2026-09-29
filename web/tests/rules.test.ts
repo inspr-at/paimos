@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { RequestFailure } from '../src/lib/api.ts'
 import {
-  IMPORT_MAX_BYTES, RulesError, applyEnabled, blankRule, calendarVersion, copyName, diffRules, duplicateRule, groupState, groupsState, hasMovable, heldIdentities,
+  IMPORT_MAX_BYTES, RulesError, applyEnabled, blankRule, calendarVersion, copyName, diffRules, diffSet, duplicateRule, groupState, groupsState, hasMovable, heldIdentities,
   identityFromText, layerInColumn, mergeQuery, parseDraftImport, publishBlock, replyUncertain, resetAvailability, resetRule, rulePayload, rulesEqual, tickTarget,
   runDraftImport, ruleSwitchLabel, scopeFor, touchRule, validVersion, validateDraft, validateRule, writeBlock, importWrites, draftImportProjects,
   setState, projectedRules, projectedBytes, largestProjected,
@@ -511,6 +511,30 @@ test('publish diff lists added, changed and removed rules', () => {
     [rule({ text: 'Updated.' }), rule({ identity: 'added', text: 'Added.' })],
   )
   assert.deepEqual(changes.map(change => change.kind), ['changed', 'added', 'removed'])
+})
+
+test('the approval lists TL;DR changes on their own, never as a rename or an unchanged rule', () => {
+  const tldr = (en: string, extra: Record<string, unknown> = {}) => ({ en, basis: '0123456789abcdef', ...extra })
+  const live = { name: 'Secrets', tldr: tldr('Keeps secrets out.'), rules: [
+    rule({ identity: 'env', text: 'Never print the environment.', tldr: tldr('Dumps leak.') }),
+    rule({ identity: 'src', text: 'Record the source.' }),
+    rule({ identity: 'fit', text: 'Keep it short.', tldr: tldr('Short lines.') }),
+  ] }
+  const draft = { name: 'Secrets', tldr: tldr('No credential reaches a transcript.', { de: 'Keine Zugangsdaten.' }), rules: [
+    rule({ identity: 'env', text: 'Never print the environment.' }),
+    rule({ identity: 'src', text: 'Record the source.', tldr: tldr('Names its ticket.') }),
+    rule({ identity: 'fit', text: 'Keep it short.', tldr: tldr('Short lines.', { basis: 'fedcba9876543210' }) }),
+  ] }
+  assert.deepEqual(diffSet(live, draft), [
+    { kind: 'changed', label: 'No credential reaches a transcript.', about: 'set-tldr', de: 'Keine Zugangsdaten.' },
+    { kind: 'removed', label: 'Dumps leak.', about: 'tldr', rule: 'Never print the environment.' },
+    { kind: 'added', label: 'Names its ticket.', about: 'tldr', rule: 'Record the source.' },
+    { kind: 'changed', label: 'Short lines.', about: 'tldr', rule: 'Keep it short.', confirmed: true },
+  ])
+  assert.deepEqual(diffSet({ ...live, tldr: null }, { ...live, name: 'Credentials' }).map(change => [change.kind, change.about]), [['changed', 'name'], ['added', 'set-tldr']])
+  assert.deepEqual(diffSet(live, { ...live, tldr: null }), [{ kind: 'removed', label: 'Keeps secrets out.', about: 'set-tldr' }])
+  const reworded = diffSet(live, { ...live, rules: [rule({ identity: 'env', text: 'Never dump the environment.', tldr: tldr('Dumps leak.') }), ...live.rules.slice(1)] })
+  assert.deepEqual(reworded, [{ kind: 'changed', label: 'Never dump the environment.' }])
 })
 
 test('budget refusals keep another person’s size private in the message', async () => {

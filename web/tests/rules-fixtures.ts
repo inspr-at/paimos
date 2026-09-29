@@ -67,6 +67,7 @@ export async function mockRules(page: Page, options: RulesMockOptions = {}): Pro
   const versions = [{
     set_id: COMPANY_SET, scope: { layer: 'company' }, name: 'Secrets', revision: 2, version: '260920100000.0.0',
     sha256: 'ab'.repeat(32), rules: state.companyRules.map(item => ({ ...item })), published_at: '2026-09-20T10:00:00Z',
+    ...(state.companyTldr ? { tldr: { ...state.companyTldr } } : {}),
   }]
   const sets = () => ({
     [COMPANY_SET]: { id: COMPANY_SET, layer_id: COMPANY, scope: { layer: 'company' }, name: state.companyName, revision: state.revision, rules: state.companyRules, published_version: state.published, ...(state.companyTldr ? { tldr: state.companyTldr } : {}) },
@@ -179,10 +180,10 @@ export async function mockRules(page: Page, options: RulesMockOptions = {}): Pro
     }
     if (path === '/api/rules/budget') {
       if (method === 'PUT') {
-        if (body.max_bytes < 2000 || body.max_bytes > 64000) return route.fulfill({ status: 400, json: { error: 'the session file budget must be between 2000 and 64000 bytes', code: 'invalid_budget' } })
+        if (body.max_bytes < 2000 || body.max_bytes > 12000) return route.fulfill({ status: 400, json: { error: 'the session file budget must be between 2000 and 12000 bytes', code: 'invalid_budget' } })
         state.budget = { max_bytes: body.max_bytes, layer_max_bytes: body.layer_max_bytes ?? {} }
       }
-      return route.fulfill({ json: { ...state.budget, default_bytes: 12000, min_bytes: 2000, ceiling_bytes: 64000, min_layer_bytes: 500 } })
+      return route.fulfill({ json: { ...state.budget, default_bytes: 12000, min_bytes: 2000, ceiling_bytes: 12000, min_layer_bytes: 500 } })
     }
     if (path === '/api/rules/explained' && method === 'GET') {
       const harness = url.searchParams.get('harness') ?? 'claude-code'

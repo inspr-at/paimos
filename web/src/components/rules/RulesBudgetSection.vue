@@ -64,7 +64,7 @@ async function save() {
     <form v-if="editing" class="form" @submit.prevent="save" @keydown.esc.prevent="editing = false">
       <label class="fld total"><span>Total <span class="opt">bytes</span></span>
         <input v-model="total" class="field" inputmode="numeric" autocomplete="off" :aria-describedby="'rules-budget-range'">
-        <span id="rules-budget-range" class="range">{{ fmt(view.min_bytes) }} to {{ fmt(view.ceiling_bytes) }}; default {{ fmt(view.default_bytes) }}</span>
+        <span id="rules-budget-range" class="range">{{ fmt(view.min_bytes) }} to {{ fmt(view.ceiling_bytes) }}<template v-if="view.default_bytes !== view.ceiling_bytes">; default {{ fmt(view.default_bytes) }}</template></span>
       </label>
       <label v-for="layer in LAYERS" :key="layer" class="fld"><span>{{ LAYER_LABEL[layer] }}</span>
         <input v-model="caps[layer]" class="field" inputmode="numeric" autocomplete="off" placeholder="No cap">

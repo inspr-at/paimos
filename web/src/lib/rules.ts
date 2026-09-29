@@ -520,18 +520,58 @@ export function validateDraft(name: string, rules: AgentRule[]): DraftCheck {
   return { error, warning: duplicateTextWarning(rules) }
 }
 
-export interface RuleChange { kind: 'added' | 'removed' | 'changed'; label: string }
+/** One entry of a publication's approval. `about` says what changes: the rule
+ *  itself (absent), its TL;DR, the set's TL;DR or the set's name. */
+export interface RuleChange {
+  kind: 'added' | 'removed' | 'changed'
+  label: string
+  about?: 'tldr' | 'set-tldr' | 'name'
+  /** TL;DR entries: the German line, when there is one. */
+  de?: string
+  /** A rule's TL;DR: the rule it explains. */
+  rule?: string
+  /** A TL;DR whose words stay; it was confirmed for the rule's new wording. */
+  confirmed?: boolean
+}
+function tldrChange(before: RuleTLDR | null | undefined, after: RuleTLDR | null | undefined, about: 'tldr' | 'set-tldr', rule?: string): RuleChange | null {
+  const old = tldrPayload(before)
+  const next = tldrPayload(after)
+  if (tldrKey(old) === tldrKey(next)) return null
+  const shown = (next ?? old)!
+  const change: RuleChange = { kind: !old ? 'added' : !next ? 'removed' : 'changed', label: shown.en, about }
+  if (shown.de) change.de = shown.de
+  if (rule) change.rule = rule
+  if (old && next && old.en === next.en && old.de === next.de) change.confirmed = true
+  return change
+}
+const withoutTLDR = (rules: AgentRule[]) => rules.map(rule => ({ ...rule, tldr: null }))
+
+/** Rule changes, each followed by its own TL;DR change. A rule's TL;DR is an
+ *  entry of its own, never folded into the rule; one that leaves with its rule
+ *  goes with the removal. */
 export function diffRules(before: AgentRule[], after: AgentRule[]): RuleChange[] {
   const prior = new Map(before.map(rule => [rule.identity, rule]))
   const next = new Map(after.map(rule => [rule.identity, rule]))
   const changes: RuleChange[] = []
   for (const rule of after) {
     const old = prior.get(rule.identity)
-    if (!old) changes.push({ kind: 'added', label: rule.text || rule.identity })
-    else if (!rulesEqual([old], [rule])) changes.push({ kind: 'changed', label: rule.text || rule.identity })
+    const label = rule.text || rule.identity
+    if (!old) changes.push({ kind: 'added', label })
+    else if (!rulesEqual(withoutTLDR([old]), withoutTLDR([rule]))) changes.push({ kind: 'changed', label })
+    const tldr = tldrChange(old?.tldr, rule.tldr, 'tldr', label)
+    if (tldr) changes.push(tldr)
   }
   for (const rule of before) if (!next.has(rule.identity)) changes.push({ kind: 'removed', label: rule.text || rule.identity })
   return changes
+}
+
+/** Everything a publication changes in one set: its name, its TL;DR, then its rules. */
+export function diffSet(before: Pick<RuleSnapshot, 'name' | 'rules' | 'tldr'> | null | undefined, after: Pick<RuleSet, 'name' | 'rules' | 'tldr'>): RuleChange[] {
+  const changes: RuleChange[] = []
+  if (before && before.name !== after.name) changes.push({ kind: 'changed', label: after.name, about: 'name' })
+  const tldr = tldrChange(before?.tldr, after.tldr, 'set-tldr')
+  if (tldr) changes.push(tldr)
+  return [...changes, ...diffRules(before?.rules ?? [], after.rules)]
 }
 
 /** Reset only when an upstream original was actually supplied. The contract has no original text. */
@@ -648,7 +688,7 @@ export const mergeRules = (query: string) => send<MergedRules>(`/rules/merged?${
 export type LayerBytes = Partial<Record<LayerName, number>>
 export interface RuleBudget { max_bytes: number; layer_max_bytes: LayerBytes }
 export interface RuleBudgetView extends RuleBudget { default_bytes: number; min_bytes: number; ceiling_bytes: number; min_layer_bytes: number }
-export const DEFAULT_BUDGET: RuleBudgetView = { max_bytes: RULES_BUDGET, layer_max_bytes: {}, default_bytes: RULES_BUDGET, min_bytes: 2000, ceiling_bytes: 64000, min_layer_bytes: 500 }
+export const DEFAULT_BUDGET: RuleBudgetView = { max_bytes: RULES_BUDGET, layer_max_bytes: {}, default_bytes: RULES_BUDGET, min_bytes: 2000, ceiling_bytes: 12000, min_layer_bytes: 500 }
 export const getBudget = () => send<RuleBudgetView>('/rules/budget').then(view => ({ ...view, layer_max_bytes: view.layer_max_bytes ?? {} }))
 export const putBudget = (budget: RuleBudget) => send<RuleBudgetView>('/rules/budget', 'PUT', budget).then(view => ({ ...view, layer_max_bytes: view.layer_max_bytes ?? {} }))
 

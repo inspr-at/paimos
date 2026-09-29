@@ -15,7 +15,7 @@ import { getMembers } from '../../lib/access'
 import { toast } from '../../lib/toast'
 import { useSession } from '../../stores/session'
 import {
-  DEFAULT_BUDGET, MAX_RULES, ROLE_LABEL, ROLES, RulesError, applyEnabled, getBudget, saveTldrs, blankRule, copyName, createLayer, createSet, diffRules, duplicateRule, getVersion, groupsState, hasMovable, importBlock, largestProjected,
+  DEFAULT_BUDGET, MAX_RULES, ROLE_LABEL, ROLES, RulesError, applyEnabled, getBudget, saveTldrs, blankRule, copyName, createLayer, createSet, diffSet, duplicateRule, getVersion, groupsState, hasMovable, importBlock, largestProjected,
   listLayers, listSets, publishBlock, publishSets, replyUncertain, rulesEqual, rulesMessage, saveDraft, scopeKey, scopeRank,
   setState, validateDraft, writeBlock,
   type AgentRule, type Caller, type CheckGroup, type RuleBudgetView, type CheckState, type ImportReport, type MergeInput, type RoleName, type RuleLayer, type RuleScope, type RuleSet, type RuleSnapshot, type SetState,
@@ -463,8 +463,8 @@ function openPublish(ids?: string[]) {
 }
 const publishList = computed(() => (publishTarget.value ?? []).map(find).filter((item): item is NonNullable<ReturnType<typeof find>> => !!item))
 const publishItems = computed<PublishItem[]>(() => publishList.value.map(({ bundle, set }) => ({
-  id: set.remote.id, name: set.remote.name, where: where(bundle.layer.scope), state: stateOf(set), rules: set.remote.rules,
-  changes: diffRules(set.live?.rules ?? [], set.remote.rules),
+  id: set.remote.id, name: set.remote.name, where: where(bundle.layer.scope), state: stateOf(set), rules: set.remote.rules, tldr: set.remote.tldr,
+  changes: diffSet(set.live, set.remote),
 })))
 const publishBlocked = computed(() => publishTarget.value && publishTarget.value.length === publishable.value.length
   ? waiting.value.filter(item => publishBlock(caller.value, item.bundle.layer.scope)).map(({ bundle, set }) => ({ id: set.remote.id, name: set.remote.name, where: where(bundle.layer.scope), reason: publishBlock(caller.value, bundle.layer.scope) ?? '' }))
