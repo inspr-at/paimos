@@ -4,7 +4,7 @@ import { brand } from '../../lib/brand'
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter, type RouteLocationNormalized } from 'vue-router'
 import { beyond, diff, groupPermissions, permissionLabel, type Permission, type Role } from '../../lib/access'
-import { can, myPermissions, permissionsRevoked } from '../../lib/authz'
+import { can, myPermissions, grantablePermissions, permissionsRevoked } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
 import { useSession } from '../../stores/session'
 import { toast } from '../../lib/toast'
@@ -32,7 +32,7 @@ const name = ref(props.role?.name ?? (props.from ? `${props.from.name} copy` : '
 const description = ref(props.role?.description ?? (props.from ? props.from.description : ''))
 // A duplicate starts from what I may give: permissions of the source that I do
 // not hold are left out (and said so), never sent.
-const leftOut = computed(() => props.role ? [] : beyond(props.from?.permissions ?? [], myPermissions()))
+const leftOut = computed(() => props.role ? [] : beyond(props.from?.permissions ?? [], grantablePermissions(myPermissions())))
 const picked = ref(new Set<string>(props.role ? initial.value : initial.value.filter(k => !leftOut.value.includes(k))))
 const term = ref('')
 type View = 'all' | 'selected' | 'high' | 'changes'
@@ -40,7 +40,7 @@ const view = ref<View>('all')
 const errors = ref<{ name?: string; permissions?: string; form?: string }>({})
 const saving = ref(false)
 const deleting = ref(false)
-const mine = computed(() => myPermissions())
+const mine = computed(() => grantablePermissions(myPermissions()))
 const selected = computed(() => access.registry.filter(p => picked.value.has(p.key)).map(p => p.key))
 const vsBase = computed(() => base.value ? diff(base.value.permissions, selected.value) : { added: [], removed: [] })
 const unsaved = computed(() => {

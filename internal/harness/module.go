@@ -118,6 +118,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
+	Watch                *AttachStatus          `json:"watch,omitempty"`
 	ProcessOwnership     *ownedprocess.Identity `json:"process_ownership,omitempty"`
 	ProcessObservedAt    *time.Time             `json:"process_observed_at,omitempty"`
 	ArchivedAt           *time.Time             `json:"archived_at"`
@@ -673,6 +674,11 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
+	s.Watch, err = readAttachStatus(r.Context(), tx, s.ID)
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := tx.Query(r.Context(), `SELECT note,created_at FROM harness_activity_notes WHERE session_id=$1 ORDER BY id DESC LIMIT 20`, s.ID)
 	if err != nil {
 		return nil, err

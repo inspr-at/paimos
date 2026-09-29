@@ -18,6 +18,7 @@ import SessionStateEvidence from './SessionStateEvidence.vue'
 import SessionRecovery from './SessionRecovery.vue'
 import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import ManagedSessionControls from './ManagedSessionControls.vue'
+import LiveWatch from './LiveWatch.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 import { attentionReasonText } from '../../lib/agentSignals'
@@ -113,7 +114,7 @@ watch(() => s.value?.id, async id => {
 onMounted(() => root.value?.focus({ preventScroll: true }))
 
 async function send() {
-  if (!s.value || !draft.value.trim() || sending.value || composeBlock.value) return
+  if (reported.value?.watch || !s.value || !draft.value.trim() || sending.value || composeBlock.value) return
   sending.value = true; sendError.value = ''
   try {
     await agents.send(s.value, address.value, draft.value.trim(), level.value, replyTo.value?.id)
@@ -148,14 +149,14 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <div v-if="view && !loading" class="head-actions">
         <span class="host-meta">{{ view.harness }}<template v-if="view.session.host"> on {{ view.session.host }}</template></span>
         <span class="spacer" />
-        <template v-if="view.session.phase !== 'stopped' && !view.session.advertised_capabilities.includes('managed_control_v1')">
+        <template v-if="view.session.phase !== 'stopped' && !reported?.watch && !view.session.advertised_capabilities.includes('managed_control_v1')">
           <button type="button" class="btn sm ghost" :aria-disabled="!!controlBlock(view, 'interrupt')" :data-tip="controlBlock(view, 'interrupt') || 'Stop the current turn'" @click="control('interrupt')"><AppIcon name="interrupt" :size="14" />Interrupt</button>
           <button type="button" class="btn sm ghost stop" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'End this session'" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
         </template>
-        <SessionRecovery :session="view.session" />
+        <SessionRecovery v-if="!reported?.watch" :session="view.session" />
         <RemoveSessionDialog :session="view.session" :label="view.name" />
       </div>
-      <ManagedSessionControls v-if="view && !loading" :session="reported || view.session" :now="now" />
+      <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now" />
     </header>
 
     <!-- Until the first load completes the body stays a placeholder, so runs and
@@ -181,6 +182,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         </div>
         <button type="button" class="btn sm primary" @click="emit('review', pending[0])">Review</button>
       </div>
+
+      <LiveWatch v-if="reported?.watch" :session="reported" />
 
       <section class="now-block" aria-labelledby="now-title">
         <h3 id="now-title" class="sr-only">Now</h3>
@@ -257,10 +260,10 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <section v-if="inboxNotes.length" class="inbox-note" aria-label="Inbox attention">
         <p v-for="note in inboxNotes" :key="note.code"><AppIcon name="inbox" :size="13" />{{ note.text }}</p>
       </section>
-      <SessionMessages :messages="messages" :session-id="view.session.id" :principal-id="view.session.agent_principal_id" :address="address" :now="now" :can-reply="canWrite && !composeBlock && !view.session.advertised_capabilities.includes('managed_control_v1')" @reply="replyTo = $event" />
+      <SessionMessages v-if="!reported?.watch" :messages="messages" :session-id="view.session.id" :principal-id="view.session.agent_principal_id" :address="address" :now="now" :can-reply="canWrite && !composeBlock && !view.session.advertised_capabilities.includes('managed_control_v1')" @reply="replyTo = $event" />
     </div>
 
-    <footer v-if="view && !loading && address && !view.session.advertised_capabilities.includes('managed_control_v1')" class="composer">
+    <footer v-if="view && !loading && address && !reported?.watch && !view.session.advertised_capabilities.includes('managed_control_v1')" class="composer">
       <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
       <form v-else class="compose" @submit.prevent="send">
         <p v-if="replyTo" class="replying"><span>Replying to “{{ replyTo.body.slice(0, 80) }}{{ replyTo.body.length > 80 ? '…' : '' }}”</span><button type="button" class="icon-btn sm flat" aria-label="Cancel the reply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>

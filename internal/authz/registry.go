@@ -30,7 +30,7 @@ func makeRegistry() []Permission {
 		{"attachments", "read write delete"}, {"knowledge", "read write delete"},
 		{"journey", "read act manage"}, {"requirements", "read write agree"},
 		{"releases", "read write deploy"}, {"intake", "read write decide"},
-		{"stage_handoffs", "read write decide"}, {"harness", "read write worker control manage recover force_stop"},
+		{"stage_handoffs", "read write decide"}, {"harness", "read write worker control manage recover force_stop watch"},
 		{"work_orders", "read write assign"}, {"runs", "read write control claim"},
 		{"run", "create read claim telemetry"}, {"account", "read manage route probe"},
 		{"approvals", "read request propose decide decide_high revoke"}, {"inbox", "read send manage receipt"},
@@ -52,7 +52,7 @@ func makeRegistry() []Permission {
 			if action == "read" || strings.HasSuffix(action, "_read") || action == "resolve" {
 				risk = "low"
 			}
-			if action == "publish" || action == "delete" || action == "deploy" || action == "apply" || action == "decide" || action == "decide_high" || action == "manage" || action == "issue" || action == "approve" || action == "undo" || action == "undo_other" || action == "control" || action == "configure" || action == "revoke" || action == "recover" || action == "force_stop" {
+			if action == "watch" || action == "publish" || action == "delete" || action == "deploy" || action == "apply" || action == "decide" || action == "decide_high" || action == "manage" || action == "issue" || action == "approve" || action == "undo" || action == "undo_other" || action == "control" || action == "configure" || action == "revoke" || action == "recover" || action == "force_stop" {
 				risk = "high"
 			}
 			at := []string{"workspace", "project"}
@@ -73,7 +73,7 @@ func makeRegistry() []Permission {
 // customer portal. Those permissions never belong on an agent key.
 func agentGrantable(key string) bool {
 	switch key {
-	case "rules.publish", "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
+	case "harness.watch", "rules.publish", "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
 		"approvals.decide", "approvals.decide_high",
 		"profile.portal_read", "profile.portal_write", "quotes.portal_read", "quotes.portal_accept":
 		return false
@@ -108,6 +108,10 @@ var builtinKeys = []string{"owner", "admin", "member", "viewer", "guest", "custo
 func builtinPermissions(key string) []string {
 	out := make([]string, 0, len(Registry))
 	for _, p := range Registry {
+		// Conversation access is explicit even for workspace owners/admins.
+		if p.Key == "harness.watch" {
+			continue
+		}
 		allow := false
 		resource, _, _ := strings.Cut(p.Key, ".")
 		switch key {

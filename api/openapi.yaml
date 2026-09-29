@@ -505,6 +505,147 @@ paths:
         '404': {description: Request or proof not found}
         '409': {description: Immutable choice or lifecycle conflict}
         '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /me/security/session-watching:
+    get:
+      operationId: getSessionWatchingSecurity
+      summary: Read the signed-in person's session watching consent mode
+      responses:
+        '200':
+          description: Per-person setting; defaults to Aeon approval
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+        '403': {description: Signed-in person required}
+    put:
+      operationId: setSessionWatchingSecurity
+      summary: Change consent for future approvals without changing active watches
+      description: Same-origin person only. Local confirmation requires a signed macOS daemon with LocalAuthentication; Linux is unavailable and fails closed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+      responses:
+        '200':
+          description: Saved per-person setting
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+        '400': {description: Invalid mode}
+        '403': {description: Same-origin signed-in person required}
+  /agent-pairing/attach:
+    post:
+      operationId: attachDevice
+      summary: Paired daemon requests, activates, renews or detaches a read-only watch
+      description: >-
+        The single paired-runtime attach route. At daemon startup, register requires the
+        paired bearer, computer lifecycle proof and a fresh memory-only poll_key. Registration
+        invalidates all earlier watches on that computer, requiring new owner approval.
+        All other operations require the paired bearer and registered poll_key; lifecycle
+        proof alone is rejected. Neither daemon nor server persists the poll key. Codes never
+        appear in URLs. Requests, activation and every poll
+        repeat the immutable kernel-observed snapshot. Lease is 60 seconds and cannot
+        be resurrected. The server pins the owner's consent_mode at person approval.
+        local_auth remains approved (no session or lease) until the registered daemon
+        echoes consent_digest and local_confirmed after in-process macOS authentication.
+        Missing confirmation never activates; request-supplied policy overrides are refused.
+        Text is host-redacted and relayed in memory only, never stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AttachDeviceRequest'}
+      responses:
+        '200':
+          description: Registration acknowledgement or attach state; user_code is returned only to the requesting daemon
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/AttachView'}
+                  - type: object
+                    required: [state]
+                    additionalProperties: false
+                    properties:
+                      state: {type: string, const: registered}
+        '403': {description: Registered memory-only poll key required; lifecycle proof only authorizes registration}
+        '409': {description: Snapshot mismatch or poll sequence rejected}
+        '410': {description: Expired or revoked; new owner approval required}
+        '429': {description: Attempt or stream quota exceeded}
+  /agent-pairing/attach/lookup:
+    post:
+      operationId: lookupAttach
+      summary: Paired computer owner reviews a nine-digit attach code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [user_code]
+              properties:
+                user_code: {type: string, pattern: '^[0-9]{9}$'}
+      responses:
+        '200':
+          description: Immutable approval snapshot and digest, no conversation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AttachView'}
+        '403': {description: Same-origin signed-in owner required}
+        '404': {description: Code unavailable}
+        '429': {description: Attempt cap reached}
+  /agent-pairing/attach/{requestId}/approve:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: approveAttach
+      summary: Same-origin paired owner approves exactly the reviewed snapshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_digest]
+              properties:
+                request_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Required for local_auth; binds the mode the person reviewed}
+      responses:
+        '200': {description: Approved snapshot; activation requires the registered daemon poll key and, for local_auth, its local confirmation}
+        '403': {description: Same-origin paired owner required}
+        '409': {description: Digest differs from reviewed snapshot}
+        '410': {description: Approval expired or revoked}
+  /agent-pairing/attach/{requestId}/revoke:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: revokeAttach
+      summary: Paired owner ends a watch without stopping the process
+      responses:
+        '200': {description: Detached; conversation access ends}
+        '403': {description: Same-origin paired owner required}
+  /projects/{projectId}/harness-sessions/{sessionId}/watch:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: watchAttachedSession
+      summary: Live-only inert text; requires explicit harness.watch, never implied by read
+      description: >-
+        Person-only SSE. No replay or history. Authorization and lease are rechecked
+        on each chunk and every second. Events are text (JSON string), end, and keepalive.
+        Agent-written text is unverified; never interpret HTML, Markdown or terminal escapes.
+        Stream is no-store and bounded to 16 viewers per session, 256 per server.
+      responses:
+        '200':
+          description: Memory-only live stream
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '403': {description: Explicit conversation-view permission required}
+        '410': {description: Watch unavailable or lease expired}
   /agent-pairing/self:
     get:
       operationId: getOwnPairing
@@ -4797,6 +4938,74 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    SessionWatchingSecurity:
+      type: object
+      additionalProperties: false
+      required: [consent_mode]
+      properties:
+        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon}
+    AttachProcess:
+      type: object
+      additionalProperties: false
+      required: [pid, uid, started, executable, cwd]
+      properties:
+        pid: {type: integer, minimum: 1}
+        uid: {type: integer, minimum: 0}
+        started: {type: string, maxLength: 128}
+        executable: {type: string, maxLength: 1024}
+        cwd: {type: string, maxLength: 1024}
+    AttachSnapshot:
+      type: object
+      additionalProperties: false
+      required: [computer_id, project_id, ticket_id, host, harness, process, transcript, file_id]
+      properties:
+        computer_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        ticket_id: {type: string, format: uuid}
+        host: {type: string, maxLength: 128}
+        harness: {type: string, enum: [codex, claude, cursor, grok]}
+        process: {$ref: '#/components/schemas/AttachProcess'}
+        transcript: {type: string, maxLength: 1024}
+        file_id: {type: string, maxLength: 128}
+        platform: {type: string, enum: [darwin, linux], description: Observed daemon platform; required for strict local authentication}
+    AttachDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [operation, computer_id, poll_key]
+      oneOf:
+        - properties:
+            operation: {const: register}
+          required: [device_proof]
+        - properties:
+            operation: {enum: [request, poll, detach]}
+          required: [request_id, snapshot, request_digest]
+      properties:
+        operation: {type: string, enum: [register, request, poll, detach]}
+        request_id: {type: string, format: uuid}
+        computer_id: {type: string, format: uuid}
+        device_proof: {type: string, writeOnly: true, description: Existing computer lifecycle proof; registration only, never watch authority}
+        poll_key: {type: string, pattern: '^[a-f0-9]{64}$', writeOnly: true, description: Fresh daemon-start random key held only in memory; required for every operation}
+        snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
+        request_digest: {type: string, description: Required with the snapshot for request, activation, poll and detachment}
+        consent_digest: {type: string, description: Echo of the server-selected consent binding; required for strict activation}
+        local_confirmed: {type: boolean, description: Set only by the daemon after in-process LocalAuthentication; never accepted on the local socket}
+        sequence: {type: integer, minimum: 1}
+        text: {type: string, maxLength: 16384, description: Host-redacted new complete records only; no persistence or replay}
+    AttachView:
+      type: object
+      required: [request_id, request_digest, snapshot, state, expires_at]
+      properties:
+        request_id: {type: string, format: uuid}
+        request_digest: {type: string}
+        snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
+        state: {type: string, enum: [pending, approved, active, detached, unreachable]}
+        expires_at: {type: string, format: date-time}
+        lease_until: {type: [string, 'null'], format: date-time}
+        session_id: {type: [string, 'null'], format: uuid}
+        user_code: {type: string, description: Nine digits, daemon response only}
+        consent_mode: {type: string, enum: [aeon, local_auth]}
+        consent_digest: {type: string, description: SHA-256 binding of request ID, snapshot digest and server-selected mode; immutable after approval}
+
     RuleError: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string}, actual_bytes: {type: integer}, max_bytes: {type: integer}}}
     RuleScope:
       type: "object"
@@ -7470,6 +7679,14 @@ components:
         activity_history: {type: array, description: Up to 20 changed notes, newest first; present on session detail., items: {$ref: '#/components/schemas/HarnessActivityNote'}}
         metadata_history: {type: array, description: Up to 20 display label, model, and reasoning effort changes, newest first; present on session detail., items: {$ref: '#/components/schemas/HarnessMetadataChange'}}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        watch:
+          type: object
+          description: Content-free attach status, present on attached session detail only
+          properties:
+            request_id: {type: string, format: uuid}
+            owner_id: {type: string, format: uuid}
+            state: {type: string, enum: [active, detached, unreachable]}
+            lease_until: {type: [string, 'null'], format: date-time}
         host: {type: string}
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [worker, coordinator]}
