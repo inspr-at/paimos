@@ -1635,15 +1635,15 @@ paths:
               additionalProperties: false
               minProperties: 1
               properties:
-                add: {type: array, maxItems: 32, items: {type: string}}
-                remove: {type: array, maxItems: 32, items: {type: string}}
+                add: {type: array, maxItems: 256, items: {type: string}}
+                remove: {type: array, maxItems: 256, items: {type: string}}
       responses:
         '200':
           description: Updated key metadata without a secret
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AgentKey'}
-        '400': {description: Invalid scopes or more than 32 resulting scopes}
+        '400': {description: Invalid scopes}
         '401': {description: Not signed in}
         '403': {description: Person with keys.manage required or resulting scopes exceed a ceiling}
         '404': {description: Key not found in this tenant}

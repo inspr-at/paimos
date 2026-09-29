@@ -68,7 +68,7 @@ func (m *Module) handleAgentKeyScopes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Removals may clean up retired registry entries, but are still bounded.
-		if len(delta.Remove) > 32 {
+		if len(delta.Remove) > maxScopeInput {
 			writeBadRequest(w, "invalid scopes")
 			return
 		}
@@ -90,7 +90,7 @@ func (m *Module) handleAgentKeyScopes(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errKeyInactive):
 		writeJSON(w, http.StatusConflict, errorJSON{Error: errKeyInactive.Error()})
 	case errors.Is(err, errKeyScopes):
-		writeBadRequest(w, "invalid scopes or more than 32 scopes")
+		writeBadRequest(w, "invalid scopes")
 	case err != nil:
 		writeInternal(w)
 	case delta != nil:
@@ -157,7 +157,7 @@ func (m *Module) agentKeyScopes(ctx context.Context, p tenant.Principal, id stri
 					after = append(after, scope)
 				}
 			}
-			if len(after) > 32 {
+			if len(after) > maxScopeInput {
 				return errKeyScopes
 			}
 			for _, scope := range after {

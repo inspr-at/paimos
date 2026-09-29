@@ -120,7 +120,7 @@ async function copyCommand() {
         <p v-if="rotationProblem" class="field-error" role="alert">{{ rotationProblem }}</p>
       </div>
       <fieldset v-else id="key-scopes" class="scopes" tabindex="-1" :aria-invalid="tried && !!scopeProblem" :aria-describedby="tried && scopeProblem ? 'key-scopes-error' : undefined">
-        <legend class="label">What it may do <span class="count">{{ scopes.size }} chosen, at most {{ MAX_KEY_SCOPES }}</span></legend>
+        <legend class="label">What it may do <span class="count">{{ scopes.size }} chosen</span></legend>
         <div class="presets">
           <label class="search-field find">
             <AppIcon name="search" :size="14" />
