@@ -3,9 +3,13 @@
 package knowledge
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -13,10 +17,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -682,6 +688,116 @@ func TestLearningsProjectGrant(t *testing.T) {
 	if decode[LearningDecision](t, w).Decision != "dismissed" || decisionProject(t, f, commentID) != f.project {
 		t.Fatal("member dismiss")
 	}
+}
+
+// The project grant above injects the route scope. This one does not: a
+// project-only person arrives as a real session, and the production auth
+// middleware has to resolve the scope before list, accept or dismiss run.
+func TestLearningsProjectSessionThroughAuth(t *testing.T) {
+	f := setup(t)
+	setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
+	ticketComment := addComment(t, f, f.ticket, "#process-learning Quote the ticket in the changelog.")
+	elsewhere := addNode(t, f, "OTH-9", "ticket", "Other project learning", &f.other)
+	setFields(t, f, elsewhere, map[string]any{"tags": []any{"process-learning"}})
+	otherComment := addComment(t, f, elsewhere, "#process-learning Stay in the other project.")
+
+	member := projectPerson(t, f, "Nia Session")
+	bindProjectRole(t, f, member.ID, "member", f.project)
+	var workspace int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2 AND scope_type='workspace'`, f.a.TenantID, member.ID).Scan(&workspace); err != nil {
+		t.Fatal(err)
+	}
+	if workspace != 0 {
+		t.Fatal("project session has a workspace binding")
+	}
+	entry := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "session-notes", "title": "Session notes", "body": "Notes.\n"})
+
+	srv := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{New(f.db.App)}}
+	if _, err := auth.Attach(srv, auth.Config{Env: "dev", SessionKey: bytes.Repeat([]byte{9}, 32)}); err != nil {
+		t.Fatal(err)
+	}
+	handler := srv.Handler()
+	cookie := projectSessionCookie(t, f, member)
+	ticketID := nodeLearningID(f.ticket)
+	commentID := commentLearningID(f.ticket, ticketComment)
+	foreignID := nodeLearningID(elsewhere)
+	foreignComment := commentLearningID(elsewhere, otherComment)
+
+	expect(t, callSession(t, handler, "", "GET", "/api/knowledge/learnings?project_id="+f.project, nil), 401)
+
+	own := callSession(t, handler, cookie, "GET", "/api/knowledge/learnings?project_id="+f.project, nil)
+	expect(t, own, 200)
+	page := decode[LearningPage](t, own)
+	if page.Items == nil || !hasLearning(page.Items, ticketID) || !hasLearning(page.Items, commentID) || hasLearning(page.Items, foreignID) || hasLearning(page.Items, foreignComment) {
+		t.Fatalf("project list %+v", page.Items)
+	}
+	expect(t, callSession(t, handler, cookie, "GET", "/api/knowledge/learnings?project_id="+f.other, nil), 404)
+
+	denied := callSession(t, handler, cookie, "POST", "/api/knowledge/learnings/"+foreignID+"/accept", map[string]any{"knowledge_id": entry.ID})
+	expect(t, denied, 403)
+	if code(t, denied) != "forbidden" || decisionOf(t, f, foreignID) != "" {
+		t.Fatalf("cross-project accept %s", denied.Body.String())
+	}
+	denied = callSession(t, handler, cookie, "POST", "/api/knowledge/learnings/"+foreignComment+"/dismiss", nil)
+	expect(t, denied, 403)
+	if code(t, denied) != "forbidden" || decisionOf(t, f, foreignComment) != "" {
+		t.Fatalf("cross-project dismiss %s", denied.Body.String())
+	}
+
+	accepted := callSession(t, handler, cookie, "POST", "/api/knowledge/learnings/"+ticketID+"/accept", map[string]any{"knowledge_id": entry.ID})
+	expect(t, accepted, 200)
+	if decode[LearningDecision](t, accepted).Decision != "accepted" || decisionProject(t, f, ticketID) != f.project {
+		t.Fatalf("session accept %s", accepted.Body.String())
+	}
+	dismissed := callSession(t, handler, cookie, "POST", "/api/knowledge/learnings/"+commentID+"/dismiss", nil)
+	expect(t, dismissed, 200)
+	if decode[LearningDecision](t, dismissed).Decision != "dismissed" || decisionProject(t, f, commentID) != f.project {
+		t.Fatalf("session dismiss %s", dismissed.Body.String())
+	}
+	again := callSession(t, handler, cookie, "GET", "/api/knowledge/learnings?project_id="+f.project, nil)
+	expect(t, again, 200)
+	closed := decode[LearningPage](t, again)
+	if hasLearning(closed.Items, ticketID) || hasLearning(closed.Items, commentID) {
+		t.Fatal("decided learnings stayed in the project list")
+	}
+}
+
+func projectSessionCookie(t *testing.T, f fixture, p tenant.Principal) string {
+	t.Helper()
+	raw := sha256.Sum256([]byte("learning-session/" + p.ID))
+	id := sha256.Sum256(raw[:])
+	var identity string
+	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO identities(issuer,subject) VALUES('learning-session',$1) RETURNING id::text`, p.ID).Scan(&identity); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE principals SET identity_id=$1::uuid WHERE tenant_id=$2::uuid AND id=$3::uuid`, identity, p.TenantID, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO sessions(id,identity_id,tenant_id,principal_id,expires_at) VALUES($1,$2::uuid,$3::uuid,$4::uuid,now()+interval '1 day')`, hex.EncodeToString(id[:]), identity, p.TenantID, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	return hex.EncodeToString(raw[:])
+}
+
+func callSession(t *testing.T, h http.Handler, cookie, method, path string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader *strings.Reader
+	if body == nil {
+		reader = strings.NewReader("")
+	} else {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader = strings.NewReader(string(raw))
+	}
+	r := httptest.NewRequest(method, path, reader)
+	if cookie != "" {
+		r.AddCookie(&http.Cookie{Name: "aeon_session", Value: cookie})
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w
 }
 
 func projectPerson(t *testing.T, f fixture, name string) tenant.Principal {
