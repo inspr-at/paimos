@@ -777,10 +777,11 @@ func assigneeShownExpr(projectID, harnessAll, projects, members string) string {
 // boolean. Empty means every row; otherwise the probe runs only when the gate
 // is true (CASE does not evaluate that branch). Assignee sorts pass
 // "ap.name IS NULL" while ordering, because a stored person is already the
-// sort key, and "s.lead_name IS NULL" on the page so assigned rows still
-// receive a lead. The carried sort lead and the page lead are one statement.
-// Other sorts attach the lookup only to the selected page. The partial index
-// harness_sessions_ticket_eta probes one ticket.
+// sort key. The same lookup returns lead_evaluated: true when the probe ran,
+// including when it found nobody. The page gates on "NOT s.lead_evaluated",
+// so an empty result is not probed again and a stored person still receives
+// a lead from this statement. Other sorts attach the lookup only to the
+// selected page. The partial index harness_sessions_ticket_eta probes one ticket.
 //
 // gated is MATERIALIZED. Inlining it re-runs the lookup once per reference:
 // the sort reads the shown name twice, and the statement also carries the
@@ -807,13 +808,17 @@ func assigneeWorkerJoin(nodeID, projectID, harnessAll, projects, members string,
 	scoped := strings.ReplaceAll(lookup, "s.", "sess.")
 	scoped = strings.ReplaceAll(scoped, "harness_sessions s", "harness_sessions sess")
 	return ` LEFT JOIN LATERAL (
-    WITH gated AS MATERIALIZED (
-        SELECT CASE WHEN ` + gate + ` THEN (
+    WITH decision AS (
+        SELECT (` + gate + `) AS lead_evaluated
+    ), gated AS MATERIALIZED (
+        SELECT decision.lead_evaluated,
+            CASE WHEN decision.lead_evaluated THEN (
             SELECT jsonb_build_object('shown_name', picked.shown_name, 'lead_key', picked.lead_key)
             FROM (` + scoped + `) picked
         ) END AS payload
+        FROM decision
     )
-    SELECT payload->>'shown_name' AS shown_name, payload->>'lead_key' AS lead_key
+    SELECT payload->>'shown_name' AS shown_name, payload->>'lead_key' AS lead_key, lead_evaluated
     FROM gated
 ) worker ON true `
 }
@@ -1066,11 +1071,12 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	pageWorker := workerJoin("n.id", "n.project_id", "")
 	if sortsBy(q, "assignee") {
 		// A stored person is the sort key, so only the other rows need a live
-		// probe before paging. Assigned rows take their lead from the page.
+		// probe before paging. lead_evaluated stays true when that probe finds
+		// nobody; the page probes only the rows this pass deferred.
 		people = ` LEFT JOIN principals ap ON ap.tenant_id=current_setting('aeon.tenant_id')::uuid AND ap.id=f.assignee_id::uuid` + workerJoin("f.id", "f.project_id", "ap.name IS NULL")
-		orderedLead = ",worker.shown_name AS lead_name,worker.lead_key"
+		orderedLead = ",worker.shown_name AS lead_name,worker.lead_key,worker.lead_evaluated"
 		leadColumns = "coalesce(s.lead_name,worker.shown_name),coalesce(s.lead_key,worker.lead_key)"
-		pageWorker = workerJoin("n.id", "n.project_id", "s.lead_name IS NULL")
+		pageWorker = workerJoin("n.id", "n.project_id", "NOT s.lead_evaluated")
 	}
 	etaJoin := ""
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {

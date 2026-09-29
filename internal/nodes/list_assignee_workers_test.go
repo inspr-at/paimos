@@ -139,11 +139,11 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 	}
 	sorted, _ := listSQL(listQuery{Sort: []sortKey{{Name: "assignee"}}, Limit: 50}, nil)
 	before, after, cut := strings.Cut(sorted, "selected AS")
-	if !cut || !strings.Contains(before, "harness_sessions sess") || !strings.Contains(before, "ap.name IS NULL") || !strings.Contains(before, "AS lead_name") || strings.Contains(sorted, "sessess") {
+	if !cut || !strings.Contains(before, "harness_sessions sess") || !strings.Contains(before, "ap.name IS NULL") || !strings.Contains(before, "AS lead_name") || !strings.Contains(before, "lead_evaluated") || strings.Contains(sorted, "sessess") {
 		t.Fatal("assignee sort must probe a live lead only when the row has no stored person, and carry that lead")
 	}
-	if !strings.Contains(after, "s.lead_name") || !strings.Contains(after, "s.lead_name IS NULL") || !strings.Contains(after, "harness_sessions sess") {
-		t.Fatal("assigned rows must take their lead from the page of the same statement")
+	if !strings.Contains(after, "s.lead_name") || !strings.Contains(after, "NOT s.lead_evaluated") || !strings.Contains(after, "harness_sessions sess") || strings.Contains(sorted, "s.lead_name IS NULL") {
+		t.Fatal("assigned rows must take their lead from the page, and an empty lookup must stay evaluated")
 	}
 
 	// About 300 tickets and enough live sessions that a per-row sequential scan
@@ -401,14 +401,116 @@ func TestListAssigneeSortProbesEachUnassignedRowOnce(t *testing.T) {
 	}
 }
 
+// Stopped sessions are not eligible leads. An evaluated lookup that finds
+// nobody used to look like a deferred lookup, because both leave the carried
+// name null, and the page probed those rows again. lead_evaluated keeps the
+// empty result, so probes stay within the unassigned rows.
+func TestListAssigneeSortStoppedOnlyProbesAtMostOnce(t *testing.T) {
+	p := newPrincipal(t, "assignee-probe-stopped")
+	project := kindBySlug(t, p, "project")
+	ticket := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Stopped probes"}`)
+	sam := addPrincipalIn(t, p.TenantID, "Sam")
+	zed := insertNamedAgent(t, p.TenantID, "Zed")
+	const tickets = 3000
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id, key, kind_id, title, state, parent_id, position)
+            SELECT $1, 'STOP-'||g, $2, 'Stopped '||g, 'new', $3, g FROM generate_series(1, $4) g`,
+			p.TenantID, ticket.ID, root.ID, tickets); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions (
+            tenant_id, project_id, agent_principal_id, ticket_node_id, harness, host, management, role, work_shape,
+            ref_digest, lease_digest, phase, activity, display_label, created_at, heartbeat_at, stopped_at, stop_reason)
+            SELECT $1, $2, $3, n.id, 'claude', 'test', 'unmanaged', 'worker', 'ship',
+                decode(md5(n.id::text), 'hex'), decode(md5('lease'||n.id::text), 'hex'),
+                'stopped', 'busy', 'S-'||n.key, clock_timestamp(), clock_timestamp(), clock_timestamp(), 'completed'
+            FROM nodes n
+            WHERE n.tenant_id=$1 AND n.key LIKE 'STOP-%'`, p.TenantID, root.ID, zed)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes, principals, harness_sessions`); err != nil {
+		t.Fatal(err)
+	}
+
+	page := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee&limit=20")
+	if len(page.Items) != 20 {
+		t.Fatalf("page %d", len(page.Items))
+	}
+	for _, item := range page.Items {
+		if item.Assignee != nil || item.LeadWorker != nil {
+			t.Fatalf("stopped %s assignee %#v lead %#v", item.Key, item.Assignee, item.LeadWorker)
+		}
+	}
+	loops, seq := explainAssigneeProbes(t, p, root.ID)
+	// Every row was evaluated while ordering and found nobody. The page must
+	// not probe them again.
+	if seq > 1 || loops > tickets || loops < tickets {
+		t.Fatalf("stopped probe loops %.0f, seq %.0f, want <= %d", loops, seq, tickets)
+	}
+
+	const assigned = 1500
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_build_object('assignee', $2::text)
+            WHERE tenant_id=$1 AND parent_id=$3 AND key LIKE 'STOP-%' AND position<=$4`,
+			p.TenantID, sam.ID, root.ID, assigned)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes, principals, harness_sessions`); err != nil {
+		t.Fatal(err)
+	}
+	stored := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee&limit=50")
+	if len(stored.Items) != 50 {
+		t.Fatalf("stored page %d", len(stored.Items))
+	}
+	for _, item := range stored.Items {
+		if item.Assignee == nil || item.Assignee.Name != "Sam" || item.LeadWorker != nil {
+			t.Fatalf("stored stopped %s assignee %#v lead %#v", item.Key, item.Assignee, item.LeadWorker)
+		}
+	}
+	unassigned := tickets - assigned
+	const pageRows = 50 + 1
+	loops, seq = explainAssigneeProbes(t, p, root.ID)
+	// Ordering probes only the open rows. This page is stored people, so it
+	// adds one probe per page row and no second probe of an empty result.
+	if seq > 1 || loops > float64(unassigned+pageRows) || loops <= float64(unassigned) {
+		t.Fatalf("stopped stored-page probes %.0f, seq %.0f, unassigned %d page %d", loops, seq, unassigned, pageRows)
+	}
+	var anchor string
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT id::text FROM nodes
+            WHERE tenant_id=$1 AND parent_id=$2 AND key LIKE 'STOP-%' AND fields ? 'assignee'
+            ORDER BY id DESC LIMIT 1`, p.TenantID, root.ID).Scan(&anchor)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loops, seq = explainAssigneeProbesAt(t, p, root.ID, anchor)
+	// The next page is rows whose lookup already returned nobody.
+	if seq > 1 || loops > float64(unassigned) || loops < float64(unassigned) {
+		t.Fatalf("stopped unassigned-page probes %.0f, seq %.0f, want <= %d", loops, seq, unassigned)
+	}
+}
+
 func explainAssigneeProbes(t *testing.T, p tenant.Principal, rootID string) (indexLoops, seqLoops float64) {
+	t.Helper()
+	return explainAssigneeProbesAt(t, p, rootID, nil)
+}
+
+func explainAssigneeProbesAt(t *testing.T, p tenant.Principal, rootID string, anchor any) (indexLoops, seqLoops float64) {
 	t.Helper()
 	q, err := parseListQuery(httptest.NewRequest(http.MethodGet, "/api/nodes?within="+rootID+"&kind=ticket&sort=assignee&limit=50", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	q.seen = assigneeSeen{harnessAll: true, members: true}
-	sqlText, args := listSQL(q, nil)
+	sqlText, args := listSQL(q, anchor)
 	var planRaw string
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), "EXPLAIN (ANALYZE, FORMAT JSON) "+sqlText, args...).Scan(&planRaw)
