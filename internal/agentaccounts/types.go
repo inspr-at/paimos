@@ -66,6 +66,9 @@ type Window struct {
 	Used        int64     `json:"used"`
 	Reserved    int64     `json:"reserved"`
 	Provisional bool      `json:"provisional"`
+	// SetByYou marks a manual window, set by a person rather than read from
+	// the vendor. It caps on top of readings (AEON-384).
+	SetByYou bool `json:"set_by_you,omitempty"`
 }
 
 // Reservation is one held estimate against a window.

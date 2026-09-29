@@ -4270,7 +4270,7 @@ paths:
     get:
       operationId: listAccountCapacity
       summary: Current observed capacity and schedule pacing per account
-      description: Person account.read permission. Separate from the legacy account contract. Manual active windows override routing; readings remain visible here.
+      description: Person account.read permission. Separate from the legacy account contract. Manual active windows and the account's Advanced limit cap on top of these readings (AEON-384); both bind.
       responses:
         '200': {description: Capacity, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountCapacity'}}}}}
         '403': {description: Person account.read permission required}
@@ -4390,7 +4390,7 @@ paths:
   /agent-accounts/{accountId}/windows:
     post:
       operationId: createAccountWindow
-      description: Admin sets a bounded allowance and pacing policy. Overlapping windows of one unit are rejected.
+      description: Admin sets a bounded allowance and pacing policy for the CLI and older clients. Overlapping windows of one unit are rejected. The window caps on top of readings, pacing and Keep for you; it no longer replaces them (AEON-384). The web app offers the Advanced limit instead.
       security: [{session: []}]
       parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AllowanceWindowWrite'}}}}
@@ -4398,6 +4398,55 @@ paths:
         '201': {description: Window, content: {application/json: {schema: {$ref: '#/components/schemas/AllowanceWindow'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/windows/{windowId}:
+    delete:
+      operationId: removeAccountWindow
+      summary: Remove a limit set by hand
+      description: Person account.manage permission. The manual window stops capping; its row, usage and reservations stay, so nothing is lost and running work settles as before. Windows read from the vendor and pairing verifications are not removable (404).
+      security: [{session: []}]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: windowId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Removed}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/windows/{windowId}/repeat:
+    post:
+      operationId: repeatAccountWindow
+      summary: Make a limit set by hand repeat
+      description: Person account.manage permission. Turns a manual window into the account's Advanced limit - its allowance and unit per the period its length matches (up to 36 hours a day, up to 10 days a week, else a month) - and removes the window in the same transaction. Replaces an existing limit, which stays as history.
+      security: [{session: []}]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: windowId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: The limit now in force, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLimitRule'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/limit:
+    put:
+      operationId: putAccountLimit
+      summary: Set the Advanced limit of an account
+      description: 'Person account.manage permission. One sentence per account - "Let agents use at most <amount> <unit> of this account per <period>" - in the account owner''s schedule timezone. It caps on top of readings, pacing and Keep for you and never replaces them. percent counts the rise of each current vendor window within the period (a reset inside the period starts that count again; the person''s own use counts too); runs counts managed runs started in, or holding the account during, the period; requests, tokens and cost_micros count run telemetry in the period, so a run that starts under the limit may finish above it. A reached limit waits with code allowance until the period ends, and Run now does not skip it. An identical sentence is a no-op; a different one replaces the old, which stays as history.'
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLimitWrite'}}}}
+      responses:
+        '200': {description: The limit now in force, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLimitRule'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: removeAccountLimit
+      summary: Remove the Advanced limit of an account
+      description: Person account.manage permission. Idempotent; the removed rule stays as history.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {description: No limit}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}:
     patch:
       operationId: updateAgentAccount
@@ -10143,7 +10192,7 @@ components:
       properties:
         timezone: {type: string, description: IANA timezone; defaults to the person profile timezone}
         override_until: {type: string, format: date-time, description: 'Sprint expires at this reset, populated by the server from the earliest current reset in scope. Away requires it (its date); Hold may carry it (a dated hold). The override ends at this instant.'}
-        override: {type: string, enum: ["", sprint, hold, away], description: 'Sprint uses remaining quota until reset; Hold prevents measured-capacity routing; Away (user scope) is a Sprint bounded by override_until, across resets, with no reserve. Manual windows remain explicit overrides.'}
+        override: {type: string, enum: ["", sprint, hold, away], description: 'Sprint uses remaining quota until reset; Hold prevents measured-capacity routing; Away (user scope) is a Sprint bounded by override_until, across resets, with no reserve. Manual windows and the Advanced limit still cap on top.'}
         reserve: {type: string, enum: ["", auto, fixed, off], description: 'Keep for you (AEON-375): how much of every window agents leave the person while they work, shrinking as a reset comes close (R_eff = R x min(1, H_you/H_ref)). Omitted or empty inherits the next scope up; on the user scope it means auto (30% until learned). off reproduces release 11 pacing.'}
         reserve_percent: {type: number, minimum: 10, maximum: 80, multipleOf: 5, description: The fixed reserve level R; present only with reserve fixed.}
         week:
@@ -10240,6 +10289,16 @@ components:
               freshness: {type: string, enum: [fresh, aging, stale, expired]}
               usage_today_known: {type: boolean, description: False when no exact schedule-boundary observation exists; never infers daily usage from tokens}
               pacing: {$ref: '#/components/schemas/CapacityPacing'}
+        limit:
+          description: The account's Advanced limit (AEON-384) with what it counted this period. Absent when none is set.
+          allOf:
+            - {$ref: '#/components/schemas/AccountLimitRule'}
+            - type: object
+              required: [used, period_end]
+              properties:
+                used: {type: number, minimum: 0, description: Counted this period in the rule's unit; for percent the largest rise among the current vendor windows.}
+                period_end: {type: string, format: date-time, description: When the period ends and the count starts again.}
+        spend_month_usd: {type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: 'List-price spend this local month, in dollars, for an account whose usage is billed by API key. Absent for subscriptions. An estimate, not a billed charge.'}
     AgentAccountWrite:
       type: object
       required: [account_key, harness, daemon_id, label]
@@ -10353,6 +10412,25 @@ components:
         available: {type: boolean}
         host_label: {type: string, maxLength: 128, description: Optional display-only host name reported by the owner daemon; fills an empty label without overwriting configured metadata.}
         failure: {type: string, enum: [auth_failed, unavailable], description: 'Only with available=false. auth_failed only when the vendor status command confirmed this account is signed out or signed in as another identity; every other failure is unavailable (the default when omitted).'}
+    AccountLimitWrite:
+      type: object
+      additionalProperties: false
+      required: [amount, unit, period]
+      description: 'Let agents use at most <amount> <unit> of this account per <period>.'
+      properties:
+        amount: {type: integer, format: int64, minimum: 1, maximum: 1000000000000000, description: At most 100 for percent. Money is in cost_micros.}
+        unit: {type: string, enum: [percent, runs, requests, tokens, cost_micros]}
+        period: {type: string, enum: [day, week, month], description: Local calendar day, week (Monday first) or month of the account owner's schedule timezone.}
+    AccountLimitRule:
+      allOf:
+        - {$ref: '#/components/schemas/AccountLimitWrite'}
+        - type: object
+          required: [id, account_id, created_at]
+          properties:
+            id: {type: string, format: uuid}
+            account_id: {type: string, format: uuid}
+            from_window_id: {type: string, format: uuid, description: Present when made from a manual window with Make this repeat.}
+            created_at: {type: string, format: date-time}
     AllowanceWindowWrite:
       type: object
       required: [starts_at, ends_at, unit, allowance, pace_model]
@@ -10382,6 +10460,7 @@ components:
             used: {type: integer, format: int64}
             reserved: {type: integer, format: int64}
             provisional: {type: boolean, description: "True when this window has no measured usage for its unit, or at least one settled reservation lacked measured usage. Zero-valued legacy telemetry is treated as unknown."}
+            set_by_you: {type: boolean, description: 'True for a manual window set by a person (the old Settings form, pairing or the CLI), which caps on top of readings. Absent for windows read from the vendor. Removed windows are not listed.'}
     AccountRouteRequest:
       type: object
       required: [run_id, daemon_id, account_ids, estimated_units]

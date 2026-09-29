@@ -61,15 +61,14 @@ func allowanceHeadroom(windows []Window, now time.Time) bool {
 	return true
 }
 
+// activeWindows is every window that binds now. A manual window set by hand
+// caps on top of the vendor's readings (AEON-384): both apply, so readings,
+// pacing and Keep for you stay in force next to a person's limit.
 func activeWindows(windows []Window, now time.Time) []Window {
 	out := []Window{}
-	manual := false
 	latest := map[string]Window{}
 	for _, w := range windows {
 		if w.capacityReadAt == nil {
-			if !w.pairingVerification && !now.Before(w.StartsAt) && now.Before(w.EndsAt) {
-				manual = true
-			}
 			continue
 		}
 		key := w.capacityKind + "/" + w.capacityBucket
@@ -86,7 +85,7 @@ func activeWindows(windows []Window, now time.Time) []Window {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	usable := !manual
+	usable := true
 	kept := make([]string, 0, len(keys))
 	for _, key := range keys {
 		w := latest[key]

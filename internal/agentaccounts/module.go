@@ -46,6 +46,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agent-accounts", m.register)
 	mux.HandleFunc("POST /api/agent-accounts/route", m.route)
 	mux.HandleFunc("POST /api/agent-accounts/{accountId}/windows", m.createWindow)
+	mux.HandleFunc("DELETE /api/agent-accounts/{accountId}/windows/{windowId}", m.removeWindow)
+	mux.HandleFunc("POST /api/agent-accounts/{accountId}/windows/{windowId}/repeat", m.repeatWindow)
+	mux.HandleFunc("PUT /api/agent-accounts/{accountId}/limit", m.putLimit)
+	mux.HandleFunc("DELETE /api/agent-accounts/{accountId}/limit", m.deleteLimit)
 	mux.HandleFunc("PATCH /api/agent-accounts/{accountId}", m.patch)
 	mux.HandleFunc("POST /api/agent-accounts/{accountId}/probe", m.probe)
 }

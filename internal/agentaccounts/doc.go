@@ -70,8 +70,28 @@
 // Catalog and queued runs expose structured advisory waits; reservation and
 // claim recheck admission under the account lock. A person's per-run "now"
 // override skips schedule pacing, never holds, truth or ownership fences.
-// Active manual windows override pacing; fresh vendor denial still fences them. Percent reservations hold an
-// initial 1% per job; tokens/dollars never masquerade as vendor quota.
+// Active manual windows cap on top of readings (AEON-384): readings, pacing and
+// Keep for you still apply next to them, and fresh vendor denial fences them.
+// A removed manual window keeps its row and ledger but no longer caps. Percent
+// reservations hold an initial 1% per job; tokens/dollars never masquerade as
+// vendor quota.
+//
+// PUT/DELETE {id}/limit stores the one Advanced sentence per account in
+// account_limit_rules: at most N percent, runs, requests, tokens or cost micros
+// per local day, week or month of the account owner's schedule timezone. A rule
+// is evaluated at admission, next to the readings, and never replaces them.
+// Percent counts the rise of each current vendor window within the period (a
+// reset inside the period starts that count again; your own use counts too).
+// Runs count managed runs started, or holding the account, in the period.
+// Requests, tokens and cost count run telemetry in the period, so a run that
+// starts under the limit may finish above it. A reached limit waits with code
+// allowance until the period ends; Run now does not skip it. Replacing or
+// removing a rule keeps the old row as history. POST {id}/windows/{wid}/repeat
+// turns an old manual window into a rule (its length picks day, week or month)
+// and removes the window in the same transaction; DELETE {id}/windows/{wid}
+// removes one. GET /capacity projects the rule with its use this period, the
+// manual windows still in force, and list-price spend this month for accounts
+// billed by API key.
 // Settlement releases that hold without adding usage already in observations.
 //
 // GET /api/agent-accounts/capacity (person account.read) returns exact percentages,

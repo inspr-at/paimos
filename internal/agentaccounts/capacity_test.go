@@ -280,8 +280,9 @@ func TestCapacityActiveWindowSelection(t *testing.T) {
 	if got := activeWindows([]Window{denied, manual}, now); len(got) != 0 {
 		t.Fatal("reset bypassed fresh vendor denial")
 	}
+	// A manual window caps on top of the reading (AEON-384): both bind.
 	got := activeWindows([]Window{fresh, manual}, now)
-	if len(got) != 1 || got[0].ID != "manual" {
+	if len(got) != 2 || got[0].ID != "manual" || got[1].ID != "derived" {
 		t.Fatal(got)
 	}
 }

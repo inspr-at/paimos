@@ -443,7 +443,7 @@ func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (ma
 		SELECT id::text, account_id::text, starts_at, ends_at, unit, allowance, used, reserved,
 		       pace_model, burst_ratio::float8, pairing_verification, capacity_read_at, capacity_allowed, COALESCE(capacity_kind,''), capacity_bucket, capacity_retired, capacity_refresh_run::text
 		FROM account_allowance_windows
-		WHERE account_id::text = ANY($1::text[])
+		WHERE account_id::text = ANY($1::text[]) AND removed_at IS NULL
 		ORDER BY id
 		FOR UPDATE`, accountIDs)
 	if err != nil {

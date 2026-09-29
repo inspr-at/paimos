@@ -240,6 +240,10 @@ type accountCapacity struct {
 	LimitingReset      *time.Time        `json:"limiting_reset,omitempty"`
 	Schedule           capacity.Schedule `json:"schedule"`
 	Windows            []capacityWindow  `json:"windows"`
+	// Limit is the Advanced sentence with its use this period (AEON-384).
+	Limit *limitUse `json:"limit,omitempty"`
+	// SpendMonthUSD is list-price spend this month for an API-key account.
+	SpendMonthUSD string `json:"spend_month_usd,omitempty"`
 }
 
 func (m *Module) capacityList(w http.ResponseWriter, r *http.Request) {
@@ -414,6 +418,12 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 				return nil, err
 			}
 			item.Windows = append(item.Windows, capacityWindow{v, v.StartsAt(), 100, left, v.Freshness(now), pace, known})
+		}
+		if item.Limit, err = accountLimitUse(ctx, tx, a, now); err != nil {
+			return nil, err
+		}
+		if item.SpendMonthUSD, err = monthSpend(ctx, tx, a.ID, s.Timezone, now); err != nil {
+			return nil, err
 		}
 		out = append(out, item)
 	}
