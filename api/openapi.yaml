@@ -9006,8 +9006,8 @@ components:
         input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
-        reasoning_tokens: {$ref: '#/components/schemas/UsageTokenCount', description: Subset of output_tokens. Null means unknown, not zero. Not added to estimated_cost_usd.}
-        provisional: {type: boolean, description: True when the reporter marks partial or any of input, output, or cached input is unknown. A missing reasoning count does not by itself make the row provisional. Cost remains an estimate even when false.}
+        reasoning_tokens: {$ref: '#/components/schemas/UsageTokenCount', description: 'Subset of output_tokens. Null means unknown, not zero. Not added to estimated_cost_usd.'}
+        provisional: {type: boolean, description: 'True when the reporter marks partial or any of input, output, or cached input is unknown. A missing reasoning count does not by itself make the row provisional. Cost remains an estimate even when false.'}
         price_version: {type: [integer, 'null'], format: int64, description: Null unless billing_mode is api.}
         estimated_cost_usd: {type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{12}$', description: 'Exact ((input-cached)*input_rate + cached*cached_rate + output*output_rate)/1000000, with no binary floats or intermediate rounding. Present only when billing_mode is api and every counter and price is known. Subscription and unknown stay null. Never actual billed cost.'}
         cost_status: {type: string, enum: [estimated, unknown]}
