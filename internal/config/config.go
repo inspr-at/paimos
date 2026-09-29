@@ -6,9 +6,13 @@ package config
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
+	"path"
+	"regexp"
 	"strings"
 )
 
@@ -39,7 +43,10 @@ type Config struct {
 	// doctrine quotation guard (AEON_DOCTRINE_GUARD_KEY_FILE). In dev without a
 	// file it is random and lives only in memory; in prod without a file it is
 	// nil and public proposals stay refused. It is never logged.
-	DoctrineGuardKey        []byte
+	DoctrineGuardKey []byte
+	// Reviewed host configuration only: exact private-tree path -> SHA-256.
+	// Empty by default. Never supplied by a proposal or a source's HTTP API.
+	DoctrineBinaryAllowlist map[string]string
 	DoctrineAppID           string
 	DoctrineInstallationID  string
 	DoctrineAppKeyRef       string
@@ -79,6 +86,11 @@ func FromEnv() (Config, error) {
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("AEON_DATABASE_URL is required")
 	}
+	var policyErr error
+	cfg.DoctrineBinaryAllowlist, policyErr = doctrineBinaryAllowlist(os.Getenv("AEON_DOCTRINE_BINARY_ALLOWLIST"))
+	if policyErr != nil {
+		return Config{}, policyErr
+	}
 	if f := os.Getenv("AEON_DOCTRINE_GUARD_KEY_FILE"); f != "" {
 		key, err := doctrineGuardKey(f)
 		if err != nil {
@@ -116,6 +128,42 @@ func FromEnv() (Config, error) {
 		cfg.DatabaseURL = u
 	}
 	return cfg, nil
+}
+
+func doctrineBinaryAllowlist(raw string) (map[string]string, error) {
+	policy := map[string]string{}
+	if raw == "" {
+		return policy, nil
+	}
+	bad := func() (map[string]string, error) {
+		return nil, fmt.Errorf("AEON_DOCTRINE_BINARY_ALLOWLIST must be a JSON object of exact relative paths and lowercase SHA-256 digests")
+	}
+	if len(raw) > 64<<10 {
+		return bad()
+	}
+	d := json.NewDecoder(strings.NewReader(raw))
+	// Read entries explicitly so duplicate keys cannot silently replace an
+	// exception that an operator thought they reviewed.
+	if token, err := d.Token(); err != nil || token != json.Delim('{') {
+		return bad()
+	}
+	digest := regexp.MustCompile(`^[0-9a-f]{64}$`)
+	for d.More() {
+		token, err := d.Token()
+		name, ok := token.(string)
+		var hash string
+		if err != nil || !ok || d.Decode(&hash) != nil || name == "." || len(name) > 300 || path.IsAbs(name) || path.Clean(name) != name || strings.HasPrefix(name, "../") || strings.ContainsAny(name, "\\\x00\r\n*?[") || !digest.MatchString(hash) || policy[name] != "" {
+			return bad()
+		}
+		policy[name] = hash
+	}
+	if _, err := d.Token(); err != nil {
+		return bad()
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return bad()
+	}
+	return policy, nil
 }
 
 // LinkKeyFromEnv uses an explicit link file or the existing host messaging

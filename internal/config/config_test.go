@@ -9,6 +9,39 @@ import (
 	"testing"
 )
 
+func TestDoctrineBinaryAllowlist(t *testing.T) {
+	hash := strings.Repeat("a", 64)
+	good := `{"assets/logo.png":"` + hash + `"}`
+	policy, err := doctrineBinaryAllowlist(good)
+	if err != nil || policy["assets/logo.png"] != hash {
+		t.Fatal("valid exact exception rejected")
+	}
+	for _, raw := range []string{"", "{}"} {
+		policy, err := doctrineBinaryAllowlist(raw)
+		if err != nil || len(policy) != 0 {
+			t.Fatal("default must allow nothing")
+		}
+	}
+	for _, raw := range []string{"null", "[]", `{`, good + good, `{"x":12}`, `{"x":"short"}`, strings.Replace(good, "assets/logo.png", "../logo.png", 1), strings.Replace(good, "assets/logo.png", "/logo.png", 1), strings.Replace(good, "assets/logo.png", "assets/*.png", 1), `{"x":"` + hash + `","x":"` + hash + `"}`} {
+		if _, err := doctrineBinaryAllowlist(raw); err == nil {
+			t.Fatal("invalid exception config accepted")
+		}
+	}
+	t.Setenv("AEON_DATABASE_URL", "postgres://example")
+	t.Setenv("AEON_ENV", "prod")
+	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", "")
+	t.Setenv("AEON_MESSAGING_KEY_FILE", "")
+	t.Setenv("AEON_DOCTRINE_BINARY_ALLOWLIST", good)
+	config, err := FromEnv()
+	if err != nil || config.DoctrineBinaryAllowlist["assets/logo.png"] != hash {
+		t.Fatal("host exception was not loaded")
+	}
+	t.Setenv("AEON_DOCTRINE_BINARY_ALLOWLIST", "invalid")
+	if _, err := FromEnv(); err == nil {
+		t.Fatal("invalid host exception config started")
+	}
+}
+
 func TestFromEnvDefaults(t *testing.T) {
 	t.Setenv("AEON_DATABASE_URL", "postgres://example")
 	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", "")

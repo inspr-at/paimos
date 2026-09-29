@@ -570,9 +570,9 @@ func TestPublicPinCannotLaunderPrivateText(t *testing.T) {
 		bad := in
 		bad.RequestID = "31900000-0000-4000-8000-0000000000b1"
 		bad.Explanation = guardRule
-		before := forge.writes
+		before, beforeCalls, beforeMinted := forge.writes, forge.calls, forge.minted
 		got := f.call(owner, "POST", "/api/rules/doctrine/proposals", bad, 422)
-		if !strings.Contains(string(got), "private_doctrine") || bytes.Contains(got, []byte(guardRule)) || forge.writes != before {
+		if !strings.Contains(string(got), "private_doctrine") || bytes.Contains(got, []byte(guardRule)) || forge.writes != before || forge.calls != beforeCalls || forge.minted != beforeMinted {
 			t.Fatal("pinned private text was published")
 		}
 		ok := in
@@ -761,8 +761,8 @@ func TestPrivateQuoteFailureIsGeneric(t *testing.T) {
 }
 
 func TestLatinLookalikeFoldAndIdentity(t *testing.T) {
-	if got := normalizeProposalText("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"); got != "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz0123456789" {
-		t.Fatalf("ASCII skeleton changed: %q", got)
+	if got := normalizeProposalText("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"); got != normalizeProposalText("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz0123456789") {
+		t.Fatalf("casefold changed the skeleton: %q", got)
 	}
 	skeleton := normalizeProposalText(guardRule)
 	for _, attack := range []string{
@@ -812,6 +812,7 @@ func TestLatinLookalikeFoldAndIdentity(t *testing.T) {
 	missed := 0
 	for _, text := range variants {
 		if guardPublic(publicRepository, "Deploy to "+text+" now.") == nil {
+			t.Logf("synthetic identity missed: %q -> %q", text, normalizeProposalText(text))
 			missed++
 		}
 	}

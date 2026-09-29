@@ -142,16 +142,42 @@ GitHub App is enabled for the workspace. The editor creates a proposal branch
 and PR in the rule's owning public/private repo, changing its source and git
 TL;DR sidecar together. Public proposals run the `inspr-modules` leak patterns
 against only the changed rule, its TL;DR entry and PR explanation before any
-GitHub write. Text is NFKC-normalized, stripped of invisible format characters,
-and case/whitespace folded. Whole private rules/TL;DRs, eight-word quotations,
-and substantial four-word shingle overlap are refused. Public proposals require
-a successfully indexed private source with a valid credential grant; missing or
-unusable private indexes block publication. The quotation guard is an HMAC keyed
-by `AEON_DOCTRINE_GUARD_KEY_FILE` (at least 32 characters; dev without the file
-uses an ephemeral key), and startup rebuilds a missing or rotated guard. Public
-exemptions use the current main tree only, never the configured pin. Public
-proposal letters must be Latin, including German umlauts and ß, and digits must
-be ASCII. Unchanged file content is excluded.
+GitHub call or token mint. Comparison removes every Unicode default-ignorable
+character, applies NFKD, drops combining marks, folds case and uses a vendored
+Unicode 17.0.0 UTS #39 skeleton. Named Latin small capitals are generated from
+UnicodeData as well; ambiguous compatibility/visual forms fail closed. The
+private corpus, public text and identity literals use the same normalizer;
+proposed git bytes stay unchanged. Six-word runs, whole entries of five or more
+words, and substantial four-word shingle overlap are refused.
+Public proposals require a successfully indexed private source with a valid
+credential grant. The quotation guard is an HMAC keyed by
+`AEON_DOCTRINE_GUARD_KEY_FILE` (at least 32 characters; dev without the file uses
+an ephemeral key). Its saved metadata binds the normalization code/table and
+binary policy versions. Startup rebuilds missing, old or rotated guards;
+public proposals fail closed until a compatible guard exists.
+
+Every private-tree file must be UTF-8 text, without control codes other than
+tab, LF and CR. No binary extension, signature or readable-text heuristic skips
+files. A non-text file blocks the guard and the index error names only its path.
+The optional host config `AEON_DOCTRINE_BINARY_ALLOWLIST` is an explicit reviewed
+JSON object of exact repository-relative paths to lowercase SHA-256 digests of
+complete blobs (empty by default). It cannot be set through proposals or source
+configuration. Changing or removing an exception invalidates cached guards.
+
+Public source indexing separately caches the resolved main commit and tree.
+Only matching cached blobs can exempt a private match, for at most five minutes.
+A missing, invalid or stale cache returns `422 public_main_unavailable` without
+fetching; reindex the public source to refresh it. A proposal with no private
+match needs no exemption cache and adds no guard GitHub reads. Normal PR
+preparation still verifies main; if it changed since an exemption was checked,
+reindex and retry. A proposal branch or unchecked pin never grants an exception.
+Public letters must be Latin, including German umlauts and ß; the compatibility
+form admits superscripts, fractions and the information symbol while other
+scripts/digits stay refused. Unchanged file content is excluded.
+
+Regenerate the pinned Unicode table with
+`python3 internal/rules/doctrine/unicodegen/generate.py`, then `gofmt` the output.
+The generator verifies immutable input digests; builds and runtime are offline.
 Credential-shaped text is refused for either repository, including private.
 Git stays authoritative; the database holds request digests, PR references and
 audit metadata, never draft prose or credentials. Keep the same request UUID

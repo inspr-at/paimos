@@ -51,22 +51,24 @@ const (
 // normalised runs, whole entries and shingles, never the private words or the
 // server key. key is the per-tenant HMAC key and stays in memory only.
 type guardCorpus struct {
-	key     []byte
-	keyID   [8]byte
-	runs    map[[16]byte]struct{}
-	wholes  map[uint16]map[[16]byte]struct{}
-	entries []map[[16]byte]struct{}
-	seen    map[[16]byte]struct{}
+	key      []byte
+	keyID    [8]byte
+	policyID [32]byte
+	runs     map[[16]byte]struct{}
+	wholes   map[uint16]map[[16]byte]struct{}
+	entries  []map[[16]byte]struct{}
+	seen     map[[16]byte]struct{}
 }
 
 func newGuardCorpus(key []byte) *guardCorpus {
 	copied := append([]byte(nil), key...)
 	return &guardCorpus{
-		key:    copied,
-		keyID:  guardFingerprint(copied),
-		runs:   map[[16]byte]struct{}{},
-		wholes: map[uint16]map[[16]byte]struct{}{},
-		seen:   map[[16]byte]struct{}{},
+		key:      copied,
+		keyID:    guardFingerprint(copied),
+		policyID: blobPolicyVersion(),
+		runs:     map[[16]byte]struct{}{},
+		wholes:   map[uint16]map[[16]byte]struct{}{},
+		seen:     map[[16]byte]struct{}{},
 	}
 }
 
@@ -343,8 +345,11 @@ func (c *guardCorpus) marshal() ([]byte, error) {
 		return nil, gitFail("the private doctrine guard key is not configured")
 	}
 	var b []byte
-	b = append(b, 'P', 'G', 2)
+	b = append(b, 'P', 'G', 3)
 	b = append(b, c.keyID[:]...)
+	version := normalizerVersion()
+	b = append(b, version[:]...)
+	b = append(b, c.policyID[:]...)
 	b = appendU32(b, len(runs))
 	for _, h := range runs {
 		b = append(b, h[:]...)
@@ -389,16 +394,22 @@ func appendU32(b []byte, n int) []byte {
 	return append(b, buf[:]...)
 }
 
-func unmarshalGuard(raw, key []byte) (*guardCorpus, error) {
-	if len(key) < 32 || len(raw) < 11 || raw[0] != 'P' || raw[1] != 'G' || raw[2] != 2 {
+func unmarshalGuard(raw, key []byte, allowlists ...map[string]string) (*guardCorpus, error) {
+	if len(key) < 32 || len(raw) < 75 || len(raw) > maxCorpusBytes || raw[0] != 'P' || raw[1] != 'G' || raw[2] != 3 {
 		return nil, gitFail("the private doctrine guard could not be read")
 	}
 	id := guardFingerprint(key)
 	if !hmac.Equal(raw[3:11], id[:]) {
 		return nil, gitFail("the private doctrine guard could not be read")
 	}
+	version := normalizerVersion()
+	policy := blobPolicyVersion(allowlists...)
+	if !hmac.Equal(raw[11:43], version[:]) || !hmac.Equal(raw[43:75], policy[:]) {
+		return nil, gitFail("the private doctrine guard needs rebuilding")
+	}
 	c := newGuardCorpus(key)
-	rest := raw[11:]
+	c.policyID = policy
+	rest := raw[75:]
 	var n int
 	var err error
 	if n, rest, err = takeU32(rest, 2_000_000); err != nil {
@@ -478,11 +489,6 @@ func takeU32(b []byte, limit int) (int, []byte, error) {
 	return n, b[4:], nil
 }
 
-// readPrivateCorpus hashes every text blob at commit. Paths are not consulted:
-// narrowing what the index shows must not narrow what a public proposal is
-// checked against. A NUL blob is skipped only when it is a known binary with
-// no readable text; every other non-UTF-8 blob fails the build. The returned
-// bytes contain hashes only.
 // mainMatchingFiles keeps cached public blobs that are identical to main's
 // current tree. A configured pin, proposal branch or unmerged SHA does not
 // widen the quotation exemption.
@@ -493,188 +499,17 @@ func mainMatchingFiles(cached []File, tree []Entry) []File {
 	}
 	out := make([]File, 0, len(cached))
 	for _, f := range cached {
-		if f.BlobSHA != "" && current[f.Path] == f.BlobSHA {
+		if f.BlobSHA != "" && current[f.Path] == f.BlobSHA && BlobSHA(f.Content) == f.BlobSHA {
 			out = append(out, f)
 		}
 	}
 	return out
 }
 
-func pinIsMain(cached, matched []File) bool {
-	if len(cached) != len(matched) {
-		return false
-	}
-	have := make(map[string]string, len(matched))
-	for _, f := range matched {
-		have[f.Path] = f.BlobSHA
-	}
-	for _, f := range cached {
-		if have[f.Path] != f.BlobSHA {
-			return false
-		}
-	}
-	return true
-}
-
-type blobDisposition int
-
-const (
-	blobIndex blobDisposition = iota
-	blobSkip
-	blobReject
-)
-
-// classifyPrivateBlob indexes UTF-8 text. A known binary signature or extension
-// is skipped only when the blob has no readable ASCII or UTF-16/UTF-32 text, so
-// a PNG with a sentence after the header and a NUL in front of UTF-8 both fail
-// closed. Any other NUL or invalid UTF-8 fails closed too.
-func classifyPrivateBlob(path string, raw []byte) blobDisposition {
-	if !bytes.Contains(raw, []byte{0}) && utf8.Valid(raw) {
-		if len(bytes.TrimSpace(raw)) == 0 {
-			return blobSkip
-		}
-		return blobIndex
-	}
-	if carriesReadableText(raw) || carriesUTF16ASCII(raw) || utf16Text(raw) || utf32Text(raw) {
-		return blobReject
-	}
-	if knownBinarySignature(raw) || knownBinaryExt(path) {
-		return blobSkip
-	}
-	return blobReject
-}
-
-func carriesReadableText(raw []byte) bool {
-	run, spaces, letters := 0, 0, 0
-	for _, b := range raw {
-		if b >= 0x20 && b < 0x7f {
-			run++
-			if b == ' ' {
-				spaces++
-			}
-			if b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' {
-				letters++
-			}
-			if run >= 24 && spaces >= 1 && letters >= 8 {
-				return true
-			}
-			continue
-		}
-		run, spaces, letters = 0, 0, 0
-	}
-	return false
-}
-
-func carriesUTF16ASCII(raw []byte) bool {
-	for _, align := range []int{0, 1} {
-		run := 0
-		for i := align; i+1 < len(raw); i += 2 {
-			lo, hi := raw[i], raw[i+1]
-			asciiLE := lo >= 0x20 && lo < 0x7f && hi == 0
-			asciiBE := hi >= 0x20 && hi < 0x7f && lo == 0
-			if asciiLE || asciiBE {
-				run++
-				if run >= 12 {
-					return true
-				}
-				continue
-			}
-			run = 0
-		}
-	}
-	return false
-}
-
-func utf32Text(raw []byte) bool {
-	if bytes.HasPrefix(raw, []byte{0xff, 0xfe, 0, 0}) || bytes.HasPrefix(raw, []byte{0, 0, 0xfe, 0xff}) {
-		return true
-	}
-	if len(raw) < 8 || len(raw)%4 != 0 {
-		return false
-	}
-	units, ascii := len(raw)/4, 0
-	for i := 0; i < len(raw); i += 4 {
-		if raw[i] >= 0x20 && raw[i] < 0x7f && raw[i+1] == 0 && raw[i+2] == 0 && raw[i+3] == 0 {
-			ascii++
-			continue
-		}
-		if raw[i+3] >= 0x20 && raw[i+3] < 0x7f && raw[i] == 0 && raw[i+1] == 0 && raw[i+2] == 0 {
-			ascii++
-		}
-	}
-	return ascii >= 4 && ascii*4 >= units*3
-}
-
-func knownBinaryExt(path string) bool {
-	lower := strings.ToLower(path)
-	for _, ext := range []string{
-		".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp", ".tif", ".tiff",
-		".pdf", ".zip", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".woff", ".woff2",
-		".ttf", ".otf", ".eot", ".wasm", ".bin", ".exe", ".dll", ".so", ".dylib",
-		".a", ".o", ".class", ".jar", ".mp3", ".mp4", ".webm", ".ogg", ".wav",
-		".mov", ".avi", ".avif", ".heic", ".psd",
-	} {
-		if strings.HasSuffix(lower, ext) {
-			return true
-		}
-	}
-	return false
-}
-
-func knownBinarySignature(raw []byte) bool {
-	if len(raw) >= 8 && bytes.Equal(raw[:8], []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}) {
-		return true
-	}
-	if len(raw) >= 3 && raw[0] == 0xff && raw[1] == 0xd8 && raw[2] == 0xff {
-		return true
-	}
-	if bytes.HasPrefix(raw, []byte("GIF87a")) || bytes.HasPrefix(raw, []byte("GIF89a")) || bytes.HasPrefix(raw, []byte("%PDF-")) {
-		return true
-	}
-	if bytes.HasPrefix(raw, []byte("PK\x03\x04")) || bytes.HasPrefix(raw, []byte("PK\x05\x06")) || bytes.HasPrefix(raw, []byte("PK\x07\x08")) {
-		return true
-	}
-	if len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
-		return true
-	}
-	if bytes.HasPrefix(raw, []byte("\x00asm")) || bytes.HasPrefix(raw, []byte("\x7fELF")) {
-		return true
-	}
-	if len(raw) >= 12 && bytes.Equal(raw[:4], []byte("RIFF")) && bytes.Equal(raw[8:12], []byte("WEBP")) {
-		return true
-	}
-	if bytes.HasPrefix(raw, []byte("wOFF")) || bytes.HasPrefix(raw, []byte("wOF2")) || bytes.HasPrefix(raw, []byte("OTTO")) {
-		return true
-	}
-	if bytes.HasPrefix(raw, []byte("SQLite format 3\x00")) || bytes.HasPrefix(raw, []byte("7z\xbc\xaf\x27\x1c")) {
-		return true
-	}
-	return false
-}
-
-func utf16Text(raw []byte) bool {
-	if len(raw) >= 2 && ((raw[0] == 0xff && raw[1] == 0xfe) || (raw[0] == 0xfe && raw[1] == 0xff)) {
-		return true
-	}
-	if len(raw) < 4 || len(raw)%2 != 0 {
-		return false
-	}
-	nulEven, nulOdd := 0, 0
-	for i, b := range raw {
-		if b != 0 {
-			continue
-		}
-		if i%2 == 0 {
-			nulEven++
-		} else {
-			nulOdd++
-		}
-	}
-	half := len(raw) / 2
-	return nulEven == half || nulOdd == half
-}
-
-func readPrivateCorpus(ctx context.Context, r Reader, repository, commit string, key []byte) ([]byte, error) {
+// readPrivateCorpus hashes every UTF-8 text file in the private tree. Paths
+// selected for the visible rule index never narrow this guard. Unsupported
+// bytes block indexing unless an exact reviewed path/hash exception exists.
+func readPrivateCorpus(ctx context.Context, r Reader, repository, commit string, key []byte, allowlists ...map[string]string) ([]byte, error) {
 	if len(key) < 32 {
 		return nil, gitFail("the private doctrine guard key is not configured")
 	}
@@ -686,6 +521,7 @@ func readPrivateCorpus(ctx context.Context, r Reader, repository, commit string,
 		return nil, gitFail("the private doctrine tree has no files")
 	}
 	c := newGuardCorpus(key)
+	c.policyID = blobPolicyVersion(allowlists...)
 	total, texts := 0, 0
 	for _, e := range entries {
 		if e.Size < 0 || e.Size > maxGuardFile {
@@ -699,11 +535,11 @@ func readPrivateCorpus(ctx context.Context, r Reader, repository, commit string,
 			return nil, gitFail("the private doctrine tree is larger than the guard can cover")
 		}
 		total += len(raw)
-		switch classifyPrivateBlob(e.Path, raw) {
+		switch classifyPrivateBlob(e.Path, raw, allowlists...) {
 		case blobSkip:
 			continue
 		case blobReject:
-			return nil, gitFail("a private doctrine file is not UTF-8 text")
+			return nil, gitFail("private doctrine file is not UTF-8 text: %q", e.Path)
 		}
 		texts++
 		c.add(e.Path, string(raw))

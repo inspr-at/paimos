@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -36,19 +37,21 @@ import (
 // GuardKey is the server secret for per-tenant HMAC of the private quotation
 // guard. It is copied, never logged, and never written to the database.
 type Options struct {
-	CredentialsDir string
-	Client         *http.Client
-	App            AppConfig
-	GuardKey       []byte
+	CredentialsDir  string
+	Client          *http.Client
+	App             AppConfig
+	GuardKey        []byte
+	BinaryAllowlist map[string]string
 }
 
 // Module serves the doctrine layer.
 type Module struct {
-	pool        *pgxpool.Pool
-	credentials Credentials
-	client      *http.Client
-	app         AppConfig
-	guardMaster []byte
+	pool            *pgxpool.Pool
+	credentials     Credentials
+	client          *http.Client
+	app             AppConfig
+	guardMaster     []byte
+	binaryAllowlist map[string]string
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -58,7 +61,7 @@ func New(pool *pgxpool.Pool, opts Options) *Module {
 	if len(opts.GuardKey) >= 32 {
 		key = append([]byte(nil), opts.GuardKey...)
 	}
-	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client, app: opts.App, guardMaster: key}
+	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client, app: opts.App, guardMaster: key, binaryAllowlist: maps.Clone(opts.BinaryAllowlist)}
 }
 
 func (m *Module) guardKey(tenantID string) []byte {
@@ -529,6 +532,12 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 		return
 	}
 	files, skipped, corpus, fetchErr := m.fetch(ctx, p.TenantID, s)
+	// Resolving main is an index operation, never a prerequisite fetched on a
+	// refusing proposal. A failed refresh removes the exemption cache only.
+	var main *publicMainSnapshot
+	if fetchErr == nil && s.Repository == publicRepository && s.Visibility == "public" {
+		main = m.readPublicMain(ctx, p.TenantID, s)
+	}
 	err := m.tx(ctx, p, "settings.manage", func(tx pgx.Tx) error {
 		current, err := getSource(ctx, tx, id, true)
 		if err != nil {
@@ -538,12 +547,18 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 			return nil // the pin moved meanwhile; that change indexes itself
 		}
 		if fetchErr != nil {
+			if err := storePublicMain(ctx, tx, p.TenantID, s, nil); err != nil {
+				return err
+			}
 			return recordIndexError(ctx, tx, id, safeMessage(fetchErr))
 		}
 		if err := storeIndex(ctx, tx, p.TenantID, s, files, skipped); err != nil {
 			return err
 		}
 		if err := storeGuardCorpus(ctx, tx, p.TenantID, s, corpus); err != nil {
+			return err
+		}
+		if err := storePublicMain(ctx, tx, p.TenantID, s, main); err != nil {
 			return err
 		}
 		_, err = events.Append(ctx, tx, p, events.Change{Type: "doctrine.indexed", After: map[string]any{
@@ -572,7 +587,7 @@ func (m *Module) fetch(ctx context.Context, tenantID string, s Source) ([]File, 
 	if s.Repository != privateRepository || s.Visibility != "private" {
 		return files, skipped, nil, nil
 	}
-	corpus, err := readPrivateCorpus(ctx, reader, s.Repository, s.Commit, m.guardKey(tenantID))
+	corpus, err := readPrivateCorpus(ctx, reader, s.Repository, s.Commit, m.guardKey(tenantID), m.binaryAllowlist)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -580,7 +595,7 @@ func (m *Module) fetch(ctx context.Context, tenantID string, s Source) ([]File, 
 }
 
 // EnsurePrivateGuards rebuilds a private quotation guard that is missing or
-// was keyed with a different server secret. A failed rebuild leaves the
+// uses an older normalizer/policy or was keyed with a different server secret. A failed rebuild leaves the
 // doctrine index readable and public proposals refused until a later success.
 // It does not log the key or any doctrine text.
 func (m *Module) EnsurePrivateGuards(ctx context.Context) {
@@ -632,7 +647,7 @@ func (m *Module) ensureTenantGuard(ctx context.Context, tenantID string) error {
 			if err != nil {
 				return err
 			}
-			if corpus, err := unmarshalGuard(raw, key); err == nil && !corpus.empty() {
+			if corpus, err := unmarshalGuard(raw, key, m.binaryAllowlist); err == nil && !corpus.empty() {
 				continue
 			}
 			ids = append(ids, s.ID)
@@ -667,7 +682,7 @@ func (m *Module) rebuildGuard(ctx context.Context, tenantID, id string) error {
 		return err
 	}
 	fetchCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
-	corpus, err := readPrivateCorpus(fetchCtx, reader, s.Repository, s.Commit, m.guardKey(tenantID))
+	corpus, err := readPrivateCorpus(fetchCtx, reader, s.Repository, s.Commit, m.guardKey(tenantID), m.binaryAllowlist)
 	cancel()
 	if err != nil {
 		return err

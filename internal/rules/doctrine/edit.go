@@ -13,21 +13,47 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/inspr-at/paimos/internal/workorders"
 	"gopkg.in/yaml.v3"
 )
 
-// Mirrors inspr-modules/scripts/leak-guard.sh (read 2026-09-29), plus
-// general contact/credential shapes. No matched text ever leaves this guard.
-// No allowlist: a proposal cannot grant itself a public-surface exception.
-var publicLeaks = regexp.MustCompile(`(?i)markus@|@barta\.|[a-z0-9.-]+\.cm\b|~/\.inspr/secrets|(?:api[_-]?key|token|password|secret)["' ]*[:=]["' ]*[A-Za-z0-9/+=_-]{16,}|hsb[^a-z0-9]{0,3}[0-9]|csb[^a-z0-9]{0,3}[0-9]|mbp[^a-z0-9]{0,3}[0-9]{4}|agm[^a-z0-9]{0,3}[0-9]|dsc[^a-z0-9]{0,3}[0-9]|imac[^a-z0-9]{0,3}0|pm\.barta|paimos\.agm|hs\.barta|[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}|-----BEGIN .*PRIVATE KEY-----|github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]{16,}|inspr-doctrine-private|/Users/|/home/`)
+// Every literal passes through the same normalizer as the corpus and input.
+// Regex syntax and character classes are not normalization input: UTS #39 also
+// maps ASCII (m -> rn, 1 -> l, 0 -> O), so raw identity regexes are incorrect.
+func identityLiteral(s string) string { return regexp.QuoteMeta(normalizeProposalText(s)) }
+
+func credentialPattern() string {
+	labels := []string{"api_key", "api-key", "apikey", "token", "password", "secret"}
+	for i := range labels {
+		labels[i] = identityLiteral(labels[i])
+	}
+	return `(?:` + strings.Join(labels, "|") + `)["' ]*[:=]["' ]*[a-z0-9/+=_-]{16,}|` +
+		identityLiteral("-----BEGIN ") + `.*` + identityLiteral("PRIVATE KEY-----") + `|` +
+		identityLiteral("github_pat_") + `[a-z0-9_]+|` + identityLiteral("gh") + `[` + normalizeProposalText("pousr") + `]_[a-z0-9_]{16,}`
+}
+
+func publicIdentityPattern() string {
+	patterns := []string{credentialPattern(), `[a-z0-9.-]+\.` + identityLiteral("cm") + `\b`, `[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}`}
+	for _, literal := range []string{"markus@", "@barta.", "~/.inspr/secrets", "pm.barta", "paimos.agm", "hs.barta", "/Users/", "/home/"} {
+		patterns = append(patterns, identityLiteral(literal))
+	}
+	// Whitespace and Unicode dash punctuation are separator variants; soft
+	// hyphens and all other default ignorables have already been removed.
+	patterns = append(patterns, identityLiteral("inspr")+`[^a-z0-9]`+identityLiteral("doctrine")+`[^a-z0-9]`+identityLiteral("private"))
+	digits := `[` + regexp.QuoteMeta(normalizeProposalText("0123456789")) + `]`
+	for _, host := range []string{"hsb", "csb", "agm", "dsc"} {
+		patterns = append(patterns, identityLiteral(host)+`[^a-z0-9]{0,3}`+digits)
+	}
+	patterns = append(patterns, identityLiteral("mbp")+`[^a-z0-9]{0,3}`+digits+`{4}`, identityLiteral("imac")+`[^a-z0-9]{0,3}`+identityLiteral("0"))
+	return strings.Join(patterns, "|")
+}
 
 // Credentials are forbidden in either repository; private routing permits
-// operator identity, never credential values.
-var credentialLeaks = regexp.MustCompile(`(?i)(?:api[_-]?key|token|password|secret)["' ]*[:=]["' ]*[A-Za-z0-9/+=_-]{16,}|-----BEGIN .*PRIVATE KEY-----|github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]{16,}`)
+// operator identity, never credential values. No proposal-controlled exceptions.
+var publicLeaks = regexp.MustCompile(publicIdentityPattern())
+var credentialLeaks = regexp.MustCompile(credentialPattern())
 var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type ProposalInput struct {
@@ -77,6 +103,9 @@ func guardPublic(repository string, texts ...string) error {
 		return nil
 	}
 	for _, text := range texts {
+		if ambiguousPublicText(text) {
+			return fail(422, "ambiguous_text", "This public proposal contains a character whose Unicode compatibility and visual forms disagree. Use ordinary Latin text. Nothing was published.")
+		}
 		if !latinPublicText(text) {
 			return fail(422, "non_latin", "Public proposals may use only Latin letters, including German umlauts and ß, and ASCII digits. Nothing was published.")
 		}
@@ -101,6 +130,9 @@ func latinPublicText(text string) bool {
 		return r
 	}, text)
 	for _, r := range text {
+		if !unicode.Is(unicode.Latin, r) && !unicode.Is(unicode.Inherited, r) && !unicode.Is(unicode.Common, r) {
+			return false
+		}
 		if unicode.IsLetter(r) && !unicode.Is(unicode.Latin, r) {
 			return false
 		}
@@ -208,104 +240,4 @@ func editRule(s Source, files []File, in ProposalInput) (map[string]string, erro
 		return nil, err
 	}
 	return map[string]string{in.Path: content, SidecarPath(in.Path): string(encoded)}, nil
-}
-
-// Normalize only for comparison; the proposed git bytes remain unchanged.
-// Compatibility characters are composed, then NFD splits accents so combining
-// marks can be dropped. Latin, Cyrillic, Greek, dash, dot and slash lookalikes
-// fold to an ASCII skeleton so a homoglyph cannot hide an identity pattern or
-// a private quotation.
-func normalizeProposalText(text string) string {
-	text = norm.NFD.String(norm.NFKC.String(text))
-	text = strings.Map(func(r rune) rune {
-		if folded, ok := foldSeparator(r); ok {
-			return folded
-		}
-		if isCombiningMark(r) || isIgnoredFormat(r) {
-			return -1
-		}
-		if unicode.Is(unicode.Zs, r) {
-			return ' '
-		}
-		return r
-	}, text)
-	text = foldConfusables(text)
-	text = norm.NFD.String(cases.Fold().String(text))
-	text = strings.Map(func(r rune) rune {
-		if isCombiningMark(r) || isIgnoredFormat(r) {
-			return -1
-		}
-		return r
-	}, text)
-	return strings.Join(strings.Fields(foldConfusables(text)), " ")
-}
-
-func isCombiningMark(r rune) bool {
-	return unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) || unicode.Is(unicode.Mc, r)
-}
-
-func isIgnoredFormat(r rune) bool {
-	return unicode.Is(unicode.Cf, r) || r >= '\ufe00' && r <= '\ufe0f' || r >= '\U000e0100' && r <= '\U000e01ef'
-}
-
-// foldSeparator maps dash, dot and slash lookalikes. A soft hyphen is a dash,
-// not an invisible character, so it is rewritten before format characters drop.
-func foldSeparator(r rune) (rune, bool) {
-	switch r {
-	case '\u00ad', '\u02d7', '\u1680', '\u2043', '\u2212', '\u23af', '\u23ba', '\u23bb', '\u23bc', '\u23bd', '\u2500', '\u2501', '\u2796', '\u2e3a', '\u2e3b', '\u30fc', '\ufe58', '\ufe63', '\uff0d':
-		return '-', true
-	case '\u00b7', '\u2024', '\u2027', '\u30fb', '\ua4f8', '\u0589', '\uff0e':
-		return '.', true
-	case '\u2044', '\u2215', '\u29f8', '\u2571', '\uff0f':
-		return '/', true
-	}
-	if unicode.Is(unicode.Pd, r) {
-		return '-', true
-	}
-	return 0, false
-}
-
-func foldConfusables(text string) string {
-	return strings.Map(func(r rune) rune {
-		if mapped, ok := confusableFold[r]; ok {
-			return mapped
-		}
-		return r
-	}, text)
-}
-
-func proposalWords(text string) []string {
-	return strings.FieldsFunc(normalizeProposalText(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
-}
-
-// confusableFold maps lookalikes to Latin. Latin small capitals and phonetic
-// letters do not decompose under NFD, so they are listed beside Cyrillic and
-// Greek. init adds the non-ASCII uppercase of each key.
-var confusableFold = map[rune]rune{
-	'\u0430': 'a', '\u0435': 'e', '\u0451': 'e', '\u043e': 'o', '\u0440': 'p', '\u0441': 'c', '\u0443': 'y', '\u0445': 'x',
-	'\u0456': 'i', '\u0457': 'i', '\u0458': 'j', '\u0455': 's', '\u04bb': 'h', '\u0501': 'd', '\u051b': 'q', '\u051d': 'w',
-	'\u0461': 'w', '\u0475': 'v', '\u04af': 'y', '\u04b1': 'u', '\u04cf': 'l', '\u04c0': 'l', '\u043a': 'k', '\u043c': 'm',
-	'\u0442': 't', '\u0433': 'r', '\u044d': 'e', '\u0454': 'e', '\u0491': 'g', '\u0432': 'b', '\u0431': 'b', '\u04b3': 'h',
-	'\u03b1': 'a', '\u03b5': 'e', '\u03b9': 'i', '\u03ba': 'k', '\u03bf': 'o', '\u03c1': 'p', '\u03c4': 't', '\u03c5': 'u',
-	'\u03bd': 'v', '\u03c7': 'x', '\u03b3': 'y', '\u03b7': 'n', '\u03c9': 'w', '\u03b2': 'b', '\u03f2': 'c', '\u03c2': 's', '\u03c3': 's',
-	'\u0131': 'i', '\u0585': 'o',
-	'\u0251': 'a', '\u2c6d': 'a', '\u0261': 'g', '\u0193': 'g', '\u0269': 'i', '\u0196': 'i', '\u026a': 'i', '\u017f': 's',
-	'\u0299': 'b', '\u0262': 'g', '\u029c': 'h', '\u029f': 'l', '\u0274': 'n', '\u0280': 'r', '\u028f': 'y',
-	'\ua730': 'f', '\ua731': 's',
-	'\u1d00': 'a', '\u1d03': 'b', '\u1d04': 'c', '\u1d05': 'd', '\u1d06': 'd', '\u1d07': 'e', '\u1d08': 'e',
-	'\u1d09': 'i', '\u1d0a': 'j', '\u1d0b': 'k', '\u1d0c': 'l', '\u1d0d': 'm', '\u1d0e': 'n', '\u1d0f': 'o',
-	'\u1d10': 'o', '\u1d11': 'o', '\u1d18': 'p', '\u1d19': 'r', '\u1d1a': 'r', '\u1d1b': 't', '\u1d1c': 'u',
-	'\u1d20': 'v', '\u1d21': 'w', '\u1d22': 'z',
-}
-
-func init() {
-	for from, to := range confusableFold {
-		upper := unicode.ToUpper(from)
-		if upper == from || upper <= unicode.MaxASCII {
-			continue
-		}
-		if _, ok := confusableFold[upper]; !ok {
-			confusableFold[upper] = to
-		}
-	}
 }

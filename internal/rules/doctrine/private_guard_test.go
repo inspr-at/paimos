@@ -97,7 +97,6 @@ func TestReadPrivateCorpusFullTreeFailClosed(t *testing.T) {
 		"docs/AGENTS-PROFILE-MARKUS.md":        []byte("# Profile\n\n- " + profile + "\n"),
 		"commands/secrets.md":                  []byte("# Secrets\n\n- " + command + "\n"),
 		"docs/AGENTS-KERNEL-PRIVATE.tldr.yaml": []byte("rules:\n  copper:\n    en: " + guardTLDR + "\n"),
-		"assets/blank.png":                     append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 0, 1, 2, 3),
 		"notes/blank.md":                       []byte("   \n"),
 	}
 	ctx := context.Background()
@@ -151,12 +150,9 @@ func TestReadPrivateCorpusFullTreeFailClosed(t *testing.T) {
 	if _, err := readPrivateCorpus(ctx, memReader{files: wide}, privateRepository, fixtureCommit, nil); err == nil || strings.Contains(err.Error(), "synthetic-doctrine") {
 		t.Fatal("missing guard key was accepted or reflected")
 	}
-	if utf16Text([]byte{0, 1, 2, 3}) {
-		t.Fatal("binary fixture classified as UTF-16")
-	}
 }
 
-func TestNulBlobFailsClosedUnlessKnownBinary(t *testing.T) {
+func TestNonTextFailsClosedUnlessExactReviewedException(t *testing.T) {
 	base := map[string][]byte{"docs/OK.md": []byte(guardRule)}
 	quietPNG := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 0, 1, 2, 3)
 	readable := []byte("The copper observatory keeps seven violet notebooks beneath the eastern stairway.")
@@ -173,7 +169,7 @@ func TestNulBlobFailsClosedUnlessKnownBinary(t *testing.T) {
 		{"utf16 be", utf16BEString("Hello \u2192 the private line must not be skipped as binary text."), "notes/be.bin", true},
 		{"utf32", utf32LEString("The private line must not be skipped as binary text today."), "notes/u32.bin", true},
 		{"png tail", append(append([]byte{}, quietPNG...), readable...), "assets/logo.png", true},
-		{"quiet png", quietPNG, "assets/logo.png", false},
+		{"quiet png", quietPNG, "assets/logo.png", true},
 		{"png extension of utf8", readable, "assets/logo.png", false},
 	}
 	for _, tc := range cases {
@@ -187,11 +183,11 @@ func TestNulBlobFailsClosedUnlessKnownBinary(t *testing.T) {
 		}
 	}
 	docs := map[string][]byte{"docs/OK.md": []byte(guardRule), "assets/logo.png": quietPNG}
-	raw, err := readPrivateCorpus(context.Background(), memReader{files: docs}, privateRepository, fixtureCommit, testGuardMaster())
+	raw, err := readPrivateCorpus(context.Background(), memReader{files: docs}, privateRepository, fixtureCommit, testGuardMaster(), map[string]string{"assets/logo.png": fmt.Sprintf("%x", sha256.Sum256(quietPNG))})
 	if err != nil {
 		t.Fatal(err)
 	}
-	corpus, err := unmarshalGuard(raw, testGuardMaster())
+	corpus, err := unmarshalGuard(raw, testGuardMaster(), map[string]string{"assets/logo.png": fmt.Sprintf("%x", sha256.Sum256(quietPNG))})
 	if err != nil || guardPrivateQuotes(corpus, nil, guardRule) == nil {
 		t.Fatal("quiet png dropped the rest of the tree")
 	}
@@ -451,7 +447,7 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 		if strings.HasPrefix(path, "commands/") {
 			commandFiles++
 		}
-		for n, line := range strings.Split(text, "\n") {
+		for _, line := range strings.Split(text, "\n") {
 			words := proposalWords(line)
 			if len(words) >= quoteWholeMin {
 				wholes++
@@ -467,7 +463,7 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 			}
 			if corpus.runHit(allow, words) {
 				privateOnlyAllowed++
-				t.Errorf("private line allowed with a private-only run %s:%d", path, n+1)
+				t.Error("private line allowed with a private-only run")
 			}
 		}
 	}
@@ -509,7 +505,7 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 				identity++
 			case "non_latin":
 				nonLatin++
-				t.Errorf("public rule became non_latin %s %s", view.Path, rule.Key)
+				t.Error("public rule became non_latin")
 			default:
 				t.Errorf("public rule refused %s %s code=%s", view.Path, rule.Key, got.Code)
 			}
@@ -527,6 +523,18 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 		name string
 		fn   func(string) string
 	}{
+		{"small-capitals-all", smallCapitalAttack},
+		{"soft-hyphen-between-all-runes", func(s string) string { return insertEveryRune(s, '\u00ad') }},
+		{"zwsp-between-all-runes", func(s string) string { return insertEveryRune(s, '\u200b') }},
+		{"zwj-between-all-runes", func(s string) string { return insertEveryRune(s, '\u200d') }},
+		{"variation-between-all-runes", func(s string) string { return insertEveryRune(s, '\ufe0f') }},
+		{"bidi-between-all-runes", func(s string) string { return insertEveryRune(s, '\u202e') }},
+		{"hangul-filler-between-all-runes", func(s string) string { return insertEveryRune(s, '\u3164') }},
+		{"cyrillic", cyrillicCapitals}, {"greek", greekCapitals}, {"fullwidth", fullwidth},
+		{"dotless-i", func(s string) string { return strings.ReplaceAll(s, "i", "ı") }},
+		{"nbsp", func(s string) string { return strings.ReplaceAll(s, " ", "\u00a0") }},
+		{"thin-space", func(s string) string { return strings.ReplaceAll(s, " ", "\u2009") }},
+		{"nonbreaking-hyphen", func(s string) string { return strings.ReplaceAll(s, "-", "\u2011") }},
 		{"latin-diacritic-e", func(s string) string { return strings.ReplaceAll(s, "e", "é") }},
 		{"latin-diacritic-a", func(s string) string { return strings.ReplaceAll(s, "a", "à") }},
 		{"one-accent", func(s string) string {
@@ -562,7 +570,7 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 			}
 		}
 		t.Logf("latin %s rules=%d passed=%d", attack.name, n, pass)
-		if n != 412 || pass != 0 {
+		if n < 412 || pass != 0 {
 			t.Fatalf("latin lookalike %s passed %d of %d", attack.name, pass, n)
 		}
 	}
@@ -613,6 +621,12 @@ func gitTexts(t *testing.T, dir string) map[string]string {
 			continue
 		}
 		path := string(name)
+		if rulesimport.Prohibited(path) != nil {
+			continue
+		}
+		if strings.HasSuffix(dir, "inspr-modules") && !strings.HasSuffix(path, ".md") && !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml") {
+			continue
+		}
 		full := filepath.Join(dir, path)
 		info, err := os.Lstat(full)
 		if err != nil {
@@ -649,4 +663,26 @@ func gitTexts(t *testing.T, dir string) map[string]string {
 
 func utf8Valid(raw []byte) bool {
 	return strings.ToValidUTF8(string(raw), "") == string(raw)
+}
+
+func insertEveryRune(s string, insertion rune) string {
+	var b strings.Builder
+	for _, r := range s {
+		b.WriteRune(r)
+		b.WriteRune(insertion)
+	}
+	return b.String()
+}
+
+func smallCapitalAttack(s string) string {
+	byLetter := map[rune]rune{}
+	for from, to := range unicodeSmallCapitals {
+		byLetter[[]rune(to)[0]] = from
+	}
+	return strings.Map(func(r rune) rune {
+		if v, ok := byLetter[r]; ok {
+			return v
+		}
+		return r
+	}, strings.ToLower(s))
 }

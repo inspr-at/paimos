@@ -225,13 +225,9 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Quote-check the pin before minting a token or reading GitHub. A refusal
-	// costs no GitHub call. When the pin is not main, check again against
-	// main's tree before any write so a side pin cannot launder private text.
 	quoteTexts := []string{in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation}
-	if err := withGuardSlot(ctx, func() error {
-		return guardPrivateQuotes(guard, files, quoteTexts...)
-	}); err != nil {
+	exemptMain, err := m.checkPrivateQuotes(ctx, actor, source, files, guard, quoteTexts...)
+	if err != nil {
 		return nil, err
 	}
 	g, err := m.appClient(ctx, actor.TenantID, source.Repository)
@@ -254,15 +250,14 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	for _, e := range tree {
 		current[e.Path] = e.SHA
 	}
-	// Exempt only blobs that are on main right now. The configured pin, a
-	// proposal branch and an unmerged SHA are not a public-text exemption.
-	matched := mainMatchingFiles(files, tree)
-	if !pinIsMain(files, matched) {
-		if err := withGuardSlot(ctx, func() error {
-			return guardPrivateQuotes(guard, matched, quoteTexts...)
-		}); err != nil {
-			return nil, err
-		}
+	// These reads belong to PR preparation, after the local guard accepted.
+	// An exemption is bound to the main commit the guard actually checked;
+	// a changed main cannot reuse it or trigger a second networked guard.
+	if exemptMain != "" && exemptMain != main {
+		_ = m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
+			return storePublicMain(ctx, tx, actor.TenantID, source, nil)
+		})
+		return nil, fail(409, "stale_source", "Main changed since its cached quotation check. Reindex the public source and retry.")
 	}
 	cached := map[string]string{}
 	for _, f := range files {
