@@ -28,6 +28,7 @@ func TestDeliveryRoutesArePersonRead(t *testing.T) {
 		"GET /api/nodes/{nodeId}/delivery-ratings",
 		"GET /api/harness-sessions/{sessionId}/delivery-rating",
 		"PUT /api/harness-sessions/{sessionId}/delivery-rating",
+		"DELETE /api/harness-sessions/{sessionId}/delivery-rating",
 	} {
 		if authz.RoutePermissions[pattern] != "nodes.read" {
 			t.Fatalf("%s = %q", pattern, authz.RoutePermissions[pattern])
@@ -48,8 +49,11 @@ func TestRejectsAgentAndInvalidRating(t *testing.T) {
 		mux.ServeHTTP(w, r)
 		return w
 	}
-	if w := call(agent, http.MethodPut, "/api/harness-sessions/"+session+"/delivery-rating", `{"score":4,"tags":[],"comment":""}`); w.Code != http.StatusForbidden {
+	if w := call(agent, http.MethodPut, "/api/harness-sessions/"+session+"/delivery-rating", `{"score":4,"tags":[],"comment":"no"}`); w.Code != http.StatusForbidden {
 		t.Fatalf("agent %d %s", w.Code, w.Body.String())
+	}
+	if w := call(agent, http.MethodDelete, "/api/harness-sessions/"+session+"/delivery-rating", ""); w.Code != http.StatusForbidden {
+		t.Fatalf("agent delete %d %s", w.Code, w.Body.String())
 	}
 	if w := call(agent, http.MethodGet, "/api/harness-sessions/"+session+"/delivery-rating", ""); w.Code != http.StatusForbidden {
 		t.Fatalf("agent get %d %s", w.Code, w.Body.String())
@@ -63,14 +67,15 @@ func TestRejectsAgentAndInvalidRating(t *testing.T) {
 	path := "/api/harness-sessions/" + session + "/delivery-rating"
 	long := strings.Repeat("a", 2001)
 	for _, body := range []string{
-		`{"score":0,"tags":[],"comment":""}`,
-		`{"score":6,"tags":[],"comment":""}`,
-		`{"score":1.5,"tags":[],"comment":""}`,
-		`{"score":4,"tags":["nope"],"comment":""}`,
-		`{"score":4,"tags":["quality","quality"],"comment":""}`,
-		`{"score":4,"comment":""}`,
+		`{"score":0,"tags":[],"comment":"no"}`,
+		`{"score":6,"tags":[],"comment":"no"}`,
+		`{"score":1.5,"tags":[],"comment":"no"}`,
+		`{"score":4,"tags":["nope"],"comment":"no"}`,
+		`{"score":4,"tags":["quality","quality"],"comment":"no"}`,
+		`{"score":4,"tags":[],"comment":""}`,
+		`{"score":4,"tags":[],"comment":"   "}`,
 		`{"score":4,"tags":[]}`,
-		`{"score":4,"tags":[],"comment":"","extra":true}`,
+		`{"score":4,"tags":[],"comment":"no","extra":true}`,
 		`{"score":4,"tags":[],"comment":"` + long + `"}`,
 		`{"score":4,"tags":[],"comment":"bad\u0001"}`,
 	} {
@@ -106,12 +111,12 @@ func TestSavesOneVotePerPerson(t *testing.T) {
 	}
 	loose := id()
 	f.session(t, loose, project, "", "gpt-4.1", "desk", created, &stopped)
-	if w := f.call(f.person, http.MethodPut, "/api/harness-sessions/"+loose+"/delivery-rating", `{"score":4,"tags":[],"comment":""}`); w.Code != http.StatusConflict {
+	if w := f.call(f.person, http.MethodPut, "/api/harness-sessions/"+loose+"/delivery-rating", `{"comment":"loose"}`); w.Code != http.StatusConflict {
 		t.Fatalf("no ticket %d %s", w.Code, w.Body.String())
 	}
 
 	first := f.put(t, f.person, session, `{"score":5,"tags":["taste","quality"],"comment":"  kept\nline  "}`)
-	if first.Mine == nil || first.Mine.Score != 5 || first.Mine.Comment != "kept\nline" || strings.Join(first.Mine.Tags, ",") != "quality,taste" {
+	if first.Mine == nil || first.Mine.Score == nil || *first.Mine.Score != 5 || first.Mine.Comment != "kept\nline" || strings.Join(first.Mine.Tags, ",") != "quality,taste" {
 		t.Fatalf("mine %+v", first.Mine)
 	}
 	if first.Votes != 1 || first.Average == nil || *first.Average != "5.00" || first.AccountLabel == nil || *first.AccountLabel != "desk" || first.Model == nil || *first.Model != "gpt-4.1" {
@@ -127,12 +132,12 @@ func TestSavesOneVotePerPerson(t *testing.T) {
 	if n := f.count(t, session); n != 1 {
 		t.Fatalf("rows %d", n)
 	}
-	second := f.put(t, f.member, session, `{"score":3,"tags":[],"comment":""}`)
-	if second.Votes != 2 || second.Average == nil || *second.Average != "4.00" || second.Mine == nil || second.Mine.Score != 3 {
+	second := f.put(t, f.member, session, `{"score":3,"tags":[],"comment":"shaky"}`)
+	if second.Votes != 2 || second.Average == nil || *second.Average != "4.00" || second.Mine == nil || second.Mine.Score == nil || *second.Mine.Score != 3 {
 		t.Fatalf("member %+v", second)
 	}
 	home := f.get(t, f.person, session)
-	if home.Mine == nil || home.Mine.Score != 5 || home.Votes != 2 || home.Average == nil || *home.Average != "4.00" {
+	if home.Mine == nil || home.Mine.Score == nil || *home.Mine.Score != 5 || home.Votes != 2 || home.Average == nil || *home.Average != "4.00" {
 		t.Fatalf("home still owns its vote %+v", home)
 	}
 	if !bytes.Contains(f.raw(t, f.person, session), []byte(`"average":"4.00"`)) {
@@ -181,17 +186,44 @@ func TestSavesOneVotePerPerson(t *testing.T) {
 	if _, err := f.db.Admin.Exec(context.Background(), `UPDATE principals SET status = 'deactivated' WHERE id = $1`, f.quiet.ID); err != nil {
 		t.Fatal(err)
 	}
-	if w := f.call(f.quiet, http.MethodPut, "/api/harness-sessions/"+session+"/delivery-rating", `{"score":1,"tags":[],"comment":""}`); w.Code != http.StatusForbidden {
+	if w := f.call(f.quiet, http.MethodPut, "/api/harness-sessions/"+session+"/delivery-rating", `{"score":1,"tags":[],"comment":"no"}`); w.Code != http.StatusForbidden {
 		t.Fatalf("deactivated %d %s", w.Code, w.Body.String())
 	}
 	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO agent_delivery_votes
 			(tenant_id, session_id, ticket_node_id, voter_principal_id, score, tags, comment, harness)
-			VALUES ($1,$2,$3,$4,4,'{}','','codex')`, f.person.TenantID, session, ticket, f.agent.ID)
+			VALUES ($1,$2,$3,$4,4,'{}','agent','codex')`, f.person.TenantID, session, ticket, f.agent.ID)
 		return err
 	})
 	if err == nil || !strings.Contains(err.Error(), "limited to active people") {
 		t.Fatalf("agent insert: %v", err)
+	}
+
+	bare := f.put(t, f.person, session, `{"comment":"Needs another pass"}`)
+	if bare.Mine == nil || bare.Mine.Score != nil || bare.Mine.Comment != "Needs another pass" || len(bare.Mine.Tags) != 0 || bare.Votes != 2 {
+		t.Fatalf("optional score %+v votes %d", bare.Mine, bare.Votes)
+	}
+	if bare.Average == nil || *bare.Average != "3.00" {
+		t.Fatalf("null score left the average %+v", bare.Average)
+	}
+	if !bytes.Contains(f.raw(t, f.person, session), []byte(`"score":null`)) {
+		t.Fatal("score was omitted instead of null")
+	}
+	cleared := f.remove(t, f.person, session)
+	if cleared.Mine != nil || cleared.Votes != 1 || cleared.Average == nil || *cleared.Average != "3.00" {
+		t.Fatalf("undo %+v", cleared)
+	}
+	if n := f.count(t, session); n != 1 {
+		t.Fatalf("rows after undo %d", n)
+	}
+	var withdrawn bool
+	f.scan(t, f.person, &withdrawn, `SELECT after IS NULL FROM events WHERE type = 'delivery.rated' AND node_id = $1 ORDER BY id DESC LIMIT 1`, ticket)
+	if !withdrawn {
+		t.Fatal("withdrawing a mark did not record an empty after")
+	}
+	secondClear := f.remove(t, f.person, session)
+	if secondClear.Mine != nil || secondClear.Votes != 1 {
+		t.Fatalf("second undo %+v", secondClear)
 	}
 }
 
@@ -350,6 +382,19 @@ func (f *fix) put(t *testing.T, p tenant.Principal, session, body string) Rating
 	w := f.call(p, http.MethodPut, "/api/harness-sessions/"+session+"/delivery-rating", body)
 	if w.Code != http.StatusOK {
 		t.Fatalf("put %d %s", w.Code, w.Body.String())
+	}
+	var rating Rating
+	if err := json.Unmarshal(w.Body.Bytes(), &rating); err != nil {
+		t.Fatal(err)
+	}
+	return rating
+}
+
+func (f *fix) remove(t *testing.T, p tenant.Principal, session string) Rating {
+	t.Helper()
+	w := f.call(p, http.MethodDelete, "/api/harness-sessions/"+session+"/delivery-rating", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete %d %s", w.Code, w.Body.String())
 	}
 	var rating Rating
 	if err := json.Unmarshal(w.Body.Bytes(), &rating); err != nil {

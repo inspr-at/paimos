@@ -8,7 +8,7 @@ export interface DeliverySignals {
 }
 
 export interface DeliveryVote {
-  score: number
+  score: number | null
   tags: string[]
   comment: string
   updated_at: string
@@ -26,11 +26,6 @@ export interface SessionRating {
 const tags = ['quality', 'rework', 'taste'] as const
 const averagePattern = /^(?:[1-4]\.\d{2}|5\.00)$/
 
-export function formatRating(value: string | null | undefined): string {
-  if (!value || !averagePattern.test(value)) return ''
-  return value.replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')
-}
-
 export function signalLine(signals: DeliverySignals | null | undefined): string {
   if (!signals) return ''
   const parts = [
@@ -41,10 +36,14 @@ export function signalLine(signals: DeliverySignals | null | undefined): string 
   return parts.join(' · ')
 }
 
-export function crowdLine(votes: number, average: string | null): string {
-  if (votes < 2) return ''
-  const shown = formatRating(average)
-  return shown ? `${shown} from ${votes}` : ''
+export function reworkPercent(exceptions: number, deliveries: number): string {
+  if (!Number.isInteger(exceptions) || !Number.isInteger(deliveries) || exceptions <= 0 || deliveries <= 0 || exceptions > deliveries) return ''
+  return `${Math.round((exceptions * 100) / deliveries)}%`
+}
+
+export function reworkDetail(exceptions: number, deliveries: number): string {
+  if (!reworkPercent(exceptions, deliveries)) return ''
+  return `${exceptions} of ${deliveries}`
 }
 
 export function parseNodeRatings(value: unknown): SessionRating[] | null {
@@ -92,18 +91,25 @@ export async function loadSessionRating(sessionId: string, signal?: AbortSignal)
   return parseRating(await response.json().catch(() => null))
 }
 
-export async function saveSessionRating(sessionId: string, body: { score: number; tags: string[]; comment: string }): Promise<SessionRating> {
-  const response = await api(`/harness-sessions/${encodeURIComponent(sessionId)}/delivery-rating`, {
+export async function saveSessionRating(sessionId: string, body: { score: number | null; tags: string[]; comment: string }): Promise<SessionRating> {
+  return readRating(await api(`/harness-sessions/${encodeURIComponent(sessionId)}/delivery-rating`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  })
+  }))
+}
+
+export async function clearSessionRating(sessionId: string): Promise<SessionRating> {
+  return readRating(await api(`/harness-sessions/${encodeURIComponent(sessionId)}/delivery-rating`, { method: 'DELETE' }))
+}
+
+async function readRating(response: Response): Promise<SessionRating> {
   const payload = await response.json().catch(() => null)
   const rating = parseRating(payload)
   if (!response.ok || !rating) {
     const message = payload && typeof payload === 'object' && typeof (payload as { error?: unknown }).error === 'string'
       ? (payload as { error: string }).error
-      : 'Could not save the rating'
+      : 'Could not save the mark'
     throw new Error(message)
   }
   return rating
@@ -123,7 +129,9 @@ function parseMine(value: unknown): DeliveryVote | null | undefined {
   if (value === null) return null
   if (!value || typeof value !== 'object') return undefined
   const row = value as Record<string, unknown>
-  if (typeof row.score !== 'number' || !Number.isInteger(row.score) || row.score < 1 || row.score > 5) return undefined
+  if (!('score' in row)) return undefined
+  const score = row.score === null ? null : countScore(row.score)
+  if (score === undefined) return undefined
   if (!Array.isArray(row.tags) || row.tags.length > tags.length) return undefined
   const seen = new Set<string>()
   for (const tag of row.tags) {
@@ -131,7 +139,11 @@ function parseMine(value: unknown): DeliveryVote | null | undefined {
     seen.add(tag)
   }
   if (typeof row.comment !== 'string') return undefined
-  return { score: row.score, tags: row.tags as string[], comment: row.comment, updated_at: typeof row.updated_at === 'string' ? row.updated_at : '' }
+  return { score, tags: row.tags as string[], comment: row.comment, updated_at: typeof row.updated_at === 'string' ? row.updated_at : '' }
+}
+
+function countScore(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 5 ? value : undefined
 }
 
 function count(value: unknown): number | null {

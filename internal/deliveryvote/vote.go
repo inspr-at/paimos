@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package deliveryvote records a person's rating of one harness session.
+// Package deliveryvote records a person's rework mark on one harness session.
+// Silence is not stored: a row is an exception. Score is an optional detail.
 // Agents cannot read or write these routes. Objective signals are counts of
 // ticket events, present only when those events were recorded.
 package deliveryvote
@@ -38,42 +39,16 @@ var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[
 
 var allowedTags = map[string]struct{}{"quality": {}, "rework": {}, "taste": {}}
 
-// Review, CI and revert event types. An event that names session_id counts
-// only for that session. An event that names none counts only while the
-// session was running (created_at through stopped_at, or now when it is open).
-const signalSQL = `
-SELECT s.id::text,
-	count(DISTINCT CASE
-		WHEN e.type IN ('review.verdict', 'review.round', 'gate.finding', 'gate.verdict')
-		THEN coalesce(nullif(e.after->>'round', ''), e.id::text)
-	END)::int,
-	count(*) FILTER (WHERE e.type IN ('ci.failed', 'ci.failure', 'check.failed'))::int,
-	count(*) FILTER (WHERE e.id IS NOT NULL AND (e.undo_of IS NOT NULL OR e.type IN ('change.reverted', 'node.reverted', 'delivery.reverted')))::int
-FROM harness_sessions s
-LEFT JOIN events e
-	ON e.tenant_id = s.tenant_id
-	AND e.node_id = s.ticket_node_id
-	AND e.type <> 'delivery.rated'
-	AND (
-		coalesce(e.after->>'session_id', e.before->>'session_id', '') = s.id::text
-		OR (
-			coalesce(e.after->>'session_id', e.before->>'session_id', '') = ''
-			AND e.at >= s.created_at
-			AND (s.stopped_at IS NULL OR e.at <= s.stopped_at)
-		)
-	)
-WHERE s.tenant_id = $1::uuid AND s.id = ANY($2::uuid[])
-GROUP BY s.id`
-
 type module struct{ pool *pgxpool.Pool }
 
-// New serves person ratings of harness sessions.
+// New serves person rework marks on harness sessions.
 func New(pool *pgxpool.Pool) httpapi.Module { return &module{pool: pool} }
 
 func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/nodes/{nodeId}/delivery-ratings", m.list)
 	mux.HandleFunc("GET /api/harness-sessions/{sessionId}/delivery-rating", m.get)
 	mux.HandleFunc("PUT /api/harness-sessions/{sessionId}/delivery-rating", m.put)
+	mux.HandleFunc("DELETE /api/harness-sessions/{sessionId}/delivery-rating", m.clear)
 }
 
 // Signals are objective counts beside a rating. Zero means none were recorded.
@@ -83,17 +58,20 @@ type Signals struct {
 	Reverts      int `json:"reverts"`
 }
 
-// Vote is one person's saved rating.
+// Vote is one person's rework mark. Score is an optional detail; null means
+// the mark has no score. Comment is the required reason.
 type Vote struct {
-	Score     int       `json:"score"`
+	Score     *int      `json:"score"`
 	Tags      []string  `json:"tags"`
 	Comment   string    `json:"comment"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Rating is one visible session, the caller's vote, and the session average.
-// Harness, model and account are the session's current metadata. Each saved
-// vote also keeps the snapshot used by the usage aggregate.
+// Rating is one visible session and the caller's mark. A missing mark means
+// this person has not asked for rework. Votes counts exception rows. Average
+// is the mean of the scores that were given. Harness, model and account are
+// the session's current metadata. Each saved mark also keeps the snapshot
+// copied at save time.
 type Rating struct {
 	SessionID    string  `json:"session_id"`
 	TicketNodeID string  `json:"ticket_node_id"`
@@ -113,7 +91,7 @@ type Page struct {
 }
 
 type voteWrite struct {
-	Score   int      `json:"score"`
+	Score   *int     `json:"score"`
 	Tags    []string `json:"tags"`
 	Comment *string  `json:"comment"`
 }
@@ -125,7 +103,7 @@ type sessionHead struct {
 
 type storedVote struct {
 	voter, comment, harness string
-	score                   int
+	score                   *int
 	tags                    []string
 	updated                 time.Time
 	model, account          *string
@@ -213,8 +191,9 @@ func (m *module) put(w http.ResponseWriter, r *http.Request) {
 		write(w, err, nil)
 		return
 	}
-	if body.Score < 1 || body.Score > 5 {
-		write(w, &workorders.Error{Status: http.StatusBadRequest, Message: "score must be from 1 to 5"}, nil)
+	score, err := normalizeScore(body.Score)
+	if err != nil {
+		write(w, err, nil)
 		return
 	}
 	var rating Rating
@@ -230,7 +209,7 @@ func (m *module) put(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err := upsert(r.Context(), tx, p, head, body.Score, tags, comment); err != nil {
+		if err := upsert(r.Context(), tx, p, head, score, tags, comment); err != nil {
 			return err
 		}
 		var before any
@@ -241,9 +220,55 @@ func (m *module) put(w http.ResponseWriter, r *http.Request) {
 			NodeID: &head.ticket,
 			Type:   "delivery.rated",
 			Before: before,
-			After:  voteSnapshot(sessionID, body.Score, tags, comment, head.harness, head.model, head.account),
+			After:  voteSnapshot(sessionID, score, tags, comment, head.harness, head.model, head.account),
 		}); err != nil {
 			return err
+		}
+		rows, err := assemble(r.Context(), tx, p, []sessionHead{head})
+		if err != nil {
+			return err
+		}
+		rating = rows[0]
+		return nil
+	})
+	write(w, err, rating)
+}
+
+func (m *module) clear(w http.ResponseWriter, r *http.Request) {
+	p, ok := person(w, r)
+	if !ok {
+		return
+	}
+	sessionID := r.PathValue("sessionId")
+	if !uuidPattern.MatchString(sessionID) {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var rating Rating
+	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := activePerson(r.Context(), tx, p); err != nil {
+			return err
+		}
+		head, err := oneSession(r.Context(), tx, p.TenantID, sessionID)
+		if err != nil {
+			return err
+		}
+		previous, err := myVote(r.Context(), tx, p, sessionID)
+		if err != nil {
+			return err
+		}
+		if previous != nil {
+			if _, err := tx.Exec(r.Context(), `DELETE FROM agent_delivery_votes
+				WHERE tenant_id = $1 AND session_id = $2 AND voter_principal_id = $3`, p.TenantID, sessionID, p.ID); err != nil {
+				return err
+			}
+			if _, err := events.Append(r.Context(), tx, p, events.Change{
+				NodeID: &head.ticket,
+				Type:   "delivery.rated",
+				Before: voteSnapshot(sessionID, previous.score, previous.tags, previous.comment, previous.harness, previous.model, previous.account),
+			}); err != nil {
+				return err
+			}
 		}
 		rows, err := assemble(r.Context(), tx, p, []sessionHead{head})
 		if err != nil {
@@ -263,7 +288,7 @@ func person(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 		return tenant.Principal{}, false
 	}
 	if p.Kind != tenant.Person {
-		httpapi.WriteError(w, http.StatusForbidden, "only a person can rate a delivery")
+		httpapi.WriteError(w, http.StatusForbidden, "only a person can mark a delivery")
 		return tenant.Principal{}, false
 	}
 	return p, true
@@ -281,19 +306,29 @@ func write(w http.ResponseWriter, err error, body any) {
 	}
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "42501" {
-		httpapi.WriteError(w, http.StatusForbidden, "only a person can rate a delivery")
+		httpapi.WriteError(w, http.StatusForbidden, "only a person can mark a delivery")
 		return
 	}
 	if errors.As(err, &pg) && (pg.Code == "23514" || pg.Code == "22P02") {
-		httpapi.WriteError(w, http.StatusBadRequest, "invalid rating")
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid mark")
 		return
 	}
-	httpapi.WriteError(w, http.StatusInternalServerError, "rating is unavailable")
+	httpapi.WriteError(w, http.StatusInternalServerError, "rework mark is unavailable")
+}
+
+func normalizeScore(score *int) (*int, error) {
+	if score == nil {
+		return nil, nil
+	}
+	if *score < 1 || *score > 5 {
+		return nil, &workorders.Error{Status: http.StatusBadRequest, Message: "score must be from 1 to 5"}
+	}
+	return score, nil
 }
 
 func normalizeTags(tags []string) ([]string, error) {
 	if tags == nil {
-		return nil, &workorders.Error{Status: http.StatusBadRequest, Message: "tags is required"}
+		return []string{}, nil
 	}
 	if len(tags) > len(allowedTags) {
 		return nil, &workorders.Error{Status: http.StatusBadRequest, Message: "too many tags"}
@@ -316,7 +351,7 @@ func normalizeTags(tags []string) ([]string, error) {
 
 func normalizeComment(comment *string) (string, error) {
 	if comment == nil {
-		return "", &workorders.Error{Status: http.StatusBadRequest, Message: "comment is required"}
+		return "", &workorders.Error{Status: http.StatusBadRequest, Message: "a reason is required"}
 	}
 	if utf8.RuneCountInString(*comment) > maxComment {
 		return "", &workorders.Error{Status: http.StatusBadRequest, Message: "comment is too long"}
@@ -329,10 +364,14 @@ func normalizeComment(comment *string) (string, error) {
 			return "", &workorders.Error{Status: http.StatusBadRequest, Message: "comment has unsupported characters"}
 		}
 	}
-	return strings.TrimSpace(*comment), nil
+	trimmed := strings.TrimSpace(*comment)
+	if trimmed == "" {
+		return "", &workorders.Error{Status: http.StatusBadRequest, Message: "a reason is required"}
+	}
+	return trimmed, nil
 }
 
-func voteSnapshot(sessionID string, score int, tags []string, comment, harness string, model, account *string) map[string]any {
+func voteSnapshot(sessionID string, score *int, tags []string, comment, harness string, model, account *string) map[string]any {
 	out := map[string]any{
 		"session_id": sessionID,
 		"score":      score,
@@ -353,7 +392,7 @@ func activePerson(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 	var status string
 	err := tx.QueryRow(ctx, `SELECT status FROM principals WHERE tenant_id = $1 AND id = $2 AND kind = 'person'`, p.TenantID, p.ID).Scan(&status)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != "active") {
-		return &workorders.Error{Status: http.StatusForbidden, Message: "only a person can rate a delivery"}
+		return &workorders.Error{Status: http.StatusForbidden, Message: "only a person can mark a delivery"}
 	}
 	return err
 }
@@ -484,7 +523,7 @@ func myVote(ctx context.Context, tx pgx.Tx, p tenant.Principal, sessionID string
 	return &vote, nil
 }
 
-func upsert(ctx context.Context, tx pgx.Tx, p tenant.Principal, head sessionHead, score int, tags []string, comment string) error {
+func upsert(ctx context.Context, tx pgx.Tx, p tenant.Principal, head sessionHead, score *int, tags []string, comment string) error {
 	_, err := tx.Exec(ctx, `INSERT INTO agent_delivery_votes
 		(tenant_id, session_id, ticket_node_id, voter_principal_id, score, tags, comment, harness, model, account_label)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
@@ -521,15 +560,18 @@ func assemble(ctx context.Context, tx pgx.Tx, p tenant.Principal, heads []sessio
 	if err != nil {
 		return nil, err
 	}
-	signals, err := loadSignals(ctx, tx, p.TenantID, ids)
+	signals, err := countTicketEventSignals(ctx, tx, p.TenantID, ids)
 	if err != nil {
 		return nil, err
 	}
 	for i := range out {
 		rows := votes[out[i].SessionID]
-		sum := 0
+		sum, scored := 0, 0
 		for _, vote := range rows {
-			sum += vote.score
+			if vote.score != nil {
+				sum += *vote.score
+				scored++
+			}
 			if vote.voter == p.ID {
 				tags := vote.tags
 				if tags == nil {
@@ -539,7 +581,7 @@ func assemble(ctx context.Context, tx pgx.Tx, p tenant.Principal, heads []sessio
 			}
 		}
 		out[i].Votes = len(rows)
-		out[i].Average = FormatAverage(sum, len(rows))
+		out[i].Average = FormatAverage(sum, scored)
 		if signal, ok := signals[out[i].SessionID]; ok {
 			out[i].Signals = signal
 		}
@@ -565,24 +607,6 @@ func loadVotes(ctx context.Context, tx pgx.Tx, tenantID string, ids []string) (m
 			vote.tags = []string{}
 		}
 		out[sessionID] = append(out[sessionID], vote)
-	}
-	return out, rows.Err()
-}
-
-func loadSignals(ctx context.Context, tx pgx.Tx, tenantID string, ids []string) (map[string]Signals, error) {
-	rows, err := tx.Query(ctx, signalSQL, tenantID, ids)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]Signals{}
-	for rows.Next() {
-		var id string
-		var signal Signals
-		if err := rows.Scan(&id, &signal.ReviewRounds, &signal.CIFailures, &signal.Reverts); err != nil {
-			return nil, err
-		}
-		out[id] = signal
 	}
 	return out, rows.Err()
 }

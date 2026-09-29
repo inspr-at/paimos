@@ -2919,10 +2919,12 @@ paths:
         A provisional window, including mixed settled evidence, returns null used, headroom and hard remaining.
         Declared allowance, explicit reservations and the pace-cap schedule stay numbers. Null is unknown, not zero.
         Project visibility follows harness sessions. The most expensive tickets are a ranking, not a session list.
-        by_harness groups the same usage rows by session harness. ratings are person votes on the
-        sessions in this read, grouped by the model and harness stored with each vote, not by the
-        priced usage row. average is a decimal string; null means nobody voted. Token and list-price
-        totals are unchanged. A missing vote table leaves ratings empty rather than failing the read.
+        by_harness groups the same usage rows by session harness. ratings count rework by exception
+        on the sessions in this read. A vote row is an exception; a session with none counts only
+        as a delivery. rework_rate is exceptions/deliveries. by_model and by_harness use the same
+        labels as the usage breakdown. average remains the mean of optional scores and is null when
+        no score was given. Token and list-price totals are unchanged. A missing vote table leaves
+        exception counts at zero rather than failing the read.
       parameters:
         - {name: from, in: query, schema: {type: string}, description: RFC3339 or YYYY-MM-DD. Both from and to, or neither (then the last 30 UTC days).}
         - {name: to, in: query, schema: {type: string}, description: Exclusive end. Span at most 366 days.}
@@ -4776,16 +4778,17 @@ paths:
   /nodes/{nodeId}/delivery-ratings:
     get:
       operationId: listDeliveryRatings
-      summary: Person ratings and objective signals for sessions on a ticket, epic or task
+      summary: Rework marks and objective signals for sessions on a ticket, epic or task
       description: >
         Person session only. One row per visible session whose ticket is this node
-        or a visible descendant, newest first, at most 80. mine is the caller's vote.
-        votes and average cover every person's vote on that session. average is null
-        when nobody has voted and is a two-decimal string, never a JSON number.
-        Signals count review rounds, CI failures and reverts from ticket events when
-        those events exist. Zero means none were recorded. An event that names a
-        session counts only for that session. An event that names none counts only
-        while the session was running.
+        or a visible descendant, newest first, at most 80. A vote row is an exception:
+        silence is not stored. mine is the caller's mark, or null. votes counts
+        exception rows. average is the mean of optional scores, null when none were
+        given, and is a two-decimal string, never a JSON number. Signals count review
+        rounds, CI failures and reverts from ticket events when those events exist.
+        Zero means none were recorded. An event that names a session counts only for
+        that session. An event that names none counts only while the session was running.
+        AEON-286 outcome events will replace that signal source.
       security: [{session: []}]
       parameters:
         - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -4800,8 +4803,8 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: getDeliveryRating
-      summary: The caller's rating, the session average and objective signals
-      description: Person session only. 404 when the session or its ticket is not visible. 409 when the session has no ticket. harness, model and account_label are the session's current metadata.
+      summary: The caller's rework mark, optional score average and objective signals
+      description: Person session only. 404 when the session or its ticket is not visible. 409 when the session has no ticket. harness, model and account_label are the session's current metadata. mine is null when this person has not marked the session.
       security: [{session: []}]
       responses:
         '200': {description: Rating, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRating'}}}}
@@ -4812,17 +4815,30 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
     put:
       operationId: saveDeliveryRating
-      summary: Create or replace the caller's rating of this session
+      summary: Mark this session as needing rework
       description: >
-        Person session only. One vote per person per session. A later save replaces
-        score, tags and comment and refreshes the stored model, harness and account
-        from the session. Tags are quality, rework and taste.
+        Person session only. One mark per person per session. A row means an exception;
+        silence is not stored. comment is the required reason. tags and score are
+        optional. A later save replaces them and refreshes the stored model, harness
+        and account from the session. Tags are quality, rework and taste.
       security: [{session: []}]
       requestBody:
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/DeliveryVoteWrite'}
+      responses:
+        '200': {description: Rating, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRating'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: clearDeliveryRating
+      summary: Withdraw the caller's rework mark
+      description: Person session only. Removes this person's exception and leaves other people's marks. Idempotent when they had not marked the session.
+      security: [{session: []}]
       responses:
         '200': {description: Rating, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRating'}}}}
         '400': {$ref: '#/components/responses/Error'}
@@ -7135,7 +7151,7 @@ components:
         sessions: {type: array, maxItems: 80, items: {$ref: '#/components/schemas/DeliveryRating'}}
     DeliveryRating:
       type: object
-      description: One visible session. harness, model and account_label are current session metadata. The usage aggregate groups the snapshot stored with each vote.
+      description: One visible session. A missing mine means this person has not marked it. harness, model and account_label are current session metadata.
       required: [session_id, ticket_node_id, harness, model, account_label, mine, votes, average, signals]
       properties:
         session_id: {type: string, format: uuid}
@@ -7144,28 +7160,28 @@ components:
         model: {type: [string, 'null']}
         account_label: {type: [string, 'null']}
         mine: {oneOf: [{$ref: '#/components/schemas/DeliveryVote'}, {type: 'null'}]}
-        votes: {type: integer, minimum: 0}
-        average: {type: [string, 'null'], pattern: '^(?:[1-4]\.[0-9]{2}|5\.00)$', description: Mean of scores from 1 to 5, two decimal places, half up. Null when nobody has voted. Never a JSON number.}
+        votes: {type: integer, minimum: 0, description: Exception rows on this session. Silence is not counted.}
+        average: {type: [string, 'null'], pattern: '^(?:[1-4]\.[0-9]{2}|5\.00)$', description: Mean of the optional scores, two decimal places, half up. Null when no score was given. Never a JSON number.}
         signals: {$ref: '#/components/schemas/DeliverySignals'}
     DeliveryVote:
       type: object
       required: [score, tags, comment, updated_at]
       properties:
-        score: {type: integer, minimum: 1, maximum: 5}
+        score: {type: [integer, 'null'], minimum: 1, maximum: 5, description: Optional detail. Null when the mark has no score.}
         tags: {type: array, maxItems: 3, uniqueItems: true, items: {type: string, enum: [quality, rework, taste]}}
-        comment: {type: string, maxLength: 2000}
+        comment: {type: string, minLength: 1, maxLength: 2000, description: Required reason.}
         updated_at: {type: string, format: date-time}
     DeliveryVoteWrite:
       type: object
       additionalProperties: false
-      required: [score, tags, comment]
+      required: [comment]
       properties:
-        score: {type: integer, minimum: 1, maximum: 5}
+        score: {type: [integer, 'null'], minimum: 1, maximum: 5, description: Optional detail. Omit or null when the mark has no score.}
         tags: {type: array, maxItems: 3, uniqueItems: true, items: {type: string, enum: [quality, rework, taste]}}
-        comment: {type: string, maxLength: 2000}
+        comment: {type: string, minLength: 1, maxLength: 2000, description: Required reason.}
     DeliverySignals:
       type: object
-      description: Counts from ticket events. Zero means none of that kind were recorded.
+      description: Counts from ticket events (review.verdict, review.round, gate.finding, gate.verdict, ci.failed, ci.failure, check.failed, undone events, change.reverted, node.reverted, delivery.reverted). Zero means none of that kind were recorded. AEON-286 outcome events will replace this source.
       required: [review_rounds, ci_failures, reverts]
       properties:
         review_rounds: {type: integer, minimum: 0, description: Distinct rounds of review.verdict, review.round, gate.finding or gate.verdict.}
@@ -7173,19 +7189,25 @@ components:
         reverts: {type: integer, minimum: 0, description: Undone events, or change.reverted, node.reverted or delivery.reverted. A delivery.rated event is not a signal.}
     DeliveryRatingSummary:
       type: object
-      required: [votes, average, by_model, by_harness]
+      required: [votes, average, exceptions, deliveries, rework_rate, by_model, by_harness]
       properties:
-        votes: {type: integer, minimum: 0}
-        average: {type: [string, 'null'], pattern: '^(?:[1-4]\.[0-9]{2}|5\.00)$'}
+        votes: {type: integer, minimum: 0, description: Exception rows. A row is a rework mark.}
+        average: {type: [string, 'null'], pattern: '^(?:[1-4]\.[0-9]{2}|5\.00)$', description: Mean of optional scores. Null when no score was given.}
+        exceptions: {type: integer, minimum: 0, description: Distinct sessions with at least one vote row.}
+        deliveries: {type: integer, minimum: 0, description: Distinct sessions in this read.}
+        rework_rate: {type: [string, 'null'], pattern: '^[1-9][0-9]*/[1-9][0-9]*$', description: exceptions/deliveries. Null when there are no exceptions.}
         by_model: {type: array, items: {$ref: '#/components/schemas/DeliveryRatingGroup'}}
         by_harness: {type: array, items: {$ref: '#/components/schemas/DeliveryRatingGroup'}}
     DeliveryRatingGroup:
       type: object
-      required: [label, votes, average]
+      required: [label, votes, average, exceptions, deliveries, rework_rate]
       properties:
-        label: {type: string}
+        label: {type: string, description: Same label as the usage breakdown for this model or harness.}
         votes: {type: integer, minimum: 1}
-        average: {type: string, pattern: '^(?:[1-4]\.[0-9]{2}|5\.00)$'}
+        average: {type: [string, 'null'], pattern: '^(?:[1-4]\.[0-9]{2}|5\.00)$'}
+        exceptions: {type: integer, minimum: 1}
+        deliveries: {type: integer, minimum: 1}
+        rework_rate: {type: string, pattern: '^[1-9][0-9]*/[1-9][0-9]*$'}
     NonNegativeIntString:
       type: [string, 'null']
       pattern: '^(0|[1-9][0-9]{0,18})$'

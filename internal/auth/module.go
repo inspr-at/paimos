@@ -327,7 +327,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "stage.<op>", true
 		}
 	case "nodes":
-		// A person rates a delivery. An agent key must not inherit nodes.read here.
+		// A person marks a delivery for rework. An agent key must not inherit nodes.read here.
 		if len(parts) == 3 && parts[2] == "delivery-ratings" {
 			return "", false
 		}

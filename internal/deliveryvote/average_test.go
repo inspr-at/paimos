@@ -4,6 +4,16 @@ package deliveryvote
 
 import "testing"
 
+func TestFormatReworkRate(t *testing.T) {
+	if FormatReworkRate(0, 4) != nil || FormatReworkRate(1, 0) != nil || FormatReworkRate(3, 2) != nil {
+		t.Fatal("no rate")
+	}
+	got := FormatReworkRate(1, 4)
+	if got == nil || *got != "1/4" {
+		t.Fatalf("quarter: %v", got)
+	}
+}
+
 func TestFormatAverage(t *testing.T) {
 	if FormatAverage(0, 0) != nil || FormatAverage(1, 0) != nil {
 		t.Fatal("no votes")

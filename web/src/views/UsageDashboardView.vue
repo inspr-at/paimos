@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import { loadUsageDashboard } from '../lib/usageDashboard'
 import UsageTrendChart from '../components/usage/UsageTrendChart.vue'
-import { formatRating } from '../lib/deliveryRating'
+import { reworkDetail, reworkPercent } from '../lib/deliveryRating'
 import { billingLabel, compactCount, costStateLabel, formatAllowanceAmount, formatCount, formatTokens, formatUSD, formatWhen, paceLabel, rangeBounds, unitLabel, type AllowanceWindow, type CostState, type UsageDashboard, type UsageGroup, type UsageTicket } from '../lib/usageFormat'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
@@ -148,21 +148,28 @@ const ratingGroups = computed(() => {
   if (!ratings || (groupBy.value !== 'model' && groupBy.value !== 'harness')) return []
   return groupBy.value === 'model' ? ratings.by_model ?? [] : ratings.by_harness ?? []
 })
-const showRating = computed(() => groupRows.value.some(row => ratingGroups.value.some(item => item.label === row.label && item.votes > 0)))
-function ratingText(label: string) {
-  const found = ratingGroups.value.find(item => item.label === label && item.votes > 0)
-  return found ? formatRating(found.average) : ''
+const showRework = computed(() => groupRows.value.some(row => {
+  const found = ratingGroups.value.find(item => item.label === row.label)
+  return !!found && found.exceptions > 0 && found.deliveries > 0
+}))
+function reworkText(label: string) {
+  const found = ratingGroups.value.find(item => item.label === label)
+  return found ? reworkPercent(found.exceptions, found.deliveries) : ''
 }
-const ratingFact = computed(() => {
+function reworkTip(label: string) {
+  const found = ratingGroups.value.find(item => item.label === label)
+  return found ? reworkDetail(found.exceptions, found.deliveries) : ''
+}
+const reworkFact = computed(() => {
   const ratings = visible.value?.ratings
-  if (!ratings || ratings.votes < 1) return null
-  const value = formatRating(ratings.average)
+  if (!ratings) return null
+  const value = reworkPercent(ratings.exceptions, ratings.deliveries)
   if (!value) return null
   const lines = [
-    ...(ratings.by_model ?? []).map(item => `${item.label} ${formatRating(item.average)}`),
-    ...(ratings.by_harness ?? []).map(item => `${harnessName(item.label)} ${formatRating(item.average)}`),
+    ...(ratings.by_model ?? []).map(item => `${item.label} ${reworkPercent(item.exceptions, item.deliveries)}`),
+    ...(ratings.by_harness ?? []).map(item => `${harnessName(item.label)} ${reworkPercent(item.exceptions, item.deliveries)}`),
   ].filter(line => !line.endsWith(' '))
-  return { value, detail: plural(ratings.votes, 'vote', 'votes'), tip: lines.join(' · ') }
+  return { value, detail: reworkDetail(ratings.exceptions, ratings.deliveries), tip: lines.join(' · ') }
 })
 
 function amount(value: number | null, window: AllowanceWindow) {
@@ -251,11 +258,11 @@ const rankingNote = 'Ranked by the known list estimate of sessions that started 
               <span v-if="coverage(visible.totals, item[0])" class="coverage" aria-hidden="true">{{ coverage(visible.totals, item[0]) }} reports</span>
             </dd>
           </div>
-          <div v-if="ratingFact">
-            <dt>Rating</dt>
-            <dd :data-tip="ratingFact.tip || undefined">
-              {{ ratingFact.value }}
-              <span class="coverage">{{ ratingFact.detail }}</span>
+          <div v-if="reworkFact">
+            <dt>Rework</dt>
+            <dd :data-tip="reworkFact.tip || undefined">
+              {{ reworkFact.value }}
+              <span class="coverage">{{ reworkFact.detail }}</span>
             </dd>
           </div>
         </dl>
@@ -282,7 +289,7 @@ const rankingNote = 'Ranked by the known list estimate of sessions that started 
           <p v-if="!groupRows.length" class="empty">Nothing in this range.</p>
           <table v-else class="grid">
             <caption class="sr-only">By {{ groupBy }}</caption>
-            <thead><tr><th>{{ groupOptions.find(option => option.id === groupBy)?.label }}</th><th class="r">Sessions</th><th class="r opt">Input</th><th class="r cost">List estimate</th><th v-if="showRating" class="r rating">Rating</th></tr></thead>
+            <thead><tr><th>{{ groupOptions.find(option => option.id === groupBy)?.label }}</th><th class="r">Sessions</th><th class="r opt">Input</th><th class="r cost">List estimate</th><th v-if="showRework" class="r rework">Rework</th></tr></thead>
             <tbody>
               <tr v-for="group in groupRows" :key="group.label + (group.key ?? '')">
                 <td class="name">
@@ -299,7 +306,7 @@ const rankingNote = 'Ranked by the known list estimate of sessions that started 
                   <span v-else class="unknown"><span aria-hidden="true">–</span><span class="sr-only">Unknown</span></span>
                   <span v-if="stateNote(group.cost_state)" class="state">{{ stateNote(group.cost_state) }}</span>
                 </td>
-                <td v-if="showRating" class="r num rating">{{ ratingText(group.label) }}</td>
+                <td v-if="showRework" class="r num rework" :data-tip="reworkTip(group.label) || undefined">{{ reworkText(group.label) }}</td>
               </tr>
             </tbody>
           </table>
@@ -408,7 +415,7 @@ const rankingNote = 'Ranked by the known list estimate of sessions that started 
 .grid th:nth-child(3) { width: 72px; }
 .grid th:last-child { width: 128px; }
 .grid th.cost { width: 128px; }
-.grid th.rating { width: 64px; }
+.grid th.rework { width: 72px; }
 .grid td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .grid tr:last-child td { border-bottom: 0; }
 .grid tbody tr:hover td { background: var(--row-hover); }
@@ -470,6 +477,6 @@ const rankingNote = 'Ranked by the known list estimate of sessions that started 
   .grid th:nth-child(2) { width: 64px; }
   .grid th:last-child { width: 108px; }
   .grid th.cost { width: 108px; }
-  .grid th.rating { width: 52px; }
+  .grid th.rework { width: 64px; }
 }
 </style>

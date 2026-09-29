@@ -72,8 +72,11 @@ export interface UsageDashboard {
   ratings?: {
     votes: number
     average: string | null
-    by_model: { label: string; votes: number; average: string | null }[]
-    by_harness: { label: string; votes: number; average: string | null }[]
+    exceptions: number
+    deliveries: number
+    rework_rate: string | null
+    by_model: { label: string; votes: number; average: string | null; exceptions: number; deliveries: number; rework_rate: string | null }[]
+    by_harness: { label: string; votes: number; average: string | null; exceptions: number; deliveries: number; rework_rate: string | null }[]
   }
 }
 

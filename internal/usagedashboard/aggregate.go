@@ -50,20 +50,28 @@ type Dashboard struct {
 	Ratings            Ratings         `json:"ratings"`
 }
 
-// Ratings is the person votes on sessions in this dashboard, grouped by the
-// model and harness stored on each vote. Average is a decimal string.
+// Ratings is rework by exception for the sessions in this dashboard.
+// A vote row is an exception. ReworkRate is exceptions/deliveries.
+// Average is the mean of optional scores, null when none were given.
 type Ratings struct {
-	Votes     int           `json:"votes"`
-	Average   *string       `json:"average"`
-	ByModel   []RatingGroup `json:"by_model"`
-	ByHarness []RatingGroup `json:"by_harness"`
+	Votes      int           `json:"votes"`
+	Average    *string       `json:"average"`
+	Exceptions int           `json:"exceptions"`
+	Deliveries int           `json:"deliveries"`
+	ReworkRate *string       `json:"rework_rate"`
+	ByModel    []RatingGroup `json:"by_model"`
+	ByHarness  []RatingGroup `json:"by_harness"`
 }
 
-// RatingGroup is one model or harness label and its vote average.
+// RatingGroup is one usage model or harness and its rework rate.
+// Labels match the usage breakdown. Votes counts exception rows.
 type RatingGroup struct {
-	Label   string  `json:"label"`
-	Votes   int     `json:"votes"`
-	Average *string `json:"average"`
+	Label      string  `json:"label"`
+	Votes      int     `json:"votes"`
+	Average    *string `json:"average"`
+	Exceptions int     `json:"exceptions"`
+	Deliveries int     `json:"deliveries"`
+	ReworkRate *string `json:"rework_rate"`
 }
 
 // UsageGroup is one project, model, reported subscription, or the range total.
@@ -133,6 +141,20 @@ type AllowanceWindow struct {
 	PaceCap       *int64    `json:"pace_cap"`
 	Headroom      *int64    `json:"headroom"`
 	HardRemaining *int64    `json:"hard_remaining"`
+}
+
+func deliveryModelLabel(row sessionRow) string {
+	if row.reported && row.model != nil && *row.model != "" {
+		return *row.model
+	}
+	return "Unreported"
+}
+
+func deliveryHarnessLabel(row sessionRow) string {
+	if row.harness != "" {
+		return row.harness
+	}
+	return "Unreported"
 }
 
 type sessionRow struct {
@@ -235,7 +257,7 @@ func (m *Module) dashboard(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	out.ByModel = models
 	out.ByHarness = harnesses
 	out.BySubscription = subs
-	ratings, err := loadVoteRatings(r.Context(), tx, sessionIDs(rows))
+	ratings, err := loadVoteRatings(r.Context(), tx, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -355,17 +377,18 @@ func aggregate(rows []sessionRow) (UsageGroup, []UsageGroup, []UsageGroup, []Usa
 		if err := touch(projects, row.projectID, row.projectID, row.projectKey, projectLabel, false).add(row); err != nil {
 			return UsageGroup{}, nil, nil, nil, nil, nil, nil, 0, err
 		}
-		modelLabel, modelKey := "Unreported", ""
-		if row.reported && row.model != nil && *row.model != "" {
-			modelLabel = *row.model
-			modelKey = *row.model
+		modelLabel := deliveryModelLabel(row)
+		modelKey := ""
+		if modelLabel != "Unreported" {
+			modelKey = modelLabel
 		}
 		if err := touch(models, "m:"+modelKey, "", modelKey, modelLabel, false).add(row); err != nil {
 			return UsageGroup{}, nil, nil, nil, nil, nil, nil, 0, err
 		}
-		harnessLabel, harnessKey := "Unreported", ""
-		if row.harness != "" {
-			harnessLabel, harnessKey = row.harness, row.harness
+		harnessLabel := deliveryHarnessLabel(row)
+		harnessKey := ""
+		if harnessLabel != "Unreported" {
+			harnessKey = harnessLabel
 		}
 		if err := touch(harnesses, "h:"+harnessKey, "", harnessKey, harnessLabel, false).add(row); err != nil {
 			return UsageGroup{}, nil, nil, nil, nil, nil, nil, 0, err

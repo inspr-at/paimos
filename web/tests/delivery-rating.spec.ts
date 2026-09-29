@@ -18,14 +18,14 @@ const world: AgentWorld = {
   },
 }
 
-function rating(mine: { score: number; tags: string[]; comment: string } | null, votes = 2, average: string | null = '4.50') {
+function rating(mine: { score: number | null; tags: string[]; comment: string } | null, votes = 0, average: string | null = null) {
   return {
     session_id: sessionId,
     ticket_node_id: 'n-1',
     harness: 'codex',
     model: 'gpt-5.4',
     account_label: null,
-    mine: mine ? { ...mine, updated_at: '2026-09-27T10:00:00Z' } : null,
+    mine: mine ? { ...mine, updated_at: '2026-09-29T10:00:00Z' } : null,
     votes,
     average,
     signals: { review_rounds: 1, ci_failures: 0, reverts: 2 },
@@ -58,16 +58,22 @@ const agentWork = {
 }
 
 async function openTicket(page: Page, theme: 'light' | 'dark' = 'light') {
-  const saved: unknown[] = []
+  const saved: { method: string; body?: unknown }[] = []
   const data = fixtures()
   data.preferences.theme = { choice: theme }
   await mockWork(page, data)
   await page.route('**/api/nodes/n-epic/agent-work', route => route.fulfill({ json: agentWork }))
   await page.route('**/api/nodes/n-epic/delivery-ratings', route => route.fulfill({ json: { node_id: 'n-epic', sessions: [rating(null)] } }))
   await page.route('**/api/harness-sessions/*/delivery-rating', async route => {
+    const method = route.request().method()
+    if (method === 'DELETE') {
+      saved.push({ method })
+      await route.fulfill({ json: rating(null) })
+      return
+    }
     const body = route.request().postDataJSON()
-    saved.push(body)
-    await route.fulfill({ json: rating({ score: body.score, tags: body.tags, comment: body.comment }, 3, '4.33') })
+    saved.push({ method, body })
+    await route.fulfill({ json: rating({ score: body.score ?? null, tags: body.tags ?? [], comment: body.comment }, 1, body.score ? '4.00' : null) })
   })
   await page.goto('/p/PHAROS/PHAROS-10')
   const work = page.getByRole('region', { name: 'Agent work' })
@@ -75,76 +81,101 @@ async function openTicket(page: Page, theme: 'light' | 'dark' = 'light') {
   return { work, saved }
 }
 
-test('a person rates the delivery on the ticket and the signals stay beside it', async ({ page }) => {
+test('a person marks rework with a reason and can undo it', async ({ page }) => {
   const errors = watchErrors(page)
   const { work, saved } = await openTicket(page)
   const box = work.locator('[data-delivery-rating]')
-  await expect(box).toContainText('4.5 from 2')
+  await expect(box.getByRole('button', { name: 'Needs rework' })).toBeVisible()
+  await expect(box.getByRole('radio')).toHaveCount(0)
   await expect(box).toContainText('1 review round · 2 reverts')
   await expect(box).not.toContainText('CI')
+  await box.getByRole('button', { name: 'Needs rework' }).click()
+  await expect(box.getByRole('radio', { name: '4 out of 5' })).toHaveCount(0)
+  await box.getByRole('button', { name: 'Rework', exact: true }).click()
+  await box.getByRole('textbox', { name: 'Reason' }).fill('Needs another pass')
+  await box.locator('summary').click()
   await box.getByRole('radio', { name: '4 out of 5' }).click()
-  await box.getByRole('button', { name: 'Rework' }).click()
-  await box.getByRole('textbox', { name: 'Comment' }).fill('Needs another pass')
-  await box.getByRole('button', { name: 'Save' }).click()
+  await box.getByRole('button', { name: 'Mark for rework' }).click()
   await expect.poll(() => saved.length).toBe(1)
-  expect(saved[0]).toEqual({ score: 4, tags: ['rework'], comment: 'Needs another pass' })
-  await expect(box.getByRole('radio', { name: '4 out of 5' })).toHaveAttribute('aria-checked', 'true')
-  await expect(box.getByRole('button', { name: 'Rework' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(box.getByRole('button', { name: 'Save' })).toHaveCount(0)
-  await expect(box).toContainText('4.33 from 3')
+  expect(saved[0]).toEqual({ method: 'PUT', body: { score: 4, tags: ['rework'], comment: 'Needs another pass' } })
+  await expect(box).toContainText('Marked for rework')
+  await expect(box).toContainText('Needs another pass')
+  await expect(box.getByRole('radio')).toHaveCount(0)
+  await box.getByRole('button', { name: 'Edit' }).click()
+  await box.getByRole('textbox', { name: 'Reason' }).fill('Still needs another pass')
+  await box.getByRole('button', { name: 'Update' }).click()
+  await expect.poll(() => saved.length).toBe(2)
+  expect(saved[1]?.body).toMatchObject({ comment: 'Still needs another pass', score: 4, tags: ['rework'] })
+  await box.getByRole('button', { name: 'Undo' }).click()
+  await expect.poll(() => saved.some(item => item.method === 'DELETE')).toBe(true)
+  await expect(box.getByRole('button', { name: 'Needs rework' })).toBeVisible()
+  await expect(box).not.toContainText('Marked for rework')
   expect(errors).toEqual([])
 })
 
-test('ticket rating fits light and dark', async ({ browser }) => {
+test('ticket rework fits 390 and 1600 in light and dark', async ({ browser }) => {
   mkdirSync(shots, { recursive: true })
-  await shot(browser, 1600, 'light', async page => {
-    const { work } = await openTicket(page, 'light')
-    const box = work.locator('[data-delivery-rating]')
-    await box.getByRole('radio', { name: '4 out of 5' }).click()
-    await box.getByRole('button', { name: 'Quality' }).click()
-    await expect(box.getByRole('button', { name: 'Save' })).toBeVisible()
-    await expect(box.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).resolves.toBe(true)
-    await box.screenshot({ path: `${shots}/ticket-light-1600.png` })
-  })
-  await shot(browser, 390, 'dark', async page => {
-    const { work } = await openTicket(page, 'dark')
-    const box = work.locator('[data-delivery-rating]')
-    await box.getByRole('radio', { name: '4 out of 5' }).click()
-    await box.getByRole('textbox', { name: 'Comment' }).fill('Needs another pass')
-    await expect(box.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).resolves.toBe(true)
-    await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).resolves.toBe(true)
-    await box.screenshot({ path: `${shots}/ticket-dark-390.png` })
-  })
+  for (const width of [1600, 390]) {
+    for (const theme of ['light', 'dark'] as const) {
+      await shot(browser, width, theme, async page => {
+        const { work } = await openTicket(page, theme)
+        const box = work.locator('[data-delivery-rating]')
+        await expect(box.getByRole('button', { name: 'Needs rework' })).toBeVisible()
+        await box.screenshot({ path: `${shots}/ticket-idle-${theme}-${width}.png` })
+        await box.getByRole('button', { name: 'Needs rework' }).click()
+        await box.getByRole('textbox', { name: 'Reason' }).fill('Needs another pass')
+        await box.locator('summary').click()
+        await expect(box.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).resolves.toBe(true)
+        await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).resolves.toBe(true)
+        await box.screenshot({ path: `${shots}/ticket-form-${theme}-${width}.png` })
+        await box.getByRole('button', { name: 'Mark for rework' }).click()
+        await expect(box).toContainText('Marked for rework')
+        await expect(box.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).resolves.toBe(true)
+        await box.screenshot({ path: `${shots}/ticket-marked-${theme}-${width}.png` })
+      })
+    }
+  }
 })
 
-test('the session overview shows the same rating', async ({ browser }) => {
+test('the session overview shows the same rework mark', async ({ browser }) => {
   mkdirSync(shots, { recursive: true })
-  await shot(browser, 1600, 'light', async page => {
-    const data = fixtures()
-    data.preferences.theme = { choice: 'light' }
-    await mockWork(page, data)
-    await mockAgents(page, agentData(world))
-    await page.route('**/api/harness-sessions/*/delivery-rating', route => route.fulfill({
-      json: rating({ score: 4, tags: ['rework'], comment: 'Needs another pass' }, 3, '4.33'),
-    }))
-    await page.goto(`/agents/${sessionId}`)
-    const details = page.getByRole('complementary', { name: 'Session details' })
-    const box = details.locator('[data-delivery-rating]')
-    await expect(box.getByRole('radio', { name: '4 out of 5' })).toHaveAttribute('aria-checked', 'true')
-    await expect(box).toContainText('1 review round · 2 reverts')
-    await expect(details.getByRole('heading', { name: 'Details' })).toBeVisible()
-    await box.screenshot({ path: `${shots}/session-light-1600.png` })
-  })
+  for (const width of [1600, 390]) {
+    for (const theme of ['light', 'dark'] as const) {
+      await shot(browser, width, theme, async page => {
+        const data = fixtures()
+        data.preferences.theme = { choice: theme }
+        await mockWork(page, data)
+        await mockAgents(page, agentData(world))
+        await page.route('**/api/harness-sessions/*/delivery-rating', route => route.fulfill({
+          json: rating({ score: null, tags: ['rework'], comment: 'Needs another pass' }, 1, null),
+        }))
+        await page.goto(`/agents/${sessionId}`)
+        const details = page.getByRole('complementary', { name: 'Session details' })
+        const box = details.locator('[data-delivery-rating]')
+        await expect(box).toContainText('Marked for rework')
+        await expect(box).toContainText('Needs another pass')
+        await expect(box.getByRole('button', { name: 'Undo' })).toBeVisible()
+        await expect(box.getByRole('radio')).toHaveCount(0)
+        await expect(box).toContainText('1 review round · 2 reverts')
+        await expect(details.getByRole('heading', { name: 'Details' })).toBeVisible()
+        await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).resolves.toBe(true)
+        await box.screenshot({ path: `${shots}/session-${theme}-${width}.png` })
+      })
+    }
+  }
 })
 
-test('usage shows the rating by harness', async ({ browser }) => {
+test('usage shows the rework rate by harness', async ({ browser }) => {
   mkdirSync(shots, { recursive: true })
+  const group = (label: string, exceptions: number, deliveries: number) => ({
+    label, votes: exceptions, average: null, exceptions, deliveries, rework_rate: `${exceptions}/${deliveries}`,
+  })
   const dashboard = {
     from: '2026-08-29T00:00:00Z', to: '2026-09-28T00:00:00Z', generated_at: '2026-09-27T10:00:00Z',
     attribution: 'lifetime_for_sessions_started_in_range', trend_basis: 'session_started_utc_day', list_price_currency: 'USD',
     truncated: false,
-    totals: blank('All visible sessions', 2, '1.250000000000'),
-    by_project: [blank('Pharos', 2, '1.250000000000')],
+    totals: blank('All visible sessions', 3, '1.250000000000'),
+    by_project: [blank('Pharos', 3, '1.250000000000')],
     by_model: [blank('gpt-4.1', 2, '1.250000000000')],
     by_harness: [blank('codex', 2, '1.250000000000'), blank('claude', 1, '0.250000000000')],
     by_subscription: [blank('Codex Pro', 2, '1.250000000000', { billing_mode: 'subscription' })],
@@ -153,40 +184,35 @@ test('usage shows the rating by harness', async ({ browser }) => {
     tickets_cost_unknown: 0,
     allowance: { state: 'none', windows: [] },
     ratings: {
-      votes: 2, average: '4.50',
-      by_model: [{ label: 'gpt-4.1', votes: 2, average: '4.50' }],
-      by_harness: [{ label: 'codex', votes: 2, average: '4.50' }],
+      votes: 2, average: null, exceptions: 1, deliveries: 3, rework_rate: '1/3',
+      by_model: [group('gpt-4.1', 1, 2)],
+      by_harness: [group('codex', 1, 2)],
     },
   }
-  await shot(browser, 1600, 'light', async page => {
-    const data = fixtures()
-    data.preferences.theme = { choice: 'light' }
-    await mockWork(page, data)
-    await page.route('**/api/usage/dashboard**', route => route.fulfill({ json: dashboard }))
-    await page.goto('/agents/usage')
-    await expect(page.getByRole('heading', { name: 'Usage', level: 1 })).toBeVisible()
-    const summary = page.locator('.summary-card')
-    await expect(summary.getByText('Rating', { exact: true })).toBeVisible()
-    await expect(summary).toContainText('4.5')
-    await expect(summary).toContainText('2 votes')
-    await page.getByRole('button', { name: 'Harness' }).click()
-    const table = page.getByRole('table', { name: 'By harness' })
-    await expect(table.getByRole('columnheader', { name: 'Rating' })).toBeVisible()
-    await expect(table.getByRole('row', { name: /Codex/ })).toContainText('4.5')
-    await expect(table.getByRole('row', { name: /Claude/ }).locator('td').last()).toHaveText('')
-    await page.locator('.breakdown').screenshot({ path: `${shots}/usage-light-1600.png` })
-  })
-  await shot(browser, 390, 'dark', async page => {
-    const data = fixtures()
-    data.preferences.theme = { choice: 'dark' }
-    await mockWork(page, data)
-    await page.route('**/api/usage/dashboard**', route => route.fulfill({ json: dashboard }))
-    await page.goto('/agents/usage')
-    await page.getByRole('button', { name: 'Harness' }).click()
-    await expect(page.getByRole('table', { name: 'By harness' })).toBeVisible()
-    await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).resolves.toBe(true)
-    await page.locator('.breakdown').screenshot({ path: `${shots}/usage-dark-390.png` })
-  })
+  for (const width of [1600, 390]) {
+    for (const theme of ['light', 'dark'] as const) {
+      await shot(browser, width, theme, async page => {
+        const data = fixtures()
+        data.preferences.theme = { choice: theme }
+        await mockWork(page, data)
+        await page.route('**/api/usage/dashboard**', route => route.fulfill({ json: dashboard }))
+        await page.goto('/agents/usage')
+        await expect(page.getByRole('heading', { name: 'Usage', level: 1 })).toBeVisible()
+        const summary = page.locator('.summary-card')
+        await expect(summary.getByText('Rework', { exact: true })).toBeVisible()
+        await expect(summary).toContainText('33%')
+        await expect(summary).toContainText('1 of 3')
+        await expect(summary).not.toContainText('4.5')
+        await page.getByRole('button', { name: 'Harness' }).click()
+        const table = page.getByRole('table', { name: 'By harness' })
+        await expect(table.getByRole('columnheader', { name: 'Rework' })).toBeVisible()
+        await expect(table.getByRole('row', { name: /Codex/ })).toContainText('50%')
+        await expect(table.getByRole('row', { name: /Claude/ }).locator('td').last()).toHaveText('')
+        await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).resolves.toBe(true)
+        await page.locator('.breakdown').screenshot({ path: `${shots}/usage-${theme}-${width}.png` })
+      })
+    }
+  }
 })
 
 function blank(label: string, sessions: number, cost: string, extra: Record<string, unknown> = {}) {

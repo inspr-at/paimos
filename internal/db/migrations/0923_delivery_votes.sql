@@ -1,6 +1,8 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
--- AEON-218. A person rates one harness session. The row keeps the ticket and a
--- snapshot of that session's model, harness and account. Agents cannot write.
+-- AEON-218. A person marks one harness session for rework. Silence is not
+-- stored: a row is an exception. Score is an optional detail. The row keeps
+-- the ticket and a snapshot of that session's model, harness and account.
+-- Agents cannot write.
 SET LOCAL lock_timeout = '5s';
 
 CREATE TABLE agent_delivery_votes (
@@ -9,7 +11,7 @@ CREATE TABLE agent_delivery_votes (
     session_id uuid NOT NULL,
     ticket_node_id uuid NOT NULL,
     voter_principal_id uuid NOT NULL,
-    score smallint NOT NULL CHECK (score BETWEEN 1 AND 5),
+    score smallint CHECK (score IS NULL OR score BETWEEN 1 AND 5),
     tags text[] NOT NULL DEFAULT '{}',
     comment text NOT NULL DEFAULT '',
     harness text NOT NULL CHECK (char_length(harness) BETWEEN 1 AND 32 AND harness = btrim(harness) AND harness ~ '^[a-z][a-z0-9_-]*$'),
@@ -24,7 +26,7 @@ CREATE TABLE agent_delivery_votes (
     FOREIGN KEY (tenant_id, voter_principal_id) REFERENCES principals(tenant_id, id),
     CHECK (cardinality(tags) <= 3),
     CHECK (tags <@ ARRAY['quality', 'rework', 'taste']::text[]),
-    CHECK (char_length(comment) <= 2000),
+    CHECK (char_length(btrim(comment)) >= 1 AND char_length(comment) <= 2000),
     CHECK (translate(comment, chr(10) || chr(9), '') !~ '[[:cntrl:]]')
 );
 CREATE INDEX agent_delivery_votes_ticket_idx ON agent_delivery_votes (tenant_id, ticket_node_id);
@@ -33,7 +35,8 @@ ALTER TABLE agent_delivery_votes FORCE ROW LEVEL SECURITY;
 CREATE POLICY agent_delivery_votes_tenant ON agent_delivery_votes
     USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
     WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
-COMMENT ON TABLE agent_delivery_votes IS 'One person''s rating of one harness session. Model, harness and account are copied from the session at save time.';
+COMMENT ON TABLE agent_delivery_votes IS 'One person marked one harness session for rework. Silence is not stored. Score is an optional detail. Model, harness and account are copied from the session at save time.';
+COMMENT ON COLUMN agent_delivery_votes.score IS 'Optional detail from 1 to 5. Null when the mark has no score.';
 
 CREATE FUNCTION aeon_delivery_vote_person() RETURNS trigger
 LANGUAGE plpgsql AS $$
