@@ -36,7 +36,8 @@ func (rt *runtime) rulesChannelCheck(options doctorRulesOptions) doctorCheck {
 			State      string `json:"state"`
 			Error      string `json:"error"`
 			Files      []struct {
-				Rules []struct {
+				Problem string `json:"problem"`
+				Rules   []struct {
 					Identity string `json:"identity"`
 					Key      string `json:"key"`
 					Text     string `json:"text"`
@@ -69,7 +70,7 @@ func (rt *runtime) rulesChannelCheck(options doctorRulesOptions) doctorCheck {
 		pins[source.Repository] = source.Commit
 		rel := rulescompare.PinnedRelease{Repository: source.Repository, Ref: source.Ref, Commit: source.Commit, State: source.State, Error: source.Error}
 		for _, file := range source.Files {
-			if file.Rules == nil {
+			if file.Rules == nil || file.Problem != "" {
 				return doctorCheck{Name: "rules", Status: "fail", Detail: "doctrine index unverified"}
 			}
 			for _, rule := range file.Rules {

@@ -81,7 +81,7 @@ func TestDoctorReportsOneChannel(t *testing.T) {
 		t.Fatalf("drift exit %d\n%s\n%s", code, out, errOut)
 	}
 	cleanDoctrine := doctrine
-	for _, mode := range []string{"empty harness", "removed marker", "failed source", "unindexed source", "missing state", "ready with error", "missing files", "changed pin", "empty response", "session duplicate", "empty session", "missing session", "unreadable session", "inbox only", "explicit session", "codex session"} {
+	for _, mode := range []string{"empty harness", "removed marker", "failed source", "unindexed source", "missing state", "ready with error", "file index error", "missing files", "changed pin", "empty response", "session duplicate", "empty session", "missing session", "unreadable session", "inbox only", "explicit session", "codex session"} {
 		t.Run(mode, func(t *testing.T) {
 			doctrine = cleanDoctrine
 			mustWrite := func(path, text string) {
@@ -108,6 +108,8 @@ func TestDoctorReportsOneChannel(t *testing.T) {
 				doctrine = strings.Replace(doctrine, `"state":"ready",`, "", 1)
 			case "ready with error":
 				doctrine = strings.Replace(doctrine, `"state":"ready"`, `"state":"ready","error":"index failed"`, 1)
+			case "file index error":
+				doctrine = strings.Replace(doctrine, `"files":[{`, `"files":[{"problem":"not UTF-8 text",`, 1)
 			case "missing files":
 				doctrine = `{"sources":[{"state":"ready","repository":"inspr-at/fixture-doctrine","commit":"` + strings.Repeat("ab", 20) + `"}]}`
 			case "changed pin":
@@ -152,7 +154,6 @@ func TestDoctorReportsOneChannel(t *testing.T) {
 			}
 		})
 	}
-
 }
 
 func TestDoctorRulesHookOutputs(t *testing.T) {
