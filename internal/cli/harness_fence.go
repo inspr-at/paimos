@@ -79,7 +79,7 @@ func resolveHarnessPath(kind harnessFileKind, path string) (string, bool) {
 		return "", false
 	}
 	for _, part := range parts {
-		if !printablePathPart(part) || credentialUsageName(part) || credentialUsageName(fsFold(part)) {
+		if !printablePathPart(part) || credentialUsageName(part) {
 			return "", false
 		}
 	}

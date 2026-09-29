@@ -49,22 +49,38 @@ func launchDefaultRev(ctx context.Context, workspace string) string {
 	return rev
 }
 
-// remoteDefaultRev is the commit the remote default branch (origin/HEAD or
-// its fallbacks) names now, or "" when the default branch is not a remote ref.
-func remoteDefaultRev(ctx context.Context, workspace string) string {
-	ref := defaultBranchRef(ctx, workspace)
-	if !strings.HasPrefix(ref, "origin/") {
-		return ""
+// remoteDefaultRevs are the commits the remote default branch names now:
+// origin/HEAD's target, or else every existing remote-tracking candidate
+// (origin/<init.defaultBranch>, origin/main, origin/master, origin/trunk).
+// Local branches never shadow them. Empty when there is no remote ref.
+func remoteDefaultRevs(ctx context.Context, workspace string) []string {
+	var names []string
+	if out, err := gitOutput(ctx, workspace, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
+		if name := strings.TrimSpace(out); branchRefName(name) && strings.HasPrefix(name, "origin/") {
+			names = []string{name}
+		}
 	}
-	out, err := gitOutput(ctx, workspace, "rev-parse", "--verify", "--quiet", "refs/remotes/"+ref+"^{commit}")
-	if err != nil {
-		return ""
+	if len(names) == 0 {
+		if out, err := gitOutput(ctx, workspace, "config", "--local", "--get", "init.defaultBranch"); err == nil {
+			if name := strings.TrimSpace(out); branchRefName(name) {
+				names = append(names, "origin/"+name)
+			}
+		}
+		names = append(names, "origin/main", "origin/master", "origin/trunk")
 	}
-	rev := strings.ToLower(strings.TrimSpace(out))
-	if !fullSHA(rev) {
-		return ""
+	var revs []string
+	seen := map[string]bool{}
+	for _, name := range names {
+		out, err := gitOutput(ctx, workspace, "rev-parse", "--verify", "--quiet", "refs/remotes/"+name+"^{commit}")
+		if err != nil {
+			continue
+		}
+		if rev := strings.ToLower(strings.TrimSpace(out)); fullSHA(rev) && !seen[rev] {
+			seen[rev] = true
+			revs = append(revs, rev)
+		}
 	}
-	return rev
+	return revs
 }
 
 // runCommits lists the run's commit evidence: non-merge commits on the first-
@@ -85,7 +101,7 @@ func runCommits(ctx context.Context, workspace, launch, launchDefault string) []
 	}
 	// Upstream work fetched during the run and fast-forwarded onto is on the
 	// remote default branch now; it is not the run's work either.
-	if remote := remoteDefaultRev(ctx, workspace); fullSHA(remote) {
+	for _, remote := range remoteDefaultRevs(ctx, workspace) {
 		args = append(args, "^"+remote)
 	}
 	out, err := gitOutput(ctx, workspace, append(args, "--")...)

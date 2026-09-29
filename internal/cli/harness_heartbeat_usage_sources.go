@@ -163,8 +163,11 @@ func usagePathParts(path string) []string {
 	return parts
 }
 
+// credentialUsageName reports a credential-store name. It judges the name as
+// APFS compares names (fsFold), so every spelling APFS treats as the same
+// file gets the same verdict, and nothing APFS keeps distinct is folded in.
 func credentialUsageName(name string) bool {
-	base := strings.ToLower(name)
+	base := fsFold(name)
 	switch base {
 	case "auth.json", "cli-config.json", "cookies", "cookies.db", "cookies.binarycookies",
 		"keychain", "keychains", "login.keychain", "login.keychain-db",

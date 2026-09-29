@@ -222,6 +222,8 @@ func TestFenceGuardCatchesAliases(t *testing.T) {
 		"harness_heartbeat_ioutil.go": "package cli\nimport \"io/ioutil\"\nvar slurp = ioutil.ReadFile\n",
 		"harness_heartbeat_iofs.go":   "package cli\nimport iofs \"io/fs\"\nfunc probeFS(f iofs.FS) ([]byte, error) { return iofs.ReadFile(f, \"auth.json\") }\n",
 		"harness_heartbeat_dirfs.go":  "package cli\nimport \"os\"\nvar tree = os.DirFS(\"/\")\n",
+		"harness_heartbeat_rffs.go":   "package cli\nimport \"io/fs\"\nfunc probeRF(f fs.ReadFileFS) ([]byte, error) { return f.ReadFile(\"auth.json\") }\n",
+		"harness_heartbeat_http.go":   "package cli\nimport \"net/http\"\nfunc probeHTTP() { _, _ = http.Dir(\"/\").Open(\"auth.json\") }\n",
 	}
 	for name, body := range probes {
 		fenceWrite(t, filepath.Join(dir, name), body)
@@ -261,7 +263,8 @@ func fenceGuardViolations(t *testing.T, dir string) []string {
 	readers := map[string]map[string]bool{
 		"os":        {"Open": true, "OpenFile": true, "ReadFile": true, "Stat": true, "Lstat": true, "ReadDir": true, "DirFS": true, "Readlink": true, "OpenRoot": true, "OpenInRoot": true},
 		"io/ioutil": {"ReadFile": true, "ReadDir": true},
-		"io/fs":     {"ReadFile": true, "ReadDir": true, "Stat": true},
+		"io/fs":     {"ReadFile": true, "ReadDir": true, "Stat": true, "ReadFileFS": true, "ReadDirFS": true, "StatFS": true, "Sub": true, "SubFS": true},
+		"net/http":  {"Dir": true, "FS": true, "FileServer": true, "FileServerFS": true, "ServeFile": true, "ServeFileFS": true},
 	}
 	var bad []string
 	for _, path := range files {
@@ -359,6 +362,9 @@ func TestHarnessFenceFilesystemEquivalentNames(t *testing.T) {
 		"\U0001d634\U0001d626\U0001d624\U0001d633\U0001d626\U0001d635\U0001d634", "Key​chains", "Keychaıns",
 		"secrets️", "secrets‍", "Istanbul", "İstanbul", "Straße", "ﬀolder", "Σίσυφος",
 		"José", "José", "研究", "notes‎",
+		// Round 5: dotted capital I and its decomposed spelling are one APFS
+		// name; both are distinct from the ASCII credential names.
+		"Cook\u0130es", "CookI\u0307es", "Keycha\u0130ns", "KeychaI\u0307ns", "\u0130d_notes", "I\u0307d_notes",
 	}
 	for _, tc := range fenceKinds {
 		t.Run(tc.name, func(t *testing.T) {
@@ -382,6 +388,14 @@ func TestHarnessFenceFilesystemEquivalentNames(t *testing.T) {
 						f.Close()
 						t.Errorf("filesystem alias %q of %q opened", name, canonical)
 					}
+				}
+			}
+			// Every spelling APFS resolves to one name gets one verdict.
+			for _, pair := range [][2]string{{"Cook\u0130es", "CookI\u0307es"}, {"Keycha\u0130ns", "KeychaI\u0307ns"}, {"\u0130d_notes", "I\u0307d_notes"}, {"\u017fecrets", "secrets"}, {"s\u00e9crets", "se\u0301crets"}} {
+				_, first := resolveHarnessPath(tc.kind, filepath.Join(home, "pair", pair[0], tc.rel))
+				_, second := resolveHarnessPath(tc.kind, filepath.Join(home, "pair", pair[1], tc.rel))
+				if first != second {
+					t.Errorf("%q and %q got different verdicts: %t %t", pair[0], pair[1], first, second)
 				}
 			}
 			for _, name := range distinct {

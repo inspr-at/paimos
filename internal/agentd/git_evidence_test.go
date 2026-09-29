@@ -171,6 +171,40 @@ func TestRunCommitsFastForwardOntoUpstream(t *testing.T) {
 	}
 }
 
+// Round 5 review case: no origin/HEAD and a configured local trunk must not
+// shadow origin/main; a fast-forward onto its upstream commits is no_commit.
+func TestRemoteDefaultNotShadowedByLocalFallback(t *testing.T) {
+	root, git := evidenceRepo(t)
+	origin := filepath.Join(root, "origin.git")
+	work := filepath.Join(root, "work")
+	upstream := filepath.Join(root, "upstream")
+	git(root, "init", "--bare", "-b", "main", origin)
+	git(root, "clone", "-q", origin, work)
+	git(work, "commit", "--allow-empty", "-m", "base")
+	git(work, "push", "-q", "origin", "HEAD:main")
+	git(work, "fetch", "-q", "origin")
+	git(work, "remote", "set-head", "origin", "-d")
+	git(work, "branch", "trunk")
+	git(work, "config", "--local", "init.defaultBranch", "trunk")
+	if ref := defaultBranchRef(t.Context(), work); ref != "trunk" {
+		t.Fatalf("fixture: default %q", ref)
+	}
+	r := &launchedRepo{dir: work, git: git}
+	r.launchNow(t)
+	git(root, "clone", "-q", origin, upstream)
+	git(upstream, "commit", "--allow-empty", "-m", "foreign upstream")
+	git(upstream, "push", "-q", "origin", "HEAD:main")
+	r.run("fetch", "-q", "origin")
+	r.run("merge", "--ff-only", "origin/main")
+	if got := r.evidence(t); got != "" {
+		t.Fatalf("foreign upstream credited: %s", got)
+	}
+	r.run("commit", "--allow-empty", "-m", "own work")
+	if got := r.evidence(t); got != "own work" {
+		t.Fatalf("own work: %s", got)
+	}
+}
+
 // Earlier review cases keep their answers under the simpler rule.
 func TestRunCommitsEarlierReproductions(t *testing.T) {
 	t.Run("upstream merge synced beside unmerged work is committed", func(t *testing.T) {
