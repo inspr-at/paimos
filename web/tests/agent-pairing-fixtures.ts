@@ -36,6 +36,17 @@ export function pairingGuide() {
   }
 }
 
+export async function mockChecksumGuide(page: Page) {
+  await mockAnonymousGuide(page)
+  const targets = ['darwin/arm64', 'darwin/amd64', 'linux/arm64', 'linux/amd64'].map(platform => ({
+    platform: platform.split('/')[0], arch: platform.split('/')[1],
+    service: platform.startsWith('darwin') ? 'launchd-user' : 'systemd-user',
+    qualification: 'candidate', artifact_url: `https://release.example/${platform}`, checksums_url: 'https://release.example/SHA256SUMS',
+    command: `# Fixture checksum installer for ${platform}\n# Downloads and verifies the release before linking ~/.local/bin/aeon-agentd.`,
+  }))
+  await page.route('**/api/agent-pairing/guide', route => route.fulfill({ json: { ...pairingGuide(), install_available: true, install_targets: targets } }))
+}
+
 function verification(mode: string | null = null) {
   return {
     mode, policy: 'read_only', runs_per_account: 1, max_parallel_runs: 1, max_duration_seconds: 60,

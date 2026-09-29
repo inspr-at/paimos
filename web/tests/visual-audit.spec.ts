@@ -15,7 +15,7 @@ import { fixtures, liveAgent, me, mockWork, type Fixtures } from './work-fixture
 import { mockEffectivePermissions } from './authz-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { mockStartAgent } from './start-agent-fixtures'
-import { mockAnonymousGuide, mockPairing } from './agent-pairing-fixtures'
+import { mockAnonymousGuide, mockChecksumGuide, mockPairing } from './agent-pairing-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { RULE_PERSON, RULE_PROJECT, mockRules } from './rules-fixtures'
 import { journeyWorld, mockJourney, PROJECT, retryJourneyWorld, type JourneyWorld } from './journey-fixtures'
@@ -593,7 +593,7 @@ const shots: Shot[] = [
     await page.goto('/agents/register-agent')
     await heading(page, 'Connect a computer')
   } },
-  { screen: 'pairing', state: 'fallback-guide', setup: mockAnonymousGuide, act: async page => {
+  { screen: 'pairing', state: 'fallback-guide', setup: mockChecksumGuide, act: async page => {
     await page.goto('/agents/register-agent')
     await heading(page, 'Connect a computer')
     await page.getByLabel('Installation method').selectOption('manual')
