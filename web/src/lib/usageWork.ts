@@ -5,7 +5,7 @@
 // Pure, so every partial state is unit tested (tests/usageWork.test.ts).
 import { accountPlan, gauge, pct, when, whenFull, type AccountRow, type Gauge, type PoolView } from './capacity.ts'
 import { reworkDetail, reworkPercent } from './deliveryRating.ts'
-import { compactCount, formatCount, formatUSD, type UsageDashboard, type UsageWork, type WasteItem, type WorkGroup } from './usageFormat.ts'
+import { compactCount, formatCount, formatUSD, type TokenParts, type UsageDashboard, type UsageWork, type WasteItem, type WorkGroup } from './usageFormat.ts'
 
 export const HARNESS: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi' }
 export const harnessName = (h: string) => HARNESS[h] ?? (h ? h[0].toUpperCase() + h.slice(1) : h)
@@ -42,6 +42,40 @@ export function coverage(part: number, whole: number, verb = 'reported by'): str
   return `${verb} ${formatCount(part)} of ${plural(whole, 'session')}`
 }
 
+/** Token coverage that never reads as complete when a component is missing:
+ *  "reported by all 12 sessions" when every session reported input and output,
+ *  otherwise per component, "input and output from 5 of 7 sessions, cached from
+ *  2 of 7", plus how many reports are still provisional. Cached input is named
+ *  only when some session reported it; it is part of input, not of the total. */
+export function tokenCoverage(c: TokenParts & { sessions: number; usage_reported_sessions: number }): string {
+  const whole = c.sessions
+  if (whole <= 0) return ''
+  const provisional = c.usage_provisional_sessions > 0
+    ? c.usage_provisional_sessions >= whole ? (whole === 1 ? 'still provisional' : 'all still provisional') : `${formatCount(c.usage_provisional_sessions)} still provisional`
+    : ''
+  const parts: [string, number][] = [['input', c.input_reported_sessions], ['output', c.output_reported_sessions]]
+  if (c.cached_input_reported_sessions > 0) parts.push(['cached', c.cached_input_reported_sessions])
+  const r = c.usage_reported_sessions
+  let head: string
+  if (parts.every(([, n]) => n === r)) head = coverage(r, whole)
+  else {
+    // Components with the same count share one clause, in input, output, cached order.
+    const counts = [...new Set(parts.map(([, n]) => n))]
+    head = counts.map((n, i) => {
+      const names = parts.filter(([, m]) => m === n).map(([name]) => name)
+      const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]
+      const of = i === 0 ? plural(whole, 'session') : formatCount(whole)
+      const from = n === 0 ? 'none' : n >= whole ? (whole === 1 ? 'the one session' : `all ${of}`) : `${formatCount(n)} of ${of}`
+      return `${who} from ${from}`
+    }).join(', ')
+  }
+  return [head, provisional].filter(Boolean).join(', ')
+}
+
+/** True when some session left out input or output, so the total is partial. */
+export const tokensPartial = (c: TokenParts & { sessions: number }) =>
+  c.input_reported_sessions !== c.output_reported_sessions || c.usage_provisional_sessions > 0
+
 export interface Tile {
   key: 'done' | 'cost' | 'time' | 'waste'
   /** The bold figure; null turns the tile into a sentence (the reason). */
@@ -76,8 +110,8 @@ export function tiles(d: Pick<UsageDashboard, 'totals' | 'work' | 'ratings'>): T
     : {
         key: 'cost', value: compactCount(tokens), label: 'tokens',
         detail: api ? `${api} at API list price` : split.length > 1 ? split.slice(0, 2).map(g => `${harnessName(g.key)} ${compactCount(g.tokens)}`).join(' · ') : split[0] ? `all ${harnessName(split[0].key)}` : '',
-        note: coverage(w.usage_reported_sessions, w.sessions),
-        tip: `${formatCount(Number(tokens))} input and output tokens. Subscriptions are measured in capacity, not dollars.`,
+        note: tokenCoverage(w),
+        tip: `${formatCount(Number(tokens))} input and output tokens${tokensPartial(w) ? ', as reported: a component a session did not report is left out, not counted as zero' : ''}. Subscriptions are measured in capacity, not dollars.`,
       }
   const time: Tile = w.timed_sessions
     ? {

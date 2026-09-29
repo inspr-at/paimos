@@ -173,7 +173,8 @@ func TestDashboardWorkFromSessionsAndOutcomes(t *testing.T) {
 }
 
 // A provisional report with no token components is not token coverage: the
-// page must say "reported by 1 of 2 sessions", never "by all 2".
+// page must say "reported by 1 of 2 sessions", never "by all 2". A session that
+// reported input but no output covers input only, and its output is not zero.
 func TestDashboardWorkTokenCoverageCountsOnlyReportedTokens(t *testing.T) {
 	w := newWorld(t)
 	project := w.project(t, w.home, "TOK-1", "Token project")
@@ -183,13 +184,19 @@ func TestDashboardWorkTokenCoverageCountsOnlyReportedTokens(t *testing.T) {
 		beat: tm(day.Add(time.Hour)), stop: tm(day.Add(time.Hour)), worktree: true, commits: 1}, 7)
 	empty := w.workSession(t, w.home, workSession{project: project, ticket: &ticket, harness: "claude", model: "claude-opus-5-5", at: day.Add(2 * time.Hour),
 		beat: tm(day.Add(3 * time.Hour)), stop: tm(day.Add(3 * time.Hour)), worktree: true, commits: 1}, 8)
+	partial := w.workSession(t, w.home, workSession{project: project, ticket: &ticket, harness: "claude", model: "claude-opus-5-5", at: day.Add(4 * time.Hour),
+		beat: tm(day.Add(5 * time.Hour)), stop: tm(day.Add(5 * time.Hour)), worktree: true, commits: 1}, 9)
 	w.tx(t, w.home, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO harness_session_usage(tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,provisional,billing_mode,reported_at)
 			VALUES($1,$2,'claude-opus-5-5',1,60,40,0,false,'unknown',$3)`, w.home.TenantID, full, day); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO harness_session_usage(tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,provisional,billing_mode,reported_at)
+			VALUES($1,$2,'claude-opus-5-5',1,NULL,NULL,NULL,true,'unknown',$3)`, w.home.TenantID, empty, day); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO harness_session_usage(tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,provisional,billing_mode,reported_at)
-			VALUES($1,$2,'claude-opus-5-5',1,NULL,NULL,NULL,true,'unknown',$3)`, w.home.TenantID, empty, day)
+			VALUES($1,$2,'claude-opus-5-5',1,50,NULL,NULL,true,'unknown',$3)`, w.home.TenantID, partial, day)
 		return err
 	})
 	dbtest.BindRole(t, w.db, w.home.TenantID, w.admin.ID, "admin")
@@ -199,13 +206,16 @@ func TestDashboardWorkTokenCoverageCountsOnlyReportedTokens(t *testing.T) {
 		t.Fatalf("status %d %s", code, body)
 	}
 	work := page.Work
-	if work.Sessions != 2 || work.ReportedSessions != 1 {
-		t.Fatalf("coverage sessions %d reported %d", work.Sessions, work.ReportedSessions)
+	if work.Sessions != 3 || work.ReportedSessions != 1 || work.InputSessions != 2 || work.OutputSessions != 1 || work.CachedInputSessions != 1 || work.ProvisionalSessions != 2 {
+		t.Fatalf("coverage %+v reported %d of %d", work.TokenParts, work.ReportedSessions, work.Sessions)
 	}
-	if len(work.Tickets) != 1 || work.Tickets[0].Tokens == nil || *work.Tickets[0].Tokens != "100" || work.Tickets[0].ReportedSessions != 1 || work.Tickets[0].Sessions != 2 {
+	if work.InputTokens == nil || *work.InputTokens != "110" || work.OutputTokens == nil || *work.OutputTokens != "40" {
+		t.Fatalf("parts %+v", work.TokenParts)
+	}
+	if len(work.Tickets) != 1 || work.Tickets[0].Tokens == nil || *work.Tickets[0].Tokens != "150" || work.Tickets[0].ReportedSessions != 1 || work.Tickets[0].OutputSessions != 1 || work.Tickets[0].Sessions != 3 {
 		t.Fatalf("ticket %+v", work.Tickets)
 	}
-	if len(work.ByHarness) != 1 || work.ByHarness[0].ReportedSessions != 1 || work.ByHarness[0].Tokens == nil || *work.ByHarness[0].Tokens != "100" {
+	if len(work.ByHarness) != 1 || work.ByHarness[0].ReportedSessions != 1 || work.ByHarness[0].InputSessions != 2 || work.ByHarness[0].Tokens == nil || *work.ByHarness[0].Tokens != "150" {
 		t.Fatalf("harness %+v", work.ByHarness)
 	}
 }

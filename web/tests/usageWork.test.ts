@@ -2,8 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildPools, buildRows, type AccountCapacity, type AccountInput } from '../src/lib/capacity.ts'
-import { bandReadings, bandRows, breakdown, coverage, duration, since, sumTokens, tiles, wasteWords } from '../src/lib/usageWork.ts'
-import { NOW, usageDashboard } from './usage-data.ts'
+import { bandReadings, bandRows, breakdown, coverage, duration, since, sumTokens, tiles, tokenCoverage, wasteWords } from '../src/lib/usageWork.ts'
+import { NOW, parts, usageDashboard } from './usage-data.ts'
 
 test('durations read like a clock, never zero for a short session', () => {
   assert.equal(duration(30), '<1 min')
@@ -25,6 +25,35 @@ test('coverage says how many reported, and never divides by nothing', () => {
   assert.equal(coverage(0, 0), '')
   assert.equal(sumTokens([null, null]), null)
   assert.equal(sumTokens(['900000000000', null, '200000000000']), '1100000000000')
+})
+
+test('token coverage is per component, so a partial report never reads as complete', () => {
+  const c = (sessions: number, reported: number, input: number, output: number, cached = 0, provisional = 0) => ({
+    sessions, usage_reported_sessions: reported, ...parts('100', 0),
+    input_reported_sessions: input, output_reported_sessions: output, cached_input_reported_sessions: cached, usage_provisional_sessions: provisional,
+  })
+  // Complete: the plain sentence.
+  assert.equal(tokenCoverage(c(12, 12, 12, 12)), 'reported by all 12 sessions')
+  assert.equal(tokenCoverage(c(7, 5, 5, 5)), 'reported by 5 of 7 sessions')
+  assert.equal(tokenCoverage(c(7, 5, 5, 5, 5)), 'reported by 5 of 7 sessions')
+  // Codex review repro: one complete session, one with input only, provisional.
+  assert.equal(tokenCoverage(c(2, 1, 2, 1, 1, 1)), 'input from all 2 sessions, output and cached from 1 of 2, 1 still provisional')
+  assert.equal(tokenCoverage(c(2, 1, 2, 1)), 'input from all 2 sessions, output from 1 of 2')
+  assert.equal(tokenCoverage(c(7, 5, 5, 5, 2)), 'input and output from 5 of 7 sessions, cached from 2 of 7')
+  assert.equal(tokenCoverage(c(3, 0, 1, 0)), 'input from 1 of 3 sessions, output from none')
+  assert.equal(tokenCoverage(c(1, 0, 1, 0, 0, 1)), 'input from the one session, output from none, still provisional')
+  assert.equal(tokenCoverage(c(4, 4, 4, 4, 0, 4)), 'reported by all 4 sessions, all still provisional')
+  // Same counts from different sessions: only 3 reported both, so the components are named.
+  assert.equal(tokenCoverage(c(5, 3, 4, 4)), 'input and output from 4 of 5 sessions')
+  assert.equal(tokenCoverage(c(0, 0, 0, 0)), '')
+})
+
+test('a partial token total on the cost tile says what is missing', () => {
+  const d = usageDashboard('reported')
+  Object.assign(d.work, { input_reported_sessions: 230, output_reported_sessions: 212, usage_provisional_sessions: 3 })
+  const cost = tiles(d)[1]
+  assert.equal(cost.note, 'input from 230 of 357 sessions, output from 212 of 357, 3 still provisional')
+  assert.match(cost.tip ?? '', /left out, not counted as zero/)
 })
 
 test('nothing reported: the cost tile becomes its reason, the other tiles stay figures', () => {

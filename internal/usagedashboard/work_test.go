@@ -100,7 +100,7 @@ func TestBuildWorkFoldsRetriesAndAttributesDone(t *testing.T) {
 		row("s2", retry, "AEON-1", "in_progress", day.Add(2*time.Hour), func(r *workRow) { r.stopReason = "heartbeat_lost" }),
 		row("s3", retry, "AEON-1", "in_progress", day.Add(4*time.Hour), func(r *workRow) { r.commits = 1 }),
 		row("s4", shipped, "AEON-2", "done", day.Add(24*time.Hour), func(r *workRow) {
-			r.harness, r.model, r.commits, r.tokens = "claude", sp("claude-opus-5-5"), 2, sp("1200")
+			r.harness, r.model, r.commits, r.input, r.output = "claude", sp("claude-opus-5-5"), 2, sp("1000"), sp("200")
 		}),
 		row("s5", nil, "", "", day, func(r *workRow) {
 			r.ticketKey, r.ticketTitle, r.ticketState, r.role, r.model, r.shape = nil, nil, nil, "coordinator", nil, "unknown"
@@ -161,5 +161,39 @@ func TestBuildWorkKeepsTwoOrFewerWorkersAsSessionWaste(t *testing.T) {
 	}
 	if w.TimedSessions != 1 || w.Sessions != 2 {
 		t.Fatalf("timed %d of %d", w.TimedSessions, w.Sessions)
+	}
+}
+
+// A session counts for a token component only when it reported that
+// component; a missing component is never summed as zero or as coverage.
+func TestBuildWorkTokenCoverageIsPerComponent(t *testing.T) {
+	at := time.Date(2026, 9, 23, 9, 0, 0, 0, time.UTC)
+	base := workRow{projectID: "p", projectKey: "P", harness: "claude", role: "coordinator", phase: "stopped", created: at}
+	complete, partial, cachedOnly, none := base, base, base, base
+	complete.id, complete.input, complete.output, complete.cached = "complete", sp("60"), sp("40"), sp("10")
+	partial.id, partial.input, partial.provisional = "partial", sp("50"), true
+	cachedOnly.id, cachedOnly.cached = "cached", sp("5")
+	none.id, none.provisional = "none", true
+	w := buildWork([]workRow{complete, partial, cachedOnly, none}, nil, nil, wStart, wEnd, wNow)
+
+	if w.Sessions != 4 || w.ReportedSessions != 1 {
+		t.Fatalf("sessions %d reported %d", w.Sessions, w.ReportedSessions)
+	}
+	p := w.TokenParts
+	if p.InputSessions != 2 || p.OutputSessions != 1 || p.CachedInputSessions != 2 || p.ProvisionalSessions != 2 {
+		t.Fatalf("coverage %+v", p)
+	}
+	if p.InputTokens == nil || *p.InputTokens != "110" || p.OutputTokens == nil || *p.OutputTokens != "40" || p.CachedInputTokens == nil || *p.CachedInputTokens != "15" {
+		t.Fatalf("parts %+v", p)
+	}
+	g := w.ByHarness[0]
+	if g.Tokens == nil || *g.Tokens != "150" || g.ReportedSessions != 1 || g.InputSessions != 2 || g.OutputSessions != 1 {
+		t.Fatalf("harness %+v", g)
+	}
+
+	// Nothing reported: every component is null, not zero.
+	empty := buildWork([]workRow{none}, nil, nil, wStart, wEnd, wNow)
+	if e := empty.ByHarness[0]; e.Tokens != nil || e.InputTokens != nil || e.OutputTokens != nil || e.CachedInputTokens != nil || e.InputSessions != 0 || e.ProvisionalSessions != 1 {
+		t.Fatalf("empty %+v", e)
 	}
 }

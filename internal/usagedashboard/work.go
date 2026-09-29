@@ -16,7 +16,7 @@ import (
 // AEON-301: what agents got done, how long they worked and where the waste is.
 // Every figure here comes from sessions, runs and outcome events that exist for
 // every session, so it is known without a usage report. The one reported figure,
-// tokens, carries its own coverage count.
+// tokens, carries its own coverage count per component.
 const (
 	workBasis       = "sessions_started_in_range"
 	maxWorkTickets  = 50
@@ -49,6 +49,7 @@ type Work struct {
 	ByModel          []WorkGroup  `json:"by_model"`
 	ByProject        []WorkGroup  `json:"by_project"`
 	Waste            Waste        `json:"waste"`
+	TokenParts
 }
 
 // WorkDay is one UTC day of the range. Every day is present; zero is a known zero.
@@ -75,6 +76,7 @@ type WorkTicket struct {
 	Tokens           *string   `json:"tokens"`
 	ReportedSessions int       `json:"usage_reported_sessions"`
 	LastActiveAt     time.Time `json:"last_active_at"`
+	TokenParts
 }
 
 // WorkGroup is one harness, model or project.
@@ -87,6 +89,22 @@ type WorkGroup struct {
 	Done             int     `json:"done"`
 	Tokens           *string `json:"tokens"`
 	ReportedSessions int     `json:"usage_reported_sessions"`
+	TokenParts
+}
+
+// TokenParts is the token figure by component, each with the sessions that
+// reported it. A session counts for a component only when every one of its
+// usage rows carries that component; a missing component is left out of the
+// sum, never added as zero. Tokens is input plus output of what was reported,
+// and usage_reported_sessions counts the sessions that reported both.
+type TokenParts struct {
+	InputTokens         *string `json:"input_tokens"`
+	OutputTokens        *string `json:"output_tokens"`
+	CachedInputTokens   *string `json:"cached_input_tokens"`
+	InputSessions       int     `json:"input_reported_sessions"`
+	OutputSessions      int     `json:"output_reported_sessions"`
+	CachedInputSessions int     `json:"cached_input_reported_sessions"`
+	ProvisionalSessions int     `json:"usage_provisional_sessions"`
 }
 
 // Waste counts every wasted session or retried ticket; Rows is the costliest few.
@@ -131,7 +149,8 @@ type workRow struct {
 	commits                                 int
 	label                                   *string
 	runStatus, runOutcome                   *string
-	tokens                                  *string
+	input, output, cached                   *string
+	provisional                             bool
 }
 
 type doneRow struct {
@@ -192,15 +211,16 @@ func loadWorkSessions(ctx context.Context, tx pgx.Tx, from, to time.Time, projec
 		       s.created_at, s.heartbeat_at, s.stopped_at, coalesce(s.stop_reason, ''),
 		       s.worktree IS NOT NULL, jsonb_array_length(s.commits), s.display_label,
 		       r.status, r.outcome_detail,
-		       u.tokens::text
+		       u.input::text, u.output::text, u.cached::text, u.provisional
 		  FROM harness_sessions s
 		  JOIN nodes p ON p.tenant_id = s.tenant_id AND p.id = s.project_id
 		  LEFT JOIN nodes t ON t.tenant_id = s.tenant_id AND t.id = s.ticket_node_id AND t.deleted_at IS NULL
 		  LEFT JOIN agent_runs r ON r.tenant_id = s.tenant_id AND r.id = s.run_id
 		  LEFT JOIN LATERAL (
-		      SELECT count(*) AS rows,
-		             sum(coalesce(x.input_tokens, 0) + coalesce(x.output_tokens, 0))
-		                 FILTER (WHERE x.input_tokens IS NOT NULL OR x.output_tokens IS NOT NULL) AS tokens
+		      SELECT CASE WHEN bool_and(x.input_tokens IS NOT NULL) THEN sum(x.input_tokens) END AS input,
+		             CASE WHEN bool_and(x.output_tokens IS NOT NULL) THEN sum(x.output_tokens) END AS output,
+		             CASE WHEN bool_and(x.cached_input_tokens IS NOT NULL) THEN sum(x.cached_input_tokens) END AS cached,
+		             coalesce(bool_or(x.provisional), false) AS provisional
 		        FROM harness_session_usage x
 		       WHERE x.tenant_id = s.tenant_id AND x.session_id = s.id
 		  ) u ON true
@@ -222,7 +242,7 @@ func loadWorkSessions(ctx context.Context, tx pgx.Tx, from, to time.Time, projec
 			&r.created, &r.heartbeat, &r.stopped, &r.stopReason,
 			&r.worktree, &r.commits, &r.label,
 			&r.runStatus, &r.runOutcome,
-			&r.tokens,
+			&r.input, &r.output, &r.cached, &r.provisional,
 		); err != nil {
 			return nil, err
 		}
@@ -384,9 +404,39 @@ func positiveRun(outcome *string) bool {
 }
 
 type tally struct {
-	sessions, timed, reported int
-	seconds                   int64
-	tokens                    *big.Int
+	sessions, timed, reported, provisional int
+	seconds                                int64
+	input, output, cached                  part
+}
+
+// part is one token component: the sum over the sessions that reported it.
+type part struct {
+	sum      *big.Int
+	sessions int
+}
+
+func (p *part) add(v *string) bool {
+	if v == nil {
+		return false
+	}
+	n, ok := new(big.Int).SetString(*v, 10)
+	if !ok {
+		return false
+	}
+	if p.sum == nil {
+		p.sum = new(big.Int)
+	}
+	p.sum.Add(p.sum, n)
+	p.sessions++
+	return true
+}
+
+func (p part) text() *string {
+	if p.sum == nil {
+		return nil
+	}
+	s := p.sum.String()
+	return &s
 }
 
 func (t *tally) add(r workRow, secs int64, timed bool) {
@@ -395,25 +445,39 @@ func (t *tally) add(r workRow, secs int64, timed bool) {
 		t.timed++
 		t.seconds += secs
 	}
-	// Coverage counts only sessions that reported a token figure; a usage row
-	// with no token components (a provisional report) is not coverage.
-	if r.tokens != nil {
-		if n, ok := new(big.Int).SetString(*r.tokens, 10); ok {
-			if t.tokens == nil {
-				t.tokens = new(big.Int)
-			}
-			t.tokens.Add(t.tokens, n)
-			t.reported++
-		}
+	// Each component counts only the sessions that reported it, so a session
+	// with input but no output is input coverage, not token coverage.
+	in, out := t.input.add(r.input), t.output.add(r.output)
+	if in && out {
+		t.reported++
+	}
+	t.cached.add(r.cached)
+	if r.provisional {
+		t.provisional++
 	}
 }
 
+// tokenText is input plus output of what was reported; null when neither was.
 func (t *tally) tokenText() *string {
-	if t.tokens == nil {
+	if t.input.sum == nil && t.output.sum == nil {
 		return nil
 	}
-	s := t.tokens.String()
+	n := new(big.Int)
+	for _, s := range []*big.Int{t.input.sum, t.output.sum} {
+		if s != nil {
+			n.Add(n, s)
+		}
+	}
+	s := n.String()
 	return &s
+}
+
+func (t *tally) parts() TokenParts {
+	return TokenParts{
+		InputTokens: t.input.text(), OutputTokens: t.output.text(), CachedInputTokens: t.cached.text(),
+		InputSessions: t.input.sessions, OutputSessions: t.output.sessions, CachedInputSessions: t.cached.sessions,
+		ProvisionalSessions: t.provisional,
+	}
 }
 
 type groupAcc struct {
@@ -436,7 +500,7 @@ func workGroups(set map[string]*groupAcc) []WorkGroup {
 	for _, g := range set {
 		out = append(out, WorkGroup{
 			Key: g.key, Label: g.label, Sessions: g.sessions, TimedSessions: g.timed, AgentSeconds: g.seconds,
-			Done: g.done, Tokens: g.tokenText(), ReportedSessions: g.reported,
+			Done: g.done, Tokens: g.tokenText(), ReportedSessions: g.reported, TokenParts: g.parts(),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -550,6 +614,7 @@ func buildWork(rows []workRow, done []doneRow, released map[string]bool, from, t
 	out.TimedSessions = total.timed
 	out.AgentSeconds = total.seconds
 	out.ReportedSessions = total.reported
+	out.TokenParts = total.parts()
 
 	for _, d := range done {
 		out.Done++
@@ -641,7 +706,7 @@ func buildWork(rows []workRow, done []doneRow, released map[string]bool, from, t
 	list := make([]WorkTicket, 0, len(tickets))
 	for id, t := range tickets {
 		t.Sessions, t.TimedSessions, t.AgentSeconds = t.sessions, t.timed, t.seconds
-		t.Tokens, t.ReportedSessions = t.tokenText(), t.reported
+		t.Tokens, t.ReportedSessions, t.TokenParts = t.tokenText(), t.reported, t.parts()
 		t.DoneInRange = doneTickets[id]
 		t.Released = released[id]
 		if doneLike(&t.State) {

@@ -4,7 +4,7 @@
 // many sessions, none reported usage, but done tickets, agent time and waste
 // are known. "reported" has tokens from part of the sessions and a little API
 // spend. "empty" has no session in the range.
-import type { UsageDashboard, UsageGroup, UsageWork, WasteItem, WorkGroup, WorkTicket } from '../src/lib/usageFormat.ts'
+import type { TokenParts, UsageDashboard, UsageGroup, UsageWork, WasteItem, WorkGroup, WorkTicket } from '../src/lib/usageFormat.ts'
 
 export const NOW = Date.parse('2026-09-29T12:02:00Z')
 export type UsageVariant = 'unreported' | 'reported' | 'empty'
@@ -23,8 +23,16 @@ function group(label: string, sessions: number, extra: Partial<UsageGroup> = {})
     cost_state: 'unknown', provisional_rows: 0, provisional_sessions: 0, ...extra,
   }
 }
+// Complete reports: every reporting session gave input and output (a fifth of the total), no cached count.
+export function parts(tokens: string | null, reported: number): TokenParts {
+  const output = tokens === null ? null : BigInt(tokens) / 5n
+  return {
+    input_tokens: tokens === null ? null : String(BigInt(tokens) - output!), output_tokens: output === null ? null : String(output), cached_input_tokens: null,
+    input_reported_sessions: reported, output_reported_sessions: reported, cached_input_reported_sessions: 0, usage_provisional_sessions: 0,
+  }
+}
 const wg = (key: string, label: string, sessions: number, done: number, hours: number, tokens: string | null = null, reported = 0, timed = sessions): WorkGroup =>
-  ({ key, label, sessions, timed_sessions: timed, agent_seconds: Math.round(hours * H), done, tokens, usage_reported_sessions: reported })
+  ({ key, label, sessions, timed_sessions: timed, agent_seconds: Math.round(hours * H), done, tokens, usage_reported_sessions: reported, ...parts(tokens, reported) })
 
 const TICKETS: [key: string, title: string, project: string, projectKey: string, state: string, sessions: number, hours: number, extra?: Partial<WorkTicket>][] = [
   ['AEON-292', 'Capacity: accounts and allowances that configure themselves', 'p-aeon', 'PRJ-35', 'done', 14, 31.5, { done_in_range: true, released: true }],
@@ -41,12 +49,15 @@ const TICKETS: [key: string, title: string, project: string, projectKey: string,
 ]
 
 function tickets(reported: boolean): WorkTicket[] {
-  return TICKETS.map(([key, title, project, projectKey, state, sessions, hours, extra], i) => ({
-    id: `n-${key}`, key, title, project_id: project, project_key: projectKey, state, done_in_range: false, released: false,
-    sessions, timed_sessions: sessions, agent_seconds: Math.round(hours * H),
-    tokens: reported && i % 3 !== 2 ? String(Math.round(hours * 410_000)) : null, usage_reported_sessions: reported && i % 3 !== 2 ? sessions : 0,
-    last_active_at: minutesAgo(40 + i * 170), ...extra,
-  }))
+  return TICKETS.map(([key, title, project, projectKey, state, sessions, hours, extra], i) => {
+    const tokens = reported && i % 3 !== 2 ? String(Math.round(hours * 410_000)) : null, covered = tokens === null ? 0 : sessions
+    return {
+      id: `n-${key}`, key, title, project_id: project, project_key: projectKey, state, done_in_range: false, released: false,
+      sessions, timed_sessions: sessions, agent_seconds: Math.round(hours * H),
+      tokens, usage_reported_sessions: covered, ...parts(tokens, covered),
+      last_active_at: minutesAgo(40 + i * 170), ...extra,
+    }
+  })
 }
 
 const waste = (kind: WasteItem['kind'], key: string, title: string, harness: string, model: string, label: string, minutes: number, hours: number | null, sessions = 1): WasteItem => ({
@@ -64,7 +75,7 @@ export function usageWork(variant: UsageVariant, days = 30): UsageWork {
   })
   if (variant === 'empty') {
     return {
-      basis: 'sessions_started_in_range', sessions: 0, worker_sessions: 0, timed_sessions: 0, agent_seconds: 0, usage_reported_sessions: 0, model_sessions: 0,
+      basis: 'sessions_started_in_range', sessions: 0, worker_sessions: 0, timed_sessions: 0, agent_seconds: 0, usage_reported_sessions: 0, ...parts(null, 0), model_sessions: 0,
       done: 0, released: 0, done_attributed: 0, tickets_worked: 0, tickets_done: 0, days: daysList, tickets: [], by_harness: [], by_model: [], by_project: [],
       waste: { total: 0, stuck: 0, failed: 0, lost: 0, no_result: 0, retried: 0, rows: [] },
     }
@@ -73,7 +84,7 @@ export function usageWork(variant: UsageVariant, days = 30): UsageWork {
   const tok = (v: number) => (reported ? String(v) : null)
   return {
     basis: 'sessions_started_in_range', sessions: 357, worker_sessions: 318, timed_sessions: 349, agent_seconds: Math.round(612.4 * H),
-    usage_reported_sessions: reported ? 212 : 0, model_sessions: 331,
+    usage_reported_sessions: reported ? 212 : 0, ...parts(tok(100_100_000), reported ? 212 : 0), model_sessions: 331,
     done: 41, released: 6, done_attributed: 39, tickets_worked: 64, tickets_done: 43,
     days: daysList,
     tickets: tickets(reported),

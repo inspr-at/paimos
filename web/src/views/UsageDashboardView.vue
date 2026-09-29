@@ -16,7 +16,7 @@ import { reworkDetail, reworkPercent } from '../lib/deliveryRating'
 import { loadUsageDashboard } from '../lib/usageDashboard'
 import { compactCount, formatCount, formatWhen, rangeBounds, type UsageDashboard, type WasteItem, type WorkGroup, type WorkTicket } from '../lib/usageFormat'
 import { usePoller } from '../lib/usePolledData'
-import { breakdown, coverage, duration, harnessName, plural, tiles, wasteWords, type Breakdown } from '../lib/usageWork'
+import { breakdown, coverage, duration, harnessName, plural, tiles, tokenCoverage, tokensPartial, wasteWords, type Breakdown } from '../lib/usageWork'
 import { statusMeta } from '../lib/work'
 import { useAgents } from '../stores/agents'
 import { useCapacity } from '../stores/capacity'
@@ -116,7 +116,8 @@ function ticketFacts(t: WorkTicket) {
   return [
     t.released ? 'Released' : statusMeta(t.state).label,
     plural(t.sessions, 'session'),
-    t.tokens !== null ? `${compactCount(t.tokens)} tokens` : '',
+    // Tokens from only some sessions, or with a component missing, say so.
+    t.tokens !== null ? `${compactCount(t.tokens)} tokens${t.usage_reported_sessions < t.sessions || tokensPartial(t) ? ' (partial)' : ''}` : '',
   ].filter(Boolean).join(' · ')
 }
 
@@ -281,7 +282,7 @@ const showRework = computed(() => groups.value.rows.some(g => rework(g)))
                 <td class="r num" :class="{ zero: !g.done }">{{ formatCount(g.done) }}</td>
                 <td class="r num opt">{{ formatCount(g.sessions) }}</td>
                 <td class="r num" :data-tip="g.timed_sessions < g.sessions ? coverage(g.timed_sessions, g.sessions, 'timed for') : undefined">{{ g.timed_sessions ? duration(g.agent_seconds) : '' }}</td>
-                <td v-if="showTokens" class="r num opt" :data-tip="g.tokens !== null ? coverage(g.usage_reported_sessions, g.sessions) : undefined">{{ g.tokens !== null ? compactCount(g.tokens) : '' }}</td>
+                <td v-if="showTokens" class="r num opt" :data-tip="g.tokens !== null ? tokenCoverage(g) : undefined">{{ g.tokens !== null ? compactCount(g.tokens) : '' }}</td>
                 <td v-if="showRework" class="r num opt" :data-tip="rework(g)?.tip">{{ rework(g)?.value ?? '' }}</td>
               </tr>
             </tbody>

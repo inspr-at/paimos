@@ -52,7 +52,18 @@ export interface AllowanceWindow {
   headroom: number | null
   hard_remaining: number | null
 }
-export interface WorkGroup {
+/** Tokens by component, each with the sessions that reported it (AEON-301).
+ *  A missing component is left out of the sum, never counted as zero. */
+export interface TokenParts {
+  input_tokens: string | null
+  output_tokens: string | null
+  cached_input_tokens: string | null
+  input_reported_sessions: number
+  output_reported_sessions: number
+  cached_input_reported_sessions: number
+  usage_provisional_sessions: number
+}
+export interface WorkGroup extends TokenParts {
   key: string
   label: string
   sessions: number
@@ -62,7 +73,7 @@ export interface WorkGroup {
   tokens: string | null
   usage_reported_sessions: number
 }
-export interface WorkTicket {
+export interface WorkTicket extends TokenParts {
   id: string
   key: string
   title: string
@@ -95,7 +106,7 @@ export interface WasteItem {
   agent_seconds: number | null
 }
 /** What agents got done and where the time went (AEON-301). */
-export interface UsageWork {
+export interface UsageWork extends TokenParts {
   basis: 'sessions_started_in_range'
   sessions: number
   worker_sessions: number
