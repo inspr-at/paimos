@@ -778,12 +778,14 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 		t.Fatal("Nix guide is not bound to the server origin and owning module")
 	}
 	for _, target := range guide.Targets {
-		if !strings.HasPrefix(target.ArtifactURL, "https://github.com/inspr-at/paimos/releases/download/v260927160212.0.0/paimos-agentd-") || !strings.Contains(target.Command, "mkdir \"$aeon_pairing_dir\"") || !strings.Contains(target.Command, "if (n != 1) exit 1") || strings.Contains(target.Command, "attacker.invalid") {
+		if !strings.HasPrefix(target.ArtifactURL, "https://github.com/inspr-at/paimos/releases/download/v260927160212.0.0/paimos-agentd-") || !strings.Contains(target.Command, "mkdir \"$aeon_pairing_dir\"") || !strings.Contains(target.Command, "if (n != 1) exit 1") || strings.Contains(target.Command, "attacker.invalid") || !strings.Contains(target.Command, "aeon-agentd pair --url $aeon_pair_url") || !strings.Contains(target.Command, "'https://pairing.test'") {
 			t.Fatalf("unsafe install contract: %+v", target)
 		}
 		check := strings.Index(target.Command, " -c selected.SHA256SUMS")
 		install := strings.Index(target.Command, "install -m 0700")
-		if check < 0 || install < check {
+		link := strings.Index(target.Command, "ln -sfn \"$aeon_pairing_dir/paimos-agentd\" \"$aeon_bin\"")
+		next := strings.Index(target.Command, "aeon-agentd pair --url $aeon_pair_url")
+		if check < 0 || install < check || link < install || next < link {
 			t.Fatal("artifact becomes executable before checksum verification")
 		}
 	}

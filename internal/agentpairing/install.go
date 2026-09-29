@@ -3,7 +3,10 @@ package agentpairing
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/config"
@@ -22,25 +25,89 @@ type InstallTarget struct {
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
 
+var pairHostnamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// validPairOrigin accepts an http(s) origin: scheme, host, and optional port.
+// Bracketed IPv6 hosts are included. Userinfo, paths, queries, and fragments are
+// refused before a command is built so a crafted URL cannot become shell.
+func validPairOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	if u.User != nil || u.Opaque != "" || u.Path != "" || u.RawPath != "" || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery || u.Host == "" {
+		return false
+	}
+	if origin != u.Scheme+"://"+u.Host || strings.HasSuffix(u.Host, ":") {
+		return false
+	}
+	port := u.Port()
+	if port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
+			return false
+		}
+	}
+	host := u.Hostname()
+	if host == "" {
+		return false
+	}
+	if strings.HasPrefix(u.Host, "[") {
+		ip := net.ParseIP(host)
+		if ip == nil || !strings.Contains(host, ":") {
+			return false
+		}
+		want := "[" + host + "]"
+		if port != "" {
+			want += ":" + port
+		}
+		return u.Host == want
+	}
+	if strings.Contains(host, ":") || !pairHostnamePattern.MatchString(host) {
+		return false
+	}
+	want := host
+	if port != "" {
+		want += ":" + port
+	}
+	return u.Host == want
+}
+
+// pairNextLine is the stdout line when ~/.local/bin is already on PATH.
+// The origin is shell-quoted. Anything that is not an origin is refused.
+func pairNextLine(origin string) (string, bool) {
+	if !validPairOrigin(origin) {
+		return "", false
+	}
+	return "aeon-agentd pair --url " + shellQuote(origin), true
+}
+
 // PAIR4's release contract builds four agentd targets. Build availability does
 // not assert lifecycle qualification on the user's OS/service manager.
-func installTargets() []InstallTarget {
+func installTargets(origin string) []InstallTarget {
 	if !regexp.MustCompile(`^[0-9]{12}\.0\.0$`).MatchString(version.Version) {
 		return []InstallTarget{}
 	}
+	originOK := validPairOrigin(origin)
 	base := "https://github.com/inspr-at/paimos/releases/download/v" + version.Version + "/"
 	targets := []InstallTarget{}
 	for _, p := range []struct{ os, arch, service string }{{"darwin", "arm64", "launchd-user"}, {"darwin", "amd64", "launchd-user"}, {"linux", "arm64", "systemd-user"}, {"linux", "amd64", "systemd-user"}} {
 		asset := "paimos-agentd-" + p.os + "-" + p.arch
-		checksum := "sha256sum -c selected.SHA256SUMS"
+		checksum := "sha256sum -c selected.SHA256SUMS >checksum.out 2>checksum.err || { cat checksum.err >&2; cat checksum.out >&2; exit 1; }\nrm -f checksum.out checksum.err"
 		statOwner, statMode := "stat -c %u", "stat -c %a"
 		if p.os == "darwin" {
-			checksum = "shasum -a 256 -c selected.SHA256SUMS"
+			checksum = "shasum -a 256 -c selected.SHA256SUMS >checksum.out 2>checksum.err || { cat checksum.err >&2; cat checksum.out >&2; exit 1; }\nrm -f checksum.out checksum.err"
 			statOwner, statMode = "stat -f %u", "stat -f %Lp"
 		}
-		// An exclusive versioned directory prevents overwrite and keeps downloaded
-		// bytes non-executable until the exact manifest entry verifies successfully.
-		cmd := fmt.Sprintf(`(
+		cmd := "(\nset -eu\nprintf 'Refusing to install without a usable instance URL.\\n' >&2\nexit 1\n)\n"
+		if originOK {
+			// An exclusive versioned directory prevents overwrite and keeps downloaded
+			// bytes non-executable until the exact manifest entry verifies successfully.
+			// The verified file is then linked at ~/.local/bin/aeon-agentd. stdout is
+			// only the pair command. When that directory is absent from PATH the
+			// command is the shell-quoted absolute link path, and stderr has one
+			// hint to add the directory. The origin is shell-quoted in the script.
+			cmd = fmt.Sprintf(`(
 set -eu
 if command -v aeon-agentd >/dev/null 2>&1; then
   printf 'Aeon is already installed. Use aeon-agentd pair with the --url from this instance guide.\n' >&2
@@ -81,6 +148,21 @@ ensure_private_dir() {
 }
 check_private_dir "$HOME"
 ensure_private_dir "$HOME/.local"
+ensure_private_dir "$HOME/.local/bin"
+aeon_bin="$HOME/.local/bin/aeon-agentd"
+if [ -L "$aeon_bin" ]; then
+  aeon_link=$(readlink "$aeon_bin") || exit 1
+  case "$aeon_link" in
+    "$HOME/.local/lib/aeon/"*) ;;
+    *) printf 'Refusing to replace an existing aeon-agentd.\n' >&2; exit 1 ;;
+  esac
+  case "$aeon_link" in
+    *..*) printf 'Refusing to replace an existing aeon-agentd.\n' >&2; exit 1 ;;
+  esac
+elif [ -e "$aeon_bin" ]; then
+  printf 'Refusing to replace an existing aeon-agentd.\n' >&2
+  exit 1
+fi
 ensure_private_dir "$HOME/.local/lib"
 ensure_private_dir "$HOME/.local/lib/aeon"
 ensure_private_dir "$HOME/.local/lib/aeon/%s"
@@ -96,8 +178,42 @@ curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --outpu
 awk -v asset=%s '$2 == asset && length($1) == 64 && $1 !~ /[^0-9a-f]/ { print; n++ } END { if (n != 1) exit 1 }' SHA256SUMS > selected.SHA256SUMS
 %s
 install -m 0700 %s "$aeon_pairing_dir/paimos-agentd"
-printf 'Verified binary: %%s/paimos-agentd\n' "$aeon_pairing_dir"
-)`, statOwner, statMode, version.Version, version.Version, p.os, p.arch, asset, shellQuote(base+asset), shellQuote(base+"SHA256SUMS"), shellQuote(asset), checksum, asset)
+if [ -L "$aeon_bin" ]; then
+  ln -sfn "$aeon_pairing_dir/paimos-agentd" "$aeon_bin"
+else
+  ln -s "$aeon_pairing_dir/paimos-agentd" "$aeon_bin"
+fi
+aeon_shell_quote() {
+  aeon_rest=$1
+  aeon_out=
+  while [ -n "$aeon_rest" ]; do
+    case "$aeon_rest" in
+      *\'*)
+        aeon_chunk=${aeon_rest%%\'*}
+        aeon_out="$aeon_out'$aeon_chunk'\\'"
+        aeon_rest=${aeon_rest#*\'}
+        ;;
+      *)
+        aeon_out="$aeon_out'$aeon_rest'"
+        aeon_rest=
+        ;;
+    esac
+  done
+  printf '%%s' "$aeon_out"
+}
+aeon_pair_url=$(aeon_shell_quote %s)
+case ":${PATH-}:" in
+  *":$HOME/.local/bin:"*)
+    printf '%%s\n' "aeon-agentd pair --url $aeon_pair_url"
+    ;;
+  *)
+    aeon_pair_bin=$(aeon_shell_quote "$HOME/.local/bin/aeon-agentd")
+    printf '%%s\n' "$aeon_pair_bin pair --url $aeon_pair_url"
+    printf '%%s\n' "Add $(aeon_shell_quote "$HOME/.local/bin") to PATH to run aeon-agentd by name." >&2
+    ;;
+esac
+)`, statOwner, statMode, version.Version, version.Version, p.os, p.arch, asset, shellQuote(base+asset), shellQuote(base+"SHA256SUMS"), shellQuote(asset), checksum, asset, shellQuote(origin))
+		}
 		targets = append(targets, InstallTarget{p.os, p.arch, p.service, "candidate; consult this exact release's service qualification evidence", base + asset, base + "SHA256SUMS", cmd})
 	}
 	return targets

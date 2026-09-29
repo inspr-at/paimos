@@ -73,7 +73,7 @@ func reply(w http.ResponseWriter, v any) {
 	httpapi.WriteJSON(w, 200, v)
 }
 func (m *Module) guide(w http.ResponseWriter, r *http.Request) {
-	guide := map[string]any{"protocol": "pairing-v1", "version": version.Version, "verification_helper_version": version.Version, "verification_capabilities": verificationCapabilities("", ""), "instance_url": m.origin, "default_tenant_slug": m.defaultTenant, "platforms": []string{"darwin/arm64", "darwin/amd64", "linux/arm64", "linux/amd64"}, "setup_command": setupCommand(m.origin), "platform_qualification": "candidate; consult the exact release service qualification evidence", "install_targets": installTargets(), "install_available": len(installTargets()) > 0, "managed_installation": "Pair with the installed aeon-agentd; Nix/Home Manager keeps ownership of binaries and services."}
+	guide := map[string]any{"protocol": "pairing-v1", "version": version.Version, "verification_helper_version": version.Version, "verification_capabilities": verificationCapabilities("", ""), "instance_url": m.origin, "default_tenant_slug": m.defaultTenant, "platforms": []string{"darwin/arm64", "darwin/amd64", "linux/arm64", "linux/amd64"}, "setup_command": setupCommand(m.origin), "platform_qualification": "candidate; consult the exact release service qualification evidence", "install_targets": installTargets(m.origin), "install_available": len(installTargets(m.origin)) > 0, "managed_installation": "Pair with the installed aeon-agentd; Nix/Home Manager keeps ownership of binaries and services."}
 	if m.managed != nil {
 		guide["managed_setup"] = m.managed
 	}
