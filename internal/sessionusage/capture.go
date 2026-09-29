@@ -122,7 +122,7 @@ func checkReports(old, next []UsageReport) error {
 		if after == nil {
 			return fmt.Errorf("%w: model disappeared", ErrRejected)
 		}
-		for _, pair := range [][2]*int64{{before.InputTokens, after.InputTokens}, {before.OutputTokens, after.OutputTokens}, {before.CachedInputTokens, after.CachedInputTokens}} {
+		for _, pair := range [][2]*int64{{before.InputTokens, after.InputTokens}, {before.OutputTokens, after.OutputTokens}, {before.CachedInputTokens, after.CachedInputTokens}, {before.ReasoningTokens, after.ReasoningTokens}} {
 			if pair[0] != nil && (pair[1] == nil || *pair[1] < *pair[0]) {
 				return fmt.Errorf("%w: known cumulative counter decreased or became unknown", ErrRejected)
 			}

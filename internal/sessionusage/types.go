@@ -69,6 +69,7 @@ type UsageReport struct {
 	InputTokens       *int64  `json:"input_tokens"`
 	OutputTokens      *int64  `json:"output_tokens"`
 	CachedInputTokens *int64  `json:"cached_input_tokens"`
+	ReasoningTokens   *int64  `json:"reasoning_tokens"`
 	Provisional       bool    `json:"provisional"`
 	AccountID         *string `json:"account_id"`
 	AccountLabel      *string `json:"account_label"`
@@ -96,11 +97,13 @@ type Result struct {
 }
 
 type snapshot struct {
-	input       int64
-	output      int64
-	cached      int64
-	inputKnown  bool
-	cachedKnown bool
+	input          int64
+	output         int64
+	cached         int64
+	reasoning      int64
+	inputKnown     bool
+	cachedKnown    bool
+	reasoningKnown bool
 }
 
 type usageRecord struct {

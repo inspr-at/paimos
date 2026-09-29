@@ -3040,7 +3040,7 @@ paths:
     get:
       operationId: listModelPrices
       security: *auth
-      description: Latest immutable price version per model for the tenant. Requires harness.read. No seeded or inferred vendor prices.
+      description: Latest immutable price version per model for the tenant. Requires harness.read. A migration seeds published api list prices. Prices are not inferred at request time. Subscription billing does not use these rates for dashboard dollars.
       parameters:
         - {name: model, in: query, schema: {type: string, minLength: 1, maxLength: 128}}
       responses:
@@ -3368,7 +3368,10 @@ paths:
         total for one session and model. The range selects sessions by start time and does not mean the tokens
         or list estimate were consumed inside it. Null totals are unknown, not zero. estimated_cost_usd is the
         exact USD list estimate, summed once; it is not a billed charge. billing_mode and subscription_label are
-        reported metadata, not verified coverage, and a subscription does not remove the estimate. Run telemetry
+        reported metadata, not verified coverage. New reports are priced from model_prices only when billing_mode
+        is api. Subscription and unknown store tokens without a dollar estimate. Dashboard totals sum a
+        stored estimate only when billing_mode is api. Subscription and unknown rows stay unknown even
+        when a historical estimate is stored. Run telemetry
         and agent-run totals are not added. More than 5000 sessions sets truncated and drops the rest. If the
         usage relation is not installed the response is 503, not a dashboard of zeros. Allowance windows are the
         caller's registered account windows and only when they hold account.read; the response has no account key.
@@ -7878,7 +7881,7 @@ components:
         totals: {$ref: '#/components/schemas/TicketAgentWorkTotals'}
     TicketAgentUsageModel:
       type: object
-      description: One current usage row for a session and model. estimated_cost_usd is a list price, not a billed charge. billing_mode is reported metadata, not verified coverage.
+      description: One current usage row for a session and model. estimated_cost_usd is a list price, not a billed charge, and is present only when billing_mode is api. billing_mode is reported metadata, not verified coverage.
       required: [model, input_tokens, output_tokens, cached_input_tokens, tokens_state, cached_state, estimated_cost_usd, cost_state, provisional, price_version, billing_mode, subscription_label]
       properties:
         model: {type: string}
@@ -7887,10 +7890,10 @@ components:
         cached_input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
         tokens_state: {type: string, enum: [known, unknown]}
         cached_state: {type: string, enum: [known, unknown]}
-        estimated_cost_usd: {$ref: '#/components/schemas/NonNegativeDecimalString'}
+        estimated_cost_usd: {$ref: '#/components/schemas/NonNegativeDecimalString', description: Null unless billing_mode is api. A stored estimate on a subscription or unknown row is historical and is never returned or summed.}
         cost_state: {type: string, enum: [estimated, unknown]}
         provisional: {type: boolean}
-        price_version: {$ref: '#/components/schemas/NonNegativeIntString'}
+        price_version: {$ref: '#/components/schemas/NonNegativeIntString', description: Null unless billing_mode is api.}
         billing_mode: {type: string, enum: [unknown, api, subscription]}
         subscription_label: {type: [string, 'null']}
     TicketAgentSession:
@@ -8169,6 +8172,10 @@ components:
           type: [string, 'null']
           format: uuid
           description: Optional strict account choice. Must belong to the selected agent, match the model harness and allow the selected model profile. The daemon still reserves allowance and claims; an unavailable chosen account leaves the run queued without fallback. Omit or null for automatic routing.
+        retry_of_run_id:
+          type: [string, 'null']
+          format: uuid
+          description: Optional earlier run of the same work order and agent. A different order, agent, or unknown run is rejected.
     RunClaim:
       type: object
       required: [daemon_id, daemon_generation, reservation_ids]
@@ -8369,6 +8376,7 @@ components:
         input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        reasoning_tokens: {$ref: '#/components/schemas/UsageTokenCount', description: Subset of output_tokens. Null or omitted means unknown. Not added to estimated_cost_usd.}
         provisional: {type: boolean}
         account_id: {type: [string, 'null'], format: uuid}
         account_label: {type: [string, 'null'], minLength: 1, maxLength: 128, description: 'Public self-reported label; trimmed, valid Unicode without control characters.'}
@@ -8384,9 +8392,10 @@ components:
         input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
-        provisional: {type: boolean, description: True when the reporter marks partial or any counter is unknown. Cost remains an estimate even when false.}
-        price_version: {type: [integer, 'null'], format: int64}
-        estimated_cost_usd: {type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{12}$', description: 'Exact ((input-cached)*input_rate + cached*cached_rate + output*output_rate)/1000000, with no binary floats or intermediate rounding. Null if any counter or pricing is unknown; never actual billed cost.'}
+        reasoning_tokens: {$ref: '#/components/schemas/UsageTokenCount', description: Subset of output_tokens. Null means unknown, not zero. Not added to estimated_cost_usd.}
+        provisional: {type: boolean, description: True when the reporter marks partial or any of input, output, or cached input is unknown. A missing reasoning count does not by itself make the row provisional. Cost remains an estimate even when false.}
+        price_version: {type: [integer, 'null'], format: int64, description: Null unless billing_mode is api.}
+        estimated_cost_usd: {type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{12}$', description: 'Exact ((input-cached)*input_rate + cached*cached_rate + output*output_rate)/1000000, with no binary floats or intermediate rounding. Present only when billing_mode is api and every counter and price is known. Subscription and unknown stay null. Never actual billed cost.'}
         cost_status: {type: string, enum: [estimated, unknown]}
         currency: {type: string, const: USD}
         account_id: {type: [string, 'null'], format: uuid}
@@ -8748,9 +8757,14 @@ components:
         effective_model: {type: [string, 'null']}
         outcome: {type: [string, 'null'], enum: [completed, failed, cancelled, ownership_lost, null]}
         duration_ms: {type: [integer, 'null'], format: int64, description: Whole elapsed milliseconds for terminal runs; null until both timestamps exist}
+        active_ms: {type: [integer, 'null'], format: int64, description: Milliseconds not spent waiting. Null until the run is terminal and both timestamps exist. Equal to duration_ms when no waiting telemetry was recorded.}
+        outcome_detail: {type: [string, 'null'], enum: [no_commit, committed, pr_opened, merged, abandoned, null], description: Derived when the run becomes terminal. Local git evidence yields committed or no_commit only; merged is reserved for forge or release evidence. A pull-request URL is pr_opened. Null when the run is not terminal.}
+        retry_of_run_id: {type: [string, 'null'], format: uuid, description: Earlier run of the same work order and agent that this run retries.}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
         input_tokens: {type: integer, format: int64}
         output_tokens: {type: integer, format: int64}
+        cached_input_tokens: {type: integer, format: int64, minimum: 0, description: Cached input accumulated from telemetry deltas. A subset of input when both were reported together.}
+        reasoning_tokens: {type: integer, format: int64, minimum: 0, description: Reasoning output accumulated from telemetry deltas. A subset of output when both were reported together. Not a separate cost.}
         cost_micros: {type: integer, format: int64}
         started_at: {type: [string, 'null'], format: date-time}
         ended_at: {type: [string, 'null'], format: date-time}
@@ -8764,12 +8778,26 @@ components:
         status: {type: string, enum: [starting, running, waiting, completed, failed, cancelled, ownership_lost]}
         input_tokens_delta: {type: integer, format: int64, minimum: 0}
         output_tokens_delta: {type: integer, format: int64, minimum: 0}
+        cached_input_tokens_delta: {type: integer, format: int64, minimum: 0, maximum: 1000000000000}
+        reasoning_tokens_delta: {type: integer, format: int64, minimum: 0, maximum: 1000000000000, description: Reasoning output in this report. Not added to cost.}
         cost_micros_delta: {type: integer, format: int64, minimum: 0}
         tool_count_delta: {type: integer, minimum: 0}
         turn_count_delta: {type: integer, minimum: 0}
         effective_model: {type: string}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
         error_code: {type: string, enum: [event_stream_bound, app_server_protocol, child_exit_failed, turn_failed, child_stop_failed, ownership_lost, reporter_unavailable, workspace_conflict, decision_refused]}
+        git_commits:
+          type: array
+          maxItems: 20
+          description: Optional commit evidence of this run, as non-merge commits on the first-parent history of its final HEAD that neither its launch commit, the default branch as it was at launch, nor the remote default branch at the end contains (at most 20, newest first). The server derives committed or no_commit from these, from the run's harness session commits, and from this run's work evidence. Local git never yields merged.
+          items:
+            type: object
+            required: [sha, subject]
+            properties:
+              sha: {type: string, pattern: '^[0-9a-f]{7,40}$'}
+              subject: {type: string, minLength: 1, maxLength: 200}
+              parents: {type: integer, minimum: 0, maximum: 64, description: Parent count from git. Optional. A merge commit has at least two.}
+              on_default_branch: {type: boolean, description: 'Optional and ignored. Kept for compatibility; merged comes from forge or release evidence, never from local git.'}
     DeployTarget:
       type: object
       additionalProperties: false

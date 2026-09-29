@@ -32,12 +32,17 @@ type Run struct {
 	RequestedAccountID        *string    `json:"requested_account_id"`
 	Outcome                   *string    `json:"outcome"`
 	DurationMS                *int64     `json:"duration_ms"`
+	ActiveMS                  *int64     `json:"active_ms"`
+	OutcomeDetail             *string    `json:"outcome_detail"`
+	RetryOfRunID              *string    `json:"retry_of_run_id"`
 	Status                    string     `json:"status"`
 	RequestedModel            *string    `json:"requested_model"`
 	EffectiveModel            *string    `json:"effective_model"`
 	ModelEvidence             string     `json:"model_evidence"`
 	InputTokens               int64      `json:"input_tokens"`
 	OutputTokens              int64      `json:"output_tokens"`
+	CachedInputTokens         int64      `json:"cached_input_tokens"`
+	ReasoningTokens           int64      `json:"reasoning_tokens"`
 	Cost                      int64      `json:"cost_micros"`
 	StartedAt                 *time.Time `json:"started_at"`
 	EndedAt                   *time.Time `json:"ended_at"`
@@ -97,11 +102,11 @@ func (m *module) Mount(mux *http.ServeMux) {
 }
 
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
- requested_model,effective_model,model_evidence,input_tokens,output_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose`
+ requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID)
 
 	v.RepositoryMutationAllowed = true
 	if v.Purpose == "pairing_verification" {
@@ -195,11 +200,12 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		Agent   string  `json:"agent_principal_id"`
 		Profile string  `json:"model_profile_id"`
 		Account *string `json:"requested_account_id"`
+		Retry   *string `json:"retry_of_run_id"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
-	if !workorders.UUID(in.Agent) || !workorders.UUID(in.Profile) || (in.Account != nil && !workorders.UUID(*in.Account)) {
+	if !workorders.UUID(in.Agent) || !workorders.UUID(in.Profile) || (in.Account != nil && !workorders.UUID(*in.Account)) || (in.Retry != nil && !workorders.UUID(*in.Retry)) {
 		return nil, workorders.Fail(400, "agent and model profile required")
 	}
 	ctx := r.Context()
@@ -232,7 +238,14 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			return nil, workorders.Fail(409, "requested account must belong to the run agent and allow the model profile")
 		}
 	}
-	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account))
+	if in.Retry != nil {
+		var orderID, agentID string
+		err = tx.QueryRow(ctx, `SELECT work_order_id::text, agent_principal_id::text FROM agent_runs WHERE id=$1`, *in.Retry).Scan(&orderID, &agentID)
+		if err != nil || orderID != o.NodeID || agentID != in.Agent {
+			return nil, workorders.Fail(400, "retry_of_run_id must be an earlier run of this work order and agent")
+		}
+	}
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry))
 	if err != nil {
 		return nil, err
 	}

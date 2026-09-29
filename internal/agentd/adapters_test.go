@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,7 +48,8 @@ func TestFakeVendorProcess(t *testing.T) {
 				_ = write.Encode(map[string]any{"kind": "turn_started"})
 				_ = write.Encode(map[string]any{"kind": "usage", "input_tokens_total": 12, "output_tokens_total": 3, "cost_usd_total": json.Number("0.0000125")})
 				_ = write.Encode(map[string]any{"kind": "usage", "input_tokens_total": 12, "output_tokens_total": 3, "cost_usd_total": json.Number("0.0000125")})
-				_ = write.Encode(map[string]any{"kind": "usage", "input_tokens_total": 15, "output_tokens_total": 4, "cost_usd_total": json.Number("0.000020")})
+				_ = write.Encode(map[string]any{"kind": "usage", "input_tokens_total": 15, "output_tokens_total": 4, "cost_usd_total": json.Number("0.000020"),
+					"models": []map[string]any{{"model": "test-model", "input_tokens": 15, "output_tokens": 4, "cached_input_tokens": 4}}})
 				_ = write.Encode(map[string]any{"kind": "turn_completed"})
 			} else {
 				_ = write.Encode(map[string]string{"kind": "control_applied", "correlation_id": command.CorrelationID})
@@ -309,7 +311,12 @@ func TestPiRPCStateAndSteer(t *testing.T) {
 	a := NewPiAdapter(fakeVendorPath(t, "pi"), map[string]string{"account": home})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	p, err := a.Start(ctx, r, func(AdapterEvent) {})
+	var invented bool
+	p, err := a.Start(ctx, r, func(ev AdapterEvent) {
+		if ev.SessionUsage != nil || ev.InputTokensDelta != 0 || ev.OutputTokensDelta != 0 {
+			invented = true
+		}
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,6 +341,9 @@ func TestPiRPCStateAndSteer(t *testing.T) {
 	}
 	if err := p.Stop(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if invented {
+		t.Fatal("Pi events invented token usage")
 	}
 }
 
@@ -485,13 +495,20 @@ func TestClaudeBridgeMapsSDKResultUsage(t *testing.T) {
 	cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", root)
 	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"hello","model":"test-model","effort":"high"}` + "\n")
 	output, _ := cmd.Output() // The fake Query closes without a normal stop receipt.
-	var turn, usage bool
+	var turn, usage, models bool
 	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
 		var frame struct {
 			Kind    string          `json:"kind"`
 			Input   int64           `json:"input_tokens_total"`
 			Output  int64           `json:"output_tokens_total"`
+			Cached  *int64          `json:"cached_input_tokens_total"`
 			CostUSD json.RawMessage `json:"cost_usd_total"`
+			Models  []struct {
+				Model  string `json:"model"`
+				Input  int64  `json:"input_tokens"`
+				Output int64  `json:"output_tokens"`
+				Cached int64  `json:"cached_input_tokens"`
+			} `json:"models"`
 		}
 		if json.Unmarshal([]byte(line), &frame) != nil {
 			continue
@@ -501,11 +518,12 @@ func TestClaudeBridgeMapsSDKResultUsage(t *testing.T) {
 		}
 		if frame.Kind == "usage" && frame.Input == 17 && frame.Output == 5 {
 			cost, ok := usdMicros(frame.CostUSD)
-			usage = ok && cost == 13
+			usage = ok && cost == 13 && frame.Cached != nil && *frame.Cached == 4
+			models = len(frame.Models) == 1 && frame.Models[0].Model == "model" && frame.Models[0].Input == 17 && frame.Models[0].Output == 5 && frame.Models[0].Cached == 4
 		}
 	}
-	if !turn || !usage {
-		t.Fatalf("Claude bridge did not map result usage: turn=%t usage=%t output=%s", turn, usage, output)
+	if !turn || !usage || !models {
+		t.Fatalf("Claude bridge did not map result usage: turn=%t usage=%t models=%t output=%s", turn, usage, models, output)
 	}
 }
 
@@ -568,5 +586,68 @@ func TestClaudeBridgeDeniesNativeEdits(t *testing.T) {
 	if !strings.Contains(string(output), `"kind":"session_started"`) ||
 		!strings.Contains(string(output), `"kind":"usage"`) {
 		t.Fatalf("Claude bridge path gate did not pass: %s", output)
+	}
+}
+
+// Review case: the Claude bridge reports 4 cached tokens in session usage;
+// run telemetry must carry the same 4 as cached deltas, not 0.
+func TestClaudeRunTelemetryCarriesCachedTokens(t *testing.T) {
+	r := adapterRequest(t)
+	r.Profile.Harness = Claude
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := fakeVendorPath(t, "claude")
+	sdk := filepath.Join(filepath.Dir(path), "sdk.mjs")
+	if err := os.WriteFile(sdk, []byte("export {};"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := NewClaudeAdapter(path, sdk, path, map[string]string{"account": home})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	events := make(chan AdapterEvent, 32)
+	p, err := a.Start(ctx, r, func(ev AdapterEvent) { events <- ev })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = p.Stop(ctx); _ = p.Wait() }()
+	var input, cached int64
+	for {
+		select {
+		case ev := <-events:
+			input += ev.InputTokensDelta
+			cached += ev.CachedInputTokensDelta
+			if ev.SessionUsage != nil && ev.SessionUsage.CachedInputTokens != nil {
+				if input != 15 || *ev.SessionUsage.CachedInputTokens != 4 {
+					t.Fatalf("fixture: input=%d session cached=%d", input, *ev.SessionUsage.CachedInputTokens)
+				}
+				if cached != 4 {
+					t.Fatalf("session cached=4 but run cached=%d", cached)
+				}
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("usage not received")
+		}
+	}
+}
+
+func TestClaudeCachedTotal(t *testing.T) {
+	seven := int64(7)
+	if got, ok := claudeCachedTotal(&seven, []claudeModelUsage{{Cached: 1}}); !ok || got != 7 {
+		t.Fatalf("bridge total ignored: %d %t", got, ok)
+	}
+	if got, ok := claudeCachedTotal(nil, []claudeModelUsage{{Cached: 1}, {Cached: 3}}); !ok || got != 4 {
+		t.Fatalf("model sum: %d %t", got, ok)
+	}
+	if _, ok := claudeCachedTotal(nil, nil); ok {
+		t.Fatal("no evidence became zero cached tokens")
+	}
+	if _, ok := claudeCachedTotal(nil, []claudeModelUsage{{Cached: math.MaxInt64}, {Cached: 1}}); ok {
+		t.Fatal("overflow accepted")
 	}
 }

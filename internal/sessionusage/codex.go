@@ -331,6 +331,7 @@ func parseUsage(fields map[string]json.RawMessage, inputKey, outputKey, cachedKe
 		if reasoning > output {
 			return snapshot{}, fmt.Errorf("%w: reasoning tokens exceed output", ErrRejected)
 		}
+		snap.reasoning, snap.reasoningKnown = reasoning, true
 	}
 	if raw, ok := fields[totalKey]; ok {
 		total, err := parseCount(raw)

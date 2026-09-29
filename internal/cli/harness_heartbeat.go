@@ -63,34 +63,41 @@ type heartbeatDeps struct {
 }
 
 type heartbeatOptions struct {
-	Capacity       heartbeatCapacity
-	OwnerPID       int
-	Interval       int
-	StateDir       string
-	Project        string
-	Agent          string
-	Harness        string
-	Host           string
-	Label          string
-	Model          string
-	Effort         string
-	AccountLabel   string
-	Brief          string
-	Worktree       string
-	Branch         string
-	Note           string
-	Phase          string
-	Activity       string
-	Parent         string
-	Ticket         string
-	Shape          string
-	Management     string
-	Role           string
-	SourceSession  string
-	CodexIndex     string
-	ClaudeProjects string
-	Transcript     string
-	PrintControls  bool
+	Capacity          heartbeatCapacity
+	OwnerPID          int
+	Interval          int
+	StateDir          string
+	Project           string
+	Agent             string
+	Harness           string
+	Host              string
+	Label             string
+	Model             string
+	Effort            string
+	AccountLabel      string
+	Brief             string
+	Worktree          string
+	Branch            string
+	Note              string
+	Phase             string
+	Activity          string
+	Parent            string
+	Ticket            string
+	Shape             string
+	Management        string
+	Role              string
+	SourceSession     string
+	CodexIndex        string
+	ClaudeProjects    string
+	Transcript        string
+	UsageSource       string
+	UsageFile         string
+	UsageID           string
+	CodexHome         string
+	GrokHome          string
+	BillingMode       string
+	SubscriptionLabel string
+	PrintControls     bool
 }
 
 type heartbeatCommit struct {
@@ -133,8 +140,15 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.Role, "role", 0, "worker or coordinator")
 			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source")
 			fs.string(&o.CodexIndex, "codex-index", 0, "Codex session_index.jsonl (default ~/.codex/session_index.jsonl)")
-			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default ~/.claude/projects)")
+			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
 			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage and its title")
+			fs.string(&o.UsageSource, "usage-source", 0, "usage log family: claude, codex, cursor, or grok")
+			fs.string(&o.UsageFile, "usage-file", 0, "explicit usage log; credential paths are rejected")
+			fs.string(&o.UsageID, "usage-id", 0, "vendor session or thread id used to locate the usage log")
+			fs.string(&o.CodexHome, "codex-home", 0, "Codex home (default $CODEX_HOME or ~/.codex)")
+			fs.string(&o.GrokHome, "grok-home", 0, "Grok home (default $GROK_HOME or ~/.grok)")
+			fs.string(&o.BillingMode, "billing-mode", 0, "unknown, api, or subscription (default unknown)")
+			fs.string(&o.SubscriptionLabel, "subscription-label", 0, "public subscription label; only with --billing-mode subscription")
 			fs.bool(&o.PrintControls, "print-controls", 0, "print request JSON records and pending control/message lines; --json emits NDJSON")
 		},
 		run: func([]string) error {
@@ -178,8 +192,24 @@ func (o *heartbeatOptions) normalize() {
 		}
 	}
 	if o.ClaudeProjects == "" {
-		if home, err := os.UserHomeDir(); err == nil {
+		if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+			o.ClaudeProjects = filepath.Join(dir, "projects")
+		} else if home, err := os.UserHomeDir(); err == nil {
 			o.ClaudeProjects = filepath.Join(home, ".claude", "projects")
+		}
+	}
+	if o.CodexHome == "" {
+		if home := os.Getenv("CODEX_HOME"); home != "" {
+			o.CodexHome = home
+		} else if home, err := os.UserHomeDir(); err == nil {
+			o.CodexHome = filepath.Join(home, ".codex")
+		}
+	}
+	if o.GrokHome == "" {
+		if home := os.Getenv("GROK_HOME"); home != "" {
+			o.GrokHome = home
+		} else if home, err := os.UserHomeDir(); err == nil {
+			o.GrokHome = filepath.Join(home, ".grok")
 		}
 	}
 }
@@ -234,6 +264,28 @@ func (o *heartbeatOptions) prepare() error {
 	}
 	if heartbeatText(o.Host, 200) == "" {
 		return usagef("--host is required")
+	}
+	switch o.BillingMode {
+	case "", "unknown", "api", "subscription":
+	default:
+		return usagef("invalid --billing-mode")
+	}
+	if o.BillingMode == "" {
+		o.BillingMode = "unknown"
+	}
+	if o.SubscriptionLabel != "" && o.BillingMode != "subscription" {
+		return usagef("--subscription-label requires subscription billing")
+	}
+	switch o.UsageSource {
+	case "", "claude", "codex", "cursor", "grok":
+	default:
+		return usagef("invalid --usage-source")
+	}
+	if o.UsageID != "" && !usageID(o.UsageID) {
+		return usagef("invalid --usage-id")
+	}
+	if o.UsageFile != "" && !allowedUsagePath(usageSourceOf(*o), o.UsageFile) {
+		return usagef("--usage-file is not a usage log")
 	}
 	return nil
 }
@@ -403,11 +455,17 @@ func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, 
 	// is unread transcript: a partial record or an interrupted scan. A
 	// stopped generation is allowed to settle those, and a closed one may
 	// still have transcript bytes past the cursor.
-	owed := len(session.disk.PendingUsage) > 0 || heartbeatTranscriptOutstanding(o.Transcript, session.disk.UsageOffset, session.disk.UsageDiscard)
+	owed := len(session.disk.PendingUsage) > 0 || usageOutstanding(o, session)
 	if session.disk.Terminal && !owed && !session.disk.Closed {
 		return
 	}
-	if o.Transcript == "" && len(session.disk.PendingUsage) == 0 {
+	target, targetErr := resolveHeartbeatUsage(o)
+	if targetErr != nil {
+		fmt.Fprintf(rt.stderr, "heartbeat: usage source rejected\n")
+		_ = saveHeartbeatSession(session)
+		return
+	}
+	if target.Path == "" && len(session.disk.PendingUsage) == 0 {
 		return
 	}
 	projectID := session.disk.ProjectID
@@ -448,7 +506,7 @@ func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, 
 			fmt.Fprintf(rt.stderr, "heartbeat: final usage flush failed\n")
 			return
 		}
-		if len(session.disk.PendingUsage) == 0 && heartbeatTranscriptCaughtUp(o.Transcript, session.disk.UsageOffset) {
+		if len(session.disk.PendingUsage) == 0 && usageCaughtUp(o, session) {
 			return
 		}
 		if session.disk.UsageOffset == beforeOff && len(session.disk.PendingUsage) == beforePending {
@@ -457,12 +515,23 @@ func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, 
 	}
 }
 
-func heartbeatTranscriptCaughtUp(path string, offset int64) bool {
-	if path == "" || unsafeHeartbeatPath(path) {
+// heartbeatUsageDue is true when this beat can owe a usage post. A resolved
+// Grok, Codex, or Cursor log counts even when --transcript is empty.
+func heartbeatUsageDue(o heartbeatOptions) bool {
+	if o.Transcript != "" {
 		return true
 	}
-	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+	target, err := resolveHeartbeatUsage(o)
+	return err != nil || target.Path != ""
+}
+
+func heartbeatTranscriptCaughtUp(source, path string, offset int64) bool {
+	kind, ok := harnessKindForSource(source)
+	if path == "" || !ok {
+		return true
+	}
+	info, err := statHarnessFile(kind, path)
+	if err != nil {
 		return true
 	}
 	return offset >= info.Size()
@@ -471,16 +540,17 @@ func heartbeatTranscriptCaughtUp(path string, offset int64) bool {
 // heartbeatTranscriptOutstanding reports bytes a later scan can still turn
 // into usage: a partial record past the cursor, or an interrupted discard
 // still waiting for its newline.
-func heartbeatTranscriptOutstanding(path string, offset int64, discarding bool) bool {
-	if !heartbeatTranscriptCaughtUp(path, offset) {
+func heartbeatTranscriptOutstanding(source, path string, offset int64, discarding bool) bool {
+	if !heartbeatTranscriptCaughtUp(source, path, offset) {
 		return true
 	}
-	if !discarding || path == "" || unsafeHeartbeatPath(path) {
+	kind, ok := harnessKindForSource(source)
+	if !discarding || path == "" || !ok {
 		return false
 	}
-	info, err := os.Lstat(path)
+	info, err := statHarnessFile(kind, path)
 	// A cursor past EOF means the transcript shrank.
-	return err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 && offset <= info.Size()
+	return err == nil && offset <= info.Size()
 }
 
 // finishStop closes the generation on a budget that the usage flush does not share.
@@ -548,7 +618,7 @@ func (rt *runtime) settleGeneration(o heartbeatOptions, session *heartbeatSessio
 	if session.disk.TerminalReason == "archived" {
 		session.disk.PendingUsage = nil
 		_ = session.hold.remove("settle.intent")
-	} else if len(session.disk.PendingUsage) > 0 || heartbeatTranscriptOutstanding(o.Transcript, session.disk.UsageOffset, session.disk.UsageDiscard) {
+	} else if len(session.disk.PendingUsage) > 0 || usageOutstanding(o, session) {
 		rememberSettleIntent(session)
 	} else {
 		_ = session.hold.remove("settle.intent")
@@ -857,7 +927,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if len(commits) > 0 {
 		session.disk.CommitCursor = commits[len(commits)-1].SHA
 	}
-	if o.Transcript != "" {
+	if heartbeatUsageDue(o) {
 		if uerr := rt.reportHeartbeatUsage(ctx, projectID, o, session); uerr != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -1156,7 +1226,7 @@ func agentStatusNote(worktree string) string {
 		return ""
 	}
 	path := filepath.Join(worktree, ".agent-status.json")
-	f, err := openNoFollow(path)
+	f, err := openHarnessFile(harnessAgentStatus, path)
 	if err != nil {
 		return ""
 	}

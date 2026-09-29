@@ -132,8 +132,20 @@ func (c *ManagedCodex) Observe(raw []byte) (report *UsageReport, err error) {
 	if prev.cachedKnown && next.cachedKnown && (next.cached < prev.cached || next.input-next.cached < prev.input-prev.cached) {
 		return nil, ErrRejected
 	}
+	if prev.reasoningKnown && (!next.reasoningKnown || next.reasoning < prev.reasoning) {
+		return nil, ErrRejected
+	}
+	reasoningDelta := int64(0)
+	if next.reasoningKnown {
+		if prev.reasoningKnown {
+			reasoningDelta = next.reasoning - prev.reasoning
+		} else {
+			reasoningDelta = next.reasoning
+		}
+	}
 	delta := snapshot{input: next.input - prev.input, output: next.output - prev.output,
-		cached: next.cached - prev.cached, inputKnown: true, cachedKnown: next.cachedKnown && prev.cachedKnown}
+		cached: next.cached - prev.cached, reasoning: reasoningDelta, inputKnown: true,
+		cachedKnown: next.cachedKnown && prev.cachedKnown, reasoningKnown: next.reasoningKnown}
 	// Replayed totals do not consume a pending reroute or need new attribution.
 	if next == prev {
 		return nil, nil
@@ -157,7 +169,8 @@ func (c *ManagedCodex) Observe(raw []byte) (report *UsageReport, err error) {
 	if model != c.model || c.rerouteModel != "" {
 		last := rec.delta
 		if last == nil || last.input != delta.input || last.output != delta.output ||
-			last.cachedKnown != delta.cachedKnown || last.cachedKnown && last.cached != delta.cached {
+			last.cachedKnown != delta.cachedKnown || last.cachedKnown && last.cached != delta.cached ||
+			last.reasoningKnown != delta.reasoningKnown || last.reasoningKnown && last.reasoning != delta.reasoning {
 			return nil, ErrAmbiguous
 		}
 	}
@@ -167,19 +180,26 @@ func (c *ManagedCodex) Observe(raw []byte) (report *UsageReport, err error) {
 	}
 	input, output := delta.input, delta.output
 	cached := delta.cached
+	reasoning := delta.reasoning
 	if exists {
 		input += *old.InputTokens
 		output += *old.OutputTokens
 		if old.CachedInputTokens != nil {
 			cached += *old.CachedInputTokens
 		}
+		if old.ReasoningTokens != nil {
+			reasoning += *old.ReasoningTokens
+		}
 	}
-	if input > maxToken || output > maxToken || cached > maxToken {
+	if input > maxToken || output > maxToken || cached > maxToken || reasoning > maxToken {
 		return nil, ErrRejected
 	}
 	out := UsageReport{Model: model, InputTokens: &input, OutputTokens: &output, Provisional: true, BillingMode: "unknown"}
 	if delta.cachedKnown && (!exists || old.CachedInputTokens != nil) {
 		out.CachedInputTokens = &cached
+	}
+	if delta.reasoningKnown && (!exists || old.ReasoningTokens != nil) {
+		out.ReasoningTokens = &reasoning
 	}
 	c.requireModel = c.requireModel || model != c.model || c.rerouteModel != ""
 	c.previous, c.model = next, model

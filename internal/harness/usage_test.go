@@ -66,7 +66,7 @@ func TestUsageModelAndAccountLabelLimits(t *testing.T) {
 	expect(t, f.call(f.person, "POST", "/api/model-prices", price, ""), 201)
 	expect(t, f.call(f.person, "GET", "/api/model-prices?model="+model, nil, ""), 200)
 	report := usagePayload()
-	report["model"], report["account_label"] = model, label
+	report["model"], report["account_label"], report["billing_mode"] = model, label, "api"
 	out, _ := usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
 	if out.Model != model || out.AccountLabel == nil || *out.AccountLabel != label || out.PriceVersion == nil || *out.PriceVersion != 1 {
 		t.Fatalf("128-character model/account label or price was lost: %+v", out)
@@ -116,7 +116,7 @@ func TestUsageReportingLifecycle(t *testing.T) {
 	report := usagePayload()
 	report["billing_mode"], report["subscription_label"], report["account_label"] = "subscription", "Synthetic plan", "Synthetic account"
 	out, replay := usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
-	if replay || out.EstimatedCostUSD == nil || *out.EstimatedCostUSD != "0.000360000000" || !out.Provisional || *out.PriceVersion != 1 || out.BillingMode != "subscription" || out.MetadataSource != "reported" {
+	if replay || out.EstimatedCostUSD != nil || out.PriceVersion != nil || !out.Provisional || out.BillingMode != "subscription" || out.MetadataSource != "reported" {
 		t.Fatalf("unexpected usage %+v", out)
 	}
 	first := make(map[string]any)
@@ -133,8 +133,8 @@ func TestUsageReportingLifecycle(t *testing.T) {
 	expect(t, usagePrice(t, f, 3, "99"), 201)
 	expect(t, usagePrice(t, f, 2, "20"), 409)
 	out, _ = usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
-	if *out.EstimatedCostUSD != "0.000485000000" || *out.PriceVersion != 1 {
-		t.Fatalf("repriced old usage: %+v", out)
+	if out.EstimatedCostUSD != nil || out.PriceVersion != nil || out.BillingMode != "subscription" {
+		t.Fatalf("subscription priced: %+v", out)
 	}
 	out, replay = usageResult(t, f.call(f.agent, "POST", path+"/usage", first, lease))
 	if !replay || out.Sequence != 2 || *out.InputTokens != 150 {
@@ -171,8 +171,10 @@ func TestUsageReportingLifecycle(t *testing.T) {
 	})
 	// A new managed session pins the latest version; no managed telemetry is duplicated.
 	managed, _, managedLease := usageSession(t, f, "managed")
-	out, _ = usageResult(t, f.call(f.agent, "POST", managed+"/usage", usagePayload(), managedLease))
-	if *out.PriceVersion != 3 || *out.EstimatedCostUSD != "0.006150000000" {
+	managedReport := usagePayload()
+	managedReport["billing_mode"] = "api"
+	out, _ = usageResult(t, f.call(f.agent, "POST", managed+"/usage", managedReport, managedLease))
+	if out.PriceVersion == nil || *out.PriceVersion != 3 || out.EstimatedCostUSD == nil || *out.EstimatedCostUSD != "0.006150000000" {
 		t.Fatalf("managed pricing: %+v", out)
 	}
 	expect(t, f.call(f.agent, "GET", managed+"/usage", nil, ""), 200)
@@ -199,8 +201,15 @@ func TestUsageUnknownAndLatePricing(t *testing.T) {
 	expect(t, usagePrice(t, f, 1, "2.5"), 201)
 	report["report_id"], report["sequence"] = uid(), 3
 	out, _ = usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
-	if out.EstimatedCostUSD == nil || *out.EstimatedCostUSD != "0.000360000000" {
-		t.Fatal("late pricing missing")
+	if out.EstimatedCostUSD != nil || out.PriceVersion != nil {
+		t.Fatal("unknown billing received a dollar estimate")
+	}
+	apiPath, _, apiLease := usageSession(t, f, "managed")
+	apiReport := usagePayload()
+	apiReport["billing_mode"] = "api"
+	out, _ = usageResult(t, f.call(f.agent, "POST", apiPath+"/usage", apiReport, apiLease))
+	if out.EstimatedCostUSD == nil || *out.EstimatedCostUSD != "0.000360000000" || out.PriceVersion == nil || *out.PriceVersion != 1 {
+		t.Fatalf("api pricing missing: %+v", out)
 	}
 	report["report_id"], report["model"], report["sequence"] = uid(), "second-model", 1
 	report["input_tokens"], report["output_tokens"], report["cached_input_tokens"] = 0, 0, 0
@@ -391,13 +400,71 @@ func TestUsageMonotonicHTTPAndAccountMetadata(t *testing.T) {
 	}
 }
 
+func TestUsageReasoningRoundTrip(t *testing.T) {
+	f := fixture(t)
+	path, _, lease := usageSession(t, f, "unmanaged")
+	in := usagePayload()
+	in["reasoning_tokens"] = 6
+	out, _ := usageResult(t, f.call(f.agent, "POST", path+"/usage", in, lease))
+	if out.ReasoningTokens == nil || *out.ReasoningTokens != 6 || out.EstimatedCostUSD != nil {
+		t.Fatalf("reasoning: %+v", out)
+	}
+	down := map[string]any{}
+	for k, v := range in {
+		down[k] = v
+	}
+	down["report_id"], down["sequence"], down["reasoning_tokens"] = uid(), 2, 5
+	expect(t, f.call(f.agent, "POST", path+"/usage", down, lease), 409)
+	in["report_id"], in["sequence"], in["reasoning_tokens"] = uid(), 2, 7
+	out, _ = usageResult(t, f.call(f.agent, "POST", path+"/usage", in, lease))
+	if out.ReasoningTokens == nil || *out.ReasoningTokens != 7 {
+		t.Fatalf("growth: %+v", out)
+	}
+	over := usagePayload()
+	over["sequence"], over["reasoning_tokens"] = 3, 21
+	expect(t, f.call(f.agent, "POST", path+"/usage", over, lease), 400)
+}
+
 func TestUsagePricingIsolationAndStorageConstraints(t *testing.T) {
 	f := fixture(t)
 	expect(t, usagePrice(t, f, 1, "2.5"), 201)
 	w := f.call(f.foreign, "GET", "/api/model-prices", nil, "")
 	expect(t, w, 200)
-	if len(decode(t, w)["items"].([]any)) != 0 {
-		t.Fatal("foreign tenant price leaked")
+	items := decode(t, w)["items"].([]any)
+	if len(items) == 0 {
+		t.Fatal("seeded api list prices missing")
+	}
+	seeded := map[string]map[string]any{}
+	for _, item := range items {
+		row := item.(map[string]any)
+		model := row["model"].(string)
+		if model == "test-model" {
+			t.Fatal("foreign tenant price leaked")
+		}
+		seeded[model] = row
+	}
+	for _, absent := range []string{"haiku", "sonnet", "opus", "fable", "composer-2.5", "grok-4", "grok-4-fast", "gpt-6-terra", "grok-4.7-high"} {
+		if _, ok := seeded[absent]; ok {
+			t.Fatalf("unsourced model %s was seeded", absent)
+		}
+	}
+	for model, want := range map[string][3]string{
+		"grok-4.7":                  {"2.000000", "0.500000", "6.000000"},
+		"claude-sonnet-5":           {"2.000000", "0.200000", "10.000000"},
+		"anthropic/claude-sonnet-5": {"2.000000", "0.200000", "10.000000"},
+		"claude-opus-5":             {"5.000000", "0.500000", "25.000000"},
+		"anthropic/claude-opus-5":   {"5.000000", "0.500000", "25.000000"},
+		"claude-opus-5-5":           {"4.000000", "0.200000", "20.000000"},
+		"claude-fable-5-1":          {"10.000000", "0.250000", "50.000000"},
+		"claude-haiku-4-5-20251001": {"1.000000", "0.100000", "5.000000"},
+		"gpt-6-sol":                 {"2.000000", "0.200000", "10.000000"},
+		"gpt-6-luna":                {"0.100000", "0.010000", "0.500000"},
+		"gpt-4.1":                   {"2.000000", "0.500000", "8.000000"},
+	} {
+		row := seeded[model]
+		if row == nil || row["input_usd_per_million"] != want[0] || row["cached_input_usd_per_million"] != want[1] || row["output_usd_per_million"] != want[2] {
+			t.Fatalf("seed %s = %+v", model, row)
+		}
 	}
 	path, id, lease := usageSession(t, f, "managed")
 	in := usagePayload()
@@ -421,7 +488,7 @@ func TestUsagePricingIsolationAndStorageConstraints(t *testing.T) {
 	// Maximum values survive exact NUMERIC persistence without int64 products.
 	p := map[string]any{"model": "max-model", "version": 1, "input_usd_per_million": "1000000", "output_usd_per_million": "1000000", "cached_input_usd_per_million": "1000000"}
 	expect(t, f.call(f.person, "POST", "/api/model-prices", p, ""), 201)
-	in["model"], in["report_id"], in["input_tokens"], in["output_tokens"], in["cached_input_tokens"] = "max-model", uid(), int64(1000000000000), int64(1000000000000), int64(1000000000000)
+	in["model"], in["report_id"], in["billing_mode"], in["input_tokens"], in["output_tokens"], in["cached_input_tokens"] = "max-model", uid(), "api", int64(1000000000000), int64(1000000000000), int64(1000000000000)
 	out, _ := usageResult(t, f.call(f.agent, "POST", path+"/usage", in, lease))
 	if *out.EstimatedCostUSD != "2000000000000.000000000000" {
 		t.Fatal("maximum exact cost changed")
@@ -434,4 +501,26 @@ func TestUsagePricingIsolationAndStorageConstraints(t *testing.T) {
 		}
 		return err
 	})
+}
+
+// Review case: a historical subscription row that still stores $12.34 and a
+// price version is returned without dollars. Only api billing is priced.
+func TestHistoricalSubscriptionUsageIsNeverPriced(t *testing.T) {
+	f := fixture(t)
+	expect(t, usagePrice(t, f, 1, "2.5"), 201)
+	path, id, lease := usageSession(t, f, "unmanaged")
+	in := usagePayload()
+	in["billing_mode"] = "subscription"
+	usageResult(t, f.call(f.agent, "POST", path+"/usage", in, lease))
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_session_usage SET estimated_cost_usd=12.34, price_version=1 WHERE session_id=$1`, id)
+		return err
+	})
+	w := f.call(f.person, "GET", path+"/usage", nil, "")
+	expect(t, w, 200)
+	items := decode(t, w)["items"].([]any)
+	row := items[0].(map[string]any)
+	if row["estimated_cost_usd"] != nil || row["cost_status"] != "unknown" || row["price_version"] != nil || row["billing_mode"] != "subscription" {
+		t.Fatalf("historical subscription row priced: %v", row)
+	}
 }

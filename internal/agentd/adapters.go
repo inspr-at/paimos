@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -111,22 +112,22 @@ func (*CodexAdapter) Name() string                                 { return Code
 type codexProcess struct {
 	capacityParser capacity.Parser
 	*wireProcess
-	persistent                bool
-	idleTimeout               time.Duration
-	idleTimer                 *time.Timer
-	idleGeneration            uint64
-	finishing                 bool
-	profile                   Profile
-	idlePublished             bool
-	controlMu                 sync.Mutex
-	done                      chan bool
-	once                      sync.Once
-	usage                     *sessionusage.ManagedCodex
-	inputTokens, outputTokens int64
-	terminal                  *sessionusage.CodexTerminal
-	terminalSeen, invalid     bool
-	acknowledged, sealed      bool
-	abandoned                 atomic.Bool // drain failure; never needs eventMu to publish
+	persistent                                               bool
+	idleTimeout                                              time.Duration
+	idleTimer                                                *time.Timer
+	idleGeneration                                           uint64
+	finishing                                                bool
+	profile                                                  Profile
+	idlePublished                                            bool
+	controlMu                                                sync.Mutex
+	done                                                     chan bool
+	once                                                     sync.Once
+	usage                                                    *sessionusage.ManagedCodex
+	inputTokens, outputTokens, cachedTokens, reasoningTokens int64
+	terminal                                                 *sessionusage.CodexTerminal
+	terminalSeen, invalid                                    bool
+	acknowledged, sealed                                     bool
+	abandoned                                                atomic.Bool // drain failure; never needs eventMu to publish
 }
 
 func (p *codexProcess) Wait() error {
@@ -539,6 +540,8 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			var result struct {
 				StopReason string `json:"stopReason"`
 			}
+			// A Cursor prompt result is only a stop reason. It carries no token
+			// usage; cost arrives separately as a usage_update.
 			if len(frame.Error) > 0 && string(frame.Error) != "null" || json.Unmarshal(frame.Result, &result) != nil || result.StopReason != "end_turn" {
 				cp.finish(errors.New("Cursor ACP prompt failed"))
 			} else {
@@ -740,20 +743,22 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	for _, capability := range r.Capabilities {
 		cp.steerEnabled = cp.steerEnabled || capability == "steer"
 	}
-	var inputTokens, outputTokens, costMicros int64
+	var inputTokens, outputTokens, cachedTokens, costMicros int64
 	capacitySeen := false
 	capacityParser := capacity.Parser{}
 	p.setOnEvent(func(raw json.RawMessage) {
 		var frame struct {
-			Kind            string          `json:"kind"`
-			Reason          string          `json:"reason"`
-			CorrelationID   string          `json:"correlation_id"`
-			EffectiveModel  string          `json:"effective_model"`
-			EffectiveEffort string          `json:"effective_effort"`
-			ModelEvidence   string          `json:"model_evidence_status"`
-			InputTokens     int64           `json:"input_tokens_total"`
-			OutputTokens    int64           `json:"output_tokens_total"`
-			CostUSD         json.RawMessage `json:"cost_usd_total"`
+			Kind            string             `json:"kind"`
+			Reason          string             `json:"reason"`
+			CorrelationID   string             `json:"correlation_id"`
+			EffectiveModel  string             `json:"effective_model"`
+			EffectiveEffort string             `json:"effective_effort"`
+			ModelEvidence   string             `json:"model_evidence_status"`
+			InputTokens     int64              `json:"input_tokens_total"`
+			OutputTokens    int64              `json:"output_tokens_total"`
+			CachedTokens    *int64             `json:"cached_input_tokens_total"`
+			CostUSD         json.RawMessage    `json:"cost_usd_total"`
+			Models          []claudeModelUsage `json:"models"`
 		}
 		if json.Unmarshal(raw, &frame) != nil {
 			return
@@ -807,11 +812,19 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			}
 			ev := AdapterEvent{Kind: "usage", InputTokensDelta: cumulativeDelta(frame.InputTokens, &inputTokens),
 				OutputTokensDelta: cumulativeDelta(frame.OutputTokens, &outputTokens)}
+			if cached, ok := claudeCachedTotal(frame.CachedTokens, frame.Models); ok && cached >= cachedTokens {
+				ev.CachedInputTokensDelta = cumulativeDelta(cached, &cachedTokens)
+			}
 			if cost, ok := usdMicros(frame.CostUSD); ok {
 				ev.CostMicrosDelta = cumulativeDelta(cost, &costMicros)
 			}
-			if ev.InputTokensDelta > 0 || ev.OutputTokensDelta > 0 || ev.CostMicrosDelta > 0 {
+			if ev.InputTokensDelta > 0 || ev.OutputTokensDelta > 0 || ev.CachedInputTokensDelta > 0 || ev.CostMicrosDelta > 0 {
 				observe(ev)
+			}
+			reports := claudeModelReports(frame.Models)
+			for i := range reports {
+				report := reports[i]
+				observe(AdapterEvent{SessionUsage: &report})
 			}
 		case "tool_started":
 			observe(AdapterEvent{Kind: "tool"})
@@ -838,4 +851,42 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	case <-p.readDone:
 		return p.failStart(errors.New("Claude bridge ended before readiness"))
 	}
+}
+
+type claudeModelUsage struct {
+	Model  string `json:"model"`
+	Input  int64  `json:"input_tokens"`
+	Output int64  `json:"output_tokens"`
+	Cached int64  `json:"cached_input_tokens"`
+}
+
+// claudeCachedTotal is the cumulative cache-read input across models: the
+// bridge's own total, or the sum of its per-model figures. The same numbers
+// feed session usage, so run telemetry and session usage agree.
+func claudeCachedTotal(total *int64, models []claudeModelUsage) (int64, bool) {
+	if total != nil {
+		return *total, *total >= 0
+	}
+	if len(models) == 0 {
+		return 0, false
+	}
+	var sum int64
+	for _, model := range models {
+		if model.Cached < 0 || sum > math.MaxInt64-model.Cached {
+			return 0, false
+		}
+		sum += model.Cached
+	}
+	return sum, true
+}
+
+func claudeModelReports(models []claudeModelUsage) []sessionusage.UsageReport {
+	out := make([]sessionusage.UsageReport, 0, len(models))
+	for _, model := range models {
+		report, ok := sessionusage.CountReport(model.Model, model.Input, model.Output, model.Cached, true)
+		if ok {
+			out = append(out, report)
+		}
+	}
+	return out
 }

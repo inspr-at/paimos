@@ -122,16 +122,27 @@ type WorkCriterion struct {
 // Telemetry carries content-free, nonnegative deltas. TurnCountDelta is one
 // accepted user turn; token and cost deltas come from vendor usage reports.
 type Telemetry struct {
-	Sequence          int64  `json:"sequence"`
-	Kind              string `json:"kind"`
-	Status            string `json:"status,omitempty"`
-	InputTokensDelta  int64  `json:"input_tokens_delta,omitempty"`
-	OutputTokensDelta int64  `json:"output_tokens_delta,omitempty"`
-	CostMicrosDelta   int64  `json:"cost_micros_delta,omitempty"`
-	TurnCountDelta    int64  `json:"turn_count_delta,omitempty"`
-	EffectiveModel    string `json:"effective_model,omitempty"`
-	ModelEvidence     string `json:"model_evidence,omitempty"`
-	ErrorCode         string `json:"error_code,omitempty"`
+	Sequence               int64       `json:"sequence"`
+	Kind                   string      `json:"kind"`
+	Status                 string      `json:"status,omitempty"`
+	InputTokensDelta       int64       `json:"input_tokens_delta,omitempty"`
+	OutputTokensDelta      int64       `json:"output_tokens_delta,omitempty"`
+	CachedInputTokensDelta int64       `json:"cached_input_tokens_delta,omitempty"`
+	ReasoningTokensDelta   int64       `json:"reasoning_tokens_delta,omitempty"`
+	CostMicrosDelta        int64       `json:"cost_micros_delta,omitempty"`
+	TurnCountDelta         int64       `json:"turn_count_delta,omitempty"`
+	EffectiveModel         string      `json:"effective_model,omitempty"`
+	ModelEvidence          string      `json:"model_evidence,omitempty"`
+	ErrorCode              string      `json:"error_code,omitempty"`
+	GitCommits             []GitCommit `json:"git_commits,omitempty"`
+}
+
+// GitCommit is one commit introduced after the run's launch revision.
+type GitCommit struct {
+	SHA             string `json:"sha"`
+	Subject         string `json:"subject"`
+	Parents         int    `json:"parents,omitempty"`
+	OnDefaultBranch bool   `json:"on_default_branch,omitempty"`
 }
 
 type InboxMessage struct {
@@ -210,22 +221,24 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
-	Activity          string // busy or idle, independent of the run process lifetime.
-	Capacity          []capacity.Reading
-	BudgetExhausted   string
-	BudgetTurnsDelta  int64
-	SessionUsage      *sessionusage.UsageReport
-	Kind              string
-	VendorSessionID   string
-	HarnessModel      string // Resolved model from this owned adapter connection only.
-	HarnessEffort     string // Omitted when the vendor has not established an effort.
-	EffectiveModel    string
-	ModelEvidence     string
-	InputTokensDelta  int64
-	OutputTokensDelta int64
-	CostMicrosDelta   int64
-	TurnCountDelta    int64
-	ErrorCode         string
+	Activity               string // busy or idle, independent of the run process lifetime.
+	Capacity               []capacity.Reading
+	BudgetExhausted        string
+	BudgetTurnsDelta       int64
+	SessionUsage           *sessionusage.UsageReport
+	Kind                   string
+	VendorSessionID        string
+	HarnessModel           string // Resolved model from this owned adapter connection only.
+	HarnessEffort          string // Omitted when the vendor has not established an effort.
+	EffectiveModel         string
+	ModelEvidence          string
+	InputTokensDelta       int64
+	OutputTokensDelta      int64
+	CachedInputTokensDelta int64
+	ReasoningTokensDelta   int64
+	CostMicrosDelta        int64
+	TurnCountDelta         int64
+	ErrorCode              string
 }
 
 // RecoveryProcess exposes a live child identity and verifies it before force.

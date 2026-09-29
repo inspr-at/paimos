@@ -87,6 +87,15 @@ func heartbeatRuntime(t *testing.T, srv *httptest.Server) (*runtime, *bytes.Buff
 	return &runtime{stdin: strings.NewReader(""), stdout: &stdout, stderr: &stderr, program: "aeon"}, &stdout, &stderr
 }
 
+func claudeUsagePath(t *testing.T, dir, name string) string {
+	t.Helper()
+	path := filepath.Join(dir, "projects", "-work-slug", name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func heartbeatTestOptions(dir string) heartbeatOptions {
 	return heartbeatOptions{
 		OwnerPID:       4242,
@@ -405,7 +414,7 @@ func TestRunHeartbeatMissingNameSource(t *testing.T) {
 
 func TestRunHeartbeatUsageAndControls(t *testing.T) {
 	dir := t.TempDir()
-	transcript := filepath.Join(dir, "33333333-3333-4333-8333-333333333331.jsonl")
+	transcript := claudeUsagePath(t, dir, "33333333-3333-4333-8333-333333333331.jsonl")
 	body := strings.Join([]string{
 		`{"uuid":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":3}}}`,
 		`{"uuid":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":3}}}`,
@@ -834,7 +843,7 @@ func TestRunHeartbeatLockIsExclusive(t *testing.T) {
 
 func TestRunHeartbeatUsageReplayIsStable(t *testing.T) {
 	dir := t.TempDir()
-	transcript := filepath.Join(dir, "33333333-3333-4333-8333-333333333331.jsonl")
+	transcript := claudeUsagePath(t, dir, "33333333-3333-4333-8333-333333333331.jsonl")
 	line := `{"uuid":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":3}}}` + "\n"
 	if err := os.WriteFile(transcript, []byte(line), 0o600); err != nil {
 		t.Fatal(err)
@@ -895,7 +904,7 @@ func TestRunHeartbeatUsageReplayIsStable(t *testing.T) {
 
 func TestRunHeartbeatUsageReconcilesServerSequence(t *testing.T) {
 	dir := t.TempDir()
-	transcript := filepath.Join(dir, "33333333-3333-4333-8333-333333333331.jsonl")
+	transcript := claudeUsagePath(t, dir, "33333333-3333-4333-8333-333333333331.jsonl")
 	body := strings.Join([]string{
 		`{"uuid":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":3}}}`,
 		`{"type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":5,"output_tokens":2,"cache_read_input_tokens":1}}}`,
@@ -935,7 +944,7 @@ func TestRunHeartbeatUsageReconcilesServerSequence(t *testing.T) {
 
 func TestRunHeartbeatFinalUsageFlush(t *testing.T) {
 	dir := t.TempDir()
-	transcript := filepath.Join(dir, "33333333-3333-4333-8333-333333333331.jsonl")
+	transcript := claudeUsagePath(t, dir, "33333333-3333-4333-8333-333333333331.jsonl")
 	body := `{"uuid":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":3}}}` + "\n"
 	if err := os.WriteFile(transcript, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -1173,7 +1182,7 @@ func TestRunHeartbeatInitFailureKeepsStopIntent(t *testing.T) {
 
 func TestUsageScanBoundedAndCancellable(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "usage.jsonl")
+	path := claudeUsagePath(t, dir, "usage.jsonl")
 	line1 := `{"uuid":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":2,"output_tokens":1,"cache_read_input_tokens":0}}}` + "\n"
 	line2 := `{"uuid":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":3,"output_tokens":1,"cache_read_input_tokens":0}}}` + "\n"
 	if err := os.WriteFile(path, []byte(line1+line2), 0o600); err != nil {
@@ -1229,7 +1238,7 @@ func (c *heartbeatErrAfter) Err() error {
 }
 
 func TestUsagePartialLineKeepsStartOffset(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "usage.jsonl")
+	path := claudeUsagePath(t, t.TempDir(), "usage.jsonl")
 	line := heartbeatProbeUsageLine(1)
 	cut := len(line) / 2
 	if err := os.WriteFile(path, []byte(line[:cut]), 0o600); err != nil {
@@ -1258,7 +1267,7 @@ func TestUsagePartialLineKeepsStartOffset(t *testing.T) {
 }
 
 func TestUsageOversizedLineStaysInsideBudget(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "usage.jsonl")
+	path := claudeUsagePath(t, t.TempDir(), "usage.jsonl")
 	if err := os.WriteFile(path, []byte(strings.Repeat("x", 8<<20)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1338,7 +1347,7 @@ func TestFinalUsageDrainsBacklog(t *testing.T) {
 	defer srv.Close()
 	rt, _, _ := heartbeatRuntime(t, srv)
 	opts := heartbeatTestOptions(t.TempDir())
-	opts.Transcript = filepath.Join(filepath.Dir(opts.StateDir), "usage.jsonl")
+	opts.Transcript = claudeUsagePath(t, filepath.Dir(opts.StateDir), "usage.jsonl")
 	if err := os.WriteFile(opts.Transcript, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1384,7 +1393,7 @@ func TestFinalUsageTimeoutStillStops(t *testing.T) {
 	defer srv.Close()
 	rt, _, _ := heartbeatRuntime(t, srv)
 	opts := heartbeatTestOptions(t.TempDir())
-	opts.Transcript = filepath.Join(filepath.Dir(opts.StateDir), "usage.jsonl")
+	opts.Transcript = claudeUsagePath(t, filepath.Dir(opts.StateDir), "usage.jsonl")
 	if err := os.WriteFile(opts.Transcript, []byte(heartbeatProbeUsageLine(1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1447,7 +1456,7 @@ func TestFinishHeartbeatStopIntentIsRetried(t *testing.T) {
 
 func TestStopIntentFlushesPendingUsage(t *testing.T) {
 	dir := t.TempDir()
-	transcript := filepath.Join(dir, "usage.jsonl")
+	transcript := claudeUsagePath(t, dir, "usage.jsonl")
 	if err := os.WriteFile(transcript, []byte(heartbeatProbeUsageLine(1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1531,7 +1540,7 @@ func TestClaudeTitleSkipsOversizedLine(t *testing.T) {
 
 func TestSuccessfulStopRetriesPendingUsageWithoutHeartbeat(t *testing.T) {
 	dir := t.TempDir()
-	transcript := filepath.Join(dir, "usage.jsonl")
+	transcript := claudeUsagePath(t, dir, "usage.jsonl")
 	if err := os.WriteFile(transcript, []byte(heartbeatProbeUsageLine(1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1593,7 +1602,7 @@ func TestSuccessfulStopRetriesPendingUsageWithoutHeartbeat(t *testing.T) {
 
 func TestForbiddenHeartbeatSettlesPartialRecordAfterPendingReplay(t *testing.T) {
 	dir := t.TempDir()
-	transcript := filepath.Join(dir, "usage.jsonl")
+	transcript := claudeUsagePath(t, dir, "usage.jsonl")
 	line1 := heartbeatProbeUsageLine(1)
 	line2 := heartbeatProbeUsageLine(2)
 	partial := line2[:len(line2)/2]
@@ -1723,7 +1732,7 @@ func loadHeartbeatDisk(t *testing.T, stateDir string) heartbeatDisk {
 
 func TestStopRecoveryDoesNotDoubleCountUsage(t *testing.T) {
 	dir := t.TempDir()
-	transcript := filepath.Join(dir, "usage.jsonl")
+	transcript := claudeUsagePath(t, dir, "usage.jsonl")
 	if err := os.WriteFile(transcript, []byte(heartbeatProbeUsageLine(1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1803,7 +1812,7 @@ func TestUsageOversizedSuffixIsNotAnotherRecord(t *testing.T) {
 		t.Fatal("probe line is longer than the scan limit")
 	}
 	pad := strings.Repeat("x", int(limit)-len(good))
-	path := filepath.Join(t.TempDir(), "usage.jsonl")
+	path := claudeUsagePath(t, t.TempDir(), "usage.jsonl")
 	if err := os.WriteFile(path, []byte(good+pad+suffix+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

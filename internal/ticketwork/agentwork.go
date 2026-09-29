@@ -675,17 +675,21 @@ func normalizeModel(row usageRow) UsageModel {
 		m.CachedInputTokens = intString(cached)
 		m.CachedState = "known"
 	}
-	if cost, ok := parseDecimal(row.cost); ok {
-		m.EstimatedCostUSD = decimalString(cost)
-		m.CostState = "estimated"
-	}
-	if row.price != nil && intPattern.MatchString(strings.TrimSpace(*row.price)) {
-		v := strings.TrimSpace(*row.price)
-		m.PriceVersion = &v
-	}
 	switch row.billing {
 	case "api", "subscription", "unknown":
 		m.BillingMode = row.billing
+	}
+	// Only api billing is priced. A stored estimate on a subscription or
+	// unknown row is historical and never shown or summed as dollars.
+	if m.BillingMode == "api" {
+		if cost, ok := parseDecimal(row.cost); ok {
+			m.EstimatedCostUSD = decimalString(cost)
+			m.CostState = "estimated"
+		}
+		if row.price != nil && intPattern.MatchString(strings.TrimSpace(*row.price)) {
+			v := strings.TrimSpace(*row.price)
+			m.PriceVersion = &v
+		}
 	}
 	if m.BillingMode == "subscription" {
 		m.SubscriptionLabel = cleanText(row.subscription, 120)
