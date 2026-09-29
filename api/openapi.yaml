@@ -9327,6 +9327,9 @@ components:
             id: {type: [string, 'null'], format: uuid, description: Null if no imported principal mapping exists}
             name: {type: string}
             has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}
+            automatic: {type: boolean, description: 'True when the tenant System principal wrote the event. Clients show that actor as the product short name followed by (automatic). Omitted for people and ordinary agents, including a person named System.'}
+            job: {type: string, description: 'Background job recorded on the event, when one was.'}
+            reason: {type: string, description: 'Why that job wrote the event, when a reason was recorded.'}
         body_markdown: {type: string, description: Present for comments only}
         changes:
           type: array

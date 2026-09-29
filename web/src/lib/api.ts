@@ -235,7 +235,7 @@ export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent
 export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }
 export interface ActivityItem {
   id: string; at: string; type: 'comment' | 'change' | 'created'
-  author: { id: string | null; name: string; has_avatar?: boolean }
+  author: { id: string | null; name: string; has_avatar?: boolean; automatic?: boolean; job?: string; reason?: string }
   body_markdown?: string; changes?: ActivityChange[]
 }
 const authored = <T extends ActivityItem | { items: ActivityItem[] }>(value: T): T => { learnPictures('items' in value ? value.items.map(item => item.author) : [value.author]); return value }

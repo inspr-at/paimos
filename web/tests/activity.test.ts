@@ -49,6 +49,15 @@ test('changes read in product words', () => {
   assert.deepEqual(describeChange({ field: 'tags', from: 'ops', to: 'ops, process-learning' }), { label: 'changed labels', from: 'ops', to: 'ops, process-learning' })
 })
 
+test('an automatic change keeps the job that wrote it', () => {
+  const auto = { id: 'sys', name: 'System', automatic: true, job: 'learning-tagger', reason: 'method learning tagger' }
+  const timeline = buildTimeline([change('1', 0, [{ field: 'tags', from: 'ops', to: 'ops, process-learning' }], auto)])
+  assert.equal(timeline.length, 1)
+  assert.equal(timeline[0].author.automatic, true)
+  assert.equal(timeline[0].author.job, 'learning-tagger')
+  assert.equal(timeline[0].author.reason, 'method learning tagger')
+})
+
 test('own comments stay editable for 15 minutes', () => {
   const now = Date.parse(at(14))
   assert.equal(commentEditable({ at: at(0), author: { id: 'p-1' } }, 'p-1', now), true)

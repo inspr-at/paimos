@@ -28,16 +28,20 @@ func TestTaggerWritesSystemEvent(t *testing.T) {
 	}
 	var actorName, actorKind string
 	var roles []string
-	var before, after []byte
-	err = f.db.Admin.QueryRow(t.Context(), `SELECT p.name, p.kind, p.roles, e.before, e.after
+	var before, after, meta []byte
+	err = f.db.Admin.QueryRow(t.Context(), `SELECT p.name, p.kind, p.roles, e.before, e.after, e.metadata
 		FROM events e
 		JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id
-		WHERE e.tenant_id=$1 AND e.node_id=$2::uuid AND e.type='node.updated'`, f.a.TenantID, ticket).Scan(&actorName, &actorKind, &roles, &before, &after)
+		WHERE e.tenant_id=$1 AND e.node_id=$2::uuid AND e.type='node.updated'`, f.a.TenantID, ticket).Scan(&actorName, &actorKind, &roles, &before, &after, &meta)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if actorName != "System" || actorKind != "agent" || len(roles) != 1 || roles[0] != "system" {
 		t.Fatalf("actor %s %s %v", actorName, actorKind, roles)
+	}
+	var recorded map[string]string
+	if err = json.Unmarshal(meta, &recorded); err != nil || recorded["job"] != "learning-tagger" || recorded["reason"] != "method learning tagger" {
+		t.Fatalf("metadata %s", meta)
 	}
 	var prior, next struct {
 		Priority string   `json:"priority"`

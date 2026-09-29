@@ -546,7 +546,11 @@ func stampLearningTag(ctx context.Context, tx pgx.Tx, tenantID, nodeID string) (
 	if err != nil {
 		return false, err
 	}
-	_, err = events.Append(ctx, tx, actor, events.Change{NodeID: &after.ID, Type: "node.updated", Before: before, After: after})
+	meta, err := json.Marshal(map[string]string{"job": "learning-tagger", "reason": "method learning tagger"})
+	if err != nil {
+		return false, err
+	}
+	_, err = events.Append(ctx, tx, actor, events.Change{NodeID: &after.ID, Type: "node.updated", Before: before, After: after, Metadata: meta})
 	return err == nil, err
 }
 

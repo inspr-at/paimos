@@ -234,7 +234,7 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 		}
 		fields, err := validateFields(schema, in.Fields)
 		if err == nil {
-			fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields)
+			fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields, nil)
 		}
 		if err != nil {
 			return err
@@ -373,7 +373,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			}
 			fields, err := validateFields(schema, v)
 			if err == nil {
-				fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields)
+				fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields, current.Fields)
 			}
 			if err != nil {
 				return err

@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/systemactor"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -452,5 +453,68 @@ func TestStoredClassicUserNamesAndNativeAuthor(t *testing.T) {
 	// A username in a different source cannot claim the stored mapping.
 	if got := classicAuthor(record{"author": "mba"}, "other-source", map[string]Author{"username:source:mba": {ID: &mapped, Name: "Markus Barta"}}, "author_id", "author"); got.ID != nil {
 		t.Fatal("cross-source author mapping")
+	}
+}
+
+func TestSystemActorMetadataIsNotANameMatch(t *testing.T) {
+	f := setup(t)
+	var systemID, lookalike string
+	f.tx(func(tx pgx.Tx) error {
+		actor, err := systemactor.Ensure(t.Context(), tx, f.p.TenantID)
+		if err != nil {
+			return err
+		}
+		systemID = actor.ID
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','System','{}') RETURNING id::text`, f.p.TenantID).Scan(&lookalike)
+	})
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	meta, err := json.Marshal(map[string]string{"job": "learning-tagger", "reason": "method learning tagger"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(actor tenant.Principal, when time.Time, metadata json.RawMessage, from, to string) {
+		t.Helper()
+		f.tx(func(tx pgx.Tx) error {
+			_, err := events.Append(t.Context(), tx, actor, events.Change{
+				NodeID: &f.node, Type: "node.updated", At: &when, Metadata: metadata,
+				Before: record{"title": "Ticket", "state": "new", "fields": record{"tags": []any{from}}},
+				After:  record{"title": "Ticket", "state": "new", "fields": record{"tags": []any{to}}},
+			})
+			return err
+		})
+	}
+	write(tenant.Principal{ID: systemID, TenantID: f.p.TenantID, Kind: tenant.Agent, Name: "System"}, at, meta, "ops", "process-learning")
+	write(tenant.Principal{ID: lookalike, TenantID: f.p.TenantID, Kind: tenant.Person, Name: "System"}, at.Add(time.Minute), nil, "process-learning", "kept")
+	page := f.page("?limit=20")
+	if len(page.Items) != 2 {
+		t.Fatalf("items: %+v", page.Items)
+	}
+	raw := f.call(&f.p, "GET", "/api/nodes/"+f.node+"/activity?limit=20", "", 200).Body.Bytes()
+	var payload struct {
+		Items []struct {
+			Author json.RawMessage `json:"author"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	var systemAuthor, personAuthor map[string]any
+	if err := json.Unmarshal(payload.Items[0].Author, &personAuthor); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(payload.Items[1].Author, &systemAuthor); err != nil {
+		t.Fatal(err)
+	}
+	if systemAuthor["automatic"] != true || systemAuthor["job"] != "learning-tagger" || systemAuthor["reason"] != "method learning tagger" || systemAuthor["name"] != "System" {
+		t.Fatalf("system author: %s", payload.Items[1].Author)
+	}
+	if _, ok := personAuthor["automatic"]; ok || personAuthor["name"] != "System" || personAuthor["job"] != nil {
+		t.Fatalf("lookalike author: %s", payload.Items[0].Author)
+	}
+	if page.Items[1].Author.ID == nil || *page.Items[1].Author.ID != systemID || !page.Items[1].Author.Automatic {
+		t.Fatalf("system item: %+v", page.Items[1].Author)
+	}
+	if page.Items[0].Author.Automatic || page.Items[0].Author.ID == nil || *page.Items[0].Author.ID != lookalike {
+		t.Fatalf("lookalike item: %+v", page.Items[0].Author)
 	}
 }
