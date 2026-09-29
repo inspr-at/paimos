@@ -119,6 +119,53 @@ export function statusTip(status: MessageStatus, format: (iso: string) => string
 }
 export const statusDone = (status?: MessageStatus) => status?.status === 'read' || status?.status === 'not_delivered'
 
+// The status route accepts at most this many ids. Delivered, read and
+// not_delivered are terminal for the outstanding queue. A missing receipt, or
+// one that is still sent, is outstanding. The first look, when nothing is
+// known, asks for the newest batch so the thread can paint those receipts.
+// The next look asks for every id still outstanding, in batches of this size,
+// so 250 sends are covered within two refreshes and a delivered receipt cannot
+// keep an older send out. Messages on screen that are already delivered are
+// asked after the outstanding ids, so they can still move to read.
+export const receiptBatchLimit = 100
+const terminalReceipt = (status?: MessageStatus) =>
+  status?.status === 'delivered' || status?.status === 'read' || status?.status === 'not_delivered'
+
+export function receiptQueryBatches(
+  boundIds: readonly string[],
+  visibleIds: readonly string[],
+  statuses: Readonly<Record<string, MessageStatus | undefined>>,
+  limit = receiptBatchLimit,
+): string[][] {
+  const unique: string[] = []
+  const seen = new Set<string>()
+  for (const id of [...boundIds, ...visibleIds]) {
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    unique.push(id)
+  }
+  const outstanding = unique.filter(id => !terminalReceipt(statuses[id]))
+  const known = unique.some(id => statuses[id])
+  const queued = !known && outstanding.length > limit ? outstanding.slice(-limit) : outstanding
+  const batches: string[][] = []
+  for (let i = 0; i < queued.length; i += limit) batches.push(queued.slice(i, i + limit))
+  const taken = new Set(queued)
+  const readWatch: string[] = []
+  const watched = new Set<string>()
+  for (const id of visibleIds) {
+    if (!id || watched.has(id) || taken.has(id) || statuses[id]?.status !== 'delivered') continue
+    watched.add(id)
+    readWatch.push(id)
+  }
+  const follow = readWatch.slice(-limit)
+  if (follow.length) {
+    const last = batches.at(-1)
+    if (last && last.length + follow.length <= limit) last.push(...follow)
+    else batches.push(follow)
+  }
+  return batches
+}
+
 // A live session with neither a stored vendor reference nor a hook read so far
 // cannot take the message until its inbox hook runs (AEON-369).
 export const hookDeliveryNotice = "Delivered when the session's inbox hook runs."

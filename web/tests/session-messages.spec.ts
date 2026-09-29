@@ -220,6 +220,88 @@ test('a send marked not_delivered shows that failure instead of the hook wait', 
   await expect(panel.getByRole('status').filter({ hasText: "Delivered when the session's inbox hook runs." })).toHaveCount(0)
 })
 
+for (const count of [100, 101, 200]) {
+  test(`${count} delivered session-bound sends clear the hook wait within two refreshes`, async ({ page }) => {
+    await page.clock.install({ time: now })
+    const work = fixtures(); work.preferences.theme = { choice: 'light' }
+    await mockWork(page, work, { admin: true })
+    const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {} })
+    const first = data.sessions[0]!
+    Object.assign(first, { display_label: 'review-worker', role: 'worker', run_id: null, ticket_node_id: null, phase: 'working', activity: 'idle', heartbeat_at: new Date(now).toISOString(), stopped_at: null, stop_reason: null, management_mode: 'unmanaged', advertised_capabilities: ['inbox', 'status'], inbox_seen_via: 'drain', has_vendor_session_ref: false })
+    const template = data.messages[1]!
+    data.sessions.splice(0, data.sessions.length, first)
+    data.targets.splice(0); data.approvals.splice(0); data.runs.splice(0)
+    data.messages.splice(0, data.messages.length, ...Array.from({ length: count }, (_, i) => ({
+      ...template,
+      id: `3e000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+      body: `Already delivered message ${i + 1}`,
+      sender_principal_id: me.id,
+      recipient_principal_id: first.agent_principal_id,
+      recipient_session_id: first.id,
+      sender_session_id: undefined,
+      sender_label: 'Markus',
+      to: first.agent_principal_id,
+      project: first.project_id,
+      sent_event_id: 200 + i,
+      created_at: new Date(now - 60_000 + i).toISOString(),
+    })))
+    await mockAgents(page, data)
+    const requests: string[][] = []
+    await page.route('**/api/inbox/message-status?*', route => {
+      const ids = new URL(route.request().url()).searchParams.get('ids')!.split(',')
+      requests.push(ids)
+      expect(ids.length).toBeLessThanOrEqual(100)
+      expect(new Set(ids).size).toBe(ids.length)
+      return route.fulfill({ json: { items: ids.map(id => ({ message_id: id, status: 'delivered', delivered_at: new Date(now - 30_000).toISOString(), read_at: null, deliver_by: new Date(now + 240_000).toISOString() })) } })
+    })
+    await page.goto(`/agents/${first.id}?tab=messages`)
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    const notice = panel.getByRole('status').filter({ hasText: "Delivered when the session's inbox hook runs." })
+    await expect(panel.locator('.msg[data-id]')).toHaveCount(count)
+    if (count > 100) {
+      await expect(panel.locator('.delivery.delivered')).toHaveCount(100)
+      await expect(notice).toBeVisible()
+      await panel.getByRole('tab', { name: 'Overview', exact: true }).click()
+      await panel.getByRole('tab', { name: /Messages/ }).click()
+    }
+    await expect(notice).toHaveCount(0)
+    await expect.poll(() => new Set(requests.flat()).size).toBe(count)
+    expect(requests.every(batch => batch.length <= 100)).toBe(true)
+  })
+}
+
+test('a delivered send on screen is asked again and can become read', async ({ page }) => {
+  await page.clock.install({ time: now })
+  const work = fixtures(); work.preferences.theme = { choice: 'light' }
+  await mockWork(page, work, { admin: true })
+  const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {} })
+  const first = data.sessions[0]!
+  Object.assign(first, { display_label: 'review-worker', role: 'worker', run_id: null, ticket_node_id: null, phase: 'working', activity: 'idle', heartbeat_at: new Date(now).toISOString(), stopped_at: null, stop_reason: null, management_mode: 'unmanaged', advertised_capabilities: ['inbox', 'status'] })
+  const template = data.messages[1]!
+  const id = '3e000000-0000-4000-8000-000000000041'
+  data.sessions.splice(0, data.sessions.length, first)
+  data.targets.splice(0); data.approvals.splice(0); data.runs.splice(0)
+  data.messages.splice(0, data.messages.length, { ...template, id, body: 'Shown delivered', sender_principal_id: me.id, recipient_principal_id: first.agent_principal_id, recipient_session_id: first.id, sender_session_id: undefined, sender_label: 'Markus', to: first.agent_principal_id, project: first.project_id, sent_event_id: 210, created_at: new Date(now - 30_000).toISOString() })
+  await mockAgents(page, data)
+  let promote = false
+  const asked: string[][] = []
+  await page.route('**/api/inbox/message-status?*', route => {
+    const ids = new URL(route.request().url()).searchParams.get('ids')!.split(',')
+    asked.push(ids)
+    const status = promote ? 'read' : 'delivered'
+    return route.fulfill({ json: { items: ids.map(messageId => ({ message_id: messageId, status, delivered_at: new Date(now - 20_000).toISOString(), read_at: status === 'read' ? new Date(now - 10_000).toISOString() : null, deliver_by: new Date(now + 240_000).toISOString() })) } })
+  })
+  await page.goto(`/agents/${first.id}?tab=messages`)
+  const panel = page.getByRole('complementary', { name: 'Session details' })
+  await expect(panel.locator('.delivery.delivered')).toHaveCount(1)
+  promote = true
+  await panel.getByRole('tab', { name: 'Overview', exact: true }).click()
+  await panel.getByRole('tab', { name: /Messages/ }).click()
+  await expect(panel.locator('.delivery.read')).toHaveCount(1)
+  expect(asked.flat()).toContain(id)
+  expect(asked.length).toBeGreaterThan(1)
+})
+
 test('a stopped session has no active Send action', async ({ page }) => {
   const { worker } = await setup(page)
   Object.assign(worker, { phase: 'stopped', stopped_at: new Date(now).toISOString(), stop_reason: 'done' })

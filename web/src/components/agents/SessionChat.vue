@@ -10,7 +10,7 @@ import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
 import { collapseMessages } from './sessionMessages'
-import { awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, saveReadMark, sessionBoundSends, statusDone, unreadGroups, type ReadMark } from './sessionChat'
+import { awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
@@ -404,7 +404,9 @@ onBeforeUnmount(() => {
 })
 
 // ---------- Delivery status of the viewer's own posts (sender only, AEON-280) ----------
-// One batched read; delivery events re-read it live, finished posts are not asked again.
+// Outstanding sends are asked in batches the status route will accept. A
+// delivered receipt on screen is asked again so it can become read, after
+// every send that still has no terminal receipt.
 const statuses = ref<Record<string, MessageStatus>>({})
 // Session-bound sends from the loaded thread. Receipts, not memory, decide
 // which of them still wait on the inbox hook, so a reload matches the server.
@@ -415,17 +417,18 @@ function refreshReceipts() {
   if (!props.active || !me.value) return
   if (statusFlight) { statusAgain = true; return }
   const visible = current.value.filter(m => m.sender_principal_id === me.value).slice(-30).map(m => m.id)
-  // Newest 100: the status route rejects a longer list. Bound ids stay in the
-  // outstanding set even when this read has to leave an older one for later.
-  const todo = [...new Set([...visible, ...boundHookIds.value])].filter(id => !statusDone(statuses.value[id])).slice(-100)
-  if (!todo.length) return
+  const batches = receiptQueryBatches(boundHookIds.value, visible, statuses.value)
+  if (!batches.length) return
   const session = s.value.id
-  statusFlight = messageStatuses(todo).then(page => {
-    if (s.value.id !== session) return
-    const next = { ...statuses.value }
-    for (const item of page.items) next[item.message_id] = item
-    statuses.value = next
-  }).catch(() => { /* The status simply stays as it was. */ }).finally(() => {
+  statusFlight = (async () => {
+    for (const ids of batches) {
+      const page = await messageStatuses(ids)
+      if (s.value.id !== session) return
+      const next = { ...statuses.value }
+      for (const item of page.items) next[item.message_id] = item
+      statuses.value = next
+    }
+  })().catch(() => { /* The status simply stays as it was. */ }).finally(() => {
     statusFlight = undefined
     if (statusAgain) { statusAgain = false; refreshReceipts() }
   })

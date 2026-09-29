@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, saveReadMark, saveTab, sessionBoundSends, statusDone, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
+import { awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, receiptBatchLimit, receiptQueryBatches, saveReadMark, saveTab, sessionBoundSends, statusDone, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
 import type { HarnessSession } from '../src/lib/agents.ts'
 import { collapseMessages } from '../src/components/agents/sessionMessages.ts'
 import type { ProjectMessage } from '../src/lib/agents.ts'
@@ -162,6 +162,68 @@ test('a reload rebuilds the hook wait from the loaded thread and its receipts (A
   const after = hookReceipts(ids, { fail, done, wait: { ...done, message_id: 'wait' } })
   assert.deepEqual(after.waiting, [])
   assert.equal(hookNoticeVisible(true, after), false)
+})
+
+test('101 and 250 delivered sends are all queried within two refreshes (AEON-369)', () => {
+  const delivered = (id: string) => ({ message_id: id, status: 'delivered' as const, delivered_at: '2026-09-29T06:09:00Z', read_at: null, deliver_by: '2026-09-29T06:15:00Z' })
+  const idsOf = (count: number) => Array.from({ length: count }, (_, i) => `m${i + 1}`)
+  for (const count of [101, 250]) {
+    const ids = idsOf(count)
+    const visible = ids.slice(-30)
+    const first = receiptQueryBatches(ids, visible, {})
+    assert.equal(first.length, 1)
+    assert.equal(first[0]!.length, receiptBatchLimit)
+    assert.ok(first.every(batch => batch.length <= receiptBatchLimit))
+    const known = Object.fromEntries(first.flat().map(id => [id, delivered(id)]))
+    assert.equal(hookNoticeVisible(true, hookReceipts(ids, known)), true)
+    const second = receiptQueryBatches(ids, visible, known)
+    assert.ok(second.length > 0)
+    assert.ok(second.every(batch => batch.length <= receiptBatchLimit && batch.length > 0))
+    const seen = new Set([...first.flat(), ...second.flat()])
+    assert.equal(seen.size, count)
+    const after = { ...known }
+    for (const id of second.flat()) after[id] = delivered(id)
+    assert.equal(hookNoticeVisible(true, hookReceipts(ids, after)), false)
+    // A delivered receipt already on screen follows every send that still has no receipt.
+    const flat = second.flat()
+    const left = ids.filter(id => !known[id])
+    assert.ok(left.every(id => flat.includes(id)))
+    const firstDelivered = flat.findIndex(id => known[id])
+    if (firstDelivered >= 0) assert.ok(left.every(id => flat.indexOf(id) < firstDelivered))
+    assert.ok(visible.every(id => seen.has(id)))
+  }
+  const hundred = idsOf(100)
+  const once = receiptQueryBatches(hundred, hundred.slice(-30), {})
+  assert.deepEqual(once, [hundred])
+  const covered = Object.fromEntries(once.flat().map(id => [id, delivered(id)]))
+  assert.equal(hookNoticeVisible(true, hookReceipts(hundred, covered)), false)
+})
+
+test('a delivered receipt does not take the batch from a send that has none (AEON-369)', () => {
+  const base = { delivered_at: '2026-09-29T06:09:00Z', read_at: null, deliver_by: '2026-09-29T06:15:00Z' }
+  const ids = ['pending', ...Array.from({ length: 100 }, (_, i) => `d${i}`)]
+  const statuses = Object.fromEntries(ids.slice(1).map(id => [id, { ...base, message_id: id, status: 'delivered' as const }]))
+  const visible = ids.slice(-30)
+  const batches = receiptQueryBatches(ids, visible, statuses)
+  const flat = batches.flat()
+  assert.equal(flat[0], 'pending')
+  assert.ok(batches.every(batch => batch.length <= receiptBatchLimit))
+  assert.ok(visible.every(id => flat.includes(id)))
+  const closed = receiptQueryBatches(
+    ['read', 'failed', 'shown', 'sent', 'missing'],
+    ['read', 'failed', 'shown'],
+    {
+      read: { ...base, message_id: 'read', status: 'read', delivered_at: base.delivered_at, read_at: '2026-09-29T06:10:00Z' },
+      failed: { ...base, message_id: 'failed', status: 'not_delivered', delivered_at: null, reason: 'deadline' },
+      shown: { ...base, message_id: 'shown', status: 'delivered' },
+      sent: { ...base, message_id: 'sent', status: 'sent', delivered_at: null },
+    },
+  ).flat()
+  assert.deepEqual(closed.filter(id => id === 'read' || id === 'failed'), [])
+  assert.ok(closed.includes('sent') && closed.includes('missing') && closed.includes('shown'))
+  assert.ok(closed.indexOf('sent') < closed.indexOf('shown'))
+  assert.deepEqual(receiptQueryBatches([], [], {}), [])
+  assert.deepEqual(receiptQueryBatches(['a', 'a'], ['a'], {}), [['a']])
 })
 
 test('near the bottom allows a small slack', () => {
