@@ -20,10 +20,10 @@ const outcomes = {
       payload: { result: 'fail', name: 'web' },
     },
     {
-      id: 'o-3', kind: 'release_included', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos',
+      id: 'o-3', kind: 'released', ticket_node_id: 'n-1', ticket_key: 'PHAROS-11', project_id: 'p-pharos',
       session_id: null, rules_version: null, release_node_id: 'rel-1', release_key: 'PHAROS-90', release_title: 'September release',
       source: 'automatic', actor_principal_id: 'a-1', recorded_at: new Date(at - 5 * 60 * 60_000).toISOString(), idempotency_key: 'rel-1',
-      payload: { release_node_id: 'rel-1' },
+      payload: { version: '260929120000.0.0' },
     },
   ],
 }
@@ -48,7 +48,8 @@ test('outcomes stay inside the ticket panel at phone and desk widths', async ({ 
     await expect(section).toBeVisible()
     await expect(section).toContainText('Review passed')
     await expect(section).toContainText('CI failed')
-    await expect(section).toContainText('Included in September release')
+    await expect(section).toContainText('Released in September release')
+    await expect(section).toContainText('260929120000.0.0')
     await expect(section).not.toContainText('rel-1')
     await expect(section.locator('.detail').first()).toHaveAttribute('title', /naming mismatch/)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)

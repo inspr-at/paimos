@@ -53,9 +53,9 @@ function lineTitle(kind: string, payload: Record<string, unknown>, releaseTitle:
       return 'Reverted'
     case 'ticket_done':
       return marked(text(payload.to_state))
-    case 'release_included': {
+    case 'released': {
       const title = (releaseTitle ?? '').trim()
-      return title ? `Included in ${title}` : 'Included in a release'
+      return title ? `Released in ${title}` : 'Released'
     }
     default: {
       const words = kind.replace(/[_-]+/g, ' ').trim()
@@ -74,6 +74,8 @@ function detailParts(kind: string, payload: Record<string, unknown>): string[] {
       return [pullRequest(payload), text(payload.name), text(payload.summary)]
     case 'revert':
       return [text(payload.target), text(payload.summary)]
+    case 'released':
+      return [text(payload.version)]
     default:
       return []
   }

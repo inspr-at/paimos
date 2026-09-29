@@ -5247,7 +5247,7 @@ paths:
     get:
       operationId: listOutcomes
       summary: List objective outcome events
-      description: Returns append-only outcome events visible in the caller's projects. At least one of ticket_node_id, session_id or rules_version is required. Filters combine. rules_version matches exactly and skips rows with no rules version. Ticket completion and release inclusion are included; they are recorded automatically.
+      description: Returns append-only outcome events visible in the caller's projects. At least one of ticket_node_id, session_id or rules_version is required. Filters combine. rules_version matches exactly and skips rows with no rules version. Ticket completion and release publication are included; they are recorded automatically.
       security: *auth
       parameters:
         - {name: ticket_node_id, in: query, schema: {type: string}, description: Ticket node id or issue key}
@@ -5262,7 +5262,7 @@ paths:
     post:
       operationId: recordOutcome
       summary: Record a review, fix round, CI result or revert
-      description: "Requires outcome.write in the ticket's project. Agents also need that scope on the key. Idempotency-Key replays the same outcome when the body matches and conflicts when it does not. Keys starting with auto: are reserved. ticket_done and release_included cannot be posted."
+      description: "Requires outcome.write in the ticket's project. Agents also need that scope on the key. Idempotency-Key replays the same outcome when the body matches and conflicts when it does not. Keys starting with auto: are reserved. ticket_done and released cannot be posted."
       security: *auth
       parameters:
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}
@@ -8772,7 +8772,7 @@ components:
       required: [id, kind, ticket_node_id, ticket_key, project_id, source, payload, actor_principal_id, recorded_at, idempotency_key]
       properties:
         id: {type: string, format: uuid}
-        kind: {type: string, enum: [review_verdict, fix_round, ci_result, revert, ticket_done, release_included]}
+        kind: {type: string, enum: [review_verdict, fix_round, ci_result, revert, ticket_done, released]}
         ticket_node_id: {type: string, format: uuid}
         ticket_key: {type: string}
         project_id: {type: string, format: uuid}

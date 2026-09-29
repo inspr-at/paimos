@@ -1,9 +1,10 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- AEON-286. Append-only objective outcomes of agent work.
 -- rules_version stays null until a rules version is recorded (AEON-249).
--- Ticket completion and release inclusion are captured here so every writer
--- is covered. A missing actor skips the row. A visibility failure must not
--- roll back the ticket or membership write.
+-- Ticket completion and release publication are captured here so every writer
+-- is covered. Assigning a ticket to a planned release records nothing.
+-- A missing actor skips the row. A visibility failure must not roll back
+-- the ticket write or the snapshot capture.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -11,7 +12,7 @@ CREATE TABLE outcome_events (
     tenant_id uuid NOT NULL REFERENCES tenants(id),
     id uuid NOT NULL DEFAULT gen_random_uuid(),
     kind text NOT NULL CHECK (kind IN (
-        'review_verdict', 'fix_round', 'ci_result', 'revert', 'ticket_done', 'release_included')),
+        'review_verdict', 'fix_round', 'ci_result', 'revert', 'ticket_done', 'released')),
     project_id uuid NOT NULL,
     ticket_node_id uuid NOT NULL,
     session_id uuid,
@@ -31,7 +32,7 @@ CREATE TABLE outcome_events (
     FOREIGN KEY (tenant_id, release_node_id) REFERENCES nodes(tenant_id, id),
     CHECK (char_length(idempotency_key) BETWEEN 8 AND 200),
     CHECK (rules_version IS NULL OR (char_length(rules_version) BETWEEN 1 AND 128 AND rules_version !~ '[[:cntrl:]]')),
-    CHECK ((kind = 'release_included') = (release_node_id IS NOT NULL))
+    CHECK ((kind = 'released') = (release_node_id IS NOT NULL))
 );
 
 CREATE INDEX outcome_events_ticket_idx ON outcome_events (tenant_id, ticket_node_id, recorded_at DESC, id DESC);
@@ -110,55 +111,90 @@ CREATE TRIGGER outcome_events_ticket_done
     WHEN (NEW.state IN ('done', 'accepted', 'delivered'))
     EXECUTE FUNCTION aeon_record_ticket_done();
 
-CREATE FUNCTION aeon_record_release_included() RETURNS trigger
+-- Publication is the release-note snapshot insert: the journey freeze trigger
+-- writes one when a release becomes released, and a historical manifest
+-- capture writes the other. Membership edits before that insert nothing.
+CREATE FUNCTION aeon_record_released_snapshot() RETURNS trigger
 LANGUAGE plpgsql
 SECURITY INVOKER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
     actor uuid;
+    release_id uuid;
+    version text;
+    scheme text;
+    ticket jsonb;
+    ticket_id uuid;
 BEGIN
-    IF TG_OP = 'UPDATE' THEN
-        IF OLD.release_node_id IS NOT DISTINCT FROM NEW.release_node_id THEN
-            RETURN NEW;
-        END IF;
-    END IF;
-    IF NEW.release_node_id IS NULL OR NEW.project_node_id IS NULL THEN
-        RETURN NEW;
-    END IF;
     SELECT (aeon_current_principals())[1] INTO actor;
     IF actor IS NULL OR NOT EXISTS (
         SELECT 1 FROM principals p WHERE p.tenant_id = NEW.tenant_id AND p.id = actor
     ) THEN
         RETURN NEW;
     END IF;
-    BEGIN
-        INSERT INTO outcome_events (
-            tenant_id, kind, project_id, ticket_node_id, release_node_id,
-            idempotency_key, actor_principal_id, source, payload, request_digest
-        ) VALUES (
-            NEW.tenant_id,
-            'release_included',
-            NEW.project_node_id,
-            NEW.ticket_node_id,
-            NEW.release_node_id,
-            'auto:release_included:' || NEW.ticket_node_id::text || ':' || NEW.release_node_id::text || ':' || clock_timestamp()::text,
-            actor,
-            'automatic',
-            jsonb_build_object('release_node_id', NEW.release_node_id),
-            decode(md5('release_included' || NEW.ticket_node_id::text || NEW.release_node_id::text || clock_timestamp()::text), 'hex')
-        )
-        ON CONFLICT (tenant_id, idempotency_key) DO NOTHING;
-    EXCEPTION
-        WHEN insufficient_privilege THEN
-            RETURN NEW;
-    END;
+    IF TG_TABLE_NAME = 'journey_release_note_snapshots' THEN
+        release_id := NEW.release_node_id;
+        version := NEW.snapshot->>'version';
+        scheme := NEW.snapshot->>'version_scheme';
+    ELSE
+        BEGIN
+            release_id := NULLIF(NEW.snapshot->>'release_node_id', '')::uuid;
+        EXCEPTION
+            WHEN invalid_text_representation THEN
+                RETURN NEW;
+        END;
+        version := coalesce(NEW.snapshot->>'version', NEW.version);
+        scheme := NEW.snapshot->>'version_scheme';
+    END IF;
+    IF release_id IS NULL OR jsonb_typeof(NEW.snapshot->'tickets') IS DISTINCT FROM 'array' THEN
+        RETURN NEW;
+    END IF;
+    FOR ticket IN
+        SELECT value FROM jsonb_array_elements(NEW.snapshot->'tickets')
+    LOOP
+        BEGIN
+            ticket_id := NULLIF(ticket->>'id', '')::uuid;
+        EXCEPTION
+            WHEN invalid_text_representation THEN
+                CONTINUE;
+        END;
+        IF ticket_id IS NULL OR NOT EXISTS (
+            SELECT 1 FROM nodes n
+            WHERE n.tenant_id = NEW.tenant_id AND n.id = ticket_id AND n.project_id = NEW.project_node_id
+        ) THEN
+            CONTINUE;
+        END IF;
+        BEGIN
+            INSERT INTO outcome_events (
+                tenant_id, kind, project_id, ticket_node_id, release_node_id,
+                idempotency_key, actor_principal_id, source, payload, request_digest
+            ) VALUES (
+                NEW.tenant_id,
+                'released',
+                NEW.project_node_id,
+                ticket_id,
+                release_id,
+                'auto:released:' || ticket_id::text || ':' || release_id::text || ':' || clock_timestamp()::text,
+                actor,
+                'automatic',
+                jsonb_strip_nulls(jsonb_build_object(
+                    'version', NULLIF(btrim(coalesce(version, '')), ''),
+                    'version_scheme', NULLIF(btrim(coalesce(scheme, '')), '')
+                )),
+                decode(md5('released' || ticket_id::text || release_id::text || coalesce(version, '') || clock_timestamp()::text), 'hex')
+            )
+            ON CONFLICT (tenant_id, idempotency_key) DO NOTHING;
+        EXCEPTION
+            WHEN insufficient_privilege THEN
+                CONTINUE;
+        END;
+    END LOOP;
     RETURN NEW;
 END;
 $$;
 
-CREATE TRIGGER outcome_events_release_included
-    AFTER INSERT OR UPDATE OF release_node_id ON journey_tickets
+CREATE TRIGGER outcome_events_released_snapshot
+    AFTER INSERT ON journey_release_note_snapshots
     FOR EACH ROW
-    WHEN (NEW.release_node_id IS NOT NULL)
-    EXECUTE FUNCTION aeon_record_release_included();
+    EXECUTE FUNCTION aeon_record_released_snapshot();

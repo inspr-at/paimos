@@ -194,7 +194,7 @@ func testOutcomeCapture(t *testing.T, d *dbtest.DB) {
 	}
 	var leaked int
 	if err := db.InTenant(tenant.WithPrincipal(t.Context(), person), d.App, person.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type IN ('ticket_done','release_included')`).Scan(&leaked)
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type IN ('ticket_done','released','release_included')`).Scan(&leaked)
 	}); err != nil || leaked != 0 {
 		t.Fatalf("core events %d %v", leaked, err)
 	}
@@ -210,37 +210,36 @@ func testOutcomeCapture(t *testing.T, d *dbtest.DB) {
 		_, err := tx.Exec(t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,walker_position,source) VALUES($1,$2,$3,0,'manual')`, person.TenantID, ticket, project)
 		return err
 	})
-	if n := countOutcomes(t, d, person, ticket, "release_included"); n != 0 {
+	if n := countOutcomes(t, d, person, ticket, "released"); n != 0 {
 		t.Fatalf("backlog recorded %d", n)
 	}
 	inTenant(t, d, person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE journey_tickets SET release_node_id=$1 WHERE ticket_node_id=$2`, release, ticket)
 		return err
 	})
-	inTenant(t, d, person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE journey_tickets SET walker_position=1 WHERE ticket_node_id=$1`, ticket)
-		return err
-	})
-	if n := countOutcomes(t, d, person, ticket, "release_included"); n != 1 {
-		t.Fatalf("inclusion recorded %d", n)
+	if n := countOutcomes(t, d, person, ticket, "released"); n != 0 {
+		t.Fatalf("planned assignment recorded %d", n)
+	}
+	publishRelease(t, d, person, release, "260929120000.0.0")
+	if versions := releasedVersions(t, d, person, ticket); len(versions) != 1 || versions[0] != "260929120000.0.0" {
+		t.Fatalf("first publication: %v", versions)
+	}
+	if titles := releasedTitles(t, d, person); len(titles) != 1 || !titles["September release"] {
+		t.Fatalf("first publication titles: %v", titles)
 	}
 	inTenant(t, d, person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE journey_tickets SET release_node_id=$1 WHERE ticket_node_id=$2`, second, ticket)
 		return err
 	})
-	if n := countOutcomes(t, d, person, ticket, "release_included"); n != 2 {
-		t.Fatalf("move recorded %d", n)
+	if n := countOutcomes(t, d, person, ticket, "released"); n != 1 {
+		t.Fatalf("move after freeze recorded %d", n)
 	}
-	listed := callAs(t, New(d.App), person, http.MethodGet, "/api/outcomes?ticket_node_id=CAP-2", "")
-	page := decodePage(t, listed.Body.Bytes())
-	titles := map[string]bool{}
-	for _, item := range page {
-		if item.Kind == "release_included" && item.ReleaseTitle != nil {
-			titles[*item.ReleaseTitle] = true
-		}
+	publishRelease(t, d, person, second, "260929180000.0.0")
+	if versions := releasedVersions(t, d, person, ticket); len(versions) != 2 || versions[0] != "260929120000.0.0" || versions[1] != "260929180000.0.0" {
+		t.Fatalf("second publication: %v", versions)
 	}
-	if listed.Code != http.StatusOK || !titles["September release"] || !titles["October release"] {
-		t.Fatalf("release titles: %d %+v", listed.Code, page)
+	if titles := releasedTitles(t, d, person); !titles["September release"] || !titles["October release"] {
+		t.Fatalf("publication titles: %v", titles)
 	}
 }
 
@@ -274,8 +273,8 @@ func TestOutcomeReadIsPerProject(t *testing.T) {
 			tenant_id, kind, project_id, ticket_node_id, rules_version, idempotency_key,
 			actor_principal_id, source, payload, request_digest
 		) VALUES
-			($1,'ci_result',$2,$3,'rv-leak','leak-a',$6,'recorded','{"result":"pass"}'::jsonb, decode(md5('leak-a'),'hex')),
-			($1,'ci_result',$4,$5,'rv-leak','leak-b',$6,'recorded','{"result":"fail"}'::jsonb, decode(md5('leak-b'),'hex'))`,
+			($1,'ci_result',$2,$3,'rv-leak','leak-read-a',$6,'recorded','{"result":"pass"}'::jsonb, decode(md5('leak-read-a'),'hex')),
+			($1,'ci_result',$4,$5,'rv-leak','leak-read-b',$6,'recorded','{"result":"fail"}'::jsonb, decode(md5('leak-read-b'),'hex'))`,
 			owner.TenantID, projectA, ticketA, projectB, ticketB, owner.ID)
 		return err
 	})
@@ -418,6 +417,53 @@ func agentKey(t *testing.T, d *dbtest.DB, tenantID, name string, scopes []string
 		t.Fatal(err)
 	}
 	return id, token
+}
+
+func publishRelease(t *testing.T, d *dbtest.DB, p tenant.Principal, release, version string) {
+	t.Helper()
+	inTenant(t, d, p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE journey_releases
+			SET state='released', released_at=clock_timestamp(), version_scheme='inspr-calendar-v2', version=$2
+			WHERE release_node_id=$1`, release, version)
+		return err
+	})
+}
+
+func releasedVersions(t *testing.T, d *dbtest.DB, p tenant.Principal, ticket string) []string {
+	t.Helper()
+	var versions []string
+	inTenant(t, d, p, func(tx pgx.Tx) error {
+		rows, err := tx.Query(t.Context(), `SELECT coalesce(payload->>'version','') FROM outcome_events
+			WHERE ticket_node_id=$1 AND kind='released' ORDER BY recorded_at, id`, ticket)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var version string
+			if err := rows.Scan(&version); err != nil {
+				return err
+			}
+			versions = append(versions, version)
+		}
+		return rows.Err()
+	})
+	return versions
+}
+
+func releasedTitles(t *testing.T, d *dbtest.DB, p tenant.Principal) map[string]bool {
+	t.Helper()
+	listed := callAs(t, New(d.App), p, http.MethodGet, "/api/outcomes?ticket_node_id=CAP-2", "")
+	if listed.Code != http.StatusOK {
+		t.Fatalf("release list: %d %s", listed.Code, listed.Body.String())
+	}
+	titles := map[string]bool{}
+	for _, item := range decodePage(t, listed.Body.Bytes()) {
+		if item.Kind == "released" && item.ReleaseTitle != nil {
+			titles[*item.ReleaseTitle] = true
+		}
+	}
+	return titles
 }
 
 func countOutcomes(t *testing.T, d *dbtest.DB, p tenant.Principal, ticket, kind string) int {
