@@ -30,6 +30,10 @@ func Build(ctx context.Context, in Request) (Proposal, error) {
 	if len(in.Files) == 0 {
 		return Proposal{}, fmt.Errorf("at least one explicit file is required")
 	}
+	overrides, err := layerOverrides(in.Layers)
+	if err != nil {
+		return Proposal{}, err
+	}
 	seenPath := map[string]bool{}
 	var files []SourceFile
 	var raws []built
@@ -61,6 +65,10 @@ func Build(ctx context.Context, in Request) (Proposal, error) {
 		if !contextAllowed(in.Context, file.Trust) {
 			return Proposal{}, fmt.Errorf("%w: %s is %s, plan context is %s", ErrMixedContext, file.Base, file.Trust, in.Context)
 		}
+		if layer, ok := overrides[clean]; ok {
+			file.Layer = layer
+			delete(overrides, clean)
+		}
 		parsed, err := parseDocument(file, body, section)
 		if err != nil {
 			return Proposal{}, err
@@ -71,6 +79,9 @@ func Build(ctx context.Context, in Request) (Proposal, error) {
 			raws = append(raws, built{file: file, rule: rule, lines: parsed.lines})
 		}
 	}
+	if len(overrides) > 0 {
+		return Proposal{}, fmt.Errorf("layer mapping does not match an explicit file")
+	}
 	proposal := assemble(in.Context, section, files, raws, unresolved)
 	proposal.PlanID = planID(proposal)
 	proposal.Adapter = AdapterReport{Ready: true, Reason: "AR1 draft mapping available; API authorization and explicit set/revision required"}
@@ -78,6 +89,29 @@ func Build(ctx context.Context, in Request) (Proposal, error) {
 		proposal.Adapter = AdapterReport{Reason: err.Error()}
 	}
 	return proposal, nil
+}
+
+func layerOverrides(in map[string]Layer) (map[string]Layer, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]Layer, len(in))
+	for raw, layer := range in {
+		switch layer {
+		case LayerCompany, LayerProject, LayerPerson, LayerAgent:
+		default:
+			return nil, fmt.Errorf("unknown layer %q", layer)
+		}
+		clean, err := cleanPath(raw)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := out[clean]; ok {
+			return nil, fmt.Errorf("duplicate layer mapping")
+		}
+		out[clean] = layer
+	}
+	return out, nil
 }
 
 func validContext(c TrustContext) bool {
@@ -185,6 +219,7 @@ func assemble(plan TrustContext, section string, files []SourceFile, raws []buil
 			rules = append(rules, rule)
 		}
 	}
+	contradictions = append(contradictions, crossLayerContradictions(rules)...)
 	slices.SortFunc(rules, func(a, b Rule) int {
 		if layerRank(a.Layer) != layerRank(b.Layer) {
 			return layerRank(a.Layer) - layerRank(b.Layer)
@@ -213,7 +248,7 @@ func assemble(plan TrustContext, section string, files []SourceFile, raws []buil
 		}
 		return strings.Compare(a.Kind, b.Kind)
 	})
-	doc := alwaysOnDocument(rules, files)
+	doc := alwaysOnDocument(rules)
 	report := AlwaysOnReport{Bytes: len(doc), Budget: AlwaysOnBudget}
 	if report.Bytes <= AlwaysOnBudget {
 		report.Insert = true
@@ -292,11 +327,12 @@ func toRule(item built) Rule {
 		Placement:  raw.placement,
 		ExplicitID: raw.explicitID,
 		Sources: []SourceRef{{
-			Path:       item.file.Path,
-			StartLine:  raw.start,
-			EndLine:    raw.end,
-			SHA256:     hashLines(item.lines, raw.start, raw.end),
-			FileSHA256: item.file.SHA256,
+			Path:        item.file.Path,
+			HeadingPath: raw.headingPath,
+			StartLine:   raw.start,
+			EndLine:     raw.end,
+			SHA256:      hashLines(item.lines, raw.start, raw.end),
+			FileSHA256:  item.file.SHA256,
 		}},
 	}
 	rule.ID = ruleID(identity, fingerprint(rule))
@@ -349,6 +385,192 @@ func differingFields(a, b Rule) []string {
 	return fields
 }
 
+// directivePhrases are matched leftmost, and a longer phrase wins a tie, so
+// "must not" stays a prohibition rather than a requirement.
+var directivePhrases = []struct {
+	polarity string
+	phrase   string
+}{
+	{"prohibit", "must not"},
+	{"prohibit", "do not"},
+	{"prohibit", "don't"},
+	{"prohibit", "never"},
+	{"prohibit", "forbidden"},
+	{"require", "always"},
+	{"require", "required"},
+	{"require", "must"},
+	{"permit", "allowed"},
+	{"permit", "may"},
+}
+
+// crossLayerContradictions reports the same action with opposing directives
+// (must/always versus never/must-not) in different layers. Tightening
+// (may versus must) is not a conflict. Rules whose roles or harnesses cannot
+// apply to the same audience are not a conflict. Heading paths are provenance,
+// not part of the action key. Precedence is not applied; both rules stay.
+func crossLayerContradictions(rules []Rule) []Contradiction {
+	type member struct {
+		rule     Rule
+		polarity string
+	}
+	groups := map[string][]member{}
+	var topics []string
+	for _, rule := range rules {
+		topic, polarity, ok := directiveTopic(rule)
+		if !ok {
+			continue
+		}
+		if _, exists := groups[topic]; !exists {
+			topics = append(topics, topic)
+		}
+		groups[topic] = append(groups[topic], member{rule, polarity})
+	}
+	var out []Contradiction
+	for _, topic := range topics {
+		members := groups[topic]
+		involved := map[string]Rule{}
+		var order []string
+		for i := range members {
+			for j := i + 1; j < len(members); j++ {
+				a, b := members[i], members[j]
+				if a.rule.Layer == b.rule.Layer || !opposed(a.polarity, b.polarity) || !audiencesOverlap(a.rule, b.rule) {
+					continue
+				}
+				for _, rule := range []Rule{a.rule, b.rule} {
+					if _, seen := involved[rule.ID]; seen {
+						continue
+					}
+					involved[rule.ID] = rule
+					order = append(order, rule.ID)
+				}
+			}
+		}
+		if len(involved) == 0 {
+			continue
+		}
+		ids := append([]string(nil), order...)
+		slices.Sort(ids)
+		layers := map[Layer]bool{}
+		var layerOrder []Layer
+		headings := map[string]bool{}
+		var headingList []string
+		for _, id := range order {
+			rule := involved[id]
+			if !layers[rule.Layer] {
+				layers[rule.Layer] = true
+				layerOrder = append(layerOrder, rule.Layer)
+			}
+			heading := rule.SetTitle
+			if heading == "" && len(rule.Sources) > 0 {
+				heading = rule.Sources[0].HeadingPath
+			}
+			if heading != "" && !headings[heading] {
+				headings[heading] = true
+				headingList = append(headingList, heading)
+			}
+		}
+		slices.SortFunc(layerOrder, func(a, b Layer) int {
+			if d := layerRank(a) - layerRank(b); d != 0 {
+				return d
+			}
+			return strings.Compare(string(a), string(b))
+		})
+		names := make([]string, len(layerOrder))
+		for i, layer := range layerOrder {
+			names[i] = string(layer)
+		}
+		slices.Sort(headingList)
+		out = append(out, Contradiction{
+			Identity: topic,
+			Kind:     "cross_layer_directive",
+			RuleIDs:  ids,
+			Fields:   []string{"directive"},
+			Note:     "same action has conflicting directives across layers; headings are provenance and layer precedence is not applied",
+			Topic:    topic,
+			Layers:   names,
+			Headings: headingList,
+		})
+	}
+	return out
+}
+
+func opposed(a, b string) bool {
+	return (a == "require" && b == "prohibit") || (a == "prohibit" && b == "require")
+}
+
+func audiencesOverlap(a, b Rule) bool {
+	return selectorsOverlap(a.Roles, b.Roles) && selectorsOverlap(a.Harnesses, b.Harnesses)
+}
+
+func selectorsOverlap(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return true
+	}
+	for _, item := range a {
+		if slices.Contains(b, item) {
+			return true
+		}
+	}
+	return false
+}
+
+func directiveTopic(rule Rule) (topic, polarity string, ok bool) {
+	text := directiveSurface(rule.Text)
+	at, n, polarity := -1, 0, ""
+	for _, phrase := range directivePhrases {
+		i := strings.Index(text, phrase.phrase)
+		if i < 0 || !phraseBounded(text, i, len(phrase.phrase)) {
+			continue
+		}
+		if at < 0 || i < at || (i == at && len(phrase.phrase) > n) {
+			at, n, polarity = i, len(phrase.phrase), phrase.polarity
+		}
+	}
+	if at < 0 {
+		return "", "", false
+	}
+	residue := collapseSpace(text[:at] + " " + text[at+n:])
+	residue = strings.Trim(residue, ".,;:!?\"'`*-_")
+	residue = collapseSpace(residue)
+	if residue == "" {
+		return "", "", false
+	}
+	return residue, polarity, true
+}
+
+func directiveSurface(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, "🔴", "")
+	s = strings.ReplaceAll(s, "🟡", "")
+	return collapseSpace(stripEmphasis(s))
+}
+
+// stripEmphasis removes CommonMark emphasis by node and keeps code-span text.
+// The backticks that delimit a span are omitted at any run length, so a star
+// or underscore inside the span stays part of the action.
+func stripEmphasis(s string) string {
+	return renderMarkdownInline(s)
+}
+
+func collapseSpace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func phraseBounded(s string, at, n int) bool {
+	if at > 0 && isTopicWord(s[at-1]) {
+		return false
+	}
+	end := at + n
+	if end < len(s) && isTopicWord(s[end]) {
+		return false
+	}
+	return true
+}
+
+func isTopicWord(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
+}
+
 func heuristicsFor(rules []Rule) []HeuristicMatch {
 	type bucket struct {
 		ids        []string
@@ -391,39 +613,37 @@ func heuristicsFor(rules []Rule) []HeuristicMatch {
 	return out
 }
 
-func alwaysOnDocument(rules []Rule, files []SourceFile) string {
+// sessionHeader and sessionRuleLine match rules.SessionHeader and rules.ruleLine.
+// import_budget_test locks this projection to rules.RenderedBody.
+const sessionHeader = "# Aeon session rules\n\n"
+
+func sessionRuleLine(identity, text string) string {
+	return fmt.Sprintf("- [%s] %s\n", identity, text)
+}
+
+// alwaysOnDocument counts the session file Merge would write: header plus
+// identity and text for every enabled rule. Pack bodies stay in details and
+// are not part of this projection. Disabled rules are omitted.
+func alwaysOnDocument(in []Rule) string {
+	type row struct{ id, text string }
+	rows := make([]row, 0, len(in))
+	for _, rule := range in {
+		if !rule.Enabled {
+			continue
+		}
+		if rule.Placement != PlacementAlwaysOn && rule.Placement != PlacementOnDemand {
+			continue
+		}
+		rows = append(rows, row{importedIdentity(rule.Identity), rule.Text})
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	slices.SortFunc(rows, func(a, b row) int { return strings.Compare(a.id, b.id) })
 	var b strings.Builder
-	for _, file := range files {
-		if file.Placement != PlacementOnDemand {
-			continue
-		}
-		n := 0
-		for _, rule := range rules {
-			for _, source := range rule.Sources {
-				if source.Path == file.Path {
-					n++
-					break
-				}
-			}
-		}
-		fmt.Fprintf(&b, "on-demand: %s (%d rules)\n", file.Base, n)
-	}
-	var sets []string
-	grouped := map[string][]Rule{}
-	for _, rule := range rules {
-		if rule.Placement != PlacementAlwaysOn {
-			continue
-		}
-		if _, ok := grouped[rule.Set]; !ok {
-			sets = append(sets, rule.Set)
-		}
-		grouped[rule.Set] = append(grouped[rule.Set], rule)
-	}
-	for _, set := range sets {
-		fmt.Fprintf(&b, "## %s\n", set)
-		for _, rule := range grouped[set] {
-			fmt.Fprintf(&b, "- %s\n", rule.Text)
-		}
+	b.WriteString(sessionHeader)
+	for _, row := range rows {
+		b.WriteString(sessionRuleLine(row.id, row.text))
 	}
 	return b.String()
 }
