@@ -253,12 +253,14 @@ export function releaseStory(r: Pick<Release, 'notes' | 'changes'>, locale?: str
   }
   return { benefits, fixes, commits }
 }
-// A short name for a release in toasts and lists: its theme, else its benefit
-// pills, else its tidied Git headline.
-export function releaseTitle(r: Pick<Release, 'headline' | 'tickets' | 'changes' | 'notes' | 'presentation'>, locale?: string | null) {
+// A short name for a release in toasts and lists: its theme (or headline), else
+// its first benefit pill, else nothing, so callers show only version and date.
+// The Git tag message is evidence and never a name outside Evidence.
+export function releaseTitle(r: Pick<Release, 'changes' | 'notes' | 'presentation'>, locale?: string | null) {
   const presented = localizedPresentation(r, locale)
   if (presented) return presented.theme || presented.headline
-  return displayHeadline(r, locale)
+  const story = releaseStory(r, locale)
+  return [...story.benefits, ...story.fixes][0]?.label ?? ''
 }
 // The rail's second line: the theme, else the benefit pills. Git tag headlines
 // are evidence, not names, so they are not shown there.

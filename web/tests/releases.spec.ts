@@ -144,7 +144,11 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(compare.locator('.facts')).toContainText('2 releases')
   await expect(compare.locator('.facts')).toContainText('3 tickets')
   await expect(compare.locator('.changes')).toContainText('Other changes')
-  await expect(compare.getByRole('region', { name: 'Releases in this range' }).getByRole('listitem')).toHaveText([/Wide lists and columns$/, /Retry a busy BEGIN in release acceptance$/])
+  // AEON-305: no tag message outside Evidence; without a theme or benefit a release shows its version and date.
+  const included = compare.getByRole('region', { name: 'Releases in this range' }).getByRole('listitem')
+  await expect(included).toHaveCount(2)
+  await expect(included).not.toContainText(['Wide lists and columns', 'Retry a busy BEGIN in release acceptance'])
+  await expect(included.locator('.inc-date')).toHaveCount(2)
   await compare.getByRole('button', { name: 'Swap' }).click()
   await expect(compare.locator('.facts')).toContainText('2 releases')
   await page.keyboard.press('Escape')
@@ -252,7 +256,9 @@ test('a newer version on the server: a toast offers what is new and a reload', a
   await expect(pill(page)).toHaveAccessibleName(new RegExp(`version ${escaped(history.releases[1].version)}`))
   state.server = history.current
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  const toast = page.locator('.toast').filter({ hasText: `PAIMOS AEON was updated to ${history.current}: Time entry editing` })
+  // AEON-305: without a theme or benefit the toast names only the version, never the tag message.
+  const toast = page.locator('.toast').filter({ hasText: `PAIMOS AEON was updated to ${history.current}` })
+  await expect(toast).not.toContainText('Time entry editing')
   await expect(toast).toBeVisible()
   await expect(toast.getByRole('button', { name: 'Reload' })).toBeVisible()
   await toast.getByRole('button', { name: 'What’s new' }).click()

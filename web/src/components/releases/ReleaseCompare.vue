@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { compare, releasedAt, releaseTitle, span, type Release } from '../../lib/releases'
+import { absoluteTime } from '../../lib/work'
 import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
@@ -48,7 +49,7 @@ const between = computed(() => {
       <section class="included" aria-labelledby="compare-included">
         <h3 id="compare-included" class="included-h">Releases in this range</h3>
         <ul>
-          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span class="inc-headline">{{ releaseTitle(r, locale) || 'No headline recorded' }}</span></li>
+          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span v-if="releaseTitle(r, locale)" class="inc-headline">{{ releaseTitle(r, locale) }}</span><span v-else-if="releasedAt(r)" class="inc-date">{{ absoluteTime(releasedAt(r)!) }}</span></li>
         </ul>
       </section>
       <ReleaseChanges v-if="count" :groups="result.groups" :repository="repository" :query="query" class="changes" />
@@ -80,6 +81,7 @@ const between = computed(() => {
 .included li:last-child { border-bottom: 0; }
 .inc-version { font-size: 12px; }
 .inc-headline { overflow-wrap: anywhere; }
+.inc-date { color: var(--ink-3); }
 .none, .hint { font-size: 13.5px; color: var(--ink-2); line-height: 1.7; }
 @media (max-width: 760px) { .pair { font-size: 15px; } .included li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 </style>

@@ -63,7 +63,9 @@ test('without a presentation the rail and titles never fall back to the tag mess
   const named = release({ presentation, changes: benefits.changes })
   assert.deepEqual(railLine(named), { text: 'Releases with a name', themed: true })
   assert.equal(releaseTitle(named, 'de'), 'Releases mit Namen')
-  assert.equal(releaseTitle(release({ headline: 'wide lists (AEON-74)', tickets: ['AEON-74'] })), 'Wide lists')
+  // Never the Git tag message: the first benefit pill, else nothing.
+  assert.equal(releaseTitle(release({ headline: 'Stable102', tickets: ['AEON-74'] })), '')
+  assert.equal(releaseTitle(release({ headline: 'Stable102', changes: benefits.changes })), 'Wide lists')
 })
 
 test('search finds presentation text and marks every hit', () => {
