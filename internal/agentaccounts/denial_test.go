@@ -227,7 +227,9 @@ func newDenialFixture(t *testing.T) *denialFixture {
 	callStatus(t, accountsMod(), &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"denials","harness":"codex","daemon_id":"daemon-a","label":"Main","max_parallel_runs":2}`, 201, &f.account)
 	f.restart()
 	s := capacity.DefaultSchedule()
-	s.Override = "sprint"
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
 	callStatus(t, accountsMod(), &f.person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", f.account.ID, &s, false}), 204, nil)
 	return f
 }
