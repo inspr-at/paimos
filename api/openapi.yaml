@@ -2495,6 +2495,25 @@ paths:
                   items: {type: array, items: {$ref: '#/components/schemas/InboxMessageStatus'}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
+  /inbox/feedback-recipient:
+    get:
+      operationId: getFeedbackRecipient
+      summary: Who receives feedback sent from the help menu
+      description: 'AEON-312. The longest-standing active workspace owner other than the caller; the app sends the feedback itself with sendInboxMessage. 404 when the caller is the only owner. Same permission as sending (inbox.send).'
+      security: *auth
+      responses:
+        '200':
+          description: The recipient
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [principal_id, name]
+                properties:
+                  principal_id: {type: string, format: uuid}
+                  name: {type: string}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /inbox/messages/{messageId}/receipt:
     get:
       operationId: getInboxReceipt
