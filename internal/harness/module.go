@@ -57,7 +57,10 @@ import (
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
-type Module struct{ pool *pgxpool.Pool }
+type Module struct {
+	pool           *pgxpool.Pool
+	ownershipClock func(context.Context, pgx.Tx) (time.Time, error)
+}
 
 var _ httpapi.Module = (*Module)(nil)
 
@@ -827,7 +830,7 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		return nil, err
 	}
 	if in.ProcessOwnership != nil {
-		if err := reportOwnership(ctx, tx, s, *in.ProcessOwnership); err != nil {
+		if err := m.reportOwnership(ctx, tx, s, *in.ProcessOwnership); err != nil {
 			return nil, err
 		}
 	}

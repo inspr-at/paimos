@@ -5,11 +5,16 @@ package harness_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+func fixedOwnershipNow() time.Time {
+	return time.Date(2026, time.January, 1, 11, 0, 0, 0, time.UTC)
+}
 
 func TestRecoveryAuthorizationFencingHistoryAndRetry(t *testing.T) {
 	f := fixture(t)
@@ -98,7 +103,7 @@ func TestRecoveryAuthorizationFencingHistoryAndRetry(t *testing.T) {
 }
 
 func TestRecoveryClosesControlsAndPreservesOtherGenerations(t *testing.T) {
-	f := fixture(t)
+	f := fixtureWithOwnershipClock(t, fixedOwnershipNow)
 	order, run := stateRun(t, f, f.project, "running", "RCV-10")
 	base := "/api/projects/" + f.project + "/harness-sessions"
 	register := func(ref, lease string) string {
@@ -136,7 +141,7 @@ func TestRecoveryClosesControlsAndPreservesOtherGenerations(t *testing.T) {
 }
 
 func TestManagedForceStopHumanConfirmationAndGenerationFences(t *testing.T) {
-	f := fixture(t)
+	f := fixtureWithOwnershipClock(t, fixedOwnershipNow)
 	order, run := stateRun(t, f, f.project, "running", "HTS-3")
 	lease := "force-managed-lease-000000000000001"
 	base := "/api/projects/" + f.project + "/harness-sessions"
@@ -230,7 +235,7 @@ func TestManagedForceStopHumanConfirmationAndGenerationFences(t *testing.T) {
 	// Offline or archived ownership cannot authorize another force, even while its
 	// process snapshot is still stored.
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET process_observed_at=clock_timestamp()-interval '2 minutes' WHERE id=$1`, id)
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET process_observed_at=$2 WHERE id=$1`, id, fixedOwnershipNow().Add(-2*time.Minute))
 		return err
 	})
 	v = preview()
@@ -240,6 +245,81 @@ func TestManagedForceStopHumanConfirmationAndGenerationFences(t *testing.T) {
 	body["request_id"] = uid()
 	body["expected_revision"] = v["observed_revision"]
 	expect(t, f.call(f.person, "POST", path+"/controls/force-stop", body, ""), 409)
+}
+
+func TestForceStopOwnershipFreshness(t *testing.T) {
+	// Exercise production's database clock and injected clocks on either side
+	// of the real wall clock. No sleep or host/VM clock adjustment is needed.
+	for _, year := range []int{0, 2001, 2099} {
+		name := "database"
+		now := time.Date(year, time.January, 1, 11, 0, 0, 0, time.UTC)
+		var clock func() time.Time
+		if year != 0 {
+			name = now.Format("2006")
+			clock = func() time.Time { return now }
+		}
+		t.Run(name, func(t *testing.T) {
+			f := fixtureWithOwnershipClock(t, clock)
+			if clock == nil {
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now)
+				})
+			}
+			observed := now
+			order, run := stateRun(t, f, f.project, "running", "FRC-3")
+			base := "/api/projects/" + f.project + "/harness-sessions"
+			lease := "freshness-worker-lease-000000000001"
+			w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "clock-test-host", "harness_session_ref": "freshness-session-ref-00000000001", "worker_lease": lease, "management_mode": "managed", "role": "worker", "run_id": run, "work_order_id": order, "advertised_capabilities": []string{"stop"}}, "")
+			expect(t, w, 201)
+			path := base + "/" + decode(t, w)["id"].(string)
+			// A long-running process is forceable when its ownership was just
+			// reported. Process start time is not the ownership freshness clock.
+			identity := map[string]any{"daemon_id": "clock-test-daemon", "generation": strings.Repeat("1", 32), "process_id": strings.Repeat("2", 32), "root_pid": 1234, "group_id": 1234, "started_at": now.AddDate(-10, 0, 0)}
+			beat := map[string]any{"phase": "working", "activity_sequence": 1, "process_ownership": identity}
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, lease), 200)
+			check := func(want bool) {
+				t.Helper()
+				w := f.call(f.person, "GET", path+"/recovery", nil, "")
+				expect(t, w, 200)
+				v := decode(t, w)
+				if v["force_stop_available"] != want {
+					t.Fatalf("ownership age %s: availability=%v, want %v", now.Sub(observed), v["force_stop_available"], want)
+				}
+				status := 409
+				if want {
+					status = 201
+				}
+				expect(t, f.call(f.person, "POST", path+"/controls/force-stop", map[string]any{"request_id": uid(), "expected_revision": v["observed_revision"], "confirmation": v["force_confirmation"], "reason": "Exact clock-boundary authorization"}, ""), status)
+			}
+			check(true)
+			if clock == nil {
+				return
+			}
+			w = f.call(f.person, "GET", path, nil, "")
+			expect(t, w, 200)
+			stamp, err := time.Parse(time.RFC3339Nano, decode(t, w)["process_observed_at"].(string))
+			if err != nil || !stamp.Equal(observed) {
+				t.Fatalf("ownership observation did not use injected clock: %v, %v", stamp, err)
+			}
+			for _, tc := range []struct {
+				age  time.Duration
+				want bool
+			}{{-time.Microsecond, false}, {45 * time.Second, true}, {45*time.Second + time.Microsecond, false}, {24 * time.Hour, false}} {
+				now = observed.Add(tc.age)
+				check(tc.want)
+			}
+			// Only another accepted ownership report renews the window.
+			beat["activity_sequence"] = 2
+			delete(beat, "process_ownership")
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, lease), 200)
+			check(false)
+			beat["activity_sequence"], beat["process_ownership"] = 3, identity
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, lease), 200)
+			check(true)
+			expect(t, f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "process_exited"}, lease), 200)
+			check(false)
+		})
+	}
 }
 
 func TestRecoveryProjectPermissionDoesNotReachAnotherProject(t *testing.T) {

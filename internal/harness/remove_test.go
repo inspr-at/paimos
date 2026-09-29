@@ -17,7 +17,7 @@ import (
 func TestRemoveAnyStateAndFenceGeneration(t *testing.T) {
 	for _, state := range []string{"unmanaged", "legacy-managed-offline", "pending-force", "claimed-force", "stale-revision", "stopped"} {
 		t.Run(state, func(t *testing.T) {
-			f := fixture(t)
+			f := fixtureWithOwnershipClock(t, fixedOwnershipNow)
 			base := "/api/projects/" + f.project + "/harness-sessions"
 			lease := "remove-lease-" + uid()
 			registration := map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "offline-host", "harness_session_ref": "remove-ref-" + uid(), "worker_lease": lease, "management_mode": "unmanaged", "role": "worker", "ticket_node_id": f.ticket, "work_shape": "ship"}
