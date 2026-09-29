@@ -183,27 +183,61 @@ const distance = ref(0)
 const below = computed(() => props.active ? unread.value.length : 0)
 const jump = computed(() => distance.value > 160 || (below.value > 0 && distance.value > 32))
 let stick = true, lastTop = 0, entered = false, loaded = false
+// Finger origin for a touch. A move downward (clientY grows) scrolls the thread up.
+let touchY: number | undefined
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
-// Input events run before the browser queues scroll. A marker resolved between
-// those events must not reclaim the reader's position (or the pinned bottom).
-function onScrollIntent() {
-  if (!props.active || !entered) return
+const markerPending = () => holdingMarker() || awaitingServerPlacement
+const upwardKey = (key: string) => key === 'ArrowUp' || key === 'PageUp' || key === 'Home'
+// Input runs before the browser queues scroll. Remember the reader so a marker
+// resolved in that gap cannot reclaim the position. Clear the pinned bottom
+// only for an upward scroll, or for a real scroll while that marker is still
+// pending. A tap or click never unpins.
+function claimReader() {
+  if (!props.active || !entered) return false
   userMoved = true
   awaitingServerPlacement = false
+  return true
+}
+function onWheel(event: WheelEvent) {
+  const pending = markerPending()
+  if (!claimReader()) return
+  if (event.deltaY < 0 || pending) stick = false
+}
+function onPointerDown() {
+  claimReader()
+}
+function onTouchStart(event: TouchEvent) {
+  const point = event.touches?.[0] ?? event.changedTouches?.[0]
+  touchY = point?.clientY
+  claimReader()
+}
+function onTouchMove(event: TouchEvent) {
+  const point = event.touches?.[0] ?? event.changedTouches?.[0]
+  if (!point || touchY === undefined || point.clientY <= touchY + 8) return
+  if (!claimReader()) return
   stick = false
+}
+function onTouchEnd() {
+  touchY = undefined
 }
 function onScrollKey(event: KeyboardEvent) {
   if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
   if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) return
   const target = event.target
   if (target instanceof HTMLElement && target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return
-  onScrollIntent()
+  const pending = markerPending()
+  if (!claimReader()) return
+  if (upwardKey(event.key) || pending) stick = false
 }
 function readerMoved() {
   // Also cover scrollbar/accessibility/programmatic scrolling whose scroll
   // event has not yet run. Our own placements update anchorTop synchronously.
   const el = scroller.value
-  if (placed && el && !adjusting && Math.abs(el.scrollTop - anchorTop) > 2) onScrollIntent()
+  if (placed && el && !adjusting && Math.abs(el.scrollTop - anchorTop) > 2) {
+    const pending = markerPending()
+    const upward = el.scrollTop < anchorTop - 2
+    if (claimReader() && (upward || pending)) stick = false
+  }
   return userMoved
 }
 function onScroll() {
@@ -298,6 +332,7 @@ async function enter() {
   entered = true
   userMoved = false
   placed = false
+  touchY = undefined
   await schedulePlace(readGeneration)
 }
 watch(() => props.active, active => {
@@ -407,6 +442,7 @@ watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
   userMoved = false
   placed = false
   awaitingServerPlacement = false
+  touchY = undefined
   markerHold = viewer && person.value && !local ? generation : 0
   seen?.disconnect()
   draft.value = ''; replyTo.value = null; sendError.value = ''
@@ -458,8 +494,10 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
   <div class="session-chat">
     <div class="thread-wrap">
       <div ref="scroller" class="thread-scroll" @scroll.passive="onScroll"
-        @wheel.capture.passive="onScrollIntent" @touchstart.capture.passive="onScrollIntent"
-        @pointerdown.capture.passive="onScrollIntent" @keydown.capture="onScrollKey">
+        @wheel.capture.passive="onWheel" @touchstart.capture.passive="onTouchStart"
+        @touchmove.capture.passive="onTouchMove" @touchend.capture.passive="onTouchEnd"
+        @touchcancel.capture.passive="onTouchEnd" @pointerdown.capture.passive="onPointerDown"
+        @keydown.capture="onScrollKey">
         <SessionMessages :messages="messages" :principal-id="s.agent_principal_id" :now="now"
           :can-reply="canWrite && !composeBlock && !managed" :new-from="newFrom" :new-count="newCount" :statuses="statuses" @reply="reply" />
       </div>

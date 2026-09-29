@@ -288,6 +288,122 @@ for (const intent of ['wheel', 'touchstart', 'pointerdown', 'keydown', 'displace
   })
 }
 
+// Phone width matches the regression: a tall post leaves a few hundred pixels
+// below the fold when the thread stops following.
+const tallPost = (tail: string) => `${'A tall reply arrives under the open thread.\n'.repeat(30)}${tail}`
+
+test('a tap at the bottom keeps following new posts', async ({ page }) => {
+  const { worker, data, messages } = await setup(page, { count: 16, storage: { 'aeon.session-tab': 'messages' } })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/agents/${worker.id}`)
+  const panel = panelOf(page)
+  const thread = scroller(page)
+  const gap = () => thread.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)
+  await expect(panel.locator('.msg').last()).toBeInViewport()
+  // The marker hold has released once a visible post is recorded, so the gestures
+  // below are ordinary reading, not the late-marker window.
+  await expect.poll(() => localEvent(page, worker.id)).toBeGreaterThan(200)
+  await expect.poll(gap).toBeLessThanOrEqual(32)
+  await thread.evaluate(el => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    el.dispatchEvent(new Event('touchstart', { bubbles: true }))
+    el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 120 }))
+    for (const key of ['ArrowDown', 'PageDown', 'End', ' ']) el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key }))
+  })
+  const tail = 'Followed tail stays on screen after a tap.'
+  const template = messages.at(-3)!
+  data.messages.push({ ...template, id: '3e000000-0000-4000-8000-000000000901', sent_event_id: 901, body: tallPost(tail), created_at: new Date(now + 1000).toISOString() })
+  await page.clock.runFor(21_000)
+  await expect(panel.getByText(tail)).toBeInViewport()
+  await expect.poll(gap).toBeLessThanOrEqual(32)
+  await expect(panel.getByRole('button', { name: /go to the latest/i })).toHaveCount(0)
+})
+
+test('a wheel-up unpins the thread from new posts', async ({ page }) => {
+  const { worker, data, messages } = await setup(page, { count: 16, storage: { 'aeon.session-tab': 'messages' } })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/agents/${worker.id}`)
+  const panel = panelOf(page)
+  const thread = scroller(page)
+  const gap = () => thread.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)
+  await expect(panel.locator('.msg').last()).toBeInViewport()
+  await expect.poll(() => localEvent(page, worker.id)).toBeGreaterThan(200)
+  await expect.poll(gap).toBeLessThanOrEqual(32)
+  // A scroll-to-bottom can notify late and pin the thread again. Hold those
+  // notifications, the same way the late-marker specs do, so the gesture is what
+  // decides whether the next post is followed.
+  await thread.evaluate(el => {
+    window.addEventListener('scroll', event => {
+      if (event.target === el) event.stopImmediatePropagation()
+    }, { capture: true })
+  })
+  const template = messages.at(-3)!
+  const leave = async (n: number, tail: string, gesture: (el: HTMLElement) => void) => {
+    if (n > 1) {
+      await panel.getByRole('button', { name: /go to the latest/i }).click()
+      await expect.poll(gap).toBeLessThanOrEqual(32)
+    }
+    await thread.evaluate(gesture)
+    data.messages.push({ ...template, id: `3e000000-0000-4000-8000-${String(910 + n).padStart(12, '0')}`, sent_event_id: 910 + n, body: tallPost(tail), created_at: new Date(now + n * 1000).toISOString() })
+    await page.clock.runFor(21_000)
+    await expect.poll(gap).toBeGreaterThan(160)
+    await expect(panel.getByText(tail)).not.toBeInViewport()
+    await expect(panel.getByRole('button', { name: /go to the latest/i })).toBeVisible()
+  }
+  // Wheel deltaY < 0, a finger moving down the screen, and the upward keys.
+  await leave(1, 'Wheel-up tail stays below the fold.', el => {
+    el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }))
+  })
+  await leave(2, 'Touch-up tail stays below the fold.', el => {
+    const start = new Touch({ identifier: 1, target: el, clientX: 30, clientY: 200 })
+    el.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [start], changedTouches: [start] }))
+    const moved = new Touch({ identifier: 1, target: el, clientX: 30, clientY: 280 })
+    el.dispatchEvent(new TouchEvent('touchmove', { bubbles: true, touches: [moved], changedTouches: [moved] }))
+  })
+  await leave(3, 'Page-up tail stays below the fold.', el => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'PageUp' }))
+  })
+  await leave(4, 'Arrow-up tail stays below the fold.', el => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowUp' }))
+  })
+  await leave(5, 'Home tail stays below the fold.', el => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Home' }))
+  })
+})
+
+test('a late read marker never moves a reader who scrolled up', async ({ page }) => {
+  const seen = '3e000000-0000-4000-8000-000000000120'
+  const { worker } = await setup(page, { count: 40, storage: { 'aeon.session-tab': 'messages' }, readMark: { event: 220, id: seen } })
+  let release: () => void = () => {}
+  const gate = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/read-marker', async route => {
+    if (route.request().method() === 'GET') await gate
+    await route.fallback()
+  })
+  await page.setViewportSize({ width: 1600, height: 800 })
+  try {
+    const opened = page.goto(`/agents/${worker.id}`)
+    const panel = panelOf(page)
+    const thread = scroller(page)
+    await expect(panel.locator('.msg').last()).toBeInViewport()
+    const top = await thread.evaluate(el => {
+      el.style.overflowAnchor = 'none'
+      window.addEventListener('scroll', event => {
+        if (event.target === el) event.stopImmediatePropagation()
+      }, { capture: true })
+      el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }))
+      return el.scrollTop
+    })
+    release()
+    await opened
+    await expect(panel.getByRole('separator', { name: /new/ })).toBeVisible()
+    await expect.poll(() => localEvent(page, worker.id)).toBeGreaterThanOrEqual(220)
+    await page.clock.runFor(100)
+    expect(await thread.evaluate(el => el.scrollTop)).toBe(top)
+  } finally { release() }
+})
+
 test('focusing the window picks up a read from another device', async ({ page }) => {
   const seen = '3e000000-0000-4000-8000-000000000101'
   const { worker } = await setup(page, { count: 5, readMark: { event: 201, id: seen } })
