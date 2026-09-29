@@ -104,12 +104,12 @@ func TestGuideCommandsHaveNoPlaceholders(t *testing.T) {
 	}
 	html := httptest.NewRecorder()
 	agentpairing.GuidePage(http.NotFoundHandler(), nil, origin, nixGuideFixture()).ServeHTTP(html, httptest.NewRequest("GET", "/agents/register-agent", nil))
-	for _, forbidden := range []string{"placeholder", "&lt;verified", "attacker.invalid"} {
+	for _, forbidden := range []string{"placeholder", "&lt;verified", "attacker.invalid", "Install only the matching verified release"} {
 		if strings.Contains(html.Body.String(), forbidden) {
 			t.Fatalf("HTML includes %s", forbidden)
 		}
 	}
-	for _, required := range []string{"brew install inspr-at/tap/aeon-agentd", "aeon-agentd disconnect", "brew uninstall aeon-agentd", "~/.local/bin", "Nix / Home Manager"} {
+	for _, required := range []string{"brew install inspr-at/tap/aeon-agentd", "aeon-agentd disconnect", "brew uninstall aeon-agentd", "~/.local/bin", "Nix / Home Manager", "tap’s current signed release", "helper/instance version mismatch", "does not drain or restart", "verify Touch ID on the new daemon"} {
 		if !strings.Contains(html.Body.String(), required) {
 			t.Fatalf("HTML missing %s", required)
 		}

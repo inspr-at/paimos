@@ -24,7 +24,7 @@ func ServiceExecutable(executable, home string) (string, error) {
 	packageDir := filepath.Dir(filepath.Dir(filepath.Dir(physical)))
 	cellar := filepath.Dir(packageDir)
 	if filepath.Base(physical) == "aeon-agentd" && filepath.Base(filepath.Dir(physical)) == "bin" && filepath.Base(packageDir) == "aeon-agentd" && filepath.Base(cellar) == "Cellar" {
-		stable = filepath.Join(filepath.Dir(cellar), "bin", "aeon-agentd")
+		stable = filepath.Join(filepath.Dir(cellar), "opt", "aeon-agentd", "bin", "aeon-agentd")
 	} else if filepath.IsAbs(home) && within(filepath.Join(home, ".local", "lib", "aeon"), physical) {
 		stable = filepath.Join(home, ".local", "bin", "aeon-agentd")
 	}
@@ -33,7 +33,7 @@ func ServiceExecutable(executable, home string) (string, error) {
 	}
 	resolved, err := filepath.EvalSymlinks(stable)
 	if err != nil || resolved != physical {
-		return "", errors.New("stable aeon-agentd link is missing or points to another binary; repair the Homebrew or checksum installation before pairing")
+		return "", errors.New("stable aeon-agentd link is missing or points to another binary; repair the Homebrew or checksum installation before installing a service")
 	}
 	return stable, nil
 }

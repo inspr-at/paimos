@@ -29,7 +29,7 @@ func TestStableServiceExecutable(t *testing.T) {
 				e, a, l, o, x := engineFixture(t)
 				home := e.Services.Home
 				physical := filepath.Join(home, "brew", "Cellar", "aeon-agentd", "v1", "bin", "aeon-agentd")
-				stable := filepath.Join(home, "brew", "bin", "aeon-agentd")
+				stable := filepath.Join(home, "brew", "opt", "aeon-agentd", "bin", "aeon-agentd")
 				if layout == "checksum" {
 					physical = filepath.Join(home, ".local", "lib", "aeon", "v1", goos+"-arm64", "paimos-agentd")
 					stable = filepath.Join(home, ".local", "bin", "aeon-agentd")
@@ -89,6 +89,12 @@ func TestStableServiceExecutable(t *testing.T) {
 				if got, err := ServiceExecutable(next, home); err != nil || got != stable {
 					t.Fatal("upgrade lost stable entry point")
 				}
+				// Maintenance invoked through a physical release path must still
+				// remove only its receipted unit when the installer link is gone.
+				if err := os.Rename(stable, stable+".unlinked"); err != nil {
+					t.Fatal(err)
+				}
+				e.Services.Executable = next
 				l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "draining", Active: []string{"run"}}
 				l.states[testAccount] = l.states[""]
 				p, err = e.Disconnect(t.Context(), "")
@@ -122,7 +128,7 @@ func TestStableExecutableRefusesDifferentBinary(t *testing.T) {
 	home := physicalTemp(t)
 	physical := filepath.Join(home, "brew", "Cellar", "aeon-agentd", "v1", "bin", "aeon-agentd")
 	other := filepath.Join(home, "other")
-	stable := filepath.Join(home, "brew", "bin", "aeon-agentd")
+	stable := filepath.Join(home, "brew", "opt", "aeon-agentd", "bin", "aeon-agentd")
 	serviceBinary(t, physical)
 	serviceBinary(t, other)
 	if err := os.MkdirAll(filepath.Dir(stable), 0700); err != nil {
@@ -133,6 +139,33 @@ func TestStableExecutableRefusesDifferentBinary(t *testing.T) {
 	}
 	if _, err := ServiceExecutable(physical, home); err == nil {
 		t.Fatal("unrelated binary adopted")
+	}
+}
+
+func TestHomebrewOptSurvivesUnlinkedOrConflictingBin(t *testing.T) {
+	home := physicalTemp(t)
+	prefix := filepath.Join(home, "brew")
+	physical := filepath.Join(prefix, "Cellar", "aeon-agentd", "v1", "bin", "aeon-agentd")
+	serviceBinary(t, physical)
+	if err := os.MkdirAll(filepath.Join(prefix, "opt"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Dir(filepath.Dir(physical)), filepath.Join(prefix, "opt", "aeon-agentd")); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(prefix, "opt", "aeon-agentd", "bin", "aeon-agentd")
+	for _, conflict := range []bool{false, true} {
+		if conflict {
+			serviceBinary(t, filepath.Join(prefix, "bin", "aeon-agentd"))
+		}
+		got, err := ServiceExecutable(physical, home)
+		if err != nil || got != want {
+			t.Fatalf("opt path lost when bin conflict=%t: %v", conflict, err)
+		}
+		manager := ServiceManager{Executable: got, Home: home}
+		if manager.managedExecutable() {
+			t.Fatal("verified opt directory link treated as declarative")
+		}
 	}
 }
 
