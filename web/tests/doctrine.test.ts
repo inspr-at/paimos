@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { RequestFailure } from '../src/lib/api.ts'
 import {
-  DoctrineError, doctrineMessage, proposalState, fileName, fileSummary, groupRules, lineLabel, parsePaths, pathsText, pinInput, pinLine, repoName, setHeading, shortSha, sourceText, stateLine,
-  type DoctrineRule,
+  DoctrineError, doctrineMessage, proposalState, fileName, fileSummary, groupRules, lineLabel, parsePaths, pathsText, pinInput, pinLine, repoName, setHeading, shortSha, sourceText, stateLine, outcomeMetric, outcomeDelta,
+  type DoctrineRule, type DoctrineFinding, type DoctrineMetric,
 } from '../src/lib/doctrine.ts'
 
 const COMMIT = '21b814057825c06b7f1e93f9deacdb4c549e11c6'
@@ -65,9 +65,20 @@ test('failures read as one plain line', () => {
 })
 
 test('proposal states distinguish release requests and reported machine pins', () => {
+  assert.equal(proposalState({ state: 'in_review', pinned_machines: 0, draft: true }), 'Draft')
   assert.equal(proposalState({ state: 'merged', pinned_machines: 0 }), 'Merged')
   assert.equal(proposalState({ state: 'released', pinned_machines: 0 }), 'Released')
   assert.equal(proposalState({ state: 'pinned', pinned_machines: 1 }), 'Pinned on 1 reported machine')
   assert.equal(proposalState({ state: 'pinned', pinned_machines: 3 }), 'Pinned on 3 reported machines')
   assert.equal(proposalState({ state: 'proposed', pinned_machines: 0, orphaned: true }), 'Branch left on GitHub')
+})
+
+test('outcome rates and deltas retain their units and do not invent missing measurements', () => {
+  const before = { name: 'gate:validation', value: .75 } as DoctrineMetric
+  assert.equal(outcomeMetric(before), '75%')
+  assert.equal(outcomeMetric({ ...before, name: 'fix_rounds', value: 2.5 }), '2.5 rounds')
+  assert.equal(outcomeMetric({ ...before, name: 'time_to_done', value: 180 }), '3 min')
+  assert.equal(outcomeDelta({ before, delta: -.25 } as DoctrineFinding), '−25 percentage points')
+  assert.equal(outcomeDelta({ before, delta: 0 } as DoctrineFinding), '0 percentage points')
+  assert.equal(outcomeDelta({ before } as DoctrineFinding), '')
 })

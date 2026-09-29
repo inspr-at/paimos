@@ -189,6 +189,7 @@ export interface DoctrineProposal {
   merge_commit?: string; release?: string; release_commit?: string; release_url?: string
   release_requested?: boolean; gate_ready: boolean; gate_reason?: string; pinned_machines: number; created_at: string
   branch?: string; orphaned?: boolean
+  draft?: boolean; automatic?: boolean
 }
 export interface DoctrineProposalInput {
   request_id: string; source_id: string; path: string; rule_key: string; rule_sha256: string
@@ -210,8 +211,49 @@ export const proposeDoctrineChange = (input: DoctrineProposalInput) => proposalR
 export const getDoctrineProposals = async () => (await proposalRequest<{ proposals: DoctrineProposal[] }>('', 'GET')).proposals ?? []
 export const refreshDoctrineProposal = (id: string) => proposalRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/refresh`)
 export const approveDoctrineProposal = (id: string, head: string) => proposalRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/approve`, 'POST', { head_sha: head })
-export function proposalState(p: Pick<DoctrineProposal, 'state' | 'pinned_machines'> & { orphaned?: boolean }): string {
+export function proposalState(p: Pick<DoctrineProposal, 'state' | 'pinned_machines'> & { orphaned?: boolean; draft?: boolean }): string {
   if (p.orphaned) return 'Branch left on GitHub'
+  if (p.draft && (p.state === 'proposed' || p.state === 'in_review')) return 'Draft'
   if (p.state === 'pinned') return `Pinned on ${p.pinned_machines} reported ${p.pinned_machines === 1 ? 'machine' : 'machines'}`
   return { proposed: 'Proposed', in_review: 'In review', merged: 'Merged', released: 'Released', closed: 'Closed' }[p.state]
+}
+
+export interface DoctrineMetric {
+  name: string; rules_version: string; samples: number; value: number; from: string; until: string
+}
+export interface DoctrineFinding {
+  id: string; pattern: string; title: string; count: number; rules_version: string; harness: string; ticket_kind: string
+  status: 'pending' | 'draft' | 'awaiting_use' | 'internal_note' | 'observed' | 'closed'; reason?: string
+  proposal_id?: string; pr_url?: string; rule_label?: string; created_at: string
+  evidence: { id: string; ticket_id: string; ticket_key: string; href: string; kind: string }[]
+  before: DoctrineMetric; after?: DoctrineMetric; delta?: number; metrics?: DoctrineMetric[]
+}
+export async function getDoctrineFindings(): Promise<DoctrineFinding[]> {
+  const response = await api('/rules/doctrine/analysis')
+  if (response.status === 401) sessionGone()
+  if (response.status === 404) return [] // mixed-version rollout
+  if (!response.ok) throw new DoctrineError(response.status, '', 'Outcome proposals could not be loaded.')
+  return ((await response.json()) as { findings: DoctrineFinding[] }).findings ?? []
+}
+export const findingState = (f: DoctrineFinding) => ({ pending: 'Queued', draft: 'Draft', awaiting_use: 'Awaiting outcomes', internal_note: 'Internal note', observed: 'Measured', closed: 'Closed' })[f.status]
+export function outcomeMetric(m: DoctrineMetric): string {
+  if (m.name === 'fix_rounds' || m.name === 'review_rounds') return `${Number(m.value.toFixed(1))} rounds`
+  if (m.name === 'time_to_done') return `${Number((m.value / 60).toFixed(1))} min`
+  return `${Number((m.value * 100).toFixed(1))}%`
+}
+export function outcomePopulation(m: DoctrineMetric): string {
+  if (m.name.startsWith('gate:')) return 'review verdicts'
+  if (m.name.startsWith('learning:')) return 'learning tickets'
+  if (m.name === 'ci_failures') return 'CI results'
+  return 'tickets'
+}
+const outcomeMetricNames: Record<string, string> = { review_rounds: 'Review rounds', fix_rounds: 'Fix rounds', ci_failures: 'CI failures', reverts: 'Reverted tickets', exception_votes: 'Rework requests', time_to_done: 'Time to done' }
+export const outcomeMetricName = (m: DoctrineMetric): string => outcomeMetricNames[m.name] ?? 'Recorded outcomes'
+export function outcomeDelta(f: DoctrineFinding): string {
+  if (f.delta === undefined) return ''
+  const sign = f.delta > 0 ? '+' : f.delta < 0 ? '−' : ''
+  const amount = Math.abs(f.delta)
+  if (f.before.name === 'fix_rounds') return `${sign}${Number(amount.toFixed(1))} rounds`
+  if (f.before.name === 'time_to_done') return `${sign}${Number((amount / 60).toFixed(1))} min`
+  return `${sign}${Number((amount * 100).toFixed(1))} percentage points`
 }
