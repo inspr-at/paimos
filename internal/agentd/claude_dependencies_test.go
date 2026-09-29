@@ -146,6 +146,9 @@ func TestClaudeDependencyBreakAndRepinHoldDoNotStarveCodex(t *testing.T) {
 			s, api, _ := testSupervisor(t)
 			path := fakeVendorPath(t, "claude")
 			node, sdk := claudeAdapterDependencies(t, path)
+			if err := os.Chmod(filepath.Dir(path), 0700); err != nil {
+				t.Fatal(err)
+			}
 			claude := NewClaudeAdapter(node, sdk, path, map[string]string{"claude-local": filepath.Dir(path)})
 			if err := s.RefreshAccounts([]EnrolledAccount{{ID: "claude-account", Key: "claude-local", Harness: Claude}}, []Adapter{claude}); err != nil {
 				t.Fatal(err)
@@ -216,7 +219,11 @@ func TestClaudeProbeAcceptsApprovedHomebrewCLI(t *testing.T) {
 	if err := os.Chmod(root, 0775); err != nil {
 		t.Fatal(err)
 	}
-	a := NewClaudeAdapter(node, sdk, path, map[string]string{"local": root})
+	home := filepath.Join(root, "private-home")
+	if err := os.Mkdir(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	a := NewClaudeAdapter(node, sdk, path, map[string]string{"local": home})
 	if available, err := a.ProbeAccount(t.Context(), "local"); err != nil || !available {
 		t.Fatal("approved Homebrew-style CLI shown as signed out", err)
 	}
