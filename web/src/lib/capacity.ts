@@ -5,6 +5,7 @@
 // (GET /agent-accounts/capacity, POST …/capacity/preview); this module only picks
 // windows, names states and words the plan. It never re-derives a budget.
 import { api, APIError, RequestFailure, StaleRequestError } from './api.ts'
+import { capacityWaitText, type CapacityWait } from './capacityWait.ts'
 
 export type Pool = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
 export type OffDays = 'rest' | 'expire' | 'normal'
@@ -50,7 +51,7 @@ export interface CapacityWindow {
   reading: CapacityReading; starts_at: string; allowance: number; remaining_percent: number
   freshness: 'fresh' | 'aging' | 'stale' | 'expired'; usage_today_known?: boolean; pacing: CapacityPacing
 }
-export interface CapacityRouting { rank: number; available_slots: number; resets_at?: string; cap_percent?: number; wait?: { code: string; until?: string } }
+export interface CapacityRouting { rank: number; available_slots: number; resets_at?: string; cap_percent?: number; wait?: CapacityWait }
 export interface AccountCapacity {
   routing?: CapacityRouting
   account_id: string; ongoing_use_approved?: boolean; schedule: CapacitySchedule; windows: CapacityWindow[]
@@ -508,7 +509,16 @@ function reserveClause(live: { r: AccountRow; p: AccountPlan }[], at: (iso: stri
   return [t(' Keeps '), ...joinList(kept.map(x => [n(`~${pct(x.p.reserve)}`), t(` of ${x.r.name}`)])), t(' for you.')]
 }
 export function poolSentence(pool: PoolView, now: number, timezone?: string): Sentence {
-  const sentence = planSentence(pool, now, timezone)
+  const advised = pool.rows.length > 0 && pool.rows.every(r => r.routing)
+  const ready = pool.rows.filter(r => (r.routing?.rank ?? 0) > 0)
+  const paused = pool.rows.filter(r => r.routing?.rank === 0 && r.routing.wait)
+  const active = advised && ready.length ? { ...pool, rows: ready, name: ready.length === 1 && pool.rows.length > 1 ? ready[0].name : pool.name } : pool
+  const sentence = advised && !ready.length && paused.length
+    ? { segs: [b(`${pool.name}: `), t(`${capacityWaitText(paused[0].routing!.wait!, 'Agents', now)}.`)] }
+    : planSentence(active, now, timezone)
+  if (advised && ready.length) for (const row of paused) {
+    if (row.state === 'live') sentence.segs.push(t(` ${row.name}: ${capacityWaitText(row.routing!.wait!, 'Agents', now)}.`))
+  }
   if (pool.parallelRuns > 1) sentence.segs.push(t(` ${pool.parallelRuns} agents can run in parallel on ${pool.name} right now.`))
   return sentence
 }

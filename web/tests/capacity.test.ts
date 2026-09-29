@@ -319,3 +319,15 @@ test('the server rank wins over displayed reset times and names', () => {
  const [legacy] = pools(accounts, capacity.map(({ routing: _, ...c }) => c))
  assert.doesNotMatch(plainText(poolSentence(legacy, now, TZ)), /soonest reset|can run in parallel/)
 })
+
+test('server-ineligible accounts stay out of the actionable plan', () => {
+  const capacity: AccountCapacity[] = [
+    { ...cap('a', [win({ budget: 10 })]), routing: { rank: 1, available_slots: 1 } },
+    { ...cap('b', [win({ budget: 20 })]), routing: { rank: 0, available_slots: 0, wait: { code: 'vendor', run_now_allowed: false } } },
+  ]
+  const [pool] = pools([acct('a', 'Spare', 'codex'), acct('b', 'Main', 'codex')], capacity)
+  const sentence = plainText(poolSentence(pool, now, TZ))
+  assert.match(sentence, /of Spare/)
+  assert.doesNotMatch(sentence, /then .*Main|20% of Main|can run in parallel/)
+  assert.match(sentence, /Main: Waiting for the vendor/)
+})

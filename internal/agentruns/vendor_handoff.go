@@ -101,6 +101,15 @@ func retryVendorStops(ctx context.Context, tx pgx.Tx, p tenant.Principal) error 
 		if err != nil {
 			return err
 		}
+		// If the rest of the pool stays dry, retry the original account once
+		// its reset/backoff has passed, subject to the same admission checks.
+		if len(advice.Accounts) == 0 && !same && at != nil && !now.Before(*at) {
+			advice, err = agentaccounts.NextForRun(ctx, tx, id, *v.DaemonID, *v.AccountID, "", now)
+			if err != nil {
+				return err
+			}
+			same = true
+		}
 		if len(advice.Accounts) == 0 {
 			continue
 		}

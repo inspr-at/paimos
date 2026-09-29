@@ -96,6 +96,13 @@ func TestRoutingAdviceMatchesReservationsAndScope(t *testing.T) {
 			t.Fatal("local detail leaked")
 		}
 	}
+	// A workspace-authorized lead gets advice without owning daemon accounts.
+	lead := addPrincipal(t, person.TenantID, "agent", "lead", []string{"admin"})
+	leadKey := issueKey(t, lead, []string{"account.read"})
+	callStatus(t, mod, &lead, leadKey, "GET", path, "", 200, &next)
+	if len(next.Accounts) != 2 {
+		t.Fatal("lead advice did not use read authority")
+	}
 	first := insertRun(t, person, runner, profile)
 	picked := mustRoute(t, mod, runner, token, first, "daemon-a", accounts, map[string]int64{"requests": 1})
 	if picked.AccountID != accounts[1].ID {

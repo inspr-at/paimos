@@ -72,7 +72,7 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 		return nil, nil, err
 	}
 	blindHarness := a.Harness == "grok" || a.Harness == "cursor" || a.Harness == "pi"
-	block, err := loadVendorBlock(ctx, tx, a, blindHarness)
+	block, err := loadVendorBlock(ctx, tx, a)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -286,7 +286,7 @@ func (b vendorBlock) refreshDue(now time.Time) bool {
 	return b.active && !b.waiting(now)
 }
 
-func loadVendorBlock(ctx context.Context, tx pgx.Tx, a Account, blindHarness bool) (vendorBlock, error) {
+func loadVendorBlock(ctx context.Context, tx pgx.Tx, a Account) (vendorBlock, error) {
 	block, err := readingDenial(ctx, tx, a.ID)
 	if err != nil {
 		return vendorBlock{}, err
@@ -342,7 +342,10 @@ func blindDenial(ctx context.Context, tx pgx.Tx, accountID string) (vendorBlock,
 		return vendorBlock{}, err
 	}
 	stop := at.UTC()
-	until := stop.Add(vendorStopBackoff)
+	until, _, err := VendorRetryAt(ctx, tx, accountID, stop)
+	if err != nil {
+		return vendorBlock{}, err
+	}
 	return vendorBlock{active: true, until: &until, readAt: &stop, epoch: stop}, nil
 }
 

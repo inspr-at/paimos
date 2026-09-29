@@ -8,6 +8,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -212,9 +214,22 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 	}
 	var out CapacityNext
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		ownOnly := p.Kind == tenant.Agent
 		if p.Kind == tenant.Agent {
-			if err := requireScope(r.Context(), tx, r, p, "account.probe"); err != nil {
+			scopes, err := keyScopes(r.Context(), tx, r, p)
+			if err != nil {
 				return err
+			}
+			paired, err := agentpairing.PairedPrincipal(r.Context(), tx, p.ID)
+			if err != nil {
+				return err
+			}
+			reader := p
+			reader.Scopes = scopes
+			if hasScope(scopes, "account.read") && authz.RequireTx(r.Context(), tx, reader, "account.read", authz.Scope{}) == nil {
+				ownOnly = paired
+			} else if !hasScope(scopes, "account.probe") {
+				return fail(403, "account read or own-account probe authority required")
 			}
 		}
 		all, err := listAccounts(r.Context(), tx)
@@ -223,7 +238,7 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 		}
 		accounts := []Account{}
 		for _, a := range all {
-			if a.Harness == harness && (daemon == "" || a.DaemonID == daemon) && (p.Kind != tenant.Agent || a.RegisteredBy == p.ID) {
+			if a.Harness == harness && (daemon == "" || a.DaemonID == daemon) && (!ownOnly || a.RegisteredBy == p.ID) {
 				accounts = append(accounts, a)
 			}
 		}

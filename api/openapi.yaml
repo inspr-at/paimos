@@ -4278,7 +4278,7 @@ paths:
     get:
       operationId: nextCapacityAccount
       summary: Next eligible accounts in the router's order, without reserving them
-      description: Person account.read permission, or agent account.probe scope for its own accounts only. Order is soonest long-window reset, larger available cap, then account ID. Rechecks approval, probe, model grants, vendor truth, schedule, reserve and concurrency. Advisory only. No config path or credential is returned; --env resolves through the authenticated local agentd socket.
+      description: Person account.read permission, or a workspace-authorized agent with account.read. Paired agents and probe-only keys see only their own accounts. Order is soonest long-window reset, larger available cap, then account ID. Rechecks approval, probe, model grants, vendor truth, schedule, reserve and concurrency. Advisory only. No config path or credential is returned; --env resolves through the authenticated local agentd socket.
       security: *auth
       parameters:
         - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}

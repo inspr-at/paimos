@@ -40,16 +40,16 @@ func TestVendorHandoffWaitRetryAndFences(t *testing.T) {
 						return err
 					}
 				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,state) VALUES($1,$2,$2::text,'codex','daemon-test',$3,'Spare',now(),true,'generation-1',$4,$5)`, f.agent.TenantID, spare, f.agent.ID, f.person.ID, map[bool]string{true: "unavailable", false: "available"}[tc.blocked]); err != nil {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,state) VALUES($1,$2::uuid,$2::uuid::text,'codex','daemon-test',$3,'Spare',now(),true,'generation-1',$4,$5)`, f.agent.TenantID, spare, f.agent.ID, f.person.ID, map[bool]string{true: "unavailable", false: "available"}[tc.blocked]); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',100,'unrestricted')`, f.agent.TenantID, spare); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::text,$3,$4),($1,$2,'account',$5::text,$5,$4)`, f.person.TenantID, f.person.ID, spare, raw, v.AccountID); err != nil {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3::uuid,$4),($1,$2,'account',$5::uuid::text,$5::uuid,$4)`, f.person.TenantID, f.person.ID, spare, raw, v.AccountID); err != nil {
 					return err
 				}
-				_, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,window_minutes,used_percent,resets_at,read_at,source,ordinary_usage_allowed,run_id,phase) VALUES($1,$2,'5h',300,100,now()+$3*interval '1 minute',now(),'harness',false,$4,'end')`, f.agent.TenantID, v.AccountID, tc.minutes, v.ID)
+				_, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,window_minutes,used_percent,resets_at,read_at,source,ordinary_usage_allowed,run_id,phase) VALUES($1,$2,'5h',300,100,now()+$3::int*interval '1 minute',now(),'harness',false,$4,'end')`, f.agent.TenantID, v.AccountID, tc.minutes, v.ID)
 				return err
 			})
 			// A mid-turn error cannot create a second running process.
