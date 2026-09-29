@@ -1528,7 +1528,7 @@ paths:
         - {name: date_to, in: query, description: Exclusive upper bound (RFC 3339), schema: {type: string, format: date-time}}
         - {name: q, in: query, description: Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last, schema: {type: string}}
         - {name: within, in: query, description: Descendants of this node, excluding itself, schema: {type: string, format: uuid}}
-        - {name: hide_closed, in: query, schema: {type: boolean, default: false}}
+        - {name: hide_closed, in: query, description: 'When true, omits nodes whose work bucket is done, cancelled or archived. The bucket is the same one project counts use: a category on that ticket, task or epic kind wins, and spellings such as canceled are recognised. Open and in progress stay.', schema: {type: boolean, default: false}}
         - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}

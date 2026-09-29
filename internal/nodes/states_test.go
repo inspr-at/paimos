@@ -263,5 +263,98 @@ func TestProjectStatusBuckets(t *testing.T) {
 	}
 	// Ticket catalog only: mystery is done, blocked is in progress, both qa spellings are open.
 	// The epic's blocked state keeps the fixed mapping.
-	assertBuckets(7, 6, 4, 2, 20)
+	got := assertBuckets(7, 6, 4, 2, 20)
+	status, body = call(t, &p, "GET", "/api/nodes?within="+root.ID+"&kind=ticket,task,epic&hide_closed=true&limit=100", "")
+	hidden := decode[nodePage](t, status, body, 200)
+	if len(hidden.Items) != got.Open+got.InProgress {
+		t.Fatalf("hide closed %d, open+doing %d", len(hidden.Items), got.Open+got.InProgress)
+	}
+	seen := map[string]bool{}
+	for _, n := range hidden.Items {
+		seen[n.Title] = true
+	}
+	for _, title := range []string{"ticket mystery", "ticket canceled", "ticket done", "ticket archived", "ticket accepted", "ticket delivered"} {
+		if seen[title] {
+			t.Fatalf("closed work stayed visible: %s", title)
+		}
+	}
+	for _, title := range []string{"ticket open", "ticket blocked", "task open", "epic blocked"} {
+		if !seen[title] {
+			t.Fatalf("open work hidden: %s", title)
+		}
+	}
+}
+
+// Hide closed and the project counts share one bucket, per work kind.
+func TestHideClosedAgreesWithBuckets(t *testing.T) {
+	p := newPrincipal(t, "hide-closed-buckets")
+	for _, kind := range []string{"ticket", "task", "epic"} {
+		t.Run(kind, func(t *testing.T) {
+			k := kindBySlug(t, p, kind)
+			var schema map[string]any
+			if err := json.Unmarshal(k.FieldSchema, &schema); err != nil {
+				t.Fatal(err)
+			}
+			schema["states"] = []any{map[string]string{"state": "mystery", "category": "done"}}
+			raw, err := json.Marshal(map[string]any{"field_schema": schema})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status, body := call(t, &p, "PATCH", "/api/kinds/"+k.ID, string(raw)); status != 200 {
+				t.Fatalf("catalog: %d %s", status, body)
+			}
+			root := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "project").ID+`","title":"`+kind+` project","state":"active"}`)
+			for _, state := range []string{"open", "blocked", "mystery", "canceled", "done", "accepted", "delivered", "in-progress", "qa", "archived"} {
+				body := map[string]any{"kind_id": k.ID, "title": kind + " " + state, "state": state, "parent_id": root.ID}
+				if kind == "ticket" {
+					body["fields"] = json.RawMessage(benefitFields)
+				}
+				raw, err := json.Marshal(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				mustNode(t, p, string(raw))
+			}
+			status, body := call(t, &p, "GET", "/api/projects", "")
+			projects := decode[projectPage](t, status, body, 200)
+			var summary projectSummary
+			found := false
+			for _, item := range projects.Items {
+				if item.ID == root.ID {
+					summary = item
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("project missing: %s", body)
+			}
+			// open, blocked stay open; in-progress and qa are doing. mystery is done by category.
+			// canceled, done, accepted, delivered and archived are closed.
+			if summary.Open != 2 || summary.InProgress != 2 {
+				t.Fatalf("counts %+v", summary)
+			}
+			status, body = call(t, &p, "GET", "/api/nodes?within="+root.ID+"&kind="+kind+"&hide_closed=true&limit=100", "")
+			page := decode[nodePage](t, status, body, 200)
+			if len(page.Items) != summary.Open+summary.InProgress {
+				t.Fatalf("hide closed %d, open+doing %d (%s)", len(page.Items), summary.Open+summary.InProgress, body)
+			}
+			seen := map[string]bool{}
+			for _, n := range page.Items {
+				seen[n.State] = true
+				if n.KindSlug != kind {
+					t.Fatalf("kind %s in %s list", n.KindSlug, kind)
+				}
+			}
+			for _, state := range []string{"open", "blocked", "in-progress", "qa"} {
+				if !seen[state] {
+					t.Fatalf("%s hidden", state)
+				}
+			}
+			for _, state := range []string{"mystery", "canceled", "done", "accepted", "delivered", "archived"} {
+				if seen[state] {
+					t.Fatalf("%s stayed visible", state)
+				}
+			}
+		})
+	}
 }

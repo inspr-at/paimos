@@ -76,6 +76,13 @@ func workCountBucketSQL(stateExpr, categoryAlias string) string {
 	return `coalesce(nullif(` + categoryAlias + `.bucket,''), ` + fixed + `)`
 }
 
+// workNotClosedSQL is the Hide closed predicate. It uses workCountBucketSQL, so a
+// kind's category and a spelling such as canceled stay in step with the counts.
+// Done, cancelled and archived are closed; open and in progress stay visible.
+func workNotClosedSQL(stateExpr, categoryAlias string) string {
+	return workCountBucketSQL(stateExpr, categoryAlias) + ` NOT IN ('done','cancelled','archived')`
+}
+
 // compileStateCatalog checks field_schema.states: objects with a distinct state
 // and a category project counts understand.
 func compileStateCatalog(val any) error {

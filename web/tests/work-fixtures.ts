@@ -47,7 +47,6 @@ export interface MockOptions {
   liveTruncated?: boolean
 }
 
-const CLOSED = ['done', 'cancelled', 'archived', 'delivered', 'accepted']
 const STATE_ORDER = ['open', 'new', 'backlog', 'blocked', 'in_progress', 'active', 'qa', 'accepted', 'done', 'cancelled', 'archived']
 const PRIORITY_ORDER = ['high', 'medium', 'low', 'none']
 
@@ -472,7 +471,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         .filter(n => passes(releases, v => v === (release(n).toLowerCase() || 'none')))
         .filter(n => !dateField || (dateOf(n) !== null && (!dateFrom || dateOf(n)! >= Date.parse(dateFrom)) && (!dateTo || dateOf(n)! < Date.parse(dateTo))))
         .filter(n => !q || n.key.toLowerCase().includes(q) || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q))
-        .filter(n => query.get('hide_closed') !== 'true' || !CLOSED.includes(n.state))
+        .filter(n => query.get('hide_closed') !== 'true' || !['done', 'cancelled', 'archived'].includes(workBucket(n.state)))
       const sort = (query.get('sort') ?? 'position').split(',')
       rows = [...rows].sort((a, b) => {
         for (const raw of sort) {
