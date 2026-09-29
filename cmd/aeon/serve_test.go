@@ -100,6 +100,10 @@ func TestServeShutdownAndBootstrap(t *testing.T) {
 		PublicURL:           "http://127.0.0.1",
 		BootstrapTenantSlug: "p02-boot",
 		BootstrapTenantName: "Boot",
+		PairingNixGuide: &config.PairingNixGuide{
+			ModuleURL: "https://example.test/boot/module.nix", ServiceOption: "boot.agent.enable",
+			Platforms: []string{"darwin"}, ServiceNote: "Review the paired service before activation.",
+		},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -142,7 +146,7 @@ func TestServeShutdownAndBootstrap(t *testing.T) {
 	}
 	guideBody, _ := io.ReadAll(guide.Body)
 	guide.Body.Close()
-	if guide.StatusCode != http.StatusOK || !bytes.Contains(guideBody, []byte("Connect a computer")) || !bytes.Contains(guideBody, []byte("setup --url")) || !bytes.Contains(guideBody, []byte("short code")) {
+	if guide.StatusCode != http.StatusOK || !bytes.Contains(guideBody, []byte("Connect a computer")) || !bytes.Contains(guideBody, []byte("pair --url")) || !bytes.Contains(guideBody, []byte("short code")) {
 		t.Fatalf("pairing guide is not readable without JavaScript: %d", guide.StatusCode)
 	}
 	metadata, err := http.Get(base + "/api/agent-pairing/guide")
@@ -153,6 +157,13 @@ func TestServeShutdownAndBootstrap(t *testing.T) {
 	metadata.Body.Close()
 	if metadata.StatusCode != http.StatusOK || !bytes.Contains(metadataBody, []byte(`"protocol":"pairing-v1"`)) || !bytes.Contains(metadataBody, []byte(`"default_tenant_slug":"p02-boot"`)) {
 		t.Fatalf("public pairing metadata: %d", metadata.StatusCode)
+	}
+	for _, body := range [][]byte{guideBody, metadataBody} {
+		for _, want := range []string{cfg.PairingNixGuide.ModuleURL, cfg.PairingNixGuide.ServiceOption, cfg.PairingNixGuide.ServiceNote, "Service module: macOS only.", "on PATH from a reviewed release pin"} {
+			if !bytes.Contains(body, []byte(want)) {
+				t.Fatalf("server did not publish configured Nix guidance: missing %s", want)
+			}
+		}
 	}
 
 	var name string

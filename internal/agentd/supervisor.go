@@ -24,6 +24,7 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 type Config struct {
@@ -131,6 +132,7 @@ type Supervisor struct {
 	capacityAttempt     map[string]time.Time
 	capacityCapturing   bool
 	maxTokens, maxTurns int64
+	profilePermissions  map[string]bool
 
 	dispatchMu        sync.Mutex
 	state             *agentsetup.Store
@@ -138,6 +140,9 @@ type Supervisor struct {
 	blockedAccounts   map[string]bool
 	probedAccounts    map[string]bool
 	loginRequired     map[string]bool
+	harnessHolds      map[string]string
+	dependencyErrors  map[string]string
+	harnessFailed     map[string]bool
 	mu                sync.Mutex
 	api               API
 	journal           *localjournal.Journal[Record]
@@ -189,6 +194,11 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	for _, a := range c.Adapters {
 		if a == nil || a.Name() == "" || adapters[a.Name()] != nil {
 			return nil, errors.New("duplicate or invalid adapter")
+		}
+		if claude, ok := a.(*ClaudeAdapter); ok {
+			bound := *claude
+			bound.Workspace = c.Workspace
+			a = &bound
 		}
 		adapters[a.Name()] = a
 	}
@@ -399,7 +409,41 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			s.mu.Unlock()
 			continue
 		}
-		status := probeAccount(ctx, adapters[account.Harness].(AccountProber), account.Key)
+		probe := adapters[account.Harness].(AccountProber)
+		s.mu.Lock()
+		hold := s.harnessHolds[account.Harness]
+		s.mu.Unlock()
+		// A held harness (AEON-342) is not probed and reports unavailable.
+		status := probeUnavailable
+		var dependencyErr, probeErr error
+		if hold == "" {
+			if detailed, ok := probe.(interface {
+				ProbeAccountStatus(context.Context, string) (ProbeStatus, error)
+			}); ok {
+				status, dependencyErr = detailed.ProbeAccountStatus(ctx, account.Key)
+			} else if launcher, ok := probe.(interface {
+				ProbeHarness(context.Context, string) (ProbeStatus, error)
+			}); ok {
+				// AEON-341: Codex and Cursor check their launcher and pinned
+				// Node before sign-in; a start failure is a harness failure.
+				status, probeErr = launcher.ProbeHarness(ctx, account.Key)
+			} else if started, ok := probe.(interface {
+				ProbeStatus(context.Context, string) (bool, error)
+			}); ok {
+				// AEON-334 (pi): a start failure is a harness failure; a missing
+				// provider with a running harness is a sign-in problem.
+				var available bool
+				available, probeErr = started.ProbeStatus(ctx, account.Key)
+				switch {
+				case available:
+					status = probeOK
+				case probeErr == nil:
+					status = probeAuthFailed
+				}
+			} else {
+				status = probeAccount(ctx, probe, account.Key)
+			}
+		}
 		available := status.OK
 		var err error
 		if reporter, ok := s.api.(ProbeStatusReporter); ok {
@@ -408,11 +452,31 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			err = s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
 		}
 		s.mu.Lock()
+		if s.dependencyErrors == nil {
+			s.dependencyErrors = map[string]string{}
+		}
+		if dependencyErr != nil {
+			s.dependencyErrors[account.Harness] = dependencyErr.Error()
+		} else if hold == "" {
+			delete(s.dependencyErrors, account.Harness)
+		}
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
-		// Only a confirmed sign-out asks the person to sign in again.
-		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed
+		// Only a confirmed sign-out asks the person to sign in again; a hold or a
+		// local dependency failure never does (AEON-342).
+		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed && hold == "" && dependencyErr == nil && probeErr == nil
+		if s.harnessFailed == nil {
+			s.harnessFailed = map[string]bool{}
+		}
+		s.harnessFailed[account.ID] = probeErr != nil
+		if s.profilePermissions == nil {
+			s.profilePermissions = map[string]bool{}
+		}
+		s.profilePermissions[account.ID] = errors.Is(probeErr, piprobe.ErrPrivateProfile)
 		s.mu.Unlock()
+		if probeErr != nil {
+			failures = append(failures, errors.New("harness failed to start"))
+		}
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
 		}
@@ -478,6 +542,14 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	adapter := s.adapters[profile.Harness]
 	if adapter == nil || profile.ID == "" {
 		return ErrUnsupported
+	}
+	// A harness hold must also cover direct starts and runs whose account is
+	// chosen by routing, rather than only queued runs with an account ID.
+	s.mu.Lock()
+	held := s.harnessHolds[profile.Harness] != "" || s.dependencyErrors[profile.Harness] != ""
+	s.mu.Unlock()
+	if held {
+		return ErrDraining
 	}
 	if err := validQueuedExecutionMode(run, adapter); err != nil {
 		if errors.Is(err, ErrVerificationUnavailable) && entry == nil {
@@ -1147,7 +1219,7 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 				reason = "owned_group_signalled_root_exited"
 			}
 			_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
-				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt}, true)
+				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
 			if entry.managedPolicy && control.Kind != "force_stop" {
 				switch {
 				case errors.Is(err, ErrControlExpired):
@@ -1194,7 +1266,11 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 					return ErrControlUnconfirmed
 				}
 			}
-			if err := s.api.CompleteHarnessControl(ctx, entry.harness, control.ID, outcome, reason); err != nil {
+			// A late setting completion is refused once the database deadline has
+			// passed, and the next yield then finishes that control with a
+			// different outcome. Retrying the same completion forever leaves
+			// every later control for this run stuck behind it.
+			if err := s.api.CompleteHarnessControl(ctx, entry.harness, control.ID, outcome, reason); err != nil && !errors.Is(err, ErrControlTerminal) {
 				if !errors.Is(err, ErrHarnessArchived) && (entry.managedPolicy || control.Kind == "force_stop" || control.Kind == "stop") {
 					return ErrControlUnconfirmed
 				}
@@ -1407,7 +1483,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		if req.ExpectedOwnership == nil || req.ExpiresAt == nil {
 			return Receipt{}, ErrUnsupported
 		}
-		if !req.ExpiresAt.After(time.Now()) {
+		if req.deadline.IsZero() || time.Until(req.deadline) <= 0 {
 			return Receipt{}, ErrControlExpired
 		}
 		recovery, ok := entry.process.(RecoveryProcess)
@@ -1423,6 +1499,19 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 			return Receipt{}, ErrNotOwned
 		}
 	}
+	if fromRecoveryQueue && (entry.managedPolicy || req.Operation == "force_stop" || req.ExpectedOwnership != nil) {
+		// Recheck after ownership lookup and lock contention, then propagate the
+		// same monotonic deadline through adapter waits. Never restart the TTL.
+		if req.deadline.IsZero() || time.Until(req.deadline) <= 0 {
+			if req.Operation == "force_stop" {
+				return Receipt{}, ErrUnsupported
+			}
+			return Receipt{}, ErrControlExpired
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, req.deadline)
+		defer cancel()
+	}
 	if inbox {
 		// Persist uncertainty before touching the child. A crash or lost vendor
 		// response must never authorize reinjection of the same lease.
@@ -1435,7 +1524,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	if req.Operation == "force_stop" {
 		recovery, ok := entry.process.(RecoveryProcess)
 		expected := req.ExpectedOwnership
-		if !ok || expected == nil || req.ExpiresAt == nil || !req.ExpiresAt.After(time.Now()) {
+		if !ok || expected == nil || req.ExpiresAt == nil || req.deadline.IsZero() || time.Until(req.deadline) <= 0 {
 			return Receipt{}, ErrUnsupported
 		}
 		if expected.DaemonID != s.daemonID || expected.Generation != s.generation {
@@ -1448,7 +1537,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		entry.stopRequested = true
 		entry.forceRequested = true
 		entry.mu.Unlock()
-		err = recovery.ForceStop(ctx, *expected, *req.ExpiresAt)
+		err = recovery.ForceStop(ctx, *expected, req.deadline)
 		entry.mu.Lock()
 		if err != nil && !errors.Is(err, ErrForceExitUnconfirmed) {
 			entry.forceRequested = false
@@ -1475,9 +1564,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	} else if isSetting(req.Operation) {
 		proc := entry.process
 		entry.mu.Unlock()
-		settingCtx, cancel := context.WithDeadline(ctx, *req.ExpiresAt)
-		err = proc.Control(settingCtx, req.Operation, req.Value)
-		cancel()
+		err = proc.Control(ctx, req.Operation, req.Value)
 		entry.mu.Lock()
 	} else {
 		proc := entry.process

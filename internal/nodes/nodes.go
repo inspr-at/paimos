@@ -247,7 +247,10 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			fields, err = canonicalEstimate(ctx, tx, p, "", fields, nil)
 		}
 		if err == nil {
-			fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields)
+			fields, err = canonicalRouteFields(p, kind.Slug, fields, nil)
+		}
+		if err == nil {
+			fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields, nil)
 		}
 		if err != nil {
 			return err
@@ -392,7 +395,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			sets = append(sets, "state = "+add(s))
 		}
 		if v, ok := raw["fields"]; ok {
-			_, schema, err := loadKind(ctx, tx, current.KindID)
+			kind, schema, err := loadKind(ctx, tx, current.KindID)
 			if err != nil {
 				return err
 			}
@@ -401,7 +404,10 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				fields, err = canonicalEstimate(ctx, tx, p, id, fields, current.Fields)
 			}
 			if err == nil {
-				fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields)
+				fields, err = canonicalRouteFields(p, kind.Slug, fields, current.Fields)
+			}
+			if err == nil {
+				fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields, current.Fields)
 			}
 			if err != nil {
 				return err

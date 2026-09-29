@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/grokprobe"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 const snapshotName = "pairing.json"
@@ -32,31 +34,39 @@ func (c LocalCandidate) MarshalJSON() ([]byte, error) {
 	type plain LocalCandidate
 	return json.Marshal(struct {
 		plain
-		Grok grokprobe.Binding `json:"grok,omitempty"`
-	}{plain(c), c.Candidate.Grok})
+		Grok   grokprobe.Binding  `json:"grok,omitempty"`
+		PiNode piprobe.Node       `json:"pi_node,omitempty"`
+		Node   harnesslaunch.Node `json:"node,omitempty"`
+	}{plain(c), c.Candidate.Grok, c.Candidate.PiNode, c.Candidate.Node})
 }
 func (c *LocalCandidate) UnmarshalJSON(raw []byte) error {
 	type plain LocalCandidate
 	var v struct {
 		plain
-		Grok grokprobe.Binding `json:"grok"`
+		Grok   grokprobe.Binding  `json:"grok"`
+		PiNode piprobe.Node       `json:"pi_node"`
+		Node   harnesslaunch.Node `json:"node"`
 	}
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return err
 	}
 	*c = LocalCandidate(v.plain)
 	c.Candidate.Grok = v.Grok
+	c.Candidate.PiNode = v.PiNode
+	c.Candidate.Node = v.Node
 	return nil
 }
 
 type RuntimeAccount struct {
-	Harness   string            `json:"harness"`
-	Key       string            `json:"key"`
-	AccountID string            `json:"account_id"`
-	Home      string            `json:"home,omitempty"`
-	Identity  string            `json:"identity,omitempty"`
-	Path      string            `json:"path"`
-	Grok      grokprobe.Binding `json:"grok,omitempty"`
+	Harness   string             `json:"harness"`
+	Key       string             `json:"key"`
+	AccountID string             `json:"account_id"`
+	Home      string             `json:"home,omitempty"`
+	Identity  string             `json:"identity,omitempty"`
+	Path      string             `json:"path"`
+	Grok      grokprobe.Binding  `json:"grok,omitempty"`
+	PiNode    piprobe.Node       `json:"pi_node,omitempty"`
+	Node      harnesslaunch.Node `json:"node,omitempty"`
 }
 type RuntimeConfig struct {
 	Schema        string           `json:"schema"`
@@ -69,37 +79,41 @@ type RuntimeConfig struct {
 	Accounts      []RuntimeAccount `json:"accounts"`
 	NodePath      string           `json:"node_path,omitempty"`
 	ClaudeSDKPath string           `json:"claude_sdk_path,omitempty"`
+	ClaudeRepinID string           `json:"claude_repin_id,omitempty"`
 }
 
 type snapshot struct {
-	BoundComputer      string           `json:"bound_computer_id,omitempty"`
-	BoundDaemon        string           `json:"bound_daemon_id,omitempty"`
-	BoundPrincipal     string           `json:"bound_principal_id,omitempty"`
-	Schema             string           `json:"schema"`
-	Origin             string           `json:"origin"`
-	Request            DeviceRequest    `json:"request"`
-	Device             secret           `json:"device_secret"`
-	Runtime            secret           `json:"runtime_secret"`
-	Lifecycle          secret           `json:"lifecycle_secret"`
-	LifecycleRequestID string           `json:"lifecycle_request_id"`
-	Response           DeviceResponse   `json:"response"`
-	View               View             `json:"view"`
-	Candidates         []LocalCandidate `json:"candidates"`
-	StartService       bool             `json:"start_service"`
-	Service            *ServiceReceipt  `json:"service,omitempty"`
-	NodePath           string           `json:"node_path,omitempty"`
-	ClaudeSDKPath      string           `json:"claude_sdk_path,omitempty"`
-	Phase              string           `json:"phase"`
-	DisconnectAll      bool             `json:"disconnect_all"`
-	Removed            map[string]bool  `json:"removed"`
-	Cleaned            []string         `json:"cleaned"`
-	ComputerCleaned    bool             `json:"computer_cleaned"`
-	NextPoll           time.Time        `json:"next_poll"`
+	BoundComputer      string                `json:"bound_computer_id,omitempty"`
+	BoundDaemon        string                `json:"bound_daemon_id,omitempty"`
+	BoundPrincipal     string                `json:"bound_principal_id,omitempty"`
+	Schema             string                `json:"schema"`
+	Origin             string                `json:"origin"`
+	Request            DeviceRequest         `json:"request"`
+	Device             secret                `json:"device_secret"`
+	Runtime            secret                `json:"runtime_secret"`
+	Lifecycle          secret                `json:"lifecycle_secret"`
+	LifecycleRequestID string                `json:"lifecycle_request_id"`
+	Response           DeviceResponse        `json:"response"`
+	View               View                  `json:"view"`
+	Candidates         []LocalCandidate      `json:"candidates"`
+	StartService       bool                  `json:"start_service"`
+	Service            *ServiceReceipt       `json:"service,omitempty"`
+	NodePath           string                `json:"node_path,omitempty"`
+	ClaudeSDKPath      string                `json:"claude_sdk_path,omitempty"`
+	ClaudeRepinID      string                `json:"claude_repin_id,omitempty"`
+	ClaudePinInfo      *ClaudeDependencyInfo `json:"claude_pin_info,omitempty"`
+	Phase              string                `json:"phase"`
+	DisconnectAll      bool                  `json:"disconnect_all"`
+	Removed            map[string]bool       `json:"removed"`
+	Cleaned            []string              `json:"cleaned"`
+	ComputerCleaned    bool                  `json:"computer_cleaned"`
+	NextPoll           time.Time             `json:"next_poll"`
 }
 
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
+	VersionStatus     string       `json:"version_status,omitempty"`
 	AccountingState   string       `json:"accounting_state,omitempty"`
 	Schema            string       `json:"schema"`
 	Stage             string       `json:"stage"`
@@ -114,6 +128,9 @@ type Progress struct {
 	RetryAfterSeconds int          `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
+	HarnessErrors                          map[string]string
+	ProfilePermissions                     bool
+	HarnessFailed                          bool
 	LoginRequired                          bool
 	VerificationUnavailable                []string
 	Ready                                  bool
@@ -206,6 +223,9 @@ func (e *Engine) progress(s *snapshot) Progress {
 		p.VerificationURI = s.Response.VerificationURI
 		p.Action = "Enter this code at the same Aeon instance, review the selected accounts and choices, then Connect computer."
 	}
+	if s.DisconnectAll || s.View.ComputerState == "revoked" || s.Phase == "revoked" || s.Phase == "denied" || s.Phase == "expired" {
+		p.Action = "Keep this pairing's state for status and cleanup; to pair again, rerun pair with --state-root pointing to a new, empty private folder outside the working folder, then approve the new code in the browser. For Nix/Home Manager, update the service's state root through the owning configuration's review path."
+	}
 	if e.now().Before(s.NextPoll) {
 		p.RetryAfterSeconds = int(s.NextPoll.Sub(e.now()).Seconds()) + 1
 	}
@@ -229,8 +249,8 @@ func validateOptions(o Options) error {
 	if info, err := os.Stat(p); err != nil || !info.IsDir() {
 		return ErrUnsafePath
 	}
-	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 4 {
-		return errors.New("select one to four signed-in harness accounts and a computer name")
+	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 5 {
+		return errors.New("select one to five signed-in harness accounts and a computer name")
 	}
 	seen := map[string]bool{}
 	for _, c := range o.Candidates {
@@ -238,11 +258,15 @@ func validateOptions(o Options) error {
 			return errors.New("one explicitly identified signed-in account is required per harness")
 		}
 		seen[c.Harness] = true
-		if c.Managed {
-			return ErrDeclarative
-		}
+		// Nix-owned vendor executables can be pinned and used without changing
+		// their installation. Service ownership is enforced separately below.
 		if c.Harness == "claude" && (!filepath.IsAbs(o.NodePath) || !filepath.IsAbs(o.ClaudeSDKPath)) {
 			return errors.New("Claude requires pinned Node and Agent SDK paths")
+		}
+		if c.Harness != "grok" {
+			if err := validateNode(c.Path, o.Workspace, c.Interpreter()); err != nil {
+				return err
+			}
 		}
 		if c.Harness == "grok" {
 			if o.Platform.OS != "darwin" || o.Platform.Arch != "arm64" {
@@ -266,6 +290,14 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		if s.Origin != strings.TrimRight(o.Origin, "/") || s.Request.Workspace != o.Workspace {
 			return Progress{}, ErrCollision
 		}
+		if s.DisconnectAll || s.View.ComputerState == "revoked" || s.Phase == "revoked" {
+			p := e.progress(s)
+			return p, errors.New("this enrollment is revoked or disconnecting. " + p.Action)
+		}
+		if s.Phase == "denied" || s.Phase == "expired" {
+			p := e.progress(s)
+			return p, errors.New("this pairing request has ended. " + p.Action)
+		}
 		if err := e.checkSavedClaudeDependencies(s, ClaudeDependencies{NodePath: o.NodePath, SDKPath: o.ClaudeSDKPath}, false); err != nil {
 			return e.progress(s), err
 		}
@@ -277,9 +309,6 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 					return e.progress(s), err
 				}
 			}
-		}
-		if s.DisconnectAll || s.View.ComputerState == "revoked" {
-			return e.progress(s), errors.New("this enrollment is revoked; fresh pairing requires a new private state directory and fresh approval")
 		}
 		return e.Step(ctx)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -317,7 +346,11 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 	if e.Services == nil {
 		return Progress{}, errors.New("service ownership preflight unavailable")
 	}
-	if err := e.Services.Preflight(ctx, e.Store.Path(), nil); err != nil {
+	// Declarative setup may request approval and prepare its private runtime,
+	// but cannot adopt, install or activate the configuration owner's service.
+	// Preflight stops at declarative ownership; further service conflicts are
+	// checked only for unmanaged installs. No service is installed or activated here.
+	if err := e.Services.Preflight(ctx, e.Store.Path(), nil); err != nil && !(errors.Is(err, ErrDeclarative) && !o.StartService) {
 		stage := "service_conflict"
 		if errors.Is(err, ErrDeclarative) {
 			stage = "managed_plan"
@@ -375,22 +408,22 @@ func (e *Engine) checkSavedClaudeDependencies(s *snapshot, requested ClaudeDepen
 		return nil
 	}
 	if s.NodePath == "" || s.ClaudeSDKPath == "" {
-		return errors.New("saved Claude dependencies are incomplete; no enrollment was changed")
+		return errors.New("Claude dependencies changed: run aeon-agentd repin --harness claude; saved dependencies are incomplete")
 	}
-	valid, err := (Discovery{}).ResolveClaudeDependencies(ClaudeDependencies{NodePath: s.NodePath, SDKPath: s.ClaudeSDKPath}, s.Request.Workspace)
+	valid, err := ResolveClaudeRuntime(ClaudeDependencies{NodePath: s.NodePath, SDKPath: s.ClaudeSDKPath}, s.Request.Workspace)
 	if err != nil {
-		return errors.New("saved Claude dependencies are unavailable or unsafe; restore the pinned installation before resuming")
+		return errors.New("Claude dependencies changed: run aeon-agentd repin --harness claude; saved dependencies are unavailable or unsafe")
 	}
 	if requested.NodePath != "" {
 		p, err := pinnedRegular(requested.NodePath, s.Request.Workspace, true)
 		if err != nil || p != valid.NodePath {
-			return errors.New("--node-path conflicts with saved Claude dependency; no enrollment was changed")
+			return errors.New("--node-path conflicts with saved Claude dependency; dependencies changed: run aeon-agentd repin --harness claude; no enrollment was changed")
 		}
 	}
 	if requested.SDKPath != "" {
 		p, err := pinnedRegular(requested.SDKPath, s.Request.Workspace, false)
 		if err != nil || p != valid.SDKPath {
-			return errors.New("--claude-sdk-path conflicts with saved Claude dependency; no enrollment was changed")
+			return errors.New("--claude-sdk-path conflicts with saved Claude dependency; dependencies changed: run aeon-agentd repin --harness claude; no enrollment was changed")
 		}
 	}
 	return nil
@@ -411,7 +444,8 @@ func (e *Engine) Step(ctx context.Context) (Progress, error) {
 		return e.reconcile(ctx, s)
 	}
 	if s.Phase == "denied" || s.Phase == "expired" || s.Phase == "revoked" {
-		return e.progress(s), errors.New("pairing request ended; fresh approval requires a fresh enrollment request")
+		p := e.progress(s)
+		return p, errors.New("this pairing request has ended. " + p.Action)
 	}
 	if e.now().Before(s.NextPoll) {
 		return e.progress(s), nil
@@ -438,6 +472,11 @@ func (e *Engine) Step(ctx context.Context) (Progress, error) {
 	}
 	if err = validateView(s, v, true); err != nil {
 		return e.progress(s), err
+	}
+	// The server fills an omitted profile at device creation. Pin its first
+	// digest-bound projection so later polls cannot substitute a different one.
+	for i := range s.Request.Accounts {
+		s.Request.Accounts[i].ProfileID = v.Requested[i].ProfileID
 	}
 	// A pending/denied Add harness request has no new computer projection.
 	// Preserve the healthy shared computer while this separate request waits.
@@ -565,7 +604,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 	if err := e.save(s, false); err != nil {
 		return e.progress(s), err
 	}
-	config := RuntimeConfig{Schema: "aeon.agent-runtime.v1", Origin: s.Origin, TenantID: s.View.TenantID, PrincipalID: s.View.PrincipalID, DaemonID: s.View.DaemonID, ComputerID: s.View.ComputerID, Workspace: s.Request.Workspace, NodePath: s.NodePath, ClaudeSDKPath: s.ClaudeSDKPath, Accounts: []RuntimeAccount{}}
+	config := RuntimeConfig{Schema: "aeon.agent-runtime.v1", Origin: s.Origin, TenantID: s.View.TenantID, PrincipalID: s.View.PrincipalID, DaemonID: s.View.DaemonID, ComputerID: s.View.ComputerID, Workspace: s.Request.Workspace, NodePath: s.NodePath, ClaudeSDKPath: s.ClaudeSDKPath, ClaudeRepinID: s.ClaudeRepinID, Accounts: []RuntimeAccount{}}
 	seen := map[string]bool{}
 	for _, a := range s.View.Enrollments {
 		if a.State != "connected" || s.Removed[a.AccountID] {
@@ -585,7 +624,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 						return e.progress(s), err
 					}
 				}
-				config.Accounts = append(config.Accounts, RuntimeAccount{a.Harness, a.AccountKey, a.AccountID, c.Home, c.Identity, c.Path, c.Candidate.Grok})
+				config.Accounts = append(config.Accounts, RuntimeAccount{a.Harness, a.AccountKey, a.AccountID, c.Home, c.Identity, c.Path, c.Candidate.Grok, c.Candidate.PiNode, c.Candidate.Node})
 				found = true
 				break
 			}
@@ -668,14 +707,66 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 // or the credential needed to revoke this computer. Removed harnesses do not
 // block the remaining accounts merely because their old dependency pins remain.
 func ValidateRuntimeDependencies(c RuntimeConfig) error {
+	if err := ValidateHarnessRuntimeDependencies(c); err != nil {
+		return err
+	}
+	return ValidateClaudeRuntimeDependencies(c)
+}
+
+// ValidateHarnessRuntimeDependencies checks the pinned interpreters of every
+// npm-launched harness except Claude (AEON-334, AEON-341). A failure still
+// stops execution on this computer; Claude's dependencies are checked on their
+// own so that a Claude repin or repair holds only Claude (AEON-342).
+func ValidateHarnessRuntimeDependencies(c RuntimeConfig) error {
+	for _, a := range c.Accounts {
+		if a.Harness == "grok" || a.Harness == "claude" {
+			continue
+		}
+		node := a.Node
+		if a.Harness == "pi" {
+			node = a.PiNode
+		}
+		if err := validateNode(a.Path, c.Workspace, node); err != nil {
+			return err
+		}
+		if node.Path != "" {
+			raw, err := (OSExecutor{}).Run(context.Background(), Command{Path: node.Path, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, node.Path)})
+			match := safeVersion.FindSubmatch(raw)
+			if err != nil || len(match) != 2 || string(match[1]) != node.Version {
+				return piprobe.ErrStart
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateClaudeRuntimeDependencies checks the approved Claude CLI and its
+// pinned Node/SDK links (AEON-342). An npm-launched Claude CLI runs on Claude's
+// own pinned Node (AEON-341), which after a repin is the repinned one, so it is
+// checked against the resolved Claude Node rather than a saved copy.
+func ValidateClaudeRuntimeDependencies(c RuntimeConfig) error {
 	claude := false
 	for _, a := range c.Accounts {
-		claude = claude || a.Harness == "claude"
+		if a.Harness != "claude" {
+			continue
+		}
+		claude = true
+		if _, err := ResolveClaudeExecutable(a.Path, c.Workspace); err != nil {
+			return err
+		}
 	}
-	if claude {
-		valid, err := (Discovery{}).ResolveClaudeDependencies(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace)
-		if err != nil || valid.NodePath != c.NodePath || valid.SDKPath != c.ClaudeSDKPath {
-			return errors.New("pinned Claude runtime dependencies are unavailable or unsafe")
+	if !claude {
+		return nil
+	}
+	deps, err := ResolveClaudeRuntime(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace)
+	if err != nil {
+		return errors.New("Claude dependencies changed: run aeon-agentd repin --harness claude; runtime dependencies are unavailable or unsafe")
+	}
+	for _, a := range c.Accounts {
+		if a.Harness == "claude" && a.Node != (harnesslaunch.Node{}) {
+			if err := harnesslaunch.Validate(a.Path, deps.NodePath); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -711,6 +802,15 @@ func (e *Engine) DispatchPermitted() (bool, error) {
 }
 
 func sameChoices(a, b []Candidate) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	b = append([]Candidate(nil), b...)
+	for i := range b {
+		if b[i].ProfileID == "" && uuidPattern.MatchString(a[i].ProfileID) {
+			b[i].ProfileID = a[i].ProfileID
+		}
+	}
 	left, _ := json.Marshal(a)
 	right, _ := json.Marshal(b)
 	return string(left) == string(right)

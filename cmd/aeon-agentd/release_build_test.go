@@ -115,6 +115,35 @@ func TestReleaseSignsDarwinAgentdBeforeChecksums(t *testing.T) {
 	}
 }
 
+func TestReleaseHomebrewTapBumpUsesEnvironmentSecrets(t *testing.T) {
+	workflow := readRepo(t, ".github/workflows/release.yml")
+	before, tap, ok := strings.Cut(workflow, "\n  homebrew-tap:\n")
+	if !ok {
+		t.Fatal("release workflow has no homebrew-tap job")
+	}
+	if strings.Contains(before, "HOMEBREW_TAP_APP_") {
+		t.Fatal("homebrew app secrets appear before the homebrew-tap job")
+	}
+	for _, needle := range []string{
+		"needs: release",
+		"environment: homebrew-tap",
+		"node scripts/homebrew-tap-pr.mjs",
+		"secrets.HOMEBREW_TAP_APP_ID",
+		"secrets.HOMEBREW_TAP_APP_KEY",
+		"needs.release.outputs.version",
+	} {
+		if !strings.Contains(tap, needle) {
+			t.Fatalf("homebrew-tap job missing %s", needle)
+		}
+	}
+	if strings.Contains(tap, "secrets.APPLE_") || strings.Contains(tap, "release-signing") {
+		t.Fatal("homebrew-tap job references signing secrets")
+	}
+	if strings.Contains(tap, "homebrew tap bump skipped") {
+		t.Fatal("the skip line belongs in the script, which checks both secrets before minting a token")
+	}
+}
+
 type releaseWorkflow struct {
 	On   any `yaml:"on"`
 	Jobs map[string]struct {

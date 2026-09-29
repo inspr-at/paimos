@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -142,6 +143,21 @@ func authorizeKey(r *http.Request, tx pgx.Tx, p tenant.Principal, scope string) 
 }
 
 func WriteError(w http.ResponseWriter, err error) {
+	// Modules such as managed rules delivery carry a safe status and code.
+	// Keep that structured failure when they run through this shared endpoint.
+	var coded interface {
+		error
+		HTTPStatus() int
+		ErrorCode() string
+	}
+	if errors.As(err, &coded) {
+		httpapi.WriteJSON(w, coded.HTTPStatus(), map[string]string{"error": coded.Error(), "code": coded.ErrorCode()})
+		return
+	}
+	if errors.Is(err, authz.ErrForbidden) {
+		authz.WriteForbidden(w, err)
+		return
+	}
 	var e *Error
 	if errors.As(err, &e) {
 		httpapi.WriteError(w, e.Status, e.Message)

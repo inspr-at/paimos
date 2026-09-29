@@ -24,6 +24,12 @@ type Author struct {
 	Name string  `json:"name"`
 	// HasAvatar says a picture exists; clients request it only then.
 	HasAvatar bool `json:"has_avatar"`
+	// Automatic is true when the tenant System principal wrote the event.
+	// Clients show that actor as Aeon (automatic). A person named System is not.
+	Automatic bool `json:"automatic,omitempty"`
+	// Job and Reason are the background job recorded on the event.
+	Job    string `json:"job,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // avatarExists is the SQL test for a principal's profile picture.
@@ -80,6 +86,7 @@ type activityEvent struct {
 	id            int64
 	at            time.Time
 	typ, actor    string
+	job, reason   string
 	before, after record
 }
 
@@ -108,7 +115,7 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, limi
 		if c != nil {
 			watermark = c.Watermark
 		}
-		rows, err := tx.Query(ctx, `SELECT id,at,type,actor_principal_id::text,before,after FROM events
+		rows, err := tx.Query(ctx, `SELECT id,at,type,actor_principal_id::text,before,after,metadata FROM events
 		 WHERE tenant_id=$1 AND node_id=$2 AND ($3::bigint=0 OR id<=$3)
 		 AND type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','comment.created','comment.updated','comment.deleted')
 		 ORDER BY id`, p.TenantID, node, watermark)
@@ -118,11 +125,12 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, limi
 		var evs []activityEvent
 		for rows.Next() {
 			var e activityEvent
-			var before, after []byte
-			if err := rows.Scan(&e.id, &e.at, &e.typ, &e.actor, &before, &after); err != nil {
+			var before, after, meta []byte
+			if err := rows.Scan(&e.id, &e.at, &e.typ, &e.actor, &before, &after, &meta); err != nil {
 				rows.Close()
 				return err
 			}
+			e.job, e.reason = jobReason(meta)
 			e.before, err = decodeRecord(before)
 			if err == nil {
 				e.after, err = decodeRecord(after)
@@ -190,12 +198,12 @@ func readPeople(ctx context.Context, tx pgx.Tx, tenantID string, evs []activityE
 			}
 		}
 	}
-	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(target.id,p.id)::text,coalesce(target.name,p.name),CASE WHEN i.issuer='paimos-classic' THEN i.subject ELSE '' END,`+avatarExists+`
+	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(target.id,p.id)::text,coalesce(target.name,p.name),CASE WHEN i.issuer='paimos-classic' THEN i.subject ELSE '' END,`+avatarExists+`,(p.kind='agent' AND p.name='System' AND p.roles @> ARRAY['system']::text[])
 	 FROM principals p LEFT JOIN identities i ON i.id=p.identity_id
  LEFT JOIN principals target ON target.tenant_id=p.tenant_id AND target.id=p.linked_to
 	 WHERE p.tenant_id=$1 AND (p.id::text=ANY($2::text[]) OR (i.issuer='paimos-classic' AND i.subject=ANY($3::text[])))
  UNION ALL
- SELECT p.id::text,coalesce(target.id,p.id)::text,coalesce(target.name,p.name),'username:'||aliases.alias,`+avatarExists+` FROM principals p JOIN (
+ SELECT p.id::text,coalesce(target.id,p.id)::text,coalesce(target.name,p.name),'username:'||aliases.alias,`+avatarExists+`,(p.kind='agent' AND p.name='System' AND p.roles @> ARRAY['system']::text[]) FROM principals p JOIN (
    SELECT min(after->'principal'->>'id') AS principal_id,
      (after->'classic'->>'source_id')||':'||(after->'classic'->>'username') AS alias
    FROM events WHERE tenant_id=$1 AND type IN ('import.user_created','import.user_updated')
@@ -211,17 +219,37 @@ func readPeople(ctx context.Context, tx pgx.Tx, tenantID string, evs []activityE
 	people := map[string]Author{}
 	for rows.Next() {
 		var id, canonical, name, subject string
-		var avatar bool
-		if err := rows.Scan(&id, &canonical, &name, &subject, &avatar); err != nil {
+		var avatar, automatic bool
+		if err := rows.Scan(&id, &canonical, &name, &subject, &avatar, &automatic); err != nil {
 			return nil, err
 		}
-		a := Author{ID: &canonical, Name: name, HasAvatar: avatar}
+		a := Author{ID: &canonical, Name: name, HasAvatar: avatar, Automatic: automatic}
 		people[id] = a
 		if subject != "" {
 			people[subject] = a
 		}
 	}
 	return people, rows.Err()
+}
+
+func (e activityEvent) author(people map[string]Author) Author {
+	a := people[e.actor]
+	a.Job, a.Reason = e.job, e.reason
+	return a
+}
+
+func jobReason(raw []byte) (string, string) {
+	if len(raw) == 0 {
+		return "", ""
+	}
+	var doc struct {
+		Job    string `json:"job"`
+		Reason string `json:"reason"`
+	}
+	if json.Unmarshal(raw, &doc) != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(doc.Job), strings.TrimSpace(doc.Reason)
 }
 
 func sourceOf(e activityEvent) string {
@@ -243,7 +271,7 @@ func project(evs []activityEvent, people map[string]Author) []Item {
 	// its timestamp. Timeline order is applied only after projecting comments.
 	for _, e := range evs {
 		id := strconv.FormatInt(e.id, 10)
-		item := Item{ID: id, At: e.at, Author: people[e.actor]}
+		item := Item{ID: id, At: e.at, Author: e.author(people)}
 		switch e.typ {
 		case "comment.created":
 			body := textValue(e.after["body_markdown"])
@@ -357,9 +385,39 @@ func classicAuthor(r record, source string, people map[string]Author, idKey stri
 	return Author{Name: "Unknown"}
 }
 
+// tagLabel is the ticket's labels as one string, names in stored order.
+// A missing list and an empty list are the same. Objects contribute their name.
+func tagLabel(v any) any {
+	names := tagNames(v)
+	if len(names) == 0 {
+		return nil
+	}
+	return strings.Join(names, ", ")
+}
+
+func tagNames(v any) []string {
+	switch value := v.(type) {
+	case string:
+		if name := strings.TrimSpace(value); name != "" {
+			return []string{name}
+		}
+	case map[string]any:
+		if name := strings.TrimSpace(textValue(value["name"])); name != "" {
+			return []string{name}
+		}
+	case []any:
+		var names []string
+		for _, item := range value {
+			names = append(names, tagNames(item)...)
+		}
+		return names
+	}
+	return nil
+}
+
 func nativeFields(r record, people map[string]Author) record {
 	f := object(r["fields"])
-	return record{"status": r["state"], "priority": f["priority"], "assignee": personName(f["assignee"], "", people), "title": r["title"], "parent": r["parent_id"]}
+	return record{"status": r["state"], "priority": f["priority"], "assignee": personName(f["assignee"], "", people), "title": r["title"], "parent": r["parent_id"], "tags": tagLabel(f["tags"])}
 }
 
 func classicFields(r record, source string, people map[string]Author) record {
@@ -383,7 +441,7 @@ func personName(v any, source string, people map[string]Author) any {
 
 func diff(before, after record) []FieldChange {
 	var changes []FieldChange
-	for _, field := range []string{"status", "priority", "assignee", "title", "parent"} {
+	for _, field := range []string{"status", "priority", "assignee", "title", "parent", "tags"} {
 		a, b := scalar(before[field]), scalar(after[field])
 		if (a == nil && b == nil) || (a != nil && b != nil && *a == *b) {
 			continue

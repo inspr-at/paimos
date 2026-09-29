@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
@@ -35,6 +36,13 @@ import (
 )
 
 const origin = "https://pairing.test"
+
+func nixGuideFixture() *config.PairingNixGuide {
+	return &config.PairingNixGuide{
+		ModuleURL: "https://example.test/instance/module.nix", ServiceOption: "services.aeon.enable",
+		Platforms: []string{"darwin"}, ServiceNote: "This module needs a paired-service update before this computer can connect.",
+	}
+}
 
 type fixture struct {
 	t        *testing.T
@@ -97,7 +105,7 @@ func newFixture(t *testing.T) *fixture {
 	decodeResult(t, login, &me)
 	f.person = me.Principal.ID
 	err = db.InTenant(dbtest.Seed(t.Context()), d.App, id, func(tx pgx.Tx) error {
-		for _, h := range []string{"codex", "cursor", "claude", "grok"} {
+		for _, h := range []string{"codex", "cursor", "claude", "grok", "pi"} {
 			var profile string
 			err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'1',$2,'openai','test-model','low','fast') RETURNING id::text`, id, h).Scan(&profile)
 			if err != nil {
@@ -488,12 +496,12 @@ func TestPairingConcurrentApprovalAndRedemption(t *testing.T) {
 }
 
 func TestPairingGuideIsAgentReadableAndPublicRoutesExact(t *testing.T) {
-	h := agentpairing.GuidePage(http.NotFoundHandler(), fstest.MapFS{"index.html": {Data: []byte(`<html><body><div id="app"></div><script src="/assets/pinned.js"></script></body></html>`)}}, origin)
+	h := agentpairing.GuidePage(http.NotFoundHandler(), fstest.MapFS{"index.html": {Data: []byte(`<html><body><div id="app"></div><script src="/assets/pinned.js"></script></body></html>`)}}, origin, nixGuideFixture())
 	r := httptest.NewRequest("GET", "/agents/register-agent", nil)
 	r.Host = "attacker.invalid"
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	for _, want := range []string{"Connect a computer", "paimos-agentd path&gt; setup --url ", "/assets/pinned.js", "short code", "Server version:", "Cursor ask mode and an isolated config do not enforce a no-tools policy.", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", "Qualified verification with enforced no-tools mode."} {
+	for _, want := range []string{"Connect a computer", "brew install inspr-at/tap/aeon-agentd", "/assets/pinned.js", "short code", "Server version:", "Nix / Home Manager", "aeon-agentd pair --url", "services.aeon.enable", "needs a paired-service update", "Cursor ask mode and an isolated config do not enforce a no-tools policy.", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", "Qualified verification with enforced no-tools mode."} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("guide lacks %s", want)
 		}
@@ -745,7 +753,7 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 	version.Version = "260927160212.0.0"
 	t.Cleanup(func() { version.Version = old })
 	mux := http.NewServeMux()
-	agentpairing.New(nil, origin, "reviewed-tenant").Mount(mux)
+	agentpairing.New(nil, origin, "reviewed-tenant", nixGuideFixture()).Mount(mux)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/api/agent-pairing/guide", nil)
 	r.Host = "attacker.invalid"
@@ -758,20 +766,26 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 		Command       string                                         `json:"setup_command"`
 		Qualification string                                         `json:"platform_qualification"`
 		Targets       []agentpairing.InstallTarget                   `json:"install_targets"`
+		Managed       agentpairing.ManagedSetup                      `json:"managed_setup"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &guide); err != nil {
 		t.Fatal(err)
 	}
-	if guide.HelperVersion != version.Version || !guide.Capabilities["claude"].Supported || guide.Capabilities["codex"].Supported || guide.Capabilities["cursor"].Supported || guide.Capabilities["grok"].Supported || guide.Instance != origin || guide.Tenant != "reviewed-tenant" || len(guide.Targets) != 4 || !strings.Contains(guide.Command, " setup --url '") || !strings.Contains(guide.Qualification, "candidate") {
+	if guide.HelperVersion != version.Version || !guide.Capabilities["claude"].Supported || guide.Capabilities["codex"].Supported || guide.Capabilities["cursor"].Supported || guide.Capabilities["grok"].Supported || guide.Instance != origin || guide.Tenant != "reviewed-tenant" || len(guide.Targets) != 4 || !strings.Contains(guide.Command, " pair --url '") || !strings.Contains(guide.Qualification, "candidate") {
 		t.Fatalf("guide release contract mismatch: %s", w.Body.String())
 	}
+	if guide.Managed.Command != "aeon-agentd pair --url '"+origin+"'" || guide.Managed.ServiceOption != "services.aeon.enable" || guide.Managed.ModuleURL != nixGuideFixture().ModuleURL || strings.Contains(guide.Managed.Command, "attacker.invalid") {
+		t.Fatal("Nix guide is not bound to the server origin and owning module")
+	}
 	for _, target := range guide.Targets {
-		if !strings.HasPrefix(target.ArtifactURL, "https://github.com/inspr-at/paimos/releases/download/v260927160212.0.0/paimos-agentd-") || !strings.Contains(target.Command, "mkdir \"$aeon_pairing_dir\"") || !strings.Contains(target.Command, "if (n != 1) exit 1") || strings.Contains(target.Command, "attacker.invalid") {
+		if !strings.HasPrefix(target.ArtifactURL, "https://github.com/inspr-at/paimos/releases/download/v260927160212.0.0/paimos-agentd-") || !strings.Contains(target.Command, "mkdir \"$aeon_pairing_dir\"") || !strings.Contains(target.Command, "if (n != 1) exit 1") || strings.Contains(target.Command, "attacker.invalid") || !strings.Contains(target.Command, "aeon-agentd pair --url $aeon_pair_url") || !strings.Contains(target.Command, "'https://pairing.test'") {
 			t.Fatalf("unsafe install contract: %+v", target)
 		}
 		check := strings.Index(target.Command, " -c selected.SHA256SUMS")
 		install := strings.Index(target.Command, "install -m 0700")
-		if check < 0 || install < check {
+		link := strings.Index(target.Command, "ln -sfn \"$aeon_pairing_dir/paimos-agentd\" \"$aeon_bin\"")
+		next := strings.Index(target.Command, "aeon-agentd pair --url $aeon_pair_url")
+		if check < 0 || install < check || link < install || next < link {
 			t.Fatal("artifact becomes executable before checksum verification")
 		}
 	}

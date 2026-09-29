@@ -186,6 +186,24 @@ func TestUnlaunchedClaimDoesNotBlockOtherEnrollmentVerification(t *testing.T) {
 	}
 }
 
+func TestHarnessHoldDoesNotBlockClaimRecovery(t *testing.T) {
+	s, api, adapter := claimFixture(t)
+	api.claimCommitted = true
+	api.claimErr = errors.New("fixture claim response lost")
+	api.getErr = errors.New("fixture outage")
+	if err := s.StartRun(t.Context(), api.run); err == nil {
+		t.Fatal("uncertain claim hidden")
+	}
+	s.SetHarnessHold(Codex, "fixture repin pending")
+	api.getErr = nil
+	if err := s.PollOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if api.server.Status != "failed" || adapter.starts != 0 || len(api.claimIDs) != 1 {
+		t.Fatal("harness hold prevented no-launch claim recovery")
+	}
+}
+
 func TestPostClaimPreparationFailureSettlesWithoutLaunch(t *testing.T) {
 	for _, failure := range []string{"scratch", "ref", "lease_a", "lease_b"} {
 		t.Run(failure, func(t *testing.T) {

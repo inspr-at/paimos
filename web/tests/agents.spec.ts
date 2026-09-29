@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
@@ -39,6 +41,28 @@ async function grantAccounts(page: Page) {
 const queue = (page: Page) => page.getByRole('region', { name: 'Needs you' })
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Session details' })
 const row = (page: Page, id: string) => page.locator(`[data-row="s:${id}"]`)
+
+test('pi sessions retain their SVG harness icon and provider account label', async ({ page }) => {
+  const { data } = await setup(page)
+  const pi = data.sessions.find(item => item.harness === 'pi')!
+  Object.assign(pi, { account_label: 'pi / anthropic (local profile)' })
+  await openAgents(page)
+  const item = row(page, pi.id)
+  await expect(item).toBeVisible()
+  await expect(item.locator('.exec-account')).toContainText('Pi · pi / anthropic (local profile)')
+  await expect(item.locator('svg[viewBox="165.29 165.29 469.43 469.43"] path').first()).toBeVisible()
+  if (process.env.PI_PAIRING_SHOTS) {
+    mkdirSync(process.env.PI_PAIRING_SHOTS, { recursive: true })
+    for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      await page.emulateMedia({ colorScheme: theme })
+      await item.scrollIntoViewIfNeeded()
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      await page.screenshot({ path: join(process.env.PI_PAIRING_SHOTS, `pi-agents__${width}__${theme}.png`), fullPage: true })
+    }
+  }
+
+})
 
 test('the header links to Agents with a count of what needs you', async ({ page }) => {
   await setup(page)

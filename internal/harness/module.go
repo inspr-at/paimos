@@ -52,11 +52,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/reportercontract"
+	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -85,6 +87,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/harness-sessions", "harness.read", false, 200, m.list},
 		{"GET /api/projects/{projectId}/harness-sessions/orchestrator", "harness.read", false, 200, m.orchestrator},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}", "harness.read", false, 200, m.status},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/lookup", "harness.read", false, 200, m.lookup},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker", "harness.read", false, 200, m.getReadMarker},
 		{"PUT /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker", "harness.read", false, 200, m.putReadMarker},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/reparent", "harness.write", false, 200, m.reparent},
@@ -531,7 +534,8 @@ func validateParent(ctx context.Context, tx pgx.Tx, projectID, parentID, childID
 }
 
 type registration struct {
-	SucceedsID       *string `json:"succeeds_session_id"`
+	SucceedsID *string `json:"succeeds_session_id"`
+	rules.ClientReport
 	AgentPrincipalID string  `json:"agent_principal_id"`
 	RunID            *string `json:"run_id"`
 	TicketNodeID     *string `json:"ticket_node_id"`
@@ -553,6 +557,12 @@ type registration struct {
 func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	ctx := r.Context()
 	projectID := r.PathValue("projectId")
+	if p.Kind == tenant.Agent {
+		// A registered generation must be able to heartbeat and stop itself.
+		if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: projectID}); err != nil {
+			return nil, err
+		}
+	}
 	if err := project(ctx, tx, projectID); err != nil {
 		return nil, err
 	}
@@ -572,6 +582,9 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		if label != "" {
 			in.DisplayLabel = &label
 		}
+	}
+	if err := in.ClientReport.Validate(); err != nil {
+		return nil, workorders.Fail(400, err.Error())
 	}
 	if err := in.sessionText.normalize(); err != nil {
 		return nil, err
@@ -674,7 +687,7 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		if err = fillVendorRef(ctx, tx, &existing, vendor); err != nil {
 			return nil, err
 		}
-		return existing, nil
+		return existing, rules.RecordClientReport(ctx, tx, existing.ID, in.ClientReport)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -710,6 +723,9 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		}
 	}
 	if err = record(ctx, tx, p, s, "registered", nil, s); err != nil {
+		return nil, err
+	}
+	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
 		return nil, err
 	}
 	if predecessor != nil {
@@ -854,6 +870,27 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	s.Controls = controls
 	return reporterSession(s), nil
 }
+
+// lookup answers the ambient tell check for the caller's own generation.
+// Another principal's row is the same not-found as a missing id: one query,
+// with no second read that could differ in timing or body. It does not lock
+// the row or load activity, history, or controls.
+func (m *Module) lookup(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	projectID, id := r.PathValue("projectId"), r.PathValue("sessionId")
+	if !workorders.UUID(projectID) {
+		return nil, workorders.Fail(400, "invalid project id")
+	}
+	if !workorders.UUID(id) {
+		return nil, workorders.Fail(400, "invalid session id")
+	}
+	var out sessionLookup
+	err := tx.QueryRow(r.Context(), `SELECT id::text, project_id::text, agent_principal_id::text, stopped_at, archived_at FROM harness_sessions WHERE project_id=$1 AND id=$2 AND agent_principal_id=$3`, projectID, id, p.ID).Scan(&out.ID, &out.ProjectID, &out.AgentPrincipalID, &out.StoppedAt, &out.ArchivedAt)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	id := r.PathValue("projectId")
 	if err := project(r.Context(), tx, id); err != nil {
@@ -951,6 +988,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 }
 func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
+		rules.ClientReport
 		ProcessOwnership *ownedprocess.Identity `json:"process_ownership"`
 		Phase            string                 `json:"phase"`
 		Activity         string                 `json:"activity"`
@@ -1001,6 +1039,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			return nil, workorders.Fail(400, "activity note must be at most 120 characters")
 		}
 		in.ActivityNote = &note
+	}
+	if err := in.ClientReport.Validate(); err != nil {
+		return nil, workorders.Fail(400, err.Error())
 	}
 	if err := in.sessionText.normalize(); err != nil {
 		return nil, err
@@ -1054,6 +1095,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	s, err = applyEstimate(ctx, tx, p, s, in.EtaReadyAt, in.EtaLiveAt, in.ProgressPct)
 	if err != nil {
+		return nil, err
+	}
+	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
 		return nil, err
 	}
 	if err = record(ctx, tx, p, s, "heartbeat", before, s); err != nil {

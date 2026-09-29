@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -57,7 +58,14 @@ type ExplainedRule struct {
 
 // Explain renders the file for c and explains it under budget b.
 func Explain(c Context, snapshots []Snapshot, now time.Time, b Budget) (Explained, error) {
-	r, err := render(c, snapshots, now, false, nil)
+	return ExplainDelivered(c, snapshots, now, b, doctrine.Catalog{})
+}
+
+// ExplainDelivered is Explain for the file an agent receives when the
+// workspace pins doctrine: git-backed rules stay on the harness channel
+// (AEON-320), exactly as GET /rules/merged serves it.
+func ExplainDelivered(c Context, snapshots []Snapshot, now time.Time, b Budget, cat doctrine.Catalog) (Explained, error) {
+	r, err := render(c, snapshots, now, false, nil, cat)
 	if err != nil {
 		return Explained{}, err
 	}
@@ -108,5 +116,9 @@ func (m *Module) explained(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err != nil {
 		return nil, err
 	}
-	return Explain(c, snapshots, time.Now().UTC(), limits)
+	cat, err := loadDoctrineCatalog(r.Context(), tx)
+	if err != nil {
+		return nil, err
+	}
+	return ExplainDelivered(c, snapshots, time.Now().UTC(), limits, cat)
 }

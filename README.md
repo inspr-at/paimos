@@ -52,6 +52,12 @@ paimos mcp
 
 Named instances and the default live in `~/.aeon/config.yaml`. The agent API key is read from `--key-file` or stdin, never echoed, and stored under `~/.aeon/keys/` mode 0600. `AEON_URL` together with `AEON_API_KEY` (or `AEON_API_KEY_FILE`) is a process-only target. When the binary is `paimos`, `PAIMOS_URL` and `PAIMOS_API_KEY` work the same way.
 
+Create a CLI/script identity at **Settings → Access → Agents → New agent**: give it a name, an optional description, a role ceiling, and workspace or selected-project access. A person with `keys.manage` can create it, within their own permissions; agent and role changes are audited together. The next sheet creates its first scoped key and shows it once, with a copy button (manual selection if clipboard access is blocked) and this instance's `paimos --instance <name> auth login --name <name> --url <origin>` command. Paste the key at the hidden terminal prompt. Computer pairing uses agentd and needs no API key; its page links directly to this alternative.
+
+People with `keys.manage` can edit an active key in **Access → Agents → Edit scopes** without replacing its secret. The saved scopes are limited to the agent's existing role, the editor's permissions and the original creator's live ceiling. Changes apply on the next request and appear in the access audit. Removing every scope disables the key's access; revoked or expired keys cannot be edited.
+
+The same change is available as `aeon keys scopes <key-id> --add harness.worker --remove nodes.write --session-file <private-cookie-file>` (repeatable/comma-separated scopes). The file contains an existing signed-in person's `aeon_session` cookie value; `-` reads it from stdin without echo. Use `--url` or the configured instance URL. This command neither stores nor prints the cookie; agent credentials cannot manage scopes. Permission denials can include `reason_code` (`missing_role_permission`, `missing_project_access`, or `missing_key_scope`); only a missing key scope after role authority passes includes `scope`. Agent session registration also requires `harness.worker`, preventing generations that cannot heartbeat or stop.
+
 `whoami` calls `GET /api/me`. Issue, knowledge, search and onboard exit 3 with `arrives in R1` until those endpoints exist. `model resolve` exits 3 with a not-yet message. `aeon mcp` serves those tools over stdio.
 
 Versioning: INSPR Calendar Versioning, INSPR-CalVer3 (`inspr-calver-3`, `YYMMDDhhmmss.0.0`); releases up to 260929113854.0.0 stay INSPR-CalVer2 history. The version display uses the pinned INSPR presentation bundle, checked by `just release-check`.
@@ -149,6 +155,18 @@ nix profile install github:inspr-at/aeon#aeon
 
 GitHub release assets, next to `paimos-agentd` for the same four OS/architecture pairs and listed in the same `SHA256SUMS`: `aeon-cli-darwin-amd64`, `aeon-cli-darwin-arm64`, `aeon-cli-linux-amd64`, `aeon-cli-linux-arm64`. Put the CLI file on `PATH` as `aeon`; a symlink named `paimos` selects its compatibility mode. For checksum-verified computer pairing, see [Agent integration](docs/AGENT_INTEGRATION.md).
 
+With the reviewed Nix package on PATH, run `aeon-agentd pair --url 'INSTANCE_ORIGIN_FROM_GUIDE'` from your working folder (bare `aeon-agentd pair` asks for the origin or resumes the saved instance). Confirm the folder, select detected signed-in harnesses, then enter the 9-digit code in the browser and approve as a person. Pairing creates its own private state; Nix/Home Manager retains service ownership.
+
+On a Mac without Nix, install with `brew install inspr-at/tap/aeon-agentd`, then copy the instance-bound `aeon-agentd pair` command from **Connect a computer**. Machines without Homebrew use that guide's checksum installer and add `~/.local/bin` to PATH. After browser approval, pairing installs the user LaunchAgent on macOS or systemd user unit on Linux. It retains Homebrew's stable `bin/aeon-agentd` link or `~/.local/bin/aeon-agentd`, so a package upgrade does not leave the service pointing at a removed version. The stable link must resolve to the binary doing the pairing; an unrelated service is never adopted or overwritten.
+
+To remove a pairing, run `aeon-agentd disconnect` and wait for `disconnected` before uninstalling. This freezes new work, requests server revocation, waits for owned processes to drain, then stops and removes its own service. `--once` reports one resumable step; interruption or lost connectivity leaves cleanup pending, and the same command resumes it. Vendor sign-ins and project files are preserved. Homebrew users then run `brew uninstall aeon-agentd`; checksum-installer users remove the `~/.local/bin/aeon-agentd` link and downloaded versions under `~/.local/lib/aeon`. Nix users disable/remove the service and package through their owning configuration's review path. Retain private pairing state until cleanup and any accounting recovery are complete; `--state-root` selects a nondefault pairing.
+
+Claude dependency pins preserve stable Node and SDK links, including Home Manager links. Each probe and start checks the full link chain, ownership, directory permissions, workspace exclusion and the SDK's declared package entry, then launches the resolved physical paths. Existing physical pins remain supported. To replace old pins after an update, run `aeon-agentd repin --harness claude --node-path /absolute/stable/bin/node --claude-sdk-path /absolute/stable/lib/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs` (add `--state-root` for a nondefault pairing). Omit the dependency flags to discover the current global installation. The command shows old and new paths and versions; `--yes` confirms without prompting, including with `--json` in Home Manager activation. Missing old versions show as unavailable.
+
+Repin records local `claude-repin-<id>.json` and `claude-repin-<id>-applied.json` events in private pairing state. The running daemon replaces its Claude adapter after its current Claude processes exit. Historical ownership records and pending accounting remain intact and continue reconciling; they do not prevent adapter replacement. A successful `repinned` result requires the daemon's acknowledgement. After 20 seconds without it, the command returns nonzero with `restart remains pending`; the daemon retries automatically, and a daemon starting with the saved pins acknowledges them directly. An offline daemon must be started through its existing service owner. Repin preserves enrollment, credentials, fences and service definitions; it neither re-pairs nor takes ownership of a Nix/Home Manager service.
+
+A pending or failed repin, or a broken Claude dependency, holds only fresh Claude work. Other harnesses and claim recovery keep polling. Local status reports `ready: false` with a Claude entry in `harness_errors`; setup status shows the repair action instead of `login_required`. The CLI retains its existing approved physical-executable policy, including Homebrew installations; the stricter ownership and directory checks apply to Node and SDK pins.
+
 Invoking the binary as `paimos` gives the paimos-compatible CLI. `PAIMOS_URL` (with `PAIMOS_API_KEY` or `PAIMOS_API_KEY_FILE`) is the process-only target.
 
 Claude accounts offer **Show Aeon in your Claude status line** in Settings → Accounts.
@@ -206,6 +224,32 @@ and `/private/tmp` are supported through a checked descriptor walk. A custom
 symlinked checkout must be named by its physical path. Other platforms refuse
 file hashing; `--show` and explicit prompt-template versions/digests do not read instruction files.
 
+## Git-backed doctrine (AEON-318)
+
+`GET /api/rules/doctrine` accepts people and agent keys with `rules.read`.
+Source management remains person-only (`settings.manage`). GitHub reads use
+only `https://api.github.com`; redirects are refused, including repository
+renames, so configure the current repository name.
+
+The operator provisions private read-only tokens under the absolute directory
+`AEON_DOCTRINE_CREDENTIALS_DIR`. A reference such as `doctrine-private-read`
+requires both the token file of that name and `doctrine-private-read.allowlist.json`:
+
+```json
+{"grants":[{"tenant_id":"<workspace UUID>","repository":"owner/repository"}]}
+```
+
+Each grant authorizes exactly one tenant/repository pair (names are compared
+case-insensitively); repeat pairs to share a credential deliberately. The
+server reads this policy before resolving a pin, fetching an index, or serving
+cached doctrine. Missing, invalid, empty or nonmatching policies fail closed
+with `credential unavailable`. Existing token files need this policy before
+use. Removing a grant immediately prevents subsequent requests from reading
+its cached doctrine or fetching again. Aeon has no API to write these grants:
+the operator owns the directory and files, and the service has read access
+only. Tenant owners may name references but cannot authorize them. Never put
+token values in tenant configuration, API requests, logs or this repository.
+
 ## Agent rules (ADR-004, AEON-248 / AEON-249)
 
 The dedicated `/api/rules` API stores layers, sets, rules and immutable version
@@ -242,8 +286,32 @@ Role/harness are explicit selection context, not permission grants or proof of
 which process executed the result. Precedence is company, project, person, agent
 role, named agent, task. The highest matching identity wins; identical-rank
 ambiguity fails closed. No natural-language conflict guesses are made. Expiry is
-checked on every request. The complete rendered body must fit 12,000 UTF-8 bytes;
-an oversized result returns 422 with the measured size instead of truncating.
+checked on every request. The complete rendered body must fit the workspace
+budget (12,000 UTF-8 bytes by default); publication over that budget returns 422.
+Admins can set up to 64,000 bytes in the rules budget editor once all clients
+active in the tenant over the last seven days report support. Missing reports,
+reports under 12,000, stopped/archived older generations and an empty inventory
+retain the 12,000-byte ceiling. The editor lists up to 50 blocking hosts,
+harnesses and reported versions, and counts any further clients.
+CLI and agentd send optional `max_session_file_bytes` and `rules_client_version`
+on registration and every heartbeat. The number is that harness's default read
+limit: Codex stops at `project_doc_max_bytes` (32,768 bytes of combined
+`AGENTS.md`); the other harnesses report 64,000. Omission resets support to the
+legacy limit, so rolling a client back closes the gate. These are request-only fields;
+PHAROS/JANUS reporter response contracts and pins are unchanged.
+
+Rules requests report `X-Aeon-Max-Session-File-Bytes` (2,000–64,000; omission
+means 12,000). Managed delivery also respects its registered capability.
+When a valid publication is larger than that limit, delivery retains all locked
+rules, then adds whole rules in precedence/identity order as space allows, with
+an explicit compatibility note in the file. Legacy cuts also fit the old 512-KiB
+cache envelope, with 16 KiB reserved for its wrapper. The body digest, receipt
+and served manifest describe the actual cut. If locked rules plus the note cannot fit,
+delivery fails closed with an upgrade message; it never drops a locked rule.
+Upgraded CLI, managed delivery, Claude bridge and caches accept 64,000-byte
+files. The bounded cache envelope allows 32 MiB for repeated text, metadata and
+worst-case JSON escaping. Roll out the server before upgraded reporting clients;
+raise the workspace budget only after the editor's gate clears.
 An applicable published locked company floor is required.
 
 `paimos session start --rules-preview` is an opt-in JSON preview. Use `--project`
@@ -367,6 +435,35 @@ identities and hashes. `--upload` stores that summary for the project.
 Instruction text is not uploaded. The command does not replace `AGENTS.md`
 or `CLAUDE.md`, and rollout stays unauthorized.
 
+`aeon doctor` also checks the two rule delivery channels. It discovers command
+hooks marked `# aeon-rules-hook-v1` in the user and current project settings,
+reads their literal `--rules-out` targets, and compares each harness file with
+the pinned doctrine index. Inbox hooks alone do not establish rules delivery.
+For a manually delivered file or a hook with a dynamic output path, use
+`aeon doctor --rules-harness claude|codex --rules-out /absolute/received.txt`.
+This explicitly checks that file and its harness file. Doctor never executes
+hooks or expands shell expressions. Missing, empty, unreadable or unverified
+files and unready/failed doctrine sources cannot earn “no rule served twice”.
+Deleted rules are detected even when their markers were deleted too.
+Doctor normalizes whitespace and follows literal Markdown `@path` imports,
+relative to each importing file (`~/` resolves to the home directory). Reads
+stay within the home and harness directories, refuse secret paths and symlinks,
+and stop at 8 import levels, 64 files, 256 KiB per file or 1 MiB total. Unresolved
+imports report “unverified” instead of drift; neither result certifies delivery.
+
+Session merges resolve precedence before omitting doctrine copies. A locked
+company rule delivered by doctrine retains its floor obligation as a reference
+to the doctrine identity and immutable commit, without repeating its text in
+the session file, cache or bootstrap. Existing independently retained floor
+pins still require explicit review when changing from text to that reference.
+Catalog reads for publication, delivery and channel reports recheck the same
+host-provisioned credential grants as the doctrine API; an inaccessible source
+fails the operation with `503 doctrine_unavailable` before cached text or
+matching identities are inspected, including managed-session delivery. A batch
+loads the catalog once for its request; later requests recheck the grants.
+Channel reports include duplicates only from sets whose exact scope the caller
+may read, including the project permission and scoped ownership checks.
+
 ## UI shell (P0.5 / AEON-10)
 
 The Vue shell includes an authenticated workspace, sign-in, a 404, an account
@@ -406,6 +503,47 @@ sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 
 Licence: AGPL-3.0-only.
 
+### Harness interpreter pins
+
+Guided setup pins Node's physical path and version privately for npm-launched
+Codex, Cursor, Claude and pi. `--node-path` selects an installed Node outside the
+workspace, including for shell wrappers. Setup checks the launcher using the
+service PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) with the pinned Node directory first;
+interactive shell paths and Node injection variables cannot mask missing runtime
+dependencies. The same pin is used for account probes and run launches. Unsafe,
+missing or changed pins block startup rather than reporting a signed-out account.
+Existing npm enrollments without a pin need fresh guided setup; native launchers
+and saved pi bindings remain supported. Paths and interpreter versions stay local.
+
+### Pi guided setup
+
+`paimos-agentd setup --harness pi` and `add-harness --harness pi` use the same
+person-approved pairing flow as the other harnesses. Install pi normally and use
+its `/login` and `/model` commands first. Setup pins the executable and reads its
+version. For npm's `#!/usr/bin/env node` entrypoint it also resolves Node (or
+uses `--node-path`), pins its physical path and version privately, and prepends
+its directory to the probe and runtime PATH. Node must be installed outside the
+workspace; missing or changed interpreter pins block startup. Setup then checks
+the selected provider/model against pi's public RPC
+`get_available_models` response. `--account-context anthropic` selects a specific
+configured provider instead. The local profile is `~/.pi/agent`; Aeon never
+opens its credential files, inherits provider keys for this check, or sends a
+prompt. This establishes configured authentication, not remote credential
+validity or a person's identity. The approval label names the provider and local
+profile; the server selects an enabled pi model profile for that provider, and
+only the computer keeps the profile path. The profile directory must be private
+(no group or other access), as required by the daemon. Managed installations stay
+with their owning Nix/Home Manager configuration.
+
+The paired daemon rechecks that provider at most once a minute during polling
+and afresh before each run, and refuses a model profile from a different
+provider. Probe startup failures report a harness startup problem; only missing
+provider configuration requests vendor login. Pi verification is explicitly
+unavailable: its managed adapter has no qualified no-tools boundary. Connect without verification, then
+set request limits for ongoing work. Pi retains its existing SVG harness icon and
+account allowance pipeline; missing vendor token, cost or capacity readings
+remain unreported, never inferred from a provider name or a successful probe.
+
 ### Session metadata
 
 `scripts/session-metadata.py --codex-index` requires an explicit `session_index.jsonl`
@@ -433,6 +571,15 @@ events, heartbeat or the daemon journal. Server restart rejects lost text;
 ambiguous delivery is reported as unconfirmed, never silently reinjected.
 Identical request IDs replay their receipt; divergent retries are refused.
 Pending authorization is rechecked when the daemon claims the control.
+Yield includes `expires_in_ms`, a remaining lifetime calculated on the Postgres
+clock and rounded down. The daemon deducts the full request round trip and keeps
+one local monotonic deadline through queueing, adapter writes, setting waits and
+the final force-stop signal lock. It rejects missing, zero or invalid lifetimes;
+new daemons therefore require a server that supplies this additive field for
+managed controls and force stop. `expires_at` remains audit metadata. Settings
+completion uses the database clock, and transient steer retention uses a local
+monotonic budget derived from it. Process start timestamps remain opaque identity
+fields; the database observation stamp establishes ownership freshness.
 
 The worker-only `POST .../managed-context` route returns the ADR-004 merge for
 that session's tenant, project, key creator, agent and work order. Callers cannot
@@ -493,7 +640,7 @@ this is not a provider billing cap. Existing wall-clock deadlines remain.
 
 People with `harness.recover` permission can open **Recover** in a session’s details and archive its registration after confirming the exact session and host. Archive preserves ticket links, outcomes and audit history, revokes the old worker generation, and records process state as unknown. It never signals a process. Late heartbeats, control completions and registration replays cannot reopen an archived generation; a new session needs a new reference and lease. The recovery dialog refreshes on stale observations. Recovery-aware daemons detach their harness registration without stopping the run. Active older managed daemons must stop normally before archive is available, because they cannot detach safely. Archive waits for any already-authorized force request to finish or expire.
 
-Managed daemons report a per-launch process identity and generation. **Force stop** additionally requires human `harness.force_stop` permission, an ownership report no more than 45 seconds old, and exact session/host/process-group confirmation. Ownership recording and freshness checks use the Postgres clock, so API-host clock skew does not reject a fresh report; future-dated observations still fail closed. The daemon rejects a changed identity, restart, expired request or lost ownership; deadline and cancellation are rechecked under the final signal lock. Local transport and inbox credentials cannot authorize force stop. Expiry uses server and daemon wall clocks, which need normal host clock synchronization; archive cannot retract a signal that was already authorized or delivered, and always retains unknown process state. It signals only the owned process group (including children in that group), and reports root exit separately from queue acceptance; escaped descendants are outside its scope. Linux and macOS keep the group leader unreaped while signaling, preventing PID reuse. Unsupported adapters, legacy unmanaged sessions and offline ownership cannot be force stopped. Legacy normal user **Stop** sends TERM and reports timeout without escalating; the qualified Claude managed control uses native close as described above. Daemon cleanup retains its existing bounded force cleanup.
+Managed daemons report a per-launch process identity and generation. **Force stop** additionally requires human `harness.force_stop` permission, an ownership report no more than 45 seconds old, and exact session/host/process-group confirmation. Ownership recording and freshness checks use the Postgres clock, so API-host clock skew does not reject a fresh report; future-dated observations still fail closed. The daemon rejects a changed identity, restart, expired request or lost ownership; deadline and cancellation are rechecked under the final signal lock. Local transport and inbox credentials cannot authorize force stop. Expiry uses the database-derived monotonic budget above; archive cannot retract a signal that was already authorized or delivered, and always retains unknown process state. It signals only the owned process group (including children in that group), and reports root exit separately from queue acceptance; escaped descendants are outside its scope. Linux and macOS keep the group leader unreaped while signaling, preventing PID reuse. Unsupported adapters, legacy unmanaged sessions and offline ownership cannot be force stopped. Legacy normal user **Stop** sends TERM and reports timeout without escalating; the qualified Claude managed control uses native close as described above. Daemon cleanup retains its existing bounded force cleanup.
 
 ### Removing ghost sessions (AEON-265)
 

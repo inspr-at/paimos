@@ -16,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/systemactor"
 )
 
 // taggerLockKey is the session advisory lock that keeps one tagger across
@@ -513,30 +515,42 @@ func nominateVerdict(ctx context.Context, tx pgx.Tx, tenantID string, hit outcom
 // as they are now. The row is re-read under a lock, so a change committed
 // after the scan (priority, assignee, other tags) is kept, and updated_at
 // moves forward like any other write, so a person's stale save conflicts
-// instead of dropping the tag. false means the ticket is gone or its fields
-// are not an object; nothing is nominated then.
+// instead of dropping the tag. A real change appends node.updated in this
+// same transaction, authored by the tenant System principal. false means the
+// ticket is gone or its fields are not an object; nothing is nominated then.
 func stampLearningTag(ctx context.Context, tx pgx.Tx, tenantID, nodeID string) (bool, error) {
 	if taggerBeforeStamp != nil {
 		taggerBeforeStamp(nodeID)
 	}
-	var fields json.RawMessage
-	err := tx.QueryRow(ctx, `SELECT coalesce(fields, '{}'::jsonb) FROM nodes
-		WHERE tenant_id=$1 AND id=$2::uuid AND deleted_at IS NULL FOR UPDATE`, tenantID, nodeID).Scan(&fields)
+	before, err := scanSnap(tx.QueryRow(ctx, `SELECT `+nodeReturning+` FROM nodes
+		WHERE tenant_id=$1 AND id=$2::uuid AND deleted_at IS NULL FOR UPDATE`, tenantID, nodeID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	next, changed, err := withLearningTag(fields)
+	next, changed, err := withLearningTag(before.Fields)
 	if err != nil {
 		return false, nil
 	}
 	if !changed {
 		return true, nil
 	}
-	_, err = tx.Exec(ctx, `UPDATE nodes SET fields=$3::jsonb, updated_at=`+bumpUpdated+`
-		WHERE tenant_id=$1 AND id=$2::uuid`, tenantID, nodeID, next)
+	actor, err := systemactor.Ensure(ctx, tx, tenantID)
+	if err != nil {
+		return false, err
+	}
+	after, err := scanSnap(tx.QueryRow(ctx, `UPDATE nodes SET fields=$3::jsonb, updated_at=`+bumpUpdated+`
+		WHERE tenant_id=$1 AND id=$2::uuid RETURNING `+nodeReturning, tenantID, nodeID, next))
+	if err != nil {
+		return false, err
+	}
+	meta, err := json.Marshal(map[string]string{"job": "learning-tagger", "reason": "method learning tagger"})
+	if err != nil {
+		return false, err
+	}
+	_, err = events.Append(ctx, tx, actor, events.Change{NodeID: &after.ID, Type: "node.updated", Before: before, After: after, Metadata: meta})
 	return err == nil, err
 }
 

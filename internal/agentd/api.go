@@ -12,11 +12,15 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
+	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/version"
 )
 
 // Remote uses a scoped agent key through AEON's public HTTP contract.
@@ -188,6 +192,7 @@ func harnessPath(s HarnessSession) string {
 func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID, runID, orderID, harness, host string, caps []string) (HarnessSession, error) {
 	var result HarnessSession
 	body := map[string]any{
+		"max_session_file_bytes": rules.SessionFileLimit(harness), "rules_client_version": version.Version,
 		"agent_principal_id": agentID, "run_id": runID, "ticket_node_id": orderID,
 		"work_order_id": orderID, "harness": harness, "host": host,
 		"management_mode": "managed", "role": "worker", "work_shape": "ship",
@@ -208,12 +213,13 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 		return HarnessSession{}, errors.New("harness registration binding mismatch")
 	}
 	result.Lease = s.Lease
+	result.Harness = harness
 	return result, nil
 }
 
 func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix string, body, dest any) error {
 	err := r.Client.DoWithHeaders(ctx, "POST", harnessPath(s)+suffix, body, dest,
-		map[string]string{"X-Aeon-Worker-Lease": s.Lease})
+		map[string]string{"X-Aeon-Worker-Lease": s.Lease, rules.ClientMaximumHeader: strconv.Itoa(rules.SessionFileLimit(s.Harness))})
 	var status *client.StatusError
 	if errors.As(err, &status) && status.Status == 410 && status.Message == "harness generation archived" {
 		return ErrHarnessArchived
@@ -234,6 +240,7 @@ func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase s
 		activity = "idle"
 	}
 	body := map[string]any{
+		"max_session_file_bytes": rules.SessionFileLimit(s.Harness), "rules_client_version": version.Version,
 		"phase": phase, "activity": activity, "activity_sequence": sequence, "process_ownership": s.Ownership,
 	}
 	if s.Model != "" {
@@ -249,7 +256,17 @@ func (r *Remote) YieldHarness(ctx context.Context, s HarnessSession) ([]HarnessC
 	var result struct {
 		Controls []HarnessControl `json:"controls"`
 	}
+	started := time.Now()
 	err := r.harnessWorker(ctx, s, "/yield", struct{}{}, &result)
+	for i := range result.Controls {
+		c := &result.Controls[i]
+		// Deduct the full round trip, including body decoding. Starting the TTL
+		// at receipt would extend authorization after a slow response. Missing,
+		// invalid or legacy TTLs fail closed; expires_at is audit metadata only.
+		if c.ExpiresInMS > 0 && c.ExpiresInMS <= 45000 {
+			c.deadline = started.Add(time.Duration(c.ExpiresInMS) * time.Millisecond)
+		}
+	}
 	return result.Controls, err
 }
 
@@ -260,8 +277,25 @@ func (r *Remote) DrainHarness(ctx context.Context, s HarnessSession) ([]HarnessD
 }
 
 func (r *Remote) CompleteHarnessControl(ctx context.Context, s HarnessSession, id, outcome, reason string) error {
-	return r.harnessWorker(ctx, s, "/controls/"+url.PathEscape(id)+"/complete",
+	err := r.harnessWorker(ctx, s, "/controls/"+url.PathEscape(id)+"/complete",
 		map[string]string{"outcome": outcome, "reason": reason}, nil)
+	var status *client.StatusError
+	if errors.As(err, &status) && status.Status == http.StatusConflict && terminalControlCompletion(status.Message) {
+		return ErrControlTerminal
+	}
+	return err
+}
+
+// These conflicts never become a successful retry of the same outcome. The
+// server has already finished the control, or it has refused the applied
+// setting for good. Wording matches completeControl.
+func terminalControlCompletion(message string) bool {
+	switch message {
+	case "divergent control completion", "setting authorization expired":
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *Remote) CompleteHarnessDelivery(ctx context.Context, s HarnessSession, d HarnessDelivery) error {
