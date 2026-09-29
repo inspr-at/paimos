@@ -107,14 +107,41 @@ func TagOnce(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	return total, first
 }
 
+// tagCursor is where one source scan resumes: the (timestamp, id) of the last
+// row read, exclusive. A nil id means every row at or before at was read.
+type tagCursor struct {
+	at *time.Time
+	id *string
+}
+
+func (c tagCursor) start(end time.Time) (time.Time, *string) {
+	if c.at == nil {
+		return end.Add(-taggerLookback), nil
+	}
+	return *c.at, c.id
+}
+
+// tagRun counts one tenant pass. skipped is candidates that looked like they
+// held a credential; only the count is ever logged.
+type tagRun struct {
+	added, skipped int
+}
+
+// taggerBeforeStamp runs just before a ticket's tag is merged. Tests use it
+// to change the ticket between the scan and the write.
+var taggerBeforeStamp func(nodeID string)
+
 func tagTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string) (int, error) {
-	var n int
+	var run tagRun
 	err := db.InTenant(db.AllProjects(ctx, "method learning tagger"), pool, tenantID, func(tx pgx.Tx) error {
+		run = tagRun{}
 		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','5s',true)`); err != nil {
 			return err
 		}
-		var ticketsUntil, commentsUntil, verdictsUntil *time.Time
-		err := tx.QueryRow(ctx, `SELECT tickets_until, comments_until, verdicts_until FROM method_learning_tag_cursor WHERE tenant_id=$1`, tenantID).Scan(&ticketsUntil, &commentsUntil, &verdictsUntil)
+		var tickets, comments, verdicts tagCursor
+		err := tx.QueryRow(ctx, `SELECT tickets_until, tickets_after_id, comments_until, comments_after_id, verdicts_until, verdicts_after_id
+			FROM method_learning_tag_cursor WHERE tenant_id=$1`, tenantID).Scan(
+			&tickets.at, &tickets.id, &comments.at, &comments.id, &verdicts.at, &verdicts.id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = nil
 		}
@@ -129,44 +156,37 @@ func tagTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string) (int, e
 		if err != nil {
 			return err
 		}
-		var verdictsN int
-		var verdictsCursor time.Time
 		// A missing outcome table must leave verdicts_until NULL. A zero time
 		// would be year 1 and look like a finished scan.
-		var verdictsAt *time.Time
 		if verdictsOK {
-			verdictsN, verdictsCursor, err = tagReviewVerdicts(ctx, tx, tenantID, windowStart(verdictsUntil, end), end)
-			if err != nil {
+			if verdicts, err = tagReviewVerdicts(ctx, tx, tenantID, verdicts, end, &run); err != nil {
 				return err
 			}
-			verdictsAt = &verdictsCursor
 		}
-		ticketsN, ticketsCursor, err := tagClosedTickets(ctx, tx, tenantID, windowStart(ticketsUntil, end), end)
-		if err != nil {
+		if tickets, err = tagClosedTickets(ctx, tx, tenantID, tickets, end, &run); err != nil {
 			return err
 		}
-		commentsN, commentsCursor, err := tagComments(ctx, tx, tenantID, windowStart(commentsUntil, end), end, !verdictsOK)
-		if err != nil {
+		if comments, err = tagComments(ctx, tx, tenantID, comments, end, !verdictsOK, &run); err != nil {
 			return err
 		}
-		n = verdictsN + ticketsN + commentsN
-		_, err = tx.Exec(ctx, `INSERT INTO method_learning_tag_cursor (tenant_id, tickets_until, comments_until, verdicts_until)
-			VALUES ($1, $2, $3, $4)
+		_, err = tx.Exec(ctx, `INSERT INTO method_learning_tag_cursor
+			(tenant_id, tickets_until, tickets_after_id, comments_until, comments_after_id, verdicts_until, verdicts_after_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (tenant_id) DO UPDATE SET
 			  tickets_until = EXCLUDED.tickets_until,
+			  tickets_after_id = EXCLUDED.tickets_after_id,
 			  comments_until = EXCLUDED.comments_until,
-			  verdicts_until = CASE WHEN $5 THEN EXCLUDED.verdicts_until ELSE method_learning_tag_cursor.verdicts_until END`,
-			tenantID, ticketsCursor, commentsCursor, verdictsAt, verdictsOK)
+			  comments_after_id = EXCLUDED.comments_after_id,
+			  verdicts_until = CASE WHEN $8 THEN EXCLUDED.verdicts_until ELSE method_learning_tag_cursor.verdicts_until END,
+			  verdicts_after_id = CASE WHEN $8 THEN EXCLUDED.verdicts_after_id ELSE method_learning_tag_cursor.verdicts_after_id END`,
+			tenantID, tickets.at, tickets.id, comments.at, comments.id, verdicts.at, verdicts.id, verdictsOK)
 		return err
 	})
-	return n, err
-}
-
-func windowStart(cursor *time.Time, end time.Time) time.Time {
-	if cursor == nil {
-		return end.Add(-taggerLookback)
+	if err == nil && run.skipped > 0 {
+		// The count only. The skipped text may be a credential.
+		slog.Info("method learning tagger skipped candidates that look like credentials", "tenant_id", tenantID, "skipped", run.skipped)
 	}
-	return *cursor
+	return run.added, err
 }
 
 func outcomeVerdictsUsable(ctx context.Context, tx pgx.Tx) (bool, error) {
@@ -181,11 +201,10 @@ func outcomeVerdictsUsable(ctx context.Context, tx pgx.Tx) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, err = sp.Exec(ctx, `SELECT kind, project_id, ticket_node_id, payload, recorded_at FROM outcome_events WHERE kind='review_verdict' AND false`)
+	_, err = sp.Exec(ctx, `SELECT id, kind, project_id, ticket_node_id, payload, recorded_at FROM outcome_events WHERE kind='review_verdict' AND false`)
 	if err != nil {
 		_ = sp.Rollback(ctx)
-		var pe *pgconn.PgError
-		if errors.As(err, &pe) && (pe.Code == "42P01" || pe.Code == "42703") {
+		if missingOutcomeSchema(err) {
 			return false, nil
 		}
 		return false, err
@@ -193,21 +212,30 @@ func outcomeVerdictsUsable(ctx context.Context, tx pgx.Tx) (bool, error) {
 	return true, sp.Commit(ctx)
 }
 
-func finishCursor(rows int, last, end time.Time) time.Time {
-	if rows >= taggerBatch {
-		return last
-	}
-	return end
+func missingOutcomeSchema(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && (pe.Code == "42P01" || pe.Code == "42703")
 }
 
-func tagClosedTickets(ctx context.Context, tx pgx.Tx, tenantID string, start, end time.Time) (int, time.Time, error) {
-	rows, err := tx.Query(ctx, `SELECT n.id::text, n.title, n.updated_at, n.project_id::text, coalesce(n.fields, '{}'::jsonb)
+// nextCursor is the last row read when the batch was full, else the end of
+// the window.
+func nextCursor(rows int, lastAt time.Time, lastID string, end time.Time) tagCursor {
+	if rows >= taggerBatch {
+		return tagCursor{at: &lastAt, id: &lastID}
+	}
+	return tagCursor{at: &end}
+}
+
+func tagClosedTickets(ctx context.Context, tx pgx.Tx, tenantID string, cursor tagCursor, end time.Time, run *tagRun) (tagCursor, error) {
+	start, after := cursor.start(end)
+	rows, err := tx.Query(ctx, `SELECT n.id::text, n.title, n.updated_at, n.project_id::text
 		FROM nodes n
 		JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
 		WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND k.slug='ticket'
 		  AND n.state = ANY($2::text[])
 		  AND n.project_id IS NOT NULL
-		  AND n.updated_at >= $3 AND n.updated_at <= $4
+		  AND (($5::uuid IS NULL AND n.updated_at > $3) OR (n.updated_at, n.id) > ($3, $5::uuid))
+		  AND n.updated_at <= $4
 		  AND NOT EXISTS (
 		    SELECT 1 FROM method_learning_decisions d
 		    WHERE d.tenant_id=n.tenant_id AND d.source_key='n-'||n.id::text)
@@ -218,9 +246,9 @@ func tagClosedTickets(ctx context.Context, tx pgx.Tx, tenantID string, start, en
 		    SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(n.fields->'tags')='array' THEN n.fields->'tags' ELSE '[]'::jsonb END) tag
 		    WHERE lower(btrim(CASE WHEN jsonb_typeof(tag)='string' THEN tag #>> '{}' ELSE coalesce(tag->>'name','') END)) = 'process-learning')
 		ORDER BY n.updated_at, n.id
-		LIMIT $5`, tenantID, closedTicketStates, start, end, taggerBatch)
+		LIMIT $6`, tenantID, closedTicketStates, start, end, after, taggerBatch)
 	if err != nil {
-		return 0, time.Time{}, err
+		return cursor, err
 	}
 	// pgx keeps this connection busy until the scan closes. A write on the
 	// same transaction before that returns "conn busy".
@@ -228,46 +256,55 @@ func tagClosedTickets(ctx context.Context, tx pgx.Tx, tenantID string, start, en
 	type closedHit struct {
 		id, title, project string
 		at                 time.Time
-		fields             json.RawMessage
 	}
 	var hits []closedHit
-	var last time.Time
 	for rows.Next() {
 		var hit closedHit
-		if err = rows.Scan(&hit.id, &hit.title, &hit.at, &hit.project, &hit.fields); err != nil {
-			return 0, time.Time{}, err
+		if err = rows.Scan(&hit.id, &hit.title, &hit.at, &hit.project); err != nil {
+			return cursor, err
 		}
-		last = hit.at
 		hits = append(hits, hit)
 	}
 	if err = rows.Err(); err != nil {
-		return 0, time.Time{}, err
+		return cursor, err
 	}
 	rows.Close()
-	added := 0
 	for _, hit := range hits {
-		if hasLearningTag(hit.fields) {
+		if looksSensitive(hit.title) {
+			run.skipped++
 			continue
 		}
 		excerpt := oneLine(hit.title, false)
 		if excerpt == "" {
 			continue
 		}
-		if err = stampLearningTag(ctx, tx, tenantID, hit.id, hit.fields); err != nil {
-			return 0, time.Time{}, err
-		}
-		ok, err := insertNomination(ctx, tx, tenantID, nodeLearningID(hit.id), hit.project, hit.id, nil, "closed_ticket", excerpt)
+		stamped, err := stampLearningTag(ctx, tx, tenantID, hit.id)
 		if err != nil {
-			return 0, time.Time{}, err
+			return cursor, err
+		}
+		if !stamped {
+			continue
+		}
+		ok, err := insertNomination(ctx, tx, tenantID, nominationRow{
+			sourceKey: nodeLearningID(hit.id), projectID: hit.project, nodeID: hit.id,
+			origin: "closed_ticket", excerpt: excerpt, hash: sourceHash(hit.title),
+		})
+		if err != nil {
+			return cursor, err
 		}
 		if ok {
-			added++
+			run.added++
 		}
 	}
-	return added, finishCursor(len(hits), last, end), nil
+	if len(hits) == 0 {
+		return nextCursor(0, time.Time{}, "", end), nil
+	}
+	last := hits[len(hits)-1]
+	return nextCursor(len(hits), last.at, last.id, end), nil
 }
 
-func tagComments(ctx context.Context, tx pgx.Tx, tenantID string, start, end time.Time, scanVerdict bool) (int, time.Time, error) {
+func tagComments(ctx context.Context, tx pgx.Tx, tenantID string, cursor tagCursor, end time.Time, scanVerdict bool, run *tagRun) (tagCursor, error) {
+	start, after := cursor.start(end)
 	rows, err := tx.Query(ctx, `SELECT c.id::text, c.at, n.id::text, n.project_id::text,
 		  coalesce(latest.after->>'body_markdown', c.after->>'body_markdown', '')
 		FROM events c
@@ -280,7 +317,8 @@ func tagComments(ctx context.Context, tx pgx.Tx, tenantID string, start, end tim
 		    ORDER BY e.id DESC LIMIT 1
 		) latest ON true
 		WHERE c.tenant_id=$1 AND c.type='comment.created' AND n.project_id IS NOT NULL
-		  AND c.at >= $2 AND c.at <= $3
+		  AND (($5::bigint IS NULL AND c.at > $2) OR (c.at, c.id) > ($2, $5::bigint))
+		  AND c.at <= $3
 		  AND coalesce(latest.after->>'deleted','false') <> 'true'
 		  AND coalesce(latest.after->>'body_markdown', c.after->>'body_markdown', '') !~* '(^|[^A-Za-z0-9_-])#?process-learning([^A-Za-z0-9_-]|$)'
 		  AND (
@@ -294,9 +332,9 @@ func tagComments(ctx context.Context, tx pgx.Tx, tenantID string, start, end tim
 		    SELECT 1 FROM method_learning_decisions d
 		    WHERE d.tenant_id=c.tenant_id AND d.source_key='c-'||n.id::text||'-'||c.id::text)
 		ORDER BY c.at, c.id
-		LIMIT $5`, tenantID, start, end, scanVerdict, taggerBatch)
+		LIMIT $6`, tenantID, start, end, scanVerdict, after, taggerBatch)
 	if err != nil {
-		return 0, time.Time{}, err
+		return cursor, err
 	}
 	defer rows.Close()
 	type commentHit struct {
@@ -304,20 +342,17 @@ func tagComments(ctx context.Context, tx pgx.Tx, tenantID string, start, end tim
 		at                               time.Time
 	}
 	var hits []commentHit
-	var last time.Time
 	for rows.Next() {
 		var hit commentHit
 		if err = rows.Scan(&hit.commentID, &hit.at, &hit.nodeID, &hit.project, &hit.body); err != nil {
-			return 0, time.Time{}, err
+			return cursor, err
 		}
-		last = hit.at
 		hits = append(hits, hit)
 	}
 	if err = rows.Err(); err != nil {
-		return 0, time.Time{}, err
+		return cursor, err
 	}
 	rows.Close()
-	added := 0
 	for _, hit := range hits {
 		if processLearningToken.MatchString(hit.body) {
 			continue
@@ -332,6 +367,12 @@ func tagComments(ctx context.Context, tx pgx.Tx, tenantID string, start, end tim
 		if origin == "" {
 			continue
 		}
+		// The whole body, not only the excerpt: the inbox re-derives its
+		// text from the live comment.
+		if looksSensitive(hit.body) {
+			run.skipped++
+			continue
+		}
 		excerpt := oneLine(hit.body, false)
 		if excerpt == "" {
 			continue
@@ -340,108 +381,163 @@ func tagComments(ctx context.Context, tx pgx.Tx, tenantID string, start, end tim
 		if err != nil {
 			continue
 		}
-		ok, err := insertNomination(ctx, tx, tenantID, commentLearningID(hit.nodeID, hit.commentID), hit.project, hit.nodeID, &comment, origin, excerpt)
+		ok, err := insertNomination(ctx, tx, tenantID, nominationRow{
+			sourceKey: commentLearningID(hit.nodeID, hit.commentID), projectID: hit.project, nodeID: hit.nodeID,
+			commentID: &comment, origin: origin, excerpt: excerpt, hash: sourceHash(hit.body),
+		})
 		if err != nil {
-			return 0, time.Time{}, err
+			return cursor, err
 		}
 		if ok {
-			added++
+			run.added++
 		}
 	}
-	return added, finishCursor(len(hits), last, end), nil
+	if len(hits) == 0 {
+		return nextCursor(0, time.Time{}, "", end), nil
+	}
+	last := hits[len(hits)-1]
+	return nextCursor(len(hits), last.at, last.commentID, end), nil
 }
 
-func tagReviewVerdicts(ctx context.Context, tx pgx.Tx, tenantID string, start, end time.Time) (int, time.Time, error) {
-	rows, err := tx.Query(ctx, `SELECT ticket_node_id::text, payload, recorded_at
+func tagReviewVerdicts(ctx context.Context, tx pgx.Tx, tenantID string, cursor tagCursor, end time.Time, run *tagRun) (tagCursor, error) {
+	start, after := cursor.start(end)
+	// The id's type belongs to the outcome table; its text form orders and
+	// resumes the scan the same way whatever that type is.
+	rows, err := tx.Query(ctx, `SELECT id::text, project_id::text, ticket_node_id::text, payload, recorded_at
 		FROM outcome_events
 		WHERE tenant_id=$1 AND kind='review_verdict'
-		  AND recorded_at >= $2 AND recorded_at <= $3
-		ORDER BY recorded_at, id
-		LIMIT $4`, tenantID, start, end, taggerBatch)
+		  AND (($4::text IS NULL AND recorded_at > $2) OR (recorded_at, id::text) > ($2, $4::text))
+		  AND recorded_at <= $3
+		ORDER BY recorded_at, id::text
+		LIMIT $5`, tenantID, start, end, after, taggerBatch)
 	if err != nil {
-		return 0, time.Time{}, err
+		return cursor, err
 	}
 	defer rows.Close()
-	type verdictHit struct {
-		nodeID  string
-		payload json.RawMessage
-		at      time.Time
-	}
-	var hits []verdictHit
-	var last time.Time
+	var hits []outcomeVerdict
 	for rows.Next() {
-		var hit verdictHit
-		if err = rows.Scan(&hit.nodeID, &hit.payload, &hit.at); err != nil {
-			return 0, time.Time{}, err
+		var hit outcomeVerdict
+		if err = rows.Scan(&hit.id, &hit.projectID, &hit.nodeID, &hit.payload, &hit.at); err != nil {
+			return cursor, err
 		}
-		last = hit.at
 		hits = append(hits, hit)
 	}
 	if err = rows.Err(); err != nil {
-		return 0, time.Time{}, err
+		return cursor, err
 	}
 	rows.Close()
-	added := 0
 	for _, hit := range hits {
-		ok, err := nominateVerdict(ctx, tx, tenantID, hit.nodeID, hit.payload)
+		ok, err := nominateVerdict(ctx, tx, tenantID, hit, run)
 		if err != nil {
-			return 0, time.Time{}, err
+			return cursor, err
 		}
 		if ok {
-			added++
+			run.added++
 		}
 	}
-	return added, finishCursor(len(hits), last, end), nil
+	if len(hits) == 0 {
+		return nextCursor(0, time.Time{}, "", end), nil
+	}
+	last := hits[len(hits)-1]
+	return nextCursor(len(hits), last.at, last.id, end), nil
 }
 
-func nominateVerdict(ctx context.Context, tx pgx.Tx, tenantID, nodeID string, payload json.RawMessage) (bool, error) {
+type outcomeVerdict struct {
+	id, projectID, nodeID string
+	payload               json.RawMessage
+	at                    time.Time
+}
+
+// verdictText is a review verdict's inbox text and the material it came from.
+// ok is false for a payload that is not a pass or fail verdict.
+func verdictText(payload json.RawMessage, title string) (excerpt, material string, ok bool) {
 	var body struct {
 		Verdict string `json:"verdict"`
 		Summary string `json:"summary"`
 	}
 	if json.Unmarshal(payload, &body) != nil || (body.Verdict != "pass" && body.Verdict != "fail") {
-		return false, nil
+		return "", "", false
 	}
+	if excerpt = oneLine(body.Summary, false); excerpt != "" {
+		return excerpt, body.Verdict + "\x00" + body.Summary, true
+	}
+	excerpt = oneLine("Review "+body.Verdict+" on "+title, false)
+	return excerpt, body.Verdict + "\x00\x00" + title, excerpt != ""
+}
+
+func nominateVerdict(ctx context.Context, tx pgx.Tx, tenantID string, hit outcomeVerdict, run *tagRun) (bool, error) {
 	var title, project, kind string
-	var fields json.RawMessage
-	err := tx.QueryRow(ctx, `SELECT n.title, n.project_id::text, k.slug, coalesce(n.fields, '{}'::jsonb)
+	err := tx.QueryRow(ctx, `SELECT n.title, n.project_id::text, k.slug
 		FROM nodes n
 		JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-		WHERE n.tenant_id=$1 AND n.id=$2::uuid AND n.deleted_at IS NULL AND n.project_id IS NOT NULL`, tenantID, nodeID).Scan(&title, &project, &kind, &fields)
-	if errors.Is(err, pgx.ErrNoRows) || !issueKinds[kind] {
+		WHERE n.tenant_id=$1 AND n.id=$2::uuid AND n.deleted_at IS NULL AND n.project_id IS NOT NULL`, tenantID, hit.nodeID).Scan(&title, &project, &kind)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !issueKinds[kind]) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
+	// A verdict speaks for the project it was recorded in. A ticket that has
+	// since moved elsewhere is not tagged in its new project on its strength.
+	if hit.projectID != project {
+		return false, nil
+	}
 	var decided string
-	err = tx.QueryRow(ctx, `SELECT decision FROM method_learning_decisions WHERE tenant_id=$1 AND source_key=$2`, tenantID, nodeLearningID(nodeID)).Scan(&decided)
+	err = tx.QueryRow(ctx, `SELECT decision FROM method_learning_decisions WHERE tenant_id=$1 AND source_key=$2`, tenantID, nodeLearningID(hit.nodeID)).Scan(&decided)
 	if err == nil {
 		return false, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return false, err
 	}
-	excerpt := oneLine(body.Summary, false)
-	if excerpt == "" {
-		excerpt = oneLine("Review "+body.Verdict+" on "+title, false)
-	}
-	if excerpt == "" {
+	excerpt, material, ok := verdictText(hit.payload, title)
+	if !ok {
 		return false, nil
 	}
-	if err = stampLearningTag(ctx, tx, tenantID, nodeID, fields); err != nil {
+	if looksSensitive(material) {
+		run.skipped++
+		return false, nil
+	}
+	stamped, err := stampLearningTag(ctx, tx, tenantID, hit.nodeID)
+	if err != nil || !stamped {
 		return false, err
 	}
-	return insertNomination(ctx, tx, tenantID, nodeLearningID(nodeID), project, nodeID, nil, "review_verdict", excerpt)
+	outcome := hit.id
+	return insertNomination(ctx, tx, tenantID, nominationRow{
+		sourceKey: nodeLearningID(hit.nodeID), projectID: hit.projectID, nodeID: hit.nodeID,
+		outcomeID: &outcome, origin: "review_verdict", excerpt: excerpt, hash: sourceHash(material),
+	})
 }
 
-func stampLearningTag(ctx context.Context, tx pgx.Tx, tenantID, nodeID string, fields json.RawMessage) error {
-	next, changed, err := withLearningTag(fields)
-	if err != nil || !changed {
-		return err
+// stampLearningTag merges the process-learning tag into the ticket's fields
+// as they are now. The row is re-read under a lock, so a change committed
+// after the scan (priority, assignee, other tags) is kept, and updated_at
+// moves forward like any other write, so a person's stale save conflicts
+// instead of dropping the tag. false means the ticket is gone or its fields
+// are not an object; nothing is nominated then.
+func stampLearningTag(ctx context.Context, tx pgx.Tx, tenantID, nodeID string) (bool, error) {
+	if taggerBeforeStamp != nil {
+		taggerBeforeStamp(nodeID)
 	}
-	_, err = tx.Exec(ctx, `UPDATE nodes SET fields=$3::jsonb WHERE tenant_id=$1 AND id=$2::uuid`, tenantID, nodeID, next)
-	return err
+	var fields json.RawMessage
+	err := tx.QueryRow(ctx, `SELECT coalesce(fields, '{}'::jsonb) FROM nodes
+		WHERE tenant_id=$1 AND id=$2::uuid AND deleted_at IS NULL FOR UPDATE`, tenantID, nodeID).Scan(&fields)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	next, changed, err := withLearningTag(fields)
+	if err != nil {
+		return false, nil
+	}
+	if !changed {
+		return true, nil
+	}
+	_, err = tx.Exec(ctx, `UPDATE nodes SET fields=$3::jsonb, updated_at=`+bumpUpdated+`
+		WHERE tenant_id=$1 AND id=$2::uuid`, tenantID, nodeID, next)
+	return err == nil, err
 }
 
 func withLearningTag(fields json.RawMessage) (json.RawMessage, bool, error) {
@@ -469,22 +565,33 @@ func withLearningTag(fields json.RawMessage) (json.RawMessage, bool, error) {
 	return out, err == nil, err
 }
 
-func insertNomination(ctx context.Context, tx pgx.Tx, tenantID, sourceKey, projectID, nodeID string, commentID *int64, origin, excerpt string) (bool, error) {
-	excerpt = clipBytes(excerpt, 240)
+type nominationRow struct {
+	sourceKey, projectID, nodeID string
+	commentID                    *int64
+	outcomeID                    *string
+	origin, excerpt, hash        string
+}
+
+func insertNomination(ctx context.Context, tx pgx.Tx, tenantID string, row nominationRow) (bool, error) {
+	excerpt := clipBytes(row.excerpt, 240)
 	if excerpt == "" {
 		return false, nil
 	}
 	// char_length is runes. clipBytes is bytes, and oneLine is already ≤240 runes.
+	// A later review verdict replaces an earlier nomination of the same ticket,
+	// with its own project, outcome id and source hash.
 	tag, err := tx.Exec(ctx, `INSERT INTO method_learning_nominations
-		(tenant_id, source_key, project_id, node_id, comment_id, origin, excerpt)
-		VALUES ($1, $2, $3::uuid, $4::uuid, $5::bigint, $6, $7)
+		(tenant_id, source_key, project_id, node_id, comment_id, outcome_id, origin, excerpt, source_hash)
+		VALUES ($1, $2, $3::uuid, $4::uuid, $5::bigint, $6, $7, $8, $9)
 		ON CONFLICT (tenant_id, source_key) DO UPDATE SET
+		  project_id = EXCLUDED.project_id,
+		  outcome_id = EXCLUDED.outcome_id,
 		  origin = EXCLUDED.origin,
 		  excerpt = EXCLUDED.excerpt,
+		  source_hash = EXCLUDED.source_hash,
 		  nominated_at = clock_timestamp()
-		WHERE method_learning_nominations.origin IS DISTINCT FROM 'review_verdict'
-		  AND EXCLUDED.origin = 'review_verdict'`,
-		tenantID, sourceKey, projectID, nodeID, commentID, origin, excerpt)
+		WHERE EXCLUDED.origin = 'review_verdict'`,
+		tenantID, row.sourceKey, row.projectID, row.nodeID, row.commentID, row.outcomeID, row.origin, excerpt, row.hash)
 	if err != nil {
 		return false, err
 	}

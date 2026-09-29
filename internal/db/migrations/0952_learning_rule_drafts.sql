@@ -56,6 +56,13 @@ CREATE TABLE method_learning_nominations (
     comment_id bigint,
     origin text NOT NULL CHECK (origin IN ('closed_ticket', 'review_verdict', 'incident_comment')),
     excerpt text NOT NULL CHECK (char_length(excerpt) BETWEEN 1 AND 240),
+    -- sha256 of the source text the excerpt came from. A reader re-derives
+    -- the text from the live source and serves the stored excerpt only while
+    -- the hash still matches, so an edited source never shows the old copy.
+    source_hash text NOT NULL CHECK (source_hash ~ '^[0-9a-f]{64}$'),
+    -- A review verdict from outcome_events keeps that record's own id and
+    -- project: project_id is then the verdict's project, not the ticket's.
+    outcome_id text CHECK (outcome_id IS NULL OR char_length(outcome_id) BETWEEN 1 AND 64),
     nominated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (tenant_id, source_key),
     FOREIGN KEY (tenant_id, project_id) REFERENCES nodes (tenant_id, id),
@@ -67,7 +74,8 @@ CREATE TABLE method_learning_nominations (
         (origin = 'closed_ticket' AND comment_id IS NULL)
         OR (origin = 'incident_comment' AND comment_id IS NOT NULL)
         OR origin = 'review_verdict'
-    )
+    ),
+    CHECK (outcome_id IS NULL OR (origin = 'review_verdict' AND comment_id IS NULL))
 );
 
 CREATE INDEX method_learning_nominations_project_idx
@@ -80,11 +88,17 @@ CREATE POLICY method_learning_nominations_tenant ON method_learning_nominations
     WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
 
 -- One cursor per source. Null means that source has never been scanned.
+-- The cursor is the (timestamp, id) of the last row read, exclusive, so a
+-- batch of rows that share one timestamp cannot stall the scan. A null id
+-- after a timestamp means everything at or before that timestamp was read.
 CREATE TABLE method_learning_tag_cursor (
     tenant_id uuid PRIMARY KEY REFERENCES tenants(id),
     tickets_until timestamptz,
+    tickets_after_id text,
     comments_until timestamptz,
-    verdicts_until timestamptz
+    comments_after_id text,
+    verdicts_until timestamptz,
+    verdicts_after_id text
 );
 
 ALTER TABLE method_learning_tag_cursor ENABLE ROW LEVEL SECURITY;

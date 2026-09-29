@@ -90,6 +90,12 @@ func closedLearning() error {
 	return fail(http.StatusNotFound, "learning_closed", "This learning is no longer open.")
 }
 
+// sensitiveLearning refuses to copy text that looks like it holds a
+// credential into a changelog or a rule draft.
+func sensitiveLearning() error {
+	return fail(http.StatusConflict, "learning_sensitive", "This learning looks like it holds a credential. Remove it from the source first.")
+}
+
 func alreadyDecided() error {
 	return fail(http.StatusConflict, "already_decided", "This learning was already accepted or dismissed.")
 }
@@ -472,7 +478,7 @@ func listLearnings(ctx context.Context, tx pgx.Tx, tenantID, projectID string) (
 	if err != nil {
 		return page, err
 	}
-	nominated, err := listNominated(ctx, tx, tenantID, projectID, projectKey, decided)
+	nominated, err := listNominated(ctx, tx, tenantID, projectID, projectKey)
 	if err != nil {
 		return page, err
 	}
@@ -629,6 +635,9 @@ func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicI
 		if err != nil {
 			return err
 		}
+		if looksSensitive(item.Text) {
+			return sensitiveLearning()
+		}
 		current, _, err := lockNode(ctx, tx, p.TenantID, knowledgeID, false)
 		if err != nil {
 			return err
@@ -736,16 +745,17 @@ func insertDecision(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectI
 
 func loadOpen(ctx context.Context, tx pgx.Tx, tenantID, nodeID, commentID string, comment bool) (Learning, error) {
 	var item Learning
-	var kind, slug, projectKey, projectID string
+	var kind, slug, projectKey, projectID, rootProject string
 	var fields json.RawMessage
 	err := tx.QueryRow(ctx, `SELECT n.key, n.title, n.updated_at, n.fields, k.slug, coalesce(n.fields->>'slug',''),
 	    coalesce(`+owningProjectKey+`, ''),
-	    coalesce((`+owningProject+`)::text, '')
+	    coalesce((`+owningProject+`)::text, ''),
+	    coalesce(n.project_id::text, '')
 	  FROM nodes n
 	  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
 	  `+nearestProject+`
 	  WHERE n.tenant_id=$1 AND n.id=$2::uuid AND n.deleted_at IS NULL`, tenantID, nodeID).Scan(
-		&item.Key, &item.Title, &item.At, &fields, &kind, &slug, &projectKey, &projectID)
+		&item.Key, &item.Title, &item.At, &fields, &kind, &slug, &projectKey, &projectID, &rootProject)
 	if errors.Is(err, pgx.ErrNoRows) || projectID == "" {
 		return Learning{}, closedLearning()
 	}
@@ -773,25 +783,15 @@ func loadOpen(ctx context.Context, tx pgx.Tx, tenantID, nodeID, commentID string
 		}
 		text, tagged := commentLearningText(body)
 		if nom != nil {
-			switch nom.Origin {
-			case "review_verdict":
-				if !strings.Contains(body, "VERDICT") {
-					return Learning{}, closedLearning()
-				}
-				if nom.Excerpt != "" {
-					text = nom.Excerpt
-				}
-			case "incident_comment":
-				if !incidentWord.MatchString(body) {
-					return Learning{}, closedLearning()
-				}
-				if !tagged {
-					text = oneLine(body, false)
-				}
-			default:
-				if !tagged {
-					return Learning{}, closedLearning()
-				}
+			nomText, ok, err := nominationText(ctx, tx, tenantID, *nom, item.Title, kind, rootProject, &body)
+			if err != nil {
+				return Learning{}, err
+			}
+			switch {
+			case ok && (nom.Origin == "review_verdict" || !tagged):
+				text = nomText
+			case !ok && !tagged:
+				return Learning{}, closedLearning()
 			}
 		} else if !tagged {
 			return Learning{}, closedLearning()
@@ -808,21 +808,17 @@ func loadOpen(ctx context.Context, tx pgx.Tx, tenantID, nodeID, commentID string
 		return item, nil
 	}
 	text := ""
-	tagged := issueKinds[kind] && hasLearningTag(fields)
-	if tagged {
+	if issueKinds[kind] && hasLearningTag(fields) {
 		text = oneLine(item.Title, false)
 	}
 	if nom != nil && (nom.Origin == "closed_ticket" || nom.Origin == "review_verdict") {
-		if !issueKinds[kind] {
-			return Learning{}, closedLearning()
+		nomText, ok, err := nominationText(ctx, tx, tenantID, *nom, item.Title, kind, rootProject, nil)
+		if err != nil {
+			return Learning{}, err
 		}
-		if nom.Origin == "review_verdict" && nom.Excerpt != "" {
-			text = nom.Excerpt
-		} else if text == "" {
-			text = nom.Excerpt
+		if ok && (nom.Origin == "review_verdict" || text == "") {
+			text = nomText
 		}
-	} else if !tagged {
-		return Learning{}, closedLearning()
 	}
 	if text == "" {
 		return Learning{}, closedLearning()
@@ -834,35 +830,118 @@ func loadOpen(ctx context.Context, tx pgx.Tx, tenantID, nodeID, commentID string
 }
 
 type nomination struct {
-	Origin    string
-	Excerpt   string
-	CommentID string
-	NodeID    string
-	At        time.Time
+	Origin     string
+	Excerpt    string
+	SourceHash string
+	CommentID  string
+	NodeID     string
+	ProjectID  string
+	OutcomeID  *string
+	At         time.Time
+}
+
+const nominationColumns = `origin, excerpt, source_hash, coalesce(comment_id::text, ''), node_id::text, project_id::text, outcome_id, nominated_at`
+
+func scanNomination(row pgx.Row, extra ...any) (nomination, error) {
+	var nom nomination
+	dest := append([]any{&nom.Origin, &nom.Excerpt, &nom.SourceHash, &nom.CommentID, &nom.NodeID, &nom.ProjectID, &nom.OutcomeID, &nom.At}, extra...)
+	return nom, row.Scan(dest...)
 }
 
 func nominationOf(ctx context.Context, tx pgx.Tx, tenantID, sourceKey string) (*nomination, error) {
-	var nom nomination
-	var commentID *string
-	err := tx.QueryRow(ctx, `SELECT origin, excerpt, comment_id::text, node_id::text, nominated_at
-		FROM method_learning_nominations WHERE tenant_id=$1 AND source_key=$2`, tenantID, sourceKey).Scan(&nom.Origin, &nom.Excerpt, &commentID, &nom.NodeID, &nom.At)
+	nom, err := scanNomination(tx.QueryRow(ctx, `SELECT `+nominationColumns+`
+		FROM method_learning_nominations WHERE tenant_id=$1 AND source_key=$2`, tenantID, sourceKey))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if commentID != nil {
-		nom.CommentID = *commentID
-	}
 	return &nom, nil
 }
 
-func listNominated(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, decided map[string]bool) ([]Learning, error) {
-	rows, err := tx.Query(ctx, `SELECT source_key, node_id::text, comment_id::text, origin, excerpt, nominated_at
-		FROM method_learning_nominations
-		WHERE tenant_id=$1 AND project_id=$2::uuid
-		ORDER BY nominated_at DESC
+// nominationText is a nomination's inbox text, re-derived from its live
+// source: the ticket title, the comment as it reads now, or the review
+// verdict record. The stored excerpt is served only while the source hashes
+// as it did when it was nominated; an edited source gets the new text, and a
+// source that now looks like it holds a credential hides the nomination.
+//
+// A review verdict counts only in the project it was recorded in, while the
+// ticket is still there, and only when the caller can read the verdict
+// record itself: a ticket moved from A to B does not carry A's verdict to
+// people who see only B. body is the live comment for a comment nomination.
+func nominationText(ctx context.Context, tx pgx.Tx, tenantID string, nom nomination, title, kind, nodeProject string, body *string) (string, bool, error) {
+	var excerpt, material string
+	switch {
+	case nom.Origin == "closed_ticket":
+		if !issueKinds[kind] {
+			return "", false, nil
+		}
+		excerpt, material = oneLine(title, false), title
+	case nom.Origin == "review_verdict" && nom.CommentID != "":
+		if body == nil || !strings.Contains(*body, "VERDICT") {
+			return "", false, nil
+		}
+		excerpt, material = oneLine(*body, false), *body
+	case nom.Origin == "review_verdict":
+		if nom.OutcomeID == nil || !issueKinds[kind] || nom.ProjectID != nodeProject {
+			return "", false, nil
+		}
+		payload, ok, err := outcomePayload(ctx, tx, tenantID, *nom.OutcomeID)
+		if err != nil || !ok {
+			return "", false, err
+		}
+		if excerpt, material, ok = verdictText(payload, title); !ok {
+			return "", false, nil
+		}
+	case nom.Origin == "incident_comment":
+		if body == nil || !incidentWord.MatchString(*body) {
+			return "", false, nil
+		}
+		excerpt, material = oneLine(*body, false), *body
+	default:
+		return "", false, nil
+	}
+	if looksSensitive(material) {
+		return "", false, nil
+	}
+	if nom.Excerpt != "" && nom.SourceHash == sourceHash(material) {
+		excerpt = nom.Excerpt
+	}
+	return excerpt, excerpt != "", nil
+}
+
+// outcomePayload reads one review verdict with the caller's own visibility,
+// so a verdict in a project the caller cannot see is not found. A missing
+// outcome table is not found either.
+func outcomePayload(ctx context.Context, tx pgx.Tx, tenantID, outcomeID string) (json.RawMessage, bool, error) {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	var payload json.RawMessage
+	err = sp.QueryRow(ctx, `SELECT payload FROM outcome_events
+		WHERE tenant_id=$1 AND id::text=$2 AND kind='review_verdict'`, tenantID, outcomeID).Scan(&payload)
+	if err != nil {
+		_ = sp.Rollback(ctx)
+		if errors.Is(err, pgx.ErrNoRows) || missingOutcomeSchema(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return payload, true, sp.Commit(ctx)
+}
+
+// listNominated drops decided nominations in SQL, before the limit, so a
+// window of newer decided ones cannot hide an older open candidate.
+func listNominated(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string) ([]Learning, error) {
+	rows, err := tx.Query(ctx, `SELECT `+nominationColumns+`, m.source_key
+		FROM method_learning_nominations m
+		WHERE m.tenant_id=$1 AND m.project_id=$2::uuid
+		  AND NOT EXISTS (
+		    SELECT 1 FROM method_learning_decisions d
+		    WHERE d.tenant_id=m.tenant_id AND d.source_key=m.source_key)
+		ORDER BY m.nominated_at DESC, m.source_key
 		LIMIT `+strconv.Itoa(learningScanLimit), tenantID, projectID)
 	if err != nil {
 		return nil, err
@@ -871,16 +950,18 @@ func listNominated(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectK
 	// while rows are open is "conn busy".
 	defer rows.Close()
 	type nominatedHit struct {
-		sourceKey, nodeID, origin, excerpt string
-		commentID                          *string
-		at                                 time.Time
+		sourceKey string
+		nom       nomination
 	}
 	var hits []nominatedHit
 	for rows.Next() {
 		var hit nominatedHit
-		if err := rows.Scan(&hit.sourceKey, &hit.nodeID, &hit.commentID, &hit.origin, &hit.excerpt, &hit.at); err != nil {
+		var sourceKey string
+		nom, err := scanNomination(rows, &sourceKey)
+		if err != nil {
 			return nil, err
 		}
+		hit.sourceKey, hit.nom = sourceKey, nom
 		hits = append(hits, hit)
 	}
 	if err := rows.Err(); err != nil {
@@ -889,14 +970,7 @@ func listNominated(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectK
 	rows.Close()
 	var out []Learning
 	for _, hit := range hits {
-		if decided[hit.sourceKey] {
-			continue
-		}
-		comment := ""
-		if hit.commentID != nil {
-			comment = *hit.commentID
-		}
-		item, ok, err := learningFromNomination(ctx, tx, tenantID, projectID, projectKey, hit.sourceKey, hit.nodeID, comment, hit.origin, hit.excerpt, hit.at)
+		item, ok, err := learningFromNomination(ctx, tx, tenantID, projectID, projectKey, hit.sourceKey, hit.nom)
 		if err != nil {
 			return nil, err
 		}
@@ -907,76 +981,59 @@ func listNominated(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectK
 	return out, nil
 }
 
-func learningFromNomination(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey, sourceKey, nodeID, commentID, origin, excerpt string, at time.Time) (Learning, bool, error) {
+func learningFromNomination(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey, sourceKey string, nom nomination) (Learning, bool, error) {
 	var item Learning
-	var kind, slug string
-	err := tx.QueryRow(ctx, `SELECT n.key, n.title, n.updated_at, k.slug, coalesce(n.fields->>'slug','')
+	var kind, slug, nodeProject string
+	err := tx.QueryRow(ctx, `SELECT n.key, n.title, n.updated_at, k.slug, coalesce(n.fields->>'slug',''), coalesce(n.project_id::text, '')
 		FROM nodes n
 		JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-		WHERE n.tenant_id=$1 AND n.id=$2::uuid AND n.deleted_at IS NULL`, tenantID, nodeID).Scan(&item.Key, &item.Title, &item.At, &kind, &slug)
+		WHERE n.tenant_id=$1 AND n.id=$2::uuid AND n.deleted_at IS NULL`, tenantID, nom.NodeID).Scan(&item.Key, &item.Title, &item.At, &kind, &slug, &nodeProject)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Learning{}, false, nil
 	}
 	if err != nil {
 		return Learning{}, false, err
 	}
-	item.NodeID = nodeID
+	item.NodeID = nom.NodeID
 	item.ID = sourceKey
 	item.Href = learningHref(projectKey, item.Key, kind, slug)
 	item.projectID = projectID
-	switch origin {
-	case "closed_ticket":
-		if !issueKinds[kind] {
-			return Learning{}, false, nil
-		}
-		item.Source = "ticket"
-		item.Text = oneLine(item.Title, false)
-		if item.Text == "" {
-			item.Text = excerpt
-		}
-	case "review_verdict":
-		item.verdict = true
-		item.Text = excerpt
-		if commentID == "" {
-			if !issueKinds[kind] {
-				return Learning{}, false, nil
-			}
-			item.Source = "ticket"
-		} else {
-			body, commentAt, author, ok, err := openComment(ctx, tx, tenantID, nodeID, commentID)
-			if err != nil || !ok || !strings.Contains(body, "VERDICT") {
-				return Learning{}, false, err
-			}
-			item.Source = "comment"
-			item.CommentID = commentID
-			item.At = commentAt
-			item.Author = author
-		}
-	case "incident_comment":
-		body, commentAt, author, ok, err := openComment(ctx, tx, tenantID, nodeID, commentID)
-		if err != nil || !ok || !incidentWord.MatchString(body) {
+	var body *string
+	if nom.CommentID != "" {
+		text, commentAt, author, ok, err := openComment(ctx, tx, tenantID, nom.NodeID, nom.CommentID)
+		if err != nil || !ok {
 			return Learning{}, false, err
 		}
-		text, tagged := commentLearningText(body)
-		if !tagged {
-			text = oneLine(body, false)
-		}
-		if text == "" {
-			return Learning{}, false, nil
-		}
+		body = &text
 		item.Source = "comment"
-		item.CommentID = commentID
-		item.Text = text
+		item.CommentID = nom.CommentID
 		item.At = commentAt
 		item.Author = author
+	} else {
+		item.Source = "ticket"
+	}
+	text, ok, err := nominationText(ctx, tx, tenantID, nom, item.Title, kind, nodeProject, body)
+	if err != nil || !ok {
+		return Learning{}, false, err
+	}
+	switch nom.Origin {
+	case "review_verdict":
+		item.verdict = true
+		item.Text = text
+	case "incident_comment":
+		if tagged, isTagged := commentLearningText(*body); isTagged {
+			item.Text = tagged
+		} else {
+			item.Text = text
+		}
 	default:
-		return Learning{}, false, nil
+		item.Text = text
 	}
 	if item.Text == "" {
 		return Learning{}, false, nil
 	}
 	if item.At.IsZero() {
-		item.At = at
+		item.At = nom.At
 	}
 	return item, true, nil
 }

@@ -2209,9 +2209,13 @@ paths:
         a live ticket, task or epic in that project whose tags include
         process-learning, a comment on a node in the project whose current text
         contains that tag as its own word (an optional leading # is allowed),
-        or a nomination from the daily tagger that is still open. A review
-        verdict's stored excerpt is the line shown. Accepted, dismissed and
-        drafted items are omitted. At most 50, newest first.
+        or a nomination from the daily tagger that is still open. A
+        nomination's line is re-derived from its live source; its stored
+        excerpt is shown only while that source is unchanged, and a source
+        that now looks like it holds a credential hides it. A review verdict
+        shows only in the project it was recorded in, while the ticket is
+        still there, to people who can read that verdict. Accepted, dismissed
+        and drafted items are omitted. At most 50, newest first.
       security: *auth
       parameters:
         - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
@@ -2235,6 +2239,8 @@ paths:
         knowledge.learning_accepted. The entry must be in the same project.
         If-Unmodified-Since is the entry's updated_at; a stale value returns
         412 with the current entry and writes nothing. Agents cannot accept.
+        Text that looks like it holds a credential is not copied: 409
+        learning_sensitive.
       parameters:
         - {name: learningId, in: path, required: true, schema: {type: string}}
         - {name: If-Unmodified-Since, in: header, schema: {type: string}}
@@ -2296,6 +2302,8 @@ paths:
         learning line. Its source records the learning id and the node.
         Publishing stays a separate person approval and is not performed.
         Agents cannot draft. A second decision on the same learning is 409.
+        Text that looks like it holds a credential is not copied: 409
+        learning_sensitive.
       parameters:
         - {name: learningId, in: path, required: true, schema: {type: string}}
       security: *auth

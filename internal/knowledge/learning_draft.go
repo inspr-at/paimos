@@ -21,7 +21,11 @@ import (
 )
 
 // learningDraftAudit is knowledge.learning_drafted. Undo reads rule back out
-// of it; the event is not a node snapshot.
+// of it; the event is not a node snapshot. The rule layer and set are not in
+// it: every UUID in an event that names a node becomes one of the event's
+// node references, and a person who sees only this project cannot see rules
+// layer or set nodes, so the event (and its undo) would be hidden from the
+// very person who drafted it. The decision row keeps them for undo.
 type learningDraftAudit struct {
 	SourceKey string     `json:"source_key"`
 	Source    string     `json:"source"`
@@ -29,8 +33,6 @@ type learningDraftAudit struct {
 	CommentID string     `json:"comment_id,omitempty"`
 	ProjectID string     `json:"project_id"`
 	Text      string     `json:"text"`
-	LayerID   string     `json:"layer_id"`
-	SetID     string     `json:"set_id"`
 	Rule      rules.Rule `json:"rule"`
 }
 
@@ -111,6 +113,9 @@ func (m *module) draftLearning(ctx context.Context, p tenant.Principal, publicID
 		if err != nil {
 			return err
 		}
+		if looksSensitive(item.Text) || looksSensitive(item.Title) {
+			return sensitiveLearning()
+		}
 		rule, err := learningRule(item, publicID, nodeID, commentID, comment)
 		if err != nil {
 			return err
@@ -120,7 +125,7 @@ func (m *module) draftLearning(ctx context.Context, p tenant.Principal, publicID
 		}
 		audit := learningDraftAudit{
 			SourceKey: publicID, Source: item.Source, NodeID: item.NodeID, CommentID: item.CommentID,
-			ProjectID: item.projectID, Text: item.Text, LayerID: layerID, SetID: setID, Rule: rule,
+			ProjectID: item.projectID, Text: item.Text, Rule: rule,
 		}
 		ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &item.NodeID, Type: evLearningDrafted, After: audit})
 		if err != nil {
@@ -254,14 +259,17 @@ func undoLearningDrafted(ctx context.Context, tx pgx.Tx, p tenant.Principal, e e
 	if err := rules.PrepareWrite(ctx, tx, p); err != nil {
 		return events.Change{}, undoRuleErr(err)
 	}
-	tag, err := tx.Exec(ctx, `DELETE FROM method_learning_decisions WHERE tenant_id=$1 AND event_id=$2 AND decision='drafted'`, p.TenantID, e.ID)
+	var layerID, setID, projectID string
+	err := tx.QueryRow(ctx, `DELETE FROM method_learning_decisions
+		WHERE tenant_id=$1 AND event_id=$2 AND decision='drafted' AND source_key=$3
+		RETURNING rule_layer_id::text, rule_set_id::text, project_id::text`, p.TenantID, e.ID, audit.SourceKey).Scan(&layerID, &setID, &projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return events.Change{}, events.ErrConflict
+	}
 	if err != nil {
 		return events.Change{}, err
 	}
-	if tag.RowsAffected() != 1 {
-		return events.Change{}, events.ErrConflict
-	}
-	if err = rules.RemoveLearningRule(ctx, tx, p, audit.LayerID, audit.SetID, audit.ProjectID, audit.Rule); err != nil {
+	if err = rules.RemoveLearningRule(ctx, tx, p, layerID, setID, projectID, audit.Rule); err != nil {
 		return events.Change{}, undoRuleErr(err)
 	}
 	return events.Change{NodeID: e.NodeID, Type: evLearningDrafted, Before: json.RawMessage(e.After), After: map[string]any{"decision": "reopened"}}, nil
