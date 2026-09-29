@@ -3,6 +3,7 @@
 package harness_test
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -142,5 +143,136 @@ func TestSessionReadMarkerIsolationAndMonotonic(t *testing.T) {
 	}
 	if decode(t, f.call(f.person, "GET", path, nil, ""))["last_read_event_id"].(float64) != float64(secondEvent) {
 		t.Fatal("other person's update changed the first marker")
+	}
+}
+
+func TestSessionReadMarkerRejectsForeignAndMissingEvents(t *testing.T) {
+	f := fixture(t)
+	session := attentionSession(t, f)
+	otherSession := attentionSession(t, f)
+	messageID, messageEvent := boundMessage(t, f, session, f.agent.ID, f.person.ID)
+	_, foreignEvent := boundMessage(t, f, otherSession, f.agent.ID, f.person.ID)
+	if foreignEvent <= messageEvent {
+		t.Fatalf("foreign event %d is not after the message event %d", foreignEvent, messageEvent)
+	}
+	path := "/api/projects/" + f.project + "/harness-sessions/" + session + "/read-marker"
+	// The message itself is in this session, so a rejection is the event check.
+	expect(t, f.call(f.person, "PUT", path, map[string]any{"last_read_message_id": messageID, "last_read_event_id": messageEvent}, ""), 200)
+
+	expect(t, f.call(f.person, "PUT", path, map[string]any{"last_read_message_id": messageID, "last_read_event_id": foreignEvent}, ""), 400)
+	stored := decode(t, f.call(f.person, "GET", path, nil, ""))
+	if stored["last_read_message_id"] != messageID || stored["last_read_event_id"].(float64) != float64(messageEvent) {
+		t.Fatalf("foreign event moved the marker: %#v", stored)
+	}
+
+	future := foreignEvent + 1_000_000
+	expect(t, f.call(f.person, "PUT", path, map[string]any{"last_read_message_id": messageID, "last_read_event_id": future}, ""), 400)
+	stored = decode(t, f.call(f.person, "GET", path, nil, ""))
+	if stored["last_read_message_id"] != messageID || stored["last_read_event_id"].(float64) != float64(messageEvent) {
+		t.Fatalf("missing event moved the marker: %#v", stored)
+	}
+}
+
+func TestSessionReadMarkerConcurrentPutsKeepTheMax(t *testing.T) {
+	f := fixture(t)
+	session := attentionSession(t, f)
+	lowID, lowEvent := boundMessage(t, f, session, f.agent.ID, f.person.ID)
+	highID, highEvent := boundMessage(t, f, session, f.agent.ID, f.person.ID)
+	if highEvent <= lowEvent {
+		t.Fatalf("events not ordered: %d then %d", lowEvent, highEvent)
+	}
+	path := "/api/projects/" + f.project + "/harness-sessions/" + session + "/read-marker"
+	bodies := []map[string]any{
+		{"last_read_message_id": lowID, "last_read_event_id": lowEvent},
+		{"last_read_message_id": highID, "last_read_event_id": highEvent},
+		{"last_read_message_id": lowID, "last_read_event_id": lowEvent},
+		{"last_read_message_id": highID, "last_read_event_id": highEvent},
+	}
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make(chan string, len(bodies))
+	for _, body := range bodies {
+		wg.Add(1)
+		go func(body map[string]any) {
+			defer wg.Done()
+			<-start
+			w := f.call(f.person, "PUT", path, body, "")
+			if w.Code != 200 {
+				errs <- w.Body.String()
+			}
+		}(body)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("concurrent put: %s", err)
+	}
+	stored := decode(t, f.call(f.person, "GET", path, nil, ""))
+	if stored["last_read_message_id"] != highID || stored["last_read_event_id"].(float64) != float64(highEvent) {
+		t.Fatalf("concurrent puts landed on %#v, want message %s event %d", stored, highID, highEvent)
+	}
+}
+
+func TestDeletingSessionRemovesReadMarkers(t *testing.T) {
+	f := fixture(t)
+	session := attentionSession(t, f)
+	messageID, eventID := boundMessage(t, f, session, f.agent.ID, f.person.ID)
+	path := "/api/projects/" + f.project + "/harness-sessions/" + session + "/read-marker"
+	expect(t, f.call(f.person, "PUT", path, map[string]any{"last_read_message_id": messageID, "last_read_event_id": eventID}, ""), 200)
+	other := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','other')`, other.TenantID, other.ID)
+		return err
+	})
+	dbtest.BindRole(t, f.db, other.TenantID, other.ID, "admin")
+	expect(t, f.call(other, "PUT", path, map[string]any{"last_read_message_id": messageID, "last_read_event_id": eventID}, ""), 200)
+
+	var action string
+	if err := f.db.Admin.QueryRow(t.Context(), `
+		SELECT confdeltype::text FROM pg_constraint
+		WHERE conrelid = 'session_read_markers'::regclass
+		  AND confrelid = 'harness_sessions'::regclass
+		  AND contype = 'f'`).Scan(&action); err != nil {
+		t.Fatal(err)
+	}
+	if action != "c" {
+		t.Fatalf("session foreign key delete action %q", action)
+	}
+	var before int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM session_read_markers WHERE session_id=$1`, session).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if before != 2 {
+		t.Fatalf("markers before delete: %d", before)
+	}
+
+	// Messages reference the session with NO ACTION. Detach them so the only
+	// child that must follow the session is its read markers.
+	err := db.InTenant(tenant.WithPrincipal(t.Context(), f.person), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE inbox_compat_messages SET recipient_session_id=NULL, sender_session_id=NULL WHERE recipient_session_id=$1 OR sender_session_id=$1`, session); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE inbox_messages SET recipient_session_id=NULL, sender_session_id=NULL WHERE recipient_session_id=$1 OR sender_session_id=$1`, session); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(t.Context(), `DELETE FROM harness_sessions WHERE id=$1`, session)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			t.Errorf("deleted %d sessions", tag.RowsAffected())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var after int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM session_read_markers WHERE session_id=$1`, session).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != 0 {
+		t.Fatalf("session delete left %d markers", after)
 	}
 }
