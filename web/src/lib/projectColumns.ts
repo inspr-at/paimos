@@ -12,8 +12,8 @@ export interface ProjectColumnPrefs { order?: ProjectColumnId[]; visible?: Proje
 // The width Open, Doing and Done share.
 export const STAT_WIDTH = 64
 export const PROJECT_COLUMNS: ProjectColumnDef[] = [
-  { id: 'open', label: 'Open', tip: 'Open · new and backlog', min: STAT_WIDTH },
-  { id: 'doing', label: 'Doing', tip: 'In progress · in progress and QA', min: STAT_WIDTH },
+  { id: 'open', label: 'Open', tip: 'Open · waiting, including blocked', min: STAT_WIDTH },
+  { id: 'doing', label: 'Doing', tip: 'In progress · in progress, active and QA', min: STAT_WIDTH },
   { id: 'done', label: 'Done', tip: 'Done · done, delivered and accepted', min: STAT_WIDTH },
   { id: 'progress', label: 'Progress', tip: 'Share of the work that is done', min: 150 },
   { id: 'people', label: 'People', tip: 'Recently active people', min: 92 },

@@ -48,7 +48,7 @@ export interface MockOptions {
 }
 
 const CLOSED = ['done', 'cancelled', 'archived', 'delivered', 'accepted']
-const STATE_ORDER = ['new', 'backlog', 'in_progress', 'active', 'qa', 'accepted', 'done', 'cancelled', 'archived']
+const STATE_ORDER = ['open', 'new', 'backlog', 'blocked', 'in_progress', 'active', 'qa', 'accepted', 'done', 'cancelled', 'archived']
 const PRIORITY_ORDER = ['high', 'medium', 'low', 'none']
 
 export function fixtures(options: MockOptions = {}) {
@@ -172,6 +172,16 @@ function projectItem(project: Fixtures['projects'][number]) {
 }
 const listParam = (query: URLSearchParams, name: string) => (query.get(name) ?? '').split(',').map(v => v.trim()).filter(Boolean)
 const normal = (state: string) => state.replace(/-/g, '_')
+// Same buckets as the project summary: a category is not modelled here.
+// Archived stays in the total only; every other non-closed state is open.
+function workBucket(state: string): 'open' | 'in_progress' | 'done' | 'cancelled' | 'archived' {
+  const norm = state.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  if (norm === 'cancelled' || norm === 'canceled') return 'cancelled'
+  if (norm === 'accepted' || norm === 'delivered' || norm === 'done') return 'done'
+  if (norm === 'in_progress' || norm === 'inprogress' || norm === 'active' || norm === 'qa') return 'in_progress'
+  if (norm === 'archived') return 'archived'
+  return 'open'
+}
 // "!" excludes: plain values are alternatives, excluded values must all not match.
 function passes(values: string[], has: (value: string) => boolean): boolean {
   const plain = values.filter(v => !v.startsWith('!')), not = values.filter(v => v.startsWith('!')).map(v => v.slice(1))
@@ -421,12 +431,14 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     if (path === '/api/projects') {
       if (options.failProjects) return route.fulfill({ status: 503, json: { error: 'Projects are resting' } })
       const archived = query.get('include_archived') === 'true'
-      // B3 semantics: work kinds only; open = new/backlog, in_progress = in progress/QA,
-      // done = done/delivered/accepted, cancelled separate.
       return route.fulfill({ json: { items: data.projects.filter(p => archived || p.state !== 'archived').map(p => {
-        const inside = data.nodes.filter(n => n.project === p.id).map(n => normal(n.state))
-        const count = (states: string[]) => inside.filter(state => states.includes(state)).length
-        return { id: p.id, key: p.key, title: p.title, state: p.state, open: count(['new', 'backlog']), in_progress: count(['in_progress', 'qa']), done: count(['done', 'delivered', 'accepted']), cancelled: count(['cancelled']), total: inside.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
+        const work = data.nodes.filter(n => n.project === p.id && ['ticket', 'task', 'epic'].includes(n.kind_slug))
+        const tally = { open: 0, in_progress: 0, done: 0, cancelled: 0 }
+        for (const node of work) {
+          const bucket = workBucket(node.state)
+          if (bucket !== 'archived') tally[bucket]++
+        }
+        return { id: p.id, key: p.key, title: p.title, state: p.state, ...tally, total: work.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
       }) } })
     }
     if (path === '/api/nodes' && method === 'GET') {

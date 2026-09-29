@@ -8,8 +8,8 @@ const key = computed(() => statusMeta(props.state).key)
 
 <template>
   <svg class="status-icon" :class="`st-${key}`" :width="size" :height="size" viewBox="0 0 14 14" fill="none" aria-hidden="true" focusable="false">
-    <circle v-if="key === 'new'" cx="7" cy="7" r="5.1" stroke="var(--st-new)" stroke-width="1.8" />
-    <circle v-else-if="key === 'backlog'" cx="7" cy="7" r="5.1" stroke="var(--st-backlog)" stroke-width="1.6" stroke-dasharray="2.1 1.9" />
+    <circle v-if="key === 'new' || key === 'open'" cx="7" cy="7" r="5.1" stroke="var(--st-new)" stroke-width="1.8" />
+    <circle v-else-if="key === 'backlog' || key === 'blocked'" cx="7" cy="7" r="5.1" stroke="var(--st-backlog)" stroke-width="1.6" stroke-dasharray="2.1 1.9" />
     <template v-else-if="key === 'progress'"><circle cx="7" cy="7" r="5.1" stroke="var(--st-progress)" stroke-width="1.8" /><path d="M7 3.6a3.4 3.4 0 0 1 0 6.8Z" fill="var(--st-progress)" /></template>
     <circle v-else-if="key === 'qa'" cx="7" cy="7" r="5.1" fill="var(--st-qa-fill)" stroke="var(--st-qa-ring)" stroke-width="1.8" />
     <template v-else-if="key === 'done'"><circle cx="7" cy="7" r="6" fill="var(--st-ok)" /><path d="m4.4 7.2 1.8 1.8 3.4-3.7" stroke="var(--surface)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></template>

@@ -5,7 +5,7 @@
 // what screen readers hear.
 export type StatKind = 'open' | 'doing' | 'done'
 export const STATS: { kind: StatKind; label: string; long: string; state: string }[] = [
-  { kind: 'open', label: 'Open', long: 'Open', state: 'new' },
+  { kind: 'open', label: 'Open', long: 'Open', state: 'open' },
   { kind: 'doing', label: 'Doing', long: 'In progress', state: 'in_progress' },
   { kind: 'done', label: 'Done', long: 'Done', state: 'done' },
 ]
