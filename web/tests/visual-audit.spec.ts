@@ -586,17 +586,22 @@ const shots: Shot[] = [
   { screen: 'pairing', state: 'nix-guide', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')
     await heading(page, 'Connect a computer')
-    await page.getByLabel('Installation method').selectOption('nix')
+    await page.getByLabel('Install on this computer').selectOption('nix')
     await page.getByText('Declarative service', { exact: true }).click()
   } },
   { screen: 'pairing', state: 'homebrew-guide', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')
     await heading(page, 'Connect a computer')
   } },
+  { screen: 'pairing', state: 'homebrew-upgrades', setup: mockAnonymousGuide, act: async page => {
+    await page.goto('/agents/register-agent')
+    await heading(page, 'Connect a computer')
+    await page.getByText('Release and upgrades', { exact: true }).click()
+  } },
   { screen: 'pairing', state: 'fallback-guide', setup: mockChecksumGuide, act: async page => {
     await page.goto('/agents/register-agent')
     await heading(page, 'Connect a computer')
-    await page.getByLabel('Installation method').selectOption('manual')
+    await page.getByLabel('Install on this computer').selectOption('manual')
     await page.getByText('Disconnect and uninstall', { exact: true }).click()
   } },
   { screen: 'pairing', state: 'public-guide', setup: mockAnonymousGuide, act: async page => {

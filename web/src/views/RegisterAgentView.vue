@@ -555,8 +555,15 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         <p class="muted">Loading the guide for this {{ brand.short_name }}…</p>
       </template>
       <template v-else>
+        <div class="agent-address">
+          <p class="copy">Open this address on the computer, or give it to the agent setting it up.</p>
+          <div class="address">
+            <code :title="presentation.address">{{ presentation.address }}</code>
+            <button type="button" class="btn sm" aria-label="Copy guide address" @click="copyText(presentation.address, 'Address')"><AppIcon :name="copied === 'Address' ? 'check' : 'copy'" :size="13" />{{ copied === 'Address' ? 'Copied' : 'Copy' }}</button>
+          </div>
+        </div>
         <label v-if="presentation.homebrewCommand" class="install-choice">Install on this computer
-          <select v-model="installMethod" class="field" aria-label="Installation method">
+          <select v-model="installMethod" class="field" aria-label="Install on this computer">
             <option value="homebrew">macOS · Homebrew</option>
             <option value="manual">macOS or Linux · without Homebrew</option>
             <option v-if="presentation.managedSetup" value="nix">Nix / Home Manager</option>
@@ -567,6 +574,12 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
           <pre class="command"><code>{{ presentation.homebrewCommand }}</code></pre>
           <button type="button" class="btn sm" @click="copyText(presentation.homebrewCommand, 'Homebrew commands')"><AppIcon :name="copied === 'Homebrew commands' ? 'check' : 'copy'" :size="13" />{{ copied === 'Homebrew commands' ? 'Copied' : 'Copy commands' }}</button>
           <p class="copy">Confirm the folder and accounts, then approve the code below to start the service.</p>
+          <details class="service-details">
+            <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Release and upgrades</summary>
+            <p class="copy">Homebrew installs the tap’s current signed release, which may differ from this instance.</p>
+            <p class="copy"><code>aeon-agentd status</code> reports a helper/instance version mismatch when the instance is reachable.</p>
+            <p class="copy">Upgrading or rerunning pair does not drain or restart an existing daemon; arrange a restart after work finishes and verify Touch ID on the new daemon.</p>
+          </details>
         </div>
         <div v-if="presentation.homebrewCommand && installMethod === 'manual'" class="install-guide">
           <p v-if="!selectedTarget" class="copy">{{ presentation.installNote }}</p>
@@ -617,10 +630,6 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
       <details v-if="presentation" class="manual">
         <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Manual and agent setup</summary>
         <div class="manual-body">
-        <div class="address">
-          <code :title="presentation.address">{{ presentation.address }}</code>
-          <button type="button" class="btn sm" @click="copyText(presentation.address, 'Address')"><AppIcon :name="copied === 'Address' ? 'check' : 'copy'" :size="13" />{{ copied === 'Address' ? 'Copied' : 'Copy' }}</button>
-        </div>
         <p v-for="paragraph in presentation.manualParagraphs" :key="paragraph" class="copy">{{ paragraph }}</p>
         <p class="copy install-note"><AppIcon name="shield" :size="14" />{{ presentation.installNote }}</p>
         <label v-if="!presentation.homebrewCommand && presentation.targets.length > 1">Platform
@@ -644,7 +653,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Disconnect and uninstall</summary>
         <div class="manual-body">
           <pre class="command"><code>aeon-agentd disconnect</code></pre>
-          <p class="copy">{{ installMethod === 'nix' ? 'Wait for “disconnected”: current work finishes and Aeon access is revoked.' : 'Wait for “disconnected”: current work finishes, access is revoked and the service is removed.' }}</p>
+          <p class="copy">{{ installMethod === 'nix' ? 'Wait for “disconnected”: current work finishes and access is revoked.' : 'Wait for “disconnected”: current work finishes, access is revoked and the service is removed.' }}</p>
           <p class="copy">Vendor sign-ins and project files stay on your computer.</p>
           <template v-if="installMethod === 'homebrew'">
             <pre class="command"><code>brew uninstall aeon-agentd</code></pre>
@@ -800,6 +809,8 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .limit label { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
 /* Public guide commands and optional instance details. */
 .address { min-width: 0; display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 6px 6px 12px; border-radius: 10px; background: var(--surface-sunken); }
+.agent-address { margin-bottom: 24px; }
+.agent-address > p { margin: 0; }
 .address code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 13px/1.4 var(--mono); }
 .address .btn, .command + .btn { gap: 6px; flex-shrink: 0; }
 .code-form { display: grid; gap: 8px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
