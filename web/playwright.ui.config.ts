@@ -15,7 +15,9 @@ export default defineConfig({
   workers: 4,
   use: { baseURL: `http://127.0.0.1:${port}`, browserName: 'chromium', reducedMotion: 'reduce' },
   webServer: {
-    command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`,
+    // Mode test keeps the dev server (DEV stays true) and is the only build that
+    // includes the header-glimpse pin. Production builds leave that hook out.
+    command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort --mode test`,
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: process.env.PLAYWRIGHT_REUSE === '1',
   },
