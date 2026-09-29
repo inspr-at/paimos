@@ -247,17 +247,27 @@ var (
 )
 
 // storeBudget applies the publication store caps (2,000 rules, 2 MiB of rule
-// text) to the snapshots one merged file would load. An empty snapshot still
-// counts as one rule, matching budgetCheck.
+// text) to snapshots already in memory. An empty snapshot still counts as one
+// rule, matching budgetCheck. The merge handler calls admit after each read
+// so a crossing snapshot is the last one loaded.
 func storeBudget(ctx context.Context, snapshots []Snapshot) error {
 	w := &work{ctx: ctx}
 	for _, s := range snapshots {
-		if err := w.load(s); err != nil {
-			if err == errTooManyCtx {
-				return errMergeStoreTooLarge
-			}
+		if err := w.admit(s); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// admit counts one snapshot against the running store total. Crossing 2,000
+// rules or 2 MiB returns the merge refusal.
+func (w *work) admit(s Snapshot) error {
+	if err := w.load(s); err != nil {
+		if err == errTooManyCtx {
+			return errMergeStoreTooLarge
+		}
+		return err
 	}
 	return nil
 }
