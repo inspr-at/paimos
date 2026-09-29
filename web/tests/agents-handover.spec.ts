@@ -9,13 +9,13 @@ import { agentData, mockAgents } from './agents-fixtures'
 const now = Date.parse('2026-09-29T12:00:00Z')
 const id = (n: number) => `32200000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const row = (page: Page, n: number) => page.locator(`[data-row="s:${id(n)}"]`)
-async function setup(page: Page, theme = 'light', rights = true) {
+async function setup(page: Page, theme = 'light', rights = true, extraLead = false) {
   await page.clock.install({ time: now })
   const work = fixtures(); work.preferences.theme = { choice: theme }
   await mockWork(page, work, { admin: true })
   await page.route('**/api/me/permissions*', route => {
     const grant = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
-    grant.workspace.permissions.push('harness.write')
+    grant.workspace.permissions = [...grant.workspace.permissions, 'harness.write']
     return route.fulfill({ json: grant })
   })
   const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
@@ -28,6 +28,7 @@ async function setup(page: Page, theme = 'light', rights = true) {
     session(5, 'Foreign lead', { can_reparent: false }),
     session(6, 'Other project lead', { project_id: 'p-aeon' }),
   )
+  if (extraLead) data.sessions.push(session(7, 'Build lead'))
   data.approvals.splice(0); data.messages.splice(0); data.targets.splice(0); data.runs.splice(0)
   await mockAgents(page, data)
   let moves = 0, undos = 0
@@ -39,7 +40,8 @@ async function setup(page: Page, theme = 'light', rights = true) {
     const worker = data.sessions.find(s => s.id === id(4))!
     previous = { ...worker }; moves++
     Object.assign(worker, { parent_harness_session_id: id(3), adopted_from_id: null, revision: worker.revision + 1 })
-    return route.fulfill({ json: { session: worker, event_id: 322, undoable: true } })
+    const response = { ...worker }; delete response.adopted_from_id
+    return route.fulfill({ json: { session: response, event_id: 322, undoable: true } })
   })
   await page.route('**/api/events/322/undo', route => {
     undos++; Object.assign(data.sessions.find(s => s.id === id(4))!, previous)
@@ -61,7 +63,8 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1600]) {
     expect((await row(page, 4).locator('.lineage').boundingBox())!.width).toBeGreaterThan(100)
     await row(page, 4).getByRole('button', { name: 'Actions for Permission checks' }).focus()
     await page.keyboard.press('Enter')
-    await page.getByRole('menuitem', { name: 'Move to lead…' }).click()
+    await expect(page.getByRole('menuitem', { name: 'Move to lead…' })).toBeFocused()
+    await page.keyboard.press('Enter')
     const menu = page.getByRole('menu', { name: 'Move Permission checks to lead' })
     await expect(menu.getByRole('menuitem')).toHaveCount(1)
     await expect(menu.getByRole('menuitem', { name: 'Release lead' })).toBeVisible()
@@ -69,9 +72,10 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1600]) {
     const dir = process.env.HANDOVER_SHOTS || info.outputDir
     mkdirSync(dir, { recursive: true })
     await page.screenshot({ path: join(dir, `${theme}-${width}-menu.png`), fullPage: true })
-    await menu.getByRole('menuitem', { name: 'Release lead' }).focus()
+    await expect(menu.getByRole('menuitem', { name: 'Release lead' })).toBeFocused()
     await page.keyboard.press('Enter')
     await expect(row(page, 4)).toHaveAttribute('data-parent', id(3))
+    await expect(row(page, 4)).not.toContainText('Adopted from')
     expect(calls.moves()).toBe(1)
     await page.getByRole('button', { name: 'Undo', exact: true }).click()
     await expect(row(page, 4)).toHaveAttribute('data-parent', id(2))
@@ -80,6 +84,24 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1600]) {
     await page.locator('.sessions').screenshot({ path: join(dir, `${theme}-${width}-restored.png`) })
   })
 }
+test('move menu supports arrow keys and restores focus on Escape', async ({ page }) => {
+  await setup(page, 'light', true, true)
+  const trigger = row(page, 4).getByRole('button', { name: 'Actions for Permission checks' })
+  await trigger.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('menuitem', { name: 'Move to lead…' })).toBeFocused()
+  await page.keyboard.press('Enter')
+  const menu = page.getByRole('menu', { name: 'Move Permission checks to lead' })
+  await expect(menu.getByRole('menuitem')).toHaveCount(2)
+  await expect(menu.getByRole('menuitem', { name: 'Release lead' })).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(menu.getByRole('menuitem', { name: 'Build lead' })).toBeFocused()
+  await page.keyboard.press('Home')
+  await expect(menu.getByRole('menuitem', { name: 'Release lead' })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+})
 test('drag and drop moves only onto an authorized live lead', async ({ page }) => {
   const calls = await setup(page)
   await expect(row(page, 4)).toHaveAttribute('draggable', 'true')

@@ -11,6 +11,13 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// Status and heartbeat are pinned reporter surfaces. The Agents tree reads
+// lineage and caller-specific move rights from lists and hierarchy mutations.
+func reporterSession(s Session) Session {
+	s.CanReparent, s.HandedOverToID, s.AdoptedFromID = nil, nil, nil
+	return s
+}
+
 // Every hierarchy writer takes this before row locks, including registrations
 // without a parent. Concurrent restarts cannot split or duplicate adoption.
 func lockHierarchy(ctx context.Context, tx pgx.Tx, projectID string) error {

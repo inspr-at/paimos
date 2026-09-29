@@ -2,6 +2,7 @@
 package harness_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -16,6 +17,22 @@ func TestManualReparentPermissionsAndUndo(t *testing.T) {
 	f := fixture(t)
 	events.New(f.db.App, events.WithUndoHandlers(harness.UndoHandlers())).Mount(f.mux)
 	base := "/api/projects/" + f.project + "/harness-sessions"
+	moveRight := func(id any) bool {
+		t.Helper()
+		w := f.call(f.person, "GET", base, nil, "")
+		expect(t, w, 200)
+		var sessions []map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &sessions); err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range sessions {
+			if s["id"] == id {
+				return s["can_reparent"] == true
+			}
+		}
+		t.Fatal("session missing from project list")
+		return false
+	}
 	register := func(role string, parent any) map[string]any {
 		t.Helper()
 		w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "local", "management_mode": "unmanaged", "role": role, "harness_session_ref": "manual-ref-" + uid(), "worker_lease": "manual-lease-0000000000000000000000", "parent_harness_session_id": parent}, "")
@@ -60,16 +77,33 @@ func TestManualReparentPermissionsAndUndo(t *testing.T) {
 	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}, "manual-lease-0000000000000000000000"), 200)
 	expect(t, f.call(f.person, "POST", "/api/events/"+event+"/undo", nil, ""), 201)
 	got := decode(t, f.call(f.person, "GET", path, nil, ""))
-	if got["parent_harness_session_id"] != old["id"] || got["can_reparent"] != true {
+	if got["parent_harness_session_id"] != old["id"] || !moveRight(child["id"]) {
 		t.Fatal("undo lost original lead or rights")
 	}
 	// Stopped targets are not selectable; the write also denies them.
 	expect(t, f.call(f.agent, "POST", base+"/"+next["id"].(string)+"/stop", map[string]any{"reason": "process_exited"}, "manual-lease-0000000000000000000000"), 200)
 	input["expected_revision"] = got["revision"]
 	expect(t, f.call(f.person, "POST", path+"/reparent", input, ""), 409)
-	if decode(t, f.call(f.person, "GET", base+"/"+next["id"].(string), nil, ""))["can_reparent"] != false {
+	if moveRight(next["id"]) {
 		t.Fatal("stopped target granted")
 	}
 	// Project path cannot move a foreign session even to a valid lead.
 	expect(t, f.call(f.person, "POST", "/api/projects/"+uid()+"/harness-sessions/"+child["id"].(string)+"/reparent", input, ""), 404)
+	// Legacy registrations have no inferred owner. An admin may move them,
+	// but undo rechecks a role revoked since the original move.
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	third := register("coordinator", nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, e := tx.Exec(t.Context(), `UPDATE harness_sessions SET owner_principal_id=NULL WHERE id=ANY($1::uuid[])`, []string{child["id"].(string), third["id"].(string)})
+		return e
+	})
+	input["parent_harness_session_id"] = third["id"]
+	w = f.call(f.person, "POST", path+"/reparent", input, "")
+	expect(t, w, 200)
+	event = fmt.Sprint(decode(t, w)["event_id"])
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "member")
+	expect(t, f.call(f.person, "POST", "/api/events/"+event+"/undo", nil, ""), 403)
+	if decode(t, f.call(f.person, "GET", path, nil, ""))["parent_harness_session_id"] != third["id"] {
+		t.Fatal("denied undo changed hierarchy")
+	}
 }

@@ -173,8 +173,5 @@ func undoReparent(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.E
 	if err != nil {
 		return events.Change{}, err
 	}
-	if err = stampMoveRights(ctx, tx, []*Session{&restored}); err != nil {
-		return events.Change{}, err
-	}
 	return events.Change{NodeID: &current.ProjectID, Type: "harness.reparent_undone", Before: current, After: restored}, nil
 }

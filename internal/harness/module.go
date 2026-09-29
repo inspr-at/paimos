@@ -132,7 +132,7 @@ type Session struct {
 	CanReparent          *bool `json:"can_reparent,omitempty"`
 	ownerID              *string
 	HandedOverToID       *string                `json:"handed_over_to_id,omitempty"`
-	AdoptedFromID        *string                `json:"adopted_from_id"`
+	AdoptedFromID        *string                `json:"adopted_from_id,omitempty"`
 	Controls             []Control              `json:"controls,omitempty"`
 	Watch                *AttachStatus          `json:"watch,omitempty"`
 	ProcessOwnership     *ownedprocess.Identity `json:"process_ownership,omitempty"`
@@ -544,6 +544,9 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if in.Role != "worker" && in.Role != "coordinator" {
 		return nil, workorders.Fail(400, "invalid hierarchy role")
 	}
+	if in.SucceedsID != nil && (!workorders.UUID(*in.SucceedsID) || in.Role != "coordinator") {
+		return nil, workorders.Fail(400, "coordinator and valid predecessor required")
+	}
 	caps, err := normalizeCaps(in.Capabilities, in.Management)
 	if err != nil {
 		return nil, err
@@ -801,7 +804,7 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		return nil, err
 	}
 	s.Controls = controls
-	return s, nil
+	return reporterSession(s), nil
 }
 func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	id := r.PathValue("projectId")
@@ -1011,7 +1014,7 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = m.stampSessions(ctx, tx, []*Session{&s}); err != nil {
 		return nil, err
 	}
-	return s, nil
+	return reporterSession(s), nil
 }
 func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {

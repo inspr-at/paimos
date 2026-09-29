@@ -160,19 +160,36 @@ const permittedWorker = (view: SessionView) => grant.value.person && can('harnes
 const targetFor = (worker: SessionView, lead: SessionView) => permittedWorker(worker) && moveTarget(worker.session, lead.session, current.value.map(v => v.session))
 const leadsFor = (worker: SessionView) => current.value.filter(lead => targetFor(worker, lead))
 function pickMove() { moveMenu.value = menu.value; menu.value = null }
+function closeMove(restoreFocus: boolean) {
+  if (restoreFocus) moveMenu.value?.anchor.focus()
+  moveMenu.value = null
+}
+function menuKeys(event: KeyboardEvent) {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="menuitem"]')].filter(item => !(item as HTMLButtonElement).disabled)
+  if (!items.length) return
+  event.preventDefault(); event.stopPropagation()
+  const current = items.indexOf(document.activeElement as HTMLElement)
+  const index = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+  items[index]?.focus()
+}
 async function move(worker: SessionView, lead: SessionView) {
   if (moving.value || !targetFor(worker, lead)) return
   moving.value = true
   moveMenu.value = null
   try {
     const result = await reparentSession(worker.session, lead.session)
-    agents.recordRemoval(result.session)
+    agents.recordRemoval({ ...result.session, adopted_from_id: result.session.adopted_from_id ?? null })
     toast(`Moved ${worker.name} to ${lead.name}`, result.undoable ? { timeout: 8000, action: { label: 'Undo', run: () => void undoMove(result.event_id, worker.name) } } : {})
   } catch (error) { toast(error instanceof Error ? error.message : 'Move failed. Refresh and retry.', { tone: 'error' }) }
   finally { moving.value = false }
 }
 async function undoMove(event: number, label: string) {
-  try { agents.recordRemoval(await undoRemoval(event)); toast(`Move of ${label} undone`) }
+  try {
+    const restored = await undoRemoval(event)
+    agents.recordRemoval({ ...restored, adopted_from_id: restored.adopted_from_id ?? null })
+    toast(`Move of ${label} undone`)
+  }
   catch (error) { toast(error instanceof Error ? error.message : 'Could not undo this move.', { tone: 'error' }) }
 }
 function startDrag(event: DragEvent, view: SessionView) {
@@ -361,8 +378,8 @@ function rowClick(event: MouseEvent, id: string) {
       <button type="button" class="btn sm ghost quiet-btn" :disabled="historyState === 'loading'" @click="emit('older')">{{ historyState === 'loading' ? 'Loading…' : 'Show older' }}</button>
     </div>
     <FloatingPanel v-if="menu && menuItems" :anchor="menu.anchor" align="end" :width="248" :label="`Actions for ${menu.view.name}`" @close="menu = null">
-      <div role="menu" :aria-label="`Actions for ${menu.view.name}`">
-        <button v-if="permittedWorker(menu.view) && leadsFor(menu.view).length" type="button" role="menuitem" class="menu-item" @click="pickMove">
+      <div role="menu" :aria-label="`Actions for ${menu.view.name}`" @keydown="menuKeys">
+        <button v-if="permittedWorker(menu.view) && leadsFor(menu.view).length" type="button" role="menuitem" class="menu-item" data-autofocus @click="pickMove">
           <AppIcon name="arrow" :size="16" /><span class="mi-text">Move to lead…</span>
         </button>
         <template v-if="menuItems.control.length">
@@ -392,8 +409,8 @@ function rowClick(event: MouseEvent, id: string) {
         <p v-if="menuItems.note" class="menu-note">{{ menuItems.note }}</p>
       </div>
     </FloatingPanel>
-    <FloatingPanel v-if="moveMenu" :anchor="moveMenu.anchor" align="end" :width="248" :label="`Move ${moveMenu.view.name} to lead`" @close="moveMenu = null">
-      <div role="menu" :aria-label="`Move ${moveMenu.view.name} to lead`">
+    <FloatingPanel v-if="moveMenu" :anchor="moveMenu.anchor" align="end" :width="248" :label="`Move ${moveMenu.view.name} to lead`" @close="closeMove">
+      <div role="menu" :aria-label="`Move ${moveMenu.view.name} to lead`" @keydown="menuKeys">
         <p class="menu-note">Move to lead</p>
         <button v-for="lead in leadsFor(moveMenu.view)" :key="lead.session.id" type="button" role="menuitem" class="menu-item move-lead" :title="lead.name" @click="move(moveMenu.view, lead)">
           <AppIcon name="arrow" :size="16" /><span class="mi-text">{{ lead.name }}</span>
