@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { displayHeadline, groupByDay, hasUsableNotes, HISTORICAL_TAG_LABEL, historicalTagFallback, matches, presentChanges, releasedAt, stats as statsOf, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterRelease, type Release } from '../../lib/releases'
+import { groupByDay, matches, presentRelease, railLine, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
 import { useProfile } from '../../stores/profile'
 import { normalKey } from '../../lib/ticketLinks'
 import { relativeTime } from '../../lib/work'
@@ -243,9 +243,10 @@ onBeforeUnmount(() => {
 
 const timeOf = (r: Release) => { const at = releasedAt(r); return at ? new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—' }
 const ageOf = (r: Release) => { const at = releasedAt(r); return at ? relativeTime(at, { now: now.value }) : '' }
-// Per-row counts and ticket keys, worked out once per history rather than on every render.
+// Per-row counts follow the detail's blocks (features and fixes count tickets, other
+// counts commits), worked out once per history rather than on every render.
 const summaries = computed(() => new Map(releases.value.map(r => {
-  const g = presentChanges(r.changes, locale.value)
+  const g = presentRelease(r, locale.value)
   return [r.version, { features: g.features.length, fixes: g.fixes.length, other: g.other.length, tickets: ticketsOf(r) }]
 })))
 const countsOf = (r: Release) => summaries.value.get(r.version) ?? { features: 0, fixes: 0, other: 0, tickets: [] as string[] }
@@ -365,9 +366,7 @@ const KINDS = [
                   </span>
                   <span v-if="r.state === 'reserved'" class="headline">Reserved, never published</span>
                   <template v-else>
-                    <span v-if="historicalTagFallback(r)" class="eyebrow hist-label">{{ HISTORICAL_TAG_LABEL }}</span>
-                    <span class="headline"><template v-for="(p, i) in marked(hasUsableNotes(r) || r.headline ? displayHeadline(r, locale) : 'No headline recorded')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
-                    <span v-if="writtenAfterRelease(r)" class="written-after">{{ WRITTEN_AFTER_LABEL }}</span>
+                    <span v-if="railLine(r, locale).text" class="headline" :class="{ theme: railLine(r, locale).themed }"><template v-for="(p, i) in marked(railLine(r, locale).text)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                   </template>
                   <span v-if="r.state === 'published'" class="counts">
                     <template v-for="k in KINDS" :key="k.key">
@@ -510,9 +509,9 @@ const KINDS = [
 .new-tag { background: var(--gold-2); color: #3a2804; }
 .end-tag { background: var(--teal); color: var(--surface); }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
-.hist-label { letter-spacing: .12em; }
-.written-after { font-size: 12px; line-height: 1.35; color: var(--ink-3); }
 .headline { color: var(--ink); font-size: 13.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.headline:not(.theme) { color: var(--ink-2); }
+.headline.theme { font-weight: 600; }
 .reserved .headline { color: var(--ink-2); font-style: italic; }
 .counts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 11.5px; color: var(--ink-3); }
 .count { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }

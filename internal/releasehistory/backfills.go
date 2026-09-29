@@ -111,7 +111,14 @@ func (m *Module) historyFor(ctx context.Context) (History, error) {
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		presentations, err := LoadPresentations(ctx, tx, project)
+		if err != nil {
+			return err
+		}
 		for i, rel := range h.Releases {
+			if p, ok := presentations[rel.Version]; ok {
+				h.Releases[i].Presentation = &p
+			}
 			if HasSnapshot(rel) {
 				continue
 			}

@@ -74,7 +74,7 @@ test('the version pill opens the history over the page, and Esc brings the page 
   await expect(options(page)).toHaveCount(history.releases.length)
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   await expect(options(page).first()).toContainText('Current')
-  // Row counts follow the lines in the detail. Without a visible ticket, a feature or fix commit counts as other.
+  // Row counts follow the blocks in the detail. Without a told ticket, a feature or fix commit counts as other.
   await expect(options(page).first().getByRole('img', { name: '3 other changes', exact: true })).toHaveAttribute('data-tip', '3 other changes')
   await expect(options(page).first().getByRole('img', { name: '1 feature', exact: true })).toHaveCount(0)
   await expect(options(page).nth(1).getByRole('img', { name: '4 other changes', exact: true })).toBeVisible()
@@ -94,10 +94,11 @@ test('deep links open one release, and the address follows the selection', async
   await page.goto(`/releases/${target.version}`)
   await expect(sheet(page)).toBeVisible()
   await expect(options(page).nth(3)).toHaveAttribute('aria-selected', 'true')
-  // Headlines read without the keys their chips show, in sentence case.
-  await expect(sheet(page).locator('.detail .headline')).toHaveText('Retry a busy BEGIN in release acceptance')
+  // AEON-305: the tag message is evidence, not a title; the key stays as a chip.
+  await expect(sheet(page).locator('.detail .headline')).toHaveCount(0)
+  await expect(sheet(page).getByText('Historical tag headline')).toHaveCount(0)
   await expect(sheet(page).locator('.detail .tickets')).toContainText('PAI-1057')
-  await expect(options(page).nth(3).locator('.headline')).toHaveText('Retry a busy BEGIN in release acceptance')
+  await expect(options(page).nth(3).locator('.headline')).toHaveCount(0)
   await page.keyboard.press('k')
   await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
   // Opened from a link, closing leads to Projects.
@@ -145,7 +146,11 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(compare.locator('.facts')).toContainText('2 releases')
   await expect(compare.locator('.facts')).toContainText('3 tickets')
   await expect(compare.locator('.changes')).toContainText('Other changes')
-  await expect(compare.getByRole('region', { name: 'Releases in this range' }).getByRole('listitem')).toHaveText([/Wide lists and columns$/, /Retry a busy BEGIN in release acceptance$/])
+  // AEON-305: no tag message outside Evidence; without a theme or benefit a release shows its version and date.
+  const included = compare.getByRole('region', { name: 'Releases in this range' }).getByRole('listitem')
+  await expect(included).toHaveCount(2)
+  await expect(included).not.toContainText(['Wide lists and columns', 'Retry a busy BEGIN in release acceptance'])
+  await expect(included.locator('.inc-date')).toHaveCount(2)
   await compare.getByRole('button', { name: 'Swap' }).click()
   await expect(compare.locator('.facts')).toContainText('2 releases')
   await page.keyboard.press('Escape')
@@ -154,12 +159,12 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(sheet(page)).toHaveCount(0)
 })
 
-test('filters follow visible feature and fix lines, and still keep releases with tickets', async ({ page }) => {
+test('filters follow the feature and fix blocks, and still keep releases with tickets', async ({ page }) => {
   await setup(page)
   await page.goto('/releases')
   await expect(options(page)).toHaveCount(7)
   const toggles = sheet(page).getByRole('group', { name: 'Show only releases with' })
-  // These commits name tickets but carry no visible benefit line, so the rows show other, not features or fixes.
+  // These commits name tickets but none tells a benefit, so the rows show other, not features or fixes.
   await toggles.getByRole('button', { name: 'Features' }).click()
   await expect(sheet(page).getByText('0 of 7')).toBeVisible()
   await expect(sheet(page).getByRole('heading', { name: 'No release matches' })).toBeVisible()
@@ -256,7 +261,9 @@ test('a newer version on the server: a toast offers what is new and a reload', a
   await expect(pill(page)).toHaveAccessibleName(new RegExp(`version ${escaped(history.releases[1].version)}`))
   state.server = history.current
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  const toast = page.locator('.toast').filter({ hasText: `PAIMOS AEON was updated to ${history.current}: Time entry editing` })
+  // AEON-305: without a theme or benefit the toast names only the version, never the tag message.
+  const toast = page.locator('.toast').filter({ hasText: `PAIMOS AEON was updated to ${history.current}` })
+  await expect(toast).not.toContainText('Time entry editing')
   await expect(toast).toBeVisible()
   await expect(toast.getByRole('button', { name: 'Reload' })).toBeVisible()
   await toast.getByRole('button', { name: 'What’s new' }).click()

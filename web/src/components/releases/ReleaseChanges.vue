@@ -1,19 +1,16 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { plainSubject, presentChanges, shortCommit, type ChangeGroup, type ReleaseChange, type TicketChangeLine } from '../../lib/releases'
-import { useProfile } from '../../stores/profile'
+import { plainSubject, shortCommit, type ChangeGroup, type PresentedChanges, type ReleaseChange, type TicketChangeLine } from '../../lib/releases'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import TicketLink from './TicketLink.vue'
 
-// A release's changes. Features and fixes are one line per visible ticket:
-// the pill is the title, the benefit is the sentence, and that ticket's
-// commits sit behind a small disclosure. Anything without a visible ticket
-// stays under Other, with the package prefix and leading ticket key removed.
-const props = defineProps<{ changes: ReleaseChange[]; repository: string; query?: string; soleTicket?: string }>()
-const profile = useProfile()
-const locale = computed(() => profile.profile?.locale ?? null)
-const presented = computed(() => presentChanges(props.changes, locale.value))
+// A release's changes, the same for every release (AEON-305): features and fixes
+// are one block per ticket. The pill is the heading, the benefit the sentence,
+// and the ticket's commits sit behind a small disclosure. Anything no ticket
+// tells about stays under Other, with the package prefix and leading key removed.
+const props = defineProps<{ presented: PresentedChanges; repository: string; query?: string; soleTicket?: string }>()
+const presented = computed(() => props.presented)
 const ticketsShown = (c: ReleaseChange) => props.soleTicket && c.tickets.length === 1 && c.tickets[0] === props.soleTicket ? [] : c.tickets
 const GROUPS: { key: ChangeGroup; label: string; icon: IconName }[] = [
   { key: 'features', label: 'Features', icon: 'sparkle' },
@@ -75,7 +72,7 @@ function parts(text: string) {
               <TicketLink :ticket-key="line.key" variant="inline" />
             </div>
             <p v-if="line.pill && showBenefit(line)" class="benefit" :lang="line.benefitLang"><template v-for="(p, i) in parts(line.benefit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
-            <details :ref="el => revealCommits(el, line)" class="commits">
+            <details v-if="line.commits.length" :ref="el => revealCommits(el, line)" class="commits">
               <summary><AppIcon name="chevron-right" :size="12" class="chev" />{{ commitWord(line.commits.length) }}</summary>
               <ul class="commit-list">
                 <li v-for="c in line.commits" :key="c.commit">

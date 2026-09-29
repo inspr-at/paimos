@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { compare, displayHeadline, presentChanges, releasedAt, span, type Release } from '../../lib/releases'
+import { compare, presentChanges, releasedAt, releaseTitle, span, type Release } from '../../lib/releases'
+import { absoluteTime } from '../../lib/work'
 import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
@@ -16,10 +17,12 @@ const profile = useProfile()
 const locale = computed(() => profile.profile?.locale ?? null)
 const result = computed(() => props.to && props.to !== props.from ? compare(props.releases, props.from, props.to) : null)
 const count = computed(() => result.value ? result.value.groups.features.length + result.value.groups.fixes.length + result.value.groups.other.length : 0)
+// The range reads like one release: a block per linked ticket, and a chip only
+// for tickets that head no block.
+const lines = computed(() => result.value ? presentChanges(result.value.changes, locale.value) : null)
 const chipTickets = computed(() => {
-  if (!result.value) return []
-  const lines = presentChanges(result.value.changes, locale.value)
-  const lined = new Set([...lines.features, ...lines.fixes].map(line => line.key))
+  if (!result.value || !lines.value) return []
+  const lined = new Set([...lines.value.features, ...lines.value.fixes].map(line => line.key))
   return result.value.tickets.filter(key => !lined.has(key))
 })
 const between = computed(() => {
@@ -54,10 +57,10 @@ const between = computed(() => {
       <section class="included" aria-labelledby="compare-included">
         <h3 id="compare-included" class="included-h">Releases in this range</h3>
         <ul>
-          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span class="inc-headline">{{ r.notes || r.headline ? displayHeadline(r, locale) : 'No headline recorded' }}</span></li>
+          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span v-if="releaseTitle(r, locale)" class="inc-headline">{{ releaseTitle(r, locale) }}</span><span v-else-if="releasedAt(r)" class="inc-date">{{ absoluteTime(releasedAt(r)!) }}</span></li>
         </ul>
       </section>
-      <ReleaseChanges v-if="count" :changes="result.changes" :repository="repository" :query="query" class="changes" />
+      <ReleaseChanges v-if="count && lines" :presented="lines" :repository="repository" :query="query" class="changes" />
       <p v-else class="none">No changes are recorded between these releases.</p>
     </template>
     <p v-else class="hint">
@@ -86,6 +89,7 @@ const between = computed(() => {
 .included li:last-child { border-bottom: 0; }
 .inc-version { font-size: 12px; }
 .inc-headline { overflow-wrap: anywhere; }
+.inc-date { color: var(--ink-3); }
 .none, .hint { font-size: 13.5px; color: var(--ink-2); line-height: 1.7; }
 @media (max-width: 760px) { .pair { font-size: 15px; } .included li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 </style>
