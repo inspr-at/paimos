@@ -216,6 +216,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if err != nil {
 		return fmt.Errorf("release history: %w", err)
 	}
+	historyMod.UseTickets(releasehistory.DBTickets(pool))
 	portalMod := portal.New(pool, cfg.Env != "dev", authCfg.SessionKey)
 	go portalMod.RunLimitSweep(ctx)
 	// AEON-178: invites can create the sign-in account through a configured identity

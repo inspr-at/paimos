@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { displayHeadline, groupByDay, groupChanges, hasUsableNotes, HISTORICAL_TAG_LABEL, historicalTagFallback, matches, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
+import { displayHeadline, groupByDay, hasUsableNotes, HISTORICAL_TAG_LABEL, historicalTagFallback, matches, presentChanges, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
 import { useProfile } from '../../stores/profile'
 import { normalKey } from '../../lib/ticketLinks'
 import { relativeTime } from '../../lib/work'
@@ -50,7 +50,7 @@ const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
 
 const history = computed(() => store.history)
 const releases = computed(() => [...(history.value?.releases ?? [])].sort((a, b) => b.version.localeCompare(a.version)))
-const visible = computed(() => releases.value.filter(r => matches(r, filter)))
+const visible = computed(() => releases.value.filter(r => matches(r, filter, locale.value)))
 const days = computed(() => groupByDay(visible.value, now.value))
 const order = computed(() => days.value.flatMap(d => d.releases))
 const indexOf = computed(() => new Map(order.value.map((r, i) => [r.version, i])))
@@ -197,7 +197,7 @@ function keydown(event: KeyboardEvent) {
   }
   if (typing(event.target) || event.metaKey || event.ctrlKey || event.altKey) return
   if (inPeek(event.target)) { peekKeys(event); return }
-  const onControl = event.target instanceof HTMLElement && !!event.target.closest('button, a') && event.target !== listbox.value
+  const onControl = event.target instanceof HTMLElement && !!event.target.closest('button, a, summary') && event.target !== listbox.value
   switch (event.key) {
     case 'j': case 'ArrowDown': event.preventDefault(); step(1); break
     case 'k': case 'ArrowUp': event.preventDefault(); step(-1); break
@@ -245,7 +245,7 @@ const timeOf = (r: Release) => { const at = releasedAt(r); return at ? new Date(
 const ageOf = (r: Release) => { const at = releasedAt(r); return at ? relativeTime(at, { now: now.value }) : '' }
 // Per-row counts and ticket keys, worked out once per history rather than on every render.
 const summaries = computed(() => new Map(releases.value.map(r => {
-  const g = groupChanges(r.changes)
+  const g = presentChanges(r.changes, locale.value)
   return [r.version, { features: g.features.length, fixes: g.fixes.length, other: g.other.length, tickets: ticketsOf(r) }]
 })))
 const countsOf = (r: Release) => summaries.value.get(r.version) ?? { features: 0, fixes: 0, other: 0, tickets: [] as string[] }

@@ -4,7 +4,9 @@
 // ranges and search. Free of Vue for unit tests.
 import { api } from './api.ts'
 
-export interface ReleaseChange { commit: string; subject: string; type: 'feat' | 'fix' | 'test' | 'docs' | 'release' | 'refactor' | 'chore' | 'other'; scope: string; tickets: string[]; at: string }
+export type ChangeGroup = 'features' | 'fixes' | 'other'
+export interface LinkedTicket { key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string }
+export interface ReleaseChange { commit: string; subject: string; type: 'feat' | 'fix' | 'test' | 'docs' | 'release' | 'refactor' | 'chore' | 'other'; scope: string; tickets: string[]; at: string; group?: ChangeGroup; linked_tickets?: LinkedTicket[] }
 export interface ReleaseRun { name: string; url: string; status: string; conclusion: string }
 export interface ReleaseEvidence {
   source_commit: string; source_url: string; image: { reference: string; digest: string } | null
@@ -73,16 +75,61 @@ export function groupByDay(releases: Release[], now: number): Day[] {
 }
 
 // ---------- Changes ----------
-export type ChangeGroup = 'features' | 'fixes' | 'other'
 export const GROUP_OF: Record<ReleaseChange['type'], ChangeGroup | null> = {
   feat: 'features', fix: 'fixes', test: 'other', docs: 'other', refactor: 'other', chore: 'other', other: 'other',
   // The version bump is the release itself, not a change in it.
   release: null,
 }
+// The server's group wins, so every client agrees. Older manifests omit it
+// and the commit type decides. A version bump stays out of the groups.
+export function changeGroup(c: ReleaseChange): ChangeGroup | null {
+  if (c.type === 'release') return null
+  if (c.group === 'features' || c.group === 'fixes' || c.group === 'other') return c.group
+  return GROUP_OF[c.type]
+}
 export function groupChanges(changes: ReleaseChange[]): Record<ChangeGroup, ReleaseChange[]> {
   const out: Record<ChangeGroup, ReleaseChange[]> = { features: [], fixes: [], other: [] }
-  for (const c of changes) { const g = GROUP_OF[c.type]; if (g) out[g].push(c) }
+  for (const c of changes) { const g = changeGroup(c); if (g) out[g].push(c) }
   return out
+}
+export interface TicketChangeLine { key: string; pill: string; benefit: string; pillLang: 'en' | 'de'; benefitLang: 'en' | 'de'; commits: ReleaseChange[] }
+export interface PresentedChanges { features: TicketChangeLine[]; fixes: TicketChangeLine[]; other: ReleaseChange[] }
+// One line per visible ticket inside Features and Fixes. The pill and benefit
+// follow the viewer's language. A feature or fix commit with no visible ticket
+// joins Other, cleaned subject and all. A ticket can appear in both groups
+// when its commits do.
+function visibleNotes(change: ReleaseChange, locale?: string | null): LinkedTicket[] {
+  const out: LinkedTicket[] = []
+  const seen = new Set<string>()
+  for (const note of change.linked_tickets ?? []) {
+    const key = note.key?.trim()
+    if (!key || seen.has(key)) continue
+    const text = localizedNote(note, locale)
+    if (!text.pill.trim() && !text.benefit.trim()) continue
+    seen.add(key)
+    out.push({ ...note, key })
+  }
+  return out
+}
+export function presentChanges(changes: ReleaseChange[], locale?: string | null): PresentedChanges {
+  const buckets: Record<'features' | 'fixes', Map<string, TicketChangeLine>> = { features: new Map(), fixes: new Map() }
+  const other: ReleaseChange[] = []
+  for (const change of changes) {
+    const group = changeGroup(change)
+    if (!group) continue
+    const notes = group === 'other' ? [] : visibleNotes(change, locale)
+    if (group === 'other' || !notes.length) { other.push(change); continue }
+    for (const note of notes) {
+      let line = buckets[group].get(note.key)
+      if (!line) {
+        const text = localizedNote(note, locale)
+        line = { key: note.key, pill: text.pill, benefit: text.benefit, pillLang: text.pillLang, benefitLang: text.benefitLang, commits: [] }
+        buckets[group].set(note.key, line)
+      }
+      if (!line.commits.some(existing => existing.commit === change.commit)) line.commits.push(change)
+    }
+  }
+  return { features: [...buckets.features.values()], fixes: [...buckets.fixes.values()], other }
 }
 // ---------- Display ----------
 // Headlines and subjects as people read them, next to their ticket chips: the keys
@@ -119,7 +166,7 @@ export function noteLocale(locale?: string | null): 'en' | 'de' {
 export interface LocalizedNote { pill: string; benefit: string; pillLang: 'en' | 'de'; benefitLang: 'en' | 'de' }
 // One ticket's pill and sentence in the viewer's language. An empty German
 // field falls back to English; English is never replaced by an empty string.
-export function localizedNote(item: ReleaseNoteItem, locale?: string | null): LocalizedNote {
+export function localizedNote(item: Pick<ReleaseNoteItem, 'pill_en' | 'pill_de' | 'benefit_en' | 'benefit_de'>, locale?: string | null): LocalizedNote {
   const de = noteLocale(locale) === 'de'
   const pillDe = item.pill_de.trim(), pillEn = item.pill_en.trim()
   const benefitDe = item.benefit_de.trim(), benefitEn = item.benefit_en.trim()
@@ -144,10 +191,19 @@ export function hiddenNoteLine(count: number, locale?: string | null) {
   return count === 1 ? 'One ticket is hidden from release notes.' : `${count} tickets are hidden from release notes.`
 }
 export const displayHeadline = (r: Pick<Release, 'headline' | 'tickets' | 'changes' | 'notes'>, locale?: string | null) => hasUsableNotes(r) ? (r.notes.items.map(item => localizedNote(item, locale).pill).filter(Boolean).join(' · ') || (r.notes.gaps.length ? 'Release notes unavailable' : 'No public release notes')) : displayText(r.headline, ticketsOf(r as Release))
+const PACKAGE_PREFIX = /^P\d+\.(?:x|\d+)\s*:\s*/i
+const LEADING_TICKET = /^[A-Z][A-Z0-9]{1,9}-[1-9]\d{0,6}\s*[:\-–]\s*/
 // A subject without its conventional prefix ("feat(AEON-74): wide lists" reads "Wide lists").
+// Package prefixes ("P0.x:", "P0.3:") and a leading ticket key go too.
 export function plainSubject(subject: string, tickets: string[] = []) {
   const m = /^[a-z]+(?:\([^)]*\))?!?:\s*(.+)$/.exec(subject)
-  return displayText(m ? m[1] : subject, tickets)
+  let text = m ? m[1] : subject
+  for (let i = 0; i < 4; i++) {
+    const next = text.replace(PACKAGE_PREFIX, '').replace(LEADING_TICKET, '')
+    if (next === text) break
+    text = next
+  }
+  return displayText(text, tickets)
 }
 
 // ---------- Stats ----------
@@ -193,22 +249,24 @@ export function compare(releases: Release[], a: string, b: string) {
   const seen = new Set<string>()
   const unique = changes.filter(c => (seen.has(c.commit) ? false : (seen.add(c.commit), true)))
   const tickets = [...new Set(between.flatMap(ticketsOf))].sort(naturalKey)
-  return { older, newer, releases: between, groups: groupChanges(unique), tickets }
+  return { older, newer, releases: between, changes: unique, groups: groupChanges(unique), tickets }
 }
 export function naturalKey(a: string, b: string) { return a.localeCompare(b, 'en', { numeric: true }) }
 
 // ---------- Search and filters ----------
 export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; tickets: boolean }
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
-export function matches(r: Release, f: ReleaseFilter) {
-  const groups = groupChanges(r.changes)
-  if (f.features && !groups.features.length) return false
-  if (f.fixes && !groups.fixes.length) return false
+// The same lines the row counts. A feature or fix commit with no visible
+// ticket is Other, so it must not pass the Features or Fixes filter.
+export function matches(r: Release, f: ReleaseFilter, locale?: string | null) {
+  const presented = presentChanges(r.changes, locale)
+  if (f.features && !presented.features.length) return false
+  if (f.fixes && !presented.fixes.length) return false
   if (f.tickets && !ticketsOf(r).length) return false
   const q = f.q.trim().toLowerCase()
   if (!q) return true
   return !!r.notes?.items.some(item => [item.pill_en, item.pill_de, item.benefit_en, item.benefit_de, item.key].some(text => text.toLowerCase().includes(q))) || r.version.includes(q) || r.headline.toLowerCase().includes(q) || r.tickets.some(t => t.toLowerCase().includes(q))
-    || r.changes.some(c => c.subject.toLowerCase().includes(q) || c.tickets.some(t => t.toLowerCase().includes(q)))
+    || r.changes.some(c => c.subject.toLowerCase().includes(q) || c.tickets.some(t => t.toLowerCase().includes(q)) || (c.linked_tickets ?? []).some(t => [t.pill_en, t.pill_de, t.benefit_en, t.benefit_de, t.key].some(text => text.toLowerCase().includes(q))))
 }
 
 // ---------- New since the last visit ----------
