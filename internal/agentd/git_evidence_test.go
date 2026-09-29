@@ -140,6 +140,37 @@ func TestRunCommitsRound4Reproductions(t *testing.T) {
 	})
 }
 
+// Lead decision: a fast-forward onto upstream commits fetched during the run,
+// with no work of the run's own, is no_commit; own work on top still counts,
+// including after it is pushed to a feature branch.
+func TestRunCommitsFastForwardOntoUpstream(t *testing.T) {
+	root, git := evidenceRepo(t)
+	origin := filepath.Join(root, "origin.git")
+	work := filepath.Join(root, "work")
+	upstream := filepath.Join(root, "upstream")
+	git(root, "init", "--bare", "-b", "main", origin)
+	git(root, "clone", "-q", origin, work)
+	git(work, "commit", "--allow-empty", "-m", "base")
+	git(work, "push", "-q", "origin", "HEAD:main")
+	git(work, "remote", "set-head", "origin", "main")
+	r := &launchedRepo{dir: work, git: git}
+	r.launchNow(t)
+	git(root, "clone", "-q", origin, upstream)
+	git(upstream, "commit", "--allow-empty", "-m", "new upstream 1")
+	git(upstream, "commit", "--allow-empty", "-m", "new upstream 2")
+	git(upstream, "push", "-q", "origin", "HEAD:main")
+	r.run("pull", "-q", "--ff-only", "origin", "main")
+	if got := r.evidence(t); got != "" {
+		t.Fatalf("fast-forward onto upstream credited: %s", got)
+	}
+	r.run("checkout", "-b", "feature")
+	r.run("commit", "--allow-empty", "-m", "own work")
+	r.run("push", "-q", "origin", "feature")
+	if got := r.evidence(t); got != "own work" {
+		t.Fatalf("own work on top of upstream: %s", got)
+	}
+}
+
 // Earlier review cases keep their answers under the simpler rule.
 func TestRunCommitsEarlierReproductions(t *testing.T) {
 	t.Run("upstream merge synced beside unmerged work is committed", func(t *testing.T) {

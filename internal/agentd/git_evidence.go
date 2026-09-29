@@ -49,12 +49,30 @@ func launchDefaultRev(ctx context.Context, workspace string) string {
 	return rev
 }
 
+// remoteDefaultRev is the commit the remote default branch (origin/HEAD or
+// its fallbacks) names now, or "" when the default branch is not a remote ref.
+func remoteDefaultRev(ctx context.Context, workspace string) string {
+	ref := defaultBranchRef(ctx, workspace)
+	if !strings.HasPrefix(ref, "origin/") {
+		return ""
+	}
+	out, err := gitOutput(ctx, workspace, "rev-parse", "--verify", "--quiet", "refs/remotes/"+ref+"^{commit}")
+	if err != nil {
+		return ""
+	}
+	rev := strings.ToLower(strings.TrimSpace(out))
+	if !fullSHA(rev) {
+		return ""
+	}
+	return rev
+}
+
 // runCommits lists the run's commit evidence: non-merge commits on the first-
 // parent history of the final HEAD that neither the launch commit nor the
 // default branch as it was at launch contains. A merge brings its other
 // parents' history in without making it the run's work, so an upstream sync
-// adds nothing; a fast-forward to history that existed at launch adds
-// nothing either. The server derives only committed or no_commit from this;
+// adds nothing; a fast-forward to history that existed at launch, or that
+// the remote default branch holds at the end, adds nothing either. The server derives only committed or no_commit from this;
 // merged and pr_opened come from forge or release evidence, never from
 // local git.
 func runCommits(ctx context.Context, workspace, launch, launchDefault string) []GitCommit {
@@ -64,6 +82,11 @@ func runCommits(ctx context.Context, workspace, launch, launchDefault string) []
 	args := []string{"log", "--first-parent", "--no-merges", "--format=%H%x1f%s", fmt.Sprintf("--max-count=%d", gitCommitsWire), "HEAD", "^" + launch}
 	if fullSHA(launchDefault) {
 		args = append(args, "^"+launchDefault)
+	}
+	// Upstream work fetched during the run and fast-forwarded onto is on the
+	// remote default branch now; it is not the run's work either.
+	if remote := remoteDefaultRev(ctx, workspace); fullSHA(remote) {
+		args = append(args, "^"+remote)
 	}
 	out, err := gitOutput(ctx, workspace, append(args, "--")...)
 	if err != nil {

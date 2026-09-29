@@ -8083,7 +8083,7 @@ components:
         git_commits:
           type: array
           maxItems: 20
-          description: Optional commit evidence of this run, as non-merge commits on the first-parent history of its final HEAD that neither its launch commit nor the default branch as it was at launch contains (at most 20, newest first). The server derives committed or no_commit from these, from the run's harness session commits, and from this run's work evidence. Local git never yields merged.
+          description: Optional commit evidence of this run, as non-merge commits on the first-parent history of its final HEAD that neither its launch commit, the default branch as it was at launch, nor the remote default branch at the end contains (at most 20, newest first). The server derives committed or no_commit from these, from the run's harness session commits, and from this run's work evidence. Local git never yields merged.
           items:
             type: object
             required: [sha, subject]
