@@ -14,16 +14,22 @@ import (
 	"time"
 )
 
-type boundedProbe struct {
-	bytes.Buffer
-	max int
+// probeCapture keeps at most max bytes of a probe stream. It deliberately has
+// no embedded buffer, so io.Copy cannot promote a ReadFrom past the cap; any
+// byte beyond it sets overflow and stops the copy.
+type probeCapture struct {
+	buf      []byte
+	max      int
+	overflow bool
 }
 
-func (b *boundedProbe) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > b.max {
+func (c *probeCapture) Write(p []byte) (int, error) {
+	if c.overflow || len(c.buf)+len(p) > c.max {
+		c.overflow = true
 		return 0, errors.New("probe output exceeds bound")
 	}
-	return b.Buffer.Write(p)
+	c.buf = append(c.buf, p...)
+	return len(p), nil
 }
 
 // probeRun runs a vendor status command. A non-zero exit still returns its
@@ -40,24 +46,96 @@ func probeRun(ctx context.Context, path string, env []string, args ...string) ([
 	if env != nil {
 		cmd.Env = env
 	}
-	stdout, stderr := &boundedProbe{max: 4096}, &boundedProbe{max: 4096}
+	stdout, stderr := &probeCapture{max: probeOutputMax}, &probeCapture{max: probeOutputMax}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	code := 0
-	if err := cmd.Run(); err != nil {
+	err = cmd.Run()
+	// Oversized output is unavailable whatever the exit: its kept prefix is not
+	// the whole answer and must never be parsed.
+	if stdout.overflow || stderr.overflow {
+		return nil, 0, errors.New("account probe output exceeds bound")
+	}
+	if err != nil {
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) || op.Err() != nil || exit.ExitCode() < 0 {
 			return nil, 0, errors.New("account probe unavailable")
 		}
 		code = exit.ExitCode()
 	}
-	if stdout.Len() != 0 && stderr.Len() != 0 {
+	if len(stdout.buf) != 0 && len(stderr.buf) != 0 {
 		return nil, 0, errors.New("account probe output ambiguous")
 	}
-	if stdout.Len() != 0 {
-		return stdout.Bytes(), code, nil
+	if len(stdout.buf) != 0 {
+		return stdout.buf, code, nil
 	}
-	return stderr.Bytes(), code, nil
+	return stderr.buf, code, nil
+}
+
+// probeOutputMax caps each probe stream; vendor status answers are far smaller.
+const probeOutputMax = 4096
+
+// decodeProbeJSON decodes one JSON document into v, rejecting any object that
+// repeats a key. Keys are compared after unescaping and case-insensitively,
+// because encoding/json matches field names that way: "loggedIn" twice, or
+// "loggedIn" and "LOGGEDIN", would otherwise let the last one silently win.
+func decodeProbeJSON(raw []byte, v any) error {
+	if err := rejectDuplicateKeys(raw); err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, v)
+}
+
+func rejectDuplicateKeys(raw []byte) error {
+	type frame struct {
+		object  bool
+		wantKey bool
+		keys    []string
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var stack []*frame
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var top *frame
+		if len(stack) > 0 {
+			top = stack[len(stack)-1]
+		}
+		if d, ok := tok.(json.Delim); ok && (d == '}' || d == ']') {
+			stack = stack[:len(stack)-1]
+			if len(stack) > 0 && stack[len(stack)-1].object {
+				stack[len(stack)-1].wantKey = true
+			}
+			continue
+		}
+		if top != nil && top.object && top.wantKey {
+			key, _ := tok.(string)
+			for _, seen := range top.keys {
+				if strings.EqualFold(seen, key) {
+					return errors.New("duplicate JSON key")
+				}
+			}
+			top.keys = append(top.keys, key)
+			top.wantKey = false
+			continue
+		}
+		switch tok {
+		case json.Delim('{'):
+			stack = append(stack, &frame{object: true, wantKey: true})
+		case json.Delim('['):
+			stack = append(stack, &frame{})
+		default:
+			if top != nil && top.object {
+				top.wantKey = true
+			}
+		}
+	}
 }
 
 func probeCommand(ctx context.Context, path string, env []string, args ...string) ([]byte, error) {
@@ -134,7 +212,7 @@ func (a *CursorAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus
 			UserID json.RawMessage `json:"userId"`
 		} `json:"userInfo"`
 	}
-	if json.Unmarshal(raw, &status) != nil || status.Status == nil || status.IsAuthenticated == nil {
+	if decodeProbeJSON(raw, &status) != nil || status.Status == nil || status.IsAuthenticated == nil {
 		return probeUnavailable
 	}
 	// Only an explicit, consistent answer counts: signed out, or signed in as
@@ -211,7 +289,7 @@ func (a *ClaudeAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus
 		Email      string `json:"email"`
 		AuthMethod string `json:"authMethod"`
 	}
-	if json.Unmarshal(raw, &status) != nil || status.LoggedIn == nil {
+	if decodeProbeJSON(raw, &status) != nil || status.LoggedIn == nil {
 		return probeUnavailable
 	}
 	if !*status.LoggedIn {
@@ -247,4 +325,4 @@ func (a *GrokAdapter) Probe(ctx context.Context, key string) bool {
 	return a.probeNative(ctx, b)
 }
 
-var _ io.Writer = (*boundedProbe)(nil)
+var _ io.Writer = (*probeCapture)(nil)
