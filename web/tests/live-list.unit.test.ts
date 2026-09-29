@@ -486,6 +486,17 @@ describe('useLiveList: applying by itself only when it is safe', () => {
     expect(h.live.pill.value).toBeNull()
     expect(h.rows.value!.map(r => r.id)).toEqual(['n2'])
   })
+  it('AEON-385: reading the same pending change again does not restart the idle wait', async () => {
+    const h = setup([item('n1'), item('n2')])
+    await closedRow(h)
+    clock += 1500
+    const node = h.srv.nodes.find(n => n.id === 'n1')!
+    h.send({ id: 'n1', fields: ['state'], revision: node.updated_at })
+    await h.settle()
+    clock += 600; h.live.checkNow()
+    expect(h.live.pill.value).toBeNull()
+    expect(h.rows.value!.map(r => r.id)).toEqual(['n2'])
+  })
   it.each(['selected', 'editing', 'menuOpen', 'dialogOpen'] as const)('waits while %s', async blocker => {
     const h = setup([item('n1'), item('n2')])
     await closedRow(h)

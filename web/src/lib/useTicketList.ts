@@ -284,15 +284,15 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   // Bulk change: rows update in place from the server's answer; the list then
   // reloads so rows that no longer match the filters leave. Each row sends the
   // version it shows, so one changed meanwhile comes back as a conflict.
-  async function applyBulk(change: BulkChange): Promise<BulkResult> {
-    const shown = new Map(rows.value.map(row => [row.id, row.updated_at]))
+  async function applyBulk(change: BulkChange, displayed: ListItem[] = rows.value): Promise<BulkResult> {
+    const shown = new Map(displayed.map(row => [row.id, row.updated_at]))
     const since = Object.fromEntries(change.ids.flatMap(id => shown.has(id) ? [[id, shown.get(id)!]] : []))
     for (const [id, name] of names) rowStore.learnName(id, name)
-    const parents = new Map(rows.value.map(row => [row.id, row.parent_id]))
+    const parents = new Map(displayed.map(row => [row.id, row.parent_id]))
     // The answers are in the row store (this tab's writes); a move's new
     // parent chip is known here, from the project's epics.
     const result = await bulkChange(Object.keys(since).length ? { ...change, if_unmodified_since: since } : change)
-    const projectRef = rows.value[0]?.project
+    const projectRef = displayed[0]?.project
     for (const node of result.items) {
       if (!parents.has(node.id) || node.parent_id === parents.get(node.id)) continue
       const epic = epics.value.find(e => e.id === node.parent_id)

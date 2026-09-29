@@ -287,7 +287,7 @@ describe('LiveNodeStore', () => {
     store.subscribe(panel.v)
     latest().ready(40, false)
     const saved = node('n1', '2026-09-29T10:00:02Z')
-    rows.adoptNode(saved)
+    rows.adoptNode(saved, rows.mark())
     latest().node(41, [{ id: 'n1', revision: '2026-09-29T10:00:02Z' }], 'node.updated', 'me')
     expect(fetchNode).not.toHaveBeenCalled()
     expect(panel.calls[0].node).toMatchObject({ id: 'n1', updated_at: saved.updated_at })
@@ -431,14 +431,17 @@ describe('LiveNodeStore', () => {
     expect(fetchNode).toHaveBeenCalledTimes(1)
   })
 
-  it('a browser reconnect that resumes where it left off needs no refetch; a restart does', () => {
+  it('AEON-385: stream loss distrusts reads immediately; resume replays events and restart resyncs', () => {
     const panel = view(['n1'])
     store.subscribe(panel.v)
     const source = latest()
     source.ready(40, false)
     fetchNode.mockResolvedValue(node('n1', '2026-09-29T10:00:01Z'))
     source.node(41, [{ id: 'n1', revision: '2026-09-29T10:00:01Z' }])
+    const sent = rows.mark()
     source.fail(false)
+    expect(rows.gapSince(sent)).toBe(true)
+    expect(rows.current('n1')).toBe(false)
     expect(store.state).toBe('reconnecting')
     // The browser last saw 44 (an event the store does not listen to).
     source.ready(44, true)

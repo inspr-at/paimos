@@ -163,6 +163,11 @@ export class LiveNodeStore {
     for (const name of NODE_EVENTS) source.addEventListener(name, event => this.receive(event))
     source.onerror = () => {
       if (this.source !== source) return
+      // Distrust in-flight pages as soon as the stream is lost, including
+      // answers landing while EventSource is still trying to reconnect.
+      if (this.state !== 'reconnecting') {
+        this.rows.gap()
+      }
       if (source.readyState === CLOSED) { source.close(); this.source = null; this.scheduleRetry() }
       else this.setState('reconnecting')
     }
@@ -251,7 +256,7 @@ export class LiveNodeStore {
       if (!showing.length) { this.settled(id); return }
       if (this.rows.isDeleted(id)) { this.settled(id); return }
       const cached = this.rows.latest(id)
-      if (cached && compareRevision(cached.updated_at, dirty.change.revision) >= 0 && !this.rows.newer(id, cached.updated_at)) {
+      if (cached && this.rows.current(id) && compareRevision(cached.updated_at, dirty.change.revision) >= 0 && !this.rows.newer(id, cached.updated_at)) {
         this.settled(id)
         for (const view of showing) view.changed(dirty.change, cached)
         return
@@ -304,8 +309,10 @@ export class LiveNodeStore {
   async fetch(id: string): Promise<WorkNode | null> {
     const sent = this.rows.mark()
     const node = await this.options.fetchNode(id)
-    if (node) this.rows.adoptNode(node, sent)
-    else this.rows.gone(id, sent)
+    if (!this.rows.gapSince(sent)) {
+      if (node) this.rows.adoptNode(node, sent)
+      else this.rows.gone(id, sent)
+    }
     return node
   }
 }

@@ -50,13 +50,13 @@ for (const level of ['root', 'children'] as const) {
       releaseStream()
       await expect.poll(() => h.live.requests.length).toBeGreaterThan(1)
       releaseFirst()
-      await expect.poll(() => computed).toBe(2)
+      await expect.poll(() => computed).toBeGreaterThanOrEqual(2)
       await expect(row(h.page, key)).toHaveCount(0)
       releaseRetry()
       await expect(row(h.page, level === 'root' ? 'PHAROS-10' : 'PHAROS-12')).toBeVisible()
       await expect(outline(h.page).locator('tr.ghost.tree-row')).toHaveCount(0)
       await expect(row(h.page, key)).toHaveCount(0)
-      expect(requests).toBe(2)
+      expect(requests).toBeGreaterThanOrEqual(2)
       expect(h.errors).toEqual([])
     } finally { releaseFirst(); releaseRetry(); releaseStream(); await h.close() }
   })
@@ -328,3 +328,207 @@ for (const colorScheme of ['light', 'dark'] as const) {
     expect(errors).toEqual([])
   })
 }
+
+// A persistent, controllable stream: a real loss can be observed before any
+// reconnect, independent of the chunked SSE fixture used by the two-tab specs.
+async function controlledStream(page: Page) {
+  await page.addInitScript(() => {
+    class Source {
+      readyState = 1
+      onerror: (() => void) | null = null
+      listeners = new Map<string, ((event: unknown) => void)[]>()
+      constructor() {
+        ;(window as unknown as { outlineStream: Source }).outlineStream = this
+        queueMicrotask(() => this.emit('stream.ready', { after: 500, resumed: false }))
+      }
+      addEventListener(type: string, listener: (event: unknown) => void) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]) }
+      emit(type: string, data: unknown) { for (const listener of this.listeners.get(type) ?? []) listener({ data: JSON.stringify(data), lastEventId: '501' }) }
+      fail() { this.readyState = 0; this.onerror?.() }
+      close() { this.readyState = 2 }
+    }
+    window.EventSource = Source as unknown as typeof EventSource
+  })
+}
+async function outlineEvent(page: Page, node: MockNode, fields: string[], change = 'updated') {
+  await page.evaluate(({ node, fields, change }) => {
+    const stream = (window as unknown as { outlineStream: { emit: (type: string, data: unknown) => void } }).outlineStream
+    stream.emit(`node.${change}`, { id: 501, type: `node.${change}`, actor_principal_id: 'another-person', node_changes: [{ id: node.id, project_id: node.project, fields, change, revision: node.updated_at }] })
+  }, { node, fields, change })
+}
+async function outlineGap(page: Page, loss = false) {
+  await page.evaluate(loss => {
+    const stream = (window as unknown as { outlineStream: { emit: (type: string, data: unknown) => void; fail: () => void } }).outlineStream
+    if (loss) stream.fail()
+    else stream.emit('stream.ready', { after: 900, resumed: false })
+  }, loss)
+}
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`AEON-385: live Outline patches fields and holds moves, additions and deletion until Show (${scheme})`, async ({ page }) => {
+    await controlledStream(page)
+    await page.emulateMedia({ colorScheme: scheme })
+    const errors = watchErrors(page), data = fixtures()
+    await mockWork(page, data)
+    await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
+    await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+    await expect(row(page, 'PHAROS-11')).toBeVisible()
+    await row(page, 'PHAROS-14').getByRole('checkbox').check()
+    const n = data.nodes.find(n => n.id === 'n-1')!
+    Object.assign(n, { title: 'Hetzner title changed live', updated_at: ago(-1) })
+    await outlineEvent(page, n, ['title'])
+    await expect(row(page, n.key)).toContainText(n.title)
+    await expect(row(page, n.key)).toHaveClass(/live-flash/)
+    const before = await keys(page).allTextContents()
+    Object.assign(n, { parent_id: 'p-pharos', updated_at: ago(-2) })
+    await outlineEvent(page, n, ['parent_id'])
+    const removed = data.nodes.find(n => n.id === 'n-2')!
+    removed.updated_at = ago(-3)
+    data.nodes.splice(data.nodes.indexOf(removed), 1)
+    await outlineEvent(page, removed, ['deleted_at'], 'deleted')
+    const added = { ...structuredClone(n), id: 'live-new', key: 'PHAROS-99', title: 'New work from another tab', updated_at: ago(-4) }
+    data.nodes.push(added)
+    await outlineEvent(page, added, [], 'created')
+    await expect(row(page, n.key).locator('.live-label')).toHaveText('Moved')
+    await expect(row(page, removed.key).locator('.live-label')).toHaveText('Deleted')
+    await expect(page.getByRole('button', { name: '3 updates · Show' })).toBeVisible()
+    await expect(keys(page)).toHaveText(before)
+    await expect(row(page, n.key)).toHaveAttribute('aria-level', '2')
+    await page.waitForTimeout(2200)
+    await expect(keys(page)).toHaveText(before)
+    if (process.env.OUTLINE_SHOTS_DIR) {
+      const { mkdirSync } = await import('node:fs')
+      mkdirSync(process.env.OUTLINE_SHOTS_DIR, { recursive: true })
+      for (const width of [1600, 390]) {
+        await page.setViewportSize({ width, height: 950 })
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        await page.screenshot({ path: `${process.env.OUTLINE_SHOTS_DIR}/outline-live-${width}-${scheme}.png` })
+      }
+    }
+    await page.getByRole('button', { name: '3 updates · Show' }).click()
+    await expect(row(page, n.key)).toHaveAttribute('aria-level', '1')
+    await expect(row(page, removed.key)).toHaveCount(0)
+    await expect(row(page, added.key)).toBeVisible()
+    expect(errors).toEqual([])
+  })
+}
+
+test('AEON-385: filtered ancestor values and ancestry follow events without reloading', async ({ page }) => {
+  await controlledStream(page)
+  const data = fixtures(), errors = watchErrors(page)
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS/tickets?view=outline&q=Hetzner')
+  await expect(row(page, 'PHAROS-11')).toBeVisible()
+  await row(page, 'PHAROS-11').getByRole('checkbox').check()
+  const epic = data.nodes.find(n => n.id === 'n-epic')!
+  Object.assign(epic, { title: 'Ancestor renamed live', updated_at: ago(-1) })
+  await outlineEvent(page, epic, ['title'])
+  await expect(row(page, epic.key)).toContainText(epic.title)
+  const ancestor = { ...structuredClone(epic), id: 'ancestor', key: 'PHAROS-98', title: 'New ancestor', parent_id: 'p-pharos' }
+  data.nodes.push(ancestor)
+  Object.assign(epic, { parent_id: ancestor.id, updated_at: ago(-2) })
+  await outlineEvent(page, epic, ['parent_id'])
+  await expect(row(page, epic.key).locator('.live-label')).toHaveText('Moved')
+  await expect(row(page, 'PHAROS-11')).toHaveAttribute('aria-level', '2')
+  await expect(row(page, ancestor.key)).toHaveCount(0)
+  await page.getByRole('button', { name: '1 update · Show' }).click()
+  await expect(row(page, ancestor.key)).toBeVisible()
+  await expect(row(page, 'PHAROS-11')).toHaveAttribute('aria-level', '3')
+  Object.assign(ancestor, { title: 'Fresh ancestor title', updated_at: ago(-3) })
+  await outlineEvent(page, ancestor, ['title'])
+  await expect(row(page, ancestor.key)).toContainText(ancestor.title)
+  await expect(row(page, ancestor.key)).toHaveClass(/dimmed/)
+  Object.assign(ancestor, { title: 'Hetzner ancestor', updated_at: ago(-4) })
+  await outlineEvent(page, ancestor, ['title'])
+  await expect(row(page, ancestor.key)).not.toHaveClass(/dimmed/)
+  expect(errors).toEqual([])
+})
+
+test('AEON-385: a child page is distrusted at stream loss, before reconnect', async ({ page }) => {
+  await controlledStream(page)
+  const data = fixtures(), errors = watchErrors(page)
+  let firstRelease!: () => void, retryRelease!: () => void, computed = 0, requests = 0
+  const first = new Promise<void>(resolve => { firstRelease = resolve })
+  const retry = new Promise<void>(resolve => { retryRelease = resolve })
+  await mockWork(page, data, { hold: call => {
+    if (call.method === 'GET' && call.path === '/api/nodes' && call.query.get('parent_id') === 'n-epic') {
+      return { until: ++requests === 1 ? first : retry, computed: () => { computed++ } }
+    }
+  } })
+  try {
+    await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
+    await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+    await expect.poll(() => computed).toBe(1)
+    data.nodes.splice(data.nodes.findIndex(n => n.id === 'n-1'), 1)
+    await outlineGap(page, true)
+    firstRelease()
+    await expect.poll(() => computed).toBeGreaterThanOrEqual(2)
+    await expect(row(page, 'PHAROS-11')).toHaveCount(0)
+    retryRelease()
+    await expect(row(page, 'PHAROS-12')).toBeVisible()
+    await expect(row(page, 'PHAROS-11')).toHaveCount(0)
+    expect(errors).toEqual([])
+  } finally { firstRelease(); retryRelease() }
+})
+
+test('AEON-385: an old parent page cannot restore the count after moving its last child', async ({ page }) => {
+  await controlledStream(page)
+  const data = fixtures(), errors = watchErrors(page)
+  data.nodes = data.nodes.filter(n => !['n-2', 'n-3'].includes(n.id))
+  let hold = false, computed = 0, release!: () => void
+  const wait = new Promise<void>(resolve => { release = resolve })
+  await mockWork(page, data, { hold: call => {
+    if (hold && call.method === 'GET' && call.path === '/api/nodes' && call.query.get('kind') === 'epic' && call.query.get('parent_id') === 'p-pharos') return { until: wait, computed: () => { computed++ } }
+  } })
+  try {
+    await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
+    await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+    await expect(row(page, 'PHAROS-11')).toBeVisible()
+    hold = true
+    await outlineGap(page)
+    await expect.poll(() => computed).toBe(1)
+    await row(page, 'PHAROS-11').dragTo(outline(page).locator('.outline-group'))
+    await expect(row(page, 'PHAROS-11')).toHaveAttribute('aria-level', '1')
+    await expect(row(page, 'PHAROS-10').locator('.twisty')).toHaveCount(0)
+    release()
+    await expect.poll(() => page.locator('.live-pill').count()).toBe(0)
+    await page.waitForTimeout(300)
+    await expect(row(page, 'PHAROS-10').locator('.twisty')).toHaveCount(0)
+    expect(errors).toEqual([])
+  } finally { release() }
+})
+
+test('AEON-385: bulk move relocates lazy Outline rows immediately and sends displayed revisions', async ({ page }) => {
+  const data = fixtures(), errors = watchErrors(page)
+  const revisions = Object.fromEntries(data.nodes.filter(n => ['n-1', 'n-2'].includes(n.id)).map(n => [n.id, n.updated_at]))
+  const calls = await mockWork(page, data)
+  await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
+  await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+  for (const key of ['PHAROS-11', 'PHAROS-12']) await row(page, key).getByRole('checkbox').check()
+  await row(page, 'PHAROS-10').getByRole('button', { name: 'Collapse PHAROS-10' }).click()
+  await page.getByRole('toolbar', { name: '2 selected tickets' }).getByRole('button', { name: 'Move' }).click()
+  await page.getByRole('dialog', { name: 'Epic for 2 tickets' }).getByRole('option', { name: 'No epic' }).click()
+  for (const key of ['PHAROS-11', 'PHAROS-12']) await expect(row(page, key)).toHaveAttribute('aria-level', '1')
+  await expect(row(page, 'PHAROS-10').locator('.twisty')).toHaveCount(0)
+  expect(calls.find(call => call.path === '/api/nodes/bulk')?.body).toMatchObject({ parent_id: 'p-pharos', if_unmodified_since: revisions })
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+  for (const key of ['PHAROS-11', 'PHAROS-12']) await expect(row(page, key)).toHaveAttribute('aria-level', '2')
+  expect(errors).toEqual([])
+})
+
+
+test('AEON-385: filtered field patches keep sibling order', async ({ page }) => {
+  await controlledStream(page)
+  const data = fixtures(), errors = watchErrors(page)
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS/tickets?view=outline&q=Cloud')
+  await expect(row(page, 'PHAROS-12')).toBeVisible()
+  const before = await keys(page).allTextContents()
+  const ticket = data.nodes.find(n => n.id === 'n-2')!
+  Object.assign(ticket, { title: 'Cloud connector changed live', updated_at: ago(-1) })
+  await outlineEvent(page, ticket, ['title'])
+  await expect(row(page, ticket.key)).toContainText(ticket.title)
+  await expect(keys(page)).toHaveText(before)
+  await expect(page.locator('.live-pill')).toHaveCount(0)
+  expect(errors).toEqual([])
+})

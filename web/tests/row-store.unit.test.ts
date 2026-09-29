@@ -52,6 +52,21 @@ describe('RowStore: revisions only move forward', () => {
 })
 
 describe('RowStore: tombstones', () => {
+  it('a late bulk answer cannot place a retained display object below a restore floor', () => {
+    const rows = new RowStore()
+    const original = rows.adopt(item('n1', 1), rows.mark(), { show: true })!
+    const sent = rows.mark()
+    rows.adopt(item('n1', 2, { parent_id: 'elsewhere' }), rows.mark(), { show: true })
+    rows.note({ id: 'n1', change: 'deleted', revision: at(3) })
+    rows.note({ id: 'n1', change: 'created', revision: at(4) })
+    expect(rows.wrote(node('n1', 2, { parent_id: 'elsewhere' }), sent)).toBeNull()
+    expect(rows.isDeleted('n1')).toBe(false)
+    expect(rows.row('n1')).toBe(original)
+    expect(rows.visibleRow('n1')).toBeUndefined()
+    rows.adopt(item('n1', 4), rows.mark(), { show: true })
+    expect(rows.visibleRow('n1')).toBe(original)
+  })
+
   it('nothing at or before a deletion brings the node back; a restore does', () => {
     const rows = new RowStore()
     const sent = rows.mark()
@@ -161,6 +176,27 @@ describe('RowStore: editors', () => {
 })
 
 describe('review 326g: authoritative child counts replace local dedupe history', () => {
+  it('AEON-385: pages predating local membership changes cannot replace counts or reset dedupe', () => {
+    const rows = new RowStore()
+    const parent = rows.adopt(item('parent', 1, { children_count: 3 }), rows.mark(), { show: true })!
+    const sent = rows.mark()
+    rows.child('parent', 'leaving', false)
+    rows.adopt(item('parent', 1, { children_count: 3 }), sent, { show: true })
+    expect(parent.children_count).toBe(2)
+    rows.child('parent', 'leaving', false)
+    expect(parent.children_count).toBe(2)
+    const another = rows.mark()
+    rows.child('parent', 'arriving', true)
+    rows.adopt(item('parent', 2, { children_count: 2 }), another, { show: true })
+    expect(parent.children_count).toBe(3)
+    rows.child('parent', 'arriving', true)
+    expect(parent.children_count).toBe(3)
+    rows.adopt(item('parent', 2, { children_count: 1 }), rows.mark(), { show: true })
+    expect(parent.children_count).toBe(1)
+    rows.child('parent', 'arriving', true)
+    expect(parent.children_count).toBe(2)
+  })
+
   it('counts a child returning after a remote move and same-revision reload', () => {
     const rows = new RowStore()
     const parent = rows.adopt(item('parent', 1), rows.mark(), { show: true })!

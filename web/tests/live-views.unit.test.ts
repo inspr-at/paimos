@@ -15,15 +15,14 @@
 //   it (the panel closes) only when the tab knows it deleted;
 // - a parent chip that matched never names another parent while it stays;
 // - no save overwrites a field it did not mean to change;
-// - once everything arrived, the views show the server's state (the Outline
-//   reloads, since it does not itself subscribe to live row changes);
+// - once everything arrived and Show applies, the live views converge;
 // - an authoritative child count starts a new baseline: subsequent local
 //   moves count, and children remain reachable through the expand control.
 // LIVE_VIEW_SEEDS sets the number of seeds; LIVE_VIEW_TRACE=<seed> replays
 // one with every step logged (run with --reporter=verbose to see it pass).
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { computed, effectScope, nextTick, ref } from 'vue'
-import type { ListItem, ListParent, WorkNode } from '../src/lib/api'
+import type { BulkChange, ListItem, ListParent, WorkNode } from '../src/lib/api'
 import { LiveNodeStore } from '../src/lib/liveNodes'
 import { rowStore } from '../src/lib/rowStore'
 import { filtersFromQuery } from '../src/lib/ticketList'
@@ -523,11 +522,11 @@ describe('the list, the live list and the panel over any delivery order', () => 
   }, 600_000)
 })
 
-// The Outline does not subscribe to row changes itself: ProjectView's live
-// connection records gaps/tombstones, its lazy levels load on demand, and
-// workspace callbacks insert/relocate rows. Exercise those real boundaries,
-// including the panel's create callback (both views count the same child).
+// AEON-385: the live Outline shares the actual stream and row store with
+// the panel. Delayed lazy pages and live batches must agree, with structural
+// placement held until Show. Local callbacks count each child once.
 async function runOutline(seed: number): Promise<string[]> {
+  vi.useFakeTimers()
   const next = random(seed)
   const pick = <T>(items: T[]) => items[Math.floor(next() * items.length)]!
   const root = `outline-${seed}` // expansion memory belongs to one project
@@ -554,12 +553,13 @@ async function runOutline(seed: number): Promise<string[]> {
   const off = store.subscribe({ shows: () => false, changed: () => {} })
   const gap = () => { epoch++; source.emit('stream.ready', { after: ++sequence, resumed: false }, sequence) }
   const resume = () => source.emit('stream.ready', { after: sequence, resumed: true }, sequence)
+  const loss = () => { if (store.state !== 'reconnecting') epoch++; source.onerror?.call(source as unknown as EventSource, new Event('error')) }
   const floors = new Map<string, number>()
-  function event(id: string, change: Kind, rev: number) {
+  function event(id: string, change: Kind, rev: number, fields: string[] = []) {
     if (change === 'deleted') floors.set(id, rev)
     source.emit(change === 'deleted' ? 'node.deleted' : 'node.created', {
       id: ++sequence, type: change === 'deleted' ? 'node.deleted' : 'node.created', actor_principal_id: MIRA,
-      node_changes: [{ id, project_id: root, change, fields: [], revision: at(rev) }],
+      node_changes: [{ id, project_id: root, change, fields, revision: at(rev) }],
     }, sequence)
   }
   interface Read { method: string; url: URL; body?: Record<string, string>; epoch: number; answer?: { status: number; json: unknown }; resolve: (r: Response) => void; done?: boolean }
@@ -577,9 +577,18 @@ async function runOutline(seed: number): Promise<string[]> {
       // Small server pages exercise root and child pagination independently
       // of the production page-size constant.
       const kinds = q.get('kind')?.split(',')
-      const rows = [...data.values()].filter(n => n.parent_id === q.get('parent_id') && (!kinds || kinds.includes(n.kind_slug))).sort((a, b) => a.id.localeCompare(b.id))
-      const start = Number(q.get('cursor') ?? 0), limit = Math.min(2, Number(q.get('limit') ?? 2))
+      const ids = q.get('ids')?.split(',')
+      const rows = [...data.values()].filter(n => (!q.has('parent_id') || n.parent_id === q.get('parent_id')) && (!ids || ids.includes(n.id)) && (!kinds || kinds.includes(n.kind_slug)) && (!q.has('q') || n.title.includes(q.get('q')!))).sort((a, b) => a.id.localeCompare(b.id))
+      const start = Number(q.get('cursor') ?? 0), limit = q.has('parent_id') ? Math.min(2, Number(q.get('limit') ?? 2)) : Number(q.get('limit') ?? 200)
       json = { items: rows.slice(start, start + limit).map(copy), next_cursor: start + limit < rows.length ? String(start + limit) : null, facets: {} }
+    } else if (path === '/api/nodes/bulk') {
+      const change = call.body as unknown as BulkChange
+      const items = change.ids.map(id => {
+        const n = data.get(id)!
+        n.parent_id = change.parent_id!; n.parent = parent(n.parent_id); n.updated_at = at(++revision); own.add(id)
+        return nodeCopy(n)
+      })
+      json = { items, unchanged: [], skipped: [], event_id: ++sequence }
     } else if (path === '/api/kinds') {
       json = { items: ['ticket', 'epic', 'task'].map(slug => ({ id: `k-${slug}`, slug, label: slug, schema: {} })) }
     } else if (path === '/api/nodes' && call.method === 'POST') {
@@ -606,12 +615,14 @@ async function runOutline(seed: number): Promise<string[]> {
     if (call.epoch === epoch) for (const n of body.items ?? (body.id ? [body as ListItem] : [])) readIn.set(n.id, epoch)
     call.resolve({ ok: status < 400, status, headers: new Headers(), json: async () => json } as Response)
   }
-  const scope = effectScope(), selected = ref<ListItem | null>(null)
-  const { outline, ticket } = scope.run(() => {
-    const outline = useOutline(ref(root), ref(filtersFromQuery({ closed: '1' })), ref(true), { rows: ref([]), loading: ref(false), names: new Map() })
+  const scope = effectScope(), selected = ref<ListItem | null>(null), outlineBusy = ref(false)
+  const outlineFilters = ref(filtersFromQuery({ closed: '1' }))
+  const { outline, ticket, list } = scope.run(() => {
+    const list = useTicketList(ref(root), outlineFilters)
+    const outline = useOutline(ref(root), outlineFilters, ref(true), list, { store, me: () => ME, blockers: () => ({ selected: 1, editing: false, menuOpen: false, dialogOpen: false, dragging: false }) })
     const ticket = useTicket(selected, { names: new Map(), onCreated: item => outline.insert(item), onRemoved: item => outline.remove(item),
-      onMoved: (item, from) => outline.relocate(item, from, from === root ? null : from), live: { busy: ref(false), me: () => ME, store } })
-    return { outline, ticket }
+      onMoved: (item, from) => outline.relocate(item, from, from === root ? null : from), live: { busy: outlineBusy, me: () => ME, store } })
+    return { outline, ticket, list }
   })!
   let admitted = new Map<string, ListItem>()
   function observe() {
@@ -632,11 +643,18 @@ async function runOutline(seed: number): Promise<string[]> {
   }
   // Process and deliver are separate, and random across all outstanding
   // root, child, panel and stats reads. Every delivery is observed.
+  let flushing = false
   async function drain() {
     for (let i = 0; i < 400; i++) {
       await settle()
-      const pending = calls.filter(c => !c.done)
-      if (!pending.length) return
+      let pending = calls.filter(c => !c.done)
+      if (!pending.length && !flushing) {
+        flushing = true
+        void outline.live.flushNow().finally(() => { flushing = false })
+        await settle()
+        pending = calls.filter(c => !c.done)
+      }
+      if (!pending.length) { if (flushing) continue; return }
       const call = pick(pending)
       if (!call.answer) process(call)
       else deliver(call)
@@ -646,7 +664,8 @@ async function runOutline(seed: number): Promise<string[]> {
   }
   async function reload() { outline.reload(); await settle(); observe(); await drain() }
   async function move(id: string, to: string) {
-    const row = outline.node(id)!
+    const row = outline.node(id)
+    if (!row) { fail(`${id} was not available for a local move`); return }
     const moving = guardedMove(row, parent(to), (item, from) => outline.relocate(item, from, from === root ? null : from))
     await drain(); await moving; observe()
   }
@@ -674,7 +693,7 @@ async function runOutline(seed: number): Promise<string[]> {
         const victim = pick(items)
         if (victim) data.delete(victim.id)
         const missed = next() < 0.75
-        if (missed) gap(); else resume()
+        if (missed) { if (next() < 0.5) loss(); else gap() } else resume()
         // Sometimes the deletion and restore are delivered, but the first
         // post-restore copy is still on its way: the floor must hide the old page.
         if (victim && !missed) {
@@ -726,12 +745,144 @@ async function runOutline(seed: number): Promise<string[]> {
     while (outline.hasMoreRoot.value) { outline.loadMoreRoot(); await drain() }
     for (const id of ['a', 'b']) { const loading = outline.loadChildren(id, true); await drain(); await loading }
     if (outline.rows.value.map(n => n.id).sort().join() !== [...data.keys()].sort().join()) fail('fully loaded Outline differs from server')
-  } finally { selected.value = null; scope.stop(); off(); rowStore.clear() }
+    // A same-revision parent page is computed before a local move, but
+    // arrives after it. Observe counts directly, before any correcting read.
+    phase = 'stale count page crossing local move'
+    const moving = [...data.values()].find(n => n.kind_slug === 'ticket' && outline.node(n.id))!
+    const origin = moving.parent_id!, destination = origin === 'a' ? 'b' : 'a'
+    gap(); await settle()
+    const heldCount = calls.find(c => !c.done && c.url.searchParams.get('kind') === 'epic' && c.url.searchParams.get('parent_id') === root)
+    if (!heldCount) fail('gap did not refresh loaded roots')
+    else {
+      process(heldCount)
+      // Let all other reads finish without delivering this page.
+      heldCount.done = true
+      await move(moving.id, destination)
+      deliver(heldCount); await settle()
+      checkCounts()
+      await drain()
+      outline.live.apply(); await settle(); await drain()
+    }
+    phase = 'bulk moves use the displayed Outline revisions and relocate store rows'
+    const bulkRows = outline.rows.value.filter(n => n.kind_slug === 'ticket').slice(0, 2)
+    const from = new Map(bulkRows.map(n => [n.id, n.parent_id]))
+    const to = pick(['a', 'b'])
+    const bulk = list.applyBulk({ ids: bulkRows.map(n => n.id), parent_id: to }, bulkRows)
+    await drain()
+    for (const answer of (await bulk).items) {
+      const row = rowStore.visibleRow(answer.id)
+      if (row && row.parent_id !== from.get(row.id)) outline.relocate(row, from.get(row.id)!, null)
+    }
+    await drain(); observe(); checkCounts()
+    for (const item of bulkRows) {
+      const entry = outline.entries.value.find(e => e.type === 'row' && e.row.id === item.id)
+      if (entry?.type !== 'row' || entry.tree.parentId !== to) fail('bulk move did not place the accepted row')
+    }
+    phase = 'live move under an open editor'
+    const editing = pick([...data.values()].filter(n => n.kind_slug === 'ticket'))
+    selected.value = outline.node(editing.id)!
+    await drain()
+    if (!selected.value) { fail('the editor row was missing'); return failures }
+    outlineBusy.value = true; ticket.hold(); await settle()
+    const base = selected.value.updated_at, parentBefore = selected.value.parent_id
+    editing.parent_id = parentBefore === 'a' ? 'b' : 'a'
+    editing.parent = parent(editing.parent_id); editing.updated_at = at(++revision)
+    event(editing.id, 'updated', revision, ['parent_id'])
+    await drain()
+    if (selected.value.updated_at !== base || selected.value.parent_id !== parentBefore) fail('live update changed the editor base')
+    outline.live.apply(); await settle(); await drain()
+    if (selected.value.updated_at !== base) fail('Show changed the editor base')
+    outlineBusy.value = false; await settle()
+    outline.live.checkNow(); await settle(); await drain()
+    const released = outline.entries.value.find(e => e.type === 'row' && e.row.id === editing.id)
+    if (released?.type !== 'row' || released.tree.parentId !== editing.parent_id) fail('Show did not place the move after the editor released it')
+    selected.value = null; await settle()
+    // Convergence comes from the stream and Show, with no reload. Moves,
+    // additions, deletes and restored rows keep their old placement until Show.
+    for (let round = 0; round < 16; round++) {
+      phase = `live ${round}`
+      const n = pick([...data.values()].filter(n => n.kind_slug === 'ticket'))
+      const before = outline.rows.value.map(n => n.id).join(',')
+      const oldParent = outline.entries.value.find(e => e.type === 'row' && e.row.id === n.id)
+      const mode = round % 4
+      if (mode === 0) {
+        n.title = `live-${seed}-${round}`; n.updated_at = at(++revision)
+        event(n.id, 'updated', revision, ['title'])
+      } else if (mode === 1) {
+        n.parent_id = pick([root, 'a', 'b'].filter(id => id !== n.parent_id))
+        n.parent = parent(n.parent_id); n.updated_at = at(++revision)
+        event(n.id, 'updated', revision, ['parent_id'])
+      } else if (mode === 2) {
+        data.delete(n.id); event(n.id, 'deleted', ++revision)
+      } else {
+        const added = make(`live-${round}`, pick([root, 'a', 'b']))
+        data.set(added.id, added); event(added.id, 'created', revision)
+      }
+      await drain()
+      if (outline.rows.value.map(n => n.id).join(',') !== before) fail('remote change moved rows before Show')
+      if (mode === 0 && outline.node(n.id)?.title !== n.title) fail('live field patch did not arrive')
+      if (mode === 1 && oldParent?.type === 'row') {
+        const entry = outline.entries.value.find(e => e.type === 'row' && e.row.id === n.id)
+        if (entry?.type !== 'row' || entry.tree.parentId !== oldParent.tree.parentId) fail('parent moved before Show')
+        if (outline.live.pending.kind(n.id) !== 'moved') fail('remote move did not wait behind Show')
+      }
+      outline.live.apply(); await settle(); await drain()
+      checkCounts()
+      // Every level is already expanded: Show must place all surviving rows.
+      if (outline.rows.value.map(n => n.id).sort().join() !== [...data.keys()].sort().join()) fail('live Outline membership did not converge')
+      for (const entry of outline.entries.value) if (entry.type === 'row') {
+        const server = data.get(entry.row.id)
+        if (!server || entry.tree.parentId !== server.parent_id || entry.row.updated_at !== server.updated_at) fail(`${entry.row.id} live placement/revision did not converge`)
+      }
+    }
+
+    phase = 'filtered live ancestor cache'
+    const match = pick([...data.values()].filter(n => n.kind_slug === 'ticket'))
+    if (match.parent_id !== 'a') await move(match.id, 'a')
+    match.title = 'unique-filter-match'; match.updated_at = at(++revision)
+    outlineFilters.value = filtersFromQuery({ q: 'unique-filter-match', closed: '1' })
+    const loading = list.load()
+    await drain(); await loading
+    for (let round = 0; round < 4; round++) {
+      phase = `filtered live ancestor ${round}`
+      const ancestor = data.get('a')!
+      ancestor.title = `renamed-${seed}-${round}`; ancestor.updated_at = at(++revision)
+      event(ancestor.id, 'updated', revision, ['title'])
+      await drain()
+      if (outline.node('a')?.title !== ancestor.title) fail('cached ancestor ignored live field change')
+      if (outline.live.pending.kind('a')) fail('an ancestor field patch was classified as structural')
+      const oldParent = ancestor.parent_id
+      ancestor.parent_id = oldParent === root ? 'b' : root; ancestor.parent = parent(ancestor.parent_id)
+      ancestor.updated_at = at(++revision); event('a', 'updated', revision, ['parent_id'])
+      await drain()
+      if (outline.live.pending.kind('a') !== 'moved') fail('an ancestor move was not classified as moved')
+      const held = outline.entries.value.find(e => e.type === 'row' && e.row.id === 'a')
+      if (held?.type !== 'row' || held.tree.parentId !== oldParent) fail('filtered ancestor moved before Show')
+      outline.live.apply(); await settle(); await drain()
+      const entry = outline.entries.value.find(e => e.type === 'row' && e.row.id === match.id)
+      if (entry?.type !== 'row' || entry.tree.depth !== (ancestor.parent_id === root ? 1 : 2)) fail('filtered live ancestry did not converge')
+    }
+    phase = 'filtered field patches keep sort placement'
+    const sibling = make('filtered-sibling', 'a')
+    sibling.title = 'unique-filter-match-sibling'; data.set(sibling.id, sibling)
+    event(sibling.id, 'created', revision)
+    await drain(); outline.live.apply(); await settle(); await drain()
+    const order = outline.rows.value.map(row => row.id).join(',')
+    match.title = 'unique-filter-match-patched'; match.updated_at = at(++revision)
+    event(match.id, 'updated', revision, ['title']); await drain()
+    if (outline.rows.value.map(row => row.id).join(',') !== order) fail('filtered field patch reordered rows')
+    if (outline.node(match.id)?.title !== match.title) fail('filtered field patch did not arrive')
+    const ancestor = data.get('a')!
+    ancestor.title = 'unique-filter-match-ancestor'; ancestor.updated_at = at(++revision)
+    event('a', 'updated', revision, ['title']); await drain()
+    const promoted = outline.entries.value.find(e => e.type === 'row' && e.row.id === 'a')
+    if (promoted?.type !== 'row' || promoted.tree.dimmed) fail('an ancestor that now matches stayed dimmed')
+  } finally { selected.value = null; scope.stop(); off(); vi.clearAllTimers(); vi.useRealTimers(); rowStore.clear() }
   return failures
 }
 
-describe('the lazy Outline over delayed pages, gaps and child moves', () => {
-  it(`admits trusted pages and keeps moved children reachable (${SEEDS} seeds)`, async () => {
+describe('the live Outline over delayed pages, gaps and child moves', () => {
+  it(`admits trusted pages, patches live, and holds placement until Show (${SEEDS} seeds)`, async () => {
     // Session-cached metadata must not consume random choices only for the
     // first seed: replaying any seed alone uses exactly the same schedule.
     fetchNow = async () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({

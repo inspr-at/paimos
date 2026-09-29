@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { computed, reactive, ref, watch, type Ref } from 'vue'
-import { getNode, listNodes, type ListItem } from './api'
+import { computed, onScopeDispose, reactive, ref, watch, type Ref } from 'vue'
+import { getNode, listNodes, type ListItem, type ListQuery } from './api'
 import { childMap, epicStats, flattenOutline, missingAncestors, type EpicStats, type OutlineEntry } from './outline'
-import { compareRows, effectiveSort, hasFilters, type ListFilters } from './ticketList'
+import { apiParams, compareRows, effectiveSort, hasFilters, type ListFilters } from './ticketList'
 import { rowStore } from './rowStore'
 import { asListItem, kinds } from './useTicket'
 import { serializeSort, statusMeta } from './work'
+import type { LiveNodeStore } from './liveNodes'
+import { placeKey, useLiveList, type ListRead, type LiveListOptions } from './useLiveList'
 
 interface Block { ids: string[]; cursor: string | null; loading: boolean; error: string }
-type ListApi = { rows: Ref<ListItem[]>; loading: Ref<boolean>; names: Map<string, string> }
+type ListApi = { rows: Ref<ListItem[]>; loading: Ref<boolean>; names: Map<string, string>; reads?: Ref<ListRead | null>; load?: () => unknown }
+type LiveOptions = Partial<Pick<LiveListOptions, 'me' | 'quiet' | 'holds' | 'blockers' | 'around' | 'applied' | 'env'>> & { store?: LiveNodeStore }
 
 // Expansion is remembered per project for the session (memory, not device storage).
 const expandedByProject = new Map<string, Set<string>>()
@@ -17,7 +20,7 @@ const LEVEL = 200
 // The project Outline. Without search or filters and with closed work shown, levels
 // load lazily as they open. Otherwise the whole match set is known (it is the list's
 // query), so the tree is those rows plus the ancestors that place them.
-export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilters>, active: Ref<boolean>, list: ListApi) {
+export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilters>, active: Ref<boolean>, list: ListApi, options: LiveOptions = {}) {
   const matchMode = computed(() => hasFilters(filters.value) || !filters.value.showClosed)
   const autoExpand = computed(() => hasFilters(filters.value))
   const sortKeys = computed(() => effectiveSort({ ...filters.value, group: 'none' }))
@@ -40,13 +43,22 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   const resolving = ref(false)
   let generation = 0
   let ancestorRun = 0
+  const lazyRead = ref<ListRead | null>(null)
+  const loadedOnce = ref(false)
+  // Filter membership learned by live queries is committed with their rows.
+  const matched = new Map<string, boolean>()
+  // Immutable sort values keep a field patch (including updated_at) in its
+  // place. Lazy levels already have block ids; filtered trees need this too.
+  const order = reactive(new Map<string, ListItem>())
 
   watch(projectId, id => {
     expanded.value = id ? (expandedByProject.get(id) ?? new Set()) : new Set()
     if (id && !expandedByProject.has(id)) expandedByProject.set(id, expanded.value)
-    stats.clear(); ancestors.clear()
+    stats.clear(); ancestors.clear(); matched.clear(); order.clear(); ancestorRun++
   }, { immediate: true })
-  watch(() => JSON.stringify({ ...filters.value, sort: null, group: null, cols: null, view: null }), () => { autoCollapsed.value = new Set() })
+  watch(() => JSON.stringify({ ...filters.value, sort: null, group: null, cols: null, view: null }), () => {
+    autoCollapsed.value = new Set(); generation++; ancestorRun++; matched.clear()
+  })
   function persist() { if (projectId.value) expandedByProject.set(projectId.value, expanded.value) }
 
   // ---------- Match mode ----------
@@ -57,7 +69,16 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     for (const [id, row] of ancestors) if (!map.has(id)) map.set(id, row)
     return map
   })
-  const matchChildren = computed(() => childMap(matchNodes.value.values(), compare.value))
+  const placedNodes = computed(() => new Map([...matchNodes.value].map(([id, row]) => [id, live.layout(row)])))
+  const comparePlaced = (a: ListItem, b: ListItem) => compare.value(order.get(a.id) ?? a, order.get(b.id) ?? b)
+  const matchChildren = computed(() => childMap(placedNodes.value.values(), comparePlaced))
+  function rememberOrder(items: Iterable<ListItem>, replace = false) {
+    if (replace) order.clear()
+    for (const row of items) if (!order.has(row.id)) order.set(row.id, rowStore.shown(row.id) ?? { ...row })
+  }
+  watch(() => list.rows.value, items => rememberOrder(items), { flush: 'sync', immediate: true })
+  watch(() => list.reads?.value, read => { if (read?.kind === 'load') rememberOrder(matchNodes.value.values(), true) })
+  watch(sortParam, () => rememberOrder(matchNodes.value.values(), true))
   async function resolveAncestors() {
     const root = projectId.value
     if (!root || !active.value || !matchMode.value) return
@@ -66,10 +87,12 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     try {
       const all = await kinds()
       for (let round = 0; round < 8; round++) {
-        const missing = missingAncestors(matchNodes.value, root)
+        const missing = missingAncestors(placedNodes.value, root)
         if (!missing.length || request !== ancestorRun) break
         const sent = rowStore.mark()
         const fetched = await Promise.all(missing.map(id => getNode(id).catch(() => null)))
+        if (request !== ancestorRun || !active.value || !matchMode.value) return
+        if (rowStore.gapSince(sent)) { round--; continue }
         for (const node of fetched) {
           if (!node) continue
           const kind = all.find(k => k.id === node.kind_id)
@@ -79,12 +102,24 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
           if (assignee) item.assignee = { id: assignee, name: list.names.get(assignee) ?? 'Someone' }
           // The row store's display object (the panel edits and moves that
           // one); one the store knows deleted is not placed.
-          const row = rowStore.adopt(item, sent, { full: false })
-          if (row) ancestors.set(node.id, row)
+          const row = rowStore.adopt(item, sent, { full: false, show: true })
+          if (row) { rememberOrder([row]); ancestors.set(node.id, row) }
         }
         // Parents that cannot be read would loop forever; place their children at the top.
         for (const id of missing) if (!ancestors.has(id)) ancestors.set(id, { id, key: '', title: '', parent_id: root, kind_slug: 'missing' } as unknown as ListItem)
       }
+      // Keep only the chains needed by the current match set. Old parents
+      // must not survive a move as unrelated, dimmed roots.
+      const needed = new Set<string>()
+      for (const item of list.rows.value) {
+        let parent = live.layout(item).parent_id
+        for (let depth = 0; parent && parent !== root && depth < 8 && !needed.has(parent); depth++) {
+          needed.add(parent)
+          const row = ancestors.get(parent) ?? matchNodes.value.get(parent)
+          parent = row ? live.layout(row).parent_id : null
+        }
+      }
+      for (const id of ancestors.keys()) if (!needed.has(id)) ancestors.delete(id)
     } finally { if (request === ancestorRun) resolving.value = false }
   }
   watch([() => list.rows.value.length, () => list.loading.value, matchMode, active, projectId], () => {
@@ -111,12 +146,14 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       const ids: string[] = []
       for (const item of page.items) {
         const row = rowStore.adopt(item, sent, { show: true })
-        if (!row) continue
+        if (!row || row.parent_id !== params.parent_id) continue
         lazyNodes.set(item.id, row)
         ids.push(item.id)
       }
       block.ids = more ? [...block.ids, ...ids.filter(id => !block.ids.includes(id))] : ids
       block.cursor = page.next_cursor
+      loadedOnce.value = true
+      lazyRead.value = { kind: 'more', sent, behind: page.items.filter(item => rowStore.newer(item.id, item.updated_at)).map(item => item.id) }
     } catch (e) {
       if (request === generation) block.error = e instanceof Error ? e.message : 'Could not load'
     } finally { if (request === generation) block.loading = false }
@@ -131,6 +168,8 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     const root = projectId.value
     if (!root || !active.value || matchMode.value) return
     generation++
+    const request = generation
+    const sent = rowStore.mark()
     lazyNodes.clear(); blocks.clear()
     epicBlock.value = { ids: [], cursor: null, loading: true, error: '' }
     looseBlock.value = { ids: [], cursor: null, loading: true, error: '' }
@@ -138,13 +177,17 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       loadBlock(epicBlock, { parent_id: root, kind: ['epic'] }),
       loadBlock(looseBlock, { parent_id: root, kind: ['ticket', 'task'] }),
     ])
-    while (epicBlock.value.cursor && !epicBlock.value.error) await loadBlock(epicBlock, { parent_id: root, kind: ['epic'] }, true)
+    if (request !== generation) return
+    while (request === generation && epicBlock.value.cursor && !epicBlock.value.error) await loadBlock(epicBlock, { parent_id: root, kind: ['epic'] }, true)
+    if (request !== generation) return
     // Reopen what was expanded before, level by level.
     let frontier = [...expanded.value].filter(id => lazyNodes.has(id))
     for (let depth = 0; depth < 6 && frontier.length; depth++) {
       await Promise.all(frontier.map(id => loadChildren(id)))
+      if (request !== generation) return
       frontier = [...expanded.value].filter(id => lazyNodes.has(id) && !blocks.has(id))
     }
+    lazyRead.value = { kind: 'load', sent, behind: [...lazyNodes.values()].filter(row => rowStore.newer(row.id, row.updated_at)).map(row => row.id) }
   }
   watch([active, matchMode, projectId, sortParam], () => { generation++; if (active.value && !matchMode.value) void loadRoots() }, { immediate: true })
   function loadMoreRoot() { if (looseBlock.value.cursor && !looseBlock.value.loading) void loadBlock(looseBlock, { parent_id: projectId.value, kind: ['ticket', 'task'] }, true) }
@@ -179,7 +222,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       if (row.kind_slug === 'missing') top.push(...(matchChildren.value.get(row.id) ?? []))
       else top.push(row)
     }
-    top.sort(compare.value)
+    top.sort(comparePlaced)
     return { epics: top.filter(row => row.kind_slug === 'epic').map(row => row.id), loose: top.filter(row => row.kind_slug !== 'epic' && row.kind_slug !== 'missing').map(row => row.id) }
   })
   function isExpanded(id: string) { return autoExpand.value ? !autoCollapsed.value.has(id) : expanded.value.has(id) }
@@ -206,12 +249,105 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     noEpicCollapsed: noEpicCollapsed.value,
     createUnder: createUnder.value,
   }))
-  watch(() => roots.value.epics, ids => { if (active.value) for (const id of ids) ensureStats(id) }, { immediate: true })
   const rows = computed(() => entries.value.flatMap(entry => entry.type === 'row' ? [entry.row] : []))
   // The first page shows once both blocks have their first rows, so epics never
   // arrive above tickets that are already on screen.
   const loading = computed(() => matchMode.value ? (list.loading.value || (resolving.value && !entries.value.length)) : (epicBlock.value.loading && !epicBlock.value.ids.length) || (looseBlock.value.loading && !looseBlock.value.ids.length))
   const error = computed(() => matchMode.value ? '' : epicBlock.value.error || looseBlock.value.error)
+
+  // ---------- Live rows, stable tree placement ----------
+  // The list's causal batching, labels, editor pin and Show policy also own
+  // the Outline. Lazy block ids are placement only; every value is a store row.
+  const liveRows = computed<ListItem[]>({
+    get: () => [...(matchMode.value ? matchNodes.value : lazyNodes).values()].filter(row => row.kind_slug !== 'missing'),
+    set(items) {
+      if (matchMode.value) {
+        rememberOrder(items, true)
+        const wasMatch = new Set(list.rows.value.map(row => row.id))
+        list.rows.value = items.filter(row => matched.get(row.id) ?? wasMatch.has(row.id))
+        ancestors.clear()
+        for (const row of items) if (!list.rows.value.some(item => item.id === row.id)) ancestors.set(row.id, row)
+      } else {
+        lazyNodes.clear()
+        for (const row of items) lazyNodes.set(row.id, row)
+        const byParent = childMap(items.map(row => live.layout(row)), compare.value)
+        const roots = byParent.get(projectId.value ?? '') ?? []
+        epicBlock.value.ids = roots.filter(row => row.kind_slug === 'epic').map(row => row.id)
+        looseBlock.value.ids = roots.filter(row => row.kind_slug !== 'epic').map(row => row.id)
+        for (const [id, block] of blocks) block.ids = (byParent.get(id) ?? []).map(row => row.id)
+      }
+    },
+  })
+  async function fetchLive(query: ListQuery) {
+    const run = generation, sent = rowStore.mark()
+    const page = await listNodes(query)
+    if (!matchMode.value || run !== generation) return page
+    // Ancestors place filtered matches even when they do not match themselves.
+    // Read them afresh on relevant events; no project-lifetime cache of values.
+    const ids = query.ids ?? []
+    const context = ids.filter(id => ancestors.has(id) && !list.rows.value.some(row => row.id === id) && !page.items.some(row => row.id === id))
+    const extra = context.length ? await listNodes({ within: projectId.value!, kind: ['epic', 'ticket', 'task'], ids: context, limit: LEVEL }) : null
+    if (run === generation && !rowStore.gapSince(sent)) {
+      for (const id of ids) if (!rowStore.touchedSince(id, sent)) matched.set(id, page.items.some(row => row.id === id))
+      for (const item of page.items) matched.set(item.id, true)
+    }
+    return { ...page, items: [...page.items, ...(extra?.items ?? [])] }
+  }
+  function applied() {
+    if (matchMode.value) {
+      // A context ancestor that now matches stays in the same place and
+      // becomes an ordinary match once its field update is accepted.
+      const promoted = [...ancestors.values()].filter(row => matched.get(row.id) && !live.pending.kind(row.id) && !list.rows.value.some(item => item.id === row.id))
+      if (promoted.length) {
+        list.rows.value = [...list.rows.value, ...promoted]
+        for (const row of promoted) ancestors.delete(row.id)
+      }
+      void resolveAncestors()
+    }
+    void refreshParentCounts()
+    for (const id of roots.value.epics) ensureStats(id, true)
+    options.applied?.()
+  }
+  async function refreshParentCounts() {
+    const run = generation
+    const parents = liveRows.value.flatMap(row => row.children_count > 0 ? [row.id, row.parent_id] : [row.parent_id])
+    const ids = [...new Set([...parents, ...blocks.keys()])].filter((id): id is string => !!id && id !== projectId.value && !!node(id))
+    for (let at = 0; at < ids.length; at += LEVEL) {
+      const sent = rowStore.mark()
+      try {
+        const page = await listNodes({ within: projectId.value!, kind: ['epic', 'ticket', 'task'], ids: ids.slice(at, at + LEVEL), limit: LEVEL })
+        if (run !== generation || rowStore.gapSince(sent)) return
+        for (const item of page.items) rowStore.adopt(item, sent)
+      } catch { /* The next event or resync refreshes projections again. */ }
+    }
+  }
+  const live = useLiveList({
+    projectId, filters, rows: liveRows, loading,
+    reads: computed(() => matchMode.value ? list.reads?.value ?? null : lazyRead.value),
+    loadedOnce: computed(() => matchMode.value ? !list.loading.value : loadedOnce.value),
+    active, more: () => false, store: options.store, fetchList: fetchLive,
+    me: options.me ?? (() => null), quiet: options.quiet, holds: options.holds,
+    blockers: options.blockers ?? (() => ({ selected: 0, editing: false, menuOpen: false, dialogOpen: false, dragging: false })),
+    around: options.around, env: options.env, applied,
+    released: () => { liveRows.value = liveRows.value; applied() },
+    placement: row => JSON.stringify([row.parent_id, placeKey(row, { ...filters.value, group: 'none' })]),
+    resyncQueries: () => matchMode.value
+      ? [liveQuery()]
+      : [
+        { parent_id: projectId.value!, kind: ['epic'], limit: LEVEL },
+        { parent_id: projectId.value!, kind: ['ticket', 'task'], limit: LEVEL },
+        ...[...blocks.keys()].map(id => ({ parent_id: id, kind: ['epic', 'ticket', 'task'], limit: LEVEL })),
+      ],
+    reload: () => { reload(); if (matchMode.value) void list.load?.() },
+  })
+  watch(() => roots.value.epics, ids => { if (active.value) for (const id of ids) ensureStats(id) }, { immediate: true })
+  function liveQuery() { return apiParams(projectId.value!, filters.value, { limit: LEVEL }) }
+  // Placement changes only when Show releases the held layout (or after an
+  // explicit local move); resolve the new chain then, never underneath a row.
+  watch(() => [...placedNodes.value.values()].map(row => `${row.id}:${row.parent_id}`).join(','), () => {
+    if (active.value && matchMode.value && !list.loading.value) void resolveAncestors()
+  })
+  onScopeDispose(() => { generation++; ancestorRun++ })
 
   // ---------- Actions ----------
   function setExpanded(id: string, open: boolean) {
@@ -277,7 +413,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   }
   function relocate(item: ListItem, fromParent: string | null, fromEpic: string | null) {
     if (fromEpic) ensureStats(fromEpic, true)
-    if (matchMode.value) { refreshStatsFor(item.id); return }
+    if (matchMode.value) { rememberOrder([item], false); refreshStatsFor(item.id); void resolveAncestors(); return }
     detach(item, fromParent)
     insert(item)
   }
@@ -302,11 +438,16 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     createUnder.value = id
     if (id && !isExpanded(id)) setExpanded(id, true)
   }
+  function reload() {
+    generation++; ancestorRun++; matched.clear(); order.clear()
+    if (matchMode.value) { ancestors.clear(); void resolveAncestors() }
+    else void loadRoots()
+  }
 
   return {
     matchMode, autoExpand, entries, rows, loading, error, node, isExpanded, hasChildren, noEpicCollapsed, createUnder,
     toggle, setExpanded, expandAll, collapseAll, loadChildren, loadMoreRoot, parentOf, epicOf, insert, relocate, remove, findByKey, reveal, startCreateUnder,
     refreshStatsFor, hasMoreRoot: computed(() => !matchMode.value && !!looseBlock.value.cursor), loadingMoreRoot: computed(() => looseBlock.value.loading && !!looseBlock.value.ids.length),
-    reload: () => { generation++; if (matchMode.value) void resolveAncestors(); else void loadRoots() },
+    reload, live, loadedRows: liveRows,
   }
 }

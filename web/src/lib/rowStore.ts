@@ -57,6 +57,8 @@ interface Entry {
   own: string[]
   // Children this tab counted in or out (child), so each counts once.
   children: Map<string, boolean>
+  // Child membership changes do not advance the parent's node revision.
+  countChangedAt: number
   pins: number
   // Clock of the newest news (a newer revision, a tombstone, a restore).
   touched: number
@@ -203,7 +205,9 @@ export class RowStore {
       // The same revision from a list page refreshes the projections a node
       // read does not carry; older copies are dropped.
       if (order > 0 || full || !entry.full) {
-        const copy = make()
+        const incoming = make()
+        const staleCount = full && sent < entry.countChangedAt && !!entry.latest
+        const copy = staleCount ? frozen({ ...incoming, children_count: entry.latest!.children_count }) : incoming
         const previous = entry.latest
         if (order > 0 && compareRevision(revision, entry.revision) > 0) { entry.revision = revision; entry.touched = ++this.clock }
         entry.latest = copy
@@ -211,7 +215,7 @@ export class RowStore {
         // A list page replaces the count, so earlier local child deltas no
         // longer describe its baseline. Node reads only carry the previous
         // projection and must keep the dedupe shared by panel and Outline.
-        if (full) entry.children.clear()
+        if (full && !staleCount) entry.children.clear()
         if (copy.assignee?.name && copy.assignee.name !== 'Someone') this.names.set(copy.assignee.id, copy.assignee.name)
         if (full && copy.parent?.kind_slug && copy.parent.key) this.learnParent(copy.parent)
         // The same revision with the list projections (the parent chip a node
@@ -311,6 +315,12 @@ export class RowStore {
 
   // ---------- Display ----------
   row(id: string): ListItem | undefined { return this.entries.get(id)?.row ?? undefined }
+  // A callback may place only a display copy above the deletion floor. row()
+  // also retains the old object for views waiting behind the updates pill.
+  visibleRow(id: string): ListItem | undefined {
+    const entry = this.entries.get(id)
+    return entry && this.visible(entry) ? entry.row! : undefined
+  }
   // The server copy the display object shows (values and revision of one copy).
   shown(id: string): ListItem | undefined { return this.entries.get(id)?.shown ?? undefined }
   latest(id: string): ListItem | undefined { return this.entries.get(id)?.latest ?? undefined }
@@ -365,6 +375,7 @@ export class RowStore {
   child(parentId: string, childId: string, present: boolean) {
     const entry = this.entries.get(parentId)
     if (!entry?.latest || entry.children.get(childId) === present) return
+    entry.countChangedAt = ++this.clock
     entry.children.delete(childId)
     entry.children.set(childId, present)
     if (entry.children.size > CHILDREN_PER_NODE) entry.children.delete(entry.children.keys().next().value!)
@@ -470,7 +481,7 @@ export class RowStore {
   private entry(id: string): Entry {
     let entry = this.entries.get(id)
     if (!entry) {
-      entry = { row: null, shown: null, latest: null, full: false, revision: null, tomb: null, floor: null, held: null, own: [], children: new Map(), pins: 0, touched: 0, readAt: 0 }
+      entry = { row: null, shown: null, latest: null, full: false, revision: null, tomb: null, floor: null, held: null, own: [], children: new Map(), countChangedAt: 0, pins: 0, touched: 0, readAt: 0 }
       this.entries.set(id, entry)
     }
     return entry

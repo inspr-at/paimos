@@ -188,7 +188,20 @@ const graphActive = computed(() => viewMode.value === 'graph')
 const graphState = ref<TicketGraphState>({ data: { nodes: [], links: [], truncated: false }, visible: { nodes: [], links: [], truncated: false }, loading: true })
 const ticketGraphView = ref<{ focus: () => void }>()
 const outlineActive = computed(() => viewMode.value === 'outline')
-const outline = useOutline(projectId, filters, outlineActive, list)
+const outline = useOutline(projectId, filters, outlineActive, list, {
+  me: () => session.identity?.principal.id ?? null,
+  quiet: id => !!ticketKey.value && panelItem.value?.id === id,
+  holds: id => ticketKey.value && panelItem.value?.id === id
+    ? !!panel.value?.busy() || !!panel.value?.isDirty()
+    : selected.value.has(id) || statusMenu.value?.row.id === id,
+  blockers: () => ({
+    selected: selected.value.size + (phonePicking.value ? 1 : 0),
+    editing: creating.value || !!outline.createUnder.value || !!panel.value?.busy() || !!panel.value?.isDirty() || !!table.value?.createDirty(),
+    menuOpen: !!statusMenu.value || !!bulkMenu.value || !!savePanel.value || !!document.querySelector('.floating'),
+    dialogOpen: !!document.querySelector('dialog[open]'), dragging: !!document.querySelector('.dragging'),
+  }),
+  around: aroundLiveApply, applied: liveApplied,
+})
 // Changes by others, live (AEON-326): the list patches rows in place and holds
 // structural updates behind the "N updates · Show" pill until it is safe.
 const listActive = computed(() => section.value === 'tickets' && viewMode.value === 'list')
@@ -211,6 +224,9 @@ const liveList = useLiveList({
   }),
   around: aroundLiveApply, applied: liveApplied, reload: () => void list.load(),
 })
+
+const activeLive = computed(() => outlineActive.value ? outline.live : liveList)
+const liveActive = computed(() => listActive.value || outlineActive.value)
 
 const toolbarWrap = ref<HTMLElement>()
 const stickMark = ref<HTMLElement>()
@@ -500,10 +516,12 @@ async function resolvePanel() {
   }
 }
 watch([ticketKey, projectId], resolvePanel, { immediate: true })
-watch(panelItem, item => {
+// A lookup can find the store row before its list page lands. Object identity
+// then stays the same, so also observe when that row joins the visible view.
+watch([panelItem, () => sequence.value.some(row => row.id === panelItem.value?.id)], ([item, shown], [before]) => {
   if (!item) return
-  if (outlineActive.value) outline.reveal(item.id)
-  if (sequence.value.some(row => row.id === item.id)) {
+  if (item !== before && outlineActive.value) outline.reveal(item.id)
+  if (shown) {
     cursorId.value = item.id
     if (!fullView.value) void nextTick(() => table.value?.scrollToRow(item.id))
   }
@@ -583,7 +601,7 @@ function liveApplied() {
 }
 onBeforeUnmount(() => clearTimeout(liveCounts))
 function showUpdates() {
-  liveList.apply()
+  activeLive.value.apply()
   if (!fullView.value && !panel.value?.el?.contains(document.activeElement)) table.value?.focusGrid()
 }
 
@@ -1003,16 +1021,17 @@ async function selectAllMatching() {
   selectAll(true)
 }
 // Rows that left the list leave the selection.
-watch(() => list.rows.value, rows => {
+const selectionRows = computed(() => outlineActive.value ? outline.loadedRows.value : list.rows.value)
+watch(selectionRows, rows => {
   if (!selected.value.size) return
   const ids = new Set(rows.map(row => row.id))
   const kept = [...selected.value].filter(id => ids.has(id))
   if (kept.length !== selected.value.size) selected.value = new Set(kept)
 })
 watch(selectable, on => { if (!on) clearSelection() })
-const selectedRows = computed(() => list.rows.value.filter(row => selected.value.has(row.id)))
+const selectedRows = computed(() => selectionRows.value.filter(row => selected.value.has(row.id)))
 // Selected tickets someone deleted meanwhile: the bulk bar says so, and changes leave them out.
-const selectedDeleted = computed(() => liveList.deletedAmong(selected.value))
+const selectedDeleted = computed(() => activeLive.value.deletedAmong(selected.value))
 const liveSelection = () => { const gone = new Set(selectedDeleted.value); return [...selected.value].filter(id => !gone.has(id)) }
 // Where the list is, so the bulk bar centres over it (a docked panel takes the right).
 const listFrame = ref<{ left: number; width: number } | null>(null)
@@ -1066,7 +1085,7 @@ const bulkLabels = computed<LabelChoice[]>(() => {
 })
 // Review: the tickets that changed meanwhile become the selection, with their newer values.
 function reviewConflicts(ids: string[]) {
-  const shown = ids.filter(id => list.rows.value.some(row => row.id === id))
+  const shown = ids.filter(id => (outlineActive.value ? outline.rows.value : list.rows.value).some(row => row.id === id))
   if (!shown.length) return
   selected.value = new Set(shown)
   selectAnchor = shown[0]
@@ -1081,7 +1100,13 @@ async function runBulk(change: Omit<BulkChange, 'ids'>, done: (count: number) =>
   bulkMenu.value = null
   bulkBusy.value = true
   try {
-    const result = await list.applyBulk({ ids, ...change })
+    const bulkRows = selectionRows.value
+    const placements = new Map(bulkRows.map(row => [row.id, { parent: row.parent_id, epic: outline.epicOf(row.id) }]))
+    const result = await list.applyBulk({ ids, ...change }, bulkRows)
+    for (const answer of result.items) {
+      const from = placements.get(answer.id), row = rowStore.visibleRow(answer.id)
+      if (from && row && row.parent_id !== from.parent) outline.relocate(row, from.parent, from.epic)
+    }
     // Changed meanwhile: nothing was overwritten; Review shows those tickets.
     const conflicts = result.skipped.filter(item => item.code === 'conflict')
     const reported = result.skipped.filter(item => !benefitSkip(item) && item.code !== 'conflict')
@@ -1151,7 +1176,7 @@ async function undoBulk(eventId: number) {
   try {
     await list.undoBulk(eventId)
     toast('Undone: the tickets are as they were')
-    void list.load(); void projects.load(true); void refreshMemberships()
+    void list.load(); if (outlineActive.value) outline.reload(); void projects.load(true); void refreshMemberships()
   } catch (e) {
     toast(e instanceof APIError && e.status === 409 ? 'Some of them changed since, so nothing was undone.' : `Undo did not work: ${problem(e)}`, { tone: 'error' })
   }
@@ -1363,7 +1388,7 @@ function keydown(event: KeyboardEvent) {
       break
     case '/': if (!fullView.value) { event.preventDefault(); toolbar.value?.focusSearch() } break
     case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && row?.kind_slug === 'epic' ? row : null); break
-    case 'u': if (liveList.pill.value && listActive.value) { event.preventDefault(); showUpdates() } break
+    case 'u': if (activeLive.value.pill.value && liveActive.value) { event.preventDefault(); showUpdates() } break
     case 'e': if (ticketKey.value) { event.preventDefault(); void panel.value?.startEdit() } break
     case 's':
       if (ticketKey.value) { event.preventDefault(); panel.value?.openStatus() }
@@ -1524,13 +1549,13 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
         :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />
       <template v-else>
-      <div v-if="listActive && liveList.pill.value" class="live-dock">
-        <button type="button" class="live-pill" :aria-label="liveList.pill.value" aria-keyshortcuts="u" :data-tip="liveList.pending.overflow ? 'Load the list again' : 'Show the updates · u'" @click="showUpdates">
-          <AppIcon :name="liveList.pending.overflow ? 'refresh' : 'arrow-up'" :size="13" />
-          <span>{{ liveList.pill.value.split(' · ')[0] }}</span><span class="dot" aria-hidden="true">·</span><b>{{ liveList.pill.value.split(' · ')[1] }}</b>
+      <div v-if="liveActive && activeLive.pill.value" class="live-dock">
+        <button type="button" class="live-pill" :aria-label="activeLive.pill.value" aria-keyshortcuts="u" :data-tip="activeLive.pending.overflow ? 'Load the view again' : 'Show the updates · u'" @click="showUpdates">
+          <AppIcon :name="activeLive.pending.overflow ? 'refresh' : 'arrow-up'" :size="13" />
+          <span>{{ activeLive.pill.value.split(' · ')[0] }}</span><span class="dot" aria-hidden="true">·</span><b>{{ activeLive.pill.value.split(' · ')[1] }}</b>
         </button>
       </div>
-      <p v-if="listActive" class="sr-only live-said" role="status" aria-live="polite">{{ liveList.message.value }}</p>
+      <p v-if="liveActive" class="sr-only live-said" role="status" aria-live="polite">{{ activeLive.message.value }}</p>
       <TicketTable
         ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
         :query="filters.q" :sort="filters.sort" :density="density"
@@ -1547,8 +1572,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @open="openRow" @cursor="id => cursorId = id" @sort="sortBy" @status="(row, anchor) => openStatus(row, anchor, 'list')" @release="(row, anchor) => openRelease(anchor, [row.id])"
         @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
         @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
-        :live-labels="listActive ? liveList.labels.value : undefined" :live-flash="listActive ? liveList.flash.value : undefined"
-        :live-pill="listActive && liveList.pill.value ? { text: liveList.pill.value, overflow: liveList.pending.overflow } : null" @show-updates="showUpdates"
+        :live-labels="liveActive ? activeLive.labels.value : undefined" :live-flash="liveActive ? activeLive.flash.value : undefined"
+        :live-pill="liveActive && activeLive.pill.value ? { text: activeLive.pill.value, overflow: activeLive.pending.overflow } : null" @show-updates="showUpdates"
       />
       </template>
 
@@ -1676,7 +1701,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .phone-pick-status b { font-size: 15px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
   .phone-pick .dot { color: var(--ink-3); }
   .phone-pick .gone { color: var(--ink-2); }
-  .live-dock { position: sticky; top: calc(var(--toolbar-h, 0px) + 4px); z-index: 4; height: 0; display: flex; justify-content: center; pointer-events: none; }
+  .live-dock { position: sticky; top: calc(var(--toolbar-h, 0px) + 4px); z-index: 4; height: 36px; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
   .live-pill { font-size: 13px; }
   .phone-pick button { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 15px; font-weight: 600; }
   .phone-pick button.quiet { padding-left: 2px; color: var(--ink-2); font-weight: 600; }
