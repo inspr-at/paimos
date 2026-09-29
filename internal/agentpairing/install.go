@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/version"
 )
 
@@ -46,7 +47,7 @@ if command -v aeon-agentd >/dev/null 2>&1; then
   exit 1
 fi
 if command -v paimos-agentd >/dev/null 2>&1 || command -v nix >/dev/null 2>&1; then
-  printf 'Use the Nix / Home Manager section of this instance guide to pair with the existing Aeon tool; managed binaries and services are preserved.\n' >&2
+  printf 'Use this instance guide and the owning Nix / Home Manager configuration to pair with a verified compatible Aeon tool; managed binaries and services are preserved.\n' >&2
   exit 1
 fi
 umask 077
@@ -107,17 +108,32 @@ func setupCommand(origin string) string {
 }
 
 type ManagedSetup struct {
-	Command       string `json:"command"`
-	ServiceOption string `json:"service_option"`
-	ModuleURL     string `json:"module_url"`
-	ServiceNote   string `json:"service_note"`
+	Command          string `json:"command"`
+	ServiceOption    string `json:"service_option"`
+	ModuleURL        string `json:"module_url"`
+	ServiceNote      string `json:"service_note"`
+	PlatformNote     string `json:"platform_note,omitempty"`
+	PrerequisiteNote string `json:"prerequisite_note,omitempty"`
 }
 
-func managedSetup(origin string) ManagedSetup {
-	return ManagedSetup{
-		Command:       "aeon-agentd pair --url " + shellQuote(origin),
-		ServiceOption: "uzumaki.aeon.agentd.enable",
-		ModuleURL:     "https://github.com/markus-barta/nixcfg/blob/main/modules/uzumaki/aeon-agentd.nix",
-		ServiceNote:   "The current Home Manager module needs a paired-service update before this computer can connect.",
+func managedSetup(origin string, guides ...*config.PairingNixGuide) *ManagedSetup {
+	if len(guides) == 0 || guides[0] == nil || guides[0].Validate() != nil {
+		return nil
+	}
+	g := guides[0]
+	platform := "Service module: macOS and Linux."
+	if len(g.Platforms) == 1 {
+		platform = "Service module: macOS only."
+		if g.Platforms[0] == "linux" {
+			platform = "Service module: Linux only."
+		}
+	}
+	return &ManagedSetup{
+		Command:          "aeon-agentd pair --url " + shellQuote(origin),
+		ServiceOption:    g.ServiceOption,
+		ModuleURL:        g.ModuleURL,
+		ServiceNote:      g.ServiceNote,
+		PlatformNote:     platform,
+		PrerequisiteNote: "Use aeon-agentd on PATH from a reviewed release pin with pair; a service module alone does not ensure this.",
 	}
 }

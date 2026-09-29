@@ -32,9 +32,11 @@ func DefaultStateRoot(goos, home, xdgStateHome string) (string, error) {
 // ValidateStateLocation runs before creating directories or private state.
 // OpenStore separately checks ownership, permissions and symlink ancestors.
 func ValidateStateLocation(root, workspace string) error {
-	if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" ||
-		repositoryPath(root) || workspace != "" && within(workspace, root) {
-		return errors.New("private setup state must be an absolute directory outside the working folder and project repositories")
+	if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" || repositoryPath(root) {
+		return errors.New("private setup state must be an absolute directory outside project repositories; use --state-root to choose a private folder there")
+	}
+	if workspace != "" && within(workspace, root) {
+		return errors.New("the working folder contains the private pairing state; run pair from the intended project folder instead of your home folder, or pass --workspace with that folder; keep --state-root outside the working folder")
 	}
 	return nil
 }

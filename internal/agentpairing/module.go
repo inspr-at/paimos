@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -31,18 +32,19 @@ type Module struct {
 	clients               map[string]rate
 	watch                 watchRelay
 	watchKeys             watchPollKeys
+	managed               *ManagedSetup
 }
 type rate struct {
 	start time.Time
 	n     int
 }
 
-func New(pool *pgxpool.Pool, publicURL, defaultTenant string) *Module {
+func New(pool *pgxpool.Pool, publicURL, defaultTenant string, nixGuide ...*config.PairingNixGuide) *Module {
 	origin := ""
 	if u, err := url.Parse(publicURL); err == nil && u.Host != "" && (u.Scheme == "https" || u.Scheme == "http") {
 		origin = u.Scheme + "://" + u.Host
 	}
-	return &Module{pool: pool, origin: origin, defaultTenant: defaultTenant, clients: map[string]rate{}}
+	return &Module{pool: pool, origin: origin, defaultTenant: defaultTenant, clients: map[string]rate{}, managed: managedSetup(origin, nixGuide...)}
 }
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountWatch(mux)
@@ -71,7 +73,11 @@ func reply(w http.ResponseWriter, v any) {
 	httpapi.WriteJSON(w, 200, v)
 }
 func (m *Module) guide(w http.ResponseWriter, r *http.Request) {
-	reply(w, map[string]any{"protocol": "pairing-v1", "version": version.Version, "verification_helper_version": version.Version, "verification_capabilities": verificationCapabilities("", ""), "instance_url": m.origin, "default_tenant_slug": m.defaultTenant, "platforms": []string{"darwin/arm64", "darwin/amd64", "linux/arm64", "linux/amd64"}, "setup_command": setupCommand(m.origin), "platform_qualification": "candidate; consult the exact release service qualification evidence", "install_targets": installTargets(), "install_available": len(installTargets()) > 0, "managed_installation": "Pair with the installed aeon-agentd; Nix/Home Manager keeps ownership of binaries and services.", "managed_setup": managedSetup(m.origin)})
+	guide := map[string]any{"protocol": "pairing-v1", "version": version.Version, "verification_helper_version": version.Version, "verification_capabilities": verificationCapabilities("", ""), "instance_url": m.origin, "default_tenant_slug": m.defaultTenant, "platforms": []string{"darwin/arm64", "darwin/amd64", "linux/arm64", "linux/amd64"}, "setup_command": setupCommand(m.origin), "platform_qualification": "candidate; consult the exact release service qualification evidence", "install_targets": installTargets(), "install_available": len(installTargets()) > 0, "managed_installation": "Pair with the installed aeon-agentd; Nix/Home Manager keeps ownership of binaries and services."}
+	if m.managed != nil {
+		guide["managed_setup"] = m.managed
+	}
+	reply(w, guide)
 }
 
 // Deliberately ignore X-Forwarded-For. The transport peer bounds memory/traffic;

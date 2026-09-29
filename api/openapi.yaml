@@ -5884,13 +5884,15 @@ components:
         managed_installation: {type: string}
         managed_setup:
           type: object
-          description: Nix/Home Manager pairing without installing or changing a managed service
+          description: Optional deployment-admin-configured Nix/Home Manager guide; omitted when the instance has no reviewed module configuration. Commands remain bound to the server origin and never install or change a managed service.
           required: [command, service_option, module_url, service_note]
           properties:
             command: {type: string}
             service_option: {type: string}
             module_url: {type: string, format: uri}
             service_note: {type: string}
+            platform_note: {type: string, description: 'Platforms supported by the configured module, independent of the helper build targets'}
+            prerequisite_note: {type: string, description: Reviewed package pin and PATH requirements before using the pair command}
         install_available: {type: boolean}
         install_targets:
           type: array

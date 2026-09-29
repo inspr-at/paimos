@@ -571,7 +571,9 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
       <details v-if="presentation?.managedSetup" class="manual nix-guide">
         <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Nix / Home Manager</summary>
         <div class="manual-body">
-          <p class="copy">With aeon-agentd installed, run this in the folder you want to work in.</p>
+          <p v-if="presentation.managedSetup.platform_note" class="copy">{{ presentation.managedSetup.platform_note }}</p>
+          <p v-if="presentation.managedSetup.prerequisite_note" class="copy">{{ presentation.managedSetup.prerequisite_note }}</p>
+          <p class="copy">Run this from your project folder, not your home folder.</p>
           <pre class="command"><code>{{ presentation.managedSetup.command }}</code></pre>
           <button type="button" class="btn sm" @click="copyText(presentation.managedSetup.command, 'Pair command')"><AppIcon :name="copied === 'Pair command' ? 'check' : 'copy'" :size="13" />{{ copied === 'Pair command' ? 'Copied' : 'Copy pairing command' }}</button>
           <p class="copy">Confirm the folder and accounts, then enter the code below.</p>

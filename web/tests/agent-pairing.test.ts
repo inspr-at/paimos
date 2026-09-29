@@ -115,6 +115,17 @@ test('the Nix guide is additive, parsed as published, and never guesses a paired
   assert.deepEqual(presentPublicGuide(guide).managedSetup, managed)
   assert.match(presentPublicGuide(guide).note, /signed-in person/)
   assert.equal(presentPublicGuide(guidePayload()).managedSetup, null)
+  const annotated = {
+    ...managed,
+    platform_note: 'Module supports macOS only; it does not configure a Linux service.',
+    prerequisite_note: 'Use a reviewed release pin with pair and aeon-agentd on PATH.',
+  }
+  globalThis.fetch = async () => jsonResponse(guidePayload({ managed_setup: annotated }))
+  assert.deepEqual(presentPublicGuide(await getPairingGuide()).managedSetup, annotated)
+  for (const field of ['platform_note', 'prerequisite_note']) {
+    globalThis.fetch = async () => jsonResponse(guidePayload({ managed_setup: { ...annotated, [field]: ['invalid'] } }))
+    await assert.rejects(getPairingGuide(), PairingError)
+  }
   globalThis.fetch = async () => jsonResponse(guidePayload({ managed_setup: { ...managed, module_url: 'javascript:alert(1)' } }))
   await assert.rejects(getPairingGuide(), PairingError)
 })

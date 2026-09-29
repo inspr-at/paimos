@@ -26,9 +26,11 @@ export function pairingGuide() {
     managed_installation: 'Use the owning Nix or Home Manager configuration.',
     managed_setup: {
       command: NIX_PAIR_COMMAND,
-      service_option: 'uzumaki.aeon.agentd.enable',
-      module_url: 'https://github.com/markus-barta/nixcfg/blob/main/modules/uzumaki/aeon-agentd.nix',
+      service_option: 'services.aeon.enable',
+      module_url: 'https://example.test/instance/module.nix',
       service_note: 'The current Home Manager module needs a paired-service update before this computer can connect.',
+      platform_note: 'Service module: macOS only.',
+      prerequisite_note: 'Use aeon-agentd on PATH from a reviewed release pin with pair; a service module alone does not ensure this.',
     },
   }
 }

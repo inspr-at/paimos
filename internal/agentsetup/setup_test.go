@@ -3,6 +3,7 @@
 package agentsetup
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,53 @@ import (
 	"testing"
 	"time"
 )
+
+func TestEndedPairingRecoveryPreservesStateAndNeedsFreshApproval(t *testing.T) {
+	for _, state := range []string{"revoked", "draining", "denied", "expired"} {
+		t.Run(state, func(t *testing.T) {
+			e, api, _, opts, exec := engineFixture(t)
+			if _, err := e.Begin(t.Context(), opts); err != nil {
+				t.Fatal(err)
+			}
+			saved, err := e.load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved.Phase = state
+			if state == "draining" || state == "revoked" {
+				saved.DisconnectAll = true
+				saved.View.ComputerState = state
+			}
+			if err := e.save(saved, false); err != nil {
+				t.Fatal(err)
+			}
+			before, err := e.Store.Read(snapshotName, 1<<20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := len(exec.calls)
+			p, err := e.Begin(t.Context(), opts)
+			if err == nil || !strings.Contains(err.Error(), "--state-root") || !strings.Contains(p.Action, "approve the new code") || !strings.Contains(p.Action, "Keep this pairing's state") {
+				t.Fatal("ended pairing lacks actionable recovery")
+			}
+			after, err := e.Store.Read(snapshotName, 1<<20)
+			if err != nil || !bytes.Equal(before, after) || api.createCount != 1 || len(exec.calls) != calls {
+				t.Fatal("recovery changed old authority or touched a service")
+			}
+			// The documented explicit new root creates a new request, never
+			// inherits the old approval, and leaves the old root for cleanup.
+			freshAPI := &setupAPI{}
+			fresh := &Engine{Store: testStore(t), API: freshAPI, Services: e.Services, Now: e.Now}
+			p, err = fresh.Begin(t.Context(), opts)
+			if err != nil || p.Stage != "awaiting_approval" || freshAPI.createCount != 1 || freshAPI.request.RequestID == api.request.RequestID {
+				t.Fatal("fresh state did not request new person approval")
+			}
+			if _, err := fresh.Store.Read(RuntimeName, 1<<20); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("fresh state gained a runtime before approval")
+			}
+		})
+	}
+}
 
 const testTenant = "11111111-1111-4111-8111-111111111111"
 const testComputer = "22222222-2222-4222-8222-222222222222"

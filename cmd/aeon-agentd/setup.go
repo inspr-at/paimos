@@ -193,6 +193,10 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		if err != nil {
 			return errors.New("working folder unavailable; pass --workspace")
 		}
+		// Reject an impossible choice before asking the person to approve it.
+		if err = agentsetup.ValidateStateLocation(root, workspace); err != nil {
+			return err
+		}
 		yes, err := prompt.confirm(fmt.Sprintf("Use %q as the working folder?", workspace), "--workspace")
 		if err != nil {
 			return err
