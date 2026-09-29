@@ -128,7 +128,7 @@ func DiffChain(chain Chain, role, projectID string, merged rules.Merged) (LiveRe
 		}
 		seenMerged[rule.Identity] = true
 	}
-	rows := diffLoaded(local, merged.Rules)
+	rows := diffLoaded(chain.Harness, local, merged.Rules)
 	counts := LiveCounts{Files: len(files)}
 	for _, row := range rows {
 		switch row.Status {
@@ -173,7 +173,7 @@ type localBind struct {
 	report string
 }
 
-func diffLoaded(local []rulesimport.LoadedRule, merged []rules.Rule) []LiveRule {
+func diffLoaded(harness string, local []rulesimport.LoadedRule, merged []rules.Rule) []LiveRule {
 	byID := map[string]rules.Rule{}
 	var mergedOrder []string
 	for _, rule := range merged {
@@ -202,6 +202,14 @@ func diffLoaded(local []rulesimport.LoadedRule, merged []rules.Rule) []LiveRule 
 			g = &group{id: id, match: bind.match}
 			groups[id] = g
 			order = append(order, id)
+		}
+		// Codex lets the later file replace the earlier one. Claude keeps both
+		// and reports a local conflict when they disagree.
+		if harness == "codex" && len(g.items) > 0 {
+			g.items = []rulesimport.LoadedRule{rule}
+			g.conflict = false
+			g.match = bind.match
+			continue
 		}
 		if bind.match != "" {
 			g.match = bind.match

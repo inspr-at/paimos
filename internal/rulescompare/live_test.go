@@ -79,7 +79,8 @@ func TestDiffChainMatchesExplicitWhyAndConflict(t *testing.T) {
 	}
 
 	conflict := chain
-	conflict.Files = []ChainFile{chainFile(t, "repo/AGENTS.md", conflictA), chainFile(t, "repo/pkg/AGENTS.md", conflictB)}
+	conflict.Harness = "claude-code"
+	conflict.Files = []ChainFile{chainFile(t, "repo/CLAUDE.md", conflictA), chainFile(t, "repo/pkg/CLAUDE.md", conflictB)}
 	conflicted, err := DiffChain(conflict, "builder", report.ProjectID, rules.Merged{Version: "v", SHA256: strings.Repeat("ab", 32), Rules: []rules.Rule{{Identity: "safety", Text: local.Text, Why: local.Why, Strength: "normal", Enabled: true}}})
 	if err != nil {
 		t.Fatal(err)
@@ -90,5 +91,38 @@ func TestDiffChainMatchesExplicitWhyAndConflict(t *testing.T) {
 
 	if _, err = DiffChain(chain, "builder", report.ProjectID, rules.Merged{Rules: []rules.Rule{{Identity: "safety"}, {Identity: "safety"}}}); err == nil || !strings.Contains(err.Error(), "unique") {
 		t.Fatal(err)
+	}
+}
+
+func TestCodexLaterFileWins(t *testing.T) {
+	chain := Chain{Harness: "codex", Files: []ChainFile{
+		chainFile(t, "repo/AGENTS.md", doc("style", "Use root style.", "Synthetic.")),
+		chainFile(t, "repo/pkg/AGENTS.override.md", doc("style", "Use package style.", "Synthetic.")),
+	}}
+	merged := rules.Merged{Rules: []rules.Rule{{Identity: "style", Text: "Use package style.", Why: "Synthetic.", Strength: "normal", Enabled: true}}}
+	got, err := DiffChain(chain, "builder", "10000000-0000-4000-8000-000000000002", merged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Counts.Both != 1 || got.Counts.Differs != 0 {
+		t.Fatalf("effective nested rule does not compare equal: %+v", got.Rules)
+	}
+
+	child := doc("style", "Use another style.", "Synthetic.")
+	chain.Files[1] = chainFile(t, "repo/pkg/AGENTS.override.md", child)
+	parsed, err := rulesimport.ParseLoaded("repo/pkg/AGENTS.override.md", child, strings.Repeat("ab", 32), len(child))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = DiffChain(chain, "builder", "10000000-0000-4000-8000-000000000002", merged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Counts.Both != 0 || got.Counts.Differs != 1 || len(got.Rules) != 1 {
+		t.Fatalf("%+v", got.Rules)
+	}
+	row := got.Rules[0]
+	if row.Status != "differs" || strings.Join(row.Changed, ",") != "text" || row.LocalTextSHA256 != sha256Hex(parsed.Rules[0].Text) || row.MergedTextSHA256 != sha256Hex(merged.Rules[0].Text) {
+		t.Fatalf("later file was treated as a local conflict: %+v", row)
 	}
 }
