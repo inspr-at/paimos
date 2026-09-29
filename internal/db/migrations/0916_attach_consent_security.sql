@@ -1,5 +1,6 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Per-person policy, never a daemon-supplied preference.
+SET LOCAL lock_timeout = '5s';
 CREATE TABLE person_watch_security (
  tenant_id uuid NOT NULL REFERENCES tenants(id),
  person_id uuid NOT NULL,

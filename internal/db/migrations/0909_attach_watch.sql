@@ -1,5 +1,6 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Content-free approval and lease only. No column may store conversation text.
+SET LOCAL lock_timeout = '5s';
 CREATE TABLE harness_attach_requests (
  tenant_id uuid NOT NULL REFERENCES tenants(id),
  id uuid NOT NULL,
