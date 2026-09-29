@@ -138,6 +138,47 @@ for (const [width, theme] of [[1600, 'light'], [390, 'dark']] as const) {
   })
 }
 
+test('six blocked accounts of seven stay blocked when the list is truncated', async ({ page }) => {
+  const errors = watchErrors(page)
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
+  await mockWork(page, fixtures())
+  const ids = Array.from({ length: 7 }, (_, index) => `88888888-8888-4888-8888-88888888888${index}`)
+  const enrollments = ids.map((account_id, index) => ({
+    account_id, account_key: `codex-${index}`, harness: 'codex', label: index ? `Blocked ${index}` : 'Healthy work',
+    model_profile_id: '66666666-6666-4666-8666-666666666666', state: 'connected', local_cleanup: 'pending',
+    verification_run_id: null, active_run_ids: [], verification_state: 'not_selected', verification_error: '',
+    local_processes: 'unconfirmed', accounting_state: 'settled',
+  }))
+  const report = {
+    harness_statuses: { codex: 'ready' },
+    harness_details: { codex: {
+      state: 'ready', attention_count: 6,
+      attention_accounts: ids.slice(1).map(account_id => ({ account_id, reason: 'pin_drifted' })),
+    } },
+    enrollments,
+  }
+  await mockPairing(page, {}, report)
+  await page.goto('/agents')
+  const computers = page.getByRole('region', { name: 'Connected computers' })
+  const row = computers.locator('.harness-report').filter({ hasText: 'Codex' })
+  await expect(row).toContainText('6 of 7 accounts need attention')
+  await page.getByRole('button', { name: 'Show details for studio' }).click()
+  await expect(computers.locator('.enrollment-meta', { hasText: 'Pin changed' })).toHaveCount(6)
+  await expect(computers.locator('.enrollment-meta', { hasText: 'Ready' })).toHaveCount(1)
+  report.harness_details.codex = {
+    state: 'ready', attention_count: 6, attention_truncated: true,
+    attention_accounts: ids.slice(1, 6).map(account_id => ({ account_id, reason: 'pin_drifted' })),
+  }
+  await page.getByRole('button', { name: 'Refresh computers' }).click()
+  await expect(row).toContainText('6 of 7 accounts need attention')
+  const omitted = computers.locator('li', { hasText: 'Blocked 6' })
+  await expect(omitted.locator('.enrollment-meta').first()).toContainText('Needs attention')
+  await expect(omitted.locator('.enrollment-meta').first()).not.toContainText('Ready')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  expect(errors).toEqual([])
+})
+
 // AEON-347/348: per-account pin blocks and per-harness holds share one reason
 // vocabulary and fix; one ready harness keeps the computer connected.
 for (const [width, theme] of [[1600, 'light'], [390, 'dark']] as const) test(`every shared reason shows its fix beside a ready harness at ${width} ${theme}`, async ({ page }) => {

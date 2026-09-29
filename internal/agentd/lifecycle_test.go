@@ -266,7 +266,7 @@ func TestReadyAccountDoesNotHideBlockedSibling(t *testing.T) {
 	s.mu.Unlock()
 	status := s.Lifecycle("")
 	detail := status.HarnessDetails[Codex]
-	if !status.Ready || status.HarnessFailed || status.HarnessStatuses[Codex] != "ready" || detail.State != "ready" || detail.Reason != "" || detail.Fix.Command != "" || len(detail.Attention) != 1 || detail.Attention[0].AccountID != "blocked" || detail.Attention[0].Reason != agentsetup.PinDrifted {
+	if !status.Ready || status.HarnessFailed || status.HarnessStatuses[Codex] != "ready" || detail.State != "ready" || detail.Reason != "" || detail.Fix.Command != "" || len(detail.Attention) != 1 || detail.Attention[0].AccountID != "blocked" || detail.Attention[0].Reason != agentsetup.PinDrifted || detail.AttentionCount != 1 || detail.AttentionTruncated {
 		t.Fatalf("ready sibling erased the block: %+v ready=%v", detail, status.Ready)
 	}
 	if len(status.BlockedAccounts) != 1 || status.BlockedAccounts[0].AccountID != "blocked" || status.BlockedAccounts[0].Reason != agentsetup.PinDrifted {
@@ -276,5 +276,30 @@ func TestReadyAccountDoesNotHideBlockedSibling(t *testing.T) {
 		if item.AccountID == "account" {
 			t.Fatal("healthy account listed as needing attention")
 		}
+	}
+}
+
+func TestReadyAccountKeepsSixBlockedSiblings(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	s.mu.Lock()
+	s.probedAccounts["account"] = true
+	for i := 1; i <= 6; i++ {
+		id := "b" + string(rune('0'+i))
+		s.accounts = append(s.accounts, EnrolledAccount{ID: id, Key: id, Harness: Codex, DependencyBlocked: true, PinReason: agentsetup.PinDrifted})
+	}
+	s.mu.Unlock()
+	detail := s.Lifecycle("").HarnessDetails[Codex]
+	if detail.State != "ready" || detail.AttentionCount != 6 || detail.AttentionTruncated || len(detail.Attention) != 6 {
+		t.Fatalf("six blocked siblings: %+v", detail)
+	}
+	seen := map[string]bool{}
+	for _, item := range detail.Attention {
+		if item.AccountID == "account" || item.Reason != agentsetup.PinDrifted {
+			t.Fatalf("blocked set %+v", detail.Attention)
+		}
+		seen[item.AccountID] = true
+	}
+	if len(seen) != 6 {
+		t.Fatalf("blocked set %+v", detail.Attention)
 	}
 }

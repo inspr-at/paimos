@@ -369,7 +369,10 @@ func (m *Module) harnessReports(ctx context.Context, tx pgx.Tx, computer string,
 		// non-ready report is ignored. A ready report keeps only enrolled
 		// accounts that are a proper subset and still need a fix.
 		if detail.State == "ready" {
-			detail.Attention = agentsetup.PartialAttention(harness, enrolledAccounts[harness], detail.State, report.Attention)
+			block := agentsetup.ResolveAttention(harness, detail.State, enrolledAccounts[harness], report.Attention, report.AttentionCount, report.AttentionTruncated)
+			detail.Attention = block.Accounts
+			detail.AttentionCount = block.Count
+			detail.AttentionTruncated = block.Truncated
 		}
 		details[harness] = detail
 	}

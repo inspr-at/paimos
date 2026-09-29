@@ -933,4 +933,63 @@ test('a ready harness keeps a blocked sibling account visible', async () => {
   assert.equal(describeHarnessStatus(future, 'codex'), 'Needs attention · future_reason')
   assert.equal(describeHarnessFix(future, 'codex'), '')
   assert.equal(describeHarnessHint(future, 'codex'), '1 of 2 accounts needs attention')
+  assert.equal(parsed.harness_details?.codex?.attention_count, 1)
+  assert.equal(parsed.harness_details?.codex?.attention_truncated, undefined)
+})
+
+test('six blocked accounts of seven keep the full count and are not labeled ready', async () => {
+  const ids = Array.from({ length: 7 }, (_, index) => `88888888-8888-4888-8888-88888888888${index}`)
+  const healthy = ids[0]!
+  const blocked = ids.slice(1)
+  const enrollments = ids.map((account_id, index) => enrollment({
+    account_id, account_key: `codex-${index}`, harness: 'codex', label: index ? `Blocked ${index}` : 'Healthy',
+  }))
+  const full = view({
+    state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', attention_count: 6, attention_accounts: blocked.map(account_id => ({ account_id, reason: 'pin_drifted' })) } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [full] })
+  const parsed = (await listPairingComputers())[0]!
+  assert.equal(parsed.harness_details?.codex?.attention_count, 6)
+  assert.equal(parsed.harness_details?.codex?.attention_truncated, undefined)
+  assert.equal(parsed.harness_details?.codex?.attention_accounts?.length, 6)
+  assert.equal(describeHarnessHint(parsed, 'codex'), '6 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(parsed, { account_id: healthy, harness: 'codex' }), 'Ready')
+  for (const account_id of blocked) {
+    const label = describeEnrollmentStatus(parsed, { account_id, harness: 'codex' })
+    assert.equal(label.includes('Ready'), false, label)
+    assert.equal(label, 'Pin changed')
+  }
+  const omitted = blocked[5]!
+  const truncated = view({
+    state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: {
+      state: 'ready', attention_count: 6, attention_truncated: true,
+      attention_accounts: blocked.slice(0, 5).map(account_id => ({ account_id, reason: 'pin_drifted' })),
+    } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [truncated] })
+  const capped = (await listPairingComputers())[0]!
+  assert.equal(capped.harness_details?.codex?.attention_count, 6)
+  assert.equal(capped.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeHarnessHint(capped, 'codex'), '6 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(capped, { account_id: omitted, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(capped, { account_id: healthy, harness: 'codex' }).includes('Ready'), false)
+  for (const account_id of blocked.slice(0, 5)) {
+    assert.equal(describeEnrollmentStatus(capped, { account_id, harness: 'codex' }), 'Pin changed')
+  }
+  const legacy = view({
+    state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', attention_accounts: blocked.slice(0, 5).map(account_id => ({ account_id, reason: 'login_required' })) } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [legacy] })
+  const old = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessHint(old, 'codex'), 'At least 5 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(old, { account_id: omitted, harness: 'codex' }).includes('Ready'), false)
 })

@@ -5,6 +5,7 @@ package agentsetup
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -89,29 +90,76 @@ func TestPartialAttentionKeepsOnlyAProperSubset(t *testing.T) {
 		{AccountID: "c", Reason: PinMissing},
 	})
 	want := []AccountAttention{{AccountID: "a", Reason: "login_required"}, {AccountID: "c", Reason: PinDrifted}}
-	if len(got) != len(want) {
+	if got.Count != len(want) || got.Truncated || len(got.Accounts) != len(want) {
 		t.Fatalf("attention %+v", got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if got.Accounts[i] != want[i] {
 			t.Fatalf("attention[%d] %+v", i, got)
 		}
 	}
-	if PartialAttention("codex", []string{"a", "b"}, "ready", []AccountAttention{{AccountID: "a", Reason: PinDrifted}, {AccountID: "b", Reason: PinDrifted}}) != nil {
+	if len(PartialAttention("codex", []string{"a", "b"}, "ready", []AccountAttention{{AccountID: "a", Reason: PinDrifted}, {AccountID: "b", Reason: PinDrifted}}).Accounts) != 0 {
 		t.Fatal("attention covering every enrollment was kept")
 	}
-	if PartialAttention("codex", []string{"a"}, "ready", []AccountAttention{{AccountID: "a", Reason: PinDrifted}}) != nil {
+	if len(PartialAttention("codex", []string{"a"}, "ready", []AccountAttention{{AccountID: "a", Reason: PinDrifted}}).Accounts) != 0 {
 		t.Fatal("a single enrollment was treated as a partial block")
 	}
-	if PartialAttention("codex", enrolled, "blocked", []AccountAttention{{AccountID: "a", Reason: PinDrifted}}) != nil {
+	if len(PartialAttention("codex", enrolled, "blocked", []AccountAttention{{AccountID: "a", Reason: PinDrifted}}).Accounts) != 0 {
 		t.Fatal("attention stuck to a blocked harness")
 	}
 	raw := []byte(`{"state":"ready","attention_accounts":[{"account_id":"a","reason":"pin_drifted"},"nope",{"account_id":"b"}],"fix":"legacy string"}`)
 	var detail HarnessDetail
-	if err := json.Unmarshal(raw, &detail); err != nil || detail.State != "ready" || detail.Reason != "" || detail.Fix.Command != "" || len(detail.Attention) != 2 || detail.Attention[0].Reason != PinDrifted || detail.Attention[1].Reason != "" {
+	if err := json.Unmarshal(raw, &detail); err != nil || detail.State != "ready" || detail.Reason != "" || detail.Fix.Command != "" || len(detail.Attention) != 2 || detail.Attention[0].Reason != PinDrifted || detail.Attention[1].Reason != "" || detail.AttentionCount != 0 || detail.AttentionTruncated {
 		t.Fatalf("attention decode dropped the ready detail: %+v %v", detail, err)
 	}
 	if err := json.Unmarshal([]byte(`{"state":"ready","attention_accounts":"nope"}`), &detail); err != nil || detail.State != "ready" || detail.Attention != nil {
 		t.Fatalf("malformed attention dropped the detail: %+v %v", detail, err)
+	}
+	if err := json.Unmarshal([]byte(`{"state":"ready","attention_count":"six","attention_truncated":"yes"}`), &detail); err != nil || detail.State != "ready" || detail.AttentionCount != 0 || detail.AttentionTruncated {
+		t.Fatalf("malformed attention total dropped the detail: %+v %v", detail, err)
+	}
+}
+
+func TestPartialAttentionKeepsSixOfSevenAndADeclaredTotal(t *testing.T) {
+	enrolled := []string{"healthy", "b1", "b2", "b3", "b4", "b5", "b6"}
+	var blocked []AccountAttention
+	for _, id := range enrolled[1:] {
+		blocked = append(blocked, AccountAttention{AccountID: id, Reason: PinDrifted})
+	}
+	got := PartialAttention("codex", enrolled, "ready", blocked)
+	if got.Count != 6 || got.Truncated || len(got.Accounts) != 6 {
+		t.Fatalf("six of seven: %+v", got)
+	}
+	for _, item := range got.Accounts {
+		if item.AccountID == "healthy" || item.Reason != PinDrifted {
+			t.Fatalf("blocked set %+v", got.Accounts)
+		}
+	}
+	wide := []string{"healthy"}
+	var many []AccountAttention
+	for i := 0; i < AttentionAccountLimit+1; i++ {
+		id := fmt.Sprintf("b%02d", i)
+		wide = append(wide, id)
+		many = append(many, AccountAttention{AccountID: id, Reason: "login_required"})
+	}
+	capped := PartialAttention("codex", wide, "ready", many)
+	if capped.Count != AttentionAccountLimit+1 || !capped.Truncated || len(capped.Accounts) != AttentionAccountLimit {
+		t.Fatalf("truncated block: %+v", capped)
+	}
+	short := PartialAttention("codex", wide, "ready", capped.Accounts)
+	restored := short.WithDeclaredTotal(capped.Count, true, len(wide))
+	if restored.Count != capped.Count || !restored.Truncated || len(restored.Accounts) != AttentionAccountLimit {
+		t.Fatalf("declared total lost: %+v", restored)
+	}
+	if restored.WithDeclaredTotal(len(wide), true, len(wide)).Count != restored.Count {
+		t.Fatal("declared total covered every enrollment")
+	}
+	raw, err := json.Marshal(HarnessDetail{State: "ready", Attention: restored.Accounts, AttentionCount: restored.Count, AttentionTruncated: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var detail HarnessDetail
+	if err := json.Unmarshal(raw, &detail); err != nil || detail.AttentionCount != restored.Count || !detail.AttentionTruncated || len(detail.Attention) != AttentionAccountLimit {
+		t.Fatalf("count did not round-trip: %+v %s %v", detail, raw, err)
 	}
 }

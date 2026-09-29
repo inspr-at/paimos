@@ -1343,7 +1343,7 @@ func TestPartialAttentionStaysOnReadyHarness(t *testing.T) {
 	var report agentpairing.View
 	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
 	got := report.HarnessDetails["claude"]
-	if report.SetupState != "connected" || report.HarnessStatuses["claude"] != "ready" || got.State != "ready" || got.Reason != "" || got.Fix.Command != "" || len(got.Attention) != 1 || got.Attention[0].AccountID != blocked || got.Attention[0].Reason != "pin_drifted" {
+	if report.SetupState != "connected" || report.HarnessStatuses["claude"] != "ready" || got.State != "ready" || got.Reason != "" || got.Fix.Command != "" || len(got.Attention) != 1 || got.Attention[0].AccountID != blocked || got.Attention[0].Reason != "pin_drifted" || got.AttentionCount != 1 || got.AttentionTruncated {
 		t.Fatalf("partial attention lost or leaked a command: %+v %s", got, report.SetupState)
 	}
 	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "ready", Attention: []agentsetup.AccountAttention{
@@ -1364,4 +1364,91 @@ func TestPartialAttentionStaysOnReadyHarness(t *testing.T) {
 	if report.HarnessDetails["claude"].Reason != "pin_drifted" || len(report.HarnessDetails["claude"].Attention) != 0 || report.HarnessDetails["claude"].Fix.Command != "aeon-agentd repin --harness claude" {
 		t.Fatalf("non-ready attention was stored: %+v", report.HarnessDetails["claude"])
 	}
+}
+
+func TestPartialAttentionCountsSixOfSeven(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	latest := v
+	for i := 2; i <= 7; i++ {
+		latest = f.addClaude(p, *v.ComputerID, fmt.Sprintf("claude-%d", i))
+	}
+	var ids []string
+	for _, enrollment := range latest.Enrollments {
+		if enrollment.Harness == "claude" && enrollment.State != "revoked" {
+			ids = append(ids, enrollment.AccountID)
+		}
+	}
+	if len(ids) != 7 {
+		t.Fatalf("expected seven claude enrollments, got %+v", latest.Enrollments)
+	}
+	slices.Sort(ids)
+	healthy := ids[0]
+	blocked := ids[1:]
+	attention := make([]agentsetup.AccountAttention, 0, len(blocked))
+	for _, id := range blocked {
+		attention = append(attention, agentsetup.AccountAttention{AccountID: id, Reason: "pin_drifted"})
+	}
+	progress := agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "ready"}, HarnessDetails: map[string]agentsetup.HarnessDetail{
+		"claude": {State: "ready", Attention: attention, AttentionCount: len(blocked)},
+	}}
+	proof := map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": progress}
+	w := f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200)
+	if !strings.Contains(w.Body.String(), `"attention_count":6`) || strings.Contains(w.Body.String(), `"attention_truncated"`) {
+		t.Fatalf("full count missing: %s", w.Body.String())
+	}
+	var report agentpairing.View
+	decodeResult(t, w, &report)
+	got := report.HarnessDetails["claude"]
+	if got.State != "ready" || got.AttentionCount != 6 || got.AttentionTruncated || len(got.Attention) != 6 {
+		t.Fatalf("six of seven lost: %+v", got)
+	}
+	seen := map[string]bool{}
+	for _, item := range got.Attention {
+		if item.AccountID == healthy || item.Reason != "pin_drifted" {
+			t.Fatalf("blocked set %+v", got.Attention)
+		}
+		seen[item.AccountID] = true
+	}
+	if len(seen) != 6 {
+		t.Fatalf("blocked set %+v", got.Attention)
+	}
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{
+		State: "ready", Attention: attention[:5], AttentionCount: 6, AttentionTruncated: true,
+	}
+	proof["progress"] = progress
+	w = f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200)
+	if !strings.Contains(w.Body.String(), `"attention_count":6`) || !strings.Contains(w.Body.String(), `"attention_truncated":true`) {
+		t.Fatalf("truncated count missing: %s", w.Body.String())
+	}
+	report = agentpairing.View{}
+	decodeResult(t, w, &report)
+	got = report.HarnessDetails["claude"]
+	if got.AttentionCount != 6 || !got.AttentionTruncated || len(got.Attention) != 5 {
+		t.Fatalf("truncated attention collapsed: %+v", got)
+	}
+	for _, item := range got.Attention {
+		if item.AccountID == blocked[5] {
+			t.Fatal("omitted account was stored in the capped list")
+		}
+	}
+}
+
+func (f *fixture) addClaude(p *proposal, computerID, key string) agentpairing.View {
+	f.t.Helper()
+	q := &proposal{id: uuid(f.t, f.db), device: nonce(), runtime: p.runtime, lifecycle: p.lifecycle}
+	q.request = map[string]any{}
+	for k, x := range p.request {
+		q.request[k] = x
+	}
+	q.request["request_id"] = q.id
+	q.request["device_hash"] = hash(q.device)
+	q.request["existing_computer_id"] = computerID
+	q.request["existing_lifecycle_secret"] = p.lifecycle
+	q.request["accounts"] = []map[string]string{{"account_key": key, "harness": "claude", "label": key, "model_profile_id": f.profiles["claude"]}}
+	f.submit(q)
+	f.approve(q, "connect_only")
+	return f.redeem(q)
 }

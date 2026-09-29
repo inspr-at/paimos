@@ -54,7 +54,10 @@ func HarnessFailureReason(err error) string {
 // A ready harness may also list attention_accounts: a proper subset of its
 // enrolled accounts that still need a fix while a sibling can work. Reasons
 // use this same vocabulary. Commands are derived again from the reason and
-// are never stored on the attention entry.
+// are never stored on the attention entry. attention_count is the full size
+// of that subset. attention_truncated is true when the list stops at
+// AttentionAccountLimit; an omitted account is not ready.
+
 const (
 	PinMissing    = "pin_missing"
 	PinPartial    = "pin_partial"
@@ -78,6 +81,10 @@ type HarnessFix struct {
 	Command string `json:"command"`
 }
 
+// AttentionAccountLimit bounds the stored attention_accounts list. OpenAPI
+// maxItems matches it. The full total still travels in attention_count.
+const AttentionAccountLimit = 32
+
 // AccountAttention names one enrolled account that still needs a fix while
 // its harness stays ready because another account of that harness can work.
 type AccountAttention struct {
@@ -85,14 +92,25 @@ type AccountAttention struct {
 	Reason    string `json:"reason"`
 }
 
+// AttentionBlock is the validated partial block for one ready harness.
+// Count is the full number of blocked enrollments. Truncated means Accounts
+// is a prefix of that set.
+type AttentionBlock struct {
+	Accounts  []AccountAttention
+	Count     int
+	Truncated bool
+}
+
 // HarnessDetail uses the same reason tokens and structured fix as BlockedAccount.
 // Unknown bounded tokens survive version skew; local diagnostics never leave the host.
 // Attention is set only for a ready harness and only for a proper subset.
 type HarnessDetail struct {
-	State     string             `json:"state"`
-	Reason    string             `json:"reason,omitempty"`
-	Fix       HarnessFix         `json:"fix,omitzero"`
-	Attention []AccountAttention `json:"attention_accounts,omitempty"`
+	State              string             `json:"state"`
+	Reason             string             `json:"reason,omitempty"`
+	Fix                HarnessFix         `json:"fix,omitzero"`
+	Attention          []AccountAttention `json:"attention_accounts,omitempty"`
+	AttentionCount     int                `json:"attention_count,omitempty"`
+	AttentionTruncated bool               `json:"attention_truncated,omitempty"`
 }
 
 // Ignore advisory extensions and legacy string fixes without weakening the
@@ -104,6 +122,8 @@ func (d *HarnessDetail) UnmarshalJSON(raw []byte) error {
 		Reason    string          `json:"reason"`
 		Fix       json.RawMessage `json:"fix"`
 		Attention json.RawMessage `json:"attention_accounts"`
+		Count     json.RawMessage `json:"attention_count"`
+		Truncated json.RawMessage `json:"attention_truncated"`
 	}
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		return err
@@ -113,7 +133,30 @@ func (d *HarnessDetail) UnmarshalJSON(raw []byte) error {
 		_ = json.Unmarshal(wire.Fix, &d.Fix)
 	}
 	d.Attention = decodeAttention(wire.Attention)
+	if n, ok := decodeAttentionCount(wire.Count); ok {
+		d.AttentionCount = n
+	}
+	d.AttentionTruncated = decodeAttentionTruncated(wire.Truncated)
 	return nil
+}
+
+func decodeAttentionCount(raw json.RawMessage) (int, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0, false
+	}
+	var n int
+	if json.Unmarshal(raw, &n) != nil || n < 1 || n > 10000 {
+		return 0, false
+	}
+	return n, true
+}
+
+func decodeAttentionTruncated(raw json.RawMessage) bool {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false
+	}
+	var v bool
+	return json.Unmarshal(raw, &v) == nil && v
 }
 
 func decodeAttention(raw json.RawMessage) []AccountAttention {
@@ -217,10 +260,12 @@ func HarnessReport(harness, state, reason string) (HarnessDetail, bool) {
 // PartialAttention keeps a ready harness's blocked accounts only when they
 // are a proper subset of the enrolled accounts. Empty reasons, unknown
 // account ids, malformed codes and a list that covers every enrollment are
-// dropped. The result is sorted by account id and capped at five.
-func PartialAttention(harness string, enrolledIDs []string, state string, items []AccountAttention) []AccountAttention {
+// dropped. The result is sorted by account id. Accounts past
+// AttentionAccountLimit stay in Count and Truncated is set; they are not
+// reported as ready.
+func PartialAttention(harness string, enrolledIDs []string, state string, items []AccountAttention) AttentionBlock {
 	if state != "ready" || len(items) == 0 {
-		return nil
+		return AttentionBlock{}
 	}
 	enrolled := map[string]bool{}
 	for _, id := range enrolledIDs {
@@ -229,7 +274,7 @@ func PartialAttention(harness string, enrolledIDs []string, state string, items 
 		}
 	}
 	if len(enrolled) < 2 {
-		return nil
+		return AttentionBlock{}
 	}
 	seen := map[string]bool{}
 	kept := make([]AccountAttention, 0, len(items))
@@ -244,11 +289,37 @@ func PartialAttention(harness string, enrolledIDs []string, state string, items 
 		kept = append(kept, AccountAttention{AccountID: item.AccountID, Reason: item.Reason})
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].AccountID < kept[j].AccountID })
-	if len(kept) > 5 {
-		kept = kept[:5]
-	}
 	if len(kept) == 0 || len(kept) >= len(enrolled) {
-		return nil
+		return AttentionBlock{}
 	}
-	return kept
+	block := AttentionBlock{Accounts: kept, Count: len(kept)}
+	if len(kept) > AttentionAccountLimit {
+		block.Accounts = append([]AccountAttention(nil), kept[:AttentionAccountLimit]...)
+		block.Truncated = true
+	}
+	return block
+}
+
+// WithDeclaredTotal keeps a caller's full count when that caller already
+// truncated a proper subset. The count cannot shrink the validated list and
+// cannot meet or exceed the enrollment total.
+func (b AttentionBlock) WithDeclaredTotal(count int, truncated bool, enrolled int) AttentionBlock {
+	if len(b.Accounts) == 0 || !truncated || count <= b.Count || count >= enrolled {
+		return b
+	}
+	b.Count = count
+	b.Truncated = true
+	return b
+}
+
+// ResolveAttention validates a reported list, then restores a declared total
+// that a truncated sender already computed.
+func ResolveAttention(harness, state string, enrolledIDs []string, items []AccountAttention, declaredCount int, declaredTruncated bool) AttentionBlock {
+	enrolled := map[string]bool{}
+	for _, id := range enrolledIDs {
+		if id != "" {
+			enrolled[id] = true
+		}
+	}
+	return PartialAttention(harness, enrolledIDs, state, items).WithDeclaredTotal(declaredCount, declaredTruncated, len(enrolled))
 }

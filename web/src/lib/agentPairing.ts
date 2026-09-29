@@ -108,7 +108,16 @@ export interface PairingEnrollment {
 export type HarnessReason = string
 export interface HarnessFix { kind: 'repin' | 'add_harness' | 'login' | 'restart'; command: string }
 export interface AccountAttention { account_id: string; reason: string }
-export interface HarnessDetail { state: HarnessStatus; reason?: HarnessReason; fix?: HarnessFix; attention_accounts?: AccountAttention[] }
+export interface HarnessDetail {
+  state: HarnessStatus
+  reason?: HarnessReason
+  fix?: HarnessFix
+  attention_accounts?: AccountAttention[]
+  /** Full count of enrolled accounts that need a fix. May exceed attention_accounts when that list is truncated. */
+  attention_count?: number
+  /** True when attention_accounts omits accounts included in attention_count. */
+  attention_truncated?: boolean
+}
 
 /** Public pairing projection. Secret-bearing keys are not part of this type. */
 export interface PairingView {
@@ -958,8 +967,17 @@ export function harnessRecovery(harness: string, reason: string): HarnessFix | u
   return harnessFix(harness, reason)
 }
 
+interface AttentionReport { accounts: AccountAttention[]; count: number; truncated: boolean }
+
 function attentionItems(detail: HarnessDetail | undefined): AccountAttention[] {
   return detail?.state === 'ready' ? detail.attention_accounts ?? [] : []
+}
+
+function attentionReport(detail: HarnessDetail | undefined): AttentionReport | undefined {
+  const accounts = attentionItems(detail)
+  if (!accounts.length) return
+  const count = typeof detail?.attention_count === 'number' && detail.attention_count >= accounts.length ? detail.attention_count : accounts.length
+  return { accounts, count, truncated: detail?.attention_truncated === true || count > accounts.length }
 }
 
 function attentionFix(harness: string, items: AccountAttention[]): string {
@@ -995,11 +1013,12 @@ function enrolledHarnessCount(view: HarnessView, harness: string): number {
 export function describeHarnessHint(view: HarnessView, harness: string): string {
   const detail = harnessDetail(view, harness)
   if (view.computer_state !== 'connected' || !detail) return ''
-  const attention = attentionItems(detail)
+  const attention = attentionReport(detail)
   const enrolled = enrolledHarnessCount(view, harness)
-  if (attention.length > 0 && enrolled >= 2 && attention.length < enrolled) {
-    const verb = attention.length === 1 ? 'needs' : 'need'
-    return `${attention.length} of ${enrolled} accounts ${verb} attention`
+  if (attention && enrolled >= 2 && attention.count < enrolled) {
+    const verb = attention.count === 1 ? 'needs' : 'need'
+    const prefix = attention.truncated && attention.count === attention.accounts.length ? 'At least ' : ''
+    return `${prefix}${attention.count} of ${enrolled} accounts ${verb} attention`
   }
   if (!detail.reason || detail.state !== 'blocked') return ''
   return HARNESS_HINTS[detail.reason] ?? ''
@@ -1035,15 +1054,16 @@ export function describeHarnessStatus(view: HarnessView, harness: string): strin
   return freshLabel(view, label)
 }
 
-/** Per-enrollment label. A partial block names the account that needs a fix and leaves its sibling Ready. */
+/** Per-enrollment label. A complete attention list names the blocked accounts and leaves the others Ready. An account missing from a truncated list is not Ready. */
 export function describeEnrollmentStatus(view: HarnessView, enrollment: { account_id: string; harness: string }): string {
   if (view.computer_state !== 'connected') return ''
   const detail = harnessDetail(view, enrollment.harness)
-  const attention = attentionItems(detail)
-  const hit = attention.find(item => item.account_id === enrollment.account_id)
+  const attention = attentionReport(detail)
+  if (!attention) return describeHarnessStatus(view, enrollment.harness)
+  const hit = attention.accounts.find(item => item.account_id === enrollment.account_id)
   if (hit) return freshLabel(view, reasonLabel('blocked', hit.reason))
-  if (attention.length) return freshLabel(view, 'Ready')
-  return describeHarnessStatus(view, enrollment.harness)
+  if (!attention.truncated && attention.count === attention.accounts.length) return freshLabel(view, 'Ready')
+  return freshLabel(view, 'Needs attention')
 }
 
 export function describeComputerStatus(view: Pick<PairingView, 'computer_state' | 'local_cleanup' | 'local_processes' | 'enrollments' | 'setup_state' | 'connectivity' | 'accounting_state'>, hints: { httpStatus?: number; heartbeatMissing?: boolean } = {}): ComputerStatusCopy {
@@ -1489,7 +1509,12 @@ function parseInstallTarget(value: unknown): InstallTarget {
   }
 }
 
-function parseAttention(raw: unknown, enrolled: Set<string>): AccountAttention[] | undefined {
+function attentionTotal(value: unknown, enrolled: number): number | undefined {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value >= enrolled) return
+  return value
+}
+
+function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unknown, declaredTruncated: unknown): { accounts: AccountAttention[]; count: number; truncated: boolean } | undefined {
   if (!Array.isArray(raw) || enrolled.size < 2) return
   const seen = new Set<string>()
   const items: AccountAttention[] = []
@@ -1503,9 +1528,17 @@ function parseAttention(raw: unknown, enrolled: Set<string>): AccountAttention[]
     items.push({ account_id: id, reason })
   }
   items.sort((a, b) => a.account_id < b.account_id ? -1 : a.account_id > b.account_id ? 1 : 0)
-  const capped = items.slice(0, 5)
-  if (capped.length === 0 || capped.length >= enrolled.size) return
-  return capped
+  if (items.length === 0 || items.length >= enrolled.size) return
+  const declared = attentionTotal(declaredCount, enrolled.size)
+  let count = items.length
+  // Five or more names without a total may be the old cap: absence is not readiness. A declared total names the real set.
+  let truncated = declaredTruncated === true || (declared === undefined && items.length >= 5)
+  if (declared !== undefined && declared > items.length) {
+    count = declared
+    truncated = true
+  }
+  if (count >= enrolled.size) return
+  return { accounts: items, count, truncated }
 }
 
 function parseView(data: unknown): PairingView {
@@ -1559,13 +1592,13 @@ function parseView(data: unknown): PairingView {
       const reason = harnessCode(item.reason)
       if (item.reason && !reason) continue
       const enrolled = new Set(view.enrollments.filter(entry => entry.harness === harness && entry.state !== 'revoked').map(entry => entry.account_id))
-      const attention = state === 'ready' ? parseAttention(item.attention_accounts, enrolled) : undefined
+      const attention = state === 'ready' ? parseAttention(item.attention_accounts, enrolled, item.attention_count, item.attention_truncated) : undefined
       // A ready or draining detail keeps no top-level reason. Valid attention
       // still survives a mistaken reason so the partial block stays visible.
       if (['ready', 'draining'].includes(state) && reason && !attention) continue
       const storedReason = ['ready', 'draining'].includes(state) ? undefined : reason
       const fix = ['blocked', 'login_required', 'checking'].includes(state) ? harnessFix(harness, storedReason) : undefined
-      view.harness_details[harness] = { state, ...(storedReason ? { reason: storedReason } : {}), ...(fix ? { fix } : {}), ...(attention ? { attention_accounts: attention } : {}) }
+      view.harness_details[harness] = { state, ...(storedReason ? { reason: storedReason } : {}), ...(fix ? { fix } : {}), ...(attention ? { attention_accounts: attention.accounts, attention_count: attention.count, ...(attention.truncated ? { attention_truncated: true } : {}) } : {}) }
     }
   }
   if (typeof record.setup_error === 'string' && record.setup_error) view.setup_error = record.setup_error.slice(0, 500)

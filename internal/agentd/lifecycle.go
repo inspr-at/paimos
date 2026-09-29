@@ -293,9 +293,11 @@ func assignHarnessReports(v *LifecycleStatus, perHarness map[string][]harnessAcc
 				}
 				pending = append(pending, agentsetup.AccountAttention{AccountID: account.id, Reason: reason})
 			}
-			if attention := agentsetup.PartialAttention(harness, ids, "ready", pending); len(attention) > 0 {
+			if attention := agentsetup.PartialAttention(harness, ids, "ready", pending); len(attention.Accounts) > 0 {
 				if detail, ok := agentsetup.HarnessReport(harness, "ready", ""); ok {
-					detail.Attention = attention
+					detail.Attention = attention.Accounts
+					detail.AttentionCount = attention.Count
+					detail.AttentionTruncated = attention.Truncated
 					v.HarnessStatuses[harness] = "ready"
 					v.HarnessDetails[harness] = detail
 					continue
