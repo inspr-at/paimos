@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
@@ -266,14 +267,19 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 // PiAdapter speaks Pi's JSONL RPC and verifies the effective state before
 // sending the first prompt or any steer.
 type PiAdapter struct {
-	Path  string
-	Homes map[string]string
+	Path      string
+	Homes     map[string]string
+	Providers map[string]string
 }
 
 func NewPiAdapter(path string, homes map[string]string) *PiAdapter {
 	return &PiAdapter{Path: path, Homes: homes}
 }
 func (*PiAdapter) Name() string { return Pi }
+
+// SetExpectedProviders binds guided enrollments to their reviewed local profile
+// and configured provider. Existing manually configured adapters remain valid.
+func (a *PiAdapter) SetExpectedProviders(providers map[string]string) { a.Providers = providers }
 
 type piProcess struct {
 	*wireProcess
@@ -390,6 +396,9 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 	if !ok || provider == "" || model == "" {
 		return nil, errors.New("Pi model requires provider/model")
 	}
+	if a.Providers != nil && provider != a.Providers[r.AccountKey] {
+		return nil, errors.New("Pi model provider differs from the enrolled account")
+	}
 	queue, err := openPiQueue(r)
 	if err != nil {
 		return nil, err
@@ -397,7 +406,11 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 	if len(queue.Snapshot()) != 0 {
 		return nil, errors.New("Pi held queue requires explicit operator reconciliation")
 	}
-	p, err := launchWire(a.Path, []string{"--mode", "rpc", "--no-session", "--provider", provider, "--model", model, "--thinking", r.Profile.Effort}, r.Workspace, withEnv("PI_CODING_AGENT_DIR", home), "pi", observe)
+	childEnv := withEnv("PI_CODING_AGENT_DIR", home)
+	if a.Providers != nil {
+		childEnv = piprobe.Environment(home)
+	}
+	p, err := launchWire(a.Path, []string{"--mode", "rpc", "--no-session", "--provider", provider, "--model", model, "--thinking", r.Profile.Effort}, r.Workspace, childEnv, "pi", observe)
 	if err != nil {
 		return nil, err
 	}

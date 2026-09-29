@@ -59,6 +59,9 @@ func TestFakeVendorProcess(t *testing.T) {
 			if frame.Type == "get_state" {
 				data = map[string]any{"model": map[string]string{"provider": "anthropic", "id": "test-model"}, "thinkingLevel": "high"}
 			}
+			if frame.Type == "get_available_models" {
+				data = map[string]any{"models": []map[string]string{{"provider": "anthropic", "id": "test-model"}}}
+			}
 			if frame.Type == "clear_queue" {
 				data = map[string]any{"steering": []string{"held steer"}, "followUp": []string{"held follow"}}
 			}
@@ -300,8 +303,14 @@ func TestPiRPCStateAndSteer(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := NewPiAdapter(fakeVendorPath(t, "pi"), map[string]string{"account": home})
+	a.SetExpectedProviders(map[string]string{"account": "anthropic"})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	wrong := r
+	wrong.Profile.Model = "openai/test-model"
+	if process, err := a.Start(ctx, wrong, func(AdapterEvent) { t.Error("wrong provider prompted") }); err == nil || process != nil {
+		t.Fatal("guided pi account accepted another provider")
+	}
 	p, err := a.Start(ctx, r, func(AdapterEvent) {})
 	if err != nil {
 		t.Fatal(err)

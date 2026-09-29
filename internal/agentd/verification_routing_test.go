@@ -68,7 +68,7 @@ func (a *verificationBoundaryCounter) Start(context.Context, StartRequest, func(
 }
 
 func TestUnsupportedVerificationPollNeverProbesOrLaunches(t *testing.T) {
-	for _, vendor := range []Adapter{NewCodexAdapter("/unused", nil), NewCursorAdapter("/unused", nil), NewGrokAdapter()} {
+	for _, vendor := range []Adapter{NewCodexAdapter("/unused", nil), NewCursorAdapter("/unused", nil), NewPiAdapter("/unused", nil), NewGrokAdapter()} {
 		t.Run(vendor.Name(), func(t *testing.T) {
 			s, api, _ := claimFixture(t)
 			verificationClaim(api)

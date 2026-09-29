@@ -229,8 +229,8 @@ func validateOptions(o Options) error {
 	if info, err := os.Stat(p); err != nil || !info.IsDir() {
 		return ErrUnsafePath
 	}
-	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 4 {
-		return errors.New("select one to four signed-in harness accounts and a computer name")
+	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 5 {
+		return errors.New("select one to five signed-in harness accounts and a computer name")
 	}
 	seen := map[string]bool{}
 	for _, c := range o.Candidates {
@@ -438,6 +438,11 @@ func (e *Engine) Step(ctx context.Context) (Progress, error) {
 	}
 	if err = validateView(s, v, true); err != nil {
 		return e.progress(s), err
+	}
+	// The server fills an omitted profile at device creation. Pin its first
+	// digest-bound projection so later polls cannot substitute a different one.
+	for i := range s.Request.Accounts {
+		s.Request.Accounts[i].ProfileID = v.Requested[i].ProfileID
 	}
 	// A pending/denied Add harness request has no new computer projection.
 	// Preserve the healthy shared computer while this separate request waits.
@@ -711,6 +716,15 @@ func (e *Engine) DispatchPermitted() (bool, error) {
 }
 
 func sameChoices(a, b []Candidate) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	b = append([]Candidate(nil), b...)
+	for i := range b {
+		if b[i].ProfileID == "" && uuidPattern.MatchString(a[i].ProfileID) {
+			b[i].ProfileID = a[i].ProfileID
+		}
+	}
 	left, _ := json.Marshal(a)
 	right, _ := json.Marshal(b)
 	return string(left) == string(right)

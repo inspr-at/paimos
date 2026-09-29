@@ -60,6 +60,7 @@ export interface RequestedAccount {
   harness: string
   label: string
   model_profile_id?: string
+  provider?: string
 }
 
 /** Server-derived. A missing entry is not a claim that verification works. */
@@ -321,6 +322,7 @@ export function presentPublicGuide(guide: PairingGuide | null): PublicGuidePrese
     guide?.platform_qualification ? `Platform note from this ${product()}: ${guide.platform_qualification}` : '',
     guide?.default_tenant_slug ? `The published workspace slug is ${guide.default_tenant_slug}.` : '',
     guide?.managed_installation ?? '',
+    guide?.verification_capabilities?.pi ? 'For pi, use /login and /model in pi first; setup checks the configured provider without reading credential files.' : '',
     guide?.verification_helper_version ? `Verification helper published by this ${product()}: ${guide.verification_helper_version}.` : '',
     guide?.setup_command
       ? ''
@@ -1383,6 +1385,11 @@ function accounts(value: unknown): RequestedAccount[] {
       label: bounded(record.label, 'label', 128),
     }
     if (record.model_profile_id != null) account.model_profile_id = uuid(record.model_profile_id, 'model_profile_id')
+    if (record.provider != null) {
+      const provider = bounded(record.provider, 'provider', 64)
+      if (account.harness !== 'pi' || !/^[a-z][a-z0-9_-]{0,63}$/.test(provider)) invalid('provider')
+      account.provider = provider
+    }
     return account
   })
 }

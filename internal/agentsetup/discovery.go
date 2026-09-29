@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/grokprobe"
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 type Command struct {
@@ -114,6 +115,7 @@ type Candidate struct {
 	Harness   string            `json:"harness"`
 	Label     string            `json:"label"`
 	ProfileID string            `json:"model_profile_id,omitempty"`
+	Provider  string            `json:"provider,omitempty"`
 	Path      string            `json:"-"`
 	Home      string            `json:"-"`
 	Version   string            `json:"-"`
@@ -129,6 +131,7 @@ type Discovery struct {
 	Home          string
 	CodexIdentity func(context.Context, string, string) (string, error)
 	GrokProbe     func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
+	PiProvider    func(context.Context, string, string, string) (string, error)
 }
 
 var safeLabel = regexp.MustCompile(`^[^\x00-\x1f\x7f]{1,128}$`)
@@ -149,6 +152,8 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		authArgs = []string{"status", "--format", "json"}
 	case "grok":
 		return d.detectGrok(ctx, accountContext)
+	case "pi":
+		c.Home = filepath.Join(d.Home, ".pi", "agent")
 	default:
 		return c, errors.New("unsupported guided harness")
 	}
@@ -172,7 +177,11 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 	}
 	c.Path = physical
 	c.Managed = strings.HasPrefix(physical, "/nix/store/") || strings.Contains(path, "/.nix-profile/")
-	raw, err := d.Executor.Run(ctx, Command{Path: physical, Args: []string{"--version"}})
+	versionCommand := Command{Path: physical, Args: []string{"--version"}}
+	if harness == "pi" {
+		versionCommand.Env = piprobe.Environment(c.Home)
+	}
+	raw, err := d.Executor.Run(ctx, versionCommand)
 	if err != nil {
 		return c, errors.New("harness version unavailable")
 	}
@@ -181,6 +190,24 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		return c, errors.New("harness version not recognized")
 	}
 	c.Version = string(match[1])
+	if harness == "pi" {
+		probe := d.PiProvider
+		if probe == nil {
+			probe = piprobe.Provider
+		}
+		provider, err := probe(ctx, c.Path, c.Home, accountContext)
+		if errors.Is(err, piprobe.ErrPrivateProfile) {
+			return c, piprobe.ErrPrivateProfile
+		}
+		if err != nil || !piprobe.ValidProvider(provider) || accountContext != "" && provider != accountContext {
+			return c, errors.New("pi provider configuration unavailable; use pi /login and /model normally, then resume setup")
+		}
+		// The public RPC identifies a configured provider, not a person. Keep
+		// the profile path private and do not invent an email or subscription.
+		c.Identity, c.Label, c.Login = provider, "pi / "+provider+" (local profile)", "signed_in"
+		c.Provider = provider
+		return c, nil
+	}
 	raw, err = d.Executor.Run(ctx, Command{Path: physical, Args: authArgs, StatusStderr: harness == "codex"})
 	if err != nil {
 		return c, errors.New("vendor sign-in unavailable; use the vendor's normal login, then resume setup")

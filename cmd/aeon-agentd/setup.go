@@ -95,7 +95,7 @@ func setupCommand(command string, args []string, out io.Writer) error {
 	f.StringVar(&workspace, "workspace", "", "approved physical working folder")
 	f.StringVar(&computer, "computer-name", "", "computer display name")
 	f.Var(&harnesses, "harness", "selected harness; repeat for another harness")
-	f.StringVar(&contextLabel, "account-context", "", "Codex signed-in account email")
+	f.StringVar(&contextLabel, "account-context", "", "Expected account identity (pi: configured provider ID)")
 	f.StringVar(&account, "account-id", "", "remove only this enrolled account")
 	f.StringVar(&nodePath, "node-path", "", "pinned Node executable for Claude")
 	f.StringVar(&sdkPath, "claude-sdk-path", "", "pinned Claude Agent SDK module")

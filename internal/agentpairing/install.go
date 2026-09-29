@@ -99,5 +99,5 @@ printf 'Verified binary: %%s/paimos-agentd\n' "$aeon_pairing_dir"
 }
 
 func setupCommand(origin string) string {
-	return `<verified absolute paimos-agentd path> setup --url ` + shellQuote(origin) + ` --workspace <absolute approved folder> --state-root <absolute private folder outside repos> --harness <codex|claude|cursor|grok> --start-service`
+	return `<verified absolute paimos-agentd path> setup --url ` + shellQuote(origin) + ` --workspace <absolute approved folder> --state-root <absolute private folder outside repos> --harness <codex|claude|cursor|grok|pi> --start-service`
 }

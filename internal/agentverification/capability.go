@@ -22,6 +22,8 @@ func For(harness, platform, arch string) Capability {
 		return Capability{false, "unavailable", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks."}
 	case "cursor":
 		return Capability{false, "unavailable", "Cursor ask mode and an isolated config do not enforce a no-tools policy."}
+	case "pi":
+		return Capability{false, "unavailable", "pi verification has no qualified no-tools policy for extensions and provider configuration."}
 	case "grok":
 		if platform == "darwin" && arch == "arm64" {
 			return Capability{true, "no_tools", ""}

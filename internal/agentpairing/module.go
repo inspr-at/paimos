@@ -224,13 +224,13 @@ func (m *Module) device(w http.ResponseWriter, r *http.Request) {
 		for i := range in.Accounts {
 			a := &in.Accounts[i]
 			if a.ProfileID == "" {
-				err = tx.QueryRow(r.Context(), `SELECT id::text FROM model_profiles WHERE harness=$1 AND enabled ORDER BY created_at DESC,id LIMIT 1`, a.Harness).Scan(&a.ProfileID)
+				err = tx.QueryRow(r.Context(), `SELECT id::text FROM model_profiles WHERE harness=$1 AND enabled AND ($2='' OR (starts_with(model,$2||'/') AND length(model)>length($2)+1)) ORDER BY created_at DESC,id LIMIT 1`, a.Harness, a.Provider).Scan(&a.ProfileID)
 			} else {
 				var id string
-				err = tx.QueryRow(r.Context(), `SELECT id::text FROM model_profiles WHERE id=$1 AND harness=$2 AND enabled`, a.ProfileID, a.Harness).Scan(&id)
+				err = tx.QueryRow(r.Context(), `SELECT id::text FROM model_profiles WHERE id=$1 AND harness=$2 AND enabled AND ($3='' OR (starts_with(model,$3||'/') AND length(model)>length($3)+1))`, a.ProfileID, a.Harness, a.Provider).Scan(&id)
 			}
 			if errors.Is(err, pgx.ErrNoRows) {
-				return fail(400, "invalid_request", "selected harness needs an enabled tenant model profile")
+				return fail(400, "invalid_request", "selected harness and provider need a matching enabled tenant model profile")
 			}
 			if err != nil {
 				return err

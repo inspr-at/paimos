@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 type boundedProbe struct {
@@ -67,11 +69,20 @@ func (a *CodexAdapter) Probe(ctx context.Context, key string) bool {
 	return status == "Logged in using ChatGPT"
 }
 
-func (a *PiAdapter) Probe(_ context.Context, key string) bool {
-	if _, err := localHome(a.Homes, key); err != nil {
+func (a *PiAdapter) Probe(ctx context.Context, key string) bool {
+	home, err := localHome(a.Homes, key)
+	if err != nil {
 		return false
 	}
-	_, err := pinnedExecutable(a.Path)
+	if a.Providers != nil {
+		expected := a.Providers[key]
+		if !piprobe.ValidProvider(expected) {
+			return false
+		}
+		provider, err := piprobe.Provider(ctx, a.Path, home, expected)
+		return err == nil && provider == expected
+	}
+	_, err = pinnedExecutable(a.Path)
 	return err == nil
 }
 

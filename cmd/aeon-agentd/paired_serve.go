@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []agentd.Adapter, error) {
@@ -23,6 +24,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	}
 	codexHomes, emails, claudeHomes, cursorIDs := map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}
 	claudeEmails := map[string]string{}
+	piHomes, piProviders := map[string]string{}, map[string]string{}
 	grokBindings := map[string]agentd.GrokBinding{}
 	paths := map[string]string{}
 	accounts := []agentd.EnrolledAccount{}
@@ -41,6 +43,11 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 			claudeEmails[a.Key] = a.Identity
 		case agentd.Cursor:
 			cursorIDs[a.Key] = a.Identity
+		case agentd.Pi:
+			if !piprobe.ValidProvider(a.Identity) || !filepath.IsAbs(a.Home) {
+				return nil, nil, errors.New("pi private provider binding unavailable")
+			}
+			piHomes[a.Key], piProviders[a.Key] = a.Home, a.Identity
 		case agentd.Grok:
 			if a.Grok.BinaryPath != a.Path || a.Grok.PrincipalSHA256 != a.Identity || a.Grok.AuthPath == "" || a.Grok.ScratchRoot == "" {
 				return nil, nil, errors.New("native Grok private binding unavailable")
@@ -63,6 +70,11 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	}
 	if p := paths[agentd.Cursor]; p != "" {
 		adapters = append(adapters, agentd.NewCursorAdapter(p, cursorIDs))
+	}
+	if p := paths[agentd.Pi]; p != "" {
+		a := agentd.NewPiAdapter(p, piHomes)
+		a.SetExpectedProviders(piProviders)
+		adapters = append(adapters, a)
 	}
 	if len(grokBindings) > 0 {
 		adapters = append(adapters, agentd.NewGrokAdapter(grokBindings))

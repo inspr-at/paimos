@@ -421,7 +421,7 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 	if s.DisconnectAll || s.View.ComputerState != "connected" {
 		return e.progress(s), errors.New("Add harness requires a connected computer")
 	}
-	if len(candidates) == 0 || len(candidates) > 4 {
+	if len(candidates) == 0 || len(candidates) > 5 {
 		return e.progress(s), errors.New("select a signed-in harness account")
 	}
 	selected := map[string]bool{}

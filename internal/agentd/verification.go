@@ -24,6 +24,8 @@ type VerificationAdapter interface{ VerificationSupported() bool }
 
 func (*ClaudeAdapter) VerificationSupported() bool { return verificationSupported(Claude) }
 
+func (*PiAdapter) VerificationSupported() bool { return verificationSupported(Pi) }
+
 func verificationSupported(harness string) bool {
 	return agentverification.For(harness, runtime.GOOS, runtime.GOARCH).Supported
 }
