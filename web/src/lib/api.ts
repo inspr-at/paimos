@@ -179,8 +179,10 @@ export interface ListQuery {
   date_field?: string; date_from?: string; date_to?: string
   q?: string; hide_closed?: boolean; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
 }
-// Work (ticket, task, epic) counts: open = new and backlog, in_progress = in progress and QA,
-// done = done, delivered and accepted; cancelled is separate; total counts every work state.
+// Work (ticket, task, epic) counts. A kind's state category wins when one is set.
+// Otherwise open is every state that is not in progress, done, cancelled or archived
+// (including open, blocked and unknown states); in_progress is in progress, active and QA;
+// done is done, delivered and accepted; cancelled is separate; total counts every work state.
 export interface ProjectSummary {
   id: string; key: string; title: string; state: string
   open: number; in_progress: number; done: number; cancelled?: number; total: number; last_activity: string

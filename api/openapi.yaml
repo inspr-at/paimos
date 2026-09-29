@@ -1425,7 +1425,7 @@ paths:
         - {name: include_archived, in: query, schema: {type: boolean, default: false}}
       responses:
         '200':
-          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. Open counts new/backlog, in_progress counts in_progress/qa, done counts done/delivered/accepted, and cancelled is separate. Total includes all work states.
+          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. A category on that kind's field_schema.states wins (open, doing or in_progress, done, cancelled, archived). Otherwise open is every state that is not in progress, done, cancelled or archived, including open, blocked and unknown states; in_progress is in_progress, active and qa; done is done, delivered and accepted; cancelled is cancelled. Archived work is in total only. The response fields are unchanged.
           content:
             application/json:
               schema:
@@ -1574,7 +1574,7 @@ paths:
         - {name: date_to, in: query, description: Exclusive upper bound (RFC 3339), schema: {type: string, format: date-time}}
         - {name: q, in: query, description: 'Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last', schema: {type: string}}
         - {name: within, in: query, description: 'Descendants of this node, excluding itself', schema: {type: string, format: uuid}}
-        - {name: hide_closed, in: query, schema: {type: boolean, default: false}}
+        - {name: hide_closed, in: query, description: 'When true, omits nodes whose work bucket is done, cancelled or archived. The bucket is the same one project counts use: a category on that ticket, task or epic kind wins, and spellings such as canceled are recognised. Open and in progress stay.', schema: {type: boolean, default: false}}
         - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
@@ -9657,7 +9657,7 @@ components:
       in: query
       schema:
         type: string
-        description: Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state, priority, kind, assignee (by name, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions).
+        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (by name, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions).'
         default: position
     Direction:
       name: direction

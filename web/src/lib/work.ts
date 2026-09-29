@@ -3,19 +3,21 @@
 // priority semantics, time formatting, sorting and highlighting. No Vue here, so
 // tests/work.test.ts can run them under plain Node.
 
-export type StatusKey = 'new' | 'backlog' | 'progress' | 'qa' | 'done' | 'delivered' | 'accepted' | 'cancelled' | 'archived' | 'other'
+export type StatusKey = 'open' | 'new' | 'backlog' | 'blocked' | 'progress' | 'qa' | 'done' | 'delivered' | 'accepted' | 'cancelled' | 'archived' | 'other'
 export interface StatusMeta { key: StatusKey; label: string; closed: boolean; order: number }
 
 const STATUS: Record<Exclude<StatusKey, 'other'>, Omit<StatusMeta, 'key'>> = {
-  new: { label: 'New', closed: false, order: 0 },
-  backlog: { label: 'Backlog', closed: false, order: 1 },
-  progress: { label: 'In progress', closed: false, order: 2 },
-  qa: { label: 'QA', closed: false, order: 3 },
-  accepted: { label: 'Accepted', closed: true, order: 4 },
-  delivered: { label: 'Delivered', closed: true, order: 5 },
-  done: { label: 'Done', closed: true, order: 6 },
-  cancelled: { label: 'Cancelled', closed: true, order: 7 },
-  archived: { label: 'Archived', closed: true, order: 8 },
+  open: { label: 'Open', closed: false, order: 0 },
+  new: { label: 'New', closed: false, order: 1 },
+  backlog: { label: 'Backlog', closed: false, order: 2 },
+  blocked: { label: 'Blocked', closed: false, order: 3 },
+  progress: { label: 'In progress', closed: false, order: 4 },
+  qa: { label: 'QA', closed: false, order: 5 },
+  accepted: { label: 'Accepted', closed: true, order: 6 },
+  delivered: { label: 'Delivered', closed: true, order: 7 },
+  done: { label: 'Done', closed: true, order: 8 },
+  cancelled: { label: 'Cancelled', closed: true, order: 9 },
+  archived: { label: 'Archived', closed: true, order: 10 },
 }
 
 // Imported data spells some states with hyphens ("in-progress"); treat spellings alike.
@@ -33,7 +35,7 @@ export function statusMeta(state: string): StatusMeta {
   const key: StatusKey = normal === 'in_progress' || normal === 'active' ? 'progress'
     : normal === 'canceled' ? 'cancelled'
     : normal in STATUS ? normal as StatusKey : 'other'
-  if (key === 'other') return { key, label: sentenceCase(state), closed: false, order: 9 }
+  if (key === 'other') return { key, label: sentenceCase(state), closed: false, order: 11 }
   return { key, ...STATUS[key] }
 }
 

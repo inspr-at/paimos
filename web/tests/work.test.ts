@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { cycleSort, descriptionLine, highlight, initials, parseSort, priorityLabel, projectRouteKey, relativeTime, serializeSort, statusMeta, statusOptions } from '../src/lib/work.ts'
-import { apiParams, effectiveSort, epicOf, facetOptions, filtersFromQuery, filtersToQuery, groupRows, orderByStatus, totalFrom } from '../src/lib/ticketList.ts'
+import { apiParams, compareRows, effectiveSort, epicOf, facetOptions, filtersFromQuery, filtersToQuery, groupRows, orderByStatus, totalFrom } from '../src/lib/ticketList.ts'
 import type { ListItem } from '../src/lib/api.ts'
 
 test('statuses read the same in every spelling and carry product labels', () => {
@@ -12,6 +12,13 @@ test('statuses read the same in every spelling and carry product labels', () => 
   assert.equal(statusMeta('qa').label, 'QA')
   assert.equal(statusMeta('done').closed, true)
   assert.equal(statusMeta('on_hold').label, 'On hold')
+  assert.equal(statusMeta('open').label, 'Open')
+  assert.equal(statusMeta('open').key, 'open')
+  assert.equal(statusMeta('open').closed, false)
+  assert.equal(statusMeta('blocked').label, 'Blocked')
+  assert.ok(statusMeta('open').order < statusMeta('new').order)
+  assert.ok(statusMeta('blocked').order > statusMeta('backlog').order)
+  assert.ok(statusMeta('blocked').order < statusMeta('in_progress').order)
   assert.deepEqual(statusOptions(['in-progress']).map(o => o.value), ['new', 'backlog', 'in-progress', 'qa', 'accepted', 'delivered', 'done', 'cancelled'])
   assert.equal(statusOptions([]).find(o => o.meta.key === 'progress')!.value, 'in_progress')
 })
@@ -99,4 +106,18 @@ test('status order and grouping follow the workflow, epics collect their tickets
   assert.equal(epicOf(task, byId)?.id, 'e')
   const groups = groupRows([epic, ticket, task, loose], 'epic')
   assert.deepEqual(groups.map(g => [g.label, g.rows.map(r => r.id)]), [['e', ['t', 'k']], ['No epic', ['l']]])
+})
+
+test('descending status order keeps an unknown spelling last, and pages agree', () => {
+  const rows = [row('m', 'mystery'), row('a', 'archived'), row('d', 'done'), row('o', 'open'), row('s', ' OPEN '), row('q', ' QA '), row('p', 'in--progress')]
+  const asc = ['o', 's', 'p', 'q', 'd', 'a', 'm']
+  const desc = ['a', 'd', 'q', 'p', 'o', 's', 'm']
+  assert.deepEqual(orderByStatus(rows).map(r => r.id), asc)
+  assert.deepEqual(orderByStatus(rows, true).map(r => r.id), desc)
+  assert.deepEqual([...rows].sort(compareRows([{ field: 'state', desc: false }])).map(r => r.id), asc)
+  assert.deepEqual([...rows].sort(compareRows([{ field: 'state', desc: true }])).map(r => r.id), desc)
+  const full = orderByStatus(rows, true)
+  const paged: typeof full = []
+  for (let i = 0; i < full.length; i += 2) paged.push(...orderByStatus(full.slice(i, i + 2), true))
+  assert.deepEqual(paged.map(r => r.id), desc)
 })

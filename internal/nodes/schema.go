@@ -205,6 +205,12 @@ func compileObject(obj map[string]any) (*jsSchema, error) {
 				return nil, fmt.Errorf("maxProperties must be an integer")
 			}
 			s.maxProps = &n
+		case "states":
+			// Workflow states are not field constraints. The raw schema is stored,
+			// and project counts read states[].category from it.
+			if err := compileStateCatalog(val); err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("unsupported field_schema keyword %q", key)
 		}

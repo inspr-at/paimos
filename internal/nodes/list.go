@@ -693,16 +693,27 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		projection = `n.key,n.title,n.body,n.position,n.created_at,n.updated_at,
             coalesce(n.fields->>'priority','') AS priority_raw,`
 	}
+	// Hide closed uses the same buckets as the project counts. Until the filter
+	// is on, the predicate stays the previous literal so an unfiltered list
+	// keeps its plan.
+	closedPred := `n.state NOT IN ('done','cancelled','archived','delivered','accepted')`
+	configuredCTE := ""
+	configuredJoin := ""
+	if q.HideClosed {
+		configuredCTE = `, ` + workStateCategoryCTE()
+		configuredJoin = ` LEFT JOIN configured cfg ON cfg.kind_id=n.kind_id AND cfg.norm=` + workStateNormSQL("n.state")
+		closedPred = workNotClosedSQL("n.state", "cfg")
+	}
 	return `WITH RECURSIVE scope(id) AS (
         SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
         UNION ALL SELECT c.id FROM scope s CROSS JOIN LATERAL (
             SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL
             ORDER BY updated_at DESC OFFSET 0
         ) c
-    )` + epicCTE + `, filtered AS MATERIALIZED (
+    )` + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
 		SELECT n.id,` + projection + `
             assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
-            coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + kindJoin + assigneeJoin + `
+            coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + kindJoin + configuredJoin + assigneeJoin + `
         WHERE n.deleted_at IS NULL
         AND ($1::uuid IS NULL OR n.kind_id=$1::uuid)
         AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR n.kind_id::text=ANY($2::text[]))
@@ -713,7 +724,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
         AND ($6::text='' OR n.key ILIKE '%'||$6::text||'%' OR n.title ILIKE '%'||$6::text||'%' OR n.body ILIKE '%'||$6::text||'%'
             OR EXISTS(SELECT 1 FROM node_key_aliases a WHERE a.tenant_id=n.tenant_id AND a.node_id=n.id
                 AND a.key ILIKE '%'||$6::text||'%'))
-        AND (NOT $11::bool OR n.state NOT IN ('done','cancelled','archived','delivered','accepted'))` + scopeCondition + conditions + `
+        AND (NOT $11::bool OR ` + closedPred + `)` + scopeCondition + conditions + `
     )`, args
 }
 func listOrder(q listQuery) string {
@@ -731,7 +742,7 @@ func listOrder(q listQuery) string {
 		case "key":
 			parts = append(parts, `regexp_replace(f.key,'-[0-9]+$','') `+dir, `substring(f.key from '-([0-9]+)$')::numeric `+dir)
 		case "state":
-			parts = append(parts, `CASE WHEN f.state IN ('new','backlog','in_progress','active','qa','accepted','delivered','done','cancelled','archived') THEN 0 ELSE 1 END ASC`, `CASE f.state WHEN 'new' THEN 0 WHEN 'backlog' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'active' THEN 2 WHEN 'qa' THEN 3 WHEN 'accepted' THEN 4 WHEN 'delivered' THEN 5 WHEN 'done' THEN 6 WHEN 'cancelled' THEN 7 WHEN 'archived' THEN 8 ELSE 9 END `+dir, "f.state "+dir)
+			parts = append(parts, workStateKnownSQL("f.state")+` ASC`, workStateOrderSQL("f.state")+` `+dir, "f.state "+dir)
 		case "priority":
 			parts = append(parts, `CASE f.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 WHEN 'none' THEN 3 ELSE 4 END `+dir, `f.priority_raw `+dir)
 		case "kind":
@@ -1062,17 +1073,22 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
                 SELECT s.project_id,c.id,c.parent_id,c.state,c.updated_at,c.kind_id,s.depth+1
                 FROM subtree s JOIN nodes c ON c.tenant_id=current_setting('aeon.tenant_id')::uuid
                     AND c.parent_id=s.node_id AND c.deleted_at IS NULL
-            ), summary AS (
-                SELECT p.id,p.key,p.title,p.state,
-                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('new','backlog'))::int AS open,
-                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('in_progress','qa'))::int AS in_progress,
-                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('accepted','delivered','done'))::int AS done,
-                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state='cancelled')::int AS cancelled,
-                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic'))::int AS total,
-                    max(s.updated_at) AS last_activity
+            ), `+workStateCategoryCTE()+`, counted AS (
+                SELECT p.id,p.key,p.title,p.state,s.depth,k.slug,s.updated_at,
+                    `+workCountBucketSQL("s.state", "c")+` AS bucket
                 FROM projects p JOIN subtree s ON s.project_id=p.id
                 JOIN node_kinds k ON k.id=s.kind_id AND k.tenant_id=current_setting('aeon.tenant_id')::uuid
-                GROUP BY p.id,p.key,p.title,p.state
+                LEFT JOIN configured c ON c.kind_id=s.kind_id AND c.norm=`+workStateNormSQL("s.state")+`
+            ), summary AS (
+                SELECT id,key,title,state,
+                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='open')::int AS open,
+                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='in_progress')::int AS in_progress,
+                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='done')::int AS done,
+                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='cancelled')::int AS cancelled,
+                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic'))::int AS total,
+                    max(updated_at) AS last_activity
+                FROM counted
+                GROUP BY id,key,title,state
             ), recent AS (
                 SELECT e.node_id,e.actor_principal_id,e.at FROM events e
                 WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.node_id IS NOT NULL AND e.at > now() - interval '90 days'
