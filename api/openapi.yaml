@@ -4743,6 +4743,39 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/catalog.json:
+    get:
+      operationId: readPublicPortalCatalogFile
+      summary: Read the published catalog as a file
+      description: Anonymous. The body is the same document as readPublicPortal. The site also serves this file at /portal/{tenantSlug}/catalog.json, outside this API. A disabled portal and an unknown tenant both answer 404 with the same JSON error. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/llms.txt:
+    get:
+      operationId: readPublicPortalLlms
+      summary: Read a plain-text index of the public catalog
+      description: Anonymous. Public titles and summaries only. The site also serves this file at /portal/{tenantSlug}/llms.txt. A disabled portal and an unknown tenant both answer 404 with the same JSON error. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Plain-text index, headers: {Cache-Control: {schema: {type: string}}}, content: {text/plain: {schema: {type: string}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/releases:
+    get:
+      operationId: readPublicPortalReleases
+      summary: Read published release notes for the portal product
+      description: Anonymous. Notes are the frozen snapshot taken when a release shipped, for the one project linked on the portal pace screen, and only after that link turns release history on. A pace link alone returns an empty releases list. The project name is omitted. Only released and superseded releases with a frozen snapshot and at least one public note are included. A published release without a frozen snapshot, or with no public note, is omitted. Hidden tickets and incomplete benefit text are omitted. Ticket keys, node ids and later edits of ticket fields are not part of this document. A disabled portal and an unknown tenant both answer 404. An open portal with no published product returns product null and an empty releases list. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved. The public page is /portal/{tenantSlug}/releases.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Published release notes, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicReleases'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /portal/market:
     get:
       operationId: readPortalMarket
@@ -4880,7 +4913,8 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
     put:
       operationId: writePortalPace
-      summary: Link one project whose release dates become the public count, or clear it
+      summary: Link one project whose release dates become the public count, clear it, or choose whether its frozen notes are public
+      description: settings.manage, people only. Sending project_id alone keeps release history when the project stays the same and turns it off when the project changes, and advances the link revision. Sending release_history also sends the project_id and revision from the read this publish is based on. That write is one update matching both, so it cannot publish notes for a project linked later; a mismatch is 409 and leaves the link as it is. Clearing the link deletes the row and keeps the issued revision, so linking again receives a new revision and a history write from before the clear does not match. Clearing the link and setting release history in one body is refused. Release history without that project and revision is refused.
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPaceWrite'}}}}
       responses:
@@ -4888,6 +4922,7 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /portal/wishes/{wishId}/fulfillment:
     put:
       operationId: writePortalFulfillment
@@ -7163,6 +7198,32 @@ components:
           description: Present only when at least one competitor is published and at least one row exists
           items: {$ref: '#/components/schemas/PortalPublicComparison'}
         pace: {$ref: '#/components/schemas/PortalPublicPace'}
+        release_history: {type: boolean, description: True only when the linked project publishes release notes. Omitted otherwise. Notes themselves stay on the releases document.}
+    PortalPublicRelease:
+      type: object
+      additionalProperties: false
+      required: [released_at, notes]
+      properties:
+        released_at: {type: string, format: date-time}
+        version: {type: string, description: Present only when the frozen version is an inspr-calendar-v2 coordinate}
+        notes:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [pill_en, pill_de, benefit_en, benefit_de]
+            properties:
+              pill_en: {type: string}
+              pill_de: {type: string}
+              benefit_en: {type: string}
+              benefit_de: {type: string}
+    PortalPublicReleases:
+      type: object
+      additionalProperties: false
+      required: [product, releases]
+      properties:
+        product: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/PortalProduct'}]}
+        releases: {type: array, items: {$ref: '#/components/schemas/PortalPublicRelease'}}
     PortalVote:
       type: object
       additionalProperties: false
@@ -7337,6 +7398,8 @@ components:
       properties:
         project_id: {type: string, format: uuid}
         project_title: {type: string, description: Admin only. Never copied onto the public document.}
+        revision: {type: integer, minimum: 1, description: Admin only. Present while a project is linked. Advances when the link or its release-history choice changes, and is not reused after the link is cleared. A release-history write must send this value.}
+        release_history: {type: boolean, default: false, description: Admin only. Frozen notes are public only when this is true. A new or existing link stays false until set.}
         releases_30d: {type: integer, minimum: 0}
         median_release_gap_days: {type: integer, minimum: 0}
         wish_to_live_median_days: {type: integer, minimum: 0}
@@ -7344,9 +7407,11 @@ components:
     PortalPaceWrite:
       type: object
       additionalProperties: false
-      required: [project_id]
+      minProperties: 1
       properties:
-        project_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}]}
+        project_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}], description: A uuid links that project. Null clears the link. Together with release_history, it is the project the admin still expects to be linked and the write does not move the link.}
+        release_history: {type: boolean, description: Publish frozen notes for the linked project. Requires project_id and revision from the read this publish is based on. Absent on a project write leaves the current choice when the project stays, and leaves a different project off.}
+        revision: {type: integer, minimum: 1, description: Required together with release_history and project_id. The link revision from the read this publish is based on.}
     PortalFulfillmentWrite:
       type: object
       additionalProperties: false

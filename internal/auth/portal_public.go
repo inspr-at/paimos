@@ -8,13 +8,17 @@ import (
 	"strings"
 )
 
-// Catalog reads accept HEAD because net/http serves HEAD for a registered GET.
-// Wishes, votes and corrections are POST only; other methods stay authenticated.
+// Catalog, release history, llms.txt and catalog.json accept HEAD because
+// net/http serves HEAD for a registered GET. Wishes, votes and corrections
+// are POST only; other methods stay authenticated.
 const (
-	portalCatalogPattern    = "GET /api/public/portal/{tenantSlug}"
-	portalWishPattern       = "POST /api/public/portal/{tenantSlug}/wishes"
-	portalVotePattern       = "POST /api/public/portal/{tenantSlug}/wishes/{wishKey}/votes"
-	portalCorrectionPattern = "POST /api/public/portal/{tenantSlug}/corrections"
+	portalCatalogPattern     = "GET /api/public/portal/{tenantSlug}"
+	portalCatalogFilePattern = "GET /api/public/portal/{tenantSlug}/catalog.json"
+	portalLlmsPattern        = "GET /api/public/portal/{tenantSlug}/llms.txt"
+	portalReleasesPattern    = "GET /api/public/portal/{tenantSlug}/releases"
+	portalWishPattern        = "POST /api/public/portal/{tenantSlug}/wishes"
+	portalVotePattern        = "POST /api/public/portal/{tenantSlug}/wishes/{wishKey}/votes"
+	portalCorrectionPattern  = "POST /api/public/portal/{tenantSlug}/corrections"
 )
 
 // Slug and wish key match the portal handlers. Anything else keeps the auth gate,
@@ -34,6 +38,12 @@ func publicPortalRequest(r *http.Request) bool {
 		return true
 	case portalCatalogPattern:
 		return kind == "read"
+	case portalCatalogFilePattern:
+		return kind == "catalog-file"
+	case portalLlmsPattern:
+		return kind == "llms"
+	case portalReleasesPattern:
+		return kind == "releases"
 	case portalWishPattern:
 		return kind == "wish"
 	case portalVotePattern:
@@ -62,6 +72,22 @@ func portalPublicKind(r *http.Request) string {
 			return "read"
 		}
 		return ""
+	}
+	if len(parts) == 6 && parts[1] == "api" && parts[2] == "public" && parts[3] == "portal" && portalSlugPattern.MatchString(parts[4]) {
+		switch parts[5] {
+		case "releases":
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				return "releases"
+			}
+		case "llms.txt":
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				return "llms"
+			}
+		case "catalog.json":
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				return "catalog-file"
+			}
+		}
 	}
 	if len(parts) == 6 && parts[1] == "api" && parts[2] == "public" && parts[3] == "portal" && parts[5] == "wishes" && portalSlugPattern.MatchString(parts[4]) {
 		if r.Method == http.MethodPost {
