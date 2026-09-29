@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,9 +18,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -32,6 +35,77 @@ func TestDeliveryRoutesArePersonRead(t *testing.T) {
 	} {
 		if authz.RoutePermissions[pattern] != "nodes.read" {
 			t.Fatalf("%s = %q", pattern, authz.RoutePermissions[pattern])
+		}
+	}
+}
+
+func TestProjectGuestDeliveryRatingThroughMiddleware(t *testing.T) {
+	f := newFix(t)
+	project, hiddenProject, ticket, hiddenTicket := id(), id(), id(), id()
+	f.node(t, project, "project", "VT1-1", "Visible", "")
+	f.node(t, ticket, "ticket", "VT1-2", "Ticket", project)
+	f.node(t, hiddenProject, "project", "VT1-3", "Hidden", "")
+	f.node(t, hiddenTicket, "ticket", "VT1-4", "Hidden ticket", hiddenProject)
+	created := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	stopped := created.Add(time.Hour)
+	session, hidden := id(), id()
+	f.session(t, session, project, ticket, "gpt-4.1", "desk", created, &stopped)
+	f.session(t, hidden, hiddenProject, hiddenTicket, "gpt-4.1", "desk", created, &stopped)
+
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	identity := id()
+	if _, err := f.db.Admin.Exec(context.Background(), `INSERT INTO identities(id,issuer,subject) VALUES($1,'https://id.example',$2)`, identity, "guest-"+identity); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Admin.Exec(context.Background(), `INSERT INTO sessions(id,identity_id,tenant_id,principal_id,expires_at) VALUES($1,$2,$3,$4,now() + interval '1 day')`, hex.EncodeToString(sum[:]), identity, f.guest.TenantID, f.guest.ID); err != nil {
+		t.Fatal(err)
+	}
+	module, err := auth.New(auth.Config{Env: "dev", SessionKey: bytes.Repeat([]byte{7}, 32)}, f.db.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{New(f.db.App)}, Middleware: []func(http.Handler) http.Handler{module.Middleware}}
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.AddCookie(&http.Cookie{Name: "aeon_session", Value: hex.EncodeToString(raw)})
+		w := httptest.NewRecorder()
+		server.Handler().ServeHTTP(w, r)
+		return w
+	}
+	visible := "/api/harness-sessions/" + session + "/delivery-rating"
+	other := "/api/harness-sessions/" + hidden + "/delivery-rating"
+	const reason = `{"comment":"needs another pass"}`
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+		body := ""
+		if method == http.MethodPut {
+			body = reason
+		}
+		if w := call(method, visible, body); w.Code != http.StatusForbidden {
+			t.Fatalf("unbound %s %d %s", method, w.Code, w.Body.String())
+		}
+	}
+	f.bindGuest(t, project)
+	if w := call(http.MethodGet, visible, ""); w.Code != http.StatusOK {
+		t.Fatalf("get %d %s", w.Code, w.Body.String())
+	}
+	if w := call(http.MethodPut, visible, reason); w.Code != http.StatusOK {
+		t.Fatalf("put %d %s", w.Code, w.Body.String())
+	}
+	if w := call(http.MethodDelete, visible, ""); w.Code != http.StatusOK {
+		t.Fatalf("delete %d %s", w.Code, w.Body.String())
+	}
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+		body := ""
+		if method == http.MethodPut {
+			body = reason
+		}
+		if w := call(method, other, body); w.Code != http.StatusForbidden {
+			t.Fatalf("hidden %s %d %s", method, w.Code, w.Body.String())
 		}
 	}
 }

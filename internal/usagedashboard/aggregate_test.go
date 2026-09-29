@@ -16,7 +16,7 @@ func TestSessionSelectReadsUsageRowsOnly(t *testing.T) {
 			t.Fatalf("query reads %s: %s", forbidden, query)
 		}
 	}
-	for _, need := range []string{"u.model", "u.cached_input_tokens", "u.estimated_cost_usd", "u.billing_mode", "u.subscription_label", "s.created_at", "s.harness"} {
+	for _, need := range []string{"u.model", "u.cached_input_tokens", "u.estimated_cost_usd", "u.billing_mode", "u.subscription_label", "s.created_at", "s.harness", "s.phase"} {
 		if !strings.Contains(query, need) {
 			t.Fatalf("query missing %s", need)
 		}

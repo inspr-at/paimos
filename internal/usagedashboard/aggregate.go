@@ -168,6 +168,7 @@ type sessionRow struct {
 	cost                                    *string
 	provisional                             bool
 	billingMode, subscription               *string
+	delivered                               bool
 }
 
 func parseRange(fromRaw, toRaw string, now time.Time) (time.Time, time.Time, error) {
@@ -296,6 +297,7 @@ func loadSessions(ctx context.Context, tx pgx.Tx, from, to time.Time, project st
 		if err := rows.Scan(
 			&row.id, &row.projectID, &row.projectKey, &row.projectTitle,
 			&row.ticketID, &row.ticketKey, &row.ticketTitle, &row.created, &row.harness,
+			&row.delivered,
 			&row.model, &row.input, &row.output, &row.cached, &row.cost,
 			&provisional, &row.billingMode, &row.subscription,
 		); err != nil {
@@ -316,7 +318,8 @@ func loadSessions(ctx context.Context, tx pgx.Tx, from, to time.Time, project st
 func sessionSelect() string {
 	return `WITH started AS (
 	    SELECT s.tenant_id, s.id, s.project_id, p.key AS project_key, p.title AS project_title,
-	           t.id AS ticket_id, t.key AS ticket_key, t.title AS ticket_title, s.created_at, s.harness
+	           t.id AS ticket_id, t.key AS ticket_key, t.title AS ticket_title, s.created_at, s.harness,
+	           (s.phase = 'stopped') AS delivered
 	      FROM harness_sessions s
 	      JOIN nodes p ON p.tenant_id = s.tenant_id AND p.id = s.project_id
 	      LEFT JOIN nodes t ON t.tenant_id = s.tenant_id AND t.id = s.ticket_node_id AND t.deleted_at IS NULL
@@ -327,6 +330,7 @@ func sessionSelect() string {
 	)
 	SELECT started.id::text, started.project_id::text, started.project_key, started.project_title,
 	       started.ticket_id::text, started.ticket_key, started.ticket_title, started.created_at, started.harness,
+	       started.delivered,
 	       u.model, u.input_tokens, u.output_tokens, u.cached_input_tokens, u.estimated_cost_usd::text,
 	       u.provisional, u.billing_mode, u.subscription_label
 	  FROM started

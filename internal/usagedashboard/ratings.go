@@ -27,6 +27,16 @@ func emptyRatings() Ratings {
 	return Ratings{ByModel: []RatingGroup{}, ByHarness: []RatingGroup{}}
 }
 
+func deliveredSessions(rows []sessionRow) []sessionRow {
+	out := make([]sessionRow, 0, len(rows))
+	for _, row := range rows {
+		if row.delivered {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 func sessionIDs(rows []sessionRow) []string {
 	seen := map[string]struct{}{}
 	ids := []string{}
@@ -40,14 +50,18 @@ func sessionIDs(rows []sessionRow) []string {
 	return ids
 }
 
-// loadVoteRatings counts rework exceptions against the deliveries already
-// kept on the dashboard. An exception is a session with at least one vote
-// row. The rate is exceptions ÷ deliveries. Model and harness labels match
-// the usage breakdown, so the rate sits on the same row. The model stored
-// on the vote is a snapshot for the audit trail; it does not choose the group.
-// A missing vote table leaves exception counts at zero and keeps the delivery
-// total. Token and list-price totals are not touched here.
+// loadVoteRatings counts rework exceptions against stopped deliveries.
+// Phase stopped is the delivery, whether the stop reason is completed or
+// anything else. A session that is still starting, working, yielded or
+// stopping is not in the denominator, and a vote on it is not an exception.
+// An exception is a stopped session with at least one vote row. The rate is
+// exceptions ÷ deliveries. Model and harness labels match the usage
+// breakdown, so the rate sits on the same row. The model stored on the vote
+// is a snapshot for the audit trail; it does not choose the group. A missing
+// vote table leaves exception counts at zero and keeps the delivery total.
+// Token and list-price totals are not touched here.
 func loadVoteRatings(ctx context.Context, tx pgx.Tx, rows []sessionRow) (Ratings, error) {
+	rows = deliveredSessions(rows)
 	ids := sessionIDs(rows)
 	out := emptyRatings()
 	out.Deliveries = len(ids)
