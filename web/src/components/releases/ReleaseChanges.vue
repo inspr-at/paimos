@@ -135,15 +135,19 @@ ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
 .ticket-line { display: grid; gap: 3px; min-width: 0; }
 .line-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
 .pill-title { margin: 0; min-width: 0; font: 650 14.5px/1.35 var(--font); color: var(--ink); letter-spacing: 0; overflow-wrap: anywhere; }
-/* Hanging kind mark in the gutter. Cap-centred on the first line, so a wrapped
-   title stays put and the benefit and commit count keep their left edge. */
-.pill-title, .group > ul:not(.ticket-lines) > li > .subject { position: relative; }
+/* Hanging kind mark. Its box is the first line's cap, bottom on the baseline,
+   and the icon is centred in that box — so the mark meets the cap centre
+   without a nudge, and a wrapped title keeps it on the first line. Where cap
+   units are missing, the box is the line and the icon centres there. The
+   benefit and commit count keep the title's text edge. */
 .change-glyph {
   --glyph-gap: 8px;
-  position: absolute; z-index: 0; right: calc(100% + var(--glyph-gap)); top: 0;
-  display: grid; place-items: center; width: 13px; height: 1lh;
-  transform: translateY(calc((1cap - 1em) / 2));
+  position: relative; display: inline-block; width: 0; height: 1lh; vertical-align: top;
   opacity: .7; pointer-events: none;
+}
+.change-glyph :deep(svg) { position: absolute; right: var(--glyph-gap); top: 0; bottom: 0; margin-block: auto; }
+@supports (height: 1cap) {
+  .change-glyph { height: 1cap; vertical-align: baseline; }
 }
 .features .change-glyph { color: var(--teal-ink); }
 .fixes .change-glyph { color: var(--gold-ink); }
@@ -176,10 +180,9 @@ ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
   .ticket-lines > li, .group > ul:not(.ticket-lines) > li { margin-left: 0; padding: 6px 4px 7px; }
   .commit-list li { padding-left: 8px; }
   /* The detail pane scrolls, so a mark in the page padding is clipped. The
-     fallback keeps the 13px mark in the row with an 8px gap, and the benefit,
-     commits and meta share the title's text edge. */
+     13px mark stays in the row with an 8px gap, and the benefit, commits
+     and meta share the title's text edge. */
   .pill-title, .group > ul:not(.ticket-lines) > li > .subject { padding-left: 21px; }
-  .change-glyph { right: auto; left: 0; }
   .benefit, .commits, .commit-list.open, .group > ul:not(.ticket-lines) > li > .meta { margin-left: 21px; }
   .commit-list.open li { padding-left: 0; }
 }
