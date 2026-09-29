@@ -374,27 +374,34 @@ export function blankRule(taken: Iterable<string>): AgentRule {
   }
 }
 
-/** A set name for a duplicate, still one line and within 128 bytes. */
-export function copyName(name: string): string {
-  const suffix = ' (copy)'
-  const room = 128 - utf8Length(suffix)
-  let base = name.trim() || 'Set'
-  while (base && utf8Length(base) > room) base = base.slice(0, -1)
-  base = base.trimEnd()
-  if (!base || utf8Length(base) > room) base = 'Set'
-  return `${base}${suffix}`
+const COPY_TAIL = / \(copy(?: \d+)?\)$/
+
+/** A set name for a duplicate, still one line, within 128 bytes, and not already used. */
+export function copyName(name: string, taken: Iterable<string> = []): string {
+  const used = new Set(taken)
+  const stem = (name.trim() || 'Set').replace(COPY_TAIL, '').trim() || 'Set'
+  const fit = (suffix: string) => {
+    const room = 128 - utf8Length(suffix)
+    let base = stem
+    while (base && utf8Length(base) > room) base = base.slice(0, -1)
+    base = base.trimEnd()
+    if (!base || utf8Length(base) > room) base = 'Set'
+    return `${base}${suffix}`
+  }
+  for (let n = 1; n <= 99; n++) {
+    const candidate = fit(n === 1 ? ' (copy)' : ` (copy ${n})`)
+    if (!used.has(candidate)) return candidate
+  }
+  return fit(' (copy 99)')
 }
 
+/** A new rule with its own identity. The wording stays, so agents do not receive a "(copy)" suffix. */
 export function duplicateRule(rule: AgentRule, taken: Iterable<string>): AgentRule {
   const copy = normalizeRule(rule)
-  const suffix = ' (copy)'
-  const room = Math.max(0, 512 - utf8Length(suffix))
-  let text = copy.text
-  while (utf8Length(text) > room) text = text.slice(0, -1)
   return {
     ...copy,
     identity: identityFromText(`${copy.identity}-copy`, new Set(taken)),
-    text: `${text}${suffix}`,
+    text: copy.text,
     strength: 'normal',
     enabled: true,
     expires_at: null,

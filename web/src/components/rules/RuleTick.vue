@@ -9,16 +9,19 @@ const emit = defineEmits<{ toggle: [enabled: boolean] }>()
 const box = ref<HTMLInputElement | null>(null)
 
 function sync() {
-  if (box.value) box.value.indeterminate = props.state === 'mixed'
+  const input = box.value
+  if (!input) return
+  // The browser flips the control before this runs. Paint the saved state;
+  // a later prop change (optimistic, then rollback or commit) paints again.
+  input.checked = props.state === 'on'
+  input.indeterminate = props.state === 'mixed'
 }
 onMounted(sync)
 watch(() => props.state, sync)
 
-function change(event: Event) {
-  const input = event.target as HTMLInputElement
+function change() {
   const next = tickTarget(props.state)
-  input.checked = next
-  input.indeterminate = false
+  sync()
   if (!props.disabled) emit('toggle', next)
 }
 </script>

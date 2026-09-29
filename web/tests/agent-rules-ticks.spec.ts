@@ -7,7 +7,8 @@ import { fixtures, mockWork } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { mockRules } from './rules-fixtures'
 
-const SHOTS = '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-252'
+const SHOTS = process.env.RULES_SHOTS ?? ''
+const draftTip = 'Saves a draft; agents see it after you publish.'
 
 async function setup(page: Page, options: Parameters<typeof mockRules>[1] = {}) {
   await mockWork(page, fixtures())
@@ -54,6 +55,7 @@ test('a set tick turns movable rules off and leaves locked rules on', async ({ p
   await openSet(page, 'Secrets')
   const tick = page.getByRole('checkbox', { name: 'Turn Secrets rules on or off' })
   await expect(tick).toBeChecked()
+  await expect(page.locator('label.switch', { has: tick })).toHaveAttribute('data-tip', draftTip)
   await tick.click()
   await expect(page.getByText('Draft saved')).toBeVisible()
   await expect(tick).toHaveAttribute('aria-checked', 'mixed')
@@ -67,7 +69,9 @@ test('a set tick turns movable rules off and leaves locked rules on', async ({ p
 
 test('a layer tick saves the writable sets underneath it', async ({ page }) => {
   const rules = await setup(page)
-  await page.getByRole('checkbox', { name: 'Turn Project rules on or off' }).click()
+  const tick = page.getByRole('checkbox', { name: 'Turn Project rules on or off' })
+  await expect(page.locator('label.switch', { has: tick })).toHaveAttribute('data-tip', draftTip)
+  await tick.click()
   await expect(page.getByText('Draft saved')).toBeVisible()
   await openSet(page, 'Scope')
   await expect(page.getByRole('checkbox', { name: 'Your package is your scope. is on' })).not.toBeChecked()
@@ -85,8 +89,10 @@ test('a layer tick of two sets says how many drafts were saved, and stops when o
   await page.getByRole('menuitem', { name: 'Duplicate set' }).click()
   await expect(page.getByText('Duplicated as Secrets (copy). Nothing is live until you publish.')).toBeVisible()
   await page.getByRole('checkbox', { name: 'Turn Company rules on or off' }).click()
-  await expect(page.getByText('The draft was not saved.')).toBeVisible()
-  await expect(page.getByText(/Saved \d+ drafts/)).toHaveCount(0)
+  await expect(page.getByText('Saved 1 draft. The next set was not saved.')).toBeVisible()
+  await expect(page.getByRole('checkbox', { name: 'Turn Secrets rules on or off' })).toHaveAttribute('aria-checked', 'mixed')
+  await expect(page.getByRole('checkbox', { name: 'Turn Secrets (copy) rules on or off' })).toBeChecked()
+  await expect(page.getByRole('checkbox', { name: 'Record the source. is on' })).toBeChecked()
   const puts = rules.calls.filter(call => call.method === 'PUT' && call.path.endsWith('/draft'))
   expect(puts).toHaveLength(3)
   const secrets = puts.find(call => call.path.includes('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'))
@@ -118,15 +124,19 @@ test('duplicating a rule stays in the draft until save', async ({ page }) => {
   const row = page.getByRole('listitem', { name: 'Never print the environment.' })
   await row.locator('summary').click()
   await row.getByRole('button', { name: 'Duplicate rule' }).click()
-  const copy = page.getByRole('listitem', { name: 'Never print the environment. (copy)' })
-  await expect(copy).toBeVisible()
-  await expect(copy.getByRole('checkbox', { name: 'Never print the environment. (copy) is on' })).toBeEnabled()
+  const rows = page.getByRole('listitem', { name: 'Never print the environment.' })
+  await expect(rows).toHaveCount(2)
+  const copy = rows.nth(1)
+  await expect(copy.getByRole('checkbox', { name: 'Never print the environment. is on' })).toBeEnabled()
   expect(rules.calls.some(call => call.method === 'PUT')).toBe(false)
   await page.getByRole('button', { name: 'Save draft' }).click()
   await expect(page.getByText('Draft saved')).toBeVisible()
   const put = rules.calls.find(call => call.method === 'PUT')
-  const copied = draftRules(put?.body).find(rule => rule.text === 'Never print the environment. (copy)')
+  const copies = draftRules(put?.body).filter(rule => rule.text === 'Never print the environment.')
+  expect(copies).toHaveLength(2)
+  const copied = copies.find(rule => rule.identity !== 'keep-secrets')
   expect(copied?.strength).toBe('normal')
+  expect(copied?.text).toBe('Never print the environment.')
   expect(copied?.identity).not.toBe('keep-secrets')
   expect(copied?.source.identity).toBeUndefined()
   expect(copied?.source.edited_here).toBe(false)
@@ -147,13 +157,22 @@ test('duplicating a set writes a new draft and leaves the original live', async 
   expect(copies).toHaveLength(2)
   for (const rule of copies) {
     expect(rule.strength).toBe('normal')
-    expect(rule.text).toContain(' (copy)')
+    expect(rule.text).not.toMatch(/ \(copy/)
+    expect(['Never print the environment.', 'Record the source.']).toContain(rule.text)
     expect(rule.identity).not.toBe('keep-secrets')
     expect(rule.identity).not.toBe('record-source')
     expect(rule.source.identity).toBeUndefined()
   }
   expect(rules.calls.some(call => call.path.includes('publish'))).toBe(false)
   await expect(page.getByRole('heading', { name: 'Secrets', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Actions for Secrets', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Duplicate set' }).click()
+  await expect(page.getByText('Duplicated as Secrets (copy 2). Nothing is live until you publish.')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Secrets (copy 2)', exact: true })).toBeVisible()
+  const posts = rules.calls.filter(call => call.method === 'POST' && call.path === '/api/rules/sets')
+  expect(posts.map(call => (call.body as { name: string }).name)).toEqual(['Secrets (copy)', 'Secrets (copy 2)'])
+  const second = rules.calls.filter(call => call.method === 'PUT' && call.path.endsWith('/draft')).at(-1)
+  for (const rule of draftRules(second?.body)) expect(rule.text).not.toMatch(/ \(copy/)
 })
 
 test('an edited upstream rule says the original wording was not stored', async ({ page }) => {
@@ -219,8 +238,42 @@ async function growToContent(page: Page, base: number) {
   }
 }
 
+test('a failed set tick rolls back to the saved draft', async ({ page }) => {
+  const rules = await setup(page, { rejectNextDraft: true, holdDraftFailure: true })
+  await openSet(page, 'Secrets')
+  const tick = page.getByRole('checkbox', { name: 'Turn Secrets rules on or off' })
+  const ruleTick = page.getByRole('checkbox', { name: 'Record the source. is on' })
+  await expect(tick).toBeChecked()
+  await tick.click()
+  await expect(tick).toHaveAttribute('aria-checked', 'mixed')
+  await expect(ruleTick).not.toBeChecked()
+  rules.releaseDraftFailure()
+  await expect(page.getByText('The draft was not saved.')).toBeVisible()
+  await expect(tick).toBeChecked()
+  await expect(ruleTick).toBeChecked()
+  await expect(page.getByText('Off', { exact: true })).toHaveCount(0)
+  expect(rules.calls.some(call => call.path.includes('publish'))).toBe(false)
+})
+
+test('a failed rule tick rolls back to the saved draft', async ({ page }) => {
+  const rules = await setup(page, { rejectNextDraft: true, holdDraftFailure: true })
+  await openSet(page, 'Secrets')
+  const ruleTick = page.getByRole('checkbox', { name: 'Record the source. is on' })
+  const setTick = page.getByRole('checkbox', { name: 'Turn Secrets rules on or off' })
+  await expect(ruleTick).toBeChecked()
+  await ruleTick.click()
+  await expect(ruleTick).not.toBeChecked()
+  rules.releaseDraftFailure()
+  await expect(page.getByText('The draft was not saved.')).toBeVisible()
+  await expect(ruleTick).toBeChecked()
+  await expect(setTick).toBeChecked()
+  await expect(page.getByText('Off', { exact: true })).toHaveCount(0)
+  expect(rules.calls.filter(call => call.method === 'PUT' && call.path.endsWith('/draft'))).toHaveLength(1)
+  expect(rules.calls.some(call => call.path.includes('publish'))).toBe(false)
+})
+
 test('the ticked list and the reset note hold at 390 and 1600', async ({ page }) => {
-  mkdirSync(SHOTS, { recursive: true })
+  if (SHOTS) mkdirSync(SHOTS, { recursive: true })
   await setup(page)
   await openSet(page, 'Secrets')
   await page.getByRole('checkbox', { name: 'Record the source. is on' }).uncheck()
@@ -235,7 +288,26 @@ test('the ticked list and the reset note hold at 390 and 1600', async ({ page })
       expect(await overflows(page), `read ${theme} ${width}`).toBe(false)
       await growToContent(page, width === 390 ? 844 : 1000)
       expect(await overflows(page), `read grown ${theme} ${width}`).toBe(false)
-      await page.screenshot({ path: `${SHOTS}/read-mixed-${width}-${theme}.png`, fullPage: true })
+      const aligned = await page.evaluate(() => {
+        const left = [...document.querySelectorAll('.rule .rule-text')].map(el => Math.round(el.getBoundingClientRect().left))
+        return left.length ? Math.max(...left) - Math.min(...left) : 0
+      })
+      expect(aligned, `rule text lines up ${theme} ${width}`).toBeLessThan(2)
+      if (theme === 'dark') {
+        const paint = await page.evaluate(() => {
+          const read = (name: string) => {
+            const el = [...document.querySelectorAll('input')].find(input => input.getAttribute('aria-label') === name) as HTMLInputElement | undefined
+            if (!el) return null
+            return { bg: getComputedStyle(el).backgroundImage, knob: getComputedStyle(el, '::after').transform }
+          }
+          return { mixed: read('Turn Secrets rules on or off'), on: read('Turn Project rules on or off') }
+        })
+        expect(paint.mixed?.bg, `mixed track ${width} ${paint.mixed?.bg}`).toContain('50%')
+        expect(paint.mixed?.bg, `mixed track ${width}`).not.toBe(paint.on?.bg)
+        expect(paint.mixed?.knob, `mixed knob ${width} ${paint.mixed?.knob}`).toContain('7')
+        expect(paint.on?.knob, `on knob ${width}`).toContain('14')
+      }
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/read-mixed-${width}-${theme}.png`, fullPage: true })
     }
   }
   await editSet(page, 'Secrets')
@@ -250,7 +322,7 @@ test('the ticked list and the reset note hold at 390 and 1600', async ({ page })
       expect(await overflows(page), `edit ${theme} ${width}`).toBe(false)
       await growToContent(page, width === 390 ? 844 : 1200)
       expect(await overflows(page), `edit grown ${theme} ${width}`).toBe(false)
-      await page.screenshot({ path: `${SHOTS}/edit-reset-${width}-${theme}.png`, fullPage: true })
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/edit-reset-${width}-${theme}.png`, fullPage: true })
     }
   }
 })

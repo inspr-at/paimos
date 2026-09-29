@@ -224,9 +224,10 @@ function tickFor(setId: string): CheckState | null {
 function tickLocked(setId: string) {
   return saving.value || (!!editing.value && editing.value.setId !== setId && dirty.value)
 }
+const draftTip = 'Saves a draft; agents see it after you publish.'
 function tickTip(setId: string) {
   if (editing.value && editing.value.setId !== setId && dirty.value) return 'Save or cancel the set you are editing first.'
-  return 'On or off for this set. Locked rules stay on.'
+  return draftTip
 }
 function duplicateReason(setId: string) {
   const found = find(setId)
@@ -247,24 +248,32 @@ function sectionTick(key: SectionKey): CheckState | null {
 const layerTickLocked = computed(() => saving.value || dirty.value)
 function layerTickTip() {
   if (dirty.value) return 'Save or cancel the set you are editing first.'
-  return 'On or off for this layer. Locked rules stay on.'
+  return draftTip
 }
 
-async function persistRules(setId: string, rules: AgentRule[]): Promise<'saved' | 'same' | 'failed'> {
+type DraftSave = { status: 'saved' | 'same' } | { status: 'failed'; message: string }
+async function persistRules(setId: string, rules: AgentRule[], options?: { quiet?: boolean }): Promise<DraftSave> {
   const found = find(setId)
-  if (!found) return 'failed'
-  if (rulesEqual(rules, found.set.remote.rules)) return 'same'
-  const issue = validateDraft(found.set.remote.name, rules)
-  if (issue) { toast(issue, { tone: 'error' }); return 'failed' }
+  if (!found) return { status: 'failed', message: 'That set is no longer here.' }
+  const previous = found.set.remote
+  if (rulesEqual(rules, previous.rules)) return { status: 'same' }
+  const issue = validateDraft(previous.name, rules)
+  if (issue) {
+    if (!options?.quiet) toast(issue, { tone: 'error' })
+    return { status: 'failed', message: issue }
+  }
+  // Show the new ticks immediately. A failed save puts the previous draft back.
+  found.set.remote = { ...previous, rules }
   try {
-    found.set.remote = await saveDraft(setId, { expected_revision: found.set.remote.revision, name: found.set.remote.name, rules })
-    return 'saved'
+    found.set.remote = await saveDraft(setId, { expected_revision: previous.revision, name: previous.name, rules })
+    return { status: 'saved' }
   } catch (cause) {
-    if (cause instanceof RulesError && cause.code === 'revision_conflict') {
-      toast('This set was saved elsewhere. The page was reloaded.', { tone: 'error' })
-      await load(true)
-    } else toast(rulesMessage(cause), { tone: 'error' })
-    return 'failed'
+    found.set.remote = previous
+    const conflict = cause instanceof RulesError && cause.code === 'revision_conflict'
+    const message = conflict ? 'This set was saved elsewhere. The page was reloaded.' : rulesMessage(cause)
+    if (!options?.quiet) toast(message, { tone: 'error' })
+    if (conflict) await load(true)
+    return { status: 'failed', message }
   }
 }
 async function onSetTick(setId: string, enabled: boolean) {
@@ -277,7 +286,7 @@ async function onSetTick(setId: string, enabled: boolean) {
   }
   saving.value = true
   try {
-    if (await persistRules(setId, applyEnabled(found.set.remote.rules, enabled, held)) === 'saved') toast('Draft saved')
+    if ((await persistRules(setId, applyEnabled(found.set.remote.rules, enabled, held))).status === 'saved') toast('Draft saved')
   } finally { saving.value = false }
 }
 async function onRuleTick(setId: string, identity: string, enabled: boolean) {
@@ -287,8 +296,18 @@ async function onRuleTick(setId: string, identity: string, enabled: boolean) {
   const next = found.set.remote.rules.map(rule => rule.identity === identity ? applyEnabled([rule], enabled, held)[0]! : rule)
   saving.value = true
   try {
-    if (await persistRules(setId, next) === 'saved') toast('Draft saved')
+    if ((await persistRules(setId, next)).status === 'saved') toast('Draft saved')
   } finally { saving.value = false }
+}
+function layerTickNote(saved: number, failure: string) {
+  if (!failure) {
+    if (saved === 1) return 'Draft saved'
+    if (saved > 1) return `Saved ${saved} drafts. Nothing is live until you publish.`
+    return ''
+  }
+  const kept = saved > 0 ? `Saved ${saved} ${saved === 1 ? 'draft' : 'drafts'}. ` : ''
+  const detail = saved > 0 && failure === 'The draft was not saved.' ? 'The next set was not saved.' : failure
+  return `${kept}${detail}`
 }
 async function onSectionTick(key: SectionKey, enabled: boolean) {
   if (layerTickLocked.value) return
@@ -296,18 +315,18 @@ async function onSectionTick(key: SectionKey, enabled: boolean) {
   if (!section) return
   saving.value = true
   let saved = 0
-  let failed = false
+  let failure = ''
   try {
     for (const { bundle, set } of section.sets) {
       if (writeBlock(caller.value, bundle.layer.scope)) continue
       const next = applyEnabled(set.remote.rules, enabled, heldFor(bundle.layer.scope))
-      const result = await persistRules(set.remote.id, next)
-      if (result === 'failed') { failed = true; break }
-      if (result === 'saved') saved += 1
+      const result = await persistRules(set.remote.id, next, { quiet: true })
+      if (result.status === 'failed') { failure = result.message; break }
+      if (result.status === 'saved') saved += 1
     }
   } finally { saving.value = false }
-  if (!failed && saved === 1) toast('Draft saved')
-  else if (!failed && saved > 1) toast(`Saved ${saved} drafts. Nothing is live until you publish.`)
+  const note = layerTickNote(saved, failure)
+  if (note) toast(note, failure ? { tone: 'error' } : undefined)
 }
 async function duplicateSet(setId: string) {
   if (dirty.value) { toast('Save or cancel the set you are editing before duplicating.', { tone: 'error' }); return }
@@ -315,7 +334,7 @@ async function duplicateSet(setId: string) {
   if (!found) return
   const block = writeBlock(caller.value, found.bundle.layer.scope)
   if (block) { toast(block, { tone: 'error' }); return }
-  const name = copyName(found.set.remote.name)
+  const name = copyName(found.set.remote.name, allSets.value.map(item => item.set.remote.name))
   const taken = new Set<string>()
   const rules = found.set.remote.rules.map(rule => {
     const copy = duplicateRule(rule, taken)

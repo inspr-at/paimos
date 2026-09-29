@@ -32,13 +32,20 @@ const tags = computed(() => {
 const lockTip = computed(() => props.heldBy
   ? `Locked in ${props.heldBy} rules, which win over this one.`
   : props.rule.strength === 'locked' ? 'Locked: always on, and lower layers cannot switch it off.' : '')
+
+function onSwitch(event: Event) {
+  const input = event.target as HTMLInputElement
+  const next = input.checked
+  input.checked = props.rule.enabled
+  if (!props.switchDisabled) emit('toggle', next)
+}
 </script>
 
 <template>
   <li class="rule" :class="{ off: !rule.enabled && rule.strength !== 'locked', held: !!heldBy }">
     <span class="lead">
       <label v-if="switchable" class="switch">
-        <input type="checkbox" :checked="rule.enabled" :disabled="switchDisabled" :aria-label="`${rule.text.trim() || 'Untitled rule'} is on`" @change="emit('toggle', ($event.target as HTMLInputElement).checked)">
+        <input type="checkbox" :checked="rule.enabled" :disabled="switchDisabled" :aria-label="`${rule.text.trim() || 'Untitled rule'} is on`" @change="onSwitch">
       </label>
       <span v-else-if="lockTip" class="lock" role="img" :aria-label="heldBy ? `Locked in ${heldBy} rules` : 'Locked'" :data-tip="lockTip"><BizIcon name="lock" :size="13" /></span>
       <span v-else class="dot" aria-hidden="true"></span>
@@ -64,9 +71,10 @@ const lockTip = computed(() => props.heldBy
 </template>
 
 <style scoped>
-.rule { display: grid; grid-template-columns: auto minmax(0, 1fr) 28px; gap: 2px 10px; align-items: start; padding: 7px 8px 7px 10px; border-radius: 10px; }
+.rule { display: grid; grid-template-columns: 34px minmax(0, 1fr) 28px; gap: 2px 10px; align-items: start; padding: 7px 8px 7px 10px; border-radius: 10px; }
 @media (hover: hover) { .rule:hover { background: var(--row-hover); } }
-.lead { display: grid; place-items: center; min-height: 23px; }
+.lead { display: grid; place-items: center; width: 34px; height: 22px; }
+.lead .switch { width: 34px; height: 20px; min-width: 0; min-height: 0; line-height: 0; }
 .lock { display: grid; place-items: center; width: 18px; height: 18px; color: var(--teal-ink); cursor: default; }
 .held .lock { color: var(--ink-3); }
 .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--line-2); }
@@ -90,5 +98,7 @@ dd { margin: 0; min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   dd + dt { margin-top: 6px; }
+  .lead .switch { position: relative; }
+  .lead .switch::before { content: ''; position: absolute; top: 50%; left: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
 }
 </style>
