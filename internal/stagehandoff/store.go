@@ -18,7 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
-const handoffColumns = `id::text,project_node_id::text,release_node_id::text,stage,operation,plugin_id,attempt,authority_epoch,journey_revision,state,expires_at,evidence_ceiling,plan_digest,predecessor_digest,context_digest,prerequisite_seal_sha256`
+const handoffColumns = `id::text,project_node_id::text,release_node_id::text,stage,operation,plugin_id,attempt,authority_epoch,journey_revision,state,expires_at,evidence_ceiling,plan_digest,predecessor_digest,context_digest,prerequisite_seal_sha256,target,target_digest_sha256`
 
 func loadHandoff(ctx context.Context, tx pgx.Tx, id string, lock bool) (Handoff, error) {
 	var h Handoff
@@ -26,9 +26,13 @@ func loadHandoff(ctx context.Context, tx pgx.Tx, id string, lock bool) (Handoff,
 	if lock {
 		q += ` FOR UPDATE`
 	}
-	err := tx.QueryRow(ctx, q, id).Scan(&h.ID, &h.ProjectNodeID, &h.ReleaseNodeID, &h.Stage, &h.Operation, &h.PluginID, &h.Attempt, &h.AuthorityEpoch, &h.JourneyRevision, &h.State, &h.ExpiresAt, &h.EvidenceCeiling, &h.PlanDigest, &h.PredecessorDigest, &h.ContextDigest, &h.PrerequisiteSealSHA256)
+	var targetDigest *string
+	err := tx.QueryRow(ctx, q, id).Scan(&h.ID, &h.ProjectNodeID, &h.ReleaseNodeID, &h.Stage, &h.Operation, &h.PluginID, &h.Attempt, &h.AuthorityEpoch, &h.JourneyRevision, &h.State, &h.ExpiresAt, &h.EvidenceCeiling, &h.PlanDigest, &h.PredecessorDigest, &h.ContextDigest, &h.PrerequisiteSealSHA256, &h.Target, &targetDigest)
 	if err != nil {
 		return h, err
+	}
+	if targetDigest != nil {
+		h.TargetDigestSHA256 = *targetDigest
 	}
 	err = tx.QueryRow(ctx, `SELECT id::text FROM stage_handoffs WHERE release_node_id=$1::uuid AND stage=$2 AND operation=$3 AND attempt>$4 ORDER BY attempt DESC LIMIT 1`, h.ReleaseNodeID, h.Stage, h.Operation, h.Attempt).Scan(&h.SupersededBy)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -158,6 +162,8 @@ func (m *Module) create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in R
 	h.Operation = in.Operation
 	h.PluginID = plugin
 	h.EvidenceCeiling = ceiling
+	h.Target = in.Target
+	h.TargetDigestSHA256 = in.TargetDigestSHA256
 	if old, ok, err := existingRequest(ctx, tx, in); err != nil {
 		return h, err
 	} else if ok {
@@ -222,6 +228,17 @@ func (m *Module) create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in R
 	if !live {
 		return h, fail(403, "stage gate is not approved")
 	}
+	if in.Operation == "verify" {
+		// Retain audit metadata internally; Handoff excludes it from PHAROS responses.
+		var targetDigest *string
+		err := tx.QueryRow(ctx, `SELECT target,target_digest_sha256 FROM stage_handoffs WHERE release_node_id=$1::uuid AND stage='deploy' AND operation='deploy' ORDER BY attempt DESC LIMIT 1`, in.ReleaseNodeID).Scan(&h.Target, &targetDigest)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return h, err
+		}
+		if targetDigest != nil {
+			h.TargetDigestSHA256 = *targetDigest
+		}
+	}
 	h.PlanDigest, err = planDigest(ctx, tx, in.ReleaseNodeID)
 	if err != nil {
 		return h, err
@@ -247,7 +264,7 @@ func (m *Module) create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in R
 	// PostgreSQL stores timestamptz at microsecond precision. Return the stored
 	// instant so the create response can be used as an exact handoff binding.
 	h.ExpiresAt = m.clock().UTC().Add(30 * time.Minute).Truncate(time.Microsecond)
-	err = tx.QueryRow(ctx, `INSERT INTO stage_handoffs(tenant_id,project_node_id,release_node_id,stage,operation,plugin_id,requested_by_principal_id,idempotency_key,attempt,authority_epoch,journey_revision,plan_digest,predecessor_digest,context_digest,prerequisite_seal_sha256,evidence_ceiling,expires_at) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7::uuid,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id::text,expires_at`, p.TenantID, in.ProjectNodeID, in.ReleaseNodeID, in.Stage, in.Operation, plugin, p.ID, in.IdempotencyKey, h.Attempt, h.AuthorityEpoch, revision, h.PlanDigest, h.PredecessorDigest, h.ContextDigest, seal, ceiling, h.ExpiresAt).Scan(&h.ID, &h.ExpiresAt)
+	err = tx.QueryRow(ctx, `INSERT INTO stage_handoffs(tenant_id,project_node_id,release_node_id,stage,operation,plugin_id,requested_by_principal_id,idempotency_key,attempt,authority_epoch,journey_revision,plan_digest,predecessor_digest,context_digest,prerequisite_seal_sha256,evidence_ceiling,expires_at,target,target_digest_sha256) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7::uuid,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id::text,expires_at`, p.TenantID, in.ProjectNodeID, in.ReleaseNodeID, in.Stage, in.Operation, plugin, p.ID, in.IdempotencyKey, h.Attempt, h.AuthorityEpoch, revision, h.PlanDigest, h.PredecessorDigest, h.ContextDigest, seal, ceiling, h.ExpiresAt, h.Target, nullableDigest(h.TargetDigestSHA256)).Scan(&h.ID, &h.ExpiresAt)
 	if err != nil {
 		return h, err
 	}
@@ -257,7 +274,7 @@ func (m *Module) create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in R
 			return h, err
 		}
 	}
-	_, err = events.Append(ctx, tx, p, events.Change{Type: "stage_handoff.requested", NodeID: &h.ReleaseNodeID, After: map[string]any{"id": h.ID, "stage": h.Stage, "operation": h.Operation, "attempt": h.Attempt, "authority_epoch": h.AuthorityEpoch}})
+	_, err = events.Append(ctx, tx, p, events.Change{Type: "stage_handoff.requested", NodeID: &h.ReleaseNodeID, After: withTargetEvidence(h, map[string]any{"id": h.ID, "stage": h.Stage, "operation": h.Operation, "attempt": h.Attempt, "authority_epoch": h.AuthorityEpoch})})
 	return h, err
 }
 func current(ctx context.Context, tx pgx.Tx, h Handoff) (bool, error) {
@@ -391,8 +408,22 @@ func existingRequest(ctx context.Context, tx pgx.Tx, in RequestWrite) (Handoff, 
 	if err != nil {
 		return Handoff{}, false, err
 	}
-	if old.ReleaseNodeID != in.ReleaseNodeID || old.Operation != in.Operation || old.JourneyRevision != in.ExpectedJourneyRevision {
+	if old.ReleaseNodeID != in.ReleaseNodeID || old.Operation != in.Operation || old.JourneyRevision != in.ExpectedJourneyRevision || (in.Target != nil && old.TargetDigestSHA256 != in.TargetDigestSHA256) {
 		return Handoff{}, false, fail(409, "idempotency key was used for a different request")
 	}
 	return old, true, nil
+}
+
+func nullableDigest(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+func withTargetEvidence(h Handoff, fields map[string]any) map[string]any {
+	if h.Target != nil {
+		fields["target"] = h.Target
+		fields["target_digest_sha256"] = h.TargetDigestSHA256
+	}
+	return fields
 }

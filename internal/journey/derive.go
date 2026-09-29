@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/deploytarget"
 )
 
 const (
@@ -73,12 +75,14 @@ var stageOrder = []string{
 
 // gateOffer is the selected unconsumed approval request for one gate, if any.
 type gateOffer struct {
-	ID        string
-	DecidedBy string
-	Live      bool
-	Consumed  bool
-	State     string
-	ExpiresAt string
+	ID                 string
+	DecidedBy          string
+	Live               bool
+	Consumed           bool
+	State              string
+	ExpiresAt          string
+	Target             *deploytarget.Target
+	TargetDigestSHA256 string
 }
 
 // releaseFacts is the current journey release, not a client-supplied stage.
@@ -137,6 +141,8 @@ type facts struct {
 	BuildGateID                string
 	CandidateGateID            string
 	DeployGateID               string
+	DeployTarget               *deploytarget.Target
+	DeployTargetDigestSHA256   string
 	AccessGateID               string
 	GateLiveByID               map[string]bool
 	DeployHandoff              handoffIdentity
@@ -612,6 +618,13 @@ func stageRail(f facts, current string, blocked bool) []JourneyStage {
 			st.GateOfferID = strPtr(offer.ID)
 			st.GateOfferState = offer.State
 			st.GateOfferExpiresAt = offer.ExpiresAt
+		}
+		if key == stageDeploy {
+			if f.Deploy.ID != "" && !f.Deploy.Consumed {
+				st.Target, st.TargetDigestSHA256 = f.Deploy.Target, f.Deploy.TargetDigestSHA256
+			} else {
+				st.Target, st.TargetDigestSHA256 = f.DeployTarget, f.DeployTargetDigestSHA256
+			}
 		}
 		if handoff.ID != "" {
 			st.HandoffAttempt = &handoff.Attempt

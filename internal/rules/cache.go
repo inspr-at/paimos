@@ -25,6 +25,9 @@ type Cache struct {
 	Bundle   Merged    `json:"bundle"`
 	StoredAt time.Time `json:"stored_at"`
 	SHA256   string    `json:"sha256"`
+	// Stale is set only when this verified cache was served because Aeon was
+	// unreachable. A fresh fetch omits it. The bundle bytes stay as stored.
+	Stale bool `json:"stale,omitempty"`
 }
 
 func (c Cache) hash() string { c.SHA256 = ""; return jsonDigest(c) }
@@ -89,6 +92,34 @@ func DecodeCache(raw []byte, instance string, ctx Context, now time.Time) (Merge
 		return Merged{}, err
 	}
 	return c.Bundle, nil
+}
+
+// MarkStale records that a verified cache was used while Aeon was unreachable.
+// The bundle, its digest and the independent floor pin stay as stored; only the
+// envelope gains the mark and a new envelope digest. An already-marked cache is
+// returned unchanged. A cache that fails integrity is refused and must not be
+// rewritten into something that looks verified.
+func MarkStale(raw []byte, instance string, ctx Context, now time.Time) ([]byte, error) {
+	if _, err := DecodeCache(raw, instance, ctx, now); err != nil {
+		return nil, err
+	}
+	var c Cache
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return nil, errors.New("invalid rules cache")
+	}
+	if c.Stale {
+		return raw, nil
+	}
+	c.Stale = true
+	c.SHA256 = c.hash()
+	out, err := json.Marshal(c)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = DecodeCache(out, instance, ctx, now); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // Offline never substitutes a different context. Failure retains only the

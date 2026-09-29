@@ -63,11 +63,21 @@ export interface UsageDashboard {
   totals: UsageGroup
   by_project: UsageGroup[]
   by_model: UsageGroup[]
+  by_harness?: UsageGroup[]
   by_subscription: UsageGroup[]
   trend: UsageTrend[]
   tickets: UsageTicket[]
   tickets_cost_unknown: number
   allowance: { state: 'visible' | 'withheld' | 'none'; windows: AllowanceWindow[] }
+  ratings?: {
+    votes: number
+    average: string | null
+    exceptions: number
+    deliveries: number
+    rework_rate: string | null
+    by_model: { label: string; votes: number; average: string | null; exceptions: number; deliveries: number; rework_rate: string | null }[]
+    by_harness: { label: string; votes: number; average: string | null; exceptions: number; deliveries: number; rework_rate: string | null }[]
+  }
 }
 
 export const costStateLabel: Record<CostState, string> = {

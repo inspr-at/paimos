@@ -225,8 +225,117 @@ func TestStoreAuthorizationHistoryAndGenericNodeGuards(t *testing.T) {
 	if strings.Contains(string(foreignLayers), layer.ID) {
 		t.Fatal("foreign tenant layer leak")
 	}
+	savedRules := maxBudgetRules
+	maxBudgetRules = 1
+	t.Cleanup(func() { maxBudgetRules = savedRules })
+	over := call(scoped, "GET", mergePath, nil, 422)
+	if !strings.Contains(string(over), `"code":"budget_check_too_large"`) {
+		t.Fatalf("store cap: %s", over)
+	}
+	maxBudgetRules = savedRules
 	var restoredFrom string
 	if err = d.Admin.QueryRow(t.Context(), `SELECT before->>'source_version' FROM events WHERE tenant_id=$1 AND node_id=$2 AND type='rules.restored'`, tid, set.ID).Scan(&restoredFrom); err != nil || restoredFrom != "260928110000.0.0" {
 		t.Fatal("missing restoration audit", err)
+	}
+}
+
+func TestMergedLoadStopsWhenTheStoreCapIsCrossed(t *testing.T) {
+	d := dbtest.Open(t)
+	var tid string
+	if err := d.App.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('rules-stopload','Rules stop load') RETURNING id::text`).Scan(&tid); err != nil {
+		t.Fatal(err)
+	}
+	admin := tenant.Principal{TenantID: tid, Kind: tenant.Person, Name: "owner"}
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','owner') RETURNING id::text`, tid).Scan(&admin.ID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, d, tid, admin.ID, "admin")
+	var projectID string
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'RSTOP-1','Project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, tid).Scan(&projectID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	New(d.App).Mount(mux)
+	call := func(method, path string, in any, want int) []byte {
+		t.Helper()
+		body := ""
+		if in != nil {
+			body = string(jsonBytes(in))
+		}
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), admin))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != want {
+			t.Fatalf("%s %s: status %d want %d: %s", method, path, w.Code, want, w.Body.String())
+		}
+		return w.Body.Bytes()
+	}
+	var layer Layer
+	if err = json.Unmarshal(call("POST", "/api/rules/layers", Scope{Layer: "company"}, 200), &layer); err != nil {
+		t.Fatal(err)
+	}
+	locked := testRule("safety", "Keep the locked company floor.")
+	locked.Strength = "locked"
+	rules := []Rule{locked, testRule("tone", "Be brief."), testRule("format", "Use plain sentences.")}
+	names := []string{"Safety", "Tone", "Format"}
+	for i, rule := range rules {
+		var set Set
+		if err = json.Unmarshal(call("POST", "/api/rules/sets", map[string]any{"layer_id": layer.ID, "name": names[i]}, 200), &set); err != nil {
+			t.Fatal(err)
+		}
+		call("PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{1, names[i], []Rule{rule}}, 200)
+		call("POST", "/api/rules/sets/"+set.ID+"/publish", map[string]any{"expected_revision": 2, "version": "260929084800.0.0"}, 200)
+	}
+	var ordered []string
+	rows, err := d.Admin.Query(t.Context(), `SELECT id::text FROM nodes WHERE tenant_id=$1 AND rule_resource='set' AND deleted_at IS NULL ORDER BY id`, tid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		ordered = append(ordered, id)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil || len(ordered) != 3 {
+		t.Fatal(err, ordered)
+	}
+	var loaded []string
+	savedHook := beforeSnapshotLoad
+	savedRules, savedBytes := maxBudgetRules, maxBudgetBytes
+	beforeSnapshotLoad = func(setID, _ string) { loaded = append(loaded, setID) }
+	t.Cleanup(func() {
+		beforeSnapshotLoad = savedHook
+		maxBudgetRules, maxBudgetBytes = savedRules, savedBytes
+	})
+	path := "/api/rules/merged?project_id=" + projectID + "&person_id=" + admin.ID + "&role=builder&harness=codex"
+	merge := func(want int) []byte {
+		t.Helper()
+		loaded = nil
+		return call("GET", path, nil, want)
+	}
+	if body := merge(200); !strings.Contains(string(body), "Keep the locked company floor") || len(loaded) != 3 || loaded[0] != ordered[0] || loaded[1] != ordered[1] || loaded[2] != ordered[2] {
+		t.Fatalf("under cap loaded %v ordered %v body %s", loaded, ordered, body)
+	}
+	maxBudgetRules = 2
+	over := merge(422)
+	if !strings.Contains(string(over), `"code":"budget_check_too_large"`) || len(loaded) != 2 || loaded[0] != ordered[0] || loaded[1] != ordered[1] {
+		t.Fatalf("rule cap loaded %v ordered %v body %s", loaded, ordered, over)
+	}
+	maxBudgetRules = savedRules
+	maxBudgetBytes = 1
+	over = merge(422)
+	if !strings.Contains(string(over), `"code":"budget_check_too_large"`) || len(loaded) != 1 || loaded[0] != ordered[0] {
+		t.Fatalf("byte cap loaded %v ordered %v body %s", loaded, ordered, over)
 	}
 }

@@ -137,3 +137,16 @@ test('confirmation binds journey, requirements, release, action and request iden
   assert.equal(captured.revision, 12)
   assert.equal(captured.approval!.scope, 'journey.requirements.r12.da')
 })
+
+test('confirmation snapshots deployment metadata by value without requiring it', () => {
+  const approval = { id: 'deploy', scope: 'journey.deploy', resource_kind: 'node', resource_id: 'release', agent_principal_id: 'agent', target: { hosts: ['edge-1'], service: 'aeon', change: 'Update' } } as Approval
+  const journey = { project_node_id: 'project', revision: 1, stage: 'deploy', current_release_id: 'release', next_action: { key: 'approve_deploy', stage: 'deploy', approval_request_id: approval.id }, stages: [{ key: 'deploy', target: approval.target }] } as Journey
+  const captured = captureJourneyConfirmation(journey, 'approve_deploy', approval)
+  assert.equal(matchesJourneyConfirmation(captured, journey, [approval]), true)
+  approval.target!.hosts![0] = 'edge-2'
+  assert.equal(captured.approval!.target!.hosts![0], 'edge-1')
+  assert.equal(matchesJourneyConfirmation(captured, journey, [approval]), false)
+  delete approval.target
+  delete journey.stages[0].target
+  assert.equal(matchesJourneyConfirmation(captureJourneyConfirmation(journey, 'approve_deploy', approval), journey, [approval]), true)
+})

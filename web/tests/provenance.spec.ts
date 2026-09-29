@@ -51,6 +51,44 @@ function fulfillStatus(status: number) {
   return (route: Route) => route.fulfill({ status, json: { error: status === 404 ? 'not found' : 'forbidden' } })
 }
 
+test('rule versions show a hash and version without instruction text', async ({ page }) => {
+  await world(page, 'light')
+  const id = session(2)
+  const setID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const rulesHash = 'c'.repeat(64)
+  await page.route('**/api/projects/*/harness-sessions/*/provenance', route => route.fulfill({
+    json: {
+      session_id: id,
+      truncated: false,
+      revisions: [{
+        id: 'rev-rules',
+        session_id: id,
+        revision: 1,
+        recorded_at: new Date(now - 60_000).toISOString(),
+        items: [
+          { kind: 'rules_merged', logical_name: 'merged-rules', hash_kind: 'content', content_sha256: rulesHash, version: '260929120000.0.0', byte_size: 40 },
+          { kind: 'rules_set', logical_name: setID, hash_kind: 'content', content_sha256: skillHash, version: '260929120000.0.0', byte_size: null },
+        ],
+      }],
+    },
+  }))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/agents/${id}`)
+  const block = page.getByRole('complementary', { name: 'Session details' }).locator('.provenance')
+  await expect(block.getByRole('heading', { name: 'Instructions' })).toBeVisible()
+  await expect(block).toContainText('Merged rules')
+  await expect(block).toContainText('Published set')
+  await expect(block).toContainText('260929120000.0.0')
+  await expect(block).toContainText(rulesHash.slice(0, 12))
+  await expect(block).not.toContainText(rulesHash)
+  await expect(block).not.toContainText('synthetic-floor-sentence-must-not-leak')
+  await expect(block).not.toContainText(setID)
+  await expect(block.locator('.name').nth(1)).toHaveAttribute('data-tip', setID)
+  const borderLeft = await block.locator('.revision').evaluate(element => getComputedStyle(element).borderLeftWidth)
+  expect(borderLeft).toBe('0px')
+  expect(await page.getByRole('complementary', { name: 'Session details' }).locator('.scroll').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+})
+
 test('an empty provenance record stays empty inside the open session', async ({ page }) => {
   await world(page, 'light')
   await page.goto(`/agents/${session(2)}`)

@@ -455,6 +455,10 @@ func (m *Module) merged(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
+	// Count each snapshot as it is read. A snapshot costs at least one rule, so
+	// once the running total is at the cap the rest are refused unread. A
+	// snapshot that itself crosses 2,000 rules or 2 MiB is the last one loaded.
+	budget := &work{ctx: r.Context()}
 	snapshots := []Snapshot{}
 	for _, s := range ss {
 		if !s.Scope.matches(c) || s.PublishedVersion == "" {
@@ -463,13 +467,26 @@ func (m *Module) merged(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		if err = permission(r.Context(), tx, p, s.Scope, "rules.read"); err != nil {
 			return nil, err
 		}
+		if budget.rules >= maxBudgetRules {
+			return nil, errMergeStoreTooLarge
+		}
 		snap, err := loadVersion(r.Context(), tx, s.ID, s.PublishedVersion)
 		if err != nil {
 			return nil, err
 		}
+		if err = budget.admit(snap); err != nil {
+			return nil, err
+		}
 		snapshots = append(snapshots, snap)
 	}
-	return Merge(c, snapshots, time.Now().UTC())
+	merged, err := Merge(c, snapshots, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	if err = RecordServedManifest(r.Context(), tx, c, merged); err != nil {
+		return nil, err
+	}
+	return merged, nil
 }
 
 // fields is the storage envelope on ordinary Aeon nodes. Scope is copied onto

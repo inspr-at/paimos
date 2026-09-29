@@ -27,7 +27,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/projectId'
       responses:
-        '200': {description: Resolved, ambiguous or unset}
+        '200': {description: 'Resolved, ambiguous or unset'}
   /api/projects/{projectId}/harness-sessions/{sessionId}:
     get:
       operationId: getHarnessSession
@@ -55,7 +55,7 @@ paths:
       summary: Human-authorized recovery preview
       parameters: [{$ref: '#/components/parameters/projectId'}, {$ref: '#/components/parameters/sessionId'}]
       responses:
-        '200': {description: Exact session, host, observed revision and recovery confirmation; process state remains unknown}
+        '200': {description: 'Exact session, host, observed revision and recovery confirmation; process state remains unknown'}
         '403': {description: Human harness.recover permission required}
   /api/projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop:
     post:
@@ -156,7 +156,7 @@ paths:
       responses:
         '201': {description: Typed pending or replayed control metadata}
         '403': {description: Person permission required}
-        '409': {description: Unmanaged, unsupported or stale generation}
+        '409': {description: 'Unmanaged, unsupported or stale generation'}
   /api/projects/{projectId}/harness-sessions/{sessionId}/managed-context:
     post:
       operationId: managedHarnessContext
@@ -209,6 +209,15 @@ paths:
       responses:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Closed immutable generation}
+  /api/projects/{projectId}/instruction-provenance:
+    get:
+      operationId: queryHarnessInstructionProvenance
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200': {description: 'Instruction source identities for one visible project, newest first'}
+        '400': {description: Unknown or invalid query}
+        '404': {description: Project is not visible}
   /api/projects/{projectId}/harness-sessions/{sessionId}/provenance:
     get:
       operationId: getHarnessInstructionProvenance
@@ -247,8 +256,12 @@ paths:
     post:
       operationId: recordHarnessRulesReceipt
       description: >-
-        Explicit worker report of receiving particular merged bytes; never publishes rules, changes
-        instruction provenance, or proves model load, obedience or execution, and grants no authority.
+        Explicit worker report of receiving particular merged bytes; never publishes rules or proves
+        model load, obedience or execution, and grants no authority. A newly appended receipt also
+        appends session instruction provenance for that merged version and body hash, plus constituent
+        set versions from the one manifest served with those bytes. When that serve was not recorded, or
+        more than one set list was served for the same bytes, only the merged identity is stored. Replay does not append another provenance
+        revision. The receipt row itself stays free of rule text.
         Requires harness.worker and the exact active owning generation lease. Server verifies tenant,
         project, agent, canonical key creator, registered harness and any task's current session/project
         binding. Role, bytes, version and source remain worker-reported; publication is not verified.
@@ -322,7 +335,7 @@ components:
         request_id: {type: string, format: uuid, description: Caller-generated idempotency ID scoped to the session; reuse only with the identical payload}
         expected_revision: {type: integer, format: int64, minimum: 0, maximum: 9223372036854775806}
         context: {$ref: '#/components/schemas/HarnessRulesReceiptContext'}
-        body_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Worker-reported SHA256 of exact merged bytes, never a hash of a version label}
+        body_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Worker-reported SHA256 of exact merged bytes, never a hash of a version label'}
         version: {type: string, maxLength: 16, pattern: '^(floor-only|[0-9]{12}\.0\.0)$', description: Worker-reported calendar version or floor-only; no assertion of publication}
         byte_size: {type: integer, minimum: 1, maximum: 12000}
         source: {type: string, enum: [online, cache, floor-only], description: Worker-reported source; cache/floor-only are stale fallback evidence and never fresh authority}
@@ -389,7 +402,7 @@ components:
       type: object
       required: [kind, logical_name, hash_kind]
       properties:
-        kind: {type: string, enum: [agents, claude, skill, prompt_template]}
+        kind: {type: string, enum: [agents, claude, skill, prompt_template, rules_merged, rules_set]}
         logical_name: {type: string, maxLength: 80}
         hash_kind: {type: string, enum: [content, absent]}
         content_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$', description: Present only for hash_kind content. Null when absent. Never a hash of the version identifier.}

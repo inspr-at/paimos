@@ -41,11 +41,37 @@ type Dashboard struct {
 	Totals             UsageGroup      `json:"totals"`
 	ByProject          []UsageGroup    `json:"by_project"`
 	ByModel            []UsageGroup    `json:"by_model"`
+	ByHarness          []UsageGroup    `json:"by_harness"`
 	BySubscription     []UsageGroup    `json:"by_subscription"`
 	Trend              []UsageTrend    `json:"trend"`
 	Tickets            []UsageTicket   `json:"tickets"`
 	TicketsCostUnknown int             `json:"tickets_cost_unknown"`
 	Allowance          AllowanceReport `json:"allowance"`
+	Ratings            Ratings         `json:"ratings"`
+}
+
+// Ratings is rework by exception for the sessions in this dashboard.
+// A vote row is an exception. ReworkRate is exceptions/deliveries.
+// Average is the mean of optional scores, null when none were given.
+type Ratings struct {
+	Votes      int           `json:"votes"`
+	Average    *string       `json:"average"`
+	Exceptions int           `json:"exceptions"`
+	Deliveries int           `json:"deliveries"`
+	ReworkRate *string       `json:"rework_rate"`
+	ByModel    []RatingGroup `json:"by_model"`
+	ByHarness  []RatingGroup `json:"by_harness"`
+}
+
+// RatingGroup is one usage model or harness and its rework rate.
+// Labels match the usage breakdown. Votes counts exception rows.
+type RatingGroup struct {
+	Label      string  `json:"label"`
+	Votes      int     `json:"votes"`
+	Average    *string `json:"average"`
+	Exceptions int     `json:"exceptions"`
+	Deliveries int     `json:"deliveries"`
+	ReworkRate *string `json:"rework_rate"`
 }
 
 // UsageGroup is one project, model, reported subscription, or the range total.
@@ -117,16 +143,32 @@ type AllowanceWindow struct {
 	HardRemaining *int64    `json:"hard_remaining"`
 }
 
+func deliveryModelLabel(row sessionRow) string {
+	if row.reported && row.model != nil && *row.model != "" {
+		return *row.model
+	}
+	return "Unreported"
+}
+
+func deliveryHarnessLabel(row sessionRow) string {
+	if row.harness != "" {
+		return row.harness
+	}
+	return "Unreported"
+}
+
 type sessionRow struct {
 	id, projectID, projectKey, projectTitle string
 	ticketID, ticketKey, ticketTitle        *string
 	created                                 time.Time
+	harness                                 string
 	reported                                bool
 	model                                   *string
 	input, output, cached                   *int64
 	cost                                    *string
 	provisional                             bool
 	billingMode, subscription               *string
+	delivered                               bool
 }
 
 func parseRange(fromRaw, toRaw string, now time.Time) (time.Time, time.Time, error) {
@@ -186,9 +228,10 @@ func (m *Module) dashboard(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	out := Dashboard{
 		From: from, To: to, GeneratedAt: now,
 		Attribution: attributionLifetime, TrendBasis: trendBasisStartedDay, ListPriceCurrency: listPriceCurrency,
-		ByProject: []UsageGroup{}, ByModel: []UsageGroup{}, BySubscription: []UsageGroup{},
+		ByProject: []UsageGroup{}, ByModel: []UsageGroup{}, ByHarness: []UsageGroup{}, BySubscription: []UsageGroup{},
 		Trend: []UsageTrend{}, Tickets: []UsageTicket{},
 		Allowance: AllowanceReport{State: "withheld", Windows: []AllowanceWindow{}},
+		Ratings:   emptyRatings(),
 	}
 	if err := tx.QueryRow(r.Context(), `SELECT now()`).Scan(&out.GeneratedAt); err != nil {
 		return nil, err
@@ -206,14 +249,20 @@ func (m *Module) dashboard(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		return nil, err
 	}
 	rows, out.Truncated = trimSessions(rows)
-	totals, projects, models, subs, trend, tickets, unknownTickets, err := aggregate(rows)
+	totals, projects, models, harnesses, subs, trend, tickets, unknownTickets, err := aggregate(rows)
 	if err != nil {
 		return nil, err
 	}
 	out.Totals = totals
 	out.ByProject = projects
 	out.ByModel = models
+	out.ByHarness = harnesses
 	out.BySubscription = subs
+	ratings, err := loadVoteRatings(r.Context(), tx, rows)
+	if err != nil {
+		return nil, err
+	}
+	out.Ratings = ratings
 	out.Trend = trend
 	out.Tickets = tickets
 	out.TicketsCostUnknown = unknownTickets
@@ -247,7 +296,8 @@ func loadSessions(ctx context.Context, tx pgx.Tx, from, to time.Time, project st
 		var provisional *bool
 		if err := rows.Scan(
 			&row.id, &row.projectID, &row.projectKey, &row.projectTitle,
-			&row.ticketID, &row.ticketKey, &row.ticketTitle, &row.created,
+			&row.ticketID, &row.ticketKey, &row.ticketTitle, &row.created, &row.harness,
+			&row.delivered,
 			&row.model, &row.input, &row.output, &row.cached, &row.cost,
 			&provisional, &row.billingMode, &row.subscription,
 		); err != nil {
@@ -268,7 +318,8 @@ func loadSessions(ctx context.Context, tx pgx.Tx, from, to time.Time, project st
 func sessionSelect() string {
 	return `WITH started AS (
 	    SELECT s.tenant_id, s.id, s.project_id, p.key AS project_key, p.title AS project_title,
-	           t.id AS ticket_id, t.key AS ticket_key, t.title AS ticket_title, s.created_at
+	           t.id AS ticket_id, t.key AS ticket_key, t.title AS ticket_title, s.created_at, s.harness,
+	           (s.phase = 'stopped') AS delivered
 	      FROM harness_sessions s
 	      JOIN nodes p ON p.tenant_id = s.tenant_id AND p.id = s.project_id
 	      LEFT JOIN nodes t ON t.tenant_id = s.tenant_id AND t.id = s.ticket_node_id AND t.deleted_at IS NULL
@@ -278,7 +329,8 @@ func sessionSelect() string {
 	     LIMIT $4
 	)
 	SELECT started.id::text, started.project_id::text, started.project_key, started.project_title,
-	       started.ticket_id::text, started.ticket_key, started.ticket_title, started.created_at,
+	       started.ticket_id::text, started.ticket_key, started.ticket_title, started.created_at, started.harness,
+	       started.delivered,
 	       u.model, u.input_tokens, u.output_tokens, u.cached_input_tokens, u.estimated_cost_usd::text,
 	       u.provisional, u.billing_mode, u.subscription_label
 	  FROM started
@@ -309,40 +361,49 @@ func trimSessions(rows []sessionRow) ([]sessionRow, bool) {
 	return kept, true
 }
 
-func aggregate(rows []sessionRow) (UsageGroup, []UsageGroup, []UsageGroup, []UsageGroup, []UsageTrend, []UsageTicket, int, error) {
+func aggregate(rows []sessionRow) (UsageGroup, []UsageGroup, []UsageGroup, []UsageGroup, []UsageGroup, []UsageTrend, []UsageTicket, int, error) {
 	total := newBucket("", "", "All visible sessions", false)
 	projects := map[string]*bucket{}
 	models := map[string]*bucket{}
+	harnesses := map[string]*bucket{}
 	subs := map[string]*bucket{}
 	days := map[string]*bucket{}
 	tickets := map[string]*bucket{}
 	var unknownTickets int
 	for _, row := range rows {
 		if err := total.add(row); err != nil {
-			return UsageGroup{}, nil, nil, nil, nil, nil, 0, err
+			return UsageGroup{}, nil, nil, nil, nil, nil, nil, 0, err
 		}
 		projectLabel := row.projectTitle
 		if projectLabel == "" {
 			projectLabel = row.projectKey
 		}
 		if err := touch(projects, row.projectID, row.projectID, row.projectKey, projectLabel, false).add(row); err != nil {
-			return UsageGroup{}, nil, nil, nil, nil, nil, 0, err
+			return UsageGroup{}, nil, nil, nil, nil, nil, nil, 0, err
 		}
-		modelLabel, modelKey := "Unreported", ""
-		if row.reported && row.model != nil && *row.model != "" {
-			modelLabel = *row.model
-			modelKey = *row.model
+		modelLabel := deliveryModelLabel(row)
+		modelKey := ""
+		if modelLabel != "Unreported" {
+			modelKey = modelLabel
 		}
 		if err := touch(models, "m:"+modelKey, "", modelKey, modelLabel, false).add(row); err != nil {
-			return UsageGroup{}, nil, nil, nil, nil, nil, 0, err
+			return UsageGroup{}, nil, nil, nil, nil, nil, nil, 0, err
+		}
+		harnessLabel := deliveryHarnessLabel(row)
+		harnessKey := ""
+		if harnessLabel != "Unreported" {
+			harnessKey = harnessLabel
+		}
+		if err := touch(harnesses, "h:"+harnessKey, "", harnessKey, harnessLabel, false).add(row); err != nil {
+			return UsageGroup{}, nil, nil, nil, nil, nil, nil, 0, err
 		}
 		subLabel, subKey := subscription(row)
 		if err := touch(subs, "s:"+subKey, "", subKey, subLabel, true).add(row); err != nil {
-			return UsageGroup{}, nil, nil, nil, nil, nil, 0, err
+			return UsageGroup{}, nil, nil, nil, nil, nil, nil, 0, err
 		}
 		day := row.created.UTC().Format("2006-01-02")
 		if err := touch(days, day, "", day, day, false).add(row); err != nil {
-			return UsageGroup{}, nil, nil, nil, nil, nil, 0, err
+			return UsageGroup{}, nil, nil, nil, nil, nil, nil, 0, err
 		}
 		if row.ticketID == nil || row.ticketKey == nil || row.ticketTitle == nil {
 			continue
@@ -351,7 +412,7 @@ func aggregate(rows []sessionRow) (UsageGroup, []UsageGroup, []UsageGroup, []Usa
 		bucket.projectID = row.projectID
 		bucket.projectKey = row.projectKey
 		if err := bucket.add(row); err != nil {
-			return UsageGroup{}, nil, nil, nil, nil, nil, 0, err
+			return UsageGroup{}, nil, nil, nil, nil, nil, nil, 0, err
 		}
 	}
 	ranked := []UsageTicket{}
@@ -373,7 +434,7 @@ func aggregate(rows []sessionRow) (UsageGroup, []UsageGroup, []UsageGroup, []Usa
 	if len(ranked) > maxTickets {
 		ranked = ranked[:maxTickets]
 	}
-	return total.group(), groupsOf(projects), groupsOf(models), groupsOf(subs), trendsOf(days), ranked, unknownTickets, nil
+	return total.group(), groupsOf(projects), groupsOf(models), groupsOf(harnesses), groupsOf(subs), trendsOf(days), ranked, unknownTickets, nil
 }
 
 func subscription(row sessionRow) (label, key string) {

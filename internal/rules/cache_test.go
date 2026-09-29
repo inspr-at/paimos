@@ -2,6 +2,7 @@
 package rules
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -81,6 +82,46 @@ func TestCacheContextIntegrityExpiryAndFloor(t *testing.T) {
 		t.Fatal("wrong floor pin accepted")
 	}
 }
+func TestMarkStaleKeepsBundleAndRejectsTamper(t *testing.T) {
+	now := time.Now().UTC()
+	c := testContext()
+	m, err := Merge(c, []Snapshot{floorSnapshot()}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := EncodeCache("https://fixture.invalid", m, now)
+	if err != nil || bytes.Contains(raw, []byte(`"stale"`)) {
+		t.Fatal("fresh cache", err, string(raw))
+	}
+	marked, err := MarkStale(raw, "https://fixture.invalid", c, now)
+	if err != nil || !bytes.Contains(marked, []byte(`"stale":true`)) {
+		t.Fatal(err, string(marked))
+	}
+	got, err := DecodeCache(marked, "https://fixture.invalid", c, now)
+	if err != nil || got.Body != m.Body || got.SHA256 != m.SHA256 || got.Floor != m.Floor {
+		t.Fatal("marked cache changed the bundle", err)
+	}
+	again, err := MarkStale(marked, "https://fixture.invalid", c, now)
+	if err != nil || !bytes.Equal(again, marked) {
+		t.Fatal("second mark rewrote the cache", err)
+	}
+	var tampered map[string]any
+	if json.Unmarshal(marked, &tampered) != nil {
+		t.Fatal("marked cache")
+	}
+	tampered["stale"] = false
+	bad, _ := json.Marshal(tampered)
+	if _, err = DecodeCache(bad, "https://fixture.invalid", c, now); err == nil {
+		t.Fatal("stale flag cleared without a new digest")
+	}
+	if _, err = MarkStale(bad, "https://fixture.invalid", c, now); err == nil {
+		t.Fatal("tampered cache marked")
+	}
+	if _, err = MarkStale([]byte("corrupt"), "https://fixture.invalid", c, now); err == nil {
+		t.Fatal("corrupt cache marked")
+	}
+}
+
 func TestRuleSafeFilesRejectLinksBoundsAndOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.json")

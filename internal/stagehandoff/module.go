@@ -21,6 +21,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/reportercontract"
@@ -73,13 +74,18 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type RequestWrite struct {
-	ProjectNodeID           string `json:"project_node_id"`
-	ReleaseNodeID           string `json:"release_node_id"`
-	Stage                   string `json:"stage"`
-	Operation               string `json:"operation"`
-	ExpectedJourneyRevision int64  `json:"expected_journey_revision"`
-	IdempotencyKey          string `json:"idempotency_key"`
+	ProjectNodeID           string               `json:"project_node_id"`
+	ReleaseNodeID           string               `json:"release_node_id"`
+	Stage                   string               `json:"stage"`
+	Operation               string               `json:"operation"`
+	ExpectedJourneyRevision int64                `json:"expected_journey_revision"`
+	IdempotencyKey          string               `json:"idempotency_key"`
+	Target                  *deploytarget.Target `json:"target,omitempty"`
+	TargetDigestSHA256      string               `json:"-"`
 }
+
+// Handoff keeps target metadata internal for strict PHAROS 1.0 readers.
+// Journey, approvals and audit events expose the target separately.
 type Handoff struct {
 	ID                     string                 `json:"id"`
 	ProjectNodeID          string                 `json:"project_node_id"`
@@ -99,6 +105,8 @@ type Handoff struct {
 	PredecessorDigest      string                 `json:"predecessor_digest"`
 	ContextDigest          string                 `json:"context_digest"`
 	PrerequisiteSealSHA256 string                 `json:"prerequisite_seal_sha256"`
+	Target                 *deploytarget.Target   `json:"-"`
+	TargetDigestSHA256     string                 `json:"-"`
 	Result                 *Result                `json:"result,omitempty"`
 	Admission              *HandoffAdmissionState `json:"admission,omitempty"`
 }
@@ -234,6 +242,17 @@ func (m *Module) request(w http.ResponseWriter, r *http.Request) {
 	plugin, ceiling, gate, ok := route(in.Stage, in.Operation)
 	if !ok {
 		respond(w, 0, nil, fail(400, "invalid stage operation"))
+		return
+	}
+	if in.Operation == "deploy" && in.Target != nil {
+		var err error
+		in.Target, in.TargetDigestSHA256, err = deploytarget.Normalize(in.Target)
+		if err != nil {
+			respond(w, 0, nil, fail(400, err.Error()))
+			return
+		}
+	} else if in.Target != nil {
+		respond(w, 0, nil, fail(400, "target is only used for deploy handoffs"))
 		return
 	}
 	var out Handoff

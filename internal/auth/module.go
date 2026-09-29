@@ -287,6 +287,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "instruction-provenance":
+			if len(parts) == 3 && read {
+				return "harness.read", true
+			}
 		case "release-memberships":
 			if len(parts) == 3 && read {
 				return "releases.read", true
@@ -327,6 +331,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "stage.<op>", true
 		}
 	case "nodes":
+		// A person marks a delivery for rework. An agent key must not inherit nodes.read here.
+		if len(parts) == 3 && parts[2] == "delivery-ratings" {
+			return "", false
+		}
 		if len(parts) > 2 && parts[2] == "time-totals" && read {
 			return "hours.read", true
 		}
@@ -426,6 +434,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			}
 		}
 	case "harness-sessions":
+		if len(parts) >= 3 && parts[2] == "delivery-rating" {
+			return "", false
+		}
 		return harnessScope(parts[1:], read), true
 	case "agent-pairing":
 		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/attach" {
@@ -459,6 +470,11 @@ func coreAgentScope(r *http.Request) (string, bool) {
 }
 
 func harnessScope(parts []string, read bool) string {
+	// The session read marker is a person's own watermark. No agent key scope
+	// reaches it; an empty scope is denied by the agent ceiling.
+	if len(parts) > 0 && parts[len(parts)-1] == "read-marker" {
+		return ""
+	}
 	if len(parts) > 0 && parts[len(parts)-1] == "managed-settings" {
 		return "harness.control"
 	}

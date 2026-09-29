@@ -11,7 +11,7 @@ import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
 import { belongsToSession, collapseMessages } from './sessionMessages'
-import { loadReadMark, nearBottom, saveReadMark, unreadGroups, type InboxReceipt, type ReadMark } from './sessionChat'
+import { keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, saveReadMark, unreadGroups, type InboxReceipt, type ReadMark } from './sessionChat'
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
@@ -20,6 +20,7 @@ const emit = defineEmits<{ unread: [count: number] }>()
 const agents = useAgents()
 const identity = useSession()
 const me = computed(() => identity.identity?.principal.id ?? '')
+const person = computed(() => identity.identity?.principal.kind === 'person')
 const s = computed(() => props.view.session)
 const messages = computed(() => agents.thread(s.value))
 const address = computed(() => agents.addressOf(s.value.agent_principal_id))
@@ -44,8 +45,92 @@ const newFrom = ref<string>()
 const newCount = ref(0)
 watch(() => unread.value.length, n => emit('unread', n), { immediate: true })
 function markRead(event: number, id: string) {
-  if (!me.value || !Number.isFinite(event) || (mark.value && mark.value.event >= event)) return
-  mark.value = saveReadMark(me.value, s.value.id, event, id)
+  if (!me.value || !id || !Number.isFinite(event)) return
+  if (!mark.value || mark.value.event < event) mark.value = saveReadMark(me.value, s.value.id, event, id)
+  if (!person.value || !mark.value) return
+  boundProject = s.value.project_id
+  boundSession = s.value.id
+  const before = pending?.event ?? -1
+  pending = queueReadMark(pending, mark.value)
+  // A repeated look at the same post must not postpone a flush that is already waiting.
+  if (flushTimer === undefined || (pending?.event ?? -1) > before) arm()
+}
+const readPath = (projectId: string, sessionId: string) =>
+  `/projects/${encodeURIComponent(projectId)}/harness-sessions/${encodeURIComponent(sessionId)}/read-marker`
+// One trailing timer. Hide and unmount flush immediately. A failed send stays
+// in `pending` and leaves on the next flush, with no toast.
+let pending: ReadMark | null = null
+let flushTimer: ReturnType<typeof setTimeout> | undefined
+let markSending = false
+let flushAgain = false
+let boundProject = ''
+let boundSession = ''
+let readGeneration = 0
+function arm() {
+  if (!pending || !person.value) return
+  if (flushTimer !== undefined) clearTimeout(flushTimer)
+  flushTimer = setTimeout(() => { flushTimer = undefined; void flush() }, readMarkFlushDelay)
+}
+function reconcileDivider() {
+  if (!entered) return
+  const first = unread.value[0]
+  newFrom.value = first && current.value[0]?.id !== first.id ? first.id : undefined
+  newCount.value = unread.value.length
+}
+async function sendMark(projectId: string, sessionId: string, viewer: string, generation: number, next: ReadMark) {
+  const response = await api(readPath(projectId, sessionId), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ last_read_message_id: next.id, last_read_event_id: next.event }),
+    keepalive: true,
+  })
+  if (!response.ok || generation !== readGeneration || s.value.id !== sessionId) return response.ok && generation === readGeneration
+  const remote = markerFromServer(await response.json())
+  if (remote && s.value.id === sessionId && (!mark.value || remote.event > mark.value.event)) {
+    mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
+  }
+  return true
+}
+async function flush() {
+  if (flushTimer !== undefined) { clearTimeout(flushTimer); flushTimer = undefined }
+  if (!person.value || !pending) return
+  if (markSending) { flushAgain = true; return }
+  const next = pending
+  const projectId = boundProject
+  const sessionId = boundSession
+  const viewer = me.value
+  const generation = readGeneration
+  pending = null
+  markSending = true
+  let ok = false
+  try { ok = await sendMark(projectId, sessionId, viewer, generation, next) }
+  catch { ok = false }
+  finally { markSending = false }
+  if (!ok && generation === readGeneration && s.value.id === sessionId) pending = keepFailedReadMark(pending, next)
+  if (!flushAgain) return
+  flushAgain = false
+  if (pending) await flush()
+}
+async function pullReadMark(projectId: string, sessionId: string, viewer: string, generation: number) {
+  try {
+    const response = await api(readPath(projectId, sessionId))
+    if (!response.ok || generation !== readGeneration || s.value.id !== sessionId) return
+    const remote = markerFromServer(await response.json())
+    if (remote && preferReadMark(mark.value, remote) === remote) {
+      mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
+      reconcileDivider()
+    }
+    const current = mark.value
+    if (!person.value || !current?.id || (remote && current.event <= remote.event)) return
+    boundProject = projectId
+    boundSession = sessionId
+    pending = queueReadMark(pending, current)
+    arm()
+  } catch { /* Offline: the local watermark stands. */ }
+}
+function repull() {
+  if (!person.value || !me.value) return
+  void pullReadMark(s.value.project_id, s.value.id, me.value, readGeneration)
 }
 
 // Shared-inbox attention belongs to the agent principal, not this session: one quiet
@@ -136,16 +221,27 @@ function observe() {
   }, { root: el, threshold: [0, 0.6, 1] })
   el.querySelectorAll<HTMLElement>('.msg[data-event]').forEach(node => seen!.observe(node))
 }
-function visibility() { if (document.visibilityState === 'visible' && props.active && entered) observe() }
+function onVisibility() {
+  if (document.visibilityState === 'hidden') { void flush(); return }
+  repull()
+  if (props.active && entered) observe()
+}
+function onFocus() { repull() }
 onMounted(() => {
-  document.addEventListener('visibilitychange', visibility)
+  document.addEventListener('visibilitychange', onVisibility)
+  window.addEventListener('focus', onFocus)
   if (typeof ResizeObserver !== 'undefined' && scroller.value) {
     // The keyboard or a taller composer shrinks the thread: stay on the latest post.
     resize = new ResizeObserver(() => { if (props.active && entered && stick) toBottom() })
     resize.observe(scroller.value)
   }
 })
-onBeforeUnmount(() => { seen?.disconnect(); resize?.disconnect(); document.removeEventListener('visibilitychange', visibility) })
+onBeforeUnmount(() => {
+  seen?.disconnect(); resize?.disconnect()
+  document.removeEventListener('visibilitychange', onVisibility)
+  window.removeEventListener('focus', onFocus)
+  void flush()
+})
 
 // ---------- Receipts for the viewer's own posts (sender only; 404 means none) ----------
 const receipts = ref<Record<string, InboxReceipt>>({})
@@ -174,12 +270,25 @@ async function refresh() {
   await agents.refreshThread(s.value.project_id)
 }
 watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
-  mark.value = viewer ? loadReadMark(viewer, id) : null
+  const generation = ++readGeneration
+  if (flushTimer !== undefined) { clearTimeout(flushTimer); flushTimer = undefined }
+  const leftover = pending
+  const leftoverProject = boundProject
+  const leftoverSession = boundSession
+  pending = null
+  if (leftover && person.value && leftoverSession && leftoverSession !== id) void sendMark(leftoverProject, leftoverSession, viewer, generation - 1, leftover).catch(() => undefined)
+  const local = viewer ? loadReadMark(viewer, id) : null
+  mark.value = local
   receipts.value = {}; noReceipt.clear()
   entered = false; loaded = false; newFrom.value = undefined; distance.value = 0; stick = true
   draft.value = ''; replyTo.value = null; sendError.value = ''
+  const projectId = s.value.project_id
+  boundProject = projectId
+  boundSession = id
+  // The thread renders from the messages read. The marker catches up after.
+  if (viewer && person.value) void pullReadMark(projectId, id, viewer, generation)
   await refresh()
-  if (s.value.id !== id) return
+  if (generation !== readGeneration || s.value.id !== id) return
   loaded = true
   if (props.active) await enter()
   refreshReceipts()

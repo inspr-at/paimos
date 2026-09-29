@@ -49,6 +49,7 @@ type heartbeatDisk struct {
 	Terminal              bool                    `json:"terminal,omitempty"`
 	TerminalReason        string                  `json:"terminal_reason,omitempty"`
 	Closed                bool                    `json:"closed,omitempty"`
+	SourcesRecorded       bool                    `json:"sources_recorded,omitempty"`
 }
 
 type heartbeatUsageDisk struct {

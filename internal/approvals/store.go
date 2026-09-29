@@ -28,7 +28,7 @@ const (
 // have been checked at that scope.
 const approvalFrom = `
 	SELECT r.id::text, r.agent_principal_id::text, p.name, COALESCE(n.project_id, wn.project_id)::text, r.scope, r.resource_kind,
-	       r.resource_id::text, r.run_id::text, r.rationale, r.expires_at, r.proposed_at,
+	       r.resource_id::text, r.run_id::text, r.rationale, r.expires_at, r.proposed_at, r.target, r.target_digest_sha256,
 	       d.decision, d.decided_by_principal_id::text
 	FROM approval_requests r
 	LEFT JOIN principals p
@@ -144,10 +144,10 @@ func (m *Module) propose(ctx context.Context, p tenant.Principal, authorization 
 		err = tx.QueryRow(ctx, `
 			INSERT INTO approval_requests (
 				tenant_id, proposed_by_principal_id, agent_principal_id, run_id,
-				scope, resource_kind, resource_id, rationale, expires_at)
-			VALUES ($1::uuid, $2::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7, $8)
+				scope, resource_kind, resource_id, rationale, expires_at, target, target_digest_sha256)
+			VALUES ($1::uuid, $2::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7, $8, $9, $10)
 			RETURNING id::text`,
-			p.TenantID, p.ID, in.RunID, in.Scope, in.ResourceKind, in.ResourceID, in.Rationale, in.ExpiresAt,
+			p.TenantID, p.ID, in.RunID, in.Scope, in.ResourceKind, in.ResourceID, in.Rationale, in.ExpiresAt, in.Target, nullableDigest(in.TargetDigestSHA256),
 		).Scan(&id)
 		if err != nil {
 			return err
@@ -432,11 +432,11 @@ func ownRun(ctx context.Context, tx pgx.Tx, agentID, runID string) error {
 
 func lockRequest(ctx context.Context, tx pgx.Tx, id string) (Approval, bool, error) {
 	var a Approval
-	var resourceID, runID *string
+	var resourceID, runID, targetDigest *string
 	var expired bool
 	err := tx.QueryRow(ctx, `
 		SELECT r.id::text, r.agent_principal_id::text, p.name, COALESCE(n.project_id, wn.project_id)::text, r.scope, r.resource_kind,
-		       r.resource_id::text, r.run_id::text, r.rationale, r.expires_at, r.proposed_at,
+		       r.resource_id::text, r.run_id::text, r.rationale, r.expires_at, r.proposed_at, r.target, r.target_digest_sha256,
 		       r.expires_at <= now()
 		FROM approval_requests r
 		LEFT JOIN principals p
@@ -447,9 +447,12 @@ func lockRequest(ctx context.Context, tx pgx.Tx, id string) (Approval, bool, err
 		WHERE r.id = $1::uuid
 		FOR UPDATE OF r`, id).Scan(
 		&a.ID, &a.AgentPrincipalID, &a.AgentName, &a.projectID, &a.Scope, &a.ResourceKind,
-		&resourceID, &runID, &a.Rationale, &a.ExpiresAt, &a.ProposedAt, &expired)
+		&resourceID, &runID, &a.Rationale, &a.ExpiresAt, &a.ProposedAt, &a.Target, &targetDigest, &expired)
 	a.ResourceID = resourceID
 	a.RunID = runID
+	if targetDigest != nil {
+		a.TargetDigestSHA256 = *targetDigest
+	}
 	a.Risk = Risk(a.Scope, a.ResourceKind)
 	return a, expired, err
 }
@@ -460,17 +463,27 @@ func loadApproval(ctx context.Context, tx pgx.Tx, id string) (Approval, error) {
 
 func scanApproval(row pgx.Row) (Approval, error) {
 	var a Approval
-	var resourceID, runID, decision, decidedBy *string
+	var resourceID, runID, decision, decidedBy, targetDigest *string
 	err := row.Scan(
 		&a.ID, &a.AgentPrincipalID, &a.AgentName, &a.projectID, &a.Scope, &a.ResourceKind,
-		&resourceID, &runID, &a.Rationale, &a.ExpiresAt, &a.ProposedAt,
+		&resourceID, &runID, &a.Rationale, &a.ExpiresAt, &a.ProposedAt, &a.Target, &targetDigest,
 		&decision, &decidedBy)
 	a.ResourceID = resourceID
 	a.RunID = runID
+	if targetDigest != nil {
+		a.TargetDigestSHA256 = *targetDigest
+	}
 	a.Risk = Risk(a.Scope, a.ResourceKind)
 	a.Decision = decision
 	a.DecidedByPrincipalID = decidedBy
 	return a, err
+}
+
+func nullableDigest(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func nodeRef(a Approval) *string {
