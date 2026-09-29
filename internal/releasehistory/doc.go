@@ -79,7 +79,12 @@
 //	GET /api/releases/{version}  one release (with or without the leading v)
 //
 // Both require an authenticated principal. The manifest is embedded in the
-// binary (data/history.json when generated, else data/empty.json). Serving
-// reads linked-ticket kind and benefit fields for the caller's tenant when a
-// ticket source is configured, and otherwise returns the manifest unchanged.
+// binary (data/history.json when generated, else data/empty.json). WithBackfills
+// adds immutable database snapshots for the caller's tenant and visible product
+// project. Tagged snapshots win, followed by native journey snapshots, then
+// explicit manifest backfills; missing rows retain the historical fallback.
+// Note reads never capture live ticket fields and never contact the network.
+// Separately, serving reads linked-ticket kind and benefit fields for the
+// caller's tenant when a ticket source is configured to group the change list
+// (AEON-289); without one the changes are served unchanged.
 package releasehistory

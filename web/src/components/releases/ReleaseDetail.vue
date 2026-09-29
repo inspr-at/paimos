@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { displayHeadline, emptyNotesLine, groupChanges, hasUsableNotes, hiddenNoteLine, HISTORICAL_TAG_LABEL, historicalTagFallback, localizedNote, presentChanges, releasedAt, shortCommit, span, ticketsOf, type Release } from '../../lib/releases'
+import { displayHeadline, emptyNotesLine, groupChanges, hasUsableNotes, hiddenNoteLine, HISTORICAL_TAG_LABEL, historicalTagFallback, localizedNote, presentChanges, releasedAt, shortCommit, span, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterRelease, type Release } from '../../lib/releases'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
@@ -90,6 +90,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
     <TicketChips v-if="chipTickets.length && !hasUsableNotes(release)" :tickets="chipTickets" class="tickets" />
 
     <section v-if="hasUsableNotes(release)" class="changes-block notes" aria-label="Release notes">
+      <p v-if="writtenAfterRelease(release)" class="written-after">{{ WRITTEN_AFTER_LABEL }}</p>
       <div v-for="note in release.notes.items" :key="note.id" class="note-item">
         <p class="note-line"><span class="chip note-pill" :lang="localizedNote(note, locale).pillLang">{{ localizedNote(note, locale).pill }}</span> <TicketLink :ticket-key="note.key" /></p>
         <p class="note-benefit" :lang="localizedNote(note, locale).benefitLang">{{ localizedNote(note, locale).benefit }}</p>
@@ -187,6 +188,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 .changes-block { display: grid; gap: 8px; margin-top: 10px; }
 .hist-label { margin: 8px 0 0; }
 .notes { gap: 0; }
+.written-after { margin: 8px 0 0; font-size: 12.5px; line-height: 1.4; color: var(--ink-3); }
 .note-item { display: grid; gap: 4px; min-width: 0; padding: 10px 0; }
 .note-item + .note-item { margin-top: 2px; }
 .note-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; margin: 0; }

@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { displayHeadline, groupByDay, hasUsableNotes, HISTORICAL_TAG_LABEL, historicalTagFallback, matches, presentChanges, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
+import { displayHeadline, groupByDay, hasUsableNotes, HISTORICAL_TAG_LABEL, historicalTagFallback, matches, presentChanges, releasedAt, stats as statsOf, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterRelease, type Release } from '../../lib/releases'
 import { useProfile } from '../../stores/profile'
 import { normalKey } from '../../lib/ticketLinks'
 import { relativeTime } from '../../lib/work'
@@ -367,6 +367,7 @@ const KINDS = [
                   <template v-else>
                     <span v-if="historicalTagFallback(r)" class="eyebrow hist-label">{{ HISTORICAL_TAG_LABEL }}</span>
                     <span class="headline"><template v-for="(p, i) in marked(hasUsableNotes(r) || r.headline ? displayHeadline(r, locale) : 'No headline recorded')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
+                    <span v-if="writtenAfterRelease(r)" class="written-after">{{ WRITTEN_AFTER_LABEL }}</span>
                   </template>
                   <span v-if="r.state === 'published'" class="counts">
                     <template v-for="k in KINDS" :key="k.key">
@@ -510,6 +511,7 @@ const KINDS = [
 .end-tag { background: var(--teal); color: var(--surface); }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
 .hist-label { letter-spacing: .12em; }
+.written-after { font-size: 12px; line-height: 1.35; color: var(--ink-3); }
 .headline { color: var(--ink); font-size: 13.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .reserved .headline { color: var(--ink-2); font-style: italic; }
 .counts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 11.5px; color: var(--ink-3); }

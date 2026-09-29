@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/version"
@@ -47,10 +49,12 @@ func Embedded() (History, error) {
 
 // Module serves a History over HTTP.
 type Module struct {
-	history History
-	current string
-	started time.Time
-	tickets TicketSource
+	pool       *pgxpool.Pool
+	projectKey string
+	history    History
+	current    string
+	started    time.Time
+	tickets    TicketSource
 }
 
 // New serves the embedded history; current is the running version.
@@ -107,7 +111,12 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	httpapi.WriteJSON(w, http.StatusOK, Response{History: m.annotated(r.Context()), Current: m.current, LiveSince: m.started})
+	h, err := m.historyFor(r.Context())
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "release notes unavailable")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, Response{History: m.annotated(r.Context(), h), Current: m.current, LiveSince: m.started})
 }
 
 func (m *Module) one(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +128,12 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusBadRequest, "not an inspr-calendar-v2 version")
 		return
 	}
-	for _, rel := range m.annotated(r.Context()).Releases {
+	h, err := m.historyFor(r.Context())
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "release notes unavailable")
+		return
+	}
+	for _, rel := range m.annotated(r.Context(), h).Releases {
 		if rel.Version == v {
 			w.Header().Set("Cache-Control", "no-store")
 			httpapi.WriteJSON(w, http.StatusOK, rel)
@@ -129,21 +143,22 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteError(w, http.StatusNotFound, "no such release in this build's history")
 }
 
-// annotated adds group and linked ticket benefits. A lookup error, or no
-// source, returns the embedded history unchanged.
-func (m *Module) annotated(ctx context.Context) History {
+// annotated adds group and linked ticket benefits to h (the embedded history
+// with any note backfills applied). A lookup error, or no source, returns h
+// unchanged.
+func (m *Module) annotated(ctx context.Context, h History) History {
 	if m.tickets == nil {
-		return m.history
+		return h
 	}
 	p, ok := tenant.PrincipalFrom(ctx)
 	if !ok || p.TenantID == "" {
-		return m.history
+		return h
 	}
-	keys := historyTicketKeys(m.history)
+	keys := historyTicketKeys(h)
 	meta, err := m.tickets(ctx, p.TenantID, keys)
 	if err != nil {
 		slog.Warn("release change groups left derived from commit type", "err", err)
-		return m.history
+		return h
 	}
-	return withGroups(m.history, meta)
+	return withGroups(h, meta)
 }

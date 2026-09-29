@@ -13,7 +13,7 @@ export interface ReleaseEvidence {
   ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; unavailable: string[]
 }
 export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string }
-export interface ReleaseNotes { source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; gaps: string[]; hidden: number }
+export interface ReleaseNotes { source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; gaps: string[]; hidden: number; written_after_release?: boolean }
 export interface Release {
   notes?: ReleaseNotes
   version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved'
@@ -154,7 +154,7 @@ export function displayText(text: string, keys: Iterable<string>) {
   return sentence(out || text)
 }
 // Regenerated archives without snapshots keep their historical display. A real
-// snapshot remains authoritative even when empty, hidden or incomplete.
+// snapshot keeps its membership authoritative even when empty, hidden or incomplete.
 export function hasUsableNotes(r: Pick<Release, 'notes'>): r is Pick<Release, 'notes'> & { notes: ReleaseNotes } {
   return !!r.notes && r.notes.source !== 'unavailable'
 }
@@ -176,6 +176,12 @@ export function localizedNote(item: Pick<ReleaseNoteItem, 'pill_en' | 'pill_de' 
 }
 export const HISTORICAL_TAG_FALLBACK = 'historical-tag-headline'
 export const HISTORICAL_TAG_LABEL = 'Historical tag headline'
+export const WRITTEN_AFTER_LABEL = 'Notes written after release'
+// A backfilled snapshot was captured after publication. The hint stays off
+// when the notes are only the historical headline.
+export function writtenAfterRelease(r: Pick<Release, 'notes'>): boolean {
+  return hasUsableNotes(r) && r.notes.written_after_release === true
+}
 // Tag headlines are only the fallback when member benefits were never captured.
 export function historicalTagFallback(r: Pick<Release, 'notes' | 'headline'>): boolean {
   if (!r.headline.trim()) return false
@@ -184,13 +190,21 @@ export function historicalTagFallback(r: Pick<Release, 'notes' | 'headline'>): b
   return r.notes.fallback === HISTORICAL_TAG_FALLBACK || r.notes.source === 'unavailable'
 }
 export function emptyNotesLine(locale?: string | null) {
-  return noteLocale(locale) === 'de' ? 'Keine öffentlichen Release Notes.' : 'No public release notes.'
+  return noteLocale(locale) === 'de' ? 'Nur interne Änderungen.' : 'Internal changes only.'
 }
 export function hiddenNoteLine(count: number, locale?: string | null) {
   if (noteLocale(locale) === 'de') return count === 1 ? 'Ein Ticket ist in den Release Notes ausgeblendet.' : `${count} Tickets sind in den Release Notes ausgeblendet.`
   return count === 1 ? 'One ticket is hidden from release notes.' : `${count} tickets are hidden from release notes.`
 }
-export const displayHeadline = (r: Pick<Release, 'headline' | 'tickets' | 'changes' | 'notes'>, locale?: string | null) => hasUsableNotes(r) ? (r.notes.items.map(item => localizedNote(item, locale).pill).filter(Boolean).join(' · ') || (r.notes.gaps.length ? 'Release notes unavailable' : 'No public release notes')) : displayText(r.headline, ticketsOf(r as Release))
+export function displayHeadline(r: Pick<Release, 'headline' | 'tickets' | 'changes' | 'notes'>, locale?: string | null) {
+  if (hasUsableNotes(r)) {
+    const pills = r.notes.items.map(item => localizedNote(item, locale).pill).filter(Boolean).join(' · ')
+    if (pills) return pills
+    if (r.notes.gaps.length) return 'Release notes unavailable'
+    // Internal-only releases keep a useful list title; snapshot membership still wins.
+  }
+  return displayText(r.headline, ticketsOf(r as Release))
+}
 const PACKAGE_PREFIX = /^P\d+\.(?:x|\d+)\s*:\s*/i
 const LEADING_TICKET = /^[A-Z][A-Z0-9]{1,9}-[1-9]\d{0,6}\s*[:\-–]\s*/
 // A subject without its conventional prefix ("feat(AEON-74): wide lists" reads "Wide lists").
