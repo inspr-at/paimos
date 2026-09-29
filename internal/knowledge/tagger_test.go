@@ -114,6 +114,7 @@ func TestTaggerWithoutOutcomeTable(t *testing.T) {
 	incident := addComment(t, f, recent, "The incident stopped the deploy.")
 	side := addComment(t, f, recent, "An incidental remark about naming.")
 	tagged := addComment(t, f, recent, "#process-learning The incident was already tagged.")
+	hideOutcomeTable(t, f)
 
 	n, err := TagOnce(t.Context(), f.db.App)
 	if err != nil {
@@ -213,17 +214,8 @@ func TestTaggerBatchCursor(t *testing.T) {
 
 func TestTaggerOutcomeVerdicts(t *testing.T) {
 	f := setup(t)
-	installOutcomeTable(t, f)
 	ticket := addNode(t, f, "REV-1", "ticket", "Review the rotation", &f.project)
-	err := db.InTenant(db.AllProjects(t.Context(), "outcome fixture"), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO outcome_events (tenant_id, kind, project_id, ticket_node_id, payload)
-			VALUES ($1, 'review_verdict', $2::uuid, $3::uuid, '{"verdict":"pass","summary":"The rotation held"}'::jsonb)`,
-			f.a.TenantID, f.project, ticket)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	insertOutcome(t, f, f.project, ticket, `{"verdict":"pass","summary":"The rotation held"}`, "")
 	verdict := addComment(t, f, ticket, "VERDICT pass in the thread.")
 	incident := addComment(t, f, ticket, "The incident page is the source.")
 	n, err := TagOnce(t.Context(), f.db.App)
@@ -312,30 +304,13 @@ func verdictsNull(t *testing.T, f fixture) bool {
 	return null
 }
 
-func installOutcomeTable(t *testing.T, f fixture) {
+// hideOutcomeTable renames AEON-286's outcome_events table in this test's
+// private database, so the tagger sees a workspace without outcome events and
+// falls back to VERDICT comments. Call it after tickets are closed: the
+// ticket_done trigger writes to that table.
+func hideOutcomeTable(t *testing.T, f fixture) {
 	t.Helper()
-	statements := []string{
-		`CREATE TABLE outcome_events (
-			tenant_id uuid NOT NULL,
-			id uuid NOT NULL DEFAULT gen_random_uuid(),
-			kind text NOT NULL,
-			project_id uuid NOT NULL,
-			ticket_node_id uuid NOT NULL,
-			payload jsonb NOT NULL,
-			recorded_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-			PRIMARY KEY (tenant_id, id))`,
-		`ALTER TABLE outcome_events ENABLE ROW LEVEL SECURITY`,
-		`ALTER TABLE outcome_events FORCE ROW LEVEL SECURITY`,
-		`CREATE POLICY outcome_events_tenant ON outcome_events
-			USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
-			WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)`,
-		`CREATE POLICY outcome_events_project_visibility ON outcome_events AS RESTRICTIVE
-			USING ((SELECT aeon_visible_all()) OR project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))
-			WITH CHECK ((SELECT aeon_visible_all()) OR project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))`,
-	}
-	for _, statement := range statements {
-		if _, err := f.db.App.Exec(t.Context(), statement); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := f.db.Admin.Exec(t.Context(), `ALTER TABLE outcome_events RENAME TO outcome_events_hidden`); err != nil {
+		t.Fatal(err)
 	}
 }

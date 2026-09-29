@@ -134,12 +134,12 @@ func seedAnalysisOutcomes(t *testing.T, f doctrineFixture, p tenant.Principal, p
 	ids := []string{}
 	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, p.TenantID, func(tx pgx.Tx) error {
 		var project string
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,$2,'Analysis fixtures' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING nodes.id::text`, p.TenantID, prefix).Scan(&project); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,$2,'Analysis fixtures' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING nodes.id::text`, p.TenantID, prefix+"-1").Scan(&project); err != nil {
 			return err
 		}
 		for i := 0; i < 3; i++ {
 			var ticket, session, provenance string
-			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,$2,'Outcome fixture',$3 FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING nodes.id::text`, p.TenantID, fmt.Sprintf("%s-%d", prefix, i+1), project).Scan(&ticket); err != nil {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,$2,'Outcome fixture',$3 FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING nodes.id::text`, p.TenantID, fmt.Sprintf("%s-%d", prefix, i+2), project).Scan(&ticket); err != nil {
 				return err
 			}
 			ids = append(ids, ticket)

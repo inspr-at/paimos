@@ -74,6 +74,8 @@ func TestTaggerSkipsCredentialsAndServesLiveSource(t *testing.T) {
 	leakyVerdict := addComment(t, f, host, "VERDICT fail. Found password=Winter2026! in the fixture")
 	cleanIncident := addComment(t, f, host, "The incident: rotate the keys weekly")
 	cleanVerdict := addComment(t, f, host, "VERDICT pass. The rotation held")
+	// VERDICT comments are nominated only without outcome events (AEON-286).
+	hideOutcomeTable(t, f)
 
 	if _, err := TagOnce(t.Context(), f.db.App); err != nil {
 		t.Fatal(err)
@@ -131,7 +133,6 @@ func TestTaggerSkipsCredentialsAndServesLiveSource(t *testing.T) {
 
 func TestTaggerVerdictSourceChanged(t *testing.T) {
 	f := setup(t)
-	installOutcomeTable(t, f)
 	ticket := addNode(t, f, "REV-2", "ticket", "Review the backups", &f.project)
 	outcome := insertOutcome(t, f, f.project, ticket, `{"verdict":"pass","summary":"Backups restore in minutes"}`, "")
 	if _, err := TagOnce(t.Context(), f.db.App); err != nil {
@@ -148,15 +149,11 @@ func TestTaggerVerdictSourceChanged(t *testing.T) {
 	if got := learningText(t, f, nodeLearningID(ticket)); got != "Backups restore in minutes" {
 		t.Fatalf("verdict %q", got)
 	}
-	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE outcome_events SET payload='{"verdict":"pass","summary":"Backups restore in seconds"}' WHERE id::text=$1`, outcome); err != nil {
-		t.Fatal(err)
-	}
+	rewriteOutcome(t, f, `UPDATE outcome_events SET payload='{"verdict":"pass","summary":"Backups restore in seconds"}' WHERE id::text=$1`, outcome)
 	if got := learningText(t, f, nodeLearningID(ticket)); got != "Backups restore in seconds" {
 		t.Fatalf("edited verdict %q", got)
 	}
-	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE outcome_events SET payload=jsonb_build_object('verdict','pass','summary','token='||$2::text) WHERE id::text=$1`, outcome, fakeGitHubToken()); err != nil {
-		t.Fatal(err)
-	}
+	rewriteOutcome(t, f, `UPDATE outcome_events SET payload=jsonb_build_object('verdict','pass','summary','token='||$2::text) WHERE id::text=$1`, outcome, fakeGitHubToken())
 	if got := learningText(t, f, nodeLearningID(ticket)); strings.Contains(got, "Backups") || strings.Contains(got, "token=") {
 		t.Fatalf("verdict now holding a key served %q", got)
 	}
@@ -219,7 +216,6 @@ func TestTaggerKeepsConcurrentFieldEdits(t *testing.T) {
 // moves from A to B, people who see only B do not get A's verdict.
 func TestTaggerVerdictStaysInItsProject(t *testing.T) {
 	f := setup(t)
-	installOutcomeTable(t, f)
 	ticket := addNode(t, f, "REV-4", "ticket", "Review the migration", &f.project)
 	insertOutcome(t, f, f.project, ticket, `{"verdict":"fail","summary":"Project A internal verdict text"}`, "")
 	if _, err := TagOnce(t.Context(), f.db.App); err != nil {
@@ -268,7 +264,6 @@ func TestTaggerVerdictStaysInItsProject(t *testing.T) {
 // Finding 4: many rows at one timestamp do not stall the scan.
 func TestTaggerCursorSameTimestamp(t *testing.T) {
 	f := setup(t)
-	installOutcomeTable(t, f)
 	previous := taggerBatch
 	taggerBatch = 2
 	t.Cleanup(func() { taggerBatch = previous })
@@ -411,14 +406,30 @@ func insertOutcome(t *testing.T, f fixture, project, ticket, payload, at string)
 	t.Helper()
 	var id string
 	err := db.InTenant(db.AllProjects(t.Context(), "outcome fixture"), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `INSERT INTO outcome_events (tenant_id, kind, project_id, ticket_node_id, payload, recorded_at)
-			VALUES ($1, 'review_verdict', $2::uuid, $3::uuid, $4::jsonb, coalesce(NULLIF($5, '')::timestamptz, clock_timestamp()))
-			RETURNING id::text`, f.a.TenantID, project, ticket, payload, at).Scan(&id)
+		return tx.QueryRow(t.Context(), `INSERT INTO outcome_events (tenant_id, kind, project_id, ticket_node_id, idempotency_key, actor_principal_id, source, payload, request_digest, recorded_at)
+			VALUES ($1, 'review_verdict', $2::uuid, $3::uuid, 'test:'||gen_random_uuid()::text, $6::uuid, 'recorded', $4::jsonb, decode(md5($4::text), 'hex'), coalesce(NULLIF($5, '')::timestamptz, clock_timestamp()))
+			RETURNING id::text`, f.a.TenantID, project, ticket, payload, at, f.a.ID).Scan(&id)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return id
+}
+
+// rewriteOutcome edits a stored outcome as a stand-in for a changed source.
+// outcome_events is append-only (AEON-286), so the test lifts the immutability
+// trigger in its private database for this one statement.
+func rewriteOutcome(t *testing.T, f fixture, statement string, args ...any) {
+	t.Helper()
+	if _, err := f.db.Admin.Exec(t.Context(), `ALTER TABLE outcome_events DISABLE TRIGGER outcome_events_immutable`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), statement, args...); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `ALTER TABLE outcome_events ENABLE TRIGGER outcome_events_immutable`); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func moveNode(t *testing.T, f fixture, id, parent string) {
