@@ -128,6 +128,7 @@ func (w *batchWorld) publish(p tenant.Principal, s Set, version string) {
 	w.t.Helper()
 	w.call(p, "POST", "/api/rules/sets/"+s.ID+"/publish", map[string]any{"expected_revision": s.Revision, "version": version}, 200)
 }
+
 // publishUnchecked writes a version without the budget check that every
 // publication route runs, to seed a file that is already oversized.
 func (w *batchWorld) publishUnchecked(p tenant.Principal, s Set, version string) {
