@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { PLACES, placeOf, sequence, visiblePlaces } from '../src/lib/places.ts'
+import { PLACES, placeOf, releaseChordOpen, sequence, visiblePlaces } from '../src/lib/places.ts'
 
 test('places are Projects, Agents, Business in that order; pages belong to one or none', () => {
   assert.deepEqual(PLACES.map(p => p.label), ['Projects', 'Agents', 'Business'])
@@ -31,4 +31,13 @@ test('g then a place key goes there within the window; anything else disarms', (
   assert.equal(next('p', 3500, places), null) // too late
   assert.equal(next('G', 4000, places), 'armed')
   assert.equal((next('P', 4100, places) as { id: string }).id, 'projects')
+})
+
+test('a place chord finishes only through the release menu g opened, before it expires', () => {
+  assert.equal(releaseChordOpen(['Release for PHAROS-11'], 0, 1500), true)
+  assert.equal(releaseChordOpen(['Release for PHAROS-11'], 0, 1501), false)
+  assert.equal(releaseChordOpen(['Status of PHAROS-11'], 0, 100), false)
+  assert.equal(releaseChordOpen(['Release for PHAROS-11', 'Status of PHAROS-11'], 0, 100), false)
+  assert.equal(releaseChordOpen([], 0, 100), false)
+  assert.equal(releaseChordOpen(['Release for PHAROS-11'], null, 100), false)
 })

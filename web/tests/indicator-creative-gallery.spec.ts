@@ -13,10 +13,12 @@ const shots = resolve(process.cwd(), '../.agent-shots')
 async function open(page: Page, theme = 'light') {
   await page.route('**/api/**', route => route.fulfill({ json: {} }))
   await page.goto(`${fixture}?theme=${theme}&pulse=7`)
-  await expect(page.locator('.sample svg')).toHaveCount(18)
+  // Each sample is the indicator art plus the nested state-mark svg.
+  await expect(page.locator('.sample > svg.agent-indicator-art')).toHaveCount(18)
+  await expect(page.locator('.sample svg.agent-state-mark')).toHaveCount(18)
 }
 
-const probe = (page: Page, name: string) => page.getByTestId(`probe-${name}`).locator('svg')
+const probe = (page: Page, name: string) => page.getByTestId(`probe-${name}`).locator('svg.agent-indicator-art')
 const animations = (locator: Locator) => locator.evaluate(element => element.getAnimations({ subtree: true })
   .filter(animation => animation.playState === 'running').length)
 
@@ -29,13 +31,14 @@ for (const theme of ['light', 'dark']) {
     await page.locator('#contact-sheet').screenshot({ path: resolve(shots, `iv3-${theme}-gallery.png`) })
     for (const name of variants) for (const state of states) for (const size of [26, 64]) {
       const sample = page.locator(`[data-variant="${name}"] .sample[data-state="${state}"][data-size="${size}"]`)
-      const art = sample.locator('svg')
+      const art = sample.locator('svg.agent-indicator-art')
       await expect(art).toHaveAttribute('aria-hidden', 'true')
       await expect(art).toHaveAttribute('focusable', 'false')
       await expect(art).toHaveCSS('width', `${size}px`)
       await expect(art).toHaveCSS('height', `${size}px`)
+      // Signal colour is the agent state palette, not the brand teal, amber or backlog grey.
       const colors = await art.evaluate((element, state) => {
-        const token = state === 'working' ? '--teal' : state === 'waiting' ? '--warn' : '--st-backlog'
+        const token = state === 'working' ? '--agent-standard-working' : state === 'waiting' ? '--agent-standard-waiting' : '--agent-standard-inactive'
         return {
           actual: getComputedStyle(element).getPropertyValue('--signal').trim(),
           expected: getComputedStyle(document.documentElement).getPropertyValue(token).trim(),
@@ -115,6 +118,11 @@ test('only new event counters glint, including consecutive events; stale cancels
   // Remount with the reset counter as baseline; remount itself must not flash.
   await page.getByRole('button', { name: 'Remount', exact: true }).click()
   await page.getByRole('button', { name: 'Remount', exact: true }).click()
+  await expect(page.locator('.glint')).toHaveCount(0)
+  // Waiting remembers the event and does not flash; the flash belongs to working.
+  await page.getByRole('button', { name: 'Real event', exact: true }).click()
+  await expect(page.locator('.glint')).toHaveCount(0)
+  await page.getByRole('button', { name: 'working', exact: true }).click()
   await expect(page.locator('.glint')).toHaveCount(0)
   await page.getByRole('button', { name: 'Real event', exact: true }).click()
   await expect(page.locator('.glint')).toHaveCount(3)

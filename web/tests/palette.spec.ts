@@ -89,7 +89,8 @@ test('a bare project key offers the project first', async ({ page }) => {
   await expect(group(page, 'Projects').first()).toContainText('Aeon')
   await expect(group(page, 'Tickets').first()).toContainText('AEON-1')
   await page.keyboard.press('Enter')
-  await expect(page).toHaveURL('/p/AEON')
+  // Choosing a project opens its tickets section.
+  await expect(page).toHaveURL('/p/AEON/tickets')
 })
 
 test('Cmd or Ctrl+Enter opens the result in a new tab and keeps the palette', async ({ page, context }) => {
@@ -155,9 +156,10 @@ test('actions: outline, new ticket, theme and the shortcut sheet', async ({ page
     await expect(palette(page)).toBeHidden()
   }
   await runAction('outline', 'Go to Outline')
-  await expect(page).toHaveURL('/p/PHAROS?view=outline')
+  // Outline is a view of the tickets section; list is that section without the view.
+  await expect(page).toHaveURL('/p/PHAROS/tickets?view=outline')
   await runAction('list', 'Go to List')
-  await expect(page).toHaveURL('/p/PHAROS')
+  await expect(page).toHaveURL('/p/PHAROS/tickets')
   await expect(rows(page)).toHaveCount(5)
   await runAction('new ticket', 'New ticket in PHAROS')
   await expect(page.getByLabel('New ticket title')).toBeFocused()

@@ -16,7 +16,7 @@ import { can } from '../lib/authz'
 import { command, consume, run } from '../lib/commands'
 import { fatal } from '../lib/fatal'
 import { usePoller } from '../lib/usePolledData'
-import { placeOf, sequence, visiblePlaces, type PlaceId } from '../lib/places'
+import { placeOf, releaseChordOpen, sequence, visiblePlaces, type PlaceId } from '../lib/places'
 import { SETTINGS_SECTIONS, sectionOf } from '../lib/settings'
 import AppIcon from './AppIcon.vue'
 import KeyCap from './KeyCap.vue'
@@ -87,14 +87,43 @@ function shortcut(event: KeyboardEvent) {
 }
 // g p · g a · g b: go to a place. Listened for first (capture), so the second key
 // never reaches the page (p is Priority on an open ticket, a approves on Agents).
+// g on an open ticket also opens the release menu; that one layer must not swallow
+// the place key that follows. Any other menu, dialog or focused field cancels the
+// arm, and an expired arm must not re-arm inside one.
 const nextKey = sequence()
+let armedAt: number | null = null
+function layerLabels(): string[] {
+  return [...document.querySelectorAll('dialog[open], .floating')].map(layer => layer.getAttribute('aria-label') ?? '')
+}
+function releaseFromChord(now = Date.now()): Element | null {
+  if (!releaseChordOpen(layerLabels(), armedAt, now)) return null
+  return document.querySelector('dialog[open], .floating')
+}
+function disarmChord(now = Date.now()) {
+  if (armedAt === null) return
+  nextKey('\0', now, places.value)
+  armedAt = null
+}
 function placeKeys(event: KeyboardEvent) {
-  if (!session.identity || event.metaKey || event.ctrlKey || event.altKey || event.repeat || typing(event.target) || document.querySelector('dialog[open], .floating')) return
-  const hit = nextKey(event.key, Date.now(), places.value)
+  if (!session.identity || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return
+  const now = Date.now()
+  if (typing(event.target) || (document.querySelector('dialog[open], .floating') && !releaseFromChord(now))) {
+    disarmChord(now)
+    return
+  }
+  const hit = nextKey(event.key, now, places.value)
+  armedAt = hit === 'armed' ? now : null
   if (!hit || hit === 'armed') return
   event.preventDefault(); event.stopImmediatePropagation()
   if (route.path !== hit.to) void router.push(hit.to)
 }
+function chordPointer(event: PointerEvent) {
+  if (armedAt === null) return
+  const layer = releaseFromChord()
+  if (layer && event.target instanceof Node && layer.contains(event.target)) return
+  disarmChord()
+}
+function chordFocus(event: FocusEvent) { if (typing(event.target)) disarmChord() }
 // The Agents badge: permission requests and held action requests, checked each minute.
 const needsPoll = usePoller(() => agents.loadNeeds(true), 60_000, { enabled: () => !!session.identity && !agentsPage.value, invalidate: agents.invalidatePolls })
 watch(() => session.identity?.principal.id, id => {
@@ -144,9 +173,10 @@ onMounted(() => {
   void fonts?.ready.then(remeasure)
   refit()
   window.addEventListener('keydown', shortcut); window.addEventListener('keydown', placeKeys, true)
+  window.addEventListener('pointerdown', chordPointer, true); window.addEventListener('focusin', chordFocus, true)
   needsPoll.start()
 })
-onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); needsPoll.stop() })
+onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop() })
 </script>
 
 <template>
