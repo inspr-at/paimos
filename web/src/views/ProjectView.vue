@@ -1675,7 +1675,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .activity time { color: var(--ink-2); }
 .stick-mark { height: 1px; margin-bottom: -1px; }
 /* Waiting live updates on a phone (the Title header carries them on wider
-   screens): a pill floats just under the toolbar and never pushes cards down (AEON-326). */
+   screens): a pill floats beside selection controls and never pushes cards down (AEON-326). */
 .live-dock { display: none; }
 .live-pill {
   display: inline-flex; align-items: center; gap: 6px; height: 32px; margin-top: 4px; padding: 0 13px 0 11px; border: 1px solid var(--glass-edge); border-radius: 999px;
@@ -1701,8 +1701,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .phone-pick-status b { font-size: 15px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
   .phone-pick .dot { color: var(--ink-3); }
   .phone-pick .gone { color: var(--ink-2); }
-  .live-dock { position: sticky; top: calc(var(--toolbar-h, 0px) + 4px); z-index: 4; height: 36px; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
-  .live-pill { font-size: 13px; }
+  .live-dock { position: sticky; top: calc(var(--toolbar-h, 0px) + 4px); z-index: 6; height: 0; display: flex; align-items: flex-start; justify-content: flex-end; pointer-events: none; }
+  .live-pill { font-size: 13px; margin-top: -38px; }
   .phone-pick button { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 15px; font-weight: 600; }
   .phone-pick button.quiet { padding-left: 2px; color: var(--ink-2); font-weight: 600; }
   .phone-pick.on button { margin-left: -12px; color: var(--teal-ink); }

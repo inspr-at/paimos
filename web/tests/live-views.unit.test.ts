@@ -25,7 +25,7 @@ import { computed, effectScope, nextTick, ref } from 'vue'
 import type { BulkChange, ListItem, ListParent, WorkNode } from '../src/lib/api'
 import { LiveNodeStore } from '../src/lib/liveNodes'
 import { rowStore } from '../src/lib/rowStore'
-import { filtersFromQuery } from '../src/lib/ticketList'
+import { compareRows, effectiveSort, filtersFromQuery } from '../src/lib/ticketList'
 import { guardedMove, kinds, useTicket } from '../src/lib/useTicket'
 import { useLiveList } from '../src/lib/useLiveList'
 import { useTicketList } from '../src/lib/useTicketList'
@@ -578,7 +578,7 @@ async function runOutline(seed: number): Promise<string[]> {
       // of the production page-size constant.
       const kinds = q.get('kind')?.split(',')
       const ids = q.get('ids')?.split(',')
-      const rows = [...data.values()].filter(n => (!q.has('parent_id') || n.parent_id === q.get('parent_id')) && (!ids || ids.includes(n.id)) && (!kinds || kinds.includes(n.kind_slug)) && (!q.has('q') || n.title.includes(q.get('q')!))).sort((a, b) => a.id.localeCompare(b.id))
+      const rows = [...data.values()].filter(n => (!q.has('parent_id') || n.parent_id === q.get('parent_id')) && (!ids || ids.includes(n.id)) && (!kinds || kinds.includes(n.kind_slug)) && (!q.has('q') || n.title.includes(q.get('q')!)) && (q.get('hide_closed') !== 'true' || n.state !== 'done')).sort(compareRows(effectiveSort(filtersFromQuery({ sort: q.get('sort') }))))
       const start = Number(q.get('cursor') ?? 0), limit = q.has('parent_id') ? Math.min(2, Number(q.get('limit') ?? 2)) : Number(q.get('limit') ?? 200)
       json = { items: rows.slice(start, start + limit).map(copy), next_cursor: start + limit < rows.length ? String(start + limit) : null, facets: {} }
     } else if (path === '/api/nodes/bulk') {
@@ -677,6 +677,46 @@ async function runOutline(seed: number): Promise<string[]> {
   }
   try {
     gap(); await drain()
+    // A collapsed destination can start reading before or after the event.
+    // Keep its answer separate from live reads, and reopen it while it waits.
+    for (const timing of ['page before move', 'page after move']) {
+      phase = timing
+      outline.collapseAll(); await reload()
+      const from = pick(['a', 'b'].filter(id => count(id) > 0)), to = from === 'a' ? 'b' : 'a'
+      outline.setExpanded(from, true); await drain()
+      const moving = pick([...data.values()].filter(n => n.parent_id === from && outline.node(n.id)))
+      let held: Read | undefined
+      async function expandDestination() {
+        outline.setExpanded(to, true); await settle()
+        held = calls.find(c => !c.done && c.url.searchParams.get('parent_id') === to)
+        if (!held) { fail('destination page did not start'); return }
+        process(held); held.done = true
+        outline.setExpanded(to, false); outline.setExpanded(to, true); await settle()
+      }
+      if (timing === 'page before move') await expandDestination()
+      moving.parent_id = to; moving.parent = parent(to); moving.updated_at = at(++revision)
+      event(moving.id, 'updated', revision, ['parent_id']); await drain()
+      if (outline.live.pending.kind(moving.id) !== 'moved') fail('move was not held')
+      if (timing === 'page after move') await expandDestination()
+      if (timing === 'page before move') { outline.live.apply(); await settle(); await drain() }
+      if (held) { deliver(held); await settle(); observe(); await drain() }
+      const entries = outline.entries.value.filter(e => e.type === 'row' && e.row.id === moving.id)
+      const expected = timing === 'page before move' ? to : from
+      if (entries.length !== 1 || entries[0]?.type !== 'row' || entries[0].tree.parentId !== expected) fail('late page lost or duplicated the held placement')
+      outline.live.apply(); await settle(); await drain()
+      const placed = outline.entries.value.filter(e => e.type === 'row' && e.row.id === moving.id)
+      if (placed.length !== 1 || placed[0]?.type !== 'row' || placed[0].tree.parentId !== to) fail('Show failed to retain the moved row')
+    }
+    phase = 'lazy field patches stay ordered across Show'
+    while (outline.hasMoreRoot.value) { outline.loadMoreRoot(); await drain() }
+    const before = outline.rows.value.filter(n => n.parent_id === root && n.kind_slug === 'ticket').map(n => n.id)
+    const patch = data.get(before[before.length - 1]!)!
+    patch.title = 'patched in place'; patch.updated_at = at(++revision)
+    event(patch.id, 'updated', revision, ['title']); await drain()
+    const added = make('order-new', root); data.set(added.id, added)
+    event(added.id, 'created', revision); await drain()
+    outline.live.apply(); await settle(); await drain()
+    if (outline.rows.value.filter(n => before.includes(n.id)).map(n => n.id).join() !== before.join()) fail('Show reordered lazy field-only patches')
     // Randomly interleave lazy loads, pagination, expansion and repeated gaps.
     // A deletion during the gap is deliberately not delivered as an event.
     for (let round = 0; round < 5; round++) {
@@ -872,11 +912,33 @@ async function runOutline(seed: number): Promise<string[]> {
     event(match.id, 'updated', revision, ['title']); await drain()
     if (outline.rows.value.map(row => row.id).join(',') !== order) fail('filtered field patch reordered rows')
     if (outline.node(match.id)?.title !== match.title) fail('filtered field patch did not arrive')
+    const addedMatch = make('filtered-new', 'a')
+    addedMatch.title = 'unique-filter-match-new'; data.set(addedMatch.id, addedMatch)
+    event(addedMatch.id, 'created', revision); await drain()
+    outline.live.apply(); await settle(); await drain()
+    if (outline.rows.value.filter(row => row.id !== addedMatch.id).map(row => row.id).join(',') !== order) fail('Show reordered filtered field-only patches')
     const ancestor = data.get('a')!
     ancestor.title = 'unique-filter-match-ancestor'; ancestor.updated_at = at(++revision)
     event('a', 'updated', revision, ['title']); await drain()
     const promoted = outline.entries.value.find(e => e.type === 'row' && e.row.id === 'a')
     if (promoted?.type !== 'row' || promoted.tree.dimmed) fail('an ancestor that now matches stayed dimmed')
+    if (list.rows.value[0]?.id !== ancestor.id) fail('promoted ancestor was not inserted in sort order')
+
+    phase = 'closing an ancestor under hide-closed'
+    ancestor.parent_id = root; ancestor.parent = parent(root); ancestor.updated_at = at(++revision)
+    outlineFilters.value = filtersFromQuery({})
+    const hiding = list.load(); await drain(); await hiding
+    outline.setExpanded('a', true); await drain()
+    ancestor.state = 'done'; ancestor.updated_at = at(++revision)
+    event(ancestor.id, 'updated', revision, ['state']); await drain()
+    if (outline.live.pending.kind(ancestor.id) !== 'closed') fail('closed parent did not wait for Show')
+    outline.live.apply(); await settle(); await drain()
+    // The presence check must not promote the context ancestor on a later patch.
+    match.title = 'still open'; match.updated_at = at(++revision)
+    event(match.id, 'updated', revision, ['title']); await drain()
+    const context = outline.entries.value.find(e => e.type === 'row' && e.row.id === ancestor.id)
+    if (context?.type !== 'row' || !context.tree.dimmed) fail('closed parent became a match instead of context')
+    if (list.rows.value.some(row => row.id === ancestor.id)) fail('closed parent leaked into List matches')
   } finally { selected.value = null; scope.stop(); off(); vi.clearAllTimers(); vi.useRealTimers(); rowStore.clear() }
   return failures
 }

@@ -48,7 +48,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   // Filter membership learned by live queries is committed with their rows.
   const matched = new Map<string, boolean>()
   // Immutable sort values keep a field patch (including updated_at) in its
-  // place. Lazy levels already have block ids; filtered trees need this too.
+  // place, including when Show applies an unrelated structural update.
   const order = reactive(new Map<string, ListItem>())
 
   watch(projectId, id => {
@@ -146,11 +146,18 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       const ids: string[] = []
       for (const item of page.items) {
         const row = rowStore.adopt(item, sent, { show: true })
-        if (!row || row.parent_id !== params.parent_id) continue
+        if (!row || live.layout(row).parent_id !== params.parent_id) continue
+        rememberOrder([row])
         lazyNodes.set(item.id, row)
         ids.push(item.id)
       }
-      block.ids = more ? [...block.ids, ...ids.filter(id => !block.ids.includes(id))] : ids
+      // Show or a local move may already have placed rows while this first
+      // page was in flight. Its older snapshot cannot erase that placement.
+      const retained = block.ids.filter(id => {
+        const row = lazyNodes.get(id)
+        return row && live.layout(row).parent_id === params.parent_id
+      })
+      block.ids = [...new Set([...retained, ...ids])].sort((a, b) => comparePlaced(lazyNodes.get(a)!, lazyNodes.get(b)!))
       block.cursor = page.next_cursor
       loadedOnce.value = true
       lazyRead.value = { kind: 'more', sent, behind: page.items.filter(item => rowStore.newer(item.id, item.updated_at)).map(item => item.id) }
@@ -170,7 +177,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     generation++
     const request = generation
     const sent = rowStore.mark()
-    lazyNodes.clear(); blocks.clear()
+    lazyNodes.clear(); blocks.clear(); order.clear()
     epicBlock.value = { ids: [], cursor: null, loading: true, error: '' }
     looseBlock.value = { ids: [], cursor: null, loading: true, error: '' }
     await Promise.all([
@@ -261,8 +268,14 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   const liveRows = computed<ListItem[]>({
     get: () => [...(matchMode.value ? matchNodes.value : lazyNodes).values()].filter(row => row.kind_slug !== 'missing'),
     set(items) {
+      // Release only structural sort changes. A field-only patch must keep
+      // its original sort values even when Show applies other rows' updates.
+      for (const row of items) {
+        const placed = live.layout(row), before = order.get(row.id)
+        if (before && (before.parent_id !== placed.parent_id || placeKey(before, { ...filters.value, group: 'none' }) !== placeKey(placed, { ...filters.value, group: 'none' }))) order.delete(row.id)
+      }
+      rememberOrder(items)
       if (matchMode.value) {
-        rememberOrder(items, true)
         const wasMatch = new Set(list.rows.value.map(row => row.id))
         list.rows.value = items.filter(row => matched.get(row.id) ?? wasMatch.has(row.id))
         ancestors.clear()
@@ -270,7 +283,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       } else {
         lazyNodes.clear()
         for (const row of items) lazyNodes.set(row.id, row)
-        const byParent = childMap(items.map(row => live.layout(row)), compare.value)
+        const byParent = childMap(items.map(row => live.layout(row)), comparePlaced)
         const roots = byParent.get(projectId.value ?? '') ?? []
         epicBlock.value.ids = roots.filter(row => row.kind_slug === 'epic').map(row => row.id)
         looseBlock.value.ids = roots.filter(row => row.kind_slug !== 'epic').map(row => row.id)
@@ -281,7 +294,9 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   async function fetchLive(query: ListQuery) {
     const run = generation, sent = rowStore.mark()
     const page = await listNodes(query)
-    if (!matchMode.value || run !== generation) return page
+    // apiParams always includes hide_closed (true or false). The unfiltered
+    // presence read omits it: existence must never establish filter membership.
+    if (!matchMode.value || run !== generation || query.hide_closed === undefined) return page
     // Ancestors place filtered matches even when they do not match themselves.
     // Read them afresh on relevant events; no project-lifetime cache of values.
     const ids = query.ids ?? []
@@ -289,7 +304,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     const extra = context.length ? await listNodes({ within: projectId.value!, kind: ['epic', 'ticket', 'task'], ids: context, limit: LEVEL }) : null
     if (run === generation && !rowStore.gapSince(sent)) {
       for (const id of ids) if (!rowStore.touchedSince(id, sent)) matched.set(id, page.items.some(row => row.id === id))
-      for (const item of page.items) matched.set(item.id, true)
+      for (const item of page.items) if (!rowStore.touchedSince(item.id, sent)) matched.set(item.id, true)
     }
     return { ...page, items: [...page.items, ...(extra?.items ?? [])] }
   }
@@ -299,8 +314,14 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       // becomes an ordinary match once its field update is accepted.
       const promoted = [...ancestors.values()].filter(row => matched.get(row.id) && !live.pending.kind(row.id) && !list.rows.value.some(item => item.id === row.id))
       if (promoted.length) {
-        list.rows.value = [...list.rows.value, ...promoted]
-        for (const row of promoted) ancestors.delete(row.id)
+        const next = [...list.rows.value]
+        const compareMatches = compareRows(effectiveSort(filters.value))
+        for (const row of promoted) {
+          const at = next.findIndex(item => compareMatches(row, item) < 0)
+          next.splice(at < 0 ? next.length : at, 0, row)
+          ancestors.delete(row.id)
+        }
+        list.rows.value = next
       }
       void resolveAncestors()
     }
@@ -399,6 +420,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     if (matchMode.value) { refreshStatsFor(item.id); return }
     const row = rowStore.row(item.id) ?? rowStore.adopt(item, undefined, { full: false })
     if (!row) return
+    order.delete(item.id); rememberOrder([row])
     lazyNodes.set(item.id, row)
     const parent = row.parent_id ?? ''
     const block = parent === projectId.value ? (row.kind_slug === 'epic' ? epicBlock.value : looseBlock.value) : blocks.get(parent)
