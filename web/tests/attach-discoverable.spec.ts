@@ -205,17 +205,21 @@ const gate = () => { let open!: () => void; const passed = new Promise<void>(res
 test('a list still on its way when the person changes is never shown to the next person', async ({ page }) => {
   await setup(page)
   const previous = gate(), next = gate(), permissions = gate()
-  let asked = 0, permissionsAsked = false
+  let switched = false, olaAsked = 0, anyAsked = 0, permissionsAsked = false
+  // Whoever asks before Ola signs in gets the previous person's list, held until released.
   await page.route(PENDING, async route => {
-    const call = ++asked
-    await (call === 1 ? previous : next).passed
-    await route.fulfill({ json: { requests: [call === 1 ? request('r-previous', 'pending', { host: 'Previous person’s Mac' }) : request('r-next', 'pending', { host: 'Ola’s Mac' })] } }).catch(() => undefined)
+    anyAsked++
+    const forOla = switched
+    if (forOla) olaAsked++
+    await (forOla ? next : previous).passed
+    await route.fulfill({ json: { requests: [forOla ? request('r-next', 'pending', { host: 'Ola’s Mac' }) : request('r-previous', 'pending', { host: 'Previous person’s Mac' })] } }).catch(() => undefined)
   })
   await page.goto('/agents')
-  await expect.poll(() => asked).toBe(1)
+  await expect.poll(() => anyAsked).toBeGreaterThanOrEqual(1)
   // Ola signs in to another workspace; the next navigation refreshes the session. Her
   // permissions are slow, so the old answer lands while nobody is allowed yet, and the
   // new list is slow too: the old rows must not show in between.
+  switched = true
   await page.route('**/api/me', route => route.fulfill({ json: OLA }))
   await page.route('**/api/me/permissions*', async route => {
     permissionsAsked = true
@@ -230,7 +234,7 @@ test('a list still on its way when the person changes is never shown to the next
   previous.open()
   await page.waitForTimeout(300)
   permissions.open()
-  await expect.poll(() => asked).toBeGreaterThanOrEqual(2)
+  await expect.poll(() => olaAsked).toBeGreaterThanOrEqual(1)
   await page.waitForTimeout(300)
   await expect(page.getByText('Previous person’s Mac')).toHaveCount(0)
   await expect(strip(page)).toHaveCount(0)

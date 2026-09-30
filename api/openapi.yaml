@@ -1148,11 +1148,13 @@ paths:
       operationId: listPendingAttach
       summary: Paired computer owner lists their attach requests that are not a session yet
       description: >-
-        Person-only, read-only and additive. Returns the signed-in owner's most recent
-        requests (at most eight, newest first, created in the last fifteen minutes)
-        that have not become a session: pending, approved and connecting, detached
-        (declined or cancelled) and unreachable (expired). An unpolled request past
-        its expiry is reported as unreachable without changing the row. Each item is
+        Person-only, read-only and additive. Returns the signed-in owner's requests
+        that have not become a session, waiting ones first: every pending or approved
+        request that has not expired (newest first, at most 32, whatever else ended
+        after it), then up to four ended ones created in the last fifteen minutes,
+        detached (declined or cancelled) and unreachable (expired). An unpolled
+        request past its expiry is an ended one, reported as unreachable without
+        changing the row. Each item is
         the same AttachView lookup returns, so the owner can approve it with the
         request and consent digests and no code; user_code, session_id and
         local_auth_nonce are never present. Approval keeps every existing check.
@@ -1168,7 +1170,7 @@ paths:
                 properties:
                   requests:
                     type: array
-                    maxItems: 8
+                    maxItems: 36
                     items: {$ref: '#/components/schemas/AttachView'}
         '403': {description: Signed-in person with account.manage required}
   /agent-pairing/attach/{requestId}/approve:

@@ -271,15 +271,18 @@ The nine-digit code identifies a ten-minute request;
 owner lookup accepts at most ten attempts per tenant in ten minutes. Codes and
 proofs never go in request URLs or query strings. The one exception is the link
 the attach helper prints on the person's own terminal, `/agents#attach=<code>`:
-a fragment is never sent to a server or a referrer, the page uses it only to fill
-the lookup field (exactly nine digits, else ignored), removes it from the address
-bar, and opening it looks up and approves nothing.
+a fragment is never sent to a server or a referrer. The router removes it from the
+address bar before anything else runs, so it never reaches a sign-in return address
+or a report, and keeps it in memory only until the Agents page fills the lookup field
+with it (exactly nine digits, else ignored). A session that ended drops it, and opening
+the link looks up and approves nothing.
 
 `GET /api/agent-pairing/attach/pending` lets the signed-in computer owner list
-their requests that are not a session yet (newest first, at most eight, created in
-the last fifteen minutes): pending, approved, detached (declined or cancelled) and
-unreachable (expired; an unpolled request past its expiry is reported so without
-changing the row). Each item is the immutable snapshot and digests lookup returns,
+their requests that are not a session yet, waiting ones first: every pending or
+approved request until it expires, however many newer ones ended after it (at most
+32), then up to four ended in the last fifteen minutes, detached (declined or
+cancelled) and unreachable (expired; an unpolled request past its expiry is reported
+so without changing the row). Each item is the immutable snapshot and digests lookup returns,
 so the owner can review and approve it without typing a code, with every
 existing approval check. It never returns the code, the Touch ID challenge or a
 session, changes no row and needs no origin header; /agents polls it while visible.
