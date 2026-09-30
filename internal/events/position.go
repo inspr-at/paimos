@@ -29,13 +29,21 @@ import (
 //     the client merges it by the order it started in.
 //   - An accepted write names the newest committed event after the handler's
 //     transaction ended, so it is at or above the write's own event. A read whose
-//     position is below it may predate the write.
+//     position is below it may predate the write. That is a floor, not a statement
+//     about the write's own body: other events can commit between the write and
+//     the watermark read, so the body may be older than the position. A client
+//     never merges a write's body by this position.
+//
+// A session or a run is merged by the row's own revision instead: row_version
+// grows inside the statement that changes the row (migration 1050), so a larger
+// one is always the newer copy, whichever answer carries it. The position only
+// orders the reads of one collection and holds the write floor.
 //
 // Every resource mutation appends an event (see Append), so the position
 // advances with every change a person can make. Fields a worker refreshes
-// without an event (a heartbeat) are not part of the position: the client keeps
-// those by their own sequence. The header is additive: a client that does not
-// know it ignores it, and an answer without it is merged the way it was before.
+// without an event (a heartbeat) are not part of the position. The header is
+// additive: a client that does not know it ignores it, and an answer without it is
+// merged the way it was before.
 const PositionHeader = "Aeon-Event-Position"
 
 // readAttempts bounds how often an interrupted read is run again. Reads change

@@ -6795,7 +6795,7 @@ components:
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
     HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.6']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
-    EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. A read names the exact snapshot it returns: no event committed while it ran, so it includes every event up to that position and none after. A read that an event interrupted is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event. A client that holds several reads of one collection, or a read and a write of its own, keeps the newest position per entity and never lets an older one overwrite it. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
+    EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. A read names the exact snapshot it returns: no event committed while it ran, so it includes every event up to that position and none after. A read that an event interrupted is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
@@ -10720,6 +10720,7 @@ components:
         activity: {type: string, enum: [unknown, busy, idle, throttled]}
         activity_sequence: {type: integer, format: int64}
         revision: {type: integer, format: int64}
+        row_version: {type: integer, format: int64, minimum: 1, description: 'The row''s own revision (AEON-449). Every statement that changes the session bumps it in the same transaction, so of two copies of one session the larger row_version is the newer one, whatever order they arrived in. Present on every body that carries a session: lists, detail, mutation results and event snapshots. Unlike revision, which is an optimistic-lock token only some writers advance, it advances on every change, heartbeats included.'}
         heartbeat_at: {type: [string, 'null'], format: date-time}
         stopped_at: {type: [string, 'null'], format: date-time}
         stop_reason: {type: [string, 'null'], description: 'Why the generation closed. heartbeat_lost means the server closed a silent unmanaged session (Lost contact); its worker may still revive it with a heartbeat.'}
@@ -11057,6 +11058,7 @@ components:
         verification_task: {type: string, description: Fixed harmless server task for pairing verification.}
         max_duration_seconds: {type: integer, const: 60, description: Present only for pairing verification.}
         repository_mutation_allowed: {type: boolean}
+        row_version: {type: integer, format: int64, minimum: 1, description: 'The run''s own revision (AEON-449). Every statement that changes the run bumps it in the same transaction, so of two copies of one run the larger row_version is the newer one, whatever order they arrived in. Present on every body that carries a run: lists, detail, launch and every mutation result. Derived fields such as wait are read beside the row and can change without a new row_version.'}
         id: {type: string, format: uuid}
         work_order_id: {type: string, format: uuid}
         agent_principal_id: {type: string, format: uuid}
