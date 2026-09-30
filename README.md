@@ -50,6 +50,29 @@ paimos issue list --project AEON
 paimos mcp
 ```
 
+`aeon capacity next codex` shows the server's next eligible account and parallel
+capacity; `--json` returns the ordered advice. It never reserves quota. The
+Accounts plan uses that same order: soonest weekly/monthly reset, then larger
+available cap, then account ID. Short windows still constrain every admission.
+Workspace readers can request advice across their accounts; paired agents and
+keys with only `account.probe` see only accounts registered by that agent.
+
+`aeon capacity next codex --env` prints a shell-quoted config-home export only
+when the selected account belongs to the authenticated local agentd. Use
+`--shell fish` for fish, `--socket` for an explicit daemon socket, or
+`--setup-root` for non-default pairing state. Paths stay on that computer and
+never enter the server response. The command advises outside launchers; it
+does not enforce their consumption.
+
+A terminal vendor-limit failure waits on its account when the reset is within
+20 minutes. Longer stops create one linked retry on the next eligible account
+at the next daemon poll, preserving the work order and any person-selected
+account fence. The original session records the handoff. The local daemon
+requires proof that the previous process stopped and the same recorded workspace
+and branch before continuing. No eligible account means a visible vendor wait;
+Run now once is never inherited by an automatic retry. Account holds remain
+1% until learned run costs are available (AEON-292 T6).
+
 Named instances and the default live in `~/.aeon/config.yaml`. The agent API key is read from `--key-file` or stdin, never echoed, and stored under `~/.aeon/keys/` mode 0600. `AEON_URL` together with `AEON_API_KEY` (or `AEON_API_KEY_FILE`) is a process-only target. When the binary is `paimos`, `PAIMOS_URL` and `PAIMOS_API_KEY` work the same way.
 
 Create a CLI/script identity at **Settings → Access → Agents → New agent**: give it a name, an optional description, a role ceiling, and workspace or selected-project access. A person with `keys.manage` can create it, within their own permissions; agent and role changes are audited together. The next sheet creates its first scoped key and shows it once, with a copy button (manual selection if clipboard access is blocked) and this instance's `paimos --instance <name> auth login --name <name> --url <origin>` command. Paste the key at the hidden terminal prompt. Computer pairing uses agentd and needs no API key; its page links directly to this alternative.

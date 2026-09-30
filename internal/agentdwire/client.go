@@ -179,3 +179,13 @@ func (c Client) Statusline(ctx context.Context, req agentd.StatuslineRequest) (a
 	err := c.lifecycleRequest(ctx, "POST", "/v1/statusline", req, &out)
 	return out, err
 }
+
+// AccountEnvironment never dials TCP. Config homes stay on the account's host.
+func (c Client) AccountEnvironment(ctx context.Context, accountID, daemonID, harness string) (agentd.AccountEnvironment, error) {
+	var out agentd.AccountEnvironment
+	err := c.lifecycleRequest(ctx, "GET", "/v1/account-environment?account_id="+url.QueryEscape(accountID)+"&daemon_id="+url.QueryEscape(daemonID)+"&harness="+url.QueryEscape(harness), nil, &out)
+	if err == nil && (out.AccountID != accountID || out.DaemonID != daemonID || out.Harness != harness) {
+		return agentd.AccountEnvironment{}, errors.New("local account ownership mismatch")
+	}
+	return out, err
+}

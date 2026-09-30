@@ -19,10 +19,13 @@ func TestPairedCapacityReadingsThroughAuthMiddleware(t *testing.T) {
 	now := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
 	reading := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 20, ReadAt: now, ResetsAt: now.Add(time.Hour), Source: "agentd"}
 	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/readings", map[string]any{"readings": []capacity.Reading{reading}}, false, key, 204)
+	// The new advice route must pass the real pairing boundary and route map.
+	f.call("GET", "/api/agent-accounts/capacity/next?harness=codex", nil, false, key, 200)
 	// account.probe alone must pass both authorization layers.
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['account.probe'] WHERE principal_id=$1`, *v.PrincipalID); err != nil {
 		t.Fatal(err)
 	}
+	f.call("GET", "/api/agent-accounts/capacity/next?harness=codex", nil, false, key, 200)
 	var got []capacity.Reading
 	decodeResult(t, f.call("GET", "/api/agent-accounts/"+e.AccountID+"/readings", nil, false, key, 200), &got)
 	if len(got) != 1 || !got[0].ReadAt.Equal(now) || got[0].UsedPercent != 20 {
@@ -56,6 +59,12 @@ func TestObservedCapacityPreservesSeparatePairingApproval(t *testing.T) {
 	e := v.Enrollments[0]
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	f.probe(v, e, key, 200)
+	// This test isolates approval; routing must not depend on local test time.
+	schedule := capacity.DefaultSchedule()
+	for i := range schedule.Week {
+		schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	f.call("PUT", "/api/agent-accounts/capacity/schedule", map[string]any{"scope": "account", "account_id": e.AccountID, "schedule": schedule}, true, "", 204)
 	now := time.Now().UTC().Add(-time.Second)
 	reading := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 20, ReadAt: now, ResetsAt: now.Add(time.Hour), Source: "harness"}
 	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/readings", map[string]any{"readings": []capacity.Reading{reading}}, false, key, 204)

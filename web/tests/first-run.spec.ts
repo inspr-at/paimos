@@ -151,3 +151,18 @@ test('pairing retries only account approval after a partial save', async ({ page
   expect(calls.filter(c => c.path.endsWith('/approve') && !c.path.includes('/capacity/'))).toHaveLength(1)
   expect(calls.some(c => c.path.endsWith('/windows'))).toBe(false)
 })
+
+test('a vendor-stopped run stays visible while waiting without offering Run now', async ({ page }) => {
+  await page.clock.setSystemTime(new Date('2026-09-29T12:00:00Z'))
+  const mock = await mockStartAgent(page)
+  const stopped = {
+    id: 'f0000000-0000-4000-8000-000000000383', work_order_id: 'n-1', agent_principal_id: mock.account.registered_by_principal_id,
+    status: 'failed', model_evidence: 'unverified', input_tokens: 0, output_tokens: 0, cost_micros: 0,
+    created_at: '2026-09-29T12:00:00Z', wait: { code: 'vendor', until: '2026-09-29T12:12:00Z', timezone: 'UTC', run_now_allowed: false },
+  }
+  await page.route('**/api/runs?*', route => route.fulfill({ json: { items: [stopped], next_cursor: null } }))
+  await page.goto('/agents')
+  const queue = page.getByRole('region', { name: 'Runs awaiting a session' })
+  await expect(queue.getByText('Vendor says stop until 12:12')).toBeVisible()
+  await expect(queue.getByRole('button', { name: 'Run now once' })).toHaveCount(0)
+})

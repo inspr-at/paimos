@@ -255,6 +255,9 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			return nil, err
 		}
 	}
+	if err = armVendorRetry(ctx, tx, v); err != nil {
+		return nil, err
+	}
 	if err = workorders.BlockBudget(ctx, tx, p, o); err != nil {
 		return nil, err
 	}

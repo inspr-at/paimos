@@ -416,7 +416,11 @@ func blindDenials(ctx context.Context, tx pgx.Tx, accountID string) ([]denial, e
 		return nil, err
 	}
 	stop := at.UTC()
-	return []denial{{until: stop.Add(vendorStopBackoff), at: stop}}, nil
+	until, _, err := VendorRetryAt(ctx, tx, accountID, stop)
+	if err != nil {
+		return nil, err
+	}
+	return []denial{{until: until, at: stop}}, nil
 }
 
 // denialClearedByRun is a run that started after the denial and finished
@@ -656,6 +660,6 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 
 func loadWaitRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 	var r runRow
-	err := tx.QueryRow(ctx, `SELECT id::text,agent_principal_id::text,model_profile_id::text,account_id::text,requested_account_id::text,status,purpose,capacity_override FROM agent_runs WHERE id=$1`, id).Scan(&r.ID, &r.AgentID, &r.ProfileID, &r.AccountID, &r.RequestedAccountID, &r.Status, &r.Purpose, &r.CapacityOverride)
+	err := tx.QueryRow(ctx, `SELECT id::text,agent_principal_id::text,model_profile_id::text,account_id::text,COALESCE(requested_account_id,retry_account_id)::text,status,purpose,capacity_override FROM agent_runs WHERE id=$1`, id).Scan(&r.ID, &r.AgentID, &r.ProfileID, &r.AccountID, &r.RequestedAccountID, &r.Status, &r.Purpose, &r.CapacityOverride)
 	return r, err
 }

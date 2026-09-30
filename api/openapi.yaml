@@ -4390,6 +4390,20 @@ paths:
       responses:
         '200': {description: Capacity, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountCapacity'}}}}}
         '403': {description: Person account.read permission required}
+  /agent-accounts/capacity/next:
+    get:
+      operationId: nextCapacityAccount
+      summary: Next eligible accounts in the router's order, without reserving them
+      description: Person account.read permission, or a workspace-authorized agent with account.read. Paired agents and probe-only keys see only their own accounts. Order is soonest long-window reset, larger available cap, then account ID. Rechecks approval, probe, model grants, vendor truth, schedule, reserve and concurrency. Advisory only. No config path or credential is returned; --env resolves through the authenticated local agentd socket.
+      security: *auth
+      parameters:
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+        - {name: daemon_id, in: query, schema: {type: string, maxLength: 128}}
+        - {name: model_profile_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Ordered advice, content: {application/json: {schema: {$ref: '#/components/schemas/CapacityNext'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}/capacity/approve:
     post:
       operationId: approveOngoingObservedCapacity
@@ -4580,7 +4594,7 @@ paths:
   /agent-accounts/route:
     post:
       operationId: reserveAgentAccount
-      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing uses remaining allowance, recent usage, pace target and active run count; fail closed when estimates are absent or no account fits. Queued retries recheck account state, probe, enabled profile and grants, returning conflict without changing a held reservation or falling back. The daemon resolves the opaque key to its local credential.
+      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing orders fitting accounts by soonest long-window reset, then larger available cap and account ID; concurrency reservations spread parallel work across accounts; fail closed when estimates are absent or no account fits. Queued retries recheck account state, probe, enabled profile and grants, returning conflict without changing a held reservation or falling back. The daemon resolves the opaque key to its local credential.
       security: [{agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRouteRequest'}}}}
       responses:
@@ -10311,7 +10325,8 @@ components:
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
         capacity_override: {type: string, enum: ['', now]}
-        wait: {$ref: '#/components/schemas/CapacityWait'}
+        capacity_handoff: {type: boolean, description: 'Server-created vendor-stop retry. The owning daemon must prove the prior attempt has stopped and retain its recorded workspace and branch before launching.'}
+        wait: {allOf: [{$ref: '#/components/schemas/CapacityWait'}], description: 'Also present on a failed vendor-limited run awaiting automatic continuation. At most 20 minutes to reset waits on the same account; longer stops retry on the next eligible account on the same daemon. A terminal stop never bypasses a person pin, grant, budget, pairing or admission check.'}
         purpose: {type: string, enum: [managed, pairing_verification]}
         verification_policy: {type: string, enum: [read_only], description: Present only for pairing_verification; local adapter must enforce this policy.}
         verification_task: {type: string, description: Fixed harmless server task for pairing verification.}
@@ -10555,11 +10570,40 @@ components:
         reserve_percent: {type: number, description: 'Keep for you level R for this window: auto (30 until learned), the fixed share, or 0 when off.'}
         reserve_effective_percent: {type: number, description: 'R_eff now: what agents leave the person of this window. 0 under Sprint, Away and Run now once, and when no work hours remain before the reset.'}
         reserve_until: {type: string, format: date-time, description: 'End of the person''s last work band before the reset, after which the reserve is gone. Absent when reserve_effective_percent is 0.'}
+    CapacityRouting:
+      type: object
+      required: [rank, available_slots]
+      properties:
+        rank: {type: integer, minimum: 0, description: One-based server order within the harness; zero means currently ineligible.}
+        available_slots: {type: integer, minimum: 0, description: Additional runs that fit all windows and the concurrency limit right now.}
+        resets_at: {type: string, format: date-time, description: Soonest current weekly or monthly reset; falls back to a shorter window only when no long window exists.}
+        cap_percent: {type: number, minimum: 0, description: Smallest normalized available cap across all binding windows.}
+        wait: {$ref: '#/components/schemas/CapacityWait'}
+    CapacityNext:
+      type: object
+      required: [harness, accounts, parallel_runs]
+      properties:
+        harness: {type: string}
+        parallel_runs: {type: integer, minimum: 0}
+        wait: {$ref: '#/components/schemas/CapacityWait'}
+        accounts:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/CapacityRouting'}
+              - type: object
+                required: [account_id, account_label, daemon_id, harness]
+                properties:
+                  account_id: {type: string, format: uuid}
+                  account_label: {type: string}
+                  daemon_id: {type: string}
+                  harness: {type: string}
     AccountCapacity:
       type: object
       required: [account_id, schedule, windows]
       properties:
         account_id: {type: string, format: uuid}
+        routing: {$ref: '#/components/schemas/CapacityRouting'}
         ongoing_use_approved: {type: boolean, description: True for unpaired accounts or a separately approved connected pairing; readings never change this approval}
         probe_failure: {type: string, enum: [auth_failed, unavailable], description: 'Why the last probe failed; absent after a successful probe. Only auth_failed means the account needs a new sign-in.'}
         limiting_reset: {type: string, format: date-time, description: 'Earliest reset of the account''s current measured windows (including 5-hour windows); a Sprint in scope ends at the earliest of these.'}
