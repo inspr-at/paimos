@@ -4,6 +4,7 @@ package auth
 
 import (
 	"bytes"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -335,7 +336,20 @@ func TestOIDCCookieSeal(t *testing.T) {
 		t.Fatalf("open %+v %v", got, err)
 	}
 	tampered := *rec.Result().Cookies()[0]
-	tampered.Value = tampered.Value[:len(tampered.Value)-2] + "aa"
+	// XOR one MAC bit. A constant suffix is unchanged when the seal already ends in it.
+	bodyB64, sigB64, ok := strings.Cut(tampered.Value, ".")
+	if !ok {
+		t.Fatal("seal has no signature")
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(sigB64)
+	if err != nil || len(sig) == 0 {
+		t.Fatalf("signature %d %v", len(sig), err)
+	}
+	sig[len(sig)-1] ^= 1
+	tampered.Value = bodyB64 + "." + base64.RawURLEncoding.EncodeToString(sig)
+	if tampered.Value == rec.Result().Cookies()[0].Value {
+		t.Fatal("tamper was a no-op")
+	}
 	req = httptest.NewRequest(http.MethodGet, "/api/auth/callback", nil)
 	req.AddCookie(&tampered)
 	if _, err := m.readOIDCCookie(req); err == nil {
