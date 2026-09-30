@@ -74,6 +74,29 @@ test('with both forms chosen, the clock time shows on hover', async ({ page }) =
   await expect(fresh.locator('.hover')).toBeVisible()
 })
 
+test('at 100% a finished ticket reads Done, never overdue, and a still-working one shows a quiet 100% (AEON-437)', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  const data = world()
+  const set = (key: string, eta: Record<string, unknown>) => { data.nodes.find(node => node.key === key)!.eta = eta }
+  set('PHAROS-11', { eta_ready_at: at(-30), progress_pct: 100, ready_by: 'Ada', ready_reported_at: at(-45), ready_stale: true, eta_stale: true })
+  set('PHAROS-12', { eta_ready_at: at(-30), progress_pct: 100, ready_by: 'Beau', ready_reported_at: at(-2), has_working_session: true })
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS')
+  const finished = row(page, 'PHAROS-11').locator('.eta-cell')
+  await expect(finished).toHaveClass(/done/)
+  await expect(finished.locator('.main')).toHaveText('Done')
+  await expect(finished.locator('.pct, .when')).toHaveCount(0)
+  await expect(finished).not.toHaveClass(/overdue|stale/)
+  await expect(finished.locator('svg')).toHaveCount(1)
+  await expect(finished).toHaveAttribute('data-tip', /^All work reported by Ada at \d{2}:\d{2}$/)
+  const wrapping = row(page, 'PHAROS-12').locator('.eta-cell')
+  await expect(wrapping).not.toHaveClass(/done|overdue|stale/)
+  await expect(wrapping.locator('.pct')).toHaveText('100%')
+  await expect(wrapping.locator('.when, .missing')).toHaveCount(0)
+  const shots = process.env.AEON_437_SHOTS
+  if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, 'eta-done.png') }) }
+})
+
 const agentsWorld: AgentWorld = {
   me: me.id,
   projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' },
