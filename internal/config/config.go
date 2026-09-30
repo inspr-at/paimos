@@ -57,6 +57,11 @@ type Config struct {
 	DoctrineAppTenantID     string
 	DoctrineGateLogin       string
 	DoctrineDCOAcknowledged bool
+	ReviewAppID             string
+	ReviewInstallationID    string
+	ReviewAppKeyFile        string
+	ReviewAppTenantID       string
+	ReviewAppRepository     string
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -81,6 +86,11 @@ func FromEnv() (Config, error) {
 		DoctrineAppTenantID:     os.Getenv("AEON_DOCTRINE_APP_TENANT_ID"),
 		DoctrineGateLogin:       os.Getenv("AEON_DOCTRINE_GATE_LOGIN"),
 		DoctrineDCOAcknowledged: os.Getenv("AEON_DOCTRINE_DCO_ACKNOWLEDGED") == "true",
+		ReviewAppID:             os.Getenv("AEON_REVIEW_APP_ID"),
+		ReviewInstallationID:    os.Getenv("AEON_REVIEW_INSTALLATION_ID"),
+		ReviewAppKeyFile:        os.Getenv("AEON_REVIEW_APP_KEY_FILE"),
+		ReviewAppTenantID:       os.Getenv("AEON_REVIEW_APP_TENANT_ID"),
+		ReviewAppRepository:     os.Getenv("AEON_REVIEW_APP_REPOSITORY"),
 	}
 	switch cfg.Env {
 	case "dev", "prod":

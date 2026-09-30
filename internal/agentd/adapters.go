@@ -731,6 +731,8 @@ func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
 }
 
 type claudeProcess struct {
+	answerMu      sync.Mutex
+	answer        string
 	managedPolicy bool
 	steerEnabled  bool
 	*wireProcess
@@ -738,6 +740,14 @@ type claudeProcess struct {
 	ready     chan error
 	controlMu sync.Mutex
 	controls  map[string]chan bool
+}
+
+type claudeReviewProcess struct{ *claudeProcess }
+
+func (p *claudeReviewProcess) Evidence() string {
+	p.answerMu.Lock()
+	defer p.answerMu.Unlock()
+	return p.answer
 }
 
 func (p *claudeProcess) Wait() error {
@@ -852,6 +862,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	capacityParser := capacity.Parser{}
 	p.setOnEvent(func(raw json.RawMessage) {
 		var frame struct {
+			Answer          string             `json:"answer"`
 			Kind            string             `json:"kind"`
 			Reason          string             `json:"reason"`
 			CorrelationID   string             `json:"correlation_id"`
@@ -868,6 +879,12 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			return
 		}
 		switch frame.Kind {
+		case "review_result":
+			if r.Run.ReadOnlyReview && len(frame.Answer) <= 64<<10 {
+				cp.answerMu.Lock()
+				cp.answer = frame.Answer
+				cp.answerMu.Unlock()
+			}
 		case "capacity":
 			var payload struct {
 				Event  json.RawMessage `json:"event"`
@@ -972,7 +989,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			}
 		}
 	})
-	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens, "capabilities": append([]string{}, r.Capabilities...)}); err != nil {
+	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "read_only_review": r.Run.ReadOnlyReview, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens, "capabilities": append([]string{}, r.Capabilities...)}); err != nil {
 		return p.failStart(err)
 	}
 	op, cancel := operationContext(ctx)
@@ -980,6 +997,9 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	select {
 	case <-cp.ready:
 		started = true
+		if r.Run.ReadOnlyReview {
+			return &claudeReviewProcess{cp}, nil
+		}
 		return cp, nil
 	case <-op.Done():
 		return p.failStart(fmt.Errorf("Claude bridge readiness: %w", op.Err()))
