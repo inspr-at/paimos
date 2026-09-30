@@ -131,6 +131,8 @@ type Progress struct {
 	RetryAfterSeconds int                      `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
+	VerificationReasons                    map[string]string
+	AccountStatuses                        map[string]HarnessDetail
 	ProfilePermissions                     bool
 	HarnessFailed                          bool
 	HarnessDetails                         map[string]HarnessDetail

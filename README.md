@@ -702,6 +702,23 @@ can do the same with `control --setup-root PATH` (exclusive with `--socket`).
 Existing generation-specific socket references remain readable while their
 listener exists. No pairing data migration is required.
 
+`aeon-agentd status` reads the last atomic setup snapshot and live daemon status
+without taking `setup.lock`, reconciling enrollment, or performing cleanup.
+Use `pair`/`setup` to resume setup and `disconnect` to resume cleanup. Approved
+but unbound harnesses name the required `add-harness` command. Account checks
+report a 60-second startup bound; capacity capture reports a 10-second bound.
+Unsupported or incomplete verification fails with `verification_unavailable`
+and a bounded cause, independently of account probing. Connect-only approval
+creates no verification, and a later approval cancels older queued verification
+on that same computer without interrupting claimed work.
+
+New pairing-owned macOS launchd services write diagnostics to
+`~/Library/Logs/aeon-agentd/{stdout,stderr}.log` in a private `0700` directory.
+Existing receipt-bound service definitions remain owned and unchanged; logging
+is added when a new service is installed. Managed Nix/Home Manager services
+retain their configuration ownership.
+
+
 `HOME` is needed only for the fallback, so short and existing legacy socket
 paths still resolve when it is unset. If the service and shell resolve different
 fallbacks, the client reports its resolved home, setup root and socket alongside

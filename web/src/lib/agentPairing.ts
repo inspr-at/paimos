@@ -94,6 +94,7 @@ export interface PairingEnrollment {
   active_run_ids: string[]
   /** Actual run result. A verification_run_id alone is not success. */
   verification_state?: VerificationState
+  verification_reason?: string
   verification_error?: string | null
   /** Drained only after the computer acknowledges cleanup. Revoke does not infer it. */
   local_processes?: ProcessState
@@ -789,12 +790,12 @@ function setupProgress(view: PairingView): PairingProgress {
   if (progress === 'service_conflict' || progress === 'setup_failed') {
     return { phase: 'setup', title: progress === 'service_conflict' ? 'Setup found a conflict' : 'Setup did not finish', detail: setupErrorText(view) || 'The computer reported that setup did not finish.', next: 'Resolve it on the computer. Approving again does not replace another service or refill a verification.', renewsAuthority: false }
   }
-  const unavailable = view.enrollments.find(item => item.verification_state === 'unavailable')
+  const unavailable = view.enrollments.find(item => item.verification_state === 'unavailable' || item.verification_error === 'verification_unavailable')
   if (unavailable) {
     return {
       phase: 'verify',
       title: 'Verification unavailable',
-      detail: verificationUnavailableDetail(unavailable.verification_error),
+      detail: unavailable.verification_reason ? verificationRefusalText(unavailable) : verificationUnavailableDetail(unavailable.verification_error),
       next: 'The computer stays paired. Turn verification off on a new approval, or leave that harness out. This is not an installation failure.',
       renewsAuthority: false,
     }
@@ -847,6 +848,15 @@ const SETUP_ERROR_COPY: Record<string, string> = {
   private_storage_failed: 'Private setup storage could not be prepared.',
   installation_failed: 'The verified setup tool could not be installed.',
   verification_unavailable: 'Verification is unavailable for a selected harness. The computer stays paired.',
+}
+
+function harnessDisplayName(harness: string): string {
+  return ({ claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok', pi: 'pi' } as Record<string, string>)[harness] ?? harness
+}
+
+function verificationRefusalText(item: { harness: string; verification_reason?: string }): string {
+  const cause: Record<string, string> = { adapter_unsupported: 'the installed adapter cannot enforce safe verification', binding_incomplete: 'the verification binding is incomplete or unsafe', local_binding_missing: 'the approved account has no usable local binding' }
+  return `${harnessDisplayName(item.harness)} verification couldn't run on this computer (${cause[item.verification_reason ?? ''] ?? 'safe verification is unavailable'}). The computer is paired; re-run verification from /agents with a new approval.`
 }
 
 function verificationUnavailableDetail(error: string | null | undefined): string {
@@ -907,7 +917,8 @@ function harnessFix(harness: string, reason?: HarnessReason): HarnessFix | undef
       ? { kind: 'repin', command: 'aeon-agentd repin --harness claude' }
       : { kind: 'add_harness', command: `aeon-agentd add-harness --harness ${harness}` }
   }
-  if (['harness_failed', 'cli_unavailable', 'profile_permissions'].includes(reason ?? '')) return { kind: 'restart', command: 'aeon-agentd setup' }
+  if (reason === 'binding_missing') return { kind: 'add_harness', command: `aeon-agentd add-harness --harness ${harness}` }
+  if (['harness_failed', 'cli_unavailable', 'profile_permissions', 'probe_timeout', 'probe_failed', 'capacity_timeout'].includes(reason ?? '')) return { kind: 'restart', command: 'aeon-agentd setup' }
   if (reason === 'login_required') return { kind: 'login', command: harness === 'claude' ? 'claude auth login' : harness === 'pi' ? 'pi' : `${harness === 'cursor' ? 'cursor-agent' : harness} login` }
 }
 
@@ -963,7 +974,13 @@ function enrolledHarnessCount(view: HarnessView, harness: string): number {
 /** One short sentence that the command alone does not say; empty otherwise. */
 export function describeHarnessHint(view: HarnessView, harness: string): string {
   const detail = harnessDetail(view, harness)
-  if (view.computer_state !== 'connected' || !detail) return ''
+  if (view.computer_state !== 'connected') return ''
+  const refusal = view.enrollments?.find(item => item.harness === harness && item.state === 'connected' && item.verification_error === 'verification_unavailable')
+  if (refusal) return verificationRefusalText(refusal)
+  if (!detail) return ''
+  if (detail.reason === 'binding_missing') return `${harnessDisplayName(harness)} was approved but isn't set up on this computer. Add it here or remove it from this computer in ${product()}.`
+  if (detail.reason === 'probe_pending') return 'Waiting for the account sign-in and availability check; blocked after 60 seconds.'
+  if (detail.reason === 'capacity_capture') return 'A short capacity check is in progress; expected within 10 seconds.'
   const attention = attentionReport(detail)
   const enrolled = enrolledHarnessCount(view, harness)
   if (attention && enrolled >= 2 && attention.count < enrolled) {
@@ -977,7 +994,7 @@ export function describeHarnessHint(view: HarnessView, harness: string): string 
 
 function reasonLabel(status: string, reason?: string): string {
   const labels: Record<string, string> = { ready: 'Ready', blocked: 'Needs attention', login_required: 'Sign in required', checking: 'Checking', draining: 'Draining' }
-  const reasons: Record<string, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair' }
+  const reasons: Record<string, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair', binding_missing: 'Approved, not set up here', probe_pending: 'Checking account (up to 60 seconds)', probe_timeout: 'Account check timed out after 60 seconds', probe_failed: 'Account availability check failed', capacity_capture: 'Capturing capacity (up to 10 seconds)', capacity_timeout: 'Capacity capture timed out after 10 seconds' }
   // A code from a newer daemon is shown raw rather than dropped or guessed.
   if (!HARNESS_STATES.includes(status as typeof HARNESS_STATES[number])) return `Needs attention · ${reason ?? status}`
   if (reason) return reasons[reason] ?? `Needs attention · ${reason}`
@@ -1577,8 +1594,9 @@ function enrollments(value: unknown): PairingEnrollment[] {
   })
 }
 
-function optionalVerification(record: Record<string, unknown>): { verification_state?: VerificationState; verification_error?: string | null } {
-  const extra: { verification_state?: VerificationState; verification_error?: string | null } = {}
+function optionalVerification(record: Record<string, unknown>): { verification_state?: VerificationState; verification_error?: string | null; verification_reason?: string } {
+  const extra: { verification_state?: VerificationState; verification_error?: string | null; verification_reason?: string } = {}
+  if (typeof record.verification_reason === 'string' && ['adapter_unsupported', 'binding_incomplete', 'local_binding_missing'].includes(record.verification_reason)) extra.verification_reason = record.verification_reason
   const state = optionalEnum(record.verification_state, VERIFICATION_STATES)
   if (state) extra.verification_state = state
   if (typeof record.verification_error === 'string' && record.verification_error) extra.verification_error = record.verification_error.slice(0, 500)

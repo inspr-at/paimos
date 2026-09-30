@@ -53,6 +53,7 @@ type replay struct {
 // Record contains only local process provenance and bounded control digests.
 // The journal is AEON v2; classic journals are never opened implicitly.
 type Record struct {
+	VerificationReason    string `json:"verification_reason,omitempty"`
 	BudgetStopReason      string `json:"budget_stop_reason,omitempty"`
 	BudgetStopUnconfirmed bool   `json:"budget_stop_unconfirmed,omitempty"`
 	// Only launchPrepared proves that adapter.Start has never been called.
@@ -123,6 +124,9 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	startedAt           time.Time
+	capacityStartedAt   time.Time
+	capacityAccountID   string
 	quotaKey            []byte // Tenant HMAC key, memory only; never passed to a child.
 	signalsPublished    map[string]AccountSignals
 	statuslineMu        sync.Mutex
@@ -308,7 +312,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx}
 	if err := s.loadCapacityCaptures(); err != nil {
@@ -423,21 +427,8 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			}
 			continue
 		}
-		// Account probes can start vendor executables. A refused verification
-		// must not reach one merely because health probing precedes dispatch.
-		probeBlocked := false
-		for _, run := range runs {
-			if run.AgentPrincipalID == s.principalID && run.Purpose == VerificationPurpose && run.requestedAccount() == account.ID && validQueuedExecutionMode(run, adapters[account.Harness]) != nil {
-				probeBlocked = true
-				break
-			}
-		}
-		if probeBlocked {
-			s.mu.Lock()
-			s.probedAccounts[account.ID] = false
-			s.mu.Unlock()
-			continue
-		}
+		// Account health is independent of optional verification. Refusing a
+		// verification never prevents the enrolled account's normal probe.
 		probe := adapters[account.Harness].(AccountProber)
 		s.mu.Lock()
 		hold := s.harnessHolds[account.Harness]
@@ -575,6 +566,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		retry := entry.record.LaunchState == launchPrepared && entry.record.State == "claim_pending" && entry.record.Generation == s.generation
 		entry.mu.Unlock()
 		if !retry {
+			entry.mu.Lock()
+			refused, reason := entry.record.LaunchState == launchRefused, entry.record.VerificationReason
+			entry.mu.Unlock()
+			if refused {
+				return s.reportVerificationRefusal(ctx, run, reason)
+			}
 			return nil
 		}
 		if err := s.reconcileUnlaunched(ctx, entry); err != nil {
@@ -604,6 +601,34 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	held := s.harnessHeld(profile.Harness)
 	adapter := s.adapters[profile.Harness]
 	s.mu.Unlock()
+	if run.Purpose == VerificationPurpose {
+		reason := ""
+		if adapter == nil || profile.ID == "" {
+			reason = "local_binding_missing"
+		} else if err := validQueuedExecutionMode(run, adapter); err != nil {
+			reason = "binding_incomplete"
+			if errors.Is(err, ErrVerificationUnavailable) {
+				reason = "adapter_unsupported"
+			}
+		}
+		if reason == "" {
+			found := false
+			for _, a := range s.accounts {
+				if a.ID == run.requestedAccount() && a.Harness == profile.Harness && !a.DependencyBlocked {
+					found = true
+				}
+			}
+			if !found {
+				reason = "local_binding_missing"
+			}
+		}
+		if reason != "" {
+			if err := s.refuseVerification(run, reason); err != nil {
+				return err
+			}
+			return s.reportVerificationRefusal(ctx, run, reason)
+		}
+	}
 	if held {
 		return ErrDraining
 	}
@@ -611,11 +636,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return ErrUnsupported
 	}
 	if err := validQueuedExecutionMode(run, adapter); err != nil {
-		if errors.Is(err, ErrVerificationUnavailable) && entry == nil {
-			if saveErr := s.refuseVerification(run); saveErr != nil {
-				return saveErr
-			}
-		}
 		return err
 	}
 	verification := run.Purpose == VerificationPurpose

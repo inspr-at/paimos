@@ -25,6 +25,8 @@ type DrainRequest struct {
 // LifecycleStatus does not conflate telemetry acceptance with observed exit.
 // Only a drained status permits removing a pairing-owned service or credential.
 type LifecycleStatus struct {
+	VerificationReasons     map[string]string                   `json:"verification_reasons,omitempty"`
+	AccountStatuses         map[string]agentsetup.HarnessDetail `json:"account_statuses,omitempty"`
 	ProfilePermissions      bool                                `json:"profile_permissions,omitempty"`
 	HarnessFailed           bool                                `json:"harness_failed,omitempty"`
 	HarnessFailedAccountIDs []string                            `json:"harness_failed_account_ids,omitempty"`
@@ -136,8 +138,14 @@ func (s *Supervisor) Drain(req DrainRequest) (LifecycleStatus, error) {
 }
 
 func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
+	return s.lifecycleAt(accountID, time.Now())
+}
+
+func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatus {
 	v := LifecycleStatus{DaemonID: s.daemonID, Generation: s.generation, State: "drained", ActiveRunIDs: []string{}, UnconfirmedRunIDs: []string{}, SettlementPendingRunIDs: []string{}, FencedAccountIDs: []string{}, VerificationResults: map[string]string{}, HarnessErrors: map[string]string{}}
 	s.mu.Lock()
+	v.VerificationReasons = map[string]string{}
+	v.AccountStatuses = map[string]agentsetup.HarnessDetail{}
 	v.HarnessStatuses = map[string]string{}
 	v.HarnessDetails = map[string]agentsetup.HarnessDetail{}
 	if s.capacityCapturing {
@@ -191,15 +199,27 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 			} else if s.probedAccounts[a.ID] && !s.blockedAccounts[a.ID] {
 				status, reason = "ready", ""
 				v.Ready = true
+			} else if s.blockedAccounts[a.ID] {
+				status, reason = "blocked", "probe_failed"
 			} else {
-				reason = "starting"
+				reason = "probe_pending"
+				if now.Sub(s.startedAt) >= time.Minute {
+					status, reason = "blocked", "probe_timeout"
+				}
 			}
-			// A pin-blocked account stays unlaunchable; its verification waits
-			// for the repair instead of being refused.
+			if status == "ready" && s.capacityCapturing && s.capacityAccountID == a.ID {
+				status, reason = "checking", "capacity_capture"
+				if now.Sub(s.capacityStartedAt) >= 10*time.Second {
+					status, reason = "blocked", "capacity_timeout"
+				}
+			}
+			// Pin-blocked accounts remain unlaunchable. A queued verification
+			// records its own no-launch refusal independently of this health report.
 			if adapter, ok := s.adapters[a.Harness].(VerificationAdapter); !a.DependencyBlocked && (!ok || !adapter.VerificationSupported()) {
 				v.VerificationUnavailable = append(v.VerificationUnavailable, a.ID)
 			}
 		}
+		v.AccountStatuses[a.ID], _ = agentsetup.HarnessReport(a.Harness, status, reason)
 		perHarness[a.Harness] = append(perHarness[a.Harness], harnessAccountState{id: a.ID, status: status, reason: reason})
 	}
 	assignHarnessReports(&v, perHarness)
@@ -237,6 +257,9 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 		}
 		if e.record.ExecutionMode == VerificationPurpose {
 			state := e.record.State
+			if e.record.LaunchState == launchRefused {
+				v.VerificationReasons[e.record.RunID] = e.record.VerificationReason
+			}
 			if e.record.LaunchState == launchRefused && !slices.Contains(v.VerificationUnavailable, e.record.AccountID) {
 				v.VerificationUnavailable = append(v.VerificationUnavailable, e.record.AccountID)
 			}

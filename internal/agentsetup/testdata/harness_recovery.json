@@ -19,10 +19,24 @@
     "harness_failed",
     "cli_unavailable",
     "profile_permissions",
+    "binding_missing",
+    "probe_pending",
+    "probe_timeout",
+    "probe_failed",
+    "capacity_capture",
+    "capacity_timeout",
     "future_reason"
   ],
   "fixes": {
     "claude": {
+      "binding_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness claude"
+      },
+      "capacity_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
       "cli_unavailable": {
         "kind": "restart",
         "command": "aeon-agentd setup"
@@ -59,12 +73,28 @@
         "kind": "repin",
         "command": "aeon-agentd repin --harness claude"
       },
+      "probe_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "probe_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
       "profile_permissions": {
         "kind": "restart",
         "command": "aeon-agentd setup"
       }
     },
     "codex": {
+      "binding_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness codex"
+      },
+      "capacity_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
       "cli_unavailable": {
         "kind": "restart",
         "command": "aeon-agentd setup"
@@ -101,12 +131,28 @@
         "kind": "add_harness",
         "command": "aeon-agentd add-harness --harness codex"
       },
+      "probe_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "probe_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
       "profile_permissions": {
         "kind": "restart",
         "command": "aeon-agentd setup"
       }
     },
     "cursor": {
+      "binding_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness cursor"
+      },
+      "capacity_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
       "cli_unavailable": {
         "kind": "restart",
         "command": "aeon-agentd setup"
@@ -143,12 +189,28 @@
         "kind": "add_harness",
         "command": "aeon-agentd add-harness --harness cursor"
       },
+      "probe_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "probe_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
       "profile_permissions": {
         "kind": "restart",
         "command": "aeon-agentd setup"
       }
     },
     "grok": {
+      "binding_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness grok"
+      },
+      "capacity_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
       "cli_unavailable": {
         "kind": "restart",
         "command": "aeon-agentd setup"
@@ -185,12 +247,28 @@
         "kind": "add_harness",
         "command": "aeon-agentd add-harness --harness grok"
       },
+      "probe_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "probe_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
       "profile_permissions": {
         "kind": "restart",
         "command": "aeon-agentd setup"
       }
     },
     "pi": {
+      "binding_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness pi"
+      },
+      "capacity_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
       "cli_unavailable": {
         "kind": "restart",
         "command": "aeon-agentd setup"
@@ -226,6 +304,14 @@
       "pin_unsafe": {
         "kind": "add_harness",
         "command": "aeon-agentd add-harness --harness pi"
+      },
+      "probe_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "probe_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
       },
       "profile_permissions": {
         "kind": "restart",
