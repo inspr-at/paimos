@@ -180,6 +180,38 @@ test('a narrow list keeps a compact worker cue in the title', async ({ page }) =
   await expect(page).toHaveURL(/\/agents\/s-nova$/)
 })
 
+test('the copy action does not cover the compact worker', async ({ page }) => {
+  const data = withWorkers()
+  // Assignee hidden, so the cue stays in the title at every width, including 1600.
+  data.preferences['list:p-pharos'] = { visible: ['status', 'priority', 'updated'] }
+  await mockWork(page, data)
+  for (const width of [390, 800, 1600]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await page.goto('/p/PHAROS')
+    const sample = row(page, 'PHAROS-14')
+    const worker = sample.locator('.title-workers').getByRole('link', { name: /nova/ })
+    await expect(worker).toBeVisible()
+    await sample.hover()
+    const workerBox = await worker.boundingBox()
+    // Hidden on a phone (display: none), so it is not a role until the row is wide enough to hover.
+    const copy = sample.locator('.row-actions button[aria-label="Copy PHAROS-14"]')
+    const copyBox = await copy.boundingBox()
+    expect(workerBox).toBeTruthy()
+    if (width === 390) {
+      expect(copyBox).toBeNull()
+    } else if (workerBox && copyBox) {
+      expect(copyBox).toBeTruthy()
+      const clear = copyBox.x + copyBox.width <= workerBox.x
+        || workerBox.x + workerBox.width <= copyBox.x
+        || copyBox.y + copyBox.height <= workerBox.y
+        || workerBox.y + workerBox.height <= copyBox.y
+      expect(clear).toBe(true)
+    } else {
+      expect(copyBox).toBeTruthy()
+    }
+  }
+})
+
 test('rebinding follows the next poll, and leaving the list stops it', async ({ page }) => {
   const data = withWorkers()
   const calls = await mockWork(page, data)

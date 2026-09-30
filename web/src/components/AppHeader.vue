@@ -80,7 +80,17 @@ function typing(target: EventTarget | null) {
 const pageOwnsSlash = computed(() => route.path === '/' || route.path === '/business/customers' || route.path === '/business/quotes' || route.path === '/knowledge' || (!!projectKey.value && route.query.view !== 'full' && !knowledgeSlug.value))
 function shortcut(event: KeyboardEvent) {
   if (!globalSearch.value) return
-  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') { event.preventDefault(); palette.value?.open(); return }
+  const isK = event.key.toLowerCase() === 'k' || event.code === 'KeyK'
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && isK) {
+    // Capture runs before the focused control. While the palette input already
+    // has the key, leave it so Ctrl+K moves the selection instead of reopening.
+    const paletteInput = document.querySelector('dialog.palette[open] input')
+    if (paletteInput && event.target === paletteInput) return
+    event.preventDefault()
+    event.stopPropagation()
+    palette.value?.open()
+    return
+  }
   if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented || typing(event.target) || document.querySelector('dialog[open], .floating')) return
   if (event.key === '/' && !pageOwnsSlash.value) { event.preventDefault(); palette.value?.open() }
   else if (event.key === '?') { event.preventDefault(); run({ name: 'shortcuts' }) }
@@ -172,11 +182,11 @@ onMounted(() => {
   fonts?.addEventListener('loadingdone', remeasure)
   void fonts?.ready.then(remeasure)
   refit()
-  window.addEventListener('keydown', shortcut); window.addEventListener('keydown', placeKeys, true)
+  window.addEventListener('keydown', shortcut, true); window.addEventListener('keydown', placeKeys, true)
   window.addEventListener('pointerdown', chordPointer, true); window.addEventListener('focusin', chordFocus, true)
   needsPoll.start()
 })
-onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop() })
+onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', shortcut, true); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop() })
 </script>
 
 <template>

@@ -60,7 +60,14 @@ function signInAgain() {
 }
 // A page that fills the screen (the quote editor) may fold the header away.
 const folded = computed(() => headerFolded.value && !!route.meta.foldHeader && !bare.value && !fatal.value)
-watch(command, value => { if (value?.command.name === 'shortcuts') { consume(); shortcuts.value?.open() } })
+watch(command, value => {
+  if (value?.command.name !== 'shortcuts') return
+  consume()
+  // The palette closes in this same turn. Opening the sheet now lets that close,
+  // or the Enter key that chose the action, dismiss the sheet. The next turn is late
+  // enough, and the sheet ignores cancel for one frame after it opens.
+  setTimeout(() => shortcuts.value?.open(), 0)
+})
 // A new page clears an earlier page error.
 watch(() => route.fullPath, (_path, old) => { if (old !== undefined && fatal.value?.kind !== 'update') clearFatal() })
 // ---------- Release history: /releases and /releases/<version>, or ?releases= over any page ----------

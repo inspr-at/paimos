@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { ref } from 'vue'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 
 type Key = string | { icon: IconName; label: string }
@@ -113,19 +113,36 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
 const dialog = ref<HTMLDialogElement>()
 const closeButton = ref<HTMLButtonElement>()
 let opener: HTMLElement | null = null
-async function open() {
+let arming = false
+let armFrame = 0
+let escapeArmed = false
+function open() {
+  if (dialog.value?.open) return
   opener = document.activeElement as HTMLElement
+  // Arm before showModal. The Enter or click that opened the sheet can cancel it
+  // in this turn; two frames later a non-Escape cancel still closes, and Escape always does.
+  arming = true
   dialog.value?.showModal()
-  await nextTick()
-  closeButton.value?.focus()
+  cancelAnimationFrame(armFrame)
+  armFrame = requestAnimationFrame(() => {
+    armFrame = requestAnimationFrame(() => { arming = false; closeButton.value?.focus() })
+  })
 }
 function close() { dialog.value?.close(); opener?.focus({ preventScroll: true }) }
-function backdrop(event: MouseEvent) { if (event.target === dialog.value) close() }
+function noteEscape(event: KeyboardEvent) { if (event.key === 'Escape') escapeArmed = true }
+function onCancel(event: Event) {
+  event.preventDefault()
+  const viaEscape = escapeArmed
+  escapeArmed = false
+  if (arming && !viaEscape) return
+  close()
+}
+function backdrop(event: MouseEvent) { if (arming) return; if (event.target === dialog.value) close() }
 defineExpose({ open, close })
 </script>
 
 <template>
-  <dialog ref="dialog" class="sheet" aria-labelledby="shortcuts-title" @cancel.prevent="close" @click="backdrop">
+  <dialog ref="dialog" class="sheet" aria-labelledby="shortcuts-title" @keydown="noteEscape" @cancel="onCancel" @click="backdrop">
     <div class="sheet-card">
       <header>
         <h2 id="shortcuts-title">Keyboard shortcuts</h2>
