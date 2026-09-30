@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
@@ -27,6 +28,8 @@ type LocalServer struct {
 	info      os.FileInfo
 	tokenInfo os.FileInfo
 	release   func()
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*LocalServer, error) {
@@ -37,7 +40,18 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	if err != nil {
 		return nil, err
 	}
-	defer dir.Close()
+	lock, err := dir.LockSocket(filepath.Base(socket))
+	if err != nil {
+		dir.Close()
+		return nil, err
+	}
+	complete := false
+	defer func() {
+		if !complete {
+			lock.Close()
+			dir.Close()
+		}
+	}()
 	if _, err := os.Lstat(socket); err == nil {
 		return nil, errors.New("local socket already exists")
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -52,7 +66,6 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	if err != nil {
 		return nil, err
 	}
-	complete := false
 	defer func() {
 		if !complete {
 			_ = os.Remove(tokenFile)
@@ -155,6 +168,10 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	})
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ConnContext: attachConnContext}
 	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, info: info, tokenInfo: tokenInfo}
+	local.release = func() {
+		_ = lock.Close()
+		_ = dir.Close()
+	}
 	go func() { _ = server.Serve(listener) }()
 	complete = true
 	return local, nil
@@ -172,15 +189,17 @@ func (l *LocalServer) Close() error {
 	if l == nil {
 		return nil
 	}
-	if l.release != nil {
-		defer l.release()
-	}
-	err := l.Server.Close()
-	if info, e := os.Lstat(l.Socket); e == nil && os.SameFile(info, l.info) {
-		_ = os.Remove(l.Socket)
-	}
-	if info, e := os.Lstat(l.TokenFile); e == nil && os.SameFile(info, l.tokenInfo) {
-		_ = os.Remove(l.TokenFile)
-	}
-	return err
+	l.closeOnce.Do(func() {
+		if l.release != nil {
+			defer l.release()
+		}
+		l.closeErr = l.Server.Close()
+		if info, e := os.Lstat(l.Socket); e == nil && os.SameFile(info, l.info) {
+			_ = os.Remove(l.Socket)
+		}
+		if info, e := os.Lstat(l.TokenFile); e == nil && os.SameFile(info, l.tokenInfo) {
+			_ = os.Remove(l.TokenFile)
+		}
+	})
+	return l.closeErr
 }

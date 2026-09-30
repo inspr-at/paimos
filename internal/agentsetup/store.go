@@ -157,7 +157,7 @@ func (s *Store) open(name string, flags int) (*os.File, error) {
 	}
 	f := os.NewFile(uintptr(fd), "private-file")
 	var st unix.Stat_t
-	if unix.Fstat(fd, &st) != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Mode&0777 != 0600 || int(st.Uid) != os.Getuid() || st.Nlink != 1 {
+	if unix.Fstat(fd, &st) != nil || !privateArtifact(&st, unix.S_IFREG) {
 		f.Close()
 		return nil, ErrUnsafePath
 	}

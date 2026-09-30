@@ -507,18 +507,22 @@ the recorded socket; paths under the client's home are shortened to `~`.
 
 `pair`, `setup` and paired `serve` reject an unrepresentable path before
 creating pairing state or contacting the instance. Choose a shorter setup
-root (`--state-root` for pair/setup, `--setup-root` for serve). A lifetime lock
-protects the stable listener. Crash recovery checks the socket and token inodes
-recorded for that setup and daemon. If a crash happens between bind and publishing
-the owner record, recovery requires an owned mode-0600 socket with one link, no
-symlink and a connection refused by the kernel. Any accompanying token must also
-be an owned mode-0600 regular file with one link. Recovery renames the socket to
-a unique aside name through the private directory handle and probes that moved
-inode before removal; a new listener at the original path survives. A live
-socket is restored with an exclusive rename. If the original path has been
-recreated, both sockets are kept and startup refuses. Both artifact identities
-are rechecked and only quarantined names are removed; a token without a socket
-or an unsafe artifact is left untouched.
+root (`--state-root` for pair/setup, `--setup-root` for serve). Every local
+listener takes an exclusive non-blocking lock on `<socket>.lock` before touching
+the socket or token and retains it through shutdown cleanup. The lock file is
+an owned mode-0600 regular file opened without following symlinks; it is retained
+across restarts. A second start reports "agentd is already running for this state
+root" and leaves the active listener and token untouched. Clients never take
+the lock.
+
+The kernel releases the lock after a crash, including SIGKILL. The next owner
+validates all stale socket artifacts through the private directory handle before
+removing any: the socket, token (even without a socket), obsolete owner record,
+and legacy `.s` plus eight hex digit quarantine names. Each must be owned by the
+current uid, mode 0600 and single-linked, with the expected socket or regular-file
+type. Symlinks, foreign owners and unsafe modes refuse startup. Recovery does not
+probe connections or quarantine files; interruption simply leaves stale artifacts
+for the next lock owner to clean. Unrelated directory entries are preserved.
 The private token and local control authorization rules remain unchanged.
 
 ### Harness interpreter pins

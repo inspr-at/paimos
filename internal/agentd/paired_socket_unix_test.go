@@ -4,14 +4,18 @@
 package agentd
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 )
@@ -30,178 +34,175 @@ func socketTestDir(t *testing.T) string {
 	return dir
 }
 
-// The subprocess deliberately exits without defers, leaving the real listener
-// and token inodes behind while the kernel releases its lifetime lock.
-func TestPairedSocketCrashFixture(t *testing.T) {
-	if os.Getenv("AEON_SOCKET_CRASH_FIXTURE") != "1" {
+// This child holds a real lifetime flock until the parent sends SIGKILL. The
+// legacy mode recreates a crash during the removed quarantine implementation.
+func TestPairedSocketProcessFixture(t *testing.T) {
+	if os.Getenv("AEON_SOCKET_PROCESS_FIXTURE") != "1" {
 		return
 	}
-	args := os.Args[len(os.Args)-3:]
+	args := os.Args[len(os.Args)-4:]
 	store, err := agentsetup.OpenStore(args[0], false)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer store.Close()
 	s := &Supervisor{state: store, daemonID: args[1]}
-	serve := ServePairedLocal
-	if os.Getenv("AEON_SOCKET_CRASH_BEFORE_OWNER") == "1" {
-		// ServeLocal has bound/chmodded the socket and written the token, but
-		// ServePairedLocal has not yet published the ownership record.
+	input := bufio.NewReader(os.Stdin)
+	fmt.Println("waiting")
+	if _, err := input.ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	if args[3] == "legacy" {
 		sockets, err := agentsetup.OpenStore(filepath.Dir(args[2]), false)
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer sockets.Close()
 		lock, err := sockets.LockNamed(filepath.Base(args[2]) + ".lock")
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer lock.Close()
-		defer sockets.Close()
-		serve = ServeLocal
+		listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: args[2], Net: "unix"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener.SetUnlinkOnClose(false)
+		defer listener.Close()
+		if err := os.Chmod(args[2], 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(args[2]+".token", []byte("legacy fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(args[2], filepath.Join(sockets.Path(), ".s01234567")); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		local, err := ServePairedLocal(s, args[2])
+		if errors.Is(err, agentsetup.ErrBusy) {
+			fmt.Println("busy")
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer local.Close()
 	}
-	if _, err := serve(s, args[2]); err != nil {
-		t.Fatal(err)
-	}
-	os.Exit(0)
+	fmt.Println("ready")
+	_, _ = input.ReadString('\n')
 }
 
-func crashedSocket(t *testing.T, s *Supervisor, socket string, beforeOwner ...bool) {
+type socketProcess struct {
+	cmd   *exec.Cmd
+	input io.WriteCloser
+	lines <-chan string
+}
+
+func startSocketProcess(t *testing.T, s *Supervisor, socket, mode string) *socketProcess {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestPairedSocketCrashFixture$", "--", s.state.Path(), s.DaemonID(), socket)
-	cmd.Env = append(os.Environ(), "AEON_SOCKET_CRASH_FIXTURE=1")
-	if len(beforeOwner) > 0 && beforeOwner[0] {
-		cmd.Env = append(cmd.Env, "AEON_SOCKET_CRASH_BEFORE_OWNER=1")
-	}
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("crash fixture: %v: %s", err, output)
-	}
-}
-
-func TestPairedSocketRecoversCrashBeforeOwnerRecord(t *testing.T) {
-	for _, withToken := range []bool{true, false} {
-		t.Run(map[bool]string{true: "with-token", false: "socket-only"}[withToken], func(t *testing.T) {
-			s, _, _ := testSupervisor(t)
-			defer s.Close(context.Background())
-			socket := filepath.Join(socketTestDir(t), "agentd.sock")
-			crashedSocket(t, s, socket, true)
-			if _, err := os.Lstat(socket + ".owner.json"); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("crash fixture published owner record: %v", err)
-			}
-			if !withToken {
-				if err := os.Remove(socket + ".token"); err != nil {
-					t.Fatal(err)
-				}
-			}
-			local, err := ServePairedLocal(s, socket)
-			if err != nil {
-				t.Fatalf("recover real orphan socket: %v", err)
-			}
-			defer local.Close()
-			conn, err := net.Dial("unix", socket)
-			if err != nil {
-				t.Fatalf("recovered listener unavailable: %v", err)
-			}
-			conn.Close()
-			if _, err := os.Lstat(socket + ".owner.json"); err != nil {
-				t.Fatalf("recovered listener missing owner: %v", err)
-			}
-			if _, err := ServePairedLocal(s, socket); !errors.Is(err, agentsetup.ErrBusy) {
-				t.Fatalf("recovered listener not locked: %v", err)
-			}
-		})
-	}
-}
-
-func TestPairedSocketUnrecordedRecoveryRefusesUnsafeArtifacts(t *testing.T) {
-	for _, kind := range []string{"live", "socket-mode", "socket-world-writable", "socket-file", "socket-symlink", "socket-hardlink", "token-mode", "token-symlink", "token-hardlink", "owner-invalid", "owner-symlink"} {
-		t.Run(kind, func(t *testing.T) {
-			s, _, _ := testSupervisor(t)
-			defer s.Close(context.Background())
-			socket := filepath.Join(socketTestDir(t), "agentd.sock")
-			if kind == "live" {
-				local, err := ServeLocal(s, socket)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer local.Close()
-			} else {
-				crashedSocket(t, s, socket, true)
-			}
-			target := socket
-			if strings.HasPrefix(kind, "token-") {
-				target += ".token"
-			}
-			var err error
-			switch kind {
-			case "socket-mode", "token-mode":
-				err = os.Chmod(target, 0644)
-			case "socket-world-writable":
-				err = os.Chmod(target, 0666)
-			case "socket-file", "socket-symlink", "token-symlink":
-				if err := os.Rename(target, target+".original"); err != nil {
-					t.Fatal(err)
-				}
-				if kind == "socket-file" {
-					err = os.WriteFile(target, []byte("unrelated fixture"), 0600)
-				} else {
-					err = os.Symlink(target+".original", target)
-				}
-			case "socket-hardlink", "token-hardlink":
-				err = os.Link(target, target+".link")
-			case "owner-invalid":
-				err = os.WriteFile(socket+".owner.json", []byte("invalid fixture"), 0600)
-			case "owner-symlink":
-				err = os.Symlink(socket+".missing", socket+".owner.json")
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			beforeSocket, err := os.Lstat(socket)
-			if err != nil {
-				t.Fatal(err)
-			}
-			beforeToken, err := os.Lstat(socket + ".token")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if local, err := ServePairedLocal(s, socket); err == nil {
-				local.Close()
-				t.Fatal("unsafe orphan artifacts adopted")
-			}
-			for path, before := range map[string]os.FileInfo{socket: beforeSocket, socket + ".token": beforeToken} {
-				after, err := os.Lstat(path)
-				if err != nil || !os.SameFile(before, after) || before.Mode() != after.Mode() {
-					t.Fatalf("refusal changed artifact %s: %v", path, err)
-				}
-			}
-			if kind == "live" {
-				conn, err := net.Dial("unix", socket)
-				if err != nil {
-					t.Fatalf("live listener disturbed: %v", err)
-				}
-				conn.Close()
-			}
-		})
-	}
-}
-
-func TestPairedSocketRecoversCrashAndExcludesLiveListener(t *testing.T) {
-	s, _, _ := testSupervisor(t)
-	defer s.Close(context.Background())
-	socket := filepath.Join(socketTestDir(t), "agentd.sock")
-	crashedSocket(t, s, socket)
-	local, err := ServePairedLocal(s, socket)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestPairedSocketProcessFixture$", "--", s.state.Path(), s.DaemonID(), socket, mode)
+	cmd.Env = append(os.Environ(), "AEON_SOCKET_PROCESS_FIXTURE=1")
+	cmd.Stderr = os.Stderr
+	input, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
+	output, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	p := &socketProcess{cmd: cmd, input: input}
+	t.Cleanup(func() {
+		_ = input.Close()
+		_ = cmd.Process.Kill()
+		if cmd.ProcessState == nil {
+			_ = cmd.Wait()
+		}
+	})
+	lines := make(chan string, 8)
+	p.lines = lines
+	go func() {
+		defer close(lines)
+		scanner := bufio.NewScanner(output)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}()
+	if got := p.line(t); got != "waiting" {
+		t.Fatalf("fixture readiness: %q", got)
+	}
+	return p
+}
+
+func (p *socketProcess) line(t *testing.T) string {
+	t.Helper()
+	select {
+	case line := <-p.lines:
+		return line
+	case <-time.After(15 * time.Second):
+		t.Fatal("socket fixture timed out")
+		return ""
+	}
+}
+
+func (p *socketProcess) start(t *testing.T) {
+	t.Helper()
+	if _, err := io.WriteString(p.input, "start\n"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (p *socketProcess) kill(t *testing.T) {
+	t.Helper()
+	if err := p.cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.cmd.Wait(); err == nil {
+		t.Fatal("fixture did not die from SIGKILL")
+	}
+}
+
+func assertSocketConnects(t *testing.T, socket string) {
+	t.Helper()
+	conn, err := net.DialTimeout("unix", socket, time.Second)
+	if err != nil {
+		t.Fatalf("listener unavailable: %v", err)
+	}
+	conn.Close()
+}
+
+func TestPairedSocketLiveLockAndSIGKILLRecovery(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	defer s.Close(context.Background())
+	socket := filepath.Join(socketTestDir(t), "agentd.sock")
+	child := startSocketProcess(t, s, socket, "normal")
+	child.start(t)
+	if got := child.line(t); got != "ready" {
+		t.Fatalf("fixture startup: %q", got)
+	}
+	before := socketArtifacts(t, filepath.Dir(socket))
+	for _, start := range []func(*Supervisor, string, ...*AttachManager) (*LocalServer, error){ServePairedLocal, ServeLocal} {
+		if local, err := start(s, socket); !errors.Is(err, agentsetup.ErrBusy) || !strings.Contains(err.Error(), "agentd is already running for this state root") {
+			if local != nil {
+				local.Close()
+			}
+			t.Fatalf("live listener not protected: %v", err)
+		}
+		assertSocketArtifacts(t, filepath.Dir(socket), before)
+		assertSocketConnects(t, socket)
+	}
+	child.kill(t)
+	assertSocketArtifacts(t, filepath.Dir(socket), before)
+	local, err := ServePairedLocal(s, socket)
+	if err != nil {
+		t.Fatalf("restart after SIGKILL: %v", err)
+	}
 	defer local.Close()
-	before, _ := os.Lstat(socket)
-	if _, err := ServePairedLocal(s, socket); !errors.Is(err, agentsetup.ErrBusy) {
-		t.Fatalf("live listener not protected: %v", err)
-	}
-	after, _ := os.Lstat(socket)
-	if !os.SameFile(before, after) {
-		t.Fatal("live listener replaced")
-	}
+	assertSocketConnects(t, socket)
 	if err := local.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -214,61 +215,143 @@ func TestPairedSocketRecoversCrashAndExcludesLiveListener(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	next.Close()
+	defer next.Close()
+	before = socketArtifacts(t, filepath.Dir(socket))
+	// Repeated shutdown must not touch a successor after releasing the lock.
+	local.Close()
+	assertSocketArtifacts(t, filepath.Dir(socket), before)
+	assertSocketConnects(t, socket)
 }
 
-func TestPairedSocketRecoveryPreservesUnrelatedFiles(t *testing.T) {
-	for _, kind := range []string{"replacement", "symlink", "hardlink", "public-token", "other-daemon", "unrecorded"} {
-		t.Run(kind, func(t *testing.T) {
-			s, _, _ := testSupervisor(t)
-			defer s.Close(context.Background())
-			socket := filepath.Join(socketTestDir(t), "agentd.sock")
-			if kind != "unrecorded" {
-				crashedSocket(t, s, socket)
-			}
-			target := socket + ".token"
-			switch kind {
-			case "replacement", "symlink", "hardlink":
-				// Keep the original inode alive so the replacement cannot reuse it.
-				original := target + ".original"
-				if err := os.Rename(target, original); err != nil {
+func TestPairedSocketRecoversLegacyQuarantineCrash(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	defer s.Close(context.Background())
+	dir := socketTestDir(t)
+	socket := filepath.Join(dir, "agentd.sock")
+	child := startSocketProcess(t, s, socket, "legacy")
+	child.start(t)
+	if got := child.line(t); got != "ready" {
+		t.Fatalf("legacy fixture startup: %q", got)
+	}
+	child.kill(t)
+	// Cover both a canonical stranded token and a quarantined token, plus
+	// an obsolete owner record. No JSON ownership record is needed to recover.
+	for _, name := range []string{".s89abcdef", "agentd.sock.owner.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("legacy fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	local, err := ServePairedLocal(s, socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+	assertSocketConnects(t, socket)
+	for _, name := range []string{".s01234567", ".s89abcdef", "agentd.sock.owner.json"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("legacy residue %s: %v", name, err)
+		}
+	}
+}
+
+func TestPairedSocketConcurrentProcessesExactlyOneWins(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	defer s.Close(context.Background())
+	socket := filepath.Join(socketTestDir(t), "agentd.sock")
+	a := startSocketProcess(t, s, socket, "normal")
+	b := startSocketProcess(t, s, socket, "normal")
+	a.start(t)
+	b.start(t)
+	first, second := a.line(t), b.line(t)
+	if !(first == "ready" && second == "busy" || first == "busy" && second == "ready") {
+		t.Fatalf("concurrent startup results: %q, %q", first, second)
+	}
+	assertSocketConnects(t, socket)
+}
+
+func socketArtifacts(t *testing.T, dir string) map[string]os.FileInfo {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(map[string]os.FileInfo)
+	for _, entry := range entries {
+		info, err := os.Lstat(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result[entry.Name()] = info
+	}
+	return result
+}
+
+func assertSocketArtifacts(t *testing.T, dir string, before map[string]os.FileInfo) {
+	t.Helper()
+	after := socketArtifacts(t, dir)
+	if len(before) != len(after) {
+		t.Fatalf("artifact count changed: %d -> %d", len(before), len(after))
+	}
+	for name, info := range before {
+		got := after[name]
+		if got == nil || !os.SameFile(info, got) || info.Mode() != got.Mode() || info.ModTime() != got.ModTime() || info.Size() != got.Size() {
+			t.Fatalf("artifact changed: %s", name)
+		}
+	}
+}
+
+func TestPairedSocketRefusesUnsafeArtifacts(t *testing.T) {
+	for _, target := range []string{"agentd.sock.lock", "agentd.sock", "agentd.sock.token", "agentd.sock.owner.json", ".s01234567"} {
+		for _, kind := range []string{"symlink", "hardlink", "public", "world-writable", "directory"} {
+			t.Run(target+"/"+kind, func(t *testing.T) {
+				s, _, _ := testSupervisor(t)
+				defer s.Close(context.Background())
+				dir := socketTestDir(t)
+				socket := filepath.Join(dir, "agentd.sock")
+				listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
+				if err != nil {
 					t.Fatal(err)
 				}
-				var err error
+				listener.SetUnlinkOnClose(false)
+				listener.Close()
+				if err := os.Chmod(socket, 0600); err != nil {
+					t.Fatal(err)
+				}
+				for _, name := range []string{"agentd.sock.lock", "agentd.sock.token", "agentd.sock.owner.json", ".s01234567"} {
+					if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				path := filepath.Join(dir, target)
 				switch kind {
-				case "replacement":
-					err = os.WriteFile(target, []byte("unrelated fixture"), 0600)
-				case "symlink":
-					err = os.Symlink(original, target)
+				case "symlink", "directory":
+					if err := os.Rename(path, path+".original"); err != nil {
+						t.Fatal(err)
+					}
+					if kind == "symlink" {
+						err = os.Symlink(path+".original", path)
+					} else {
+						err = os.Mkdir(path, 0700)
+					}
 				case "hardlink":
-					err = os.Link(original, target)
+					err = os.Link(path, path+".link")
+				case "public":
+					err = os.Chmod(path, 0644)
+				case "world-writable":
+					err = os.Chmod(path, 0666)
 				}
 				if err != nil {
 					t.Fatal(err)
 				}
-			case "public-token":
-				if err := os.Chmod(target, 0644); err != nil {
-					t.Fatal(err)
+				before := socketArtifacts(t, dir)
+				if local, err := ServePairedLocal(s, socket); !errors.Is(err, agentsetup.ErrUnsafePath) {
+					if local != nil {
+						local.Close()
+					}
+					t.Fatalf("unsafe artifacts accepted: %v", err)
 				}
-			case "other-daemon":
-				s.daemonID = "another-daemon"
-			case "unrecorded":
-				if err := os.WriteFile(target, []byte("unrelated fixture"), 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			before, err := os.Lstat(target)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if local, err := ServePairedLocal(s, socket); err == nil {
-				local.Close()
-				t.Fatal("unrelated artifact adopted")
-			}
-			after, err := os.Lstat(target)
-			if err != nil || !os.SameFile(before, after) {
-				t.Fatal("unrelated artifact modified")
-			}
-		})
+				assertSocketArtifacts(t, dir, before)
+			})
+		}
 	}
 }

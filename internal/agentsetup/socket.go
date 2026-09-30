@@ -78,7 +78,7 @@ func resolveSocketPath(goos, home, state string, ref *ControlReference) (string,
 			return "", ErrUnsafePath
 		}
 		// 64 hash bits keep independent setup roots separate without placing
-		// their full paths in sun_path. The listener also checks its owner ID.
+		// their full paths in sun_path. Each socket has its own lifetime lock.
 		path = filepath.Join(home, ".aeon", "run", Hash([]byte(state))[:16]+".sock")
 		if len(path) > limit {
 			return "", &SocketPathLengthError{Bytes: len(path), Limit: limit}
