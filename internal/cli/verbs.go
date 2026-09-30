@@ -269,17 +269,16 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 }
 
 func (rt *runtime) cmdIssueConvert() *Command {
-	var to, sessionFile string
+	var to string
 	return &Command{
 		Name:    "convert",
-		Short:   "Convert an issue to another kind",
+		Short:   "Point a person at kind conversion",
 		Use:     "issue convert <ref> --to <kind>",
-		Long:    "Converts between issue kinds. A person session is required: pass --session-file, or call as a person. An agent key is refused and prints the ticket link.",
+		Long:    "Does not convert. A person converts a kind in the web app. The command checks --to against this tenant's issue-family kinds, prints the ticket link, and exits.",
 		minArgs: 1,
 		maxArgs: 1,
 		addFlags: func(fs *flagSet) {
-			fs.string(&to, "to", 0, "issue kind to convert to")
-			fs.string(&sessionFile, "session-file", 0, "person session cookie file, or - for stdin")
+			fs.string(&to, "to", 0, "issue-family kind a person converts to")
 		},
 		run: func(args []string) error {
 			if _, err := normalizeIssueRef(args[0]); err != nil {
@@ -288,7 +287,7 @@ func (rt *runtime) cmdIssueConvert() *Command {
 			if strings.TrimSpace(to) == "" {
 				return usagef("--to is required")
 			}
-			return rt.convertIssue(args[0], strings.TrimSpace(to), sessionFile)
+			return rt.convertIssue(args[0], strings.TrimSpace(to))
 		},
 	}
 }

@@ -37,10 +37,50 @@ type nodePage struct {
 }
 
 type apiKind struct {
-	ID          string `json:"id"`
-	Slug        string `json:"slug"`
-	Label       string `json:"label"`
-	ShortPrefix string `json:"short_prefix"`
+	ID          string          `json:"id"`
+	Slug        string          `json:"slug"`
+	Label       string          `json:"label"`
+	ShortPrefix string          `json:"short_prefix"`
+	Icon        string          `json:"icon,omitempty"`
+	FieldSchema json.RawMessage `json:"field_schema,omitempty"`
+}
+
+// issueFamilyKind matches the server and the web convert sheet. An explicit
+// issue_family boolean wins. Otherwise the seeded issue names, and a kind that
+// still uses one of those icons, are the family.
+func issueFamilyKind(kind apiKind) bool {
+	if marked, ok := explicitIssueFamily(kind.FieldSchema); ok {
+		return marked
+	}
+	return seededIssueName(kind.Slug) || seededIssueName(kind.Icon)
+}
+
+func explicitIssueFamily(raw json.RawMessage) (marked, ok bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false, false
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return false, false
+	}
+	value, exists := obj["issue_family"]
+	if !exists {
+		return false, false
+	}
+	flag, isBool := value.(bool)
+	if !isBool {
+		return false, false
+	}
+	return flag, true
+}
+
+func seededIssueName(name string) bool {
+	switch name {
+	case "epic", "ticket", "task":
+		return true
+	default:
+		return false
+	}
 }
 
 type kindPage struct {
@@ -91,46 +131,6 @@ func (rt *runtime) doHeadersCtx(ctx context.Context, method, path string, body, 
 		return rt.fail(err, c.Token)
 	}
 	return nil
-}
-
-// conversionDo returns the request function for a kind conversion. A person
-// session cookie is used when one is passed. Otherwise the configured caller
-// is used only when GET /api/me says it is a person. An agent key returns a
-// nil function so the caller can refuse without posting.
-func (rt *runtime) conversionDo(sessionFile string) (func(method, path string, body, dest any) error, error) {
-	if strings.TrimSpace(sessionFile) != "" {
-		inst, err := rt.resolve()
-		if err != nil {
-			return nil, err
-		}
-		session, err := rt.readSecret(sessionFile, "session cookie")
-		if err != nil {
-			return nil, err
-		}
-		cookie := &http.Cookie{Name: "aeon_session", Value: session}
-		if cookie.Valid() != nil {
-			return nil, usagef("invalid session cookie value")
-		}
-		c := client.New(inst.URL, "")
-		c.HTTP = &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-		headers := map[string]string{"Cookie": cookie.String(), "Origin": inst.URL}
-		return func(method, path string, body, dest any) error {
-			if err := c.DoWithHeaders(context.Background(), method, path, body, dest, headers); err != nil {
-				return rt.fail(err, session)
-			}
-			return nil
-		}, nil
-	}
-	var me client.Me
-	if err := rt.do(http.MethodGet, "/api/me", nil, &me); err != nil {
-		return nil, err
-	}
-	if me.Principal.Kind != "person" {
-		return nil, nil
-	}
-	return func(method, path string, body, dest any) error {
-		return rt.do(method, path, body, dest)
-	}, nil
 }
 
 func (rt *runtime) ticketWebURL(key string) string {

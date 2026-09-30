@@ -186,6 +186,11 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 			for _, rel := range d.Relations {
 				sourceID, _ := intField(rel, "source_id")
 				targetID, _ := intField(rel, "target_id")
+				// A recorded kind conflict leaves that node untouched. Skip a
+				// relation listed on it or aimed at it, including parent_id.
+				if relationTouchesKindConflict(r.Conflicts, issueRows, iid, sourceID, targetID) {
+					continue
+				}
 				typ := stringField(rel, "type")
 				ref, err := importEvent(ctx, tx, tenantID, actor, nodeID, "import.relation", s.SourceID, rel, "id", typ+":"+strconv.FormatInt(sourceID, 10)+":"+strconv.FormatInt(targetID, 10))
 				if err != nil {
@@ -475,6 +480,16 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 func importKindConflict(conflicts []ImportConflict, key string) bool {
 	for _, item := range conflicts {
 		if item.Key == key && item.Reason == "kind_change_not_allowed" {
+			return true
+		}
+	}
+	return false
+}
+
+func relationTouchesKindConflict(conflicts []ImportConflict, rows map[int64]Record, ids ...int64) bool {
+	for _, id := range ids {
+		key := stringField(rows[id], "issue_key")
+		if key != "" && importKindConflict(conflicts, key) {
 			return true
 		}
 	}

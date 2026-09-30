@@ -548,37 +548,32 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 	return nil
 }
 
-func (rt *runtime) convertIssue(ref, to, sessionFile string) error {
+// convertIssue never converts. The CLI holds an agent key, and kind conversion
+// is a person action in the web app. Lookups are read-only and only build the
+// link and check that --to is an issue-family kind.
+func (rt *runtime) convertIssue(ref, to string) error {
 	if strings.HasPrefix(strings.TrimSpace(ref), "id:") {
 		return usagef("id:<n> is a classic numeric id; pass the issue key")
 	}
-	n, err := rt.nodeByKey(ref)
-	if err != nil {
-		return err
+	n, nodeErr := rt.nodeByKey(ref)
+	kinds, kindsErr := rt.loadKinds()
+	if kindsErr == nil {
+		if err := requireIssueFamilyTarget(kinds, to); err != nil {
+			return err
+		}
 	}
-	kinds, err := rt.loadKinds()
-	if err != nil {
-		return err
+	key := strings.TrimSpace(ref)
+	if nodeErr == nil && n.Key != "" {
+		key = n.Key
 	}
-	current := kinds.slug(n.KindID)
-	if current == to {
-		fmt.Fprintf(rt.stdout, "kind is already %s\n", current)
-		return nil
+	return &exitError{code: 3, msg: fmt.Sprintf("Converting a kind needs a person. Open %s, then ⋯ → Convert to %s.", rt.ticketWebURL(key), to)}
+}
+
+func requireIssueFamilyTarget(kinds kindTable, to string) error {
+	kind, ok := kinds.bySlug[to]
+	if !ok || !issueFamilyKind(kind) {
+		return usagef("--to %q is not an issue kind", to)
 	}
-	post, err := rt.conversionDo(sessionFile)
-	if err != nil {
-		return err
-	}
-	if post == nil {
-		return rt.fail(fmt.Errorf("Converting a kind needs a person. Open %s, then use ⋯ → Convert to…", rt.ticketWebURL(n.Key)), "")
-	}
-	if err := post(http.MethodPost, "/api/nodes/"+url.PathEscape(n.ID)+"/convert", map[string]string{"to_kind": to}, &n); err != nil {
-		return err
-	}
-	if rt.jsonOut {
-		return rt.printJSON(rt.viewIssue(n, kinds))
-	}
-	fmt.Fprintf(rt.stdout, "✓ %s: %s → %s\n", n.Key, current, to)
 	return nil
 }
 

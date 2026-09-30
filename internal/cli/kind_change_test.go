@@ -4,7 +4,6 @@ package cli
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -79,47 +78,58 @@ func TestIssueUpdateRefusesKindChange(t *testing.T) {
 func TestIssueConvert(t *testing.T) {
 	isolate(t)
 	code, out, stderr := runCLI([]string{"aeon", "issue", "convert", "-h"}, "")
-	if code != 0 || !strings.Contains(out, "issue convert <ref> --to <kind>") || !strings.Contains(out, "person session") {
+	if code != 0 || !strings.Contains(out, "issue convert <ref> --to <kind>") || !strings.Contains(out, "Does not convert") || strings.Contains(out, "session-file") {
 		t.Fatalf("help: exit %d stdout %q stderr %q", code, out, stderr)
 	}
 	code, _, stderr = runCLI([]string{"aeon", "issue", "convert", "AEON-1"}, "")
 	if code != 2 || !strings.Contains(stderr, "--to is required") {
 		t.Fatalf("missing --to: exit %d stderr %q", code, stderr)
 	}
+	code, _, stderr = runCLI([]string{"aeon", "issue", "convert", "AEON-1", "--to", "epic", "--session-file", "cookie"}, "")
+	if code != 2 || !strings.Contains(stderr, "unknown flag") {
+		t.Fatalf("session file: exit %d stderr %q", code, stderr)
+	}
 
 	revision := time.Date(2026, 9, 29, 10, 0, 0, 123456000, time.UTC)
 	ticket := apiNode{ID: "11111111-1111-4111-8111-111111111111", Key: "AEON-1", KindID: "ticket-kind", Title: "Stay", UpdatedAt: revision, State: "open"}
-	var posted map[string]any
-	var convertAuth string
-	posts := 0
-	meKind := "agent"
+	writes := 0
+	hideNode := false
+	kindsUp := true
+	var sawBearer bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
-			if r.Header.Get("Authorization") != "Bearer "+testKey {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		if r.Method != http.MethodGet {
+			writes++
+			t.Errorf("write %s %s", r.Method, r.URL.RequestURI())
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") == "Bearer "+testKey && r.Header.Get("Cookie") == "" {
+			sawBearer = true
+		}
+		switch r.URL.Path {
+		case "/api/kinds":
+			if !kindsUp {
+				http.Error(w, `{"error":"unavailable"}`, http.StatusInternalServerError)
 				return
 			}
-			fmt.Fprintf(w, `{"principal":{"id":"p","tenant_id":"t","kind":%q,"name":"caller","roles":["admin"]},"tenant":{"id":"t","slug":"aeon","name":"Aeon"}}`, meKind)
-		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
 			json.NewEncoder(w).Encode(kindPage{Items: []apiKind{
 				{ID: "ticket-kind", Slug: "ticket"},
 				{ID: "epic-kind", Slug: "epic"},
+				{ID: "story-kind", Slug: "story", Icon: "book", FieldSchema: json.RawMessage(`{"type":"object","issue_family":true}`)},
+				{ID: "chapter-kind", Slug: "chapter", Icon: "epic"},
+				{ID: "form-kind", Slug: "form", Icon: "ticket", FieldSchema: json.RawMessage(`{"type":"object","issue_family":false}`)},
 			}})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
-			json.NewEncoder(w).Encode(nodePage{Items: []apiNode{ticket}})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/nodes/"+ticket.ID+"/convert":
-			posts++
-			convertAuth = r.Header.Get("Authorization") + " cookie:" + r.Header.Get("Cookie")
-			json.NewDecoder(r.Body).Decode(&posted)
-			if !strings.Contains(r.Header.Get("Cookie"), "aeon_session=") && meKind != "person" {
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte(`{"error":"permission denied"}`))
+		case "/api/nodes":
+			if hideNode {
+				json.NewEncoder(w).Encode(nodePage{})
 				return
 			}
-			ticket.KindID = "epic-kind"
-			json.NewEncoder(w).Encode(ticket)
+			json.NewEncoder(w).Encode(nodePage{Items: []apiNode{ticket}})
 		default:
+			if strings.HasPrefix(r.URL.Path, "/api/node-keys/") {
+				http.NotFound(w, r)
+				return
+			}
 			t.Errorf("unexpected %s %s", r.Method, r.URL.RequestURI())
 			http.NotFound(w, r)
 		}
@@ -128,34 +138,52 @@ func TestIssueConvert(t *testing.T) {
 	t.Setenv("AEON_URL", srv.URL)
 	t.Setenv("AEON_API_KEY", testKey)
 	args := []string{"aeon", "--config", filepath.Join(t.TempDir(), "missing")}
-	code, out, stderr = runCLI(append(args, "issue", "convert", "AEON-1", "--to", "ticket"), "")
-	if code != 0 || !strings.Contains(out, "kind is already ticket") || posts != 0 {
-		t.Fatalf("same kind: exit %d stdout %q stderr %q posts %d", code, out, stderr, posts)
-	}
-	code, out, stderr = runCLI(append(args, "issue", "convert", "AEON-1", "--to", "epic"), "")
 	link := srv.URL + "/p/AEON/AEON-1"
-	want := "Converting a kind needs a person. Open " + link + ", then use ⋯ → Convert to…"
-	if code == 0 || !strings.Contains(stderr, want) || posts != 0 || strings.Contains(stderr, testKey) {
-		t.Fatalf("agent key: exit %d stdout %q stderr %q posts %d", code, out, stderr, posts)
+	person := func(kind string) string {
+		return "Converting a kind needs a person. Open " + link + ", then ⋯ → Convert to " + kind + "."
 	}
 
-	meKind = "person"
 	code, out, stderr = runCLI(append(args, "issue", "convert", "AEON-1", "--to", "epic"), "")
-	if code != 0 || !strings.Contains(out, "✓ AEON-1: ticket → epic") || posts != 1 || posted["to_kind"] != "epic" {
-		t.Fatalf("person caller: exit %d stdout %q stderr %q posts %d body %v auth %q", code, out, stderr, posts, posted, convertAuth)
+	if code != 3 || !strings.Contains(stderr, person("epic")) || writes != 0 || ticket.KindID != "ticket-kind" || ticket.Title != "Stay" || !sawBearer || strings.Contains(out+stderr, testKey) {
+		t.Fatalf("agent key: exit %d stdout %q stderr %q writes %d bearer %v", code, out, stderr, writes, sawBearer)
+	}
+	code, out, stderr = runCLI(append(args, "--json", "issue", "convert", "AEON-1", "--to", "ticket"), "")
+	if code != 3 || !strings.Contains(stderr, person("ticket")) || !strings.Contains(stderr, `"error"`) || writes != 0 {
+		t.Fatalf("same kind: exit %d stdout %q stderr %q writes %d", code, out, stderr, writes)
+	}
+	code, out, stderr = runCLI(append(args, "issue", "convert", "AEON-1", "--to", "story"), "")
+	if code != 3 || !strings.Contains(stderr, person("story")) || writes != 0 {
+		t.Fatalf("custom family: exit %d stdout %q stderr %q", code, out, stderr)
+	}
+	code, out, stderr = runCLI(append(args, "issue", "convert", "AEON-1", "--to", "chapter"), "")
+	if code != 3 || !strings.Contains(stderr, person("chapter")) || writes != 0 {
+		t.Fatalf("icon family: exit %d stdout %q stderr %q", code, out, stderr)
+	}
+	code, out, stderr = runCLI(append(args, "issue", "convert", "AEON-1", "--to", "form"), "")
+	if code != 2 || !strings.Contains(stderr, `--to "form" is not an issue kind`) || strings.Contains(stderr, "needs a person") || writes != 0 {
+		t.Fatalf("flag off: exit %d stdout %q stderr %q", code, out, stderr)
+	}
+	code, out, stderr = runCLI(append(args, "issue", "convert", "AEON-1", "--to", "nope"), "")
+	if code != 2 || !strings.Contains(stderr, `--to "nope" is not an issue kind`) || writes != 0 {
+		t.Fatalf("unknown kind: exit %d stdout %q stderr %q", code, out, stderr)
 	}
 
-	ticket.KindID = "ticket-kind"
-	posts = 0
-	posted = nil
-	meKind = "agent"
-	session := filepath.Join(t.TempDir(), "session")
-	if err := os.WriteFile(session, []byte("person-session\n"), 0o600); err != nil {
-		t.Fatal(err)
+	hideNode = true
+	miss := srv.URL + "/p/AEON/AEON-404"
+	code, out, stderr = runCLI(append(args, "issue", "convert", "AEON-404", "--to", "epic"), "")
+	if code != 3 || !strings.Contains(stderr, "Converting a kind needs a person. Open "+miss+", then ⋯ → Convert to epic.") || writes != 0 {
+		t.Fatalf("missing ticket: exit %d stdout %q stderr %q", code, out, stderr)
 	}
-	code, out, stderr = runCLI(append(args, "issue", "convert", "AEON-1", "--to", "epic", "--session-file", session), "")
-	if code != 0 || !strings.Contains(out, "✓ AEON-1: ticket → epic") || posts != 1 || posted["to_kind"] != "epic" || !strings.Contains(convertAuth, "aeon_session=person-session") || strings.Contains(out+stderr, "person-session") {
-		t.Fatalf("person session: exit %d stdout %q stderr %q posts %d body %v auth %q", code, out, stderr, posts, posted, convertAuth)
+	code, _, stderr = runCLI(append(args, "issue", "convert", "AEON-404", "--to", "form"), "")
+	if code != 2 || !strings.Contains(stderr, `--to "form" is not an issue kind`) || writes != 0 {
+		t.Fatalf("missing ticket, bad kind: exit %d stderr %q", code, stderr)
+	}
+
+	hideNode = false
+	kindsUp = false
+	code, out, stderr = runCLI(append(args, "issue", "convert", "AEON-1", "--to", "epic"), "")
+	if code != 3 || !strings.Contains(stderr, person("epic")) || writes != 0 || ticket.KindID != "ticket-kind" {
+		t.Fatalf("kinds down: exit %d stdout %q stderr %q", code, out, stderr)
 	}
 }
 
