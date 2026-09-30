@@ -26,6 +26,10 @@ var hostedRunners = map[string]bool{
 }
 var secretContext = regexp.MustCompile(`(?i)\bsecrets\b`)
 
+// Artifact separators include underscores; x64 must be a token so harmless
+// names such as linux64 are not mistaken for an x86 architecture.
+var x86Artifact = regexp.MustCompile(`(?i)amd64|x86[_-]64|i[3-6]86|(?:^|[^a-z0-9])x64(?:$|[^a-z0-9])`)
+
 func main() {
 	dir := ".github/workflows"
 	if len(os.Args) == 2 {
@@ -109,7 +113,7 @@ func checkWorkflow(name string, body []byte) ([]string, error) {
 				reject("release/pairing/image/attestation/pin evidence must use hosted runners")
 			}
 			if containsAMD64Artifact(job) || containsAMD64Artifact(workflow["env"]) || containsAMD64Artifact(workflow["defaults"]) {
-				reject("routed jobs run on Linux ARM64 and must not reference amd64/x86_64/x64 artifacts")
+				reject("routed jobs run on Linux ARM64 and must not reference amd64/x86_64/x86-64/i[3-6]86/x64 artifacts")
 			}
 			if !hasNeed(job["needs"], "runner-route") || mapping(jobs["runner-route"])["uses"] != "./.github/workflows/test-runner-route.yml" {
 				reject("routed tests must depend on the hosted runner-route workflow")
@@ -249,8 +253,7 @@ func protectedJob(file, id string, job map[string]any) bool {
 func containsAMD64Artifact(v any) bool {
 	switch value := v.(type) {
 	case string:
-		value = strings.ToLower(value)
-		return strings.Contains(value, "amd64") || strings.Contains(value, "x86_64") || strings.Contains(value, "x64")
+		return x86Artifact.MatchString(value)
 	case map[string]any:
 		for key, child := range value {
 			if containsAMD64Artifact(key) || containsAMD64Artifact(child) {

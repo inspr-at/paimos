@@ -44,8 +44,12 @@ those labels, including a fork job racing the verified job.
    `inspr-at/paimos/.github/workflows/test-runner-smoke.yml@refs/heads/main`, and
    head SHA is reachable from `main`. Missing or unverifiable metadata rejects
    admission. Record the verified job ID, run ID/attempt and unique runner name.
-   Cancel every `pull_request` run targeting mbp2606 labels, including directly
-   edited `runs-on`, before registering capacity; leave no spare registrations.
+   Before **every mint**, cancel the runs for every queued mbp2606-labelled job
+   the controller has not verified, or refuse to mint while any such job remains.
+   This covers any event or ref, including directly edited `runs-on`, PRs,
+   work-branch pushes, non-main dispatches, `merge_group`, `workflow_run` and
+   `schedule`; leave no spare registrations. App **5134402** requires
+   `actions:write` on paimos to cancel those runs.
 2. **Job-started hook:** bake an executable hook into the sealed VM image,
    outside the checkout and actions-runner directory. Set
    `ACTIONS_RUNNER_HOOK_JOB_STARTED` to its absolute path in the image's runner
@@ -53,12 +57,28 @@ those labels, including a fork job racing the verified job.
    workflow step, require `GITHUB_REPOSITORY` = `inspr-at/paimos`,
    `GITHUB_EVENT_NAME` in exactly `{push, workflow_dispatch}`, and
    `GITHUB_WORKFLOW_REF` equal to one of the two fully qualified workflow refs
-   above. For PR-shaped events/payloads, also require the event payload's
-   `pull_request.head.repo.full_name` = `inspr-at/paimos`; PR events remain
-   rejected by the event allowlist. Read the payload from `GITHUB_EVENT_PATH`.
-   Missing, malformed or mismatched metadata exits non-zero: the job fails
-   before any step and the controller discards its VM. See GitHub's
-   [job hook contract](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/run-scripts).
+   above. Read and validate the payload from `GITHUB_EVENT_PATH`.
+   **PR-shaped events or payloads are always denied**, including same-repository
+   PRs; a matching `pull_request.head.repo.full_name` never admits them.
+   On missing, malformed or mismatched metadata, the hook must kill both
+   `Runner.Listener` and `Runner.Worker` and power the VM off (`poweroff -ff`)
+   **before it returns**; the controller then discards the VM. A non-zero exit
+   alone is insufficient. Attach the slot cache disk **only after the hook
+   admits the job**, never at VM boot. NIX-600's smoke acceptance must prove
+   that a rejected job containing an `if: always()` step and an action with a
+   `pre:` step produces **no workflow-step output and no cache write**.
+
+   GitHub's [job hook documentation](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/run-scripts)
+   says "the job will not run"; this contract explicitly **does not rely on
+   that claim**. In actions/runner at `ca43437862b6d6be24e6de73dff3971c99140c9a`,
+   the hook is an ordinary `always()` pre-job step
+   ([JobExtension.cs:302–310](https://github.com/actions/runner/blob/ca43437862b6d6be24e6de73dff3971c99140c9a/src/Runner.Worker/JobExtension.cs#L302-L310)).
+   A failed step only updates the job result
+   ([StepsRunner.cs:274–278](https://github.com/actions/runner/blob/ca43437862b6d6be24e6de73dff3971c99140c9a/src/Runner.Worker/StepsRunner.cs#L274-L278));
+   later step conditions are still evaluated
+   ([StepsRunner.cs:203–241](https://github.com/actions/runner/blob/ca43437862b6d6be24e6de73dff3971c99140c9a/src/Runner.Worker/StepsRunner.cs#L203-L241)),
+   and action `pre-if` defaults to `always()`
+   ([ActionManifestManager.cs:458](https://github.com/actions/runner/blob/ca43437862b6d6be24e6de73dff3971c99140c9a/src/Runner.Worker/ActionManifestManager.cs#L458)).
 3. **Controller post-job check:** query the actual completed job via the
    [workflow-jobs API](https://docs.github.com/en/rest/actions/workflow-jobs#get-a-job-for-a-workflow-run).
    Match its `runner_name` to the minted runner and confirm its job ID and run
@@ -78,21 +98,30 @@ a reviewed change to all three controls and the workflow guard.
 the reviewed ruleset baseline, including rules, parameters, ref conditions and
 bypass actors. Missing, disabled, weakened, changed or unverifiable protection
 refuses minting and clears/refuses `AEON_MBP2606_AVAILABILITY` (mode B off).
-The NIX-600 app `inspr-mbp2606-runner` (**5134402**) has
-`administration:write` on paimos and can edit rulesets, so the controller verifies
-the ID, active enforcement and unchanged rules through the API before **every**
-mint; the app's permissions are not proof that protection remains intact.
+The NIX-600 app `inspr-mbp2606-runner` (**5134402**) requires `actions:write`
+for queue cancellation and has `administration:write` on paimos and can edit
+rulesets, so the controller verifies the ID, active enforcement and unchanged
+rules through the API before **every** mint; the app's permissions are not proof
+that protection remains intact.
 
 **Mode-B runtime:** every job gets one fresh Linux ARM64 Lima VM cloned from a
 sealed base image containing rootful Docker, actions-runner and the baked hook,
 with **no host mounts**. The JIT runner executes inside that VM. The job has
 root inside its VM, so the VM is the isolation boundary; the controller deletes
 it after completion or rejection. Persistent caches use one Lima disk per slot,
-mounted read-write **only for verified main pushes**; dispatches use read-only
-trusted caches plus disposable scratch/overlays.
+**unattached at boot and attached only after hook admission**, mounted read-write
+**only for verified main pushes**; dispatches use read-only trusted caches plus
+disposable scratch/overlays.
 
 **Network precondition:** a host `pf` anchor for user `ci` blocks private ranges
-and host loopback except the Lima SSH ports, and permits DNS only to the router.
+and host loopback. Restrict the Lima SSH exception to hostagent traffic, or use
+per-instance keys, so guests cannot reach another VM's SSH over loopback.
+User `ci` has **no port-53 egress to private ranges**. VM DNS uses the Lima
+hostagent forwarder and the system resolver. If a direct resolver fallback is
+required, allow DNS only to a `pf` table of the current system resolvers
+(`scutil --dns`), refreshed when enabling the pool, on every re-prove and on
+network change; fail closed when empty and retain the private-range deny for
+user `ci`. Port 53 to arbitrary LAN hosts is never allowed.
 The controller verifies that the host anchor is installed and active before
 publishing availability and before every mint; a missing, inactive or
 unverifiable anchor keeps mode B off. An in-VM firewall does not satisfy this
@@ -136,10 +165,11 @@ secrets are added here. The Linux ARM64 pool must provide Docker service-contain
 support, Ubuntu-compatible `apt`/`sudo`, Go 1.26 and the shells used by the tests.
 Routable `go` and future routed `e2e` jobs must not assume amd64:
 `pgvector/pgvector:pg18` is multi-arch, and setup-go/setup-node select ARM64 on
-this runner. The guard rejects routed jobs referencing `amd64`, `x86_64` or
-`x64` artifacts, including action inputs, services, matrices and inherited
-environment/default settings. `release.yml` and `pairing-platform.yml` are
-**never routed**; their multi-platform artifacts and evidence remain hosted.
+this runner. The guard rejects routed jobs referencing `amd64`, `x86_64`,
+`x86-64`, `i[3-6]86` or the token `x64` in artifacts, including action inputs,
+services, matrices and inherited environment/default settings. `release.yml`
+and `pairing-platform.yml` are **never routed**; their multi-platform artifacts
+and evidence remain hosted.
 
 **Off/drain:** after clearing availability, NIX-600 keeps minting JIT runners for
 API-verified queued jobs that still carry the mbp2606 label, until that queue

@@ -73,10 +73,19 @@ func TestRoutedJobsRejectAMD64Artifacts(t *testing.T) {
 	for _, extra := range []string{
 		"    steps: [{run: 'curl -fLO https://example.invalid/tool-linux-amd64.tar.gz'}]\n",
 		"    steps: [{run: 'curl -fLO https://example.invalid/tool_linux_x86_64.zip'}]\n",
+		"    steps: [{run: 'curl -fLO https://example.invalid/tool-linux-x86-64.tar.gz'}]\n",
+		"    steps: [{run: 'curl -fLO https://example.invalid/tool-linux-i386.tar.gz'}]\n",
+		"    steps: [{run: 'curl -fLO https://example.invalid/tool-linux-i486.tar.gz'}]\n",
+		"    steps: [{run: 'curl -fLO https://example.invalid/tool-linux-i586.tar.gz'}]\n",
+		"    steps: [{run: 'curl -fLO https://example.invalid/tool-linux-i686.tar.gz'}]\n",
 		"    steps: [{uses: 'actions/setup-node@sha', with: {architecture: x64}}]\n",
+		"    steps: [{run: 'curl -fLO https://example.invalid/tool_linux_X64.zip'}]\n",
+		"    steps: [{run: 'curl -fLO https://example.invalid/x64/tool.tar.gz'}]\n",
 		"    steps: [{uses: 'actions/setup-go@sha', with: {architecture: AMD64}}]\n",
 		"    services: {postgres: {image: 'example.invalid/postgres:x86_64'}}\n",
+		"    services: {postgres: {image: 'example.invalid/postgres:X86-64'}}\n",
 		"    env: {TOOL_ARCH: linux_amd64}\n",
+		"    env: {TOOL_ARCH: I686}\n",
 		"    strategy: {matrix: {artifact: [tool-arm64, tool-x64]}}\n",
 	} {
 		t.Run(extra, func(t *testing.T) {
@@ -95,6 +104,8 @@ func TestRoutedJobsRejectAMD64Artifacts(t *testing.T) {
 	for _, inherited := range []string{
 		"env: {ARTIFACT: tool_linux_amd64}\n",
 		"defaults: {run: {working-directory: artifacts/x86_64}}\n",
+		"env: {ARTIFACT: tool_linux_x86-64}\n",
+		"defaults: {run: {working-directory: artifacts/i686}}\n",
 	} {
 		problems, err := checkWorkflow("ci.yml", []byte(inherited+routedWorkflow("tests", "")))
 		if err != nil || len(problems) != 1 || !strings.Contains(problems[0], "Linux ARM64") {
@@ -105,6 +116,18 @@ func TestRoutedJobsRejectAMD64Artifacts(t *testing.T) {
 	problems, err := checkWorkflow("ci.yml", []byte(routedWorkflow("tests", compatible)))
 	if err != nil || len(problems) != 0 {
 		t.Fatalf("ARM64-compatible job rejected: %v %v", problems, err)
+	}
+	for _, extra := range []string{
+		"    steps: [{run: 'curl -fLO https://example.invalid/tool-linux64.tar.gz'}]\n",
+		"    env: {PLATFORM: LINUX64}\n",
+		"    steps: [{run: 'echo prefix64 x64suffix x640'}]\n",
+	} {
+		t.Run(extra, func(t *testing.T) {
+			problems, err := checkWorkflow("ci.yml", []byte(routedWorkflow("tests", extra)))
+			if err != nil || len(problems) != 0 {
+				t.Fatalf("harmless architecture substring rejected: %v %v", problems, err)
+			}
+		})
 	}
 }
 
