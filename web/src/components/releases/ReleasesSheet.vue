@@ -725,7 +725,8 @@ const KINDS = [
   .mark-backing img { width: 20px; height: 20px; }
   .titles { flex: 1; }
   .titles .eyebrow { display: none; }
-  .titles h1 { font-size: 21px; }
+  /* Detail view pulls Compare onto this row, and the wordmark no longer fits one line. Wrap it; ellipsis is a clip. */
+  .titles h1 { font-size: 21px; white-space: normal; text-wrap: wrap; overflow: visible; text-overflow: unset; }
   .spacer { display: none; }
   .close-btn { order: 1; width: 44px; height: 44px; }
   .notice .btn, .notice .icon-btn { height: 44px; }

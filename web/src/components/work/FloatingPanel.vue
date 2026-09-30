@@ -23,12 +23,19 @@ function place(keepSide = false) {
   const height = panel.value.scrollHeight
   const room = innerHeight - rect.bottom - 12
   // Open above when the menu would not fit below and there is more room above.
-  if (!keepSide) above.value = room < Math.min(height, props.tallest) && rect.top > room
-  maxHeight.value = Math.max(160, Math.min(props.tallest, above.value ? rect.top - 12 : room))
+  const nextAbove = keepSide ? above.value : room < Math.min(height, props.tallest) && rect.top > room
+  const nextMax = Math.round(Math.max(160, Math.min(props.tallest, nextAbove ? rect.top - 12 : room)))
   const width = Math.min(props.width, innerWidth - 16)
   const left = props.align === 'end' ? rect.right - width : rect.left
-  x.value = Math.round(Math.min(Math.max(8, left), innerWidth - width - 8))
-  y.value = Math.round(above.value ? rect.top - Math.min(height, maxHeight.value) - 6 : rect.bottom + 6)
+  const nextX = Math.round(Math.min(Math.max(8, left), innerWidth - width - 8))
+  const nextY = Math.round(nextAbove ? rect.top - Math.min(height, nextMax) - 6 : rect.bottom + 6)
+  // A resize that does not move the panel must not write style. Writing it
+  // fires the observer again and the option list never sits still for a click.
+  if (nextX === x.value && nextY === y.value && nextMax === maxHeight.value && nextAbove === above.value) return
+  above.value = nextAbove
+  maxHeight.value = nextMax
+  x.value = nextX
+  y.value = nextY
 }
 function outside(event: PointerEvent) {
   const target = event.target as Node

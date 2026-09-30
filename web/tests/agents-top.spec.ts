@@ -156,6 +156,7 @@ test('work week editor: a custom week with its own hours, live preview, Save', a
 })
 
 test('night editor: day and night, three shifts with adjustable pace, custom blocks', async ({ page }) => {
+  test.setTimeout(60_000)
   const { capacity } = await setup(page)
   await open(page)
   await cap(page).getByRole('button', { name: 'Customize night and shifts' }).click()

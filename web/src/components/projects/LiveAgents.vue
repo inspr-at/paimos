@@ -219,6 +219,11 @@ onBeforeUnmount(() => {
 .dot { flex-shrink: 0; width: 3px; height: 3px; border-radius: 50%; background: var(--ink-3); }
 .key { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--teal-ink); white-space: nowrap; }
 .as-row .live-chip { min-height: 28px; padding: 0 8px 0 6px; }
+/* A phone card is narrower than robots + name + the longest state word.
+   Wrap the state onto its own line so the word stays inside the chip. */
+@media (max-width: 420px) {
+  .live-chip { flex-wrap: wrap; row-gap: 2px; }
+}
 /* Phones give the row chip its own line: robots, the total, the lead's name and the state. */
 @media (max-width: 760px) {
   .as-row .live-chip { gap: 5px; }
