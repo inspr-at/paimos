@@ -284,6 +284,15 @@ test('search and filters look at headlines, changes and ticket keys', () => {
   assert.deepEqual(ticketsOf(r), ['AEON-77', 'AEON-78'])
 })
 
+test('search finds a release by its codename in either language (AEON-430)', () => {
+  const r = rel('260930074921.0.0', '', { release_sequence: 111, codename: 'Gentle Gravity' })
+  const f = { q: '', features: false, fixes: false, tickets: false }
+  assert.ok(matches(r, { ...f, q: 'gentle grav' }))
+  assert.ok(matches(r, { ...f, q: 'GRAVITY' }, 'de', 'details'))
+  assert.ok(!matches(r, { ...f, q: 'amber' }))
+  assert.ok(!matches({ ...r, codename: undefined }, { ...f, q: 'gravity' }))
+})
+
 test('feature and fix filters follow the visible ticket lines, in the viewer locale', () => {
   const f = { q: '', features: false, fixes: false, tickets: false }
   const bare = rel('260924000010.0.0', '', { changes: [{ ...change('a', 'feat', 'feat: no visible ticket', ['AEON-9']), group: 'features' as const }] })

@@ -106,7 +106,8 @@ test('deep links open one release, and the address follows the selection', async
   await expect(sheet(page).locator('.detail .headline')).toHaveCount(0)
   await expect(sheet(page).getByText('Historical tag headline')).toHaveCount(0)
   await expect(sheet(page).locator('.detail .tickets')).toContainText('PAI-1057')
-  await expect(options(page).nth(3).locator('.headline')).toHaveCount(0)
+  // AEON-430: its row title is the codename, never the tag message.
+  await expect(options(page).nth(3).locator('.headline')).toHaveText(target.codename!)
   await page.keyboard.press('k')
   await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
   // Opened from a link, closing leads to Projects.
@@ -184,11 +185,12 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(compare.locator('.facts')).toContainText('2 releases')
   await expect(compare.locator('.facts')).toContainText('3 tickets')
   await expect(compare.locator('.changes')).toContainText('Other changes')
-  // AEON-305: no tag message outside Evidence; without a theme or benefit a release shows its version and date.
+  // AEON-305: no tag message outside Evidence; without a theme or benefit a
+  // release shows its version and, since AEON-430, its codename.
   const included = compare.getByRole('region', { name: 'Releases in this range' }).getByRole('listitem')
   await expect(included).toHaveCount(2)
   await expect(included).not.toContainText(['Wide lists and columns', 'Retry a busy BEGIN in release acceptance'])
-  await expect(included.locator('.inc-date')).toHaveCount(2)
+  await expect(included.locator('.inc-headline')).toHaveText([history.releases[1].codename!, history.releases[3].codename!])
   await compare.getByRole('button', { name: 'Swap' }).click()
   await expect(compare.locator('.facts')).toContainText('2 releases')
   await page.keyboard.press('Escape')

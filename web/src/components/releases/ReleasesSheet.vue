@@ -156,6 +156,11 @@ const compareTo = computed(() => mode.value === 'compare' && cursor.value && cur
 const server = computed(() => liveServer(current.value, store.available))
 const notice = computed(() => releaseNotice(pageRuns.value, server.value, missing.value))
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
+// A row with a brief (or a reservation, titled by its state) keeps the codename
+// as a quiet line beside its version; without one the codename is the title.
+const titled = (r: Release) => r.state === 'reserved' || !!rails.value.get(r.version)?.text
+// The newer server's codename, when this build's history already knows it.
+const serverName = computed(() => byVersion.value.get(server.value)?.codename ?? '')
 
 // ---------- Selection ----------
 // `releases=all` (the header) stays on the list with nothing selected. `releases=current`
@@ -406,7 +411,7 @@ const KINDS = [
           </div>
           <label class="search-field search">
             <AppIcon name="search" :size="14" />
-            <input ref="searchInput" v-model="filter.q" class="field" type="search" placeholder="Search headlines, changes, tickets" aria-label="Search releases" aria-keyshortcuts="/" @keydown="searchKeys" />
+            <input ref="searchInput" v-model="filter.q" class="field" type="search" placeholder="Search names, changes, tickets" aria-label="Search releases" aria-keyshortcuts="/" @keydown="searchKeys" />
             <kbd v-if="!filter.q" class="keycap slash" aria-hidden="true">/</kbd>
           </label>
           <button type="button" class="btn compare-btn" aria-label="Compare" :aria-pressed="mode === 'compare'" aria-keyshortcuts="c" :disabled="!releases.length" @click="mode === 'compare' ? exitCompare() : startCompare()">
@@ -417,7 +422,7 @@ const KINDS = [
         </div>
         <p v-if="notice === 'update'" class="notice" role="status">
           <AppIcon name="info" :size="14" />
-          <span>A newer version is live: this page still runs <CalendarVersion v-if="pageRuns" :value="pageRuns" class="notice-version" />, and the server runs <CalendarVersion v-if="server" :value="server" class="notice-version" />.</span>
+          <span>A newer version is live: this page still runs <CalendarVersion v-if="pageRuns" :value="pageRuns" class="notice-version" />, and the server runs <CalendarVersion v-if="server" :value="server" class="notice-version" /><template v-if="serverName">, {{ serverName }}</template>.</span>
           <button type="button" class="btn sm" @click="reload"><AppIcon name="refresh" :size="12" />Reload</button>
         </p>
         <p v-else-if="notice === 'missing'" class="notice" role="status">
@@ -490,6 +495,7 @@ const KINDS = [
                 <span class="main">
                   <span class="line1">
                     <CalendarVersion :value="r.version" class="row-version" />
+                    <span v-if="r.codename && titled(r)" class="row-codename" :title="r.codename"><template v-for="(p, i) in marked(r.codename)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                     <span v-if="r.version === current" class="tag current-tag"><span class="live-dot" aria-hidden="true" />Current</span>
                     <span v-if="store.highlight.has(r.version)" class="tag new-tag">New</span>
                     <span v-if="r.version === rollbackTarget" class="tag">Rollback target</span>
@@ -499,6 +505,8 @@ const KINDS = [
                   <span v-if="r.state === 'reserved'" class="headline">Reserved, never published</span>
                   <template v-else>
                     <span v-if="rails.get(r.version)?.text" class="rail-name"><span class="headline" :class="{ theme: rails.get(r.version)!.themed }" :lang="rails.get(r.version)!.lang"><template v-for="(p, i) in marked(rails.get(r.version)!.text)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span><LangBadge v-if="rails.get(r.version)!.lang !== lang" :lang="rails.get(r.version)!.lang" /></span>
+                    <!-- No brief: the codename is the row's title (AEON-430). It reads the same in both languages. -->
+                    <span v-else-if="r.codename" class="rail-name"><span class="headline codename-title" lang="en"><template v-for="(p, i) in marked(r.codename)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span></span>
                     <span v-if="view === 'details' && technicalLine(r)" class="subjects" :title="technicalLine(r)"><template v-for="(p, i) in marked(technicalLine(r))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                   </template>
                   <span v-if="r.state === 'published'" class="counts">
@@ -539,7 +547,7 @@ const KINDS = [
           <dl>
             <div><dt><kbd class="keycap">j</kbd><kbd class="keycap">k</kbd></dt><dd>Next and previous release</dd></div>
             <div><dt><kbd class="keycap">Enter</kbd></dt><dd>Open the release</dd></div>
-            <div><dt><kbd class="keycap">/</kbd></dt><dd>Search headlines, changes and ticket keys</dd></div>
+            <div><dt><kbd class="keycap">/</kbd></dt><dd>Search names, changes and ticket keys</dd></div>
             <div><dt><kbd class="keycap">c</kbd></dt><dd>Compare two releases, then pick the other end with j and k</dd></div>
             <div><dt><kbd class="keycap">e</kbd></dt><dd>Show or hide the evidence</dd></div>
             <div><dt><kbd class="keycap">?</kbd></dt><dd>These keys</dd></div>
@@ -642,6 +650,8 @@ const KINDS = [
 .main { display: grid; gap: 3px; min-width: 0; }
 .line1 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .row-version { font-size: 12.5px; color: var(--ink); }
+/* The codename beside the version: a quiet name, never louder than the brief. */
+.row-codename { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-3); }
 .tag { display: inline-flex; align-items: center; gap: 5px; height: 19px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
 .current-tag { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .new-tag { background: var(--gold-2); color: #3a2804; }
@@ -655,6 +665,7 @@ const KINDS = [
 .rail-name > .lang-badge { flex: none; margin-top: 2px; color: var(--ink-2); }
 .headline:not(.theme) { color: var(--ink-2); }
 .headline.theme { font-weight: 600; }
+.headline.codename-title { color: var(--ink); font-weight: 500; letter-spacing: .005em; }
 .reserved .headline { color: var(--ink-2); font-style: italic; }
 .counts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 11.5px; color: var(--ink-3); }
 .count { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }

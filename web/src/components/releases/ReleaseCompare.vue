@@ -60,7 +60,7 @@ const between = computed(() => {
       <section class="included" aria-labelledby="compare-included">
         <h3 id="compare-included" class="included-h">Releases in this range</h3>
         <ul>
-          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span v-if="rangeTitle(r).text" class="inc-headline" :lang="rangeTitle(r).lang">{{ rangeTitle(r).text }}<LangBadge v-if="rangeTitle(r).lang !== lang" :lang="rangeTitle(r).lang" /></span><span v-else-if="releasedAt(r)" class="inc-date">{{ absoluteTime(releasedAt(r)!) }}</span></li>
+          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span v-if="rangeTitle(r).text" class="inc-headline" :lang="rangeTitle(r).lang">{{ rangeTitle(r).text }}<LangBadge v-if="rangeTitle(r).lang !== lang" :lang="rangeTitle(r).lang" /></span><span v-else-if="r.codename" class="inc-headline" lang="en">{{ r.codename }}</span><span v-else-if="releasedAt(r)" class="inc-date">{{ absoluteTime(releasedAt(r)!) }}</span></li>
         </ul>
       </section>
       <ReleaseChanges v-if="count && lines" :presented="lines" :repository="repository" :query="query" :view="view" :lang="lang" class="changes" />

@@ -159,7 +159,8 @@ watch(() => releases.available, async version => {
   if (version !== releases.available) return
   const title = release ? releaseTitle(release, profile.profile?.locale) : ''
   const about = title ? `: ${title}` : ''
-  toast(`${brand.value.wordmark} was updated to ${version}${about}`, {
+  const named = release?.codename ? ` (${release.codename})` : ''
+  toast(`${brand.value.wordmark} was updated to ${version}${named}${about}`, {
     sticky: true, key: 'update',
     actions: [{ label: 'What’s new', run: () => openReleases(version) }, { label: 'Reload', run: () => window.location.reload() }],
   })

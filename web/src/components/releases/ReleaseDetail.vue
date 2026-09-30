@@ -9,8 +9,8 @@ import LangBadge from './LangBadge.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
 import TicketChips from './TicketChips.vue'
 
-// One release: when it shipped, its name when it has one, what it brings, and
-// the evidence behind it. Every release reads the same (AEON-305): backfilled
+// One release: when it shipped, its codename and its name when it has one,
+// what it brings, and the evidence behind it. Every release reads the same (AEON-305): backfilled
 // notes and linked tickets both become blocks under Features and Fixes.
 // Highlights tells the benefits; Details lists the commits and shows the
 // evidence open (AEON-323).
@@ -78,6 +78,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
   <article class="detail" :class="{ reserved }" aria-labelledby="release-detail-title">
     <p class="eyebrow top">
       <span>{{ reserved ? 'Reserved version' : `Release ${release.release_sequence}` }}</span>
+      <span v-if="release.codename" class="dot-sep codename" lang="en"><template v-for="(p, i) in parts(release.codename)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
       <span v-if="!reserved && release.release_channel" class="dot-sep">{{ release.release_channel }}</span>
     </p>
     <h2 id="release-detail-title" ref="heading" class="version" tabindex="-1"><CalendarVersion :value="release.version" /></h2>
@@ -177,8 +178,10 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 
 <style scoped>
 .detail { display: grid; align-content: start; gap: 10px; max-width: 820px; }
-.top { display: flex; gap: 8px; margin: 0; }
+.top { display: flex; flex-wrap: wrap; gap: 2px 8px; margin: 0; }
 .dot-sep::before { content: '·'; margin-right: 8px; }
+/* The codename (AEON-430) reads as part of the release's name, a step above the label. */
+.codename { color: var(--ink-2); }
 .version { font: 500 clamp(24px, 2.2vw, 30px)/1.25 var(--mono); letter-spacing: 0; color: var(--ink); outline: none; }
 .version:focus-visible { box-shadow: var(--focus-ring); border-radius: 8px; }
 .badges { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -47,6 +47,10 @@ const SPECS: Spec[] = [
   ] },
 ]
 
+// The server names each release from its sequence (AEON-430); these are the
+// frozen names of sequences 1-6 (internal/releasehistory/codename/testdata/golden.txt).
+export const CODENAMES = ['Amber Aurora', 'Brisk Binary', 'Cobalt Comet', 'Distant Dawn', 'Electric Echo', 'First Flight']
+
 export function releaseHistory(now = Date.now(), repository = 'inspr-at/aeon') {
   let sequence = SPECS.filter(s => !s.reserved).length
   const releases = SPECS.map(spec => {
@@ -62,9 +66,10 @@ export function releaseHistory(now = Date.now(), repository = 'inspr-at/aeon') {
         evidence: { source_commit: '', source_url: '', image: null, ci: null, release_run: null, release_url: '', unavailable: ['This version was reserved but never published.'] } }
     }
     const published = spec.evidence === 'no-release' ? null : new Date(at + 150_000).toISOString()
+    const seq = sequence--
     const run = (name: string, id: number, conclusion = 'success') => ({ name, url: `https://github.com/${repository}/actions/runs/${id}`, status: 'completed', conclusion })
     return {
-      version, tag: `v${version}`, release_channel: 'stable', release_sequence: sequence--, state: 'published', reserved_at: iso, tagged_at: iso, published_at: published,
+      version, tag: `v${version}`, release_channel: 'stable', release_sequence: seq, codename: CODENAMES[seq - 1], state: 'published', reserved_at: iso, tagged_at: iso, published_at: published,
       headline: spec.headline, tickets: spec.tickets, changes, changes_omitted: 0,
       evidence: {
         source_commit: commit, source_url: `https://github.com/${repository}/commit/${commit}`,
