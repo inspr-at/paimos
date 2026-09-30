@@ -29,13 +29,23 @@ async function openGraph(page: Page) {
   await expect(canvas(page)).toHaveAttribute('data-ready', 'true', { timeout: 30_000 })
 }
 
+async function openAppearance(page: Page) {
+  // Graph controls mount after the profile fixture arrives, independently of
+  // the document load event used by goto().
+  const [profile] = await Promise.all([
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/me/profile'),
+    page.goto('/settings/personal#appearance'),
+  ])
+  await profile.finished()
+}
+
 test('default orbit is one turn per 120s and Personal can change it', async ({ page }) => {
   test.setTimeout(120_000)
   const data = await setup(page)
   await openGraph(page)
   await expect(canvas(page)).toHaveAttribute('data-orbit-seconds', '120')
 
-  await page.goto('/settings/personal#appearance')
+  await openAppearance(page)
   const motion = page.getByRole('radiogroup', { name: 'Graph motion' })
   await expect(motion).toBeVisible()
   await expect(motion.getByRole('radio', { name: 'Default' })).toBeChecked()
@@ -46,13 +56,13 @@ test('default orbit is one turn per 120s and Personal can change it', async ({ p
   await openGraph(page)
   await expect(canvas(page)).toHaveAttribute('data-orbit-seconds', '60', { timeout: 15_000 })
 
-  await page.goto('/settings/personal#appearance')
+  await openAppearance(page)
   await motionOf(page, 'Slow').click()
   await expect.poll(() => data.preferences['graph-motion']).toEqual({ pace: 'slow' })
   await openGraph(page)
   await expect(canvas(page)).toHaveAttribute('data-orbit-seconds', '180', { timeout: 15_000 })
 
-  await page.goto('/settings/personal#appearance')
+  await openAppearance(page)
   await motionOf(page, 'Off').click()
   await expect.poll(() => data.preferences['graph-motion']).toEqual({ pace: 'off' })
   await openGraph(page)

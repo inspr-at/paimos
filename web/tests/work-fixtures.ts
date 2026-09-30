@@ -268,7 +268,7 @@ function completionRefusal(node: MockNode, nextState: string, fields: Record<str
   return { error: `before done: ${issues.join('; ')}`, code: 'benefit_required' }
 }
 
-export async function mockWork(page: Page, data: Fixtures, options: MockOptions = {}) {
+export async function mockWork(page: Pick<Page, 'route'>, data: Fixtures, options: MockOptions = {}) {
   const calls: Call[] = []
   const started = Date.now()
   await page.route('**/api/**', async arrived => {

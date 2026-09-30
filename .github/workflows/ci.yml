@@ -156,9 +156,9 @@ jobs:
   playwright-shard:
     name: playwright (${{ matrix.shard }}/8)
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule'
-    # Use a standard public-repository ARM runner for single-worker Linux
-    # coverage within the Free plan job budget.
-    runs-on: ubuntu-24.04-arm
+    # Measure the serial configuration on standard M1 runners. The Free plan
+    # schedules at most five macOS jobs at once; retain eight one-worker jobs.
+    runs-on: macos-15
     timeout-minutes: 15
     strategy:
       fail-fast: false

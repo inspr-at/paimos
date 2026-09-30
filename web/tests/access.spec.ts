@@ -17,6 +17,7 @@ async function open(page: Page, path = '/settings/access/people', options: Param
   await mockAccess(page, world)
   await page.goto(path)
   await expect(page.locator('.access-card .panel > :not(.set-skeleton)').first()).toBeVisible()
+  await page.evaluate(() => document.fonts.ready)
   return world
 }
 const people = (page: Page) => page.getByRole('table', { name: 'People' })

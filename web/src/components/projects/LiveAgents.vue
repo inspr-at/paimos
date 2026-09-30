@@ -224,6 +224,11 @@ onBeforeUnmount(() => {
   .as-row .live-chip { gap: 5px; }
   .as-row .live-chip::before { inset: -8px -2px; }
 }
+/* Keep the complete state word and the chip on one line in a 320px card. */
+@media (max-width: 420px) {
+  .live-chip, .as-row .live-chip { gap: 3px; padding-inline: 4px 6px; }
+  .words { gap: 3px; }
+}
 /* ---------- The popover ---------- */
 /* Placed by left and top (set once when it opens or the page moves); it arrives
    by transform and opacity only. */

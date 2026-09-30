@@ -23,12 +23,13 @@ const session = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).pa
 const peek = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
 const pathOf = (page: Page) => new URL(page.url()).pathname
 
-async function openAgents(page: Page) {
-  await mockWork(page, fixtures())
-  await mockAgents(page, agentData(world))
+async function openAgents(page: Page, routes: Pick<Page, 'route'> = page) {
+  await mockWork(routes, fixtures())
+  await mockAgents(routes, agentData(world))
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
   await expect(page.locator('.agents-page .row').first()).toBeVisible()
+  await page.evaluate(() => document.fonts.ready)
 }
 
 test('a ticket pill on /agents opens the peek and stays on /agents', async ({ page }) => {
@@ -36,7 +37,14 @@ test('a ticket pill on /agents opens the peek and stays on /agents', async ({ pa
   await openAgents(page)
   const chip = page.locator('.sessions').getByRole('link', { name: 'PHAROS-11' }).first()
   await expect(chip).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
-  await chip.click()
+  const [ticket] = await Promise.all([
+    page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return url.pathname === '/api/nodes' && url.searchParams.get('q') === 'PHAROS-11'
+    }),
+    chip.click(),
+  ])
+  await ticket.finished()
   await expect(peek(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
   await expect(peek(page).getByRole('button', { name: 'Open in project' })).toBeVisible()
   expect(pathOf(page)).toBe('/agents')
@@ -46,13 +54,19 @@ test('a ticket pill on /agents opens the peek and stays on /agents', async ({ pa
   expect(list.x + list.width).toBeLessThanOrEqual(box.x + 2)
   expect(box.x + box.width).toBeLessThanOrEqual(1600)
 
-  await peek(page).getByRole('button', { name: 'Open in project' }).click()
+  const [identity] = await Promise.all([
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/me'),
+    peek(page).getByRole('button', { name: 'Open in project' }).click(),
+  ])
+  await identity.finished()
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
   await expect(page.getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
 })
 
 test('cmd-click on an agents ticket keeps the real link', async ({ page }) => {
-  await openAgents(page)
+  // Popups do not inherit page routes. Keep the new tab on this spec's API
+  // fixtures too, rather than letting it reach a real backend.
+  await openAgents(page, page.context())
   const chip = page.locator('.sessions').getByRole('link', { name: 'PHAROS-11' }).first()
   const [tab] = await Promise.all([page.context().waitForEvent('page'), chip.click({ modifiers: ['ControlOrMeta'] })])
   await tab.waitForURL('**/p/PHAROS/PHAROS-11')

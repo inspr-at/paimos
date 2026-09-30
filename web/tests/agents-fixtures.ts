@@ -111,7 +111,7 @@ export interface AgentMockOptions {
 }
 // Routes only the agents surfaces; everything else falls through to earlier routes
 // or the real server.
-export async function mockAgents(page: Page, data: AgentData, options: AgentMockOptions = {}) {
+export async function mockAgents(page: Pick<Page, 'route'>, data: AgentData, options: AgentMockOptions = {}) {
   const calls: { path: string; method: string; body: unknown; query?: URLSearchParams }[] = []
   const groups: MockAccountGroup[] = options.groups ? options.groups.map(group => ({ ...group, account_ids: [...group.account_ids], project_ids: [...group.project_ids] })) : []
   const pins: MockTicketPin[] = options.pins ? options.pins.map(pin => ({ ...pin })) : []
