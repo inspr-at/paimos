@@ -3,6 +3,7 @@
 package events
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -20,18 +21,27 @@ import (
 // and a write of its own, keeps the newest position per entity: an older
 // position never overwrites a newer one, whatever order the answers arrive in.
 //
-//   - A read names the newest committed event before its own statements ran, so
-//     everything it returns includes every event up to that position. Events
-//     that commit while it runs may or may not be in it; the position is a floor.
+//   - A read names the exact snapshot it returns: the newest committed event
+//     was the same before its first statement and after its last, so no event
+//     committed while it ran, and it includes every event up to that position
+//     and none after. A read that an event interrupted is run again (see
+//     readAttempts); one that keeps being interrupted carries no position, and
+//     the client merges it by the order it started in.
 //   - An accepted write names the newest committed event after the handler's
 //     transaction ended, so it is at or above the write's own event. A read whose
 //     position is below it may predate the write.
 //
 // Every resource mutation appends an event (see Append), so the position
-// advances with every change a person can make. The header is additive: a
-// client that does not know it ignores it, and an answer without it is merged
-// the way it was before.
+// advances with every change a person can make. Fields a worker refreshes
+// without an event (a heartbeat) are not part of the position: the client keeps
+// those by their own sequence. The header is additive: a client that does not
+// know it ignores it, and an answer without it is merged the way it was before.
 const PositionHeader = "Aeon-Event-Position"
+
+// readAttempts bounds how often an interrupted read is run again. Reads change
+// nothing, so a repeat is safe; a tenant that commits events faster than a read
+// completes gets the last answer without a position instead of waiting for quiet.
+const readAttempts = 3
 
 // positionReads are the reads the agents workspace merges by position: the
 // lists and details that /agents holds side by side and that its own writes
@@ -63,10 +73,8 @@ func PositionMiddleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 			switch r.Method {
 			case http.MethodGet:
 				if positionReads[r.Pattern] {
-					// Before the handler: its reads then include everything up to here.
-					if position, err := newestEvent(r.Context(), pool, p.TenantID); err == nil {
-						w.Header().Set(PositionHeader, strconv.FormatInt(position, 10))
-					}
+					serveSettled(w, r, next, pool, p.TenantID)
+					return
 				}
 			case http.MethodHead, http.MethodOptions:
 			default:
@@ -75,6 +83,80 @@ func PositionMiddleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// serveSettled answers a listed read with the position of the snapshot it
+// returns. The handler answers into a buffer while the newest event is read
+// before and after it: equal means no event committed while it ran.
+func serveSettled(w http.ResponseWriter, r *http.Request, next http.Handler, pool *pgxpool.Pool, tenantID string) {
+	var answer *bufferedResponse
+	for attempt := 0; attempt < readAttempts; attempt++ {
+		before, err := newestEvent(r.Context(), pool, tenantID)
+		if err != nil {
+			break
+		}
+		answer = newBufferedResponse(w.Header())
+		next.ServeHTTP(answer, r)
+		if answer.status < 200 || answer.status >= 300 {
+			break
+		}
+		if after, err := newestEvent(r.Context(), pool, tenantID); err != nil {
+			break
+		} else if after == before {
+			answer.header.Set(PositionHeader, strconv.FormatInt(after, 10))
+			break
+		}
+	}
+	if answer == nil {
+		// The position could not be read at all: the read answers without one.
+		next.ServeHTTP(w, r)
+		return
+	}
+	answer.replay(w)
+}
+
+// bufferedResponse holds a handler's answer until its position is known.
+type bufferedResponse struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func newBufferedResponse(initial http.Header) *bufferedResponse {
+	return &bufferedResponse{header: initial.Clone()}
+}
+
+func (b *bufferedResponse) Header() http.Header { return b.header }
+
+func (b *bufferedResponse) WriteHeader(status int) {
+	if b.status == 0 {
+		b.status = status
+	}
+}
+
+func (b *bufferedResponse) Write(p []byte) (int, error) {
+	if b.status == 0 {
+		b.status = http.StatusOK
+	}
+	return b.body.Write(p)
+}
+
+// Flush is a no-op: the listed reads are plain JSON answers, never streams.
+func (b *bufferedResponse) Flush() {}
+
+func (b *bufferedResponse) replay(w http.ResponseWriter) {
+	dst := w.Header()
+	for key := range dst {
+		delete(dst, key)
+	}
+	for key, values := range b.header {
+		dst[key] = values
+	}
+	if b.status == 0 {
+		b.status = http.StatusOK
+	}
+	w.WriteHeader(b.status)
+	_, _ = w.Write(b.body.Bytes())
 }
 
 // newestEvent is the tenant's latest committed event ID (0 before the first).

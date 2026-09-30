@@ -3,9 +3,11 @@
 package events
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -20,15 +22,22 @@ import (
 // positionServer mounts the middleware the way serve.go does: the route pattern
 // is known, and the auth middleware has put the principal on the request unless
 // the caller sends X-Anonymous.
-func positionServer(t *testing.T, d *dbtest.DB, p tenant.Principal, during func()) *httptest.Server {
+func positionServer(t *testing.T, d *dbtest.DB, p tenant.Principal, during func(run int)) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
+	runs := 0
 	reply := func(w http.ResponseWriter, r *http.Request) {
+		runs++
 		if during != nil {
-			during()
+			during(runs)
 		}
-		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"items": []any{}})
+		w.Header().Set("X-Reply", "kept")
+		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"items": []any{}, "run": runs})
 	}
+	mux.HandleFunc("GET /api/models", func(w http.ResponseWriter, r *http.Request) {
+		appendEvents(t, d, p, 1)
+		httpapi.WriteError(w, http.StatusForbidden, "admins only")
+	})
 	mux.HandleFunc("GET /api/runs", reply)
 	mux.HandleFunc("GET /api/agent-accounts", reply)
 	mux.HandleFunc("GET /api/nodes", reply)
@@ -107,14 +116,57 @@ func TestPositionNamesTheNewestEventOfTheTenantBeforeAListedRead(t *testing.T) {
 	}
 }
 
-func TestPositionOfAReadIsAFloorForEventsThatCommitWhileItRuns(t *testing.T) {
+// A read's position names the snapshot it returned. One that an event committed
+// inside is run again, so the body and the position come from the same quiet stretch.
+func TestPositionOfAReadNamesTheSnapshotAnInterruptedReadIsRunAgain(t *testing.T) {
 	d, a, _ := fixture(t)
 	appendEvents(t, d, a, 2)
-	// An event commits inside the handler: the read may include it, the position must not claim it.
-	srv := positionServer(t, d, a, func() { appendEvents(t, d, a, 1) })
-	n, ok := position(t, do(t, srv, "GET", "/api/runs", false))
-	if !ok || n != 2 {
-		t.Fatalf("position %d, present %v; want 2, the newest before the handler", n, ok)
+	srv := positionServer(t, d, a, func(run int) {
+		if run == 1 {
+			appendEvents(t, d, a, 1)
+		}
+	})
+	resp := do(t, srv, "GET", "/api/runs", false)
+	n, ok := position(t, resp)
+	if !ok || n != 3 {
+		t.Fatalf("position %d, present %v; want 3, the newest event the second run saw", n, ok)
+	}
+	var body struct{ Run int }
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || body.Run != 2 {
+		t.Fatalf("body %+v (%v): the answer must come from the run the position names", body, err)
+	}
+	if resp.StatusCode != 200 || resp.Header.Get("X-Reply") != "kept" || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+		t.Fatalf("status %d, headers %v: the buffered answer must reach the client unchanged", resp.StatusCode, resp.Header)
+	}
+}
+
+// Events that keep committing while every attempt runs leave no snapshot to name:
+// the read answers without a position rather than naming one it did not read at.
+func TestPositionIsAbsentWhenEventsKeepCommittingDuringTheRead(t *testing.T) {
+	d, a, _ := fixture(t)
+	appendEvents(t, d, a, 2)
+	var runs int
+	srv := positionServer(t, d, a, func(int) { runs++; appendEvents(t, d, a, 1) })
+	resp := do(t, srv, "GET", "/api/runs", false)
+	if n, ok := position(t, resp); ok {
+		t.Fatalf("an interrupted read carries position %d", n)
+	}
+	if resp.StatusCode != 200 || runs != readAttempts {
+		t.Fatalf("status %d after %d runs; want 200 after %d", resp.StatusCode, runs, readAttempts)
+	}
+}
+
+// A refused read is not repeated, and never carries a position.
+func TestPositionIsNotReadForARefusedRead(t *testing.T) {
+	d, a, _ := fixture(t)
+	srv := positionServer(t, d, a, nil)
+	resp := do(t, srv, "GET", "/api/models", false)
+	if n, ok := position(t, resp); ok || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status %d, position %d, present %v; want a bare 403", resp.StatusCode, n, ok)
+	}
+	var count int
+	if err := d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1`, a.TenantID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("the refused read ran %d times (%v); want once", count, err)
 	}
 }
 
