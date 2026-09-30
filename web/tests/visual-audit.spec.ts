@@ -523,7 +523,7 @@ const shots: Shot[] = [
   } },
   { screen: 'start-agent', state: 'accounts-card', setup: async page => { await mockStartAgent(page, { catalog: 'two-hosts' }) }, act: async page => {
     await page.goto('/settings/accounts')
-    await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('5-hour')
+    await expect(page.locator('#agent-accounts').locator('.account').first()).toBeVisible()
   } },
   // 5. Connected computers and pairing
   { screen: 'pairing', state: 'nix-guide', setup: mockAnonymousGuide, act: async page => {

@@ -58,6 +58,8 @@ export interface AllowanceWrite {
 export interface AllowanceWindow extends AllowanceWrite {
   id: string; account_id: string; used: number; reserved: number
   provisional?: boolean
+  /** A limit a person set by hand; it caps on top of the readings (AEON-384). */
+  set_by_you?: boolean
 }
 export interface AgentAccount {
   ongoing_use_approved?: boolean
@@ -151,7 +153,6 @@ export const getRun = (id: string) => request<AgentRun>(`/runs/${enc(id)}`)
 export const listApprovals = () => request<Approval[]>('/approvals?limit=200')
 export const decideApproval = (id: string, decision: 'approved' | 'denied', reason: string) => request<Approval>(`/approvals/${enc(id)}/decision`, 'POST', { decision, reason })
 export const revokeApproval = (id: string) => request<Approval>(`/approvals/${enc(id)}/revoke`, 'POST')
-export const createWindow = (id: string, body: AllowanceWrite) => request<AllowanceWindow>(`/agent-accounts/${enc(id)}/windows`, 'POST', body)
 export const listModels = () => request<ModelProfile[]>('/models')
 // Task-appropriate profile for a work role on one harness. A miss is "routing did not answer", not a guessed model.
 // The start cascade must not call this to fill models an account did not grant.
@@ -175,12 +176,6 @@ export const messageStatuses = (ids: string[]) => request<{ items: MessageStatus
 
 export const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed. Please retry.'
 
-// The cumulative pacing model from internal/agents/doc.go, bounded by the hard allowance.
-export function paceFraction(model: AllowanceWrite['pace_model'], elapsed: number, burst: number) {
-  const f = Math.min(1, Math.max(0, elapsed))
-  const pace = model === 'steady' ? f : model === 'frontload' ? 1 - (1 - f) ** 2 : 1
-  return Math.min(1, pace + burst)
-}
 
 // Named server events that change what the agents workspace shows. They are wake
 // hints only: the caller re-reads the authorized projections. Heartbeats use the

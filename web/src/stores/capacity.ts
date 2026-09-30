@@ -49,6 +49,8 @@ export const useCapacity = defineStore('capacity', () => {
     }
   }))
   const rows = computed(() => buildRows(inputs.value, capacityRead.data.value))
+  /** The raw projection per account: windows, the Advanced limit, API-key spend. */
+  const byAccount = computed(() => new Map(capacityRead.data.value.map(c => [c.account_id, c])))
   const pools = computed(() => buildPools(rows.value, agents.now))
   const ready = computed(() => ({ live: rows.value.filter(r => r.state === 'live').length, total: rows.value.length }))
   const signins = computed(() => rows.value.filter(r => r.state === 'signin'))
@@ -166,7 +168,7 @@ export const useCapacity = defineStore('capacity', () => {
   const setGauge = (next: GaugePreference) => gaugePref.save(next, 0)
 
   return {
-    state, loaded, stale, load, inputs, rows, pools, ready, signins, schedule, timezone, saveSchedule, setPreset, setNights, setPoolOverride, gauge, setGauge,
+    state, loaded, stale, load, inputs, rows, byAccount, refreshCapacity: capacityRead.refresh, pools, ready, signins, schedule, timezone, saveSchedule, setPreset, setNights, setPoolOverride, gauge, setGauge,
     schedulesLoaded, away, reserveConfirmed, hasUserSchedule, poolReserves, saveKeep, confirmReserve, endAway,
     invalidate: () => { capacityRead.invalidate(); schedulesRead.invalidate(); computersRead.invalidate() },
   }

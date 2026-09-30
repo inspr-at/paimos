@@ -4,8 +4,7 @@
 // one enrollment. Device, runtime and lifecycle secrets never enter this module.
 // Setup, redemption and tombstone reconciliation stay on the computer.
 
-import { api, APIError, resilientFetch } from './api.ts'
-import { createWindow, listAccounts, type AllowanceWindow, type AllowanceWrite } from './agents.ts'
+import { api, resilientFetch } from './api.ts'
 import { onAccessChange } from './authz.ts'
 import { brand } from './brand.ts'
 
@@ -32,8 +31,6 @@ const CLEANUP_STATES = ['pending', 'confirmed'] as const
 const PROCESS_STATES = ['unconfirmed', 'drained'] as const
 const VERIFICATION_MODES = ['one_per_harness', 'connect_only'] as const
 const DISCONNECT_MODES = ['drain', 'revoke_now'] as const
-const UNITS = ['requests', 'tokens', 'cost_micros'] as const
-const PACES = ['steady', 'frontload', 'unrestricted'] as const
 
 export type RequestState = (typeof REQUEST_STATES)[number]
 export type ComputerState = (typeof COMPUTER_STATES)[number]
@@ -41,12 +38,11 @@ export type CleanupState = (typeof CLEANUP_STATES)[number]
 export type ProcessState = (typeof PROCESS_STATES)[number]
 export type VerificationMode = (typeof VERIFICATION_MODES)[number]
 export type DisconnectMode = (typeof DISCONNECT_MODES)[number]
-export type ReviewChoice = VerificationMode | 'ongoing_limits'
+export type ReviewChoice = VerificationMode
 export type SetupState = 'not_started' | 'approved' | 'provisioning' | 'login_required' | 'service_conflict' | 'connected' | 'setup_failed'
 export type VerificationState = 'not_selected' | 'queued' | 'starting' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'ownership_lost' | 'expired' | 'unavailable'
 export type Connectivity = 'online' | 'offline' | 'unknown'
 export type AccountingState = 'settled' | 'unconfirmed'
-export type LimitMatch = 'saved' | 'absent' | 'unknown'
 
 const SETUP_STATES: readonly SetupState[] = ['not_started', 'approved', 'provisioning', 'login_required', 'service_conflict', 'connected', 'setup_failed']
 const VERIFICATION_STATES: readonly VerificationState[] = ['not_selected', 'queued', 'starting', 'running', 'waiting', 'completed', 'failed', 'cancelled', 'ownership_lost', 'expired', 'unavailable']
@@ -187,23 +183,14 @@ export interface ApproveBody {
   selected_account_keys: string[]
 }
 
-export interface OngoingLimitDraft {
-  account_key: string
-  starts_at: string
-  ends_at: string
-  unit: AllowanceWrite['unit']
-  allowance: number | null
-  pace_model: AllowanceWrite['pace_model']
-  burst_ratio: number
-}
-
 export interface PairingPermissions {
   canLookup: boolean
   canApprove: boolean
   canDeny: boolean
   canDisconnect: boolean
   canListComputers: boolean
-  canSetOngoingLimits: boolean
+  /** Lets agents use an approved computer's accounts (capacity/approve). */
+  canApproveAccounts: boolean
   /** The runtime daemon never receives person approval or force-stop authority. */
   canForceStop: false
 }
@@ -213,7 +200,7 @@ export class PairingError extends Error {
   readonly code: string
   readonly retryAfterSeconds: number | null
   readonly next: string
-  /** Accounts whose allowance was saved or found already saved before a later account stopped the batch. */
+  /** Accounts approved before a later account stopped the batch. */
   readonly savedAccountIds: readonly string[]
   constructor(status: number, message: string, options: { code?: string; retryAfterSeconds?: number | null; next?: string; savedAccountIds?: readonly string[] } = {}) {
     super(message)
@@ -261,7 +248,7 @@ export function pairingPermissions(input: { permissions: readonly string[]; prin
     canDeny: manage,
     canDisconnect: manage,
     canListComputers: read,
-    canSetOngoingLimits: manage,
+    canApproveAccounts: manage,
     canForceStop: false,
   }
 }
@@ -441,24 +428,6 @@ export function lastActiveLabel(iso: string | null | undefined, now = Date.now()
   return new Date(time).toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
-export function emptyRequestLimit(accountKey: string): OngoingLimitDraft {
-  return { account_key: accountKey, starts_at: '', ends_at: '', unit: 'requests', allowance: null, pace_model: 'unrestricted', burst_ratio: 0 }
-}
-
-/** Requests and a period. Other units are outside this setup flow. */
-export function simpleRequestLimitError(draft: OngoingLimitDraft | null): string | null {
-  if (!draft || draft.unit !== 'requests' || draft.pace_model !== 'unrestricted' || draft.burst_ratio !== 0) {
-    return 'Ongoing limits here are a number of requests for a period.'
-  }
-  const starts = new Date(draft.starts_at)
-  const ends = new Date(draft.ends_at)
-  if (!Number.isFinite(starts.getTime()) || !Number.isFinite(ends.getTime()) || ends <= starts
-    || !Number.isSafeInteger(draft.allowance) || Number(draft.allowance) < 1) {
-    return 'Enter a positive whole number of requests and a period that ends after it starts.'
-  }
-  return null
-}
-
 export function activeRunIds(view: Pick<PairingView, 'enrollments'>): string[] {
   const ids: string[] = []
   for (const enrollment of view.enrollments) {
@@ -555,42 +524,6 @@ export function addHarnessTargetProblem(input: {
   return null
 }
 
-export interface LimitAccountRow { key: string; id: string; label: string }
-
-/**
- * The save right after approval uses only the accounts selected for this request.
- * A later explicit form may list every connected account on the computer.
- */
-export function ongoingLimitAccounts(input: {
-  pending: boolean
-  selectedKeys: readonly string[]
-  grantedKeys: readonly string[] | null
-  limitsNow: boolean
-  showAll: boolean
-  requested: readonly RequestedAccount[]
-  enrollments: readonly PairingEnrollment[]
-}): LimitAccountRow[] {
-  const row = (key: string): LimitAccountRow | null => {
-    const enrollment = input.enrollments.find(item => item.account_key === key)
-    if (enrollment?.state === 'revoked') return null
-    const requested = input.requested.find(item => item.account_key === key)
-    return {
-      key,
-      id: enrollment?.account_id ?? '',
-      label: enrollment?.label ?? requested?.label ?? key,
-    }
-  }
-  const requestKeys = input.pending ? input.selectedKeys : (input.grantedKeys ?? [])
-  if (input.pending || input.limitsNow || !input.showAll) {
-    return requestKeys.map(row).filter((item): item is LimitAccountRow => item !== null)
-  }
-  return input.enrollments.filter(item => item.state !== 'revoked').map(item => ({
-    key: item.account_key,
-    id: item.account_id,
-    label: item.label,
-  }))
-}
-
 /** A failed refresh keeps the previous list. Silence is not cleanup or a disconnect. */
 export function applyComputerListRefresh(
   previous: readonly PairingView[],
@@ -598,21 +531,6 @@ export function applyComputerListRefresh(
 ): { computers: PairingView[]; failed: boolean } {
   if (!result.ok) return { computers: [...previous], failed: true }
   return { computers: [...result.computers], failed: false }
-}
-
-export function ongoingLimitError(draft: OngoingLimitDraft | null): string | null {
-  if (!draft) return 'Enter the ongoing allowance for each selected account.'
-  const starts = new Date(draft.starts_at)
-  const ends = new Date(draft.ends_at)
-  const unitOk = (UNITS as readonly string[]).includes(draft.unit)
-  const paceOk = (PACES as readonly string[]).includes(draft.pace_model)
-  if (!Number.isFinite(starts.getTime()) || !Number.isFinite(ends.getTime()) || ends <= starts
-    || !Number.isSafeInteger(draft.allowance) || Number(draft.allowance) < 1
-    || !unitOk || !paceOk
-    || !Number.isFinite(draft.burst_ratio) || draft.burst_ratio < 0 || draft.burst_ratio > 1) {
-    return 'Enter valid start and end times, a positive whole allowance, and a burst ratio from 0 to 1.'
-  }
-  return null
 }
 
 export function planLookup(input: {
@@ -658,7 +576,6 @@ export function planApproval(input: {
   selectedAccountKeys: readonly string[]
   permissions: PairingPermissions
   now?: number
-  drafts?: readonly OngoingLimitDraft[]
   requestedComputerId?: string
   targetComputerName?: string | null
 }): { ok: true; body: ApproveBody } | { ok: false; message: string; next: string } {
@@ -708,55 +625,12 @@ export function planApproval(input: {
       }
     }
   }
-  if (input.choice === 'ongoing_limits') {
-    for (const key of selected.keys) {
-      const draft = input.drafts?.find(item => item.account_key === key) ?? null
-      const problem = ongoingLimitError(draft)
-      if (problem) return { ok: false, message: problem, next: 'Ongoing limits are saved separately, by you, after the computer is approved. They are not part of the pairing grant.' }
-    }
-  }
   const body: ApproveBody = {
     request_digest: input.view.request_digest,
     verification,
     selected_account_keys: selected.keys,
   }
   return { ok: true, body }
-}
-
-export function planOngoingLimits(input: {
-  choice: ReviewChoice
-  drafts: readonly OngoingLimitDraft[]
-  selectedAccountKeys: readonly string[]
-  enrollments: readonly PairingEnrollment[]
-  permissions: PairingPermissions
-}): { action: 'skip' } | { action: 'send'; windows: { accountId: string; body: AllowanceWrite }[] } | { action: 'blocked'; message: string; next: string } {
-  if (input.choice !== 'ongoing_limits') return { action: 'skip' }
-  if (!input.permissions.canSetOngoingLimits) {
-    return { action: 'blocked', message: 'Only a signed-in person who can manage accounts can set ongoing limits.', next: 'The paired computer cannot create its own allowance.' }
-  }
-  const windows: { accountId: string; body: AllowanceWrite }[] = []
-  for (const key of input.selectedAccountKeys) {
-    const enrollment = input.enrollments.find(item => item.account_key === key && item.state !== 'revoked')
-    if (!enrollment) {
-      return { action: 'blocked', message: 'The approved account is not available yet.', next: 'Wait until setup finishes, then set the allowance. Do not approve the pairing again.' }
-    }
-    const draft = input.drafts.find(item => item.account_key === key) ?? null
-    const problem = ongoingLimitError(draft)
-    if (problem || !draft || draft.allowance == null) return { action: 'blocked', message: problem ?? 'Enter the ongoing allowance.', next: `Set the allowance you intend. ${product()} does not infer it from the vendor subscription.` }
-    windows.push({
-      accountId: enrollment.account_id,
-      body: {
-        starts_at: new Date(draft.starts_at).toISOString(),
-        ends_at: new Date(draft.ends_at).toISOString(),
-        unit: draft.unit,
-        allowance: draft.allowance,
-        pace_model: draft.pace_model,
-        burst_ratio: draft.burst_ratio,
-      },
-    })
-  }
-  if (!windows.length) return { action: 'blocked', message: 'Choose at least one account before setting limits.', next: 'Ongoing limits apply only to accounts you selected for this pairing.' }
-  return { action: 'send', windows }
 }
 
 export function planPoll(input: {
@@ -1047,7 +921,6 @@ export async function submitApproval(input: {
   selectedAccountKeys: readonly string[]
   permissions: PairingPermissions
   now?: number
-  drafts?: readonly OngoingLimitDraft[]
   requestedComputerId?: string
   targetComputerName?: string | null
   signal?: AbortSignal
@@ -1059,9 +932,9 @@ export async function submitApproval(input: {
 }
 
 // Separate, idempotent permission grants. The pairing grant itself never
-// invents allowance windows or silently opts in on a later page visit.
+// creates limits or silently opts in on a later page visit.
 export async function approvePairedAccounts(view: PairingView, keys: readonly string[], permissions: PairingPermissions): Promise<string[]> {
-  if (!permissions.canSetOngoingLimits) throw new PairingError(403, 'Only a person who can manage accounts can allow agents.', { code: 'forbidden' })
+  if (!permissions.canApproveAccounts) throw new PairingError(403, 'Only a person who can manage accounts can allow agents.', { code: 'forbidden' })
   const started = readEpoch
   const saved: string[] = []
   for (const key of keys) {
@@ -1112,69 +985,6 @@ export async function disconnectEnrollment(view: PairingView, accountId: string,
   const body = disconnectBody(view, mode)
   const path = `/agent-pairing/computers/${pathId(view.computer_id)}/enrollments/${pathId(accountId)}/disconnect`
   return oneFlight(`disconnect:${view.computer_id}:${accountId}:${mode}:${body.expected_revision}`, () => personJson(path, 'POST', body, signal).then(parseView))
-}
-
-export async function matchOngoingLimit(accountId: string, body: AllowanceWrite): Promise<LimitMatch> {
-  try {
-    const accounts = await listAccounts()
-    const account = accounts.find(item => item.id === accountId)
-    if (!account) return 'unknown'
-    return (account.windows ?? []).some(window => sameAllowance(window, body)) ? 'saved' : 'absent'
-  } catch {
-    return 'unknown'
-  }
-}
-
-export async function createOngoingLimits(windows: readonly { accountId: string; body: AllowanceWrite }[], permissions: PairingPermissions): Promise<{ created: string[]; reconciled: string[] }> {
-  if (!permissions.canSetOngoingLimits) {
-    throw new PairingError(0, 'Only a signed-in person who can manage accounts can set ongoing limits.', { code: 'forbidden', next: 'The paired computer cannot create its own allowance.' })
-  }
-  const created: string[] = []
-  const reconciled: string[] = []
-  const started = readEpoch
-  for (const item of windows) {
-    if (started !== readEpoch) throw sessionResetError()
-    try {
-      await createWindow(item.accountId, item.body)
-      if (started !== readEpoch) throw sessionResetError()
-      created.push(item.accountId)
-    } catch (error) {
-      if (started !== readEpoch) throw sessionResetError()
-      const saved = [...created, ...reconciled]
-      const match = await matchOngoingLimit(item.accountId, item.body)
-      if (started !== readEpoch) throw sessionResetError()
-      if (match === 'saved') { reconciled.push(item.accountId); continue }
-      const uncertain = match === 'unknown' || allowanceUncertain(error)
-      const reason = error instanceof Error ? error.message : 'The allowance was not saved.'
-      throw new PairingError(error instanceof APIError ? error.status : 0, uncertain ? 'The allowance may already be saved.' : reason, {
-        code: uncertain ? 'allowance_uncertain' : 'allowance_failed',
-        savedAccountIds: saved,
-        next: uncertain
-          ? `${savedPhrase(saved)} Refresh this account before sending the allowance again. A lost response is not the same as an unsaved allowance. Do not approve the pairing again.`
-          : `${savedPhrase(saved)} This account was not saved. You can send its allowance again. Do not approve the pairing again.`,
-      })
-    }
-  }
-  return { created, reconciled }
-}
-
-function savedPhrase(saved: readonly string[]): string {
-  if (!saved.length) return 'No allowance in this batch was confirmed.'
-  return `Confirmed for ${saved.length} account${saved.length === 1 ? '' : 's'}.`
-}
-
-function allowanceUncertain(error: unknown): boolean {
-  if (error instanceof APIError) return error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500
-  return true
-}
-
-function sameAllowance(window: AllowanceWindow, body: AllowanceWrite): boolean {
-  return window.unit === body.unit
-    && window.allowance === body.allowance
-    && window.pace_model === body.pace_model
-    && window.burst_ratio === body.burst_ratio
-    && Math.abs(Date.parse(window.starts_at) - Date.parse(body.starts_at)) < 1000
-    && Math.abs(Date.parse(window.ends_at) - Date.parse(body.ends_at)) < 1000
 }
 
 function disconnectBody(view: PairingView, mode: DisconnectMode): { mode: DisconnectMode; expected_revision: number } {

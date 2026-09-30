@@ -451,7 +451,7 @@ test('stale readings, % used per account and globally, and Manage accounts', asy
   await expect(page.locator(`[data-account="${ACCOUNTS.claude}"] .win5`)).toContainText('40% used')
   await cap(page).getByRole('link', { name: /Manage/ }).click()
   await expect(page).toHaveURL('/settings/accounts')
-  await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('Spare')
+  await expect(page.locator('#agent-accounts')).toContainText('Spare')
 })
 
 test('without account.manage the pacing controls stay visible but inert', async ({ page }) => {

@@ -5,6 +5,7 @@
 // (GET /agent-accounts/capacity, POST …/capacity/preview); this module only picks
 // windows, names states and words the plan. It never re-derives a budget.
 import { api, APIError, RequestFailure, StaleRequestError } from './api.ts'
+import type { LimitUse } from './accountLimits.ts'
 
 export type Pool = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
 export type OffDays = 'rest' | 'expire' | 'normal'
@@ -56,6 +57,10 @@ export interface AccountCapacity {
   probe_failure?: 'auth_failed' | 'unavailable'
   /** Earliest reset of the current windows, 5-hour included: where a Sprint ends. */
   limiting_reset?: string
+  /** The Advanced sentence with its use this period (AEON-384). */
+  limit?: LimitUse
+  /** List-price spend this month, in dollars, for an account billed by API key. */
+  spend_month_usd?: string
 }
 export interface ScheduleOverride { scope: 'user' | 'pool' | 'account'; pool?: Pool; account_id?: string; schedule: CapacitySchedule | null; carry_overrides?: boolean }
 

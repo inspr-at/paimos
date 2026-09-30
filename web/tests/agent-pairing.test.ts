@@ -4,16 +4,16 @@ import assert from 'node:assert/strict'
 import { sessionEnded } from '../src/lib/api.ts'
 import {
   DEFAULT_REVIEW_CHOICE, LOOKUP_DEBOUNCE_MS, MIN_POLL_INTERVAL_MS, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
-  agentRouteKind, canonicalUserCode, clearPairingClientState, createOngoingLimits, denyPairing,
+  agentRouteKind, canonicalUserCode, clearPairingClientState, denyPairing,
   describeComputerStatus, describeProgress, disconnectComputer, disconnectConfirm, disconnectEnrollment,
   formatVerification, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
-  ongoingLimitError, pairingPermissions, planApproval, planLookup, planOngoingLimits, planPoll,
+  pairingPermissions, planApproval, planLookup, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
   peekPairingCode, presentPublicGuide, rememberPairingCode, takePairingCode,
-  isAddHarness, matchOngoingLimit, pairingScopeKey, setHarnessAccount,
+  isAddHarness, pairingScopeKey, setHarnessAccount,
   addHarnessTargetProblem, applyComputerListRefresh, discardPairingReads, formatAllowanceMoment,
-  ongoingLimitAccounts, pairingReadGeneration, unsupportedVerification, approvePairedAccounts,
-  type OngoingLimitDraft, type PairingGuide, type PairingView, type RequestedAccount,
+  pairingReadGeneration, unsupportedVerification, approvePairedAccounts,
+  type PairingGuide, type PairingView, type RequestedAccount,
 } from '../src/lib/agentPairing.ts'
 
 const originalFetch = globalThis.fetch
@@ -330,41 +330,7 @@ test('a conflict is not retried and a revision is not sent as an unknown field',
   assert.deepEqual(Object.keys(bodies[0] as object).sort(), ['request_digest', 'selected_account_keys', 'verification'])
 })
 
-test('ongoing limits are a separate person allowance and are not part of approval', async () => {
-  const draft: OngoingLimitDraft = {
-    account_key: 'cursor-1', starts_at: '2026-09-27T18:00:00Z', ends_at: '2026-09-27T23:00:00Z',
-    unit: 'requests', allowance: 4, pace_model: 'unrestricted', burst_ratio: 0,
-  }
-  assert.equal(ongoingLimitError({ ...draft, allowance: 1.5 }), 'Enter valid start and end times, a positive whole allowance, and a burst ratio from 0 to 1.')
-  const plan = planApproval({ view: view(), choice: 'ongoing_limits', selectedAccountKeys: ['cursor-1'], permissions: person, drafts: [draft] })
-  assert.equal(plan.ok, true)
-  if (plan.ok) {
-    assert.equal(plan.body.verification, 'connect_only')
-    assert.equal('allowance' in plan.body, false)
-    assert.equal('expected_revision' in plan.body, false)
-  }
-  const calls: { url: string; body: unknown }[] = []
-  globalThis.fetch = async (url, init) => {
-    calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
-    if (String(url).endsWith('/approve')) return jsonResponse(view({ state: 'approved', computer_id: COMPUTER, enrollments: [enrollment()] }))
-    return jsonResponse({ id: 'window' })
-  }
-  await submitApproval({ view: view(), choice: 'ongoing_limits', selectedAccountKeys: ['cursor-1'], permissions: person, drafts: [draft] })
-  assert.deepEqual(calls.map(call => call.url), ['/api/agent-pairing/requests/11111111-1111-4111-8111-111111111111/approve'])
-  const windows = planOngoingLimits({
-    choice: 'ongoing_limits', drafts: [draft], selectedAccountKeys: ['cursor-1'], enrollments: [enrollment()], permissions: person,
-  })
-  assert.equal(windows.action, 'send')
-  if (windows.action === 'send') {
-    await createOngoingLimits(windows.windows, person)
-    assert.equal(calls[1]?.url, `/api/agent-accounts/${ACCOUNT}/windows`)
-    assert.equal((calls[1]?.body as { allowance: number }).allowance, 4)
-    assert.equal(JSON.stringify(calls[1]?.body).includes('quota'), false)
-  }
-  await assert.rejects(createOngoingLimits([{ accountId: ACCOUNT, body: { starts_at: draft.starts_at, ends_at: draft.ends_at, unit: 'requests', allowance: 4, pace_model: 'unrestricted', burst_ratio: 0 } }], agent))
-})
-
-test('an agent cannot approve, deny, disconnect or set limits', async () => {
+test('an agent cannot approve, deny or disconnect', async () => {
   let calls = 0
   globalThis.fetch = async () => { calls += 1; return jsonResponse(view()) }
   assert.equal(agent.canApprove, false)
@@ -545,60 +511,6 @@ test('add harness follows existing_computer_id, and a harness can be left out', 
   if (plan.ok) assert.deepEqual(plan.body.selected_account_keys, ['codex-1'])
 })
 
-test('a lost allowance response is reconciled and is not posted again', async () => {
-  const draft: OngoingLimitDraft = {
-    account_key: 'cursor-1', starts_at: '2026-09-27T18:00:00.000Z', ends_at: '2026-09-27T23:00:00.000Z',
-    unit: 'requests', allowance: 4, pace_model: 'unrestricted', burst_ratio: 0,
-  }
-  const body = {
-    starts_at: '2026-09-27T18:00:00.000Z', ends_at: '2026-09-27T23:00:00.000Z',
-    unit: 'requests' as const, allowance: 4, pace_model: 'unrestricted' as const, burst_ratio: 0,
-  }
-  const posts: string[] = []
-  globalThis.fetch = async (url, init) => {
-    const path = String(url)
-    if (path.endsWith('/windows')) {
-      posts.push(path)
-      return jsonResponse({ error: 'gateway' }, 503)
-    }
-    assert.equal(path, '/api/agent-accounts')
-    assert.equal(init?.method ?? 'GET', 'GET')
-    return jsonResponse([{ id: ACCOUNT, windows: [{ id: 'window', account_id: ACCOUNT, used: 0, reserved: 0, ...body }] }])
-  }
-  const saved = await createOngoingLimits([{ accountId: ACCOUNT, body }], person)
-  assert.deepEqual(saved, { created: [], reconciled: [ACCOUNT] })
-  assert.deepEqual(posts, [`/api/agent-accounts/${ACCOUNT}/windows`])
-  clearPairingClientState()
-  globalThis.fetch = async () => { throw new TypeError('network down') }
-  await assert.rejects(createOngoingLimits([{ accountId: ACCOUNT, body }], person), (error: PairingError) => {
-    assert.equal(error.code, 'allowance_uncertain')
-    assert.equal(error.message.includes('Set allowance again'), false)
-    assert.match(error.next, /lost response is not the same as an unsaved allowance/)
-    return true
-  })
-  assert.equal(await matchOngoingLimit(ACCOUNT, body), 'unknown')
-})
-
-test('a session reset stops the allowance batch before reconciliation or another write', async () => {
-  const body = {
-    starts_at: '2026-09-27T18:00:00Z', ends_at: '2026-09-27T23:00:00Z',
-    unit: 'requests' as const, allowance: 4, pace_model: 'unrestricted' as const, burst_ratio: 0,
-  }
-  for (const status of [200, 503]) {
-    const calls: string[] = []
-    let release: (response: Response) => void = () => {}
-    globalThis.fetch = (url) => {
-      calls.push(String(url))
-      return new Promise(resolve => { release = resolve })
-    }
-    const pending = createOngoingLimits([{ accountId: ACCOUNT, body }, { accountId: ACCOUNT_2, body }], person)
-    discardPairingReads()
-    release(jsonResponse({ id: 'window', ...body }, status))
-    await assert.rejects(pending, (error: PairingError) => error.code === 'session_reset')
-    assert.deepEqual(calls, [`/api/agent-accounts/${ACCOUNT}/windows`])
-  }
-})
-
 test('disconnect scope includes the revision and enrollments that were reviewed', () => {
   const first = view({
     revision: 3, computer_state: 'connected',
@@ -650,40 +562,6 @@ test('a session reset drops an in-flight lookup and keeps the human code', async
   } finally {
     Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: previous })
   }
-})
-
-test('the first allowance save uses only this request’s selected accounts', () => {
-  const oldAccount = enrollment({ account_id: ACCOUNT, account_key: 'cursor-old', harness: 'cursor', label: 'Old Cursor' })
-  const selected = enrollment({ account_id: ACCOUNT_2, account_key: 'claude-1', harness: 'claude', label: 'Claude work' })
-  const rows = ongoingLimitAccounts({
-    pending: false,
-    selectedKeys: ['claude-1'],
-    grantedKeys: ['claude-1'],
-    limitsNow: true,
-    showAll: false,
-    requested: [account({ account_key: 'claude-1', harness: 'claude', label: 'Claude work' })],
-    enrollments: [oldAccount, selected],
-  })
-  assert.deepEqual(rows.map(item => item.key), ['claude-1'])
-  const later = ongoingLimitAccounts({
-    pending: false,
-    selectedKeys: ['claude-1'],
-    grantedKeys: ['claude-1'],
-    limitsNow: false,
-    showAll: true,
-    requested: [],
-    enrollments: [oldAccount, selected],
-  })
-  assert.deepEqual(later.map(item => item.key).sort(), ['claude-1', 'cursor-old'])
-  const plan = planOngoingLimits({
-    choice: 'ongoing_limits',
-    drafts: [{ account_key: 'claude-1', starts_at: '2026-09-27T18:00:00Z', ends_at: '2026-09-27T23:00:00Z', unit: 'requests', allowance: 2, pace_model: 'unrestricted', burst_ratio: 0 }],
-    selectedAccountKeys: rows.map(item => item.key),
-    enrollments: [oldAccount, selected],
-    permissions: person,
-  })
-  assert.equal(plan.action, 'send')
-  if (plan.action === 'send') assert.deepEqual(plan.windows.map(item => item.accountId), [ACCOUNT_2])
 })
 
 test('add harness connect stays blocked until the code matches the opened computer', () => {
