@@ -48,6 +48,10 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 				t.Fatalf("%s watch.%s must be optional", op, field)
 			}
 		}
+		watchMode, _ := watchProps["mode"].(map[string]any)
+		if watchMode["const"] != "lease" {
+			t.Fatalf("%s watch.mode must describe status-only leases", op)
+		}
 		watchState, _ := watchProps["state"].(map[string]any)
 		if !reflect.DeepEqual(watchState["enum"], []any{"active", "detached", "unreachable"}) {
 			t.Fatalf("%s changed the existing watch state enum", op)

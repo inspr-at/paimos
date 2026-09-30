@@ -53,7 +53,9 @@ for (const tenant of ['pma', 'ppm']) for (const width of [1600, 390]) for (const
     const sheet = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
     const detail = sheet.locator('article.detail')
     const radio = (name: string) => sheet.getByRole('radio', { name, exact: true })
-    if (width === 390 && entry !== 'version') await sheet.getByRole('option').first().click()
+    // The header and all-history entry intentionally open an unselected list
+    // at every width; direct pages preselect on desktop only.
+    if (entry === 'header' || entry === 'all' || width === 390 && entry !== 'version') await sheet.getByRole('option').first().click()
     await expect(detail.getByRole('article', { name: 'Clear release notes', exact: true })).toBeVisible()
     await expect(detail.getByRole('region', { name: /^Fixes/ })).toContainText('Reliable release switches')
     await expect(detail).toContainText('Read what changed in every workspace.')

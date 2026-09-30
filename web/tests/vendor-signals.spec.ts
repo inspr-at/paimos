@@ -72,7 +72,7 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
     const dir = process.env.AEON354_SHOTS
     if (dir) { mkdirSync(dir, { recursive: true }); await page.screenshot({ path: join(dir, `throttled-${width}-${theme}.png`), fullPage: true }) }
     await page.goto('/settings/accounts')
-  await page.locator(`[data-account="${account.id}"]`).getByRole('button', { name: /^Details for/ }).click()
+    await page.locator(`[data-account="${account.id}"]`).getByRole('button', { name: /^Details for/ }).click()
     const toggle = page.getByRole('switch', { name: /Show .* in your Claude status line/ })
     await expect(toggle).toBeVisible()
     await expect(toggle).toHaveAttribute('aria-checked', 'false')
