@@ -18,9 +18,13 @@ type tokenSample struct {
 	Model    string
 	Tokens   int64
 }
+type ownInterval struct {
+	capacity.UseSample
+	Window string
+}
 type capacityLearning struct {
 	TokenSamples           []tokenSample
-	RecentOwn              []capacity.UseSample
+	RecentOwn              []ownInterval
 	Windows                []capacity.LearnedWindow
 	FirstSeen              time.Time
 	LastOwn, PresenceUntil *time.Time
@@ -145,19 +149,23 @@ func learnReading(ctx context.Context, tx pgx.Tx, a Account, v capacity.Reading,
 		if !overlap && delta > 0 && v.ReadAt.Sub(prev.ReadAt) <= 6*time.Hour {
 			at := v.ReadAt
 			l.LastOwn = &at
-			l.RecentOwn = append(l.RecentOwn, capacity.UseSample{At: v.ReadAt, Percent: delta, Hours: v.ReadAt.Sub(prev.ReadAt).Hours()})
+			l.RecentOwn = append(l.RecentOwn, ownInterval{UseSample: capacity.UseSample{At: v.ReadAt, Percent: delta, Hours: v.ReadAt.Sub(prev.ReadAt).Hours()}, Window: v.WindowKind + "/" + v.Bucket})
 			if len(l.RecentOwn) > 128 {
 				l.RecentOwn = l.RecentOwn[len(l.RecentOwn)-128:]
 			}
-			recent := 0.0
+			// One action can move several quota windows. Presence must not add
+			// those percentages together and invent a full point of own use.
+			recent := map[string]float64{}
 			for _, sample := range l.RecentOwn {
-				if sample.At.After(v.ReadAt.Add(-15 * time.Minute)) {
-					recent += sample.Percent * math.Min(1, sample.At.Sub(v.ReadAt.Add(-15*time.Minute)).Hours()/sample.Hours)
+				if sample.Hours > 0 && sample.At.After(v.ReadAt.Add(-15*time.Minute)) {
+					recent[sample.Window] += sample.Percent * math.Min(1, sample.At.Sub(v.ReadAt.Add(-15*time.Minute)).Hours()/sample.Hours)
 				}
 			}
-			if recent >= 1 {
-				until := v.ReadAt.Add(30 * time.Minute)
-				l.PresenceUntil = &until
+			for _, points := range recent {
+				if points >= 1 {
+					until := v.ReadAt.Add(30 * time.Minute)
+					l.PresenceUntil = &until
+				}
 			}
 		}
 	}
@@ -224,6 +232,11 @@ func learnRun(ctx context.Context, tx pgx.Tx, a Account, runID string, now time.
 	if err = learnConsumption(ctx, tx, a, &l, now); err != nil {
 		return err
 	}
+	if a.Harness == "grok" || a.Harness == "cursor" || a.Harness == "pi" {
+		if err := learnBlindRuns(ctx, tx, a, &l, now); err != nil {
+			return err
+		}
+	}
 	after, _ := json.Marshal(l)
 	if bytes.Equal(before, after) {
 		return nil
@@ -235,6 +248,7 @@ func learnRun(ctx context.Context, tx pgx.Tx, a Account, runID string, now time.
 	if a.Harness == "grok" || a.Harness == "cursor" || a.Harness == "pi" {
 		if estimate := capacity.BlindEstimate(l.Hits, float64(l.Tokens), float64(l.Cost), now); estimate != nil {
 			estimate.Plan = a.Plan
+			estimate.PlusMinus = math.Max(estimate.PlusMinus, l.window(*estimate).Sigma)
 			return persistEstimate(ctx, tx, a, *estimate, now)
 		}
 	}
@@ -254,10 +268,10 @@ func learnConsumption(ctx context.Context, tx pgx.Tx, a Account, l *capacityLear
 	if l.PlanSince.After(since) {
 		since = l.PlanSince
 	}
-	rows, err := tx.Query(ctx, `SELECT ar.id::text,COALESCE(ar.started_at,ar.created_at),ar.input_tokens+ar.output_tokens,ar.cost_micros,min(t.at) FILTER(WHERE t.error_code='vendor_limit'),max(t.limit_resets_at) FILTER(WHERE t.error_code='vendor_limit')
+	rows, err := tx.Query(ctx, `SELECT ar.id::text,COALESCE(ar.ended_at,ar.started_at,ar.created_at),ar.input_tokens+ar.output_tokens,ar.cost_micros,min(t.at) FILTER(WHERE t.error_code='vendor_limit'),max(t.limit_resets_at) FILTER(WHERE t.error_code='vendor_limit'),COALESCE(max(t.limit_window) FILTER(WHERE t.error_code='vendor_limit'),'')
  FROM agent_runs ar LEFT JOIN run_telemetry t ON t.tenant_id=ar.tenant_id AND t.run_id=ar.id
  WHERE ar.account_id=$1 AND ar.created_at>=$2 AND ar.purpose='managed'
- GROUP BY ar.id,ar.tenant_id ORDER BY COALESCE(ar.started_at,ar.created_at) DESC,ar.id LIMIT 2000`, a.ID, since)
+ GROUP BY ar.id,ar.tenant_id ORDER BY COALESCE(ar.ended_at,ar.started_at,ar.created_at) DESC,ar.id LIMIT 2000`, a.ID, since)
 	if err != nil {
 		return err
 	}
@@ -266,11 +280,12 @@ func learnConsumption(ctx context.Context, tx pgx.Tx, a Account, l *capacityLear
 		at           time.Time
 		tokens, cost int64
 		hit, reset   *time.Time
+		window       string
 	}
 	runs := []run{}
 	for rows.Next() {
 		var r run
-		if err = rows.Scan(&r.id, &r.at, &r.tokens, &r.cost, &r.hit, &r.reset); err != nil {
+		if err = rows.Scan(&r.id, &r.at, &r.tokens, &r.cost, &r.hit, &r.reset, &r.window); err != nil {
 			rows.Close()
 			return err
 		}
@@ -280,6 +295,13 @@ func learnConsumption(ctx context.Context, tx pgx.Tx, a Account, l *capacityLear
 	rows.Close()
 	if err != nil {
 		return err
+	}
+	// Unmanaged sessions contribute consumption, but never managed-run count.
+	// Their exact deltas are already fenced by the harness receipt sequence.
+	for _, sample := range l.TokenSamples {
+		if !sample.From.Before(since) && !sample.At.After(now) {
+			runs = append(runs, run{at: sample.At, tokens: sample.Tokens})
+		}
 	}
 	sort.Slice(runs, func(i, j int) bool {
 		if runs[i].at.Equal(runs[j].at) {
@@ -299,9 +321,15 @@ func learnConsumption(ctx context.Context, tx pgx.Tx, a Account, l *capacityLear
 		}
 		l.Tokens += r.tokens
 		l.Cost += r.cost
-		l.Runs++
+		if r.id != "" {
+			l.Runs++
+		}
 		if r.hit != nil {
-			l.Hits = append(l.Hits, capacity.LimitSample{At: *r.hit, Tokens: float64(l.Tokens), Cost: float64(l.Cost), Reset: r.reset})
+			cost := float64(l.Cost)
+			if len(l.TokenSamples) > 0 {
+				cost = 0 // Token-only sessions make a dollar total incomplete.
+			}
+			l.Hits = append(l.Hits, capacity.LimitSample{At: *r.hit, Tokens: float64(l.Tokens), Cost: cost, Reset: r.reset, Window: r.window})
 			if r.reset != nil {
 				boundary = *r.reset
 			} else {
@@ -381,6 +409,20 @@ func ObserveSessionTokens(ctx context.Context, tx pgx.Tx, actorID, accountID, mo
 	if len(l.TokenSamples) > 4096 {
 		l.TokenSamples = l.TokenSamples[len(l.TokenSamples)-4096:]
 	}
+	if a.Harness == "grok" || a.Harness == "cursor" || a.Harness == "pi" {
+		if err := learnConsumption(ctx, tx, a, &l, at); err != nil {
+			return err
+		}
+		if err := saveLearning(ctx, tx, a.ID, l); err != nil {
+			return err
+		}
+		if v := capacity.BlindEstimate(l.Hits, float64(l.Tokens), float64(l.Cost), at); v != nil {
+			v.Plan = a.Plan
+			v.PlusMinus = math.Max(v.PlusMinus, l.window(*v).Sigma)
+			return persistEstimate(ctx, tx, a, *v, at)
+		}
+		return nil
+	}
 	if err = saveLearning(ctx, tx, a.ID, l); err != nil {
 		return err
 	}
@@ -435,10 +477,49 @@ func ObserveSessionTokens(ctx context.Context, tx pgx.Tx, actorID, accountID, mo
 		v.OrdinaryUsageAllowed = nil
 		v.UsedPercent = math.Min(100, v.UsedPercent+total)
 		v.PlusMinus = math.Max(3, total*.25)
+		v.PlusMinus = math.Max(v.PlusMinus, l.window(v).Sigma)
 		v.Evidence = &capacity.Evidence{Kind: "tokens", Samples: n}
 		if err = persistEstimate(ctx, tx, a, v, at); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func learnBlindRuns(ctx context.Context, tx pgx.Tx, a Account, l *capacityLearning, now time.Time) error {
+	reading := capacity.BlindEstimate(l.Hits, 0, 0, now)
+	if reading == nil {
+		return nil
+	}
+	reading.Plan = a.Plan
+	rows, err := tx.Query(ctx, `SELECT id::text,COALESCE(model_profile_id::text,''),COALESCE(effective_model,''),ended_at,extract(epoch FROM ended_at-started_at)::float8/3600,input_tokens+output_tokens,cost_micros FROM agent_runs WHERE account_id=$1 AND purpose='managed' AND status IN ('completed','failed') AND ended_at>started_at AND ended_at>=$2 ORDER BY ended_at DESC LIMIT 256`, a.ID, now.Add(-capacity.LearningHorizon))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var samples []capacity.RunSample
+	for rows.Next() {
+		var r capacity.RunSample
+		var cost float64
+		if err := rows.Scan(&r.ID, &r.Profile, &r.Model, &r.At, &r.Hours, &r.Tokens, &cost); err != nil {
+			return err
+		}
+		if !l.PlanSince.IsZero() && r.At.Before(l.PlanSince) {
+			continue
+		}
+		estimate := capacity.BlindEstimate(l.Hits, r.Tokens, cost, now)
+		if estimate == nil {
+			continue
+		}
+		r.Percent = estimate.UsedPercent
+		samples = append(samples, r)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	w := l.window(*reading)
+	for i := len(samples) - 1; i >= 0; i-- {
+		w.ObserveRun(samples[i])
 	}
 	return nil
 }

@@ -276,6 +276,7 @@ type LimitSample struct {
 	At           time.Time
 	Tokens, Cost float64
 	Reset        *time.Time
+	Window       string
 }
 
 // BlindEstimate needs an observed reset interval (or two observed stop cycles),
@@ -294,6 +295,16 @@ func BlindEstimate(hits []LimitSample, tokens, cost float64, now time.Time) *Rea
 		}
 	}
 	for i, h := range hits {
+		// A named fixed-length vendor window calibrates on its first stop.
+		// Monthly/other windows need an observed cycle; don't assume 30 days.
+		if h.Reset != nil {
+			switch h.Window {
+			case "5h":
+				durations = append(durations, weighted{300, 1})
+			case "weekly":
+				durations = append(durations, weighted{10080, 1})
+			}
+		}
 		value := h.Tokens
 		if useCost {
 			value = h.Cost

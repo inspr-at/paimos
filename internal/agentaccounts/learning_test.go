@@ -226,3 +226,121 @@ func TestLearningPresenceOrderAndSuggestions(t *testing.T) {
 		t.Fatal("presence did not steer ordering")
 	}
 }
+
+func TestLearningBlindSettlementCalibratesAndReplayDoesNotMint(t *testing.T) {
+	person, runner, _, a := learningAccount(t, "grok")
+	profile := codexProfile(t, person)
+	now := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
+	var last string
+	for i, tokens := range []int{1000, 1200, 100, 200, 300} {
+		id := insertRun(t, person, runner, profile)
+		last = id
+		start := now.Add(time.Duration(i-6) * time.Hour)
+		if i < 2 {
+			start = now.Add(time.Duration(i-2) * 7 * 24 * time.Hour)
+		}
+		end := start.Add(30 * time.Minute)
+		inLearning(t, person, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2,created_at=$3,started_at=$3,ended_at=$4,status='completed',input_tokens=$5,effective_model='blind-model' WHERE id=$1`, id, a.ID, start, end, tokens); err != nil {
+				return err
+			}
+			if i < 2 {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,at,limit_resets_at) VALUES($1,$2,1,'usage','vendor_limit',$3,$4)`, person.TenantID, id, end, end.Add(time.Hour)); err != nil {
+					return err
+				}
+			}
+			return learnRun(t.Context(), tx, a, id, now)
+		})
+	}
+	inLearning(t, person, func(tx pgx.Tx) error {
+		l, err := loadLearning(t.Context(), tx, a.ID)
+		if err != nil {
+			return err
+		}
+		if len(l.Hits) != 2 || l.Tokens != 600 || l.Runs != 3 {
+			t.Fatalf("cycle accounting %+v", l)
+		}
+		readings, err := readCapacity(t.Context(), tx, a.ID, true)
+		if err != nil {
+			return err
+		}
+		if len(readings) != 1 || readings[0].Source != "estimate" || math.Abs(readings[0].UsedPercent-100*600.0/1100) > .1 {
+			t.Fatalf("calibration %+v", readings)
+		}
+		metric := l.metric(readings[0], now, capacity.DefaultSchedule(), profile)
+		if metric.HoldPercent < 20 || metric.RunCount != 5 {
+			t.Fatalf("blind run cost %+v", metric)
+		}
+		return nil
+	})
+	before := scalar(t, person, `SELECT count(*) FROM account_capacity_readings WHERE account_id=$1`, a.ID)
+	inLearning(t, person, func(tx pgx.Tx) error { return learnRun(t.Context(), tx, a, last, now.Add(time.Second)) })
+	if after := scalar(t, person, `SELECT count(*) FROM account_capacity_readings WHERE account_id=$1`, a.ID); after != before {
+		t.Fatalf("replay minted an estimate: %d -> %d", before, after)
+	}
+	// A calibrated blind window still admits at most one daytime run.
+	a.MaxParallel = 4
+	inLearning(t, person, func(tx pgx.Tx) error {
+		windows, err := lockAccountWindows(t.Context(), tx, []string{a.ID})
+		if err != nil {
+			return err
+		}
+		_, wait, err := admission(t.Context(), tx, a, windows[a.ID], now, 1, runRow{Purpose: "managed"}, false)
+		if err == nil && (wait == nil || wait.Code != "capacity") {
+			t.Fatalf("concurrent blind run escaped %+v", wait)
+		}
+		return err
+	})
+}
+
+func TestLearningTokenOnlyExactModelFreshnessAndOwnership(t *testing.T) {
+	person, runner, key, a := learningAccount(t, "codex")
+	now := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
+	baseline := now.Add(-30 * time.Minute)
+	r := capacity.Reading{WindowKind: "weekly", WindowMinutes: 10080, Plan: "Pro", UsedPercent: 20, ReadAt: baseline, ResetsAt: now.Add(24 * time.Hour), Source: "harness"}
+	callStatus(t, accountsMod(), &runner, key, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{r}}), 204, nil)
+	inLearning(t, person, func(tx pgx.Tx) error {
+		l, err := loadLearning(t.Context(), tx, a.ID)
+		if err != nil {
+			return err
+		}
+		w := l.window(r)
+		for i := 0; i < 3; i++ {
+			w.ObserveRun(capacity.RunSample{ID: string(rune('a' + i)), Model: "exact-model", At: baseline.Add(-time.Hour), Percent: 10, Tokens: 1000000, Hours: 1})
+		}
+		if err := saveLearning(t.Context(), tx, a.ID, l); err != nil {
+			return err
+		}
+		if err := ObserveSessionTokens(t.Context(), tx, person.ID, a.ID, "exact-model", 9000000, baseline, now); err != nil {
+			return err
+		}
+		if err := ObserveSessionTokens(t.Context(), tx, runner.ID, a.ID, "other-model", 9000000, baseline, now); err != nil {
+			return err
+		}
+		if err := ObserveSessionTokens(t.Context(), tx, runner.ID, a.ID, "exact-model", 1000000, baseline, now); err != nil {
+			return err
+		}
+		readings, err := readCapacity(t.Context(), tx, a.ID, true)
+		if err != nil {
+			return err
+		}
+		if len(readings) != 1 || readings[0].Source != "estimate" || readings[0].UsedPercent != 30 || readings[0].Evidence.Kind != "tokens" {
+			t.Fatalf("token estimate %+v", readings)
+		}
+		return nil
+	})
+	// A new measured baseline supersedes token history. Even huge token deltas
+	// cannot replace it while it is fresh, or count samples from before it.
+	r.ReadAt, r.UsedPercent = now.Add(time.Millisecond), 34
+	callStatus(t, accountsMod(), &runner, key, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{r}}), 204, nil)
+	inLearning(t, person, func(tx pgx.Tx) error {
+		if err := ObserveSessionTokens(t.Context(), tx, runner.ID, a.ID, "exact-model", 1000000, r.ReadAt, r.ReadAt.Add(time.Minute)); err != nil {
+			return err
+		}
+		readings, err := readCapacity(t.Context(), tx, a.ID, true)
+		if err == nil && (len(readings) != 1 || readings[0].Source != "harness" || readings[0].UsedPercent != 34) {
+			t.Fatalf("fresh measured lost %+v", readings)
+		}
+		return err
+	})
+}

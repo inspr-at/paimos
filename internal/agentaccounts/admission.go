@@ -147,6 +147,9 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	}
 	blind := false
 	if blindHarness {
+		if blindDayPolicy(s, now) && slots > 0 {
+			return nil, waitFor("capacity"), nil
+		}
 		var observed bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id=$1 AND source<>'estimate')`, a.ID).Scan(&observed); err != nil {
 			return nil, nil, err

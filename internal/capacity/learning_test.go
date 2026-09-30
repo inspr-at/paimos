@@ -141,3 +141,12 @@ func TestWorkHoursRequireEvidenceAndAreOnlySuggestions(t *testing.T) {
 		t.Fatal("suggestion changed schedule")
 	}
 }
+
+func TestBlindNamedWindowCalibratesFirstHit(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	reset := now.Add(time.Hour)
+	r := BlindEstimate([]LimitSample{{At: now.Add(-time.Hour), Tokens: 1000, Reset: &reset, Window: "5h"}}, 500, 0, now)
+	if r == nil || r.WindowMinutes != 300 || r.UsedPercent != 50 || r.Evidence.Samples != 1 || !r.ResetsAt.Equal(reset) {
+		t.Fatalf("first named cycle %+v", r)
+	}
+}
