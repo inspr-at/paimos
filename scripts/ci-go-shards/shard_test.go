@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -971,6 +972,12 @@ func TestLayoutInventoryUsesTheRunnerArchitecture(t *testing.T) {
 		count int
 		arch  string
 	}{{macShardCount, "arm64"}, {hostedShardCount, "amd64"}} {
+		// Linux must list the tests this runner can execute even when a rerun
+		// retains the other runner class's shard count. Local Darwin checks
+		// still enumerate both intended CI architectures.
+		if runtime.GOOS == "linux" {
+			tc.arch = runtime.GOARCH
+		}
 		names, err := listRunnableTests(root, "example.com/platform/p", tc.count)
 		if err != nil {
 			t.Fatal(err)

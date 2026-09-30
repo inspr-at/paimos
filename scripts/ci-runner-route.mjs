@@ -2,7 +2,11 @@
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-export const trustedEvents = ["push", "workflow_dispatch"];
+const eventClasses = new Map([
+  ["push", "mbp2606-push"],
+  ["workflow_dispatch", "mbp2606-dispatch"],
+]);
+export const trustedEvents = [...eventClasses.keys()];
 export const leaseSeconds = 30;
 
 // The NIX-600 controller publishes this value-free lease only while the Linux
@@ -10,7 +14,8 @@ export const leaseSeconds = 30;
 // CI never receives the controller's administration key.
 export function routeRunner({ event, repository, ref, availability = "", requiredIdle = 1, now = Date.now() }) {
   const hosted = (reason) => ({ runs_on: ["ubuntu-latest"], runner_class: "hosted", reason });
-  if (!trustedEvents.includes(event)) return hosted("untrusted-event");
+  const eventClass = eventClasses.get(event);
+  if (!eventClass) return hosted("untrusted-event");
   if (repository !== "inspr-at/paimos") return hosted("different-repository");
   if (ref !== "refs/heads/main") return hosted("untrusted-ref");
   if (!Number.isSafeInteger(requiredIdle) || requiredIdle < 1) return hosted("invalid-capacity-request");
@@ -31,7 +36,6 @@ export function routeRunner({ event, repository, ref, availability = "", require
   if (!Number.isSafeInteger(lease.idle_runners) || lease.idle_runners < requiredIdle) {
     return hosted("insufficient-idle-capacity");
   }
-  const eventClass = event === "push" ? "mbp2606-push" : "mbp2606-dispatch";
   return { runs_on: ["self-hosted", "Linux", "ARM64", "mbp2606", eventClass], runner_class: "mbp2606", reason: "fresh-idle-lease" };
 }
 

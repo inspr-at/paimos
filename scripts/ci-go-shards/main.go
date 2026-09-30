@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -640,7 +641,9 @@ func listRunnableTests(root, pkg string, count int) ([]string, error) {
 	return names, nil
 }
 
-// withLinux lists the Linux ARM64 (four) or hosted AMD64 (seven) inventory.
+// withLinux uses the executing Linux runner's architecture, including partial
+// reruns that retain a four-shard layout on hosted AMD64. Off Linux, count picks
+// the intended CI target (four ARM64 or seven AMD64) for local inventory checks.
 // CGO_ENABLED=0 permits listing on Darwin; this module has no Linux cgo files.
 func withLinux(env []string, count int) []string {
 	out := make([]string, 0, len(env)+3)
@@ -651,7 +654,9 @@ func withLinux(env []string, count int) []string {
 		out = append(out, e)
 	}
 	arch := "amd64"
-	if count == macShardCount {
+	if runtime.GOOS == "linux" {
+		arch = runtime.GOARCH
+	} else if count == macShardCount {
 		arch = "arm64"
 	}
 	return append(out, "GOOS=linux", "GOARCH="+arch, "CGO_ENABLED=0")

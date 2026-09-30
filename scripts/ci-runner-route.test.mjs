@@ -19,12 +19,26 @@ function route(event = "push", changes = {}, options = {}) {
 
 test("trusted events use base labels plus exactly their verified event class", () => {
   assert.deepEqual(trustedEvents, ["push", "workflow_dispatch"]);
-  for (const event of trustedEvents) {
+  for (const [event, eventClass] of [["push", "mbp2606-push"], ["workflow_dispatch", "mbp2606-dispatch"]]) {
     const labels = route(event).runs_on;
-    assert.deepEqual(labels, ["self-hosted", "Linux", "ARM64", "mbp2606", `mbp2606-${event === "push" ? "push" : "dispatch"}`]);
+    assert.deepEqual(labels, ["self-hosted", "Linux", "ARM64", "mbp2606", eventClass]);
     assert.equal(labels.filter((label) => label === "mbp2606-push" || label === "mbp2606-dispatch").length, 1);
     assert.ok(labels.every((label) => !/^(ubuntu|macos|windows)-/i.test(label)));
     assert.equal(route(event).runner_class, "mbp2606");
+  }
+});
+
+test("unmapped events cannot acquire the dispatch class, even if the allowlist grows", () => {
+  const events = ["future_event", "workflow_dispatch_extra", "constructor", "toString", "__proto__"];
+  trustedEvents.push(...events);
+  try {
+    for (const event of [...events, null, undefined, {}, 1]) {
+      assert.deepEqual(route(event, {}, { event }), {
+        runs_on: ["ubuntu-latest"], runner_class: "hosted", reason: "untrusted-event",
+      });
+    }
+  } finally {
+    trustedEvents.splice(-events.length);
   }
 });
 

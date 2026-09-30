@@ -57,13 +57,19 @@ a fork job racing the verified job.
    `inspr-at/paimos/.github/workflows/test-runner-smoke.yml@refs/heads/main`, and
    head SHA is reachable from `main`. Missing or unverifiable metadata rejects
    admission. Record the verified job ID, run ID/attempt and unique runner name.
-   Mint base labels plus `mbp2606-push` for a verified push, or base labels plus
-   `mbp2606-dispatch` for a verified dispatch, never both. Before **every mint**,
-   sweep every queued paimos job whose `runs-on` labels
-   are a **case-insensitive subset of the labels of the runner about to be
-   minted**. Cancel the runs for matching jobs the controller has not verified,
-   or refuse to mint while any such job remains. This includes jobs requesting
-   only `self-hosted`, `[self-hosted, linux]` or `ARM64`, without `mbp2606`.
+   NIX-601's `class_ok` also requires the queued job to carry **exactly its
+   event's class label**: `mbp2606-push` for `push`, or `mbp2606-dispatch` for
+   `workflow_dispatch`. Cancel a verified run whose job lacks that class,
+   requests the opposite class, or carries both; never mint for that job.
+   Mint base labels plus that one class label, never both. Before **every mint**,
+   NIX-601's `unverified_label_runs` sweeps every queued paimos job whose
+   `runs-on` labels are a **case-insensitive subset of the labels of the
+   runner about to be minted**. Every matching job must belong to a verified run and pass
+   `class_ok`. Cancel any run with a matching job that fails either check,
+   **including already verified runs**, and refuse to mint on that sweep's
+   tick. This includes base-only jobs requesting
+   `[self-hosted, Linux, ARM64, mbp2606]`, as well as only `self-hosted`,
+   `[self-hosted, linux]` or `ARM64`, without an exact class label.
    This covers any event or ref, including directly edited `runs-on`, PRs,
    work-branch pushes, non-main dispatches, `merge_group`, `workflow_run` and
    `schedule`; leave no spare registrations. App **5134402** requires
@@ -75,11 +81,11 @@ a fork job racing the verified job.
    workflow step, require `GITHUB_REPOSITORY` = `inspr-at/paimos`,
    `GITHUB_EVENT_NAME` in exactly `{push, workflow_dispatch}`, and
    `GITHUB_WORKFLOW_REF` equal to one of the two fully qualified workflow refs
-   above. Read and validate the payload from `GITHUB_EVENT_PATH`. Bind the
-   verified event and job labels to the minted runner class: a push requires
-   `mbp2606-push`, a dispatch requires `mbp2606-dispatch`, and the opposite class
-   must be absent. Missing or mismatched class attribution denies admission;
-   the class label alone never substitutes for API and payload verification.
+   above. Read and validate the payload from `GITHUB_EVENT_PATH`.
+   The hook validates event and payload metadata; class binding is enforced
+   by the controller at minting (step 1) and through actual-job attribution
+   in the post-job check (step 3). The class label alone never substitutes
+   for API and payload verification.
    **PR-shaped events or payloads are always denied**, including same-repository
    PRs; a matching `pull_request.head.repo.full_name` never admits them.
    On missing, malformed or mismatched metadata, the hook must kill both
@@ -211,12 +217,16 @@ services, matrices and inherited environment/default settings. `release.yml`
 and `pairing-platform.yml` are **never routed**; their multi-platform artifacts
 and evidence remain hosted.
 
-**Off/drain:** after clearing availability, NIX-600 keeps minting JIT runners for
-API-verified queued jobs that still carry the mbp2606 label, until that queue
-empties, and lets running jobs finish, with every mode-B control and precondition
-still enforced. A ruleset/network failure or post-job mismatch stops minting and
-cancels affected queued runs rather than draining through a failed boundary.
-**Hard stop:** cancel those queued and running runs before stopping capacity;
+**Off/drain:** after clearing availability, NIX-600 with NIX-601 keeps minting
+JIT runners only for API-verified queued jobs that pass `class_ok` and still
+carry the mbp2606 label, until that queue empties, and lets running jobs finish,
+with every mode-B control and precondition still enforced.
+**Pause:** a ruleset/network failure or post-job mismatch stops minting and
+cancels runs with queued jobs whose labels are a case-insensitive subset of
+NIX-601's `pool_labels`: the base labels `self-hosted, Linux, ARM64, mbp2606`
+plus **both** `mbp2606-push` and `mbp2606-dispatch`.
+**Hard stop:** use the same combined `pool_labels` set to cancel runs with
+matching queued or running jobs before stopping capacity;
 do not leave them stranded waiting for a runner. A lease is an admission check,
 not an atomic reservation: concurrent
 admissions or host failure after selection remain a queue risk. Never publish
@@ -233,8 +243,10 @@ duties cover already queued jobs. See GitHub's
 
 **Go shard integration (AEON-459):** `go-test` depends on `runner-route` and
 uses its guarded runner selection and class to choose **4 Go shards on
-mbp2606, 7 on hosted**. The same event/ref/attempt guards protect the matrix;
-an old router output on a failed-job rerun selects seven hosted shards.
+mbp2606, 7 on hosted**. The same event/ref/attempt guards protect the matrix
+when GitHub evaluates it. A failed-job or individual-job rerun may retain
+earlier matrix values; do not assume it creates seven hosted shards. Use
+**Re-run all jobs** to refresh both the router and the entire shard layout.
 `scripts/ci-go-shards` accepts `-count` (default 7). Its checked-in plans are
 `scripts/ci/go-shards.txt` and `scripts/ci/go-shards-4.txt`; both retain the same
 timing weights and inventory, including `scripts/ci-runner-guard`. Static
