@@ -23,8 +23,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Six shards. Five-way balance of run 36695656920 left jobs at 212s, 230s and 232s.
-        shard: [1, 2, 3, 4, 5, 6]
+        # Seven shards. Five peaked at 232s. Six, splitting every package over 90s,
+        # started one process per package and peaked at 254s. Only packages over 140s are split.
+        shard: [1, 2, 3, 4, 5, 6, 7]
     runs-on: ubuntu-latest
     services:
       postgres:

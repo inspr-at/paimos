@@ -20,9 +20,9 @@ import (
 	"unicode/utf8"
 )
 
-// shardCount is six because the five-shard schedule of run 36695656920 still
-// left three hosted jobs over the 3.5 minute gate (212s, 230s and 232s).
-const shardCount = 6
+// shardCount is seven because five shards peaked at 232s and six shards, with
+// every package over 90s split into its own process, peaked at 254s.
+const shardCount = 7
 
 const pairingPackage = "github.com/inspr-at/paimos/internal/agentpairing"
 const pathProofTest = "TestPathProofCommandsRunInShells"
@@ -41,10 +41,12 @@ func shardNeedsShell(items []Item, shard int) bool {
 	return false
 }
 
-// splitAboveMS is the CI package elapsed past which one test binary misses the
-// hosted gate once it shares a runner. Run 36695656920 left whole packages of
-// 94s to 152s on the shards that finished over 3.5 minutes, so those are split.
-const splitAboveMS = 90_000
+// splitAboveMS is the CI package elapsed past which one test binary cannot
+// finish inside the hosted gate. Splitting a shorter package starts another
+// process beside the others, and run 36698280679 showed that extra processes
+// make the runner miss its own timing budgets. Inbox joined harness, nodes,
+// and agentpairing above this line.
+const splitAboveMS = 140_000
 
 // sequentialBudgetMS is the most time one test process on a shard may carry.
 // Postgres init, checkout and the aggregate gate sit outside this number,
@@ -283,9 +285,8 @@ func formatFile(items []Item, splitAbove int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# AEON-408 CI Go shards. Regenerate with: go run ./scripts/ci-go-shards generate -log <job.log> -json <tests.json>\n")
 	fmt.Fprintf(&b, "# Whole-package times are go test elapsed milliseconds from ubuntu-latest run 36695656920.\n")
-	fmt.Fprintf(&b, "# Packages over %dms are split by test. Harness, nodes, and agentpairing keep the package totals and per-test proportions from the five-shard list.\n", splitAbove)
-	fmt.Fprintf(&b, "# Summing their slices on that run would count Postgres contention once per shard.\n")
-	fmt.Fprintf(&b, "# The other split packages were measured locally and scaled to that run's package elapsed.\n")
+	fmt.Fprintf(&b, "# Packages over %dms are split by test. Harness, nodes, and agentpairing keep their five-shard proportions.\n", splitAbove)
+	fmt.Fprintf(&b, "# Inbox was measured locally and scaled to that run. Pairing tests added in release 14 were measured locally and scaled by the same ratio as the rest of that package.\n")
 	fmt.Fprintf(&b, "# A package added after that run is listed at 0ms until the next measurement.\n")
 	fmt.Fprintf(&b, "# Columns: shard milliseconds import-path [TestName]\n")
 	for _, it := range items {

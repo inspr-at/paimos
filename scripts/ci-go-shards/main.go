@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Command ci-go-shards keeps the CI go test package list balanced across six shards.
+// Command ci-go-shards keeps the CI go test package list balanced across seven shards.
 //
 //	go run ./scripts/ci-go-shards generate -log job.log -json tests.json
 //	go run ./scripts/ci-go-shards check
