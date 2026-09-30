@@ -24,10 +24,10 @@ type View struct {
 	ReadyStale        bool       `json:"ready_stale,omitempty"`
 	LiveStale         bool       `json:"live_stale,omitempty"`
 	EtaStale          bool       `json:"eta_stale,omitempty"`
-	// Finished is positive completion evidence for the ticket: no session is open on
-	// it and the last worker to leave reported 100% and recorded a clean exit
-	// (aeon_session_finished, AEON-437). Nothing else reads as Done.
-	Finished   bool       `json:"finished,omitempty"`
+	// Finished is required whenever an estimate is present, never omitted: no session
+	// is open on the ticket and the last worker to leave reported 100% and recorded a
+	// clean exit (aeon_session_finished, AEON-437). Nothing else reads as Done.
+	Finished   bool       `json:"finished"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	FinishedBy string     `json:"finished_by,omitempty"`
 }
@@ -42,24 +42,38 @@ const workingSessionSQL = `EXISTS(SELECT 1 FROM harness_sessions s
 	WHERE s.ticket_node_id=u.id AND n.deleted_at IS NULL AND s.phase='working'
 	AND s.stopped_at IS NULL AND s.archived_at IS NULL AND s.role IN ('worker','coordinator'))`
 
-// lastWorkerSQL is the worker that left the ticket last, when nobody is on it any more.
-// A finished worker's estimate is not kept (aeon_node_eta reads open sessions only), so
-// completion is read from the session itself, through the one aeon_session_finished.
-const lastWorkerSQL = `LEFT JOIN LATERAL (
+// CompletionJoin is the worker that left the ticket last, when nobody is on it any more,
+// as a LEFT JOIN LATERAL named alias over the ticket id expression idExpr. A finished
+// worker's estimate is not kept (aeon_node_eta reads open sessions only), so completion
+// is read from the session itself, through the one aeon_session_finished.
+func CompletionJoin(idExpr, alias string) string {
+	return `LEFT JOIN LATERAL (
 	SELECT s.stopped_at, pr.name AS by,
 		aeon_session_finished(s.stopped_at, s.stop_reason, s.progress_pct) AS finished
 	FROM harness_sessions s
 	JOIN nodes n ON n.tenant_id=s.tenant_id AND n.id=s.ticket_node_id AND n.project_id=s.project_id
 	LEFT JOIN principals pr ON pr.tenant_id=s.tenant_id AND pr.id=s.agent_principal_id
-	WHERE s.ticket_node_id=u.id AND n.deleted_at IS NULL AND s.role='worker'
+	WHERE s.ticket_node_id=` + idExpr + ` AND n.deleted_at IS NULL AND s.role='worker'
 	AND s.stopped_at IS NOT NULL AND s.archived_at IS NULL
 	AND NOT EXISTS(SELECT 1 FROM harness_sessions o WHERE o.tenant_id=s.tenant_id AND o.ticket_node_id=s.ticket_node_id
 		AND o.stopped_at IS NULL AND o.archived_at IS NULL)
-	ORDER BY s.stopped_at DESC, s.id DESC LIMIT 1) done ON true`
+	ORDER BY s.stopped_at DESC, s.id DESC LIMIT 1) ` + alias + ` ON true`
+}
 
-const estimateColumns = `e.eta_ready_at, e.eta_live_at, e.progress_pct,
+// ProgressSQL is the one projection of a ticket's progress: the open sessions' percent
+// from aeon_node_eta (etaAlias), or 100 when the last worker finished (CompletionJoin
+// as completionAlias). The ticket list displays it and sorts by it, so the order is the
+// number on screen.
+func ProgressSQL(etaAlias, completionAlias string) string {
+	return `CASE WHEN coalesce(` + completionAlias + `.finished, false) THEN 100 ELSE ` + etaAlias + `.progress_pct END`
+}
+
+var (
+	lastWorkerSQL   = CompletionJoin("u.id", "done")
+	estimateColumns = `e.eta_ready_at, e.eta_live_at, ` + ProgressSQL("e", "done") + `,
 		e.ready_reported_at, e.live_reported_at, e.ready_by, e.live_by, e.ready_stale, e.live_stale, ` + workingSessionSQL + `,
 		coalesce(done.finished, false), CASE WHEN done.finished THEN done.stopped_at END, CASE WHEN done.finished THEN done.by END`
+)
 
 // Load reads estimates for the page. Ids with no report are absent.
 func Load(ctx context.Context, tx pgx.Tx, ids []string) (map[string]View, error) {
@@ -112,14 +126,8 @@ func scanView(rows pgx.Rows, id *string) (View, error) {
 		return View{}, err
 	}
 	view.Progress = progress
-	if view.Finished {
-		// Nobody is on the ticket, so the open-session projection is empty: the
-		// finished worker's own 100% is what the ticket shows.
-		hundred := 100
-		view.Progress = &hundred
-		if finishedBy != nil {
-			view.FinishedBy = *finishedBy
-		}
+	if view.Finished && finishedBy != nil {
+		view.FinishedBy = *finishedBy
 	}
 	if readyBy != nil {
 		view.ReadyBy = *readyBy

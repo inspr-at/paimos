@@ -16,9 +16,6 @@ import (
 // not false/empty (mutation responses and event snapshots omit this projection).
 // Only exact session/run bindings may block a session. Legacy principal-only
 // requests remain shared inbox attention; neither age nor labels imply ownership.
-// Finished is the one answer to "did this worker complete its job": it reported
-// 100% and stopped with a recorded clean exit (aeon_session_finished, AEON-437).
-// It is derived, so a viewer who may not read the stop reason gets it too.
 // All queries use the caller's tenant transaction and project visibility.
 type StateEvidence struct {
 	VendorLimited    bool               `json:"vendor_limited,omitempty"`
@@ -28,7 +25,6 @@ type StateEvidence struct {
 	NeedsAttention   *bool              `json:"needs_attention,omitempty"`
 	HasProblem       *bool              `json:"has_problem,omitempty"`
 	AttentionReasons *[]AttentionReason `json:"attention_reasons,omitempty"`
-	Finished         *bool              `json:"finished,omitempty"`
 }
 
 // AttentionReason intentionally carries no IDs, bodies, rationale or routing.
@@ -110,7 +106,6 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
         OR EXISTS(SELECT 1 FROM approvals a WHERE a.id=s.id AND a.scope='run'))),
       (coalesce(r.status IN ('failed','ownership_lost') AND coalesce(vl.error_code,'')<>'vendor_limit',false)
         OR coalesce(s.stop_reason<>'heartbeat_lost' AND replace(replace(s.stop_reason,'_',' '),'-',' ') ~* '\m(error|errored|failed|failure|blocked|crash(ed)?|ownership lost|heartbeat lost|timeout|timed out)\M',false)),
-      aeon_session_finished(s.stopped_at,s.stop_reason,s.progress_pct),
       coalesce(q.kind,''),coalesce(q.scope,''),coalesce(q.actor,''),coalesce(q.blocking,false),
       coalesce(q.location,''),coalesce(q.permission_project,''),coalesce(q.count,0), coalesce(r.status='failed' AND vl.error_code='vendor_limit',false),coalesce(vl.limit_window,''),vl.limit_resets_at
     FROM harness_sessions s LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id
@@ -126,7 +121,7 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
 		var id, project, principal, phase, permissionProject string
 		var evidence StateEvidence
 		var reason AttentionReason
-		if err := rows.Scan(&id, &project, &principal, &phase, &evidence.RunStatus, &evidence.NeedsAttention, &evidence.HasProblem, &evidence.Finished,
+		if err := rows.Scan(&id, &project, &principal, &phase, &evidence.RunStatus, &evidence.NeedsAttention, &evidence.HasProblem,
 			&reason.Kind, &reason.Scope, &reason.Actor, &reason.Blocking, &reason.Location, &permissionProject, &reason.Count, &evidence.VendorLimited, &evidence.LimitWindow, &evidence.LimitResetsAt); err != nil {
 			return nil, err
 		}

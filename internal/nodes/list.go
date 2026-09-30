@@ -1114,7 +1114,8 @@ func listOrder(q listQuery) string {
 		case "estimate":
 			parts = append(parts, "est.hours IS NULL ASC", "est.hours "+dir)
 		case "progress":
-			parts = append(parts, "eta.progress_pct IS NULL ASC", "eta.progress_pct "+dir)
+			// The number the cell shows: a finished ticket is 100, like its ETA view.
+			parts = append(parts, eta.ProgressSQL("eta", "fin")+" IS NULL ASC", eta.ProgressSQL("eta", "fin")+" "+dir)
 		case "model":
 			// The role's rung on the ladder, then the area; rows without a role last.
 			parts = append(parts, "route.rank IS NULL ASC", "route.rank "+dir, "route.area IS NULL ASC", "route.area "+dir)
@@ -1171,7 +1172,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	}
 	etaJoin := ""
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {
-		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta(f.id) eta ON true`
+		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta(f.id) eta ON true ` + eta.CompletionJoin("f.id", "fin")
 	}
 	estimateJoin, planningCTE, planningJoin := "", "", ""
 	if sortsBy(q, "model") {

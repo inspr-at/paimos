@@ -690,7 +690,7 @@
   },
   "harness-session": {
     "version": "harness-session/1.7",
-    "sha256": "011c8158861d6e62d7a3ac27dbcd45cab77cbcd326f4aed9877a08307124e059",
+    "sha256": "e983c8a68cb0e66197761c1bb4ecf70cc0744b61fd283fe930bd67bce643edd4",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1353,7 +1353,8 @@
           "activity",
           "activity_sequence",
           "revision",
-          "created_at"
+          "created_at",
+          "finished"
         ],
         "type": "object"
       },
@@ -2018,7 +2019,8 @@
           "activity",
           "activity_sequence",
           "revision",
-          "created_at"
+          "created_at",
+          "finished"
         ],
         "type": "object"
       }

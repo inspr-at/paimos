@@ -200,3 +200,202 @@ func TestFinishedNeedsAReportedHundredAndARecordedCleanExit(t *testing.T) {
 		t.Fatalf("an earlier clean exit outlived a later early end: %+v", row)
 	}
 }
+
+// AEON-437, fix round 2: finished is a required boolean in every payload a screen
+// renders a session from, so no client needs a fallback that derives Done from the
+// percent and the stop reason. Registration, heartbeat, yield and stop responses,
+// the stored event snapshots, detail, list and live all carry it, false included.
+func TestFinishedIsARequiredBooleanInEveryPayload(t *testing.T) {
+	f := fixture(t)
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	mustBe := func(what string, data map[string]any, want bool) {
+		t.Helper()
+		got, present := data["finished"]
+		if !present {
+			t.Fatalf("%s omits finished", what)
+		}
+		if b, ok := got.(bool); !ok || b != want {
+			t.Fatalf("%s finished = %#v, want %v", what, got, want)
+		}
+	}
+	ticket := uid()
+	f.addNode(t, ticket, "REQ-1", "ticket", f.project, "required flag")
+	lease := "req-lease-0000000000000000000001"
+	registration := map[string]any{
+		"agent_principal_id": f.agent.ID, "harness": "codex", "host": "build-host",
+		"harness_session_ref": "req-ref-0000000000000001", "worker_lease": lease, "management_mode": "managed",
+		"role": "worker", "ticket_node_id": ticket, "work_shape": "ship",
+	}
+	w := f.call(f.person, "POST", base, registration, "")
+	expect(t, w, 201)
+	registered := decode(t, w)
+	mustBe("registration", registered, false)
+	id := registered["id"].(string)
+	path := base + "/" + id
+	w = f.call(f.person, "POST", base, registration, "")
+	expect(t, w, 201)
+	mustBe("registration replay", decode(t, w), false)
+
+	w = f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "progress_pct": 100}, lease)
+	expect(t, w, 200)
+	mustBe("heartbeat at 100%", decode(t, w), false)
+	w = f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease)
+	expect(t, w, 200)
+	mustBe("yield", decode(t, w), false)
+	w = f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "process_exited"}, lease)
+	expect(t, w, 200)
+	mustBe("stop at 100% with a clean exit", decode(t, w), true)
+
+	w = f.call(f.person, "GET", path, nil, "")
+	expect(t, w, 200)
+	mustBe("detail", decode(t, w), true)
+	w = f.call(f.person, "GET", base, nil, "")
+	expect(t, w, 200)
+	listed := false
+	for _, raw := range decode(t, w)["items"].([]any) {
+		if item := raw.(map[string]any); item["id"] == id {
+			mustBe("list", item, true)
+			listed = true
+		}
+	}
+	if !listed {
+		t.Fatal("session missing from the list")
+	}
+
+	// The snapshots in the event log carry it too; an event a screen renders a
+	// session from is never missing the flag.
+	var snapshots, booleans int
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE jsonb_typeof(after->'finished')='boolean')
+			FROM events WHERE type LIKE 'harness.%' AND after->>'id'=$1`, id).Scan(&snapshots, &booleans)
+	})
+	if snapshots < 3 || booleans != snapshots {
+		t.Fatalf("%d of %d event snapshots carry a boolean finished", booleans, snapshots)
+	}
+}
+
+// A stopped session at 100% whose launcher never recorded a reason is not finished,
+// and the answer is an explicit false, never a missing field and never an unknown.
+func TestFinishedIsExplicitFalseWithoutAStopReason(t *testing.T) {
+	f := fixture(t)
+	var unknown *bool
+	var answers [4]bool
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT aeon_session_finished(now(), NULL, 100::smallint)`).Scan(&unknown); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT aeon_session_finished(NULL, NULL, NULL),
+			aeon_session_finished(now(), 'process_exited', NULL),
+			aeon_session_finished(now(), NULL, NULL),
+			aeon_session_finished(now(), 'process_exited', 100::smallint)`).Scan(&answers[0], &answers[1], &answers[2], &answers[3])
+	})
+	if unknown == nil || *unknown {
+		t.Fatalf("NULL stop reason answered %v, want an explicit false", unknown)
+	}
+	if answers != [4]bool{false, false, false, true} {
+		t.Fatalf("function answers %v", answers)
+	}
+
+	ticket := uid()
+	f.addNode(t, ticket, "REQ-2", "ticket", f.project, "no reason")
+	lease := "req-lease-0000000000000000000002"
+	session := f.registerSession(t, f.agent.ID, "worker", ticket, "req-ref-0000000000000002", lease)
+	f.beat(t, session, lease, 1, map[string]any{"progress_pct": 100})
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped', stopped_at=clock_timestamp(), stop_reason=NULL WHERE id=$1`, session)
+		return err
+	})
+	explicitFalse := func(what string, data map[string]any) {
+		t.Helper()
+		if got, present := data["finished"]; !present || got != false {
+			t.Fatalf("%s finished = %#v (present %v), want an explicit false", what, got, present)
+		}
+	}
+	w := f.call(f.person, "GET", "/api/projects/"+f.project+"/harness-sessions/"+session, nil, "")
+	expect(t, w, 200)
+	explicitFalse("detail", decode(t, w))
+	w = f.call(f.person, "GET", "/api/harness-sessions/live?include_inactive=true", nil, "")
+	expect(t, w, 200)
+	found := false
+	for _, raw := range decode(t, w)["items"].([]any) {
+		item := raw.(map[string]any)
+		if bound, _ := item["ticket"].(map[string]any); bound != nil && bound["id"] == ticket {
+			explicitFalse("live", item)
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("session missing from the live feed")
+	}
+}
+
+// AEON-437, fix round 2: the ticket list sorts by the progress it displays. A
+// finished ticket shows 100, so ascending puts it after the open work and
+// descending puts it first; a ticket with nothing reported is last both ways.
+func TestProgressSortUsesTheDisplayedCompletionAwarePercent(t *testing.T) {
+	f := fixture(t)
+	mux := http.NewServeMux()
+	nodes.New(f.db.App, nil).Mount(mux)
+	n := 0
+	ticketAt := func(key string, progress int, stop string) string {
+		t.Helper()
+		n++
+		ticket := uid()
+		f.addNode(t, ticket, key, "ticket", f.project, key)
+		lease := fmt.Sprintf("sort-lease-%022d", n)
+		session := f.registerSession(t, f.agent.ID, "worker", ticket, fmt.Sprintf("sort-ref-%016d", n), lease)
+		f.beat(t, session, lease, 1, map[string]any{"progress_pct": progress})
+		if stop != "" {
+			expect(t, f.call(f.agent, "POST", "/api/projects/"+f.project+"/harness-sessions/"+session+"/stop", map[string]string{"reason": stop}, lease), 200)
+		}
+		return ticket
+	}
+	ticketAt("SORT-1", 40, "")
+	ticketAt("SORT-2", 100, "process_exited")
+	ticketAt("SORT-3", 70, "")
+	ticketAt("SORT-4", 100, "stopped") // ended early at 100%: no percent survives, unknown
+	f.addNode(t, uid(), "SORT-5", "ticket", f.project, "nothing reported")
+	order := func(sort string) []string {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, "/api/nodes?within="+f.project+"&kind=ticket&sort="+sort+"&limit=100", nil)
+		r = r.WithContext(tenant.WithPrincipal(r.Context(), f.person))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		expect(t, w, 200)
+		var page struct {
+			Items []struct {
+				Key string `json:"key"`
+				Eta *struct {
+					Progress *int `json:"progress_pct"`
+				} `json:"eta"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		var keys []string
+		for _, item := range page.Items {
+			if len(item.Key) >= 5 && item.Key[:5] == "SORT-" {
+				keys = append(keys, item.Key)
+				if item.Key == "SORT-2" && (item.Eta == nil || item.Eta.Progress == nil || *item.Eta.Progress != 100) {
+					t.Fatalf("finished ticket shows %+v, want 100", item.Eta)
+				}
+			}
+		}
+		return keys
+	}
+	for _, tc := range []struct {
+		sort string
+		want []string
+	}{
+		{"progress", []string{"SORT-1", "SORT-3", "SORT-2", "SORT-4", "SORT-5"}},
+		{"-progress", []string{"SORT-2", "SORT-3", "SORT-1", "SORT-4", "SORT-5"}},
+	} {
+		got := order(tc.sort)
+		// The two rows with no percent tie; their order is the key tiebreak, so
+		// compare the known prefix exactly and the unknown tail as a set.
+		if fmt.Sprint(got[:3]) != fmt.Sprint(tc.want[:3]) || len(got) != 5 || !(got[3] == "SORT-4" && got[4] == "SORT-5" || got[3] == "SORT-5" && got[4] == "SORT-4") {
+			t.Fatalf("sort=%s gave %v, want %v", tc.sort, got, tc.want)
+		}
+	}
+}
