@@ -209,15 +209,17 @@ test('fresh session projection cannot be changed by a stale optional run or requ
   }
 })
 
-test('a finished session sits with the ended ones; one that only went quiet at 100% stays reachable (AEON-437)', () => {
+test('a finished session sits with the ended ones; one that only went quiet at 100% keeps its heartbeat state (AEON-437)', () => {
   const done = sessionStatus(session({ phase: 'stopped', stopped_at: ago(2), stop_reason: 'process_exited', progress_pct: 100 }), now)
   assert.deepEqual([done.state, done.label, done.group, done.tone], ['done', 'Done', 'stopped', 'done'])
   const early = sessionStatus(session({ phase: 'stopped', stopped_at: ago(2), stop_reason: 'process_exited', progress_pct: 60 }), now)
   assert.deepEqual([early.state, early.label, early.group, early.tone], ['stopped', 'Ended', 'stopped', 'stopped'])
+  const plain = sessionStatus(session({ phase: 'stopped', stopped_at: ago(2), stop_reason: 'stopped', progress_pct: 100 }), now)
+  assert.deepEqual([plain.state, plain.label, plain.group, plain.tone], ['stopped', 'Ended', 'stopped', 'stopped'])
   const failed = sessionStatus(session({ phase: 'stopped', stopped_at: ago(2), stop_reason: 'process_failed', progress_pct: 100 }), now)
   assert.deepEqual([failed.state, failed.group, failed.tone], ['problem', 'problem', 'problem'])
   const quiet = sessionStatus(session({ heartbeat_at: ago(12), progress_pct: 100 }), now)
-  assert.deepEqual([quiet.state, quiet.group, quiet.tone], ['done', 'idle', 'done'])
-  const buckets = groupSessions([session({ id: 'a', phase: 'stopped', stopped_at: ago(2), stop_reason: 'stopped', progress_pct: 100 }), session({ id: 'b', phase: 'stopped', stopped_at: ago(3), stop_reason: 'stopped' })], now, () => false)
+  assert.deepEqual([quiet.state, quiet.group, quiet.tone], ['unresponsive', 'unresponsive', 'attention'])
+  const buckets = groupSessions([session({ id: 'a', phase: 'stopped', stopped_at: ago(2), stop_reason: 'process_exited', progress_pct: 100 }), session({ id: 'b', phase: 'stopped', stopped_at: ago(3), stop_reason: 'stopped', progress_pct: 100 })], now, () => false)
   assert.deepEqual(buckets.stopped.map(entry => [entry.session.id, entry.status.state]), [['a', 'done'], ['b', 'stopped']])
 })

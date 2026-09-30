@@ -7,12 +7,19 @@ import { join } from 'node:path'
 
 const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 
+// The assertions that read a wall-clock time ("13:26", or "Tue 13:26" once the day
+// differs) run on a pinned browser clock and zone, so no run can cross midnight.
+const NOW = Date.parse('2026-09-23T12:00:00Z')
+const pinned = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString()
+test.use({ timezoneId: 'Europe/Vienna' })
+const pinClock = (page: Page) => page.clock.setSystemTime(new Date(NOW))
+
 function world(mode?: 'both') {
   const data = fixtures()
   const set = (key: string, eta: Record<string, unknown>) => { data.nodes.find(node => node.key === key)!.eta = eta }
-  set('PHAROS-11', { eta_ready_at: at(25), progress_pct: 40, ready_by: 'Ada', ready_reported_at: at(-1) })
-  set('PHAROS-12', { eta_ready_at: at(-5), progress_pct: 90, ready_by: 'Beau', ready_reported_at: at(-2) })
-  set('PHAROS-13', { eta_ready_at: at(10), ready_by: 'Cleo', ready_reported_at: at(-34), ready_stale: true, eta_stale: true })
+  set('PHAROS-11', { eta_ready_at: pinned(25), progress_pct: 40, ready_by: 'Ada', ready_reported_at: pinned(-1) })
+  set('PHAROS-12', { eta_ready_at: pinned(-5), progress_pct: 90, ready_by: 'Beau', ready_reported_at: pinned(-2) })
+  set('PHAROS-13', { eta_ready_at: pinned(10), ready_by: 'Cleo', ready_reported_at: pinned(-34), ready_stale: true, eta_stale: true })
   if (mode) data.preferences['eta-display'] = { mode }
   return data
 }
@@ -20,6 +27,7 @@ function world(mode?: 'both') {
 const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 
 test('the ETA column shows fresh, overdue and stale estimates under its header and stays empty when none was reported', async ({ page }) => {
+  await pinClock(page)
   await page.setViewportSize({ width: 1600, height: 900 })
   await mockWork(page, world())
   const sorts: string[] = []
@@ -64,6 +72,7 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
 })
 
 test('with both forms chosen, the clock time shows on hover', async ({ page }) => {
+  await pinClock(page)
   await mockWork(page, world('both'))
   await page.goto('/p/PHAROS')
   const fresh = row(page, 'PHAROS-11').locator('.eta-cell')
@@ -74,12 +83,16 @@ test('with both forms chosen, the clock time shows on hover', async ({ page }) =
   await expect(fresh.locator('.hover')).toBeVisible()
 })
 
-test('at 100% a finished ticket reads Done, never overdue, and a still-working one shows a quiet 100% (AEON-437)', async ({ page }) => {
+test('only the server completion evidence reads Done; a full percent with a session still on the ticket stays a quiet 100% (AEON-437)', async ({ page }) => {
+  await pinClock(page)
   await page.setViewportSize({ width: 1600, height: 900 })
   const data = world()
   const set = (key: string, eta: Record<string, unknown>) => { data.nodes.find(node => node.key === key)!.eta = eta }
-  set('PHAROS-11', { eta_ready_at: at(-30), progress_pct: 100, ready_by: 'Ada', ready_reported_at: at(-45), ready_stale: true, eta_stale: true })
-  set('PHAROS-12', { eta_ready_at: at(-30), progress_pct: 100, ready_by: 'Beau', ready_reported_at: at(-2), has_working_session: true })
+  // A clean 100% exit: the server keeps no estimate, only the evidence and who and when.
+  set('PHAROS-11', { finished: true, progress_pct: 100, finished_by: 'Ada', finished_at: pinned(-45) })
+  // 100% with a session still open (working, yielded or stopping): never Done, never overdue.
+  set('PHAROS-12', { eta_ready_at: pinned(-30), progress_pct: 100, ready_by: 'Beau', ready_reported_at: pinned(-2), has_working_session: true })
+  set('PHAROS-13', { eta_ready_at: pinned(-30), progress_pct: 100, ready_by: 'Cleo', ready_reported_at: pinned(-45), ready_stale: true, eta_stale: true })
   await mockWork(page, data)
   await page.goto('/p/PHAROS')
   const finished = row(page, 'PHAROS-11').locator('.eta-cell')
@@ -88,11 +101,14 @@ test('at 100% a finished ticket reads Done, never overdue, and a still-working o
   await expect(finished.locator('.pct, .when')).toHaveCount(0)
   await expect(finished).not.toHaveClass(/overdue|stale/)
   await expect(finished.locator('svg')).toHaveCount(1)
-  await expect(finished).toHaveAttribute('data-tip', /^All work reported by Ada at \d{2}:\d{2}$/)
-  const wrapping = row(page, 'PHAROS-12').locator('.eta-cell')
-  await expect(wrapping).not.toHaveClass(/done|overdue|stale/)
-  await expect(wrapping.locator('.pct')).toHaveText('100%')
-  await expect(wrapping.locator('.when, .missing')).toHaveCount(0)
+  await expect(finished).toHaveAttribute('data-tip', 'All work reported by Ada at 13:15')
+  for (const key of ['PHAROS-12', 'PHAROS-13']) {
+    const open = row(page, key).locator('.eta-cell')
+    await expect(open).not.toHaveClass(/done|overdue|stale/)
+    await expect(open.locator('.pct')).toHaveText('100%')
+    await expect(open.locator('.when, .missing')).toHaveCount(0)
+    await expect(open).toHaveAttribute('data-tip', '100% done')
+  }
   const shots = process.env.AEON_437_SHOTS
   if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, 'eta-done.png') }) }
 })

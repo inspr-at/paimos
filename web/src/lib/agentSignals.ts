@@ -61,6 +61,8 @@ export function waitingLabel(evidence: Pick<StateEvidence, 'attention_reasons' |
 export interface StateEvidence {
   phase: string; activity: string; heartbeat_at?: string | null; created_at?: string; since?: string
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; progress_pct?: number | null
+  // The server's answer to "did it complete its job", present even where stop_reason is withheld.
+  finished?: boolean | null
   needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]
   eta_stale?: boolean
   vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
@@ -73,12 +75,16 @@ export const LOST_CONTACT = 'heartbeat_lost'
 export function problemReason(reason?: string | null) {
   return !!reason && reason !== LOST_CONTACT && /\b(error|errored|failed|failure|blocked|crash(?:ed)?|ownership lost|heartbeat lost|timeout|timed out)\b/i.test(reason.replace(/[_-]+/g, ' '))
 }
-// AEON-437: a worker finished when it reported all of its work and left cleanly,
-// so a finished job never looks like a crash. Under 100% is an early end; a
-// failure, a silence the server closed and a removal are none of the two.
-export function finishedStop(evidence: Pick<StateEvidence, 'progress_pct' | 'stop_reason'>) {
-  const reason = evidence.stop_reason
-  return (evidence.progress_pct ?? 0) >= 100 && !problemReason(reason) && reason !== LOST_CONTACT && !/archived/i.test(reason ?? '')
+// AEON-437: Done is positive evidence: the worker reported all of its work AND its
+// launcher recorded a clean exit. The server derives `finished` from exactly that
+// (aeon_session_finished) and sends it to every viewer, also where the stop reason
+// is withheld, so it is the one answer. Evidence that never loaded it (a mutation
+// snapshot) falls back to the same two visible facts; a withheld reason, a missing
+// reason, a plain stop, a force stop, a spent budget, a failure and a silence the
+// server closed are never a finish. Anything else that stopped is Ended or failed.
+export const CLEAN_EXIT = 'process_exited'
+export function finishedStop(evidence: Pick<StateEvidence, 'finished' | 'progress_pct' | 'stop_reason'>) {
+  return evidence.finished ?? ((evidence.progress_pct ?? 0) >= 100 && evidence.stop_reason === CLEAN_EXIT)
 }
 export interface StateReason { code: string; detail: string; next: string }
 export interface StateAssessment { state: AgentState; label: string; reasons: StateReason[] }
@@ -127,12 +133,6 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
     detail: heartbeat.invalid ? 'The reported heartbeat timestamp is invalid.' : heartbeat.hasHeartbeat ? 'The last heartbeat is overdue; current worker activity is unconfirmed.' : 'No heartbeat has been received since this session registered.',
     next: 'Check the worker and its heartbeat reporter on the recorded host. A missing heartbeat does not establish that the worker failed.',
   }
-  // A worker that reported 100% and then went quiet has most likely finished and left;
-  // silence after all of its work is reported is not a crash. Estimates of an ended job
-  // never go stale, but a request for a person still counts (AEON-437).
-  const finishedQuiet = (evidence.progress_pct ?? 0) >= 100 && ['starting', 'working', 'stopping'].includes(evidence.phase) && evidence.activity !== 'throttled'
-    && heartbeat.age >= preferences.yellowMinutes * 60_000 && !(evidence.needs_attention ?? (needs || evidence.run_status === 'waiting'))
-  if (finishedQuiet) return result('done', [{ code: 'finished-quiet', detail: 'The session reported 100% and then stopped sending heartbeats.', next: 'No action is needed. Check the session only if the work is not finished.' }])
   if (working && heartbeat.age >= preferences.redMinutes * 60_000) return result('unresponsive', [heartbeatReason])
   if ((evidence.needs_attention ?? (needs || evidence.run_status === 'waiting')) || evidence.phase === 'yielded' || evidence.eta_stale) {
     const detail = evidence.phase === 'yielded' ? 'The session yielded and is waiting to continue.' : evidence.run_status === 'waiting' ? 'The bound run is waiting.' : evidence.eta_stale ? 'The estimate was not refreshed within two reporting intervals.' : 'An approval, held action or requested reply is outstanding.'

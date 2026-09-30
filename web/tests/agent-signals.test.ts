@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULT_AGENT_STATE, LOST_CONTACT, STATE_LABEL, attentionReasonText, assessAgentState, deriveAgentState, normalizeAgentState, problemReason, type StateEvidence } from '../src/lib/agentSignals.ts'
+import { DEFAULT_AGENT_STATE, LOST_CONTACT, STATE_LABEL, attentionReasonText, assessAgentState, deriveAgentState, finishedStop, normalizeAgentState, problemReason, type StateEvidence } from '../src/lib/agentSignals.ts'
 import { liveState, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { sessionStatus } from '../src/lib/agentState.ts'
 import type { HarnessSession } from '../src/lib/agents.ts'
@@ -163,36 +163,54 @@ test('safe reasons distinguish a peer reply from person action without claiming 
   assert.match(mixed.reasons[0]!.detail, /person’s decision/)
 })
 
-test('a finished job reads Done, an early end Ended, and a failure or lost contact never Done (AEON-437)', () => {
+test('Done needs reported 100% and a recorded clean exit; every other stop is Ended or failed (AEON-437)', () => {
   const stopped = (fields: Partial<StateEvidence> = {}) => evidence({ phase: 'stopped', stopped_at: ago(60_000), heartbeat_at: ago(60_000), ...fields })
-  for (const stop_reason of [null, 'stopped', 'process_exited', 'completed']) {
-    const done = assessAgentState(stopped({ stop_reason, progress_pct: 100 }), now)
-    assert.deepEqual([done.state, done.label], ['done', 'Done'])
-    for (const progress_pct of [99, 40, 0, null, undefined]) {
-      const ended = assessAgentState(stopped({ stop_reason, progress_pct }), now)
-      assert.deepEqual([ended.state, ended.label], ['stopped', 'Ended'])
-    }
+  const done = assessAgentState(stopped({ stop_reason: 'process_exited', progress_pct: 100 }), now)
+  assert.deepEqual([done.state, done.label], ['done', 'Done'])
+  // Under 100% is an early end, however the job left.
+  for (const progress_pct of [99, 40, 0, null, undefined]) {
+    const ended = assessAgentState(stopped({ stop_reason: 'process_exited', progress_pct }), now)
+    assert.deepEqual([ended.state, ended.label], ['stopped', 'Ended'])
+  }
+  // 100% without a recorded clean exit is not a finish: no reason, a plain or interrupted
+  // stop, a force stop, a spent budget and a removal all end the session without completing it.
+  for (const stop_reason of [null, undefined, 'stopped', 'completed', 'force_stopped', 'token_budget_exhausted', 'turn_budget_exhausted', 'archived']) {
+    const ended = assessAgentState(stopped({ stop_reason, progress_pct: 100 }), now)
+    assert.deepEqual([stop_reason, ended.state, ended.label], [stop_reason, 'stopped', 'Ended'])
   }
   for (const stop_reason of ['process_failed', 'ownership_lost', 'error: exit status 1']) assert.equal(deriveAgentState(stopped({ stop_reason, progress_pct: 100 }), now), 'problem')
-  assert.equal(deriveAgentState(stopped({ stop_reason: 'stopped', progress_pct: 100, has_problem: true }), now), 'problem')
-  assert.equal(deriveAgentState(stopped({ stop_reason: 'stopped', progress_pct: 100, run_status: 'failed' }), now), 'problem')
-  // The server closing a silent session proves no clean exit, and a removal is not a finish.
+  assert.equal(deriveAgentState(stopped({ stop_reason: 'process_exited', progress_pct: 100, has_problem: true }), now), 'problem')
+  assert.equal(deriveAgentState(stopped({ stop_reason: 'process_exited', progress_pct: 100, run_status: 'failed' }), now), 'problem')
+  // The server closing a silent session proves no clean exit.
   const lost = assessAgentState(stopped({ stop_reason: LOST_CONTACT, progress_pct: 100 }), now)
   assert.deepEqual([lost.state, lost.label], ['stopped', 'Lost contact'])
-  assert.equal(deriveAgentState(stopped({ stop_reason: 'archived', progress_pct: 100 }), now), 'stopped')
 })
 
-test('100% reported and then quiet reads Done, not a dead worker; under 100% the warning stays (AEON-437)', () => {
+test('the server finished flag is the one answer, also where the stop reason is withheld (AEON-437)', () => {
+  const stopped = (fields: Partial<StateEvidence> = {}) => evidence({ phase: 'stopped', stopped_at: ago(60_000), heartbeat_at: ago(60_000), ...fields })
+  // A viewer without harness.read gets no stop_reason, but the derived flag still says Done.
+  assert.equal(deriveAgentState(stopped({ stop_reason: null, progress_pct: 100, finished: true }), now), 'done')
+  // Withheld reason, nothing derived: a missing reason is never a finish.
+  assert.equal(deriveAgentState(stopped({ stop_reason: null, progress_pct: 100 }), now), 'stopped')
+  // A loaded false wins over whatever the visible fields suggest.
+  assert.equal(deriveAgentState(stopped({ stop_reason: 'process_exited', progress_pct: 100, finished: false }), now), 'stopped')
+  assert.equal(deriveAgentState(stopped({ stop_reason: LOST_CONTACT, progress_pct: 100, finished: false }), now), 'stopped')
+  assert.equal(finishedStop({ finished: true }), true)
+  assert.equal(finishedStop({ finished: undefined, progress_pct: 100, stop_reason: 'process_exited' }), true)
+  assert.equal(finishedStop({ finished: undefined, progress_pct: 100, stop_reason: 'stopped' }), false)
+})
+
+test('100% reported and then quiet is no finish: the heartbeat warning stays (AEON-437)', () => {
   const quiet = (fields: Partial<StateEvidence> = {}) => evidence({ heartbeat_at: ago(11 * 60_000), ...fields })
-  assert.equal(deriveAgentState(quiet({ progress_pct: 99 }), now), 'unresponsive')
-  assert.equal(deriveAgentState(quiet({ progress_pct: 100 }), now), 'done')
-  assert.equal(deriveAgentState(quiet({ progress_pct: 100, activity: 'idle' }), now), 'done')
-  assert.equal(deriveAgentState(quiet({ progress_pct: 100, heartbeat_at: ago(4 * 60_000) }), now), 'done')
-  assert.equal(deriveAgentState(quiet({ progress_pct: 100, eta_stale: true }), now), 'done')
-  assert.match(assessAgentState(quiet({ progress_pct: 100 }), now).reasons[0]!.detail, /reported 100%/)
-  // A fresh heartbeat is still work in flight; a person's request and a vendor limit still show.
+  // Silence has no recorded exit, so 100% changes nothing about how a silent worker reads.
+  for (const progress_pct of [99, 100]) {
+    assert.equal(deriveAgentState(quiet({ progress_pct }), now), 'unresponsive')
+    assert.equal(deriveAgentState(quiet({ progress_pct, heartbeat_at: ago(4 * 60_000) }), now), 'awaiting')
+    assert.equal(deriveAgentState(quiet({ progress_pct, heartbeat_at: ago(4 * 60_000), needs_attention: true }), now), 'waiting')
+    assert.equal(deriveAgentState(quiet({ progress_pct, activity: 'throttled' }), now), 'throttled')
+    assert.equal(deriveAgentState(quiet({ progress_pct, run_status: 'failed' }), now), 'problem')
+  }
   assert.equal(deriveAgentState(evidence({ progress_pct: 100 }), now), 'working')
-  assert.equal(deriveAgentState(quiet({ progress_pct: 100, heartbeat_at: ago(4 * 60_000), needs_attention: true }), now), 'waiting')
-  assert.equal(deriveAgentState(quiet({ progress_pct: 100, activity: 'throttled' }), now), 'throttled')
-  assert.equal(deriveAgentState(quiet({ progress_pct: 100, run_status: 'failed' }), now), 'problem')
+  // A flag the server only sets on a stopped session never turns an open one into Done.
+  assert.equal(deriveAgentState(quiet({ progress_pct: 100, finished: true }), now), 'unresponsive')
 })

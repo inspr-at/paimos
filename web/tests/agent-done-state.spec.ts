@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-437: a worker that finished shows Done, one that ended early shows Ended, and
-// only a failure stays red, in /agents and in the ticket list's assignee cell.
+// AEON-437: a worker that finished (reported 100% and left with a recorded clean exit)
+// shows Done, anything else that stopped shows Ended, and only a failure stays red, in
+// /agents and in the ticket list's assignee cell. Silence at 100% is no finish.
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
@@ -28,16 +29,17 @@ for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width: 1600, height: 1000 })
     await mockWork(page, fixtures(), { admin: true })
     const data = agentData({ ...world })
-    Object.assign(data.sessions[6]!, { progress_pct: 100, stop_reason: 'process_exited' })
-    Object.assign(data.sessions[7]!, { run_id: null, progress_pct: 40, stop_reason: 'process_exited', activity_note: 'Reviewing the diff before stopping' })
-    Object.assign(data.sessions[8]!, { progress_pct: 100, stop_reason: 'process_failed' })
-    // Reported 100%, then went quiet for nine minutes: finished, not a worker that stopped reporting.
+    // The server sends finished: true for the clean 100% exit only; here it also sits beside the stop reason.
+    Object.assign(data.sessions[6]!, { progress_pct: 100, stop_reason: 'process_exited', finished: true })
+    Object.assign(data.sessions[7]!, { run_id: null, progress_pct: 40, stop_reason: 'process_exited', finished: false, activity_note: 'Reviewing the diff before stopping' })
+    Object.assign(data.sessions[8]!, { progress_pct: 100, stop_reason: 'process_failed', finished: false })
+    // Reported 100%, then went quiet for nine minutes: no recorded exit, so the heartbeat warning stays.
     Object.assign(data.sessions[4]!, { progress_pct: 100 })
     await mockAgents(page, data)
     await page.goto('/agents')
     await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-    await expect(sessionRow(page, 5).locator('.agent-state-label')).toHaveAttribute('data-state', 'done')
-    await expect(sessionRow(page, 5).locator('.c-state')).toContainText('Done')
+    await expect(sessionRow(page, 5).locator('.agent-state-label')).toHaveAttribute('data-state', 'awaiting')
+    await expect(sessionRow(page, 5).locator('.c-state')).not.toContainText('Done')
     await expect(sessionRow(page, 9).locator('.agent-state-label')).toHaveAttribute('data-state', 'problem')
     await page.locator('.group-toggle').filter({ hasText: 'Ended' }).click()
     await expect(sessionRow(page, 7).locator('.agent-state-label')).toHaveAttribute('data-state', 'done')
@@ -56,23 +58,27 @@ for (const theme of ['light', 'dark'] as const) {
   })
 }
 
-test('the ticket list names a finished worker Done and keeps a failed one red', async ({ page }) => {
+test('the ticket list keeps a silent 100% worker on its heartbeat warning and shows no avatar for a stopped one', async ({ page }) => {
   await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z'))
   const at = Date.parse('2026-09-23T12:00:00Z')
+  const minutesAgo = (minutes: number) => new Date(at - minutes * 60_000).toISOString()
   const ticket = (id: string, key: string, title: string) => ({ id, key, title, project_id: 'p-pharos' })
+  const stopped = { phase: 'stopped', stopped_at: minutesAgo(5), heartbeat_at: minutesAgo(6), progress_pct: 100 } as const
   const data = fixtures()
   data.live.push(
-    liveAgent({ project_id: 'p-pharos', session_id: 's-done', name: 'hausv', progress_pct: 100, heartbeat_at: new Date(at - 12 * 60_000).toISOString(), ticket: ticket('n-1', 'PHAROS-11', 'Connect Hetzner Cloud for managed provisioning') }),
-    liveAgent({ project_id: 'p-pharos', session_id: 's-lost', name: 'wren', progress_pct: 60, heartbeat_at: new Date(at - 12 * 60_000).toISOString(), ticket: ticket('n-2', 'PHAROS-12', 'Add an Oracle Cloud connector') }),
+    // Reported 100%, then went quiet with no exit recorded: the heartbeat warning stays.
+    liveAgent({ project_id: 'p-pharos', session_id: 's-quiet', name: 'wren', progress_pct: 100, heartbeat_at: minutesAgo(12), ticket: ticket('n-2', 'PHAROS-12', 'Add an Oracle Cloud connector') }),
+    // Stopped sessions are history, not workers on the ticket: a clean exit, a hidden
+    // reason and a plain stop alike leave the assignee cell without a red stopped avatar.
+    liveAgent({ project_id: 'p-pharos', session_id: 's-done', name: 'hausv', ...stopped, stop_reason: 'process_exited', finished: true, ticket: ticket('n-1', 'PHAROS-11', 'Connect Hetzner Cloud for managed provisioning') }),
+    liveAgent({ project_id: 'p-pharos', session_id: 's-hidden', name: 'kite', ...stopped, finished: true, ticket: ticket('n-3', 'PHAROS-13', 'Hetzner Cloud quota check') }),
+    liveAgent({ project_id: 'p-pharos', session_id: 's-plain', name: 'amy', ...stopped, stop_reason: 'stopped', finished: false, ticket: ticket('n-4', 'PHAROS-14', 'Add a DigitalOcean connector') }),
   )
   await mockWork(page, data)
   await page.setViewportSize({ width: 1600, height: 900 })
   await page.goto('/p/PHAROS')
   const row = (key: string) => page.getByRole('grid', { name: 'Tickets' }).locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
-  await expect(row('PHAROS-11').locator('.live-bot')).toHaveAttribute('data-state', 'done')
-  await expect(row('PHAROS-11').getByRole('link', { name: /hausv/ })).toHaveAccessibleName(/done/i)
   await expect(row('PHAROS-12').locator('.live-bot')).toHaveAttribute('data-state', 'unresponsive')
-  if (shots) {
-    for (const key of ['PHAROS-11', 'PHAROS-12']) await row(key).locator('.c-assignee').screenshot({ path: join(shots, `worker-${key}.png`) })
-  }
+  for (const key of ['PHAROS-11', 'PHAROS-13', 'PHAROS-14']) await expect(row(key).locator('.live-bot')).toHaveCount(0)
+  if (shots) await row('PHAROS-12').locator('.c-assignee').screenshot({ path: join(shots, 'worker-PHAROS-12.png') })
 })

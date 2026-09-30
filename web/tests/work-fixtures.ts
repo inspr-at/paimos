@@ -134,6 +134,7 @@ export interface LiveAgentMock {
   phase: 'starting' | 'working' | 'stopping' | 'yielded' | 'stopped'; activity: 'busy' | 'unknown' | 'idle' | 'throttled'
   ticket: { id: string; key: string; title: string; project_id: string } | null; since: string; heartbeat_at: string | null
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; needs_attention?: boolean; has_problem?: boolean
+  progress_pct?: number | null; finished?: boolean
 }
 // One live agent on the fixture clock: started `minutes` ago, heartbeat half a minute ago.
 export function liveAgent(fields: Partial<LiveAgentMock> & Pick<LiveAgentMock, 'project_id'>, minutes = 12): LiveAgentMock {

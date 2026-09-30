@@ -29,9 +29,7 @@ export function sessionStatus(session: HarnessSession, now: number, needsYou = f
   const run_status = session.run_status !== undefined ? session.run_status : run?.outcome ?? run?.status
   const assessment = assessAgentState({ ...session, run_status }, now, preferences, needsYou)
   const { state, label, reasons } = assessment
-  // A finished session that has not stopped yet stays with the live ones: it can still be reached.
-  const group = state === 'done' && !(session.phase === 'stopped' || session.stopped_at) ? 'idle' : STATE_GROUP[state]
-  return { state, label, ...(reasons.length ? { reasons } : {}), group, tone: STATE_TONE[state] }
+  return { state, label, ...(reasons.length ? { reasons } : {}), group: STATE_GROUP[state], tone: STATE_TONE[state] }
 }
 
 // Mutation/snapshot responses may omit the separately projected state evidence.

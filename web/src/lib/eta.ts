@@ -18,8 +18,9 @@ export interface EtaInput {
   live?: EtaSide | null
   progress?: number | null
   stale?: boolean
-  // A session is still working the ticket. Without one, all work reported means done.
-  active?: boolean
+  // The server's completion evidence: no session is open on the ticket and the last
+  // worker reported 100% and recorded a clean exit. The only thing that reads as Done.
+  finished?: { at?: string | null; by?: string | null } | null
 }
 
 export interface TicketEta {
@@ -34,6 +35,9 @@ export interface TicketEta {
   ready_stale?: boolean
   live_stale?: boolean
   eta_stale?: boolean
+  finished?: boolean
+  finished_at?: string | null
+  finished_by?: string | null
 }
 
 // One compact reading: the headline estimate (ready first, else live), its other
@@ -46,7 +50,7 @@ export interface EtaView {
   pct: number | null
   overdue: boolean
   stale: boolean
-  // All work is reported and nobody is working it any more: a calm Done, no time (AEON-437).
+  // The server holds positive completion evidence: a calm Done, no time (AEON-437).
   done: boolean
   tip: string
 }
@@ -56,8 +60,9 @@ export function etaFromTicket(eta: TicketEta | null | undefined): EtaInput | nul
   const ready = eta.eta_ready_at ? { at: eta.eta_ready_at, reported_at: eta.ready_reported_at, by: eta.ready_by, stale: eta.ready_stale, kind: 'Ready' as const } : null
   const live = eta.eta_live_at ? { at: eta.eta_live_at, reported_at: eta.live_reported_at, by: eta.live_by, stale: eta.live_stale, kind: 'Live' as const } : null
   const progress = typeof eta.progress_pct === 'number' ? eta.progress_pct : null
-  if (!ready && !live && progress == null) return null
-  return { ready, live, progress, stale: !!(eta.eta_stale || eta.ready_stale || eta.live_stale), active: !!eta.has_working_session }
+  const finished = eta.finished ? { at: eta.finished_at, by: eta.finished_by } : null
+  if (!ready && !live && progress == null && !finished) return null
+  return { ready, live, progress, stale: !!(eta.eta_stale || eta.ready_stale || eta.live_stale), finished }
 }
 
 export function etaFromSession(session: {
@@ -69,7 +74,6 @@ export function etaFromSession(session: {
   agent?: { name: string } | null
 }): EtaInput | null {
   return etaFromTicket({
-    has_working_session: true,
     eta_ready_at: session.eta_ready_at, eta_live_at: session.eta_live_at, progress_pct: session.progress_pct,
     ready_reported_at: session.eta_reported_at, live_reported_at: session.eta_reported_at,
     ready_by: session.agent?.name, live_by: session.agent?.name,
@@ -117,12 +121,11 @@ function sideTip(side: EtaSide, now: number, timeZone: string): string[] {
 }
 
 // At 100% there is nothing left to estimate: a due time that passed is not late, and
-// a report that aged is not stale. Nobody working the ticket any more reads Done.
-function doneTip(sides: EtaSide[], now: number, timeZone: string): string {
-  const latest = sides.filter(side => valid(side.reported_at)).sort((a, b) => Date.parse(b.reported_at!) - Date.parse(a.reported_at!))[0]
-  if (!latest) return 'All work reported'
-  const who = latest.by?.trim()
-  return `All work reported${who ? ` by ${who}` : ''} at ${clock(latest.reported_at!, now, timeZone)}`
+// a report that aged is not stale. Only the server's completion evidence reads Done;
+// 100% with a session still on the ticket is just a full percent.
+function doneTip(finished: NonNullable<EtaInput['finished']>, now: number, timeZone: string): string {
+  const who = finished.by?.trim()
+  return `All work reported${who ? ` by ${who}` : ''}${valid(finished.at) ? ` at ${clock(finished.at, now, timeZone)}` : ''}`
 }
 
 // formatEta returns null when nothing was reported. `timeZone` is explicit so tests
@@ -131,11 +134,11 @@ export function formatEta(input: EtaInput | null | undefined, mode: EtaMode, now
   if (!input) return null
   const sides = [input.ready, input.live].filter((side): side is EtaSide => !!side && valid(side.at))
   const pct = typeof input.progress === 'number' ? Math.max(0, Math.min(100, Math.round(input.progress))) : null
-  if (!sides.length && pct == null) return null
-  const complete = pct === 100
+  if (!sides.length && pct == null && !input.finished) return null
+  const complete = pct === 100 || !!input.finished
   const main = complete ? null : sides[0] ?? null
   const stale = !complete && (!!input.stale || sides.some(side => side.stale))
-  const tip = complete ? [input.active ? '100% done' : doneTip(sides, now, timeZone)] : [
+  const tip = input.finished ? [doneTip(input.finished, now, timeZone)] : complete ? ['100% done'] : [
     ...sides.flatMap(side => sideTip(side, now, timeZone)),
     ...(pct != null ? [`${pct}% done`] : []),
   ]
@@ -148,7 +151,7 @@ export function formatEta(input: EtaInput | null | undefined, mode: EtaMode, now
     pct,
     overdue: !!main && Date.parse(main.at) < now,
     stale,
-    done: complete && !input.active,
+    done: !!input.finished,
     tip: tip.join('\n'),
   }
 }
