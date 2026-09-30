@@ -90,8 +90,9 @@ func TestConsentProofVersionUpgradeKeepsPairingKeyAndRejectsV1(t *testing.T) {
 			in.LocalAuthSignature = base64.StdEncoding.EncodeToString(oldProof)
 			f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
 			in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
-			decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 200), &v)
-			if v.State != "active" || v.SessionID == nil || v.LocalAuthNonce != "" {
+			var active attachwatch.View
+			decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 200), &active)
+			if active.State != "active" || active.SessionID == nil || active.LocalAuthNonce != "" {
 				t.Fatal("v2 proof with existing pairing key did not activate")
 			}
 		})
