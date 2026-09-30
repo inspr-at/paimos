@@ -77,9 +77,11 @@ duplicate numbers across the entire directory and enforces published-file
 immutability, including below the baseline. New SQL above that bound must meet
 the allowlist or supply verified contract evidence.
 
-`.github/workflows/migration-compat.yml` runs on pull requests, `merge_group`,
-main pushes and manual dispatch, always on GitHub-hosted Linux with read-only
-permissions. It resolves GitHub's latest published stable release, pulls that
+The `migration-compat` job in `.github/workflows/ci.yml` runs on pull requests,
+`merge_group`, main pushes and manual dispatch, always on GitHub-hosted Linux
+with read-only contents/packages permissions. It inherits CI's approved
+concurrency policy and leaves existing checks and runner routing intact.
+It resolves GitHub's latest published stable release, pulls that
 release's existing image by the registry digest recorded in the release notes,
 logs that immutable reference and uses the same loaded image ID for both boots.
 It boots the image against disposable Postgres 18 with a non-superuser

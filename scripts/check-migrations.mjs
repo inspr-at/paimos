@@ -135,7 +135,9 @@ function expandSafe(statement, createdTables) {
       // A function declaration is allowed, but dynamic SQL in any body fails
       // closed. Trigger EXECUTE FUNCTION is a declaration, not dynamic SQL.
       return statement.filter(t => t.kind === 'literal').every(t => {
-        if (t.escaped && t.value.includes('\\')) return false;
+        // Encoded bodies (E/U& strings) can spell executable keywords through
+        // escapes. Opaque escapes are never expand-safe function evidence.
+        if (t.value.includes('\\')) return false;
         return !tokens(t.value).some(word => word.kind === 'word' && ['EXECUTE', 'DO', 'DROP', 'ALTER', 'TRUNCATE', 'DELETE'].includes(word.value));
       });
     }

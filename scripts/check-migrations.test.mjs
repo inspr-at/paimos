@@ -68,6 +68,7 @@ test('every non-allowlisted statement requires a contract marker', () => {
     "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'DROP TABLE nodes'; END $$;",
     "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS 'BEGIN EXECUTE ''DROP TABLE nodes''; END';",
     "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS E'BEGIN EX\\x45CUTE ''DROP TABLE nodes''; END';",
+    "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS U&'BEGIN EX\\0045CUTE ''DROP TABLE nodes''; END';",
     "CREATE OR REPLACE FUNCTION f() RETURNS text LANGUAGE sql AS $$ SELECT 'x' $$;",
     'CREATE TABLE extra (id text); DROP VIEW old_view;',
     '/* unterminated', "INSERT INTO notes VALUES ('unterminated);",
@@ -145,9 +146,11 @@ test('contract evidence names an existing earlier tag containing the expansion m
 });
 
 test('the static guard runs on PR and merge-group checkouts with full release-tag history', () => {
-  const workflow = readFileSync(new URL('../.github/workflows/migration-compat.yml', import.meta.url), 'utf8');
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   assert.match(workflow, /^  pull_request:/m);
   assert.match(workflow, /^  merge_group:/m);
+  assert.match(workflow, /merge_group:\n    types: \[checks_requested\]/);
+  assert.match(workflow, /^  migration-compat:/m);
   assert.match(workflow, /fetch-depth: 0/);
   assert.match(workflow, /node scripts\/check-migrations.mjs --base-ref/);
   assert.doesNotMatch(workflow, /if:.*pull_request/);
