@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
+import { withPublicNoteItems } from '../src/lib/releases.ts'
 import assert from 'node:assert/strict'
 import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, stats, technicalLine, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
 
@@ -9,6 +10,47 @@ const rel = (version: string, at: string, extra: Partial<Release> = {}): Release
   evidence: { source_commit: 'abc1234def', source_url: '', image: null, ci: null, release_run: null, release_url: '', unavailable: [] }, ...extra,
 })
 const change = (commit: string, type: Release['changes'][number]['type'], subject: string, tickets: string[] = []) => ({ commit, type, subject, scope: '', tickets, at: '' })
+
+test('portable public notes retain captured groups and language fallback without tenant IDs (AEON-372)', () => {
+  const raw = rel('260929120000.0.0', '2026-09-29T12:00:00Z', {
+    notes: { source: 'embedded-product-notes', snapshot_sha256: 'a'.repeat(64), captured_at: null, release_revision: 1, items: [], gaps: [], hidden: 0,
+      public_items: [
+        { key: 'AEON-7', group: 'fixes', pill_en: 'Frozen repair', pill_de: '', benefit_en: 'It works again.', benefit_de: '' },
+        { key: 'AEON-8', group: 'other', pill_en: 'Internal maintenance', pill_de: '', benefit_en: '', benefit_de: '' },
+      ],
+    },
+    changes: [change('a', 'other', 'AEON-7: repair', ['AEON-7']), change('b', 'other', 'AEON-8: maintenance', ['AEON-8'])],
+  })
+  const normalized = withPublicNoteItems(raw)
+  const shown = presentRelease(normalized, 'de')
+  assert.equal(shown.fixes[0]?.pill, 'Frozen repair')
+  assert.equal(shown.fixes[0]?.pillLang, 'en')
+  assert.deepEqual(shown.other.map(c => c.commit), ['b'])
+  assert.equal(shown.features.length, 0)
+  assert.equal(raw.notes?.items.length, 0)
+  assert.equal(normalized.notes?.items[0]?.id, '')
+  const emptyTenant = { ...raw, notes: { ...raw.notes!, source: 'database-snapshot', public_items: undefined, items: [] } }
+  assert.equal(presentRelease(withPublicNoteItems(emptyTenant)).fixes.length, 0)
+})
+
+test('a capture without a group plus a bug ticket is a fix (AEON-372)', () => {
+  const item = { id: '44444444-4444-4444-8444-444444444444', key: 'AEON-7', pill_en: 'Frozen repair', pill_de: '', benefit_en: 'Captured benefit.', benefit_de: '' }
+  const notes = {
+    source: 'database-snapshot', snapshot_sha256: 'a'.repeat(64), captured_at: '2026-09-28T12:00:00Z', release_revision: 1, gaps: [], hidden: 0,
+    items: [item],
+  }
+  const live = { key: 'AEON-7', group: 'fixes' as const, pill_en: 'Live text', pill_de: '', benefit_en: 'Not the snapshot.', benefit_de: '' }
+  const bug = { ...change('a', 'other', 'AEON-7: repair the release', ['AEON-7']), group: 'fixes' as const, linked_tickets: [live] }
+  const shown = presentRelease(rel('260928120000.0.0', '2026-09-28T12:00:00Z', { notes, changes: [bug] }))
+  assert.equal(shown.features.length, 0)
+  assert.deepEqual(shown.fixes.map(line => [line.key, line.pill, line.benefit]), [['AEON-7', 'Frozen repair', 'Captured benefit.']])
+  const recorded = presentRelease(rel('260928120000.0.0', '2026-09-28T12:00:00Z', {
+    notes: { ...notes, items: [{ ...item, group: 'fixes' as const }] },
+    changes: [change('a', 'other', 'AEON-7: repair the release', ['AEON-7'])],
+  }))
+  assert.equal(recorded.features.length, 0)
+  assert.deepEqual(recorded.fixes.map(line => [line.key, line.pill]), [['AEON-7', 'Frozen repair']])
+})
 
 test('days group newest first with Today and Yesterday labels', () => {
   const now = new Date(2026, 8, 24, 16, 0).getTime()

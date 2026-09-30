@@ -1362,7 +1362,7 @@ paths:
     get:
       operationId: releaseNoteSnapshot
       summary: Capture linked ticket benefit fields in one database snapshot
-      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). A published release with a stored snapshot returns that snapshot (frozen true), so later ticket edits do not change it. A published release with no stored snapshot was published before snapshots existed and returns ReleaseNotes with fallback historical-tag-headline; current ticket fields are not read. The release sheet labels that fallback "Historical tag headline". An operator backfill can insert one later, labelled backfilled, with the original released_at and captured_at set to that later time. The release sheet then says Notes written after release. Before publication the response is a live preview (frozen false). Save a ReleaseNoteSnapshot as release-notes/<version>.json before tagging for offline history generation; do not save the historical fallback as a snapshot. This request does not itself publish, freeze or backfill a release.
+      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). A published release with a stored snapshot returns that snapshot (frozen true), so later ticket edits do not change it. A published release with no stored snapshot was published before snapshots existed and returns ReleaseNotes with fallback historical-tag-headline; current ticket fields are not read. The release sheet labels that fallback "Historical tag headline". An operator backfill can insert one later, labelled backfilled, with the original released_at and captured_at set to that later time. The release sheet then says Notes written after release. Before publication the response is a live preview (frozen false). At reservation, review and freeze a ReleaseNoteSnapshot with internal/releasehistory/packnotes before tagging; package only its public projection, never raw hidden fields or the historical fallback. This request does not itself publish, freeze or backfill a release.
       parameters:
         - {in: path, name: projectId, required: true, schema: {type: string, format: uuid}}
         - {in: path, name: releaseId, required: true, schema: {type: string, format: uuid}}
@@ -1382,7 +1382,7 @@ paths:
     get:
       operationId: listReleases
       summary: The release history embedded in this build (inspr.release-history.v1)
-      description: Tagged snapshots win. Missing tagged notes may use an immutable version-keyed backfill for the caller tenant and visible AEON project; otherwise the historical headline remains. Backfilled notes are explicitly marked written_after_release.
+      description: Frozen snapshots for the caller tenant and visible AEON project win over embedded public product notes. Other tenants receive the same embedded product notes without reading live ticket fields. Releases without either retain the historical headline. Backfilled notes are explicitly marked written_after_release.
       responses:
         '200':
           description: History, newest first
@@ -1395,7 +1395,7 @@ paths:
     get:
       operationId: getRelease
       summary: One release of the embedded history
-      description: Uses the same tenant/project-scoped backfill and tagged snapshot precedence as the list endpoint.
+      description: Uses the same tenant snapshot and embedded public product note precedence as the list endpoint.
       parameters:
         - {name: version, in: path, required: true, schema: {type: string}, description: 'The calendar version, with or without the leading v'}
       responses:
@@ -7849,6 +7849,7 @@ components:
               id: {type: string, format: uuid}
               key: {type: string}
               position: {type: integer}
+              group: {type: string, enum: [features, fixes, other], description: Frozen ticket classification; absent on historical snapshots that did not capture it}
               updated_at: {type: [string, 'null'], format: date-time}
               fields: {type: [object, 'null'], description: Exact values of the five benefit fields only; unavailable members retain only their hide flag when readable}
               unavailable: {type: string}
@@ -7865,6 +7866,19 @@ components:
         hidden: {type: integer, minimum: 0}
         written_after_release: {type: boolean, description: "True when the captured snapshot was labelled backfilled. The release sheet says the notes were written after the release."}
         gaps: {type: array, items: {type: string}}
+        public_items:
+          type: array
+          description: Portable product notes with no tenant-local identifiers. When present, these are the embedded fallback instead of items. Tenant snapshots omit this field and retain precedence.
+          items:
+            type: object
+            required: [key, pill_en, pill_de, benefit_en, benefit_de]
+            properties:
+              key: {type: string}
+              pill_en: {type: string}
+              pill_de: {type: string}
+              benefit_en: {type: string}
+              benefit_de: {type: string}
+              group: {type: string, enum: [features, fixes, other], description: "Frozen classification, including a group recorded at export when an older snapshot did not capture one. Omitted until then."}
         items:
           type: array
           items:
@@ -7873,6 +7887,7 @@ components:
             properties:
               id: {type: string, format: uuid}
               key: {type: string}
+              group: {type: string, enum: [features, fixes, other], description: "Frozen classification when the snapshot captured it. When an older snapshot omitted it, the server fills features or fixes from the ticket's current classification only (a bug is a fix) and leaves the captured pill and benefit unchanged."}
               pill_en: {type: string}
               pill_de: {type: string}
               benefit_en: {type: string}
@@ -7956,7 +7971,7 @@ components:
               group: {type: string, enum: [features, fixes, other], description: "Additive display group, computed when the history is served. Conventional feat and fix prefixes win, and test, docs, refactor and chore stay other. Otherwise a linked ticket with a bug tag, type or kind is fixes, a ticket with a release-note pill or benefit that is not hidden is features, and anything else is other. Several tickets take the strongest group, fixes then features then other, and the commit is listed once. Omitted on the version bump and on older manifests, which derive the group from type."}
               linked_tickets:
                 type: array
-                description: "Additive. Current pill and benefit of each linked ticket, from the same batched lookup as group, so past releases follow ticket text without a new manifest. Hidden-from-release-notes tickets are omitted, as are tickets with no pill and no benefit. Each carries its own group. Attached only on features and fixes changes. Omitted when lookup is off or failed. Older clients ignore it."
+                description: "Additive. For Aeon, the frozen pill and benefit of each linked ticket from the selected snapshot; later ticket edits never rewrite history. Other products may opt into a live ticket source. Hidden-from-release-notes tickets are omitted, as are tickets with no pill and no benefit. Each carries its own group. Attached only on features and fixes changes. Omitted when lookup is off or failed. Older clients ignore it."
                 items:
                   type: object
                   required: [key, pill_en, pill_de, benefit_en, benefit_de]
@@ -7966,7 +7981,7 @@ components:
                     pill_de: {type: string}
                     benefit_en: {type: string}
                     benefit_de: {type: string}
-                    group: {type: string, enum: [features, fixes], description: "Additive. This ticket's own group: fixes for a bug tag, type or kind, else features. A commit naming several tickets takes the strongest group, so clients read this to place each ticket. Omitted by older servers."}
+                    group: {type: string, enum: [features, fixes], description: "Additive. This ticket's own group: the frozen capture when it has one, otherwise fixes for a live bug tag, type or kind and features for a visible benefit. Aeon never uses the live pill or benefit. A commit naming several tickets takes the strongest group, so clients read this to place each ticket. Omitted by older servers."}
         changes_omitted: {type: integer, minimum: 0}
         evidence:
           type: object

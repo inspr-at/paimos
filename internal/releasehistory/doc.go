@@ -24,6 +24,9 @@
 //     a source digest and gaps; hidden text is excluded. Missing snapshots do
 //     not turn Git headlines into benefits. See docs/RELEASE.md for the capture
 //     and publication boundary. Older manifests without notes remain readable.
+//   - data/product-notes.json: the reviewed, insert-only public projection of
+//     Aeon's frozen snapshots. packnotes writes it during reservation or from
+//     explicit historical exports. It contains no tenant IDs or hidden text.
 //   - GitHub (optional, with a token): the release's published_at, the image
 //     reference and digest the release workflow writes into the release notes
 //     ("Container: …" and "Digest: …"), and the CI and Release workflow runs for
@@ -55,14 +58,19 @@
 //	                   features, and anything else is other. Several tickets take
 //	                   the strongest group and the commit is listed once. The
 //	                   version bump omits group. Older manifests without it stay
-//	                   valid; clients then derive the group from type. Group uses
-//	                   current ticket metadata, so past releases follow it
-//	                   without a migration. A features or fixes change also
-//	                   carries linked_tickets: key plus pill and benefit in
-//	                   English and German, and the ticket's own group (fixes
-//	                   for a bug, else features). Hidden tickets, and tickets with no
-//	                   pill or benefit, are omitted. The text is read when the
-//	                   history is served, so a later edit shows on past releases.
+//	                   valid; clients then derive the group from type. Aeon takes
+//	                   pill and benefit text only from the selected frozen capture.
+//	                   When that capture has no group, or the release has no
+//	                   capture, every commit ticket takes its group from the live
+//	                   classification (a bug is fixes, a visible benefit is
+//	                   features). Only those two facts are read. Live pill and
+//	                   benefit text is not copied, so a release with no capture
+//	                   has no Highlights text: that is the no-live-text rule.
+//	                   A capture that already records a group keeps it. A features
+//	                   or fixes change carries linked_tickets only for frozen
+//	                   note text. Hidden tickets, and tickets with no pill or
+//	                   benefit, are omitted from that text. Later ticket edits
+//	                   cannot change the captured text.
 //	changes_omitted    how many more changes there were beyond the listed ones
 //	evidence           source_commit and its URL, the OCI image reference and
 //	                   digest, the CI and Release runs (URL, conclusion), the
@@ -87,10 +95,14 @@
 // Reads attach the stored presentation as the additive presentation member. The manifest is embedded in the
 // binary (data/history.json when generated, else data/empty.json). WithBackfills
 // adds immutable database snapshots for the caller's tenant and visible product
-// project. Tagged snapshots win, followed by native journey snapshots, then
-// explicit manifest backfills; missing rows retain the historical fallback.
-// Note reads never capture live ticket fields and never contact the network.
-// Separately, serving reads linked-ticket kind and benefit fields for the
-// caller's tenant when a ticket source is configured to group the change list
-// (AEON-289); without one the changes are served unchanged.
+// project. Native journey snapshots win, followed by explicit manifest backfills,
+// then embedded tag/public notes; empty and hidden-only captures also win.
+// Note text is never taken from live ticket fields, and reads never contact
+// the network. When a capture has no group, or the release has none, Aeon
+// reads the live classification of every commit ticket (bug tag, type or kind,
+// or a visible benefit) and ignores the live pill and benefit. A release
+// without a capture therefore loses live-text Highlights by design.
+// Portable notes use the additive notes.public_items without tenant-local UUIDs;
+// notes.items retains its original API contract. Other products can still opt
+// into the legacy TicketSource annotation for both group and text.
 package releasehistory

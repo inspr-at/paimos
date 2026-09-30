@@ -115,20 +115,64 @@ Deleted/unavailable public members remain explicit gap entries. `captured_at`,
 release revision and each member's `updated_at` record the observation. No live API or
 classic database is contacted by the history builder.
 
-The release coordinator reviews that export and records its exact JSON bytes at
-`release-notes/<version>.json` in the release commit **before tagging**. Use the
-configured `paimos --instance … curl` API client; no code discovers credentials
-from other applications or files. The export is read-only, not a publication
-permission or an immutable server snapshot. It includes hidden fields for
-provenance: record it only in the release's authorized source/artifact context.
-Do not add snapshots to already-published tags or rebuild an old artifact under
-its original coordinate.
+At reservation, the release coordinator reviews that export and freezes its
+public projection in `internal/releasehistory/data/product-notes.json` **before
+tagging** (AEON-372):
 
-`internal/releasehistory/generate` reads only that file **from its matching
-annotated Git tag**, including under `-offline`. Current worktree files and later
-ticket edits cannot change those notes. The generated manifest records the exact
+```sh
+go run ./internal/releasehistory/packnotes -repo . -snapshot SNAPSHOT.json -reserve VERSION -tenant TENANT_UUID -project AEON_PROJECT_UUID
+```
+
+`VERSION` must match `version.json`. Both UUIDs bind the source to the selected
+PPM tenant and AEON project. This explicit reserve step may freeze an unpublished
+preview; historical imports must already be frozen. Use the configured API
+client with `releases.read`/`nodes.read` to obtain the export. Keep the raw export
+in its authorized local context: it may contain hidden text and tenant IDs and
+must not be committed as the public projection. The generated file contains
+only public ticket keys, pills, benefits, captured groups and capture provenance.
+Review and commit it with the reservation. Identical reruns are idempotent
+only with that same export file: a fresh export has a new `captured_at` and
+conflicts. Restore the file before re-reserving; do not export the preview again.
+Conflicting entries fail instead of rewriting a reserved version.
+
+For historical backfill, export existing stored snapshots as `VERSION.json` in
+one directory and run the same command with `-snapshots DIRECTORY -tenant
+TENANT_UUID -project AEON_PROJECT_UUID`. A run with no exports imports only
+authoritative snapshots already in local tags and reports missing versions.
+Alternatively, save an authorized PPM `GET /api/releases` response, record that
+workspace's `tenant_id` and `project_node_id` on the saved file, and pass
+`-history HISTORY.json -tenant TENANT_UUID -project AEON_PROJECT_UUID`. Prefer
+`-history` over `-snapshots` for backfill. A snapshot file from before group
+storage has no group, and packnotes cannot derive one offline; those embedded
+items then take a group from the viewing tenant's own tickets, which usually
+means Features. `-history` records the group the serving workspace already
+derived. The two identifiers must match the flags; a file for another workspace
+is rejected. This consumes only `database-snapshot` or immutable tag-snapshot
+notes, never `changes.linked_tickets`. It records each ticket's group, including
+a group the server derived from the live classification when the snapshot itself
+had none. Never substitute live ticket fields, release PR bodies or pills.tsv
+files for missing snapshots. Existing tags and artifacts stay unchanged; the new
+binary carries the backfill. Migration `0997` captures future groups alongside
+the five note fields. Older snapshots have no group. Serving those classifies
+every commit ticket from the current classification, not only the tickets the
+capture tells: a hidden bug, a ticket with no pill or benefit, and a commit
+ticket that was not a release member. A bug is a fix and a visible benefit is a
+feature, the same rule as AEON-289. Only those two facts are read. The captured
+pill and benefit stay frozen, and live pill or benefit text never enters
+`linked_tickets`. The history export above records that group, so other
+workspaces see Fixes from the embedded notes.
+
+A release with no capture uses that same classification for `changes[].group`.
+It loses live-text Highlights by design: the no-live-text rule keeps pill and
+benefit text out of the response, so Highlights has nothing to show until a
+capture exists. Compare still follows the classified group.
+
+`internal/releasehistory/generate` also reads legacy `release-notes/VERSION.json`
+files **from their matching annotated Git tags**, including under `-offline`.
+Later ticket edits cannot change those notes. The generated manifest records the exact
 file SHA-256, tag/path, capture time, revision, both languages, hidden count and
-gaps. Members sort by recorded position, then key and ID. Exact duplicate IDs
+gaps. Portable notes are the additive `notes.public_items`, with no tenant UUIDs;
+the existing `notes.items` schema stays unchanged. Members sort by recorded position, then key and ID. Exact duplicate IDs
 collapse; conflicting duplicates, duplicate keys, malformed metadata and a
 recorded version that differs from the tag fail the build. If the release had no
 assigned version at capture time (candidate registration can happen later), the
@@ -209,10 +253,11 @@ is atomic across both paths. Reruns leave existing rows unchanged. Native journe
 releases still use their own membership and snapshot store, through the same
 person/admin authorization and project/version selectors.
 
-`GET /api/releases` and its detail route keep embedded tag snapshots first,
-then use stored journey snapshots where a native version exists, then explicit
-version-keyed backfills for the visible AEON project. Otherwise they retain the
-historical tag headline. The database overlay is computed per request and never
+`GET /api/releases` and its detail route use stored journey snapshots first,
+then explicit version-keyed backfills for the visible AEON project, then the
+embedded tag/public product notes. Tenants without that project use the public
+product notes too. Empty or hidden-only tenant captures remain authoritative.
+Without any capture, the historical evidence remains. The overlay is computed per request and never
 changes the shared embedded manifest. A malformed database snapshot is logged
 without its payload and falls back for that release alone; other releases remain
 available. Releases with no public notes or gaps show a quiet **Internal changes
@@ -230,11 +275,13 @@ English and German. The release detail shows them as a compact header above the
 blocks every release shows: Features and Fixes with one block per ticket (the
 pill as heading, the key, the benefit sentence and its commits folded), then
 Other changes. A captured or backfilled snapshot decides which tickets are told
-and their text; without one, the tickets linked from the commits do. A ticket is
-a fix when it is a bug (the served change group), else when its commits are only
-`fix:`; otherwise a feature. The release list shows version, date and theme, or
-the pills. A release without a presentation has no header. The Git tag message
-is evidence, never a title; "Notes written after release" is one muted line.
+and their text. Without a capture, Aeon does not fill Highlights from live
+ticket text: that is the no-live-text rule. Compare still uses the served change
+group. A ticket is a fix when it is a bug (the served change group), else when
+its commits are only `fix:`; otherwise a feature. The release list shows version,
+date and theme, or the pills. A release without a presentation has no header.
+The Git tag message is evidence, never a title; "Notes written after release"
+is one muted line.
 
 Presentations live in `release_presentations` (migration `0945`), keyed by
 tenant, product project and calendar version, protected by tenant RLS and project

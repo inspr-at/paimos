@@ -13,8 +13,8 @@ export interface ReleaseEvidence {
   source_commit: string; source_url: string; image: { reference: string; digest: string } | null
   ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; unavailable: string[]
 }
-export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string }
-export interface ReleaseNotes { source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; gaps: string[]; hidden: number; written_after_release?: boolean }
+export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string; group?: ChangeGroup }
+export interface ReleaseNotes { source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; public_items?: Omit<ReleaseNoteItem, 'id'>[]; gaps: string[]; hidden: number; written_after_release?: boolean }
 // How a release introduces itself (AEON-305): the theme is the kicker, the
 // headline one sentence, the intro two or three. German may be empty.
 export interface ReleasePresentation { theme_en: string; theme_de: string; headline_en: string; headline_de: string; intro_en: string; intro_de: string; revision: number; updated_at: string }
@@ -38,14 +38,21 @@ export async function getReleases(): Promise<ReleaseHistory> {
   }
   const body = await response.json() as ReleaseHistory
   if (body.schema !== 'inspr.release-history.v1' || !Array.isArray(body.releases)) throw new Error('The server sent an unknown release history format.')
-  return body
+  return { ...body, releases: body.releases.map(withPublicNoteItems) }
+}
+
+// Product notes are portable: the wire shape never invents tenant ticket UUIDs.
+// Adapt them once to the sheet's existing snapshot renderer.
+export function withPublicNoteItems(release: Release): Release {
+  if (!release.notes?.public_items) return release
+  return { ...release, notes: { ...release.notes, items: release.notes.public_items.map(item => ({ ...item, id: '' })) } }
 }
 
 // One release from the server's history; null when it has none for that version.
 export async function getRelease(version: string): Promise<Release | null> {
   try {
     const response = await api(`/releases/${encodeURIComponent(version)}`)
-    return response.ok ? await response.json() as Release : null
+    return response.ok ? withPublicNoteItems(await response.json() as Release) : null
   } catch { return null }
 }
 
@@ -108,6 +115,7 @@ function toldTickets(changes: ReleaseChange[], locale?: string | null, items?: T
   const seen = new Set<string>()
   const linked = () => changes.filter(c => { const g = changeGroup(c); return g === 'features' || g === 'fixes' }).flatMap(c => c.linked_tickets ?? [])
   for (const note of items ?? linked()) {
+    if (note.group === 'other') continue
     const key = note.key?.trim()
     if (!key || seen.has(key)) continue
     const text = localizedNote(note, locale)

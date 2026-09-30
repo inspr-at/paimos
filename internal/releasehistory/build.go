@@ -162,6 +162,15 @@ func Build(ctx context.Context, opts Options) (History, error) {
 		})
 	}
 	Sort(h.Releases)
+	if raw, err := os.ReadFile(filepath.Join(opts.Repo, ProductNotesPath)); err == nil {
+		bundle, err := ReadProductNotes(raw)
+		if err != nil {
+			return History{}, err
+		}
+		h = withProductNotes(h, bundle)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return History{}, fmt.Errorf("read product notes: %w", err)
+	}
 	if opts.GitHub != nil {
 		if err := opts.GitHub.enrich(ctx, opts.Repository, h.Releases); err != nil {
 			for i := range h.Releases {
