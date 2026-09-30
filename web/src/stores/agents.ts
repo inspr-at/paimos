@@ -14,7 +14,7 @@ import { managedControlSession } from '../lib/managedControl'
 import { usePolledData } from '../lib/usePolledData'
 import { useProjects } from './projects'
 import { useAgentAppearance } from '../lib/agentAppearance'
-import { createReadOrder, lowestPosition, positionOf, readOrdered, stampAt, writeFloor } from '../lib/position'
+import { createReadOrder, lowestPosition, positionOf, readOrdered, stampAt, writeFloor, type ReadOrder } from '../lib/position'
 
 // forbidden: not for this person; error: the read failed (any other status).
 export type Availability = 'idle' | 'ready' | 'forbidden' | 'error'
@@ -209,9 +209,9 @@ export const useAgents = defineStore('agents', () => {
   // Scope before limiting: a busy project must not crowd a session's replies out.
   // One order per thread and per agent: an older answer never replaces a newer one,
   // and one that predates a write of this tab is read again.
-  const threadOrders = new Map<string, ReturnType<typeof createReadOrder>>()
-  const agentRunOrders = new Map<string, ReturnType<typeof createReadOrder>>()
-  const orderFor = (orders: Map<string, ReturnType<typeof createReadOrder>>, key: string) => {
+  const threadOrders = new Map<string, ReadOrder>()
+  const agentRunOrders = new Map<string, ReadOrder>()
+  const orderFor = (orders: Map<string, ReadOrder>, key: string) => {
     let order = orders.get(key)
     if (!order) orders.set(key, order = createReadOrder())
     return order

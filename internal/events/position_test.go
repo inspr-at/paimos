@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -163,5 +164,14 @@ func TestPositionWriterKeepsStreamingWorking(t *testing.T) {
 	}
 	if !rec.Flushed || rec.Header().Get(PositionHeader) != "1" {
 		t.Fatalf("flushed %v, position %q", rec.Flushed, rec.Header().Get(PositionHeader))
+	}
+}
+
+// The middleware matches the mux's pattern text exactly; a typo would silently drop the header.
+func TestPositionReadsNameRegisteredRoutes(t *testing.T) {
+	for pattern := range positionReads {
+		if _, ok := authz.PermissionForPattern(pattern); !ok {
+			t.Errorf("%q is not a registered API pattern", pattern)
+		}
 	}
 }
