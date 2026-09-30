@@ -243,6 +243,53 @@ test('compare follows Back, Forward and an in-app release link', async ({ page }
   await selected(1)
 })
 
+test('a cancelled selection does not swallow the next visit to that release', async ({ page }) => {
+  const { history } = await setup(page)
+  const path = (index: number) => `/releases/${history.releases[index].version}`
+  const selected = (index: number) => expect(options(page).nth(index)).toHaveAttribute('aria-selected', 'true')
+  const compare = sheet(page).locator('section.compare')
+  // Hold the session refresh so j's address never lands. k returns to the
+  // release already in the address, which cancels j. That cancelled version
+  // must not stay an echo, or the next visit would leave Compare open.
+  let armed = false
+  let requests = 0
+  let releaseGate: () => void = () => {}
+  const gate = new Promise<void>(resolve => { releaseGate = resolve })
+  await page.route(/\/api\/me(?:\?|$)/, async route => {
+    if (!armed) { await route.fallback(); return }
+    requests++
+    try {
+      await gate
+      await route.fallback()
+    } finally { requests-- }
+  })
+  await page.goto(path(0))
+  await selected(0)
+  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  armed = true
+  await page.keyboard.press('j')
+  await selected(1)
+  await expect.poll(() => requests).toBe(1)
+  await page.keyboard.press('k')
+  await selected(0)
+  await page.keyboard.press('c')
+  await expect(compare).toBeVisible()
+  await page.keyboard.press('j')
+  await selected(2)
+  armed = false
+  releaseGate()
+  await expect.poll(() => requests).toBe(0)
+  await expect(page).toHaveURL(path(0))
+  await expect(compare).toBeVisible()
+  await page.evaluate(async url => {
+    const { router } = await import('/src/router.ts')
+    await router.push(url)
+  }, path(1))
+  await expect(page).toHaveURL(path(1))
+  await expect(compare).toHaveCount(0)
+  await selected(1)
+})
+
 test('filters follow the feature and fix blocks, and still keep releases with tickets', async ({ page }) => {
   await setup(page)
   await page.goto('/releases')

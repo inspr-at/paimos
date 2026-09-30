@@ -99,19 +99,29 @@ const missing = ref('')
 // focused while that request is in flight, and a key then would hit an empty
 // list or a history that is about to be replaced.
 const keysReady = ref(false)
-// Versions this sheet has written to the address and not yet seen come back.
-// The navigation waits on the session, so the address lands after the cursor
-// has moved — often into Compare, which never writes the address. Only that
-// echo is ignored. Back, Forward and an in-app link are a different version:
-// they select it, and Compare closes.
-const pendingEchoes: string[] = []
+// The latest version this sheet has asked the address to show and not yet seen
+// come back. The navigation waits on the session, so the address lands after
+// the cursor has moved — often into Compare, which never writes the address.
+// Only that echo is ignored. A newer request replaces it. A navigation that
+// settles on a failure, or any other address, drops it: Back, Forward and an
+// in-app link then select that release, and Compare closes.
+let pendingEcho = ''
 function targetVersion(target: string | null) {
   return target && target !== 'all' && target !== 'current' ? target.replace(/^v/, '') : ''
 }
 function publishSelection(version: string) {
-  if (version !== targetVersion(props.target) && pendingEchoes.at(-1) !== version) pendingEchoes.push(version)
+  // A request that already matches the address will not change it, so it is not
+  // an echo — and it supersedes one that was still in flight.
+  pendingEcho = version === targetVersion(props.target) ? '' : version
   emit('select', version)
 }
+// The address did not adopt this version: the replace was cancelled, duplicated
+// or rejected. A later visit to it is someone opening that release.
+function navigationSettled(version: string | undefined, failure: unknown) {
+  if (!failure || !version || version !== pendingEcho) return
+  pendingEcho = ''
+}
+defineExpose({ navigationSettled })
 const phoneQuery = window.matchMedia('(max-width: 760px)')
 const phone = ref(phoneQuery.matches)
 const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
@@ -176,17 +186,13 @@ function initialSelection() {
 watch(() => props.target, target => {
   // `current` is the footer before the running version is known. It resolves
   // to that release when the history arrives; it is not a version to echo.
-  if (target === 'current') { initialSelection(); return }
+  if (target === 'current') { pendingEcho = ''; initialSelection(); return }
   const wanted = targetVersion(target)
+  const echo = !!wanted && wanted === pendingEcho
+  // Any other address ends the echo, including one this build cannot show.
+  if (!echo) pendingEcho = ''
   if (!wanted || !byVersion.value.has(wanted)) return
-  const echo = pendingEchoes.lastIndexOf(wanted)
-  if (echo !== -1) {
-    // This write landed. Earlier ones were superseded by it; later ones are
-    // still in flight and must not look like someone opening that release.
-    pendingEchoes.splice(0, echo + 1)
-    return
-  }
-  pendingEchoes.length = 0
+  if (echo) { pendingEcho = ''; return }
   if (wanted === cursor.value) return
   mode.value = 'browse'
   cursor.value = wanted
