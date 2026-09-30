@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -44,12 +43,8 @@ func (m *Module) setStatus(w http.ResponseWriter, r *http.Request, next string) 
 		if linked != nil {
 			return errAliasTarget
 		}
-		if kind == "agent" {
-			for _, v := range legacy {
-				if v == "system" || v == "importer" || v == "operator" || v == "embedding" || strings.HasPrefix(v, "quote_") {
-					return ErrForbidden
-				}
-			}
+		if kind == "agent" && IsServiceIdentity(legacy) {
+			return ErrForbidden
 		}
 		want := "active"
 		if next == "deactivated" {
@@ -120,8 +115,17 @@ func (m *Module) setStatus(w http.ResponseWriter, r *http.Request, next string) 
 // an identity that is not an active, plain agent is left alone. extra is merged
 // into the event's after snapshot.
 func RetireAgentTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, id string, extra map[string]any) (bool, error) {
-	tag, err := tx.Exec(ctx, `UPDATE principals SET status='deactivated' WHERE tenant_id=$1::uuid AND id=$2::uuid AND kind='agent' AND status='active' AND linked_to IS NULL`, actor.TenantID, id)
-	if err != nil || tag.RowsAffected() == 0 {
+	var roles []string
+	if err := tx.QueryRow(ctx, `SELECT roles FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid AND kind='agent' AND status='active' AND linked_to IS NULL FOR UPDATE`, actor.TenantID, id).Scan(&roles); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	if IsServiceIdentity(roles) {
+		return false, nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE principals SET status='deactivated' WHERE tenant_id=$1::uuid AND id=$2::uuid`, actor.TenantID, id); err != nil {
 		return false, err
 	}
 	after := map[string]any{"principal_id": id, "status": "deactivated"}

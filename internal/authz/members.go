@@ -114,12 +114,7 @@ func (m *Module) members(w http.ResponseWriter, r *http.Request) {
 				role = &RoleRef{ID: *roleID, Key: *roleKey, Name: *roleName}
 			}
 			if kind == "agent" {
-				service := false
-				for _, v := range legacy {
-					if v == "system" || v == "importer" || v == "operator" || v == "embedding" || strings.HasPrefix(v, "quote_") {
-						service = true
-					}
-				}
+				service := IsServiceIdentity(legacy)
 				out.Agents = append(out.Agents, AgentMember{PrincipalID: id, Name: name, Description: description, ProjectRoles: []ProjectRole{}, HasAvatar: hasAvatar, WorkspaceRole: role, KeyCount: keyCount, LastSeenAt: lastSeen, Service: service, Status: status, ConnectedComputer: connectedComputer})
 				continue
 			}

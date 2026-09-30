@@ -157,6 +157,29 @@ func TestAgentIdentityDeactivateAndReactivate(t *testing.T) {
 	if rec := call("POST", "/api/members/"+service+"/deactivate", admin); rec.Code != 403 {
 		t.Fatalf("service identity %d %s", rec.Code, rec.Body.String())
 	}
+	// Every reserved service identity is classified once: the directory flags it
+	// and the lifecycle refuses it, including the portal's public service.
+	for _, role := range []string{"system", "importer", "operator", "embedding", "quote_public_service", "quote_confirmation_service", "portal_public_service"} {
+		id := agent("svc "+role, role)
+		if !agents()[id].Service {
+			t.Fatalf("%s is not flagged as a service identity in the directory", role)
+		}
+		if rec := call("POST", "/api/members/"+id+"/deactivate", admin); rec.Code != 403 {
+			t.Fatalf("%s deactivate %d %s", role, rec.Code, rec.Body.String())
+		}
+		if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+			retired, err := RetireAgentTx(ctx, tx, admin, id, nil)
+			if retired {
+				t.Fatalf("%s was retired by the pairing path", role)
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if agents()[id].Status != "active" {
+			t.Fatalf("a refused deactivation changed the %s identity", role)
+		}
+	}
 	if rec := call("POST", "/api/members/"+connected+"/deactivate", admin); rec.Code != 409 || !strings.Contains(rec.Body.String(), "connected_computer") {
 		t.Fatalf("connected computer %d %s", rec.Code, rec.Body.String())
 	}

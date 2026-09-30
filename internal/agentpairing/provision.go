@@ -162,7 +162,7 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			if _, err = tx.Exec(ctx, `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,local_auth_public_key) VALUES($1,$2,$2,$3,$4,$5,$6,$7)`, p.TenantID, computer, principal, key, daemon, rec.LifecycleHash, rec.Details.LocalAuthPublicKey); err != nil {
 				return err
 			}
-			if err = retireReplaced(ctx, tx, p, rec.Details.ComputerName, principal); err != nil {
+			if err = retireReplaced(ctx, tx, p, rec.Details, principal); err != nil {
 				return err
 			}
 		}
@@ -222,15 +222,22 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 	reply(w, out)
 }
 
-// retireReplaced deactivates the runtime identities a fresh pairing replaces:
-// those of revoked computers with the same name that are still active. They
-// hold only revoked keys, so re-pairing a laptop leaves one identity behind,
-// not one more each time. A computer that is still connected is never touched.
-func retireReplaced(ctx context.Context, tx pgx.Tx, p tenant.Principal, name, replacedBy string) error {
+// retireReplaced deactivates the runtime identities a fresh pairing replaces, so
+// re-pairing a laptop leaves one identity behind, not one more each time. A
+// computer counts as replaced only when the same person who approved it approves
+// its successor, the machine describes itself the same way (name, platform,
+// architecture), and no pinned local-auth key contradicts it; the old computer
+// must also be revoked and its identity still active. A name alone proves
+// nothing: two people may each call their laptop "Laptop". A computer that is
+// still connected is never touched.
+func retireReplaced(ctx context.Context, tx pgx.Tx, p tenant.Principal, d Details, replacedBy string) error {
 	rows, err := tx.Query(ctx, `SELECT pr.id::text FROM agent_pairing_computers c
+		JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
 		JOIN principals pr ON pr.tenant_id=c.tenant_id AND pr.id=c.principal_id
 		WHERE c.tenant_id=$1 AND c.state='revoked' AND pr.kind='agent' AND pr.status='active' AND pr.name=$2 AND pr.id<>$3
-		ORDER BY c.created_at,c.id FOR UPDATE OF pr`, p.TenantID, name, replacedBy)
+		  AND q.approved_by=$4 AND q.details->>'platform'=$5 AND q.details->>'arch'=$6
+		  AND (c.local_auth_public_key='' OR $7='' OR c.local_auth_public_key=$7)
+		ORDER BY c.created_at,c.id FOR UPDATE OF pr`, p.TenantID, d.ComputerName, replacedBy, p.ID, d.Platform, d.Arch, d.LocalAuthPublicKey)
 	if err != nil {
 		return err
 	}
