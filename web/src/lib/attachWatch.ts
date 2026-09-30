@@ -33,13 +33,7 @@ export async function listPendingAttach(signal?: AbortSignal): Promise<AttachRev
   const body = await res.json() as { requests?: AttachReview[] }
   return Array.isArray(body.requests) ? body.requests : []
 }
-// The link `aeon-agentd attach` prints is /agents#attach=<nine digits>. The code
-// rides in the fragment, which is never sent to a server or a referrer; only nine
-// digits are accepted, so nothing else can be injected into the lookup field.
-export function attachCodeFromHash(hash: string): string | null {
-  return /^#attach=(\d{9})$/.exec(hash)?.[1] ?? null
-}
-export const formatAttachCode = (code: string) => `${code.slice(0, 3)} ${code.slice(3, 6)} ${code.slice(6)}`
+export { attachCodeFromHash, formatAttachCode } from './attachLink.ts'
 
 export async function attachAction(path: string, body?: object, signal?: AbortSignal): Promise<AttachReview> {
   const res = await api(`/agent-pairing/attach${path}`, { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) })

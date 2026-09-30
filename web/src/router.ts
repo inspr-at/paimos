@@ -7,7 +7,8 @@ import { useSession } from './stores/session'
 import { sessionEnded } from './lib/api'
 import { can, ensurePermissions, permissionsRevoked } from './lib/authz'
 import { toast } from './lib/toast'
-import { takeSignInReturn } from './lib/signInReturn'
+import { attachCodeFromHash, dropAttachCode, hasAttachFragment, holdAttachCode } from './lib/attachLink'
+import { expiredSignIn, takeSignInReturn } from './lib/signInReturn'
 import ProjectsView from './views/ProjectsView.vue'
 import SignInView from './views/SignInView.vue'
 import NotFoundView from './views/NotFoundView.vue'
@@ -120,7 +121,17 @@ function refreshSession() {
   if (!refreshing) refreshing = useSession().refresh().finally(() => { refreshing = null })
   return refreshing
 }
+// A code held for a session that is gone is dropped, and the return path never carries it.
+function signInAgain(fullPath: string) { dropAttachCode(); return expiredSignIn(fullPath) }
 router.beforeEach(async (to, from) => {
+  // The terminal's attach link carries a one-time code in its fragment. It leaves the
+  // address bar before any other rule runs, so no redirect, return path or report can
+  // copy it; the page that opens the review picks it up from memory (AEON-440).
+  if (hasAttachFragment(to.hash)) {
+    const code = attachCodeFromHash(to.hash)
+    if (code && to.path === '/agents') holdAttachCode(code)
+    return { path: to.path, query: to.query, hash: '', replace: true }
+  }
   // Canonical section URLs replace bookmarks without adding a history step.
   // Ticket addresses stay /p/KEY/TICKET; ?section= preserves a non-default background,
   // including across reload, expand/collapse and links inside the side panel.
@@ -149,7 +160,7 @@ router.beforeEach(async (to, from) => {
   const session = useSession()
   // A 401 or sign-out is authoritative for this tab until an explicit sign-in.
   // A later /me response must not silently reauthorize a revoked page.
-  if (session.requiresSignIn) return to.path === '/signin' ? true : { path: '/signin', query: { error: 'expired', return: to.fullPath } }
+  if (session.requiresSignIn) return to.path === '/signin' ? true : signInAgain(to.fullPath)
   const wasSignedIn = !!session.identity
   await refreshSession()
   if (session.error) return true // The shell shows a retry screen, never protected content.
@@ -157,9 +168,9 @@ router.beforeEach(async (to, from) => {
   if (!session.identity && to.path !== '/signin') {
     // A classic link arrives before sign-in (AEON-175): keep it for after OIDC.
     if (to.path.startsWith('/from-classic/')) sessionStorage.setItem('aeon.fromClassicReturn', to.fullPath)
-    return wasSignedIn
-      ? { path: '/signin', query: { error: 'expired', return: to.fullPath } }
-      : '/signin'
+    if (wasSignedIn) return signInAgain(to.fullPath)
+    dropAttachCode()
+    return '/signin'
   }
   if (session.identity && to.path === '/signin') return '/'
   // OIDC returns to / after sign-in. Restore only a same-origin resolver route

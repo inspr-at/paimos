@@ -3,6 +3,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import { useRoute } from 'vue-router'
+import { safeReturnPath } from '../../lib/signInReturn'
 import { useSession } from '../../stores/session'
 
 // A sheet over the page: a panel on the right (or centred, for a short form),
@@ -13,7 +14,7 @@ const props = withDefaults(defineProps<{ title: string; label?: string; size?: '
 const emit = defineEmits<{ close: [] }>()
 const route = useRoute()
 const session = useSession()
-function signInAgain() { window.open(`/signin?error=expired&return=${encodeURIComponent(route.fullPath)}`, '_blank', 'noopener') }
+function signInAgain() { window.open(`/signin?error=expired&return=${encodeURIComponent(safeReturnPath(route.fullPath))}`, '_blank', 'noopener') }
 const panel = ref<HTMLElement>()
 let opener: HTMLElement | null = null
 const focusables = () => [...(panel.value?.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]') ?? [])].filter(el => el.offsetParent !== null)

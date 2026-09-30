@@ -4,6 +4,7 @@ import { brand } from '../../lib/brand'
 import { computed, nextTick, onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { can, permissionsRevoked } from '../../lib/authz'
+import { safeReturnPath } from '../../lib/signInReturn'
 import { useAccess } from '../../stores/access'
 import AppIcon from '../AppIcon.vue'
 import BizIcon, { type BizIconName } from '../business/BizIcon.vue'
@@ -36,7 +37,7 @@ const liveTabs = computed(() => TABS.filter(tab => can(tab.permission)))
 const tabs = ref(liveTabs.value)
 watch(liveTabs, now => { if (!permissionsRevoked()) tabs.value = now })
 const ended = computed(() => permissionsRevoked())
-function signIn() { window.open(`/signin?error=expired&return=${encodeURIComponent(route.fullPath)}`, '_blank', 'noopener') }
+function signIn() { window.open(`/signin?error=expired&return=${encodeURIComponent(safeReturnPath(route.fullPath))}`, '_blank', 'noopener') }
 const tab = computed<Tab>(() => { const wanted = route.params.tab as Tab | undefined; return tabs.value.some(t => t.id === wanted) ? wanted! : tabs.value[0]?.id ?? 'people' })
 const current = computed(() => TABS.find(t => t.id === tab.value)!)
 const detail = computed(() => typeof route.params.id === 'string' ? route.params.id : '')

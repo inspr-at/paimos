@@ -18,24 +18,33 @@ const emit = defineEmits<{ review: [request: AttachReview] }>()
 
 const session = useSession()
 const allowed = computed(() => session.identity?.principal.kind === 'person' && can('account.manage'))
+// Whose list this is. An answer belongs to the person and workspace that asked for
+// it, in the generation that asked: anything else is dropped, never shown.
+const owner = computed(() => allowed.value ? `${session.identity?.tenant.id}/${session.identity?.principal.id}` : '')
 const items = ref<AttachReview[]>([])
 const dismissed = ref(new Set<string>())
 let inflight: AbortController | undefined
+let generation = 0
+function reset() {
+  generation++; inflight?.abort(); inflight = undefined
+  items.value = []; dismissed.value = new Set()
+}
 async function refresh() {
-  if (!allowed.value) { items.value = []; return }
+  if (!owner.value) { reset(); return }
+  const asked = { generation, owner: owner.value }
   inflight?.abort()
   const controller = new AbortController()
   inflight = controller
   try {
     const next = await listPendingAttach(controller.signal)
-    if (inflight === controller) items.value = next
+    if (inflight === controller && asked.generation === generation && asked.owner === owner.value) items.value = next
   } catch { /* a missed read keeps what is shown; the next tick asks again */ }
 }
 const poller = usePoller(refresh, 5_000, { enabled: () => allowed.value })
-const stopAccess = onAccessChange(() => { items.value = []; void refresh() })
+const stopAccess = onAccessChange(change => { if (change === 'reset') reset(); void refresh() })
 onMounted(() => poller.start(true))
-onBeforeUnmount(() => { poller.stop(); stopAccess(); inflight?.abort() })
-watch(allowed, () => void refresh())
+onBeforeUnmount(() => { poller.stop(); stopAccess(); reset() })
+watch(owner, () => { reset(); void refresh() })
 defineExpose({ refresh })
 
 interface Row { review: AttachReview; outcome: AttachOutcome; what: string; detail: string; left: string; soon: boolean }

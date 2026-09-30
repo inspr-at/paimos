@@ -1,16 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
 import { getNode } from '../../lib/api'
-import { attachAction, attachCodeFromHash, formatAttachCode, metadataOnlyAttach, type AttachReview } from '../../lib/attachWatch'
+import { formatAttachCode, onAttachCode, takeAttachCode } from '../../lib/attachLink'
+import { attachAction, metadataOnlyAttach, type AttachReview } from '../../lib/attachWatch'
 import { can, ensurePermissions, onAccessChange } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 
 const identity = useSession()
-const route = useRoute()
-const router = useRouter()
 // A decision changes what /agents lists as waiting; the page refreshes it.
 const emit = defineEmits<{ changed: [] }>()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('account.manage'))
@@ -27,41 +25,47 @@ const busy = ref(false)
 const error = ref('')
 const project = ref('')
 const ticket = ref('')
+// Approval waits until the person can read which project and ticket it covers.
+const labelsReady = ref(false)
 let operation: AbortController | undefined
-function close() { operation?.abort(); operation = undefined; dialog.value?.close(); code.value = ''; review.value = null; error.value = ''; busy.value = false; project.value = ''; ticket.value = '' }
+let labelsLoad: AbortController | undefined
+function close() {
+  operation?.abort(); operation = undefined; labelsLoad?.abort(); labelsLoad = undefined
+  dialog.value?.close(); code.value = ''; review.value = null; error.value = ''; busy.value = false; project.value = ''; ticket.value = ''; labelsReady.value = false
+}
 async function open() { close(); dialog.value?.showModal(); await nextTick(); codeInput.value?.focus() }
 // The link `aeon-agentd attach` prints only fills the code in; the person still
-// reviews and approves. It is read once and removed from the address bar.
+// reviews and approves. The router took it off the address bar and holds it in memory.
 async function openWithCode(value: string) { await open(); code.value = formatAttachCode(value) }
-// One pass per link. The address bar is cleaned first: that navigation refreshes
-// the session, which closes an open review, so the dialog opens after it.
-let followed = ''
 async function followLink() {
-  const linked = attachCodeFromHash(route.hash)
-  if (!linked) { followed = ''; return }
-  if (!identity.identity || linked === followed) return
-  followed = linked
+  if (!identity.identity) return
+  const linked = takeAttachCode()
+  if (!linked) return
   const settled = await ensurePermissions()
-  const mayAttach = settled === 'known' && allowed.value
-  await router.replace({ path: route.path, query: route.query, hash: '' })
-  if (mayAttach) { await nextTick(); await openWithCode(linked) }
+  if (settled === 'known' && allowed.value) { await nextTick(); await openWithCode(linked) }
 }
 onMounted(followLink)
-watch([() => route.hash, () => !!identity.identity], followLink)
-// Names are a convenience; approval binds the immutable IDs in the snapshot.
-async function present(result: AttachReview, controller: AbortController) {
-  review.value = result; code.value = ''
+const stopLink = onAttachCode(followLink)
+watch(() => !!identity.identity, followLink)
+// Names are a convenience; approval binds the immutable IDs in the snapshot. A name
+// that cannot be read is replaced by the ID itself. Loading never shares a controller
+// with a decision, so deciding cannot cancel the names.
+async function loadLabels(result: AttachReview) {
+  labelsLoad?.abort()
+  const controller = new AbortController(); labelsLoad = controller
+  labelsReady.value = false; project.value = ''; ticket.value = ''
   const names = await Promise.allSettled([getNode(result.snapshot.project_id), getNode(result.snapshot.ticket_id)])
-  if (operation !== controller || controller.signal.aborted) return
-  project.value = names[0].status === 'fulfilled' ? names[0].value.title : 'Selected project'
-  ticket.value = names[1].status === 'fulfilled' ? `${names[1].value.key} · ${names[1].value.title}` : 'Selected ticket'
+  if (labelsLoad !== controller || controller.signal.aborted) return
+  project.value = names[0].status === 'fulfilled' ? names[0].value.title : result.snapshot.project_id
+  ticket.value = names[1].status === 'fulfilled' ? `${names[1].value.key} · ${names[1].value.title}` : result.snapshot.ticket_id
+  labelsReady.value = true
 }
+function present(result: AttachReview) { review.value = result; code.value = ''; void loadLabels(result) }
 // Review a request the page already lists: same review, same digests, no code to type.
-async function show(result: AttachReview) {
+function show(result: AttachReview) {
   if (!allowed.value) return
   close(); dialog.value?.showModal()
-  const controller = new AbortController(); operation = controller
-  await present(result, controller)
+  present(result)
 }
 defineExpose({ show })
 async function lookup() {
@@ -71,12 +75,12 @@ async function lookup() {
   try {
     const result = await attachAction('/lookup', { user_code: normalized }, controller.signal)
     if (operation !== controller || controller.signal.aborted) return
-    await present(result, controller)
+    present(result)
   } catch (e) { if (!controller.signal.aborted) error.value = e instanceof Error ? e.message : 'Attach unavailable.' }
   finally { if (operation === controller) busy.value = false }
 }
 async function decide(revoke = false) {
-  if (!allowed.value || !review.value || busy.value) return
+  if (!allowed.value || !review.value || busy.value || (!revoke && !labelsReady.value)) return
   operation?.abort(); const controller = new AbortController(); operation = controller; busy.value = true; error.value = ''
   try {
     const result = await attachAction(`/${encodeURIComponent(review.value.request_id)}/${revoke ? 'revoke' : 'approve'}`, revoke ? {} : { request_digest: review.value.request_digest, ...(review.value.consent_digest ? { consent_digest: review.value.consent_digest } : {}) }, controller.signal)
@@ -86,7 +90,7 @@ async function decide(revoke = false) {
 }
 watch(() => [identity.identity?.tenant.id, identity.identity?.principal.id, allowed.value], close)
 const stopAccess = onAccessChange(() => close())
-onBeforeUnmount(() => { close(); stopAccess() })
+onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
 </script>
 
 <template>
@@ -105,8 +109,8 @@ onBeforeUnmount(() => { close(); stopAccess() })
         <p class="host">{{ review.snapshot.host }} <span>· {{ review.snapshot.harness }}</span></p>
         <dl>
           <dt>Mode</dt><dd class="mode">{{ metadataOnly ? 'Status only (no conversation text)' : 'Watch the conversation' }}</dd>
-          <dt>Project</dt><dd :title="review.snapshot.project_id">{{ project }}</dd>
-          <dt>Ticket</dt><dd :title="review.snapshot.ticket_id">{{ ticket }}</dd>
+          <dt>Project</dt><dd :title="review.snapshot.project_id" :class="{ quiet: !labelsReady }">{{ labelsReady ? project : 'Loading…' }}</dd>
+          <dt>Ticket</dt><dd :title="review.snapshot.ticket_id" :class="{ quiet: !labelsReady }">{{ labelsReady ? ticket : 'Loading…' }}</dd>
           <dt>Folder</dt><dd class="path">{{ review.snapshot.process.cwd }}</dd>
           <dt>Process</dt><dd>PID {{ review.snapshot.process.pid }} · UID {{ review.snapshot.process.uid }}</dd>
           <dt>Executable</dt><dd class="path">{{ review.snapshot.process.executable }}</dd>
@@ -128,7 +132,7 @@ onBeforeUnmount(() => { close(); stopAccess() })
         <p v-if="strict && review.state === 'approved'" role="status">Waiting for confirmation on {{ review.snapshot.host }}. Nothing is shared until you confirm there.</p>
         <p v-else-if="review.state === 'approved' || review.state === 'active'" role="status">{{ metadataOnly ? 'Approved. Keep the attach terminal open to report session status.' : 'Approved. Keep the attach terminal open to share new turns.' }}</p>
         <p v-else-if="review.state !== 'pending'" role="status">This watch ended. Start a new attach in your terminal to resume.</p>
-        <footer v-if="review.state === 'pending'"><button class="btn" type="button" :disabled="busy" @click="decide(true)">Decline</button><button class="btn primary" type="button" :disabled="busy || localUnavailable" @click="decide()">{{ busy ? 'Saving…' : strict ? 'Allow and confirm on Mac' : metadataOnly ? 'Allow attach' : 'Allow live watch' }}</button></footer>
+        <footer v-if="review.state === 'pending'"><button class="btn" type="button" :disabled="busy" @click="decide(true)">Decline</button><button class="btn primary" type="button" :disabled="busy || localUnavailable || !labelsReady" @click="decide()">{{ busy ? 'Saving…' : strict ? 'Allow and confirm on Mac' : metadataOnly ? 'Allow attach' : 'Allow live watch' }}</button></footer>
         <footer v-else-if="review.state === 'approved' || review.state === 'active'"><button class="btn" type="button" :disabled="busy" @click="decide(true)">{{ metadataOnly ? 'Detach session' : 'Revoke watch' }}</button></footer>
       </template>
       <p v-if="error" role="alert">{{ error }}</p>
@@ -153,6 +157,7 @@ input { box-sizing: border-box; width: 100%; padding: 12px; font: 22px/1.3 ui-mo
 dl { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 9px 12px; font-size: 13px; line-height: 1.5; }
 dd { margin: 0; overflow-wrap: anywhere; }
 .mode { font-weight: 600; }
+dd.quiet { color: var(--ink-3); }
 .path { font: 12px/1.6 ui-monospace, monospace; }
 summary::-webkit-details-marker { display: none; }
 summary::marker { content: ""; }
