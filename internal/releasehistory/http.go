@@ -146,13 +146,16 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteError(w, http.StatusNotFound, "no such release in this build's history")
 }
 
-// annotated derives Aeon's groups from the selected frozen capture. A capture
-// without a group, and a release with no capture, take only the group from the
-// live classification of every commit ticket. A capture that already records a
+// annotated names each release and derives Aeon's groups from the selected
+// frozen capture. A capture without a group, and a release with no capture,
+// take only the group from the live classification of every commit ticket. A capture that already records a
 // group keeps it, and commit tickets that capture does not name take the same
 // group-only classification. Other products retain their legacy ticket source;
 // lookup errors leave their embedded history unchanged.
 func (m *Module) annotated(ctx context.Context, h History) History {
+	// Every release is named from its sequence when served, so a manifest built
+	// before codenames existed reads the same as a new one (AEON-430).
+	h = WithCodenames(h)
 	if aeonHistory(h) {
 		return m.annotateAeon(ctx, h)
 	}

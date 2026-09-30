@@ -21,7 +21,7 @@ import type { TicketEstimate } from './estimates.ts'
 import type { TicketPlanning } from './planning.ts'
 import { rowStore } from './rowStore.ts'
 
-export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
+export interface Version { version: string; scheme: string; brand?: import('./brand').Brand; codename?: string }
 
 export class StaleRequestError extends Error {}
 export class RequestFailure extends Error {

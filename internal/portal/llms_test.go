@@ -3,6 +3,7 @@
 package portal
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +42,26 @@ func TestProjectPublicReleaseWhitelist(t *testing.T) {
 		if strings.Contains(encoded, secret) {
 			t.Fatalf("leaked %s in %+v", secret, rel)
 		}
+	}
+
+	// AEON-430: a version this build's history names carries its marketing name.
+	original := publicCodename
+	publicCodename = func(v string) string {
+		if v == version {
+			return "Fresh Flyby"
+		}
+		return ""
+	}
+	defer func() { publicCodename = original }()
+	if named, ok := projectPublicRelease(&version, at, raw); !ok || named.Codename != "Fresh Flyby" {
+		t.Fatalf("codename: ok=%v %+v", ok, named)
+	}
+	publicCodename = func(string) string { return "" }
+	if unnamed, _ := projectPublicRelease(&version, at, raw); unnamed.Codename != "" {
+		t.Fatalf("an unknown version has no name: %+v", unnamed)
+	}
+	if encoded, err := json.Marshal(publicRelease{ReleasedAt: rel.ReleasedAt, Version: rel.Version, Notes: []publicNote{}}); err != nil || strings.Contains(string(encoded), "codename") {
+		t.Fatalf("an unnamed release omits the field: %s %v", encoded, err)
 	}
 
 	mismatch := "260916120000.0.0"

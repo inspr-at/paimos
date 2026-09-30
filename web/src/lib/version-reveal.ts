@@ -14,20 +14,66 @@ export function revealControl(host: HTMLElement): HTMLElement | null {
   return host.parentElement?.closest<HTMLElement>(CONTROL) ?? null
 }
 
+// Makes `id` (the element that holds a version's stamp) part of what the control
+// is described by, next to any description it already has, for as long as the
+// caller keeps it. A screen reader lands on the control (a button, menu item or
+// option), not on the name inside it, so the control carries the description.
+// Returns a dispose that takes only `id` back out.
+export function describeControl(control: HTMLElement, id: string): () => void {
+  const tokens = () => (control.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)
+  const apply = () => { if (!tokens().includes(id)) control.setAttribute('aria-describedby', [...tokens(), id].join(' ')) }
+  apply()
+  // The owner of the control may rewrite its own description; ours is put back.
+  const observer = new MutationObserver(apply)
+  observer.observe(control, { attributes: true, attributeFilter: ['aria-describedby'] })
+  return () => {
+    observer.disconnect()
+    const rest = tokens().filter(token => token !== id)
+    if (rest.length) control.setAttribute('aria-describedby', rest.join(' ')); else control.removeAttribute('aria-describedby')
+  }
+}
+
 const touchLike = (type: string) => type === 'touch' || type === 'pen'
 const focusVisible = (el: Element) => { try { return el.matches(':focus-visible') } catch { return true } }
+
+// Tells `onChange` when `trigger` is pointer-hovered, keyboard-focused or (for a
+// listbox option) the keyboard's active option; calls it once at the start.
+// Touch and pen pointers never count as hover. Returns a dispose.
+export function watchTrigger(trigger: HTMLElement, onChange: (on: boolean) => void): () => void {
+  const doc = trigger.ownerDocument
+  let hovered = false, last: boolean | null = null
+  function keyboard() {
+    const active = doc.activeElement
+    if (!active || !focusVisible(active)) return false
+    if (trigger.contains(active)) return true
+    // A listbox keeps focus itself and points at its current option.
+    return Boolean(trigger.id) && active.getAttribute('aria-activedescendant') === trigger.id
+  }
+  const settle = () => { const on = hovered || keyboard(); if (on !== last) { last = on; onChange(on) } }
+  const offs: Array<() => void> = []
+  const listen = (target: EventTarget, type: string, fn: (e: Event) => void) => { target.addEventListener(type, fn); offs.push(() => target.removeEventListener(type, fn)) }
+  listen(trigger, 'pointerenter', e => { hovered = !touchLike((e as PointerEvent).pointerType); settle() })
+  listen(trigger, 'pointerleave', () => { hovered = false; settle() })
+  listen(doc, 'focusin', settle)
+  listen(doc, 'focusout', () => queueMicrotask(settle))
+  // Keys make a pointer-focused control focus-visible and move a listbox's option.
+  listen(doc, 'keyup', settle)
+  const observer = new MutationObserver(settle)
+  observer.observe(trigger, { attributes: true, attributeFilter: ['aria-selected'] })
+  settle()
+  return () => { offs.forEach(off => off()); observer.disconnect() }
+}
 
 // Reveals the collapsed segments of `host` (as drawn by renderVersion) while
 // `trigger` is hovered or keyboard-focused. Returns a dispose that restores rest.
 export function attachVersionReveal(host: HTMLElement, trigger: HTMLElement, view: Window = window): () => void {
-  const doc = host.ownerDocument
   const items = [...host.children].filter((n): n is HTMLElement => n instanceof HTMLElement).map(node => ({
     node, separator: node.className === 'separator', collapsed: node.dataset.collapsed === 'true',
     rest: { opacity: node.style.opacity, maxWidth: node.style.maxWidth, transition: node.style.transition },
   }))
   if (!items.some(item => item.collapsed)) return () => {}
   const media = view.matchMedia?.('(prefers-reduced-motion: reduce)') as MediaQueryList | undefined
-  let hovered = false, revealed = false, disposed = false
+  let revealed = false, disposed = false
 
   function motion(target: boolean) {
     if (disposed || target === revealed) return
@@ -42,34 +88,15 @@ export function attachVersionReveal(host: HTMLElement, trigger: HTMLElement, vie
       if (collapsed && rest.maxWidth) node.style.maxWidth = target ? (node.scrollWidth > 0 ? `${node.scrollWidth}px` : 'none') : rest.maxWidth
     }
   }
-  function keyboard() {
-    const active = doc.activeElement
-    if (!active || !focusVisible(active)) return false
-    if (trigger.contains(active)) return true
-    // A listbox keeps focus itself and points at its current option.
-    return Boolean(trigger.id) && active.getAttribute('aria-activedescendant') === trigger.id
-  }
-  const settle = () => motion(hovered || keyboard())
-
-  const offs: Array<() => void> = []
-  const listen = (target: EventTarget, type: string, fn: (e: Event) => void) => { target.addEventListener(type, fn); offs.push(() => target.removeEventListener(type, fn)) }
-  listen(trigger, 'pointerenter', e => { hovered = !touchLike((e as PointerEvent).pointerType); settle() })
-  listen(trigger, 'pointerleave', () => { hovered = false; settle() })
-  listen(doc, 'focusin', settle)
-  listen(doc, 'focusout', () => queueMicrotask(settle))
-  // Keys make a pointer-focused control focus-visible and move a listbox's option.
-  listen(doc, 'keyup', settle)
-  const observer = new MutationObserver(settle)
-  observer.observe(trigger, { attributes: true, attributeFilter: ['aria-selected'] })
-  if (media) listen(media, 'change', () => { if (revealed) { revealed = false; motion(true) } })
   host.dataset.versionView = 'pretty'
-  settle()
+  const offs: Array<() => void> = [watchTrigger(trigger, on => motion(on))]
+  const listen = (target: EventTarget, type: string, fn: (e: Event) => void) => { target.addEventListener(type, fn); offs.push(() => target.removeEventListener(type, fn)) }
+  if (media) listen(media, 'change', () => { if (revealed) { revealed = false; motion(true) } })
 
   return () => {
     if (disposed) return
     disposed = true
     offs.forEach(off => off())
-    observer.disconnect()
     for (const { node, rest } of items) Object.assign(node.style, rest)
     delete host.dataset.versionView
   }
