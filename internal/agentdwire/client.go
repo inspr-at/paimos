@@ -181,3 +181,10 @@ func (c Client) AccountEnvironment(ctx context.Context, accountID, daemonID, har
 	}
 	return out, err
 }
+
+// Statusline sends only normalized quota observations over the private socket.
+func (c Client) Statusline(ctx context.Context, req agentd.StatuslineRequest) (agentd.StatuslineResponse, error) {
+	var out agentd.StatuslineResponse
+	err := c.lifecycleRequest(ctx, "POST", "/v1/statusline", req, &out)
+	return out, err
+}

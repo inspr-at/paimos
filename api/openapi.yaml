@@ -4389,6 +4389,47 @@ paths:
         '200': {description: Cascade and defaults, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountCatalog'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/signals:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    put:
+      operationId: reportAccountSignals
+      description: Only the registering agent may publish reading support and the tenant-keyed quota fingerprint. Never accepts a vendor identity, email, path or credential.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountSignals'}}}}
+      responses:
+        '204': {description: Accepted}
+  /agent-accounts/{accountId}/statusline:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    get:
+      operationId: getAccountStatusline
+      description: Registering agent reads explicit human consent. A read writes no settings.
+      security: *auth
+      responses:
+        '200': {description: Consent, content: {application/json: {schema: {$ref: '#/components/schemas/StatuslineConsent'}}}}
+    put:
+      operationId: setAccountStatusline
+      description: A person may opt in only for a Claude account enrolled on a computer they approved, or a workspace owner or admin may opt in for any Claude account. account.manage alone is not enough. The enrolled daemon applies the change locally and preserves a status line it did not install.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StatuslineConsent'}}}}
+      responses:
+        '200': {description: Consent, content: {application/json: {schema: {$ref: '#/components/schemas/StatuslineConsent'}}}}
+  /agent-accounts/{accountId}/quota-key:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    post:
+      operationId: getTenantQuotaKey
+      description: Registering agents with account.probe only. Stable tenant HMAC key for local fingerprinting; never log, journal, pass to children or include in public projections. No vendor credentials involved.
+      security: *auth
+      responses:
+        '200':
+          description: Private key; Cache-Control no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [key]
+                properties:
+                  key: {type: string, contentEncoding: base64}
   /agent-accounts/{accountId}/metadata:
     put:
       operationId: replaceAgentAccountMetadata
@@ -6145,7 +6186,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.3']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.4']}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
@@ -9693,6 +9734,9 @@ components:
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
       properties:
+        vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
+        limit_window: {type: string, enum: [5h, weekly, monthly, other]}
+        limit_resets_at: {type: string, format: date-time}
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
         needs_attention: {type: boolean, description: "Bound run waiting or an exact bound-run approval pending. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
         attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
@@ -9935,6 +9979,9 @@ components:
       type: object
       required: [project_id, harness, management_mode, role, phase, activity, ticket, since, heartbeat_at]
       properties:
+        vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
+        limit_window: {type: string, enum: [5h, weekly, monthly, other]}
+        limit_resets_at: {type: string, format: date-time}
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
         needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Shared inbox attention and nonblocking replies do not set this flag; stopped sessions are false."}
         attention_reasons: {type: array, description: "Authorized content-free reasons; withheld without harness.read at this project.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
@@ -10037,6 +10084,8 @@ components:
         effective_model: {type: string}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
         error_code: {type: string, enum: [event_stream_bound, app_server_protocol, child_exit_failed, turn_failed, child_stop_failed, ownership_lost, reporter_unavailable, workspace_conflict, decision_refused, vendor_limit]}
+        limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Present only when reported by the vendor.}
+        limit_resets_at: {type: string, format: date-time, description: Present only when reported by the vendor.}
         git_commits:
           type: array
           maxItems: 20
@@ -10300,6 +10349,10 @@ components:
           required: [id, registered_by_principal_id, state, created_at]
           properties:
             ongoing_use_approved: {type: boolean, description: True for an unpaired account or an explicitly approved connected pairing enrollment. State and other dispatch fences still apply.}
+            reading_support: {type: string, enum: [every_5_min, first_run, statusline, none]}
+            quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
+            statusline_enabled: {type: boolean}
+            statusline_opt_in: {type: string, enum: [own, workspace], description: Present when this person may change the status line. own means they approved the paired computer. workspace means they are a workspace owner or admin and did not. Omitted when they cannot opt in.}
             id: {type: string, format: uuid}
             registered_by_principal_id: {type: string, format: uuid}
             state: {type: string, enum: [available, draining, unavailable]}
@@ -10313,6 +10366,20 @@ components:
               description: Null preserves legacy tenant-harness catalog policy. Explicit arrays restrict model/effort pins; empty blocks new reservations.
               items: {type: string, format: uuid}
             windows: {type: array, items: {$ref: '#/components/schemas/AllowanceWindow'}}
+    AccountSignals:
+      type: object
+      additionalProperties: false
+      required: [reading_support, quota_fingerprint]
+      properties:
+        reading_support: {type: string, enum: [every_5_min, first_run, statusline, none]}
+        quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$', description: Empty until a stable non-email vendor account ID is verified.}
+    StatuslineConsent:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+        plan: {type: string, maxLength: 240, readOnly: true}
     AgentAccountMetadataWrite:
       type: object
       additionalProperties: false

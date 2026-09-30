@@ -42,6 +42,9 @@ export function mergeSessionEvidence(previous: HarnessSession | undefined, incom
   return {
     ...incoming,
     has_problem: incoming.has_problem ?? previous.has_problem,
+    vendor_limited: incoming.vendor_limited ?? previous.vendor_limited,
+    limit_window: incoming.limit_window ?? previous.limit_window,
+    limit_resets_at: incoming.limit_resets_at ?? previous.limit_resets_at,
     needs_attention: incoming.needs_attention ?? previous.needs_attention,
     attention_reasons: incoming.attention_reasons ?? previous.attention_reasons,
     run_status: incoming.run_status !== undefined ? incoming.run_status : previous.run_status,

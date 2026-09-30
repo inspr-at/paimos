@@ -18,9 +18,14 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/ownedprocess"
+
+	"github.com/inspr-at/paimos/internal/capacity"
 )
 
 type wireProcess struct {
+	limitVendor   string
+	vendorLimited atomic.Bool
+
 	identity    ownedprocess.Identity
 	lifetime    *ownedprocess.Lifetime
 	cmd         *exec.Cmd
@@ -173,8 +178,18 @@ func (p *wireProcess) failStart(err error) (Process, error) {
 	p.closeReader()
 	_ = p.Stop(context.Background())
 	_ = p.finishReader()
+	// A vendor refusal is a settled run only when the owned child exit is proven.
+	// Return that process to the supervisor for normal vendor_limit telemetry.
+	if p.vendorLimited.Load() && p.ProcessExited() {
+		return &refusedProcess{p}, nil
+	}
 	return nil, err
 }
+
+// A refused startup exposes exit evidence and no controls.
+type refusedProcess struct{ *wireProcess }
+
+func (*refusedProcess) Control(context.Context, string, string) error { return ErrNotOwned }
 
 // discardReader is also available to the supervisor if startup fails after
 // Start succeeds but before a monitor takes ownership of Wait.
@@ -338,6 +353,9 @@ func (p *wireProcess) request(ctx context.Context, protocol, method string, para
 		return nil, errors.New("adapter protocol rejected request")
 	}
 	if len(response.Error) > 0 && string(response.Error) != "null" {
+		if hit := capacity.VendorLimit(p.limitVendor, raw, nil, time.Now().UTC()); hit != nil {
+			p.emitVendorLimit(hit)
+		}
 		// Only this explicit rejection proves steer did not inject input.
 		// Never expose raw vendor errors or retry transport/malformed responses.
 		var rejection struct {

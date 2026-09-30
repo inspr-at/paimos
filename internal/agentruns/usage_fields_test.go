@@ -251,3 +251,26 @@ func TestRunStoresCachedAndReasoningTokens(t *testing.T) {
 	}
 	f.call(t, f.agent, "POST", path, map[string]any{"sequence": 2, "kind": "usage", "reasoning_tokens_delta": -1}, 400, nil)
 }
+
+func TestVendorLimitTelemetryPersistsBoundsAndRetries(t *testing.T) {
+	f := setup(t)
+	v := f.claim(t, f.run(t, f.order(t, nil)))
+	path := "/api/runs/" + v.ID + "/telemetry"
+	reset := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	body := map[string]any{"sequence": 1, "kind": "finished", "status": "failed", "error_code": "vendor_limit", "limit_window": "5h", "limit_resets_at": reset}
+	f.call(t, f.agent, "POST", path, body, 200, nil)
+	f.call(t, f.agent, "POST", path, body, 200, nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var code, window string
+		var at time.Time
+		if err := tx.QueryRow(t.Context(), `SELECT error_code,limit_window,limit_resets_at FROM run_telemetry WHERE run_id=$1 AND sequence=1`, v.ID).Scan(&code, &window, &at); err != nil {
+			return err
+		}
+		if code != "vendor_limit" || window != "5h" || !at.Equal(reset) {
+			t.Fatal("vendor bounds not persisted")
+		}
+		return nil
+	})
+	body["limit_window"] = "weekly"
+	f.call(t, f.agent, "POST", path, body, 409, nil)
+}

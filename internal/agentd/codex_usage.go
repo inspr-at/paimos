@@ -8,6 +8,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
@@ -24,6 +25,29 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 	if method == "account/rateLimits/updated" || method == "rateLimits/updated" {
 		p.emitCapacity(raw, "update")
 		return
+	}
+	// Account quota notifications above belong to this authenticated connection.
+	// Turn errors must additionally name its owned thread and acknowledged turn.
+	var limitBinding struct {
+		Params struct {
+			ThreadID string `json:"threadId"`
+			TurnID   string `json:"turnId"`
+			Turn     struct {
+				ID string `json:"id"`
+			} `json:"turn"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(raw, &limitBinding) == nil && p.threadID != "" && limitBinding.Params.ThreadID == p.threadID {
+		turn := firstNonempty(limitBinding.Params.TurnID, limitBinding.Params.Turn.ID)
+		if turn != "" {
+			if hit := capacity.VendorLimit(Codex, raw, p.lastCapacity, time.Now().UTC()); hit != nil {
+				if p.acknowledged && turn == p.turnID {
+					p.emitVendorLimit(hit)
+				} else if !p.acknowledged && p.pendingLimit == nil {
+					p.pendingLimit, p.pendingLimitTurn = hit, turn
+				}
+			}
+		}
 	}
 	if method == "thread/settings/updated" {
 		var frame struct {
@@ -233,6 +257,10 @@ func (p *codexProcess) startTurn(ctx context.Context, r StartRequest) error {
 		return errors.New("Codex turn start failed")
 	}
 	p.turnID, p.acknowledged = turn, true
+	if p.pendingLimit != nil && p.pendingLimitTurn == turn {
+		p.emitVendorLimit(p.pendingLimit)
+	}
+	p.pendingLimit, p.pendingLimitTurn = nil, ""
 	if p.usage != nil {
 		// Usage with an explicit pre-ack turnId must agree with this result.
 		if err := p.usage.BindTurn(turn); err != nil {

@@ -194,6 +194,21 @@ func TestStateEvidenceTracksRunOutcomeAndApprovalResolution(t *testing.T) {
 	})
 	check(false, true, "failed")
 	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,limit_window,limit_resets_at) VALUES($1,$2,1,'finished','vendor_limit','5h',now()+interval '1 hour')`, f.person.TenantID, run)
+		return err
+	})
+	check(false, false, "failed")
+	for _, endpoint := range []string{base + "/" + id, "/api/harness-sessions/live?include_inactive=true"} {
+		data := decode(t, f.call(f.person, "GET", endpoint, nil, ""))
+		if items, ok := data["items"].([]any); ok {
+			data = items[0].(map[string]any)
+		}
+		if data["vendor_limited"] != true || data["limit_window"] != "5h" || data["limit_resets_at"] == nil {
+			t.Fatal("missing vendor limit state")
+		}
+	}
+
+	f.tx(t, f.person, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='running' WHERE id=$1`, run); err != nil {
 			return err
 		}
