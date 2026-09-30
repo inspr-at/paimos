@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import type { AgentAccount, AgentRun, HarnessSession, ModelProfile } from '../src/lib/agents'
+import type { CapacityWait } from '../src/lib/capacityWait'
 import type { WorkOrder } from '../src/lib/startAgent'
 
 const agentId = 'a0000000-0000-4000-8000-000000000001'
@@ -12,7 +13,7 @@ const accountId = 'ac000000-0000-4000-8000-000000000001'
 const spareAccountId = 'ac000000-0000-4000-8000-000000000002'
 const laptopAccountId = 'ac000000-0000-4000-8000-000000000003'
 
-export async function mockStartAgent(page: Page, options: { offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'retry' | 'pi' | 'provisional' } = {}) {
+export async function mockStartAgent(page: Page, options: { wait?: CapacityWait; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'retry' | 'pi' | 'provisional' } = {}) {
   const work = fixtures()
   await mockWork(page, work, { admin: true })
   const profile: ModelProfile = { id: profileId, slug: 'Build · deliberate', harness: 'codex', family: 'openai', model: 'workspace-build', effort: 'high', tier: 'standard', enabled: true }
@@ -20,7 +21,7 @@ export async function mockStartAgent(page: Page, options: { offline?: boolean; u
   const now = Date.now()
   const span = { starts_at: new Date(now - 60_000).toISOString(), ends_at: new Date(now - 60_000 + 5 * 3_600_000).toISOString() }
   const reasons = [...(options.offline ? ['probe'] as const : []), ...(options.unavailable ? ['state'] as const : []), ...(options.catalog === 'empty-grants' ? ['models'] as const : [])]
-  const available = reasons.length === 0 && options.catalog !== 'empty-grants'
+  const available = !options.wait && reasons.length === 0 && options.catalog !== 'empty-grants'
   const efforts = options.catalog === 'empty-grants' ? [] : options.catalog === 'pi'
     ? [{ effort: 'xhigh', model_profile_id: profileId, version: '2' }, { effort: 'high', model_profile_id: spareProfileId, version: '2' }]
     : [{ effort: 'high', model_profile_id: profileId, version: '1' }]
@@ -30,6 +31,7 @@ export async function mockStartAgent(page: Page, options: { offline?: boolean; u
     { model: 'sk-live-token', family: 'anthropic', efforts: [{ effort: 'high', model_profile_id: 'b1000000-0000-4000-8000-000000000004', version: '2' }] },
   ]
   const primary = {
+    wait: options.wait,
     id: accountId, label: 'Workspace account', plan: 'Pro', registered_by_principal_id: agentId,
     state: options.unavailable ? 'draining' : 'available', last_probe_at: new Date(now - (options.offline ? 180_000 : 1000)).toISOString(), last_probe_ok: !options.offline,
     available, unavailable_reasons: reasons, remaining_fraction: available ? 0.8 : null,
@@ -103,6 +105,12 @@ export async function mockStartAgent(page: Page, options: { offline?: boolean; u
     if (path.endsWith('/message-targets')) return json([])
     if (path.endsWith('/messages')) return json({ items: [], next_after: 0 })
     if (path === '/api/runs') return json({ items: state.runs.filter(r => !url.searchParams.get('work_order') || r.work_order_id === url.searchParams.get('work_order')), next_cursor: null })
+    if (path.endsWith('/capacity-override') && method === 'POST') {
+      const run = state.runs.find(r => path === `/api/runs/${r.id}/capacity-override`)
+      if (!run) return json({ error: 'not found' }, 404)
+      run.capacity_override = 'now'; run.wait = undefined
+      return json(run)
+    }
     if (path.startsWith('/api/runs/')) return json(state.runs.find(r => path.endsWith(r.id)))
     if (path === '/api/nodes' && url.searchParams.get('kind') === 'work_order') return json({ items: state.orders.map(o => ({ id: o.node_id })), next_cursor: null })
     if (path === '/api/nodes/order-1') return json({ id: 'order-1', title: 'PHAROS-11: Connect Hetzner Cloud for managed provisioning' })
@@ -124,7 +132,7 @@ export async function mockStartAgent(page: Page, options: { offline?: boolean; u
         state.revoked = true
         return json({ error: 'requested account must belong to the run agent and allow the model profile' }, 409)
       }
-      const run: AgentRun = { id: 'run-1', work_order_id: 'order-1', agent_principal_id: String(body!.agent_principal_id), model_profile_id: String(body!.model_profile_id), status: 'queued', model_evidence: 'unverified', requested_model: profile.model, input_tokens: 0, output_tokens: 0, cost_micros: 0, created_at: new Date().toISOString() }
+      const run: AgentRun = { capacity_override: body?.capacity_override === 'now' ? 'now' : '', wait: body?.capacity_override === 'now' ? undefined : options.wait, id: 'run-1', work_order_id: 'order-1', agent_principal_id: String(body!.agent_principal_id), model_profile_id: String(body!.model_profile_id), status: 'queued', model_evidence: 'unverified', requested_model: profile.model, input_tokens: 0, output_tokens: 0, cost_micros: 0, created_at: new Date().toISOString() }
       if (body!.requested_account_id) run.requested_account_id = String(body!.requested_account_id)
       state.runs.push(run)
       return json(run, 201)

@@ -198,12 +198,13 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 		t.Fatal("full-length label did not survive storage")
 	}
 	callStatus(t, mod, &admin, "", "PUT", path, strings.Replace(body, fullLabel, fullLabel+"x", 1), 400, nil)
-	// A second, unmeasured unit makes even b's aggregate unknown.
+	// A second, unmeasured unit makes even b's aggregate unknown. b is the
+	// only runnable account, so it is preselected without claiming a fraction.
 	callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/"+b.ID+"/windows", windowBody(time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "tokens", 100, "unrestricted"), 201, nil)
 	callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/catalog", "", 200, &catalog)
 	h = catalog.Hosts[0].Harnesses[0]
-	if h.DefaultAccountID != nil {
-		t.Fatal("unknown aggregate was recommended as measured allowance")
+	if h.DefaultAccountID == nil || *h.DefaultAccountID != b.ID {
+		t.Fatal("only runnable unread account was not preselected")
 	}
 	for _, v := range h.Accounts {
 		if v.ID == b.ID && (!v.Available || v.RemainingFraction != nil || len(v.Windows) != 2) {
@@ -308,10 +309,40 @@ func TestCatalogProvisionalAllowanceIsUnknown(t *testing.T) {
 				t.Fatalf("default must rank measured allowance, then ID: %+v", h)
 			}
 			h = buildCatalog([]Account{a}, profiles, nil, "build", now).Hosts[0].Harnesses[0]
-			if (h.DefaultAccountID != nil) != (tc.known && tc.available) {
-				t.Fatalf("unknown or ineligible account got a default: %+v", h)
+			if tc.available {
+				if h.DefaultAccountID == nil || *h.DefaultAccountID != a.ID {
+					t.Fatalf("sole runnable account was not the default: %+v", h)
+				}
+			} else if h.DefaultAccountID != nil {
+				t.Fatalf("ineligible account got a default: %+v", h)
 			}
 		})
+	}
+}
+
+func TestCatalogPreselectsOnlyRunnableUnreadAccount(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	yes := true
+	fresh := Window{Allowance: 1, StartsAt: now.Add(-time.Minute), EndsAt: now.Add(5 * time.Minute), PaceModel: "unrestricted", Provisional: true, capacityReadAt: &now, capacityAllowed: true, capacityKind: "refresh"}
+	base := Account{DaemonID: "host", Harness: "codex", State: "available", MaxParallel: 1, LastProbeAt: &now, LastProbeOK: &yes}
+	unread, draining := base, base
+	unread.ID, unread.Windows = "unread", []Window{fresh}
+	draining.ID, draining.State, draining.Windows = "drain", "draining", []Window{fresh}
+	profiles := []catalogProfile{{ID: "p", Harness: "codex", Model: "model", Effort: "high"}}
+	h := buildCatalog([]Account{draining, unread}, profiles, nil, "build", now).Hosts[0].Harnesses[0]
+	if h.DefaultAccountID == nil || *h.DefaultAccountID != unread.ID {
+		t.Fatal("sole runnable unread account was not preselected")
+	}
+	for _, account := range h.Accounts {
+		if account.ID == unread.ID && (account.RemainingFraction != nil || !account.Available) {
+			t.Fatalf("unread account claimed a measured fraction: %+v", account)
+		}
+	}
+	other := unread
+	other.ID = "other"
+	h = buildCatalog([]Account{unread, other}, profiles, nil, "build", now).Hosts[0].Harnesses[0]
+	if h.DefaultAccountID != nil {
+		t.Fatal("two unread accounts were ranked")
 	}
 }
 

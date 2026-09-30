@@ -107,6 +107,7 @@ export interface PairingCall { path: string; method: string; body: unknown }
 
 export async function mockPairing(page: Page, reviewOverrides: Record<string, unknown> = {}, computerOverrides: Record<string, unknown> = {}) {
   const calls: PairingCall[] = []
+  await page.route('**/api/agent-accounts/*/capacity/approve', route => { calls.push({ path: new URL(route.request().url()).pathname, method: 'POST', body: route.request().postDataJSON() }); return route.fulfill({ status: 204 }) })
   await page.route('**/api/me/permissions*', route => route.fulfill({
     json: { workspace: { role: { id: 'role-admin', key: 'admin', name: 'Admin' }, permissions: ['account.manage', 'account.read', 'authz.read'] }, project: null },
   }))
@@ -127,7 +128,7 @@ export async function mockPairing(page: Page, reviewOverrides: Record<string, un
       return route.fulfill({ json: base({
         state: 'approved', computer_id: COMPUTER, computer_state: 'connected', revision: 2, setup_state: 'approved',
         verification: verification((body as { verification: string }).verification),
-        enrollments: [enrollment(ACCOUNT_2, 'codex-1', 'codex', 'Codex work')],
+        enrollments: [enrollment(ACCOUNT, 'cursor-1', 'cursor', 'Cursor work'), enrollment(ACCOUNT_2, 'codex-1', 'codex', 'Codex work')].filter(item => ((body as { selected_account_keys: string[] }).selected_account_keys ?? []).includes(item.account_key)),
       }) })
     }
     if (path.endsWith('/deny') && method === 'POST') return route.fulfill({ json: base({ state: 'denied' }) })

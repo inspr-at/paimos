@@ -14,7 +14,7 @@ import {
   chooseInstallMethod, homebrewPendingNote, installMethods, readPairingInstallMethod, writePairingInstallMethod,
   isAddHarness, matchOngoingLimit, pairingScopeKey, setHarnessAccount,
   addHarnessTargetProblem, applyComputerListRefresh, discardPairingReads, formatAllowanceMoment,
-  ongoingLimitAccounts, pairingReadGeneration, unsupportedVerification,
+  ongoingLimitAccounts, pairingReadGeneration, unsupportedVerification, approvePairedAccounts,
   type OngoingLimitDraft, type PairingGuide, type PairingView, type RequestedAccount,
 } from '../src/lib/agentPairing.ts'
 
@@ -1064,6 +1064,37 @@ test('legacy, count-only and truncation-only attention never call an omitted acc
   assert.equal(capped65.parsed.harness_details?.codex?.attention_truncated, true)
   assert.equal(describeEnrollmentStatus(capped65.parsed, { account_id: capped65.blocked[32]!, harness: 'codex' }), 'Needs attention')
   assert.equal(describeEnrollmentStatus(capped65.parsed, { account_id: capped65.healthy, harness: 'codex' }).includes('Ready'), false)
+})
+
+test('pairing account approval is selected, idempotent and never creates windows', async () => {
+  const calls: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    calls.push(String(input))
+    return new Response(null, { status: 204 })
+  }) as typeof fetch
+  const paired = view({ state: 'approved', enrollments: [enrollment(), enrollment({ account_id: ACCOUNT_2, account_key: 'other' })] })
+  const key = paired.enrollments[0]!.account_key
+  assert.deepEqual(await approvePairedAccounts(paired, [key], person), [ACCOUNT])
+  assert.deepEqual(await approvePairedAccounts(paired, [key], person), [ACCOUNT])
+  assert.deepEqual(calls, [`/api/agent-accounts/${ACCOUNT}/capacity/approve`, `/api/agent-accounts/${ACCOUNT}/capacity/approve`])
+  await assert.rejects(() => approvePairedAccounts(paired, [key], agent), /Only a person/)
+  await assert.rejects(() => approvePairedAccounts(paired, ['missing'], person), /not connected/)
+  assert.equal(calls.length, 2)
+})
+
+test('account approval stops between accounts when the signed-in scope changes', async () => {
+  let finish!: (response: Response) => void
+  let calls = 0
+  globalThis.fetch = (async () => {
+    calls++
+    return new Promise<Response>(resolve => { finish = resolve })
+  }) as typeof fetch
+  const paired = view({ state: 'approved', enrollments: [enrollment(), enrollment({ account_id: ACCOUNT_2, account_key: 'other' })] })
+  const pending = approvePairedAccounts(paired, paired.enrollments.map(e => e.account_key), person)
+  discardPairingReads()
+  finish(new Response(null, { status: 204 }))
+  await assert.rejects(pending, (error: PairingError) => error.code === 'session_reset')
+  assert.equal(calls, 1)
 })
 
 test('Homebrew commands are additive, bounded and published by this instance', async () => {

@@ -31,10 +31,11 @@ async function openAgents(page: Page, path = '/agents') {
   await expect(page.locator('.agents-page .row').first()).toBeVisible()
 }
 // Account management lives in Settings → Accounts (AEON-299).
-async function grantAccounts(page: Page) {
+async function grantAccounts(page: Page, manage = false) {
   await page.route('**/api/me/permissions*', route => {
     const effective = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
     effective.workspace.permissions.push('account.read')
+    if (manage) effective.workspace.permissions.push('account.manage')
     return route.fulfill({ json: effective })
   })
 }
@@ -426,7 +427,7 @@ test('held action requests resolve or dismiss with an optional note, by button o
 
 test('accounts show what is left and the pace; admins can drain and resume', async ({ page }) => {
   const { calls } = await setup(page)
-  await grantAccounts(page)
+  await grantAccounts(page, true)
   await page.goto('/settings/accounts')
   const accounts = page.getByRole('region', { name: 'Accounts and pacing' })
   const claude = accounts.locator('.account').filter({ hasText: 'Claude Max' })
@@ -440,7 +441,7 @@ test('accounts show what is left and the pace; admins can drain and resume', asy
   await expect(accounts.locator('.account').filter({ hasText: 'Codex Pro' })).toContainText('Room to spare')
   const codex = accounts.locator('.account').filter({ hasText: 'Codex Pro' })
   await codex.hover()
-  await codex.getByRole('button', { name: 'Drain' }).click()
+  await codex.getByRole('switch', { name: /Agents may use it/ }).click()
   await page.getByRole('dialog', { name: 'Drain Codex Pro?' }).getByRole('button', { name: 'Drain account' }).click()
   await expect(codex).toContainText('Draining')
   expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ state: 'draining' })

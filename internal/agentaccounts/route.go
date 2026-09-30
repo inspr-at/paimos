@@ -17,6 +17,7 @@ import (
 )
 
 type runRow struct {
+	CapacityOverride      string
 	Purpose               string
 	VerificationAccountID *string
 	VerificationExpiresAt *time.Time
@@ -38,11 +39,11 @@ func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 	err := tx.QueryRow(ctx, `
 		SELECT r.id::text, r.agent_principal_id::text, r.model_profile_id::text, r.account_id::text,
          r.status, r.daemon_id, r.daemon_generation, r.requested_account_id::text,
-         r.purpose, e.account_id::text, e.verification_expires_at
+         r.purpose, e.account_id::text, e.verification_expires_at, r.capacity_override
   FROM agent_runs r LEFT JOIN agent_pairing_enrollments e
    ON e.tenant_id=r.tenant_id AND e.verification_run_id=r.id
   WHERE r.id = $1::uuid FOR UPDATE OF r`, id).
-		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation, &run.RequestedAccountID, &run.Purpose, &run.VerificationAccountID, &run.VerificationExpiresAt)
+		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation, &run.RequestedAccountID, &run.Purpose, &run.VerificationAccountID, &run.VerificationExpiresAt, &run.CapacityOverride)
 	if isNoRows(err) {
 		return runRow{}, fail(http.StatusNotFound, "run not found")
 	}
@@ -147,7 +148,7 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		estimate := windowEstimate(window, estimates)
 		tag, err := tx.Exec(ctx, `
 			UPDATE account_allowance_windows
-			SET reserved = reserved + $2, capacity_refresh_run=CASE WHEN capacity_kind='refresh' OR capacity_read_at < $4::timestamptz-interval '10 minutes' THEN $3::uuid ELSE capacity_refresh_run END
+			SET reserved = reserved + $2, capacity_refresh_run=CASE WHEN capacity_kind IN ('refresh','blind') OR capacity_read_at < $4::timestamptz-interval '10 minutes' THEN $3::uuid ELSE capacity_refresh_run END
 			WHERE id = $1::uuid AND used + reserved + $2 <= allowance`, window.ID, estimate, run.ID, now)
 		if err != nil {
 			return RouteResult{}, err
@@ -197,23 +198,20 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if err != nil {
 		return err
 	}
-	if len(activeWindows(all[accountID], now)) == 0 {
-		return fail(http.StatusConflict, "reserved capacity is not eligible")
-	}
-	active := activeWindows(all[accountID], now)
-	if run.Purpose != "pairing_verification" && len(active) > 0 && active[0].capacityReadAt != nil {
-		schedule, err := routingSchedule(ctx, tx, a)
+	if run.Purpose != "pairing_verification" {
+		used, err := occupancy(ctx, tx)
 		if err != nil {
 			return err
 		}
-		if err := applyCapacityPacing(ctx, tx, a, active, now, schedule); err != nil {
+		_, wait, err := admission(ctx, tx, a, all[accountID], now, used[accountID]-1, run, true)
+		if err != nil {
 			return err
 		}
-		for _, w := range active {
-			if w.capacityBudget != nil && float64(w.Reserved) > *w.capacityBudget {
-				return fail(http.StatusConflict, "reserved pacing is not eligible")
-			}
+		if wait != nil {
+			return fail(http.StatusConflict, "reserved capacity is not eligible: "+wait.Code)
 		}
+	} else if len(activeWindows(all[accountID], now)) == 0 {
+		return fail(http.StatusConflict, "reserved capacity is not eligible")
 	}
 	var invalidCapacity bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$1 AND r.state='active' AND w.capacity_read_at IS NOT NULL AND (NOT w.capacity_allowed OR w.capacity_retired OR (w.capacity_read_at<$2::timestamptz-interval '10 minutes' AND w.capacity_refresh_run IS DISTINCT FROM r.run_id) OR w.ends_at<=$2 OR w.used+w.reserved>w.allowance))`, run.ID, now).Scan(&invalidCapacity); err != nil {
@@ -369,33 +367,20 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		if !probeFresh(account, now) || usedSlots[account.ID] >= account.MaxParallel {
 			continue
 		}
-		active := activeWindows(windows[account.ID], now)
-		if len(active) == 0 && run.Purpose != "pairing_verification" {
-			refresh := expiredCapacityRefresh(account, windows[account.ID], now)
-			if refresh != nil {
-				active = []Window{*refresh}
+		var active []Window
+		if run.Purpose == "pairing_verification" {
+			for _, w := range activeWindows(windows[account.ID], now) {
+				if windowForRun(w, run) {
+					active = append(active, w)
+				}
 			}
-		}
-		eligible := active[:0]
-		for _, w := range active {
-			if windowForRun(w, run) {
-				eligible = append(eligible, w)
-			}
-		}
-		active = eligible
-		if run.Purpose != "pairing_verification" && len(active) > 0 && active[0].capacityReadAt != nil {
-			schedule, err := routingSchedule(ctx, tx, account)
+		} else {
+			var wait *CapacityWait
+			active, wait, err = admission(ctx, tx, account, windows[account.ID], now, usedSlots[account.ID], run, false)
 			if err != nil {
 				return Account{}, nil, err
 			}
-			if err := applyCapacityPacing(ctx, tx, account, active, now, schedule); err != nil {
-				return Account{}, nil, err
-			}
-			stale := false
-			for _, w := range active {
-				stale = stale || w.capacityReadAt != nil && (w.capacityKind == "refresh" || now.Sub(*w.capacityReadAt) > 10*time.Minute)
-			}
-			if stale && usedSlots[account.ID] > 0 {
+			if wait != nil {
 				continue
 			}
 		}
@@ -446,7 +431,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		if w.ID != "" {
 			continue
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_read_at,capacity_allowed,capacity_source) SELECT tenant_id,id,$2,$3,'percent',1,0,'unrestricted',0,'refresh',$4,true,'estimate' FROM agent_accounts WHERE id=$1 RETURNING id::text`, w.AccountID, w.StartsAt, w.EndsAt, w.capacityReadAt).Scan(&w.ID); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_read_at,capacity_allowed,capacity_source,capacity_bucket) SELECT tenant_id,id,$2,$3,'percent',1,0,'unrestricted',0,$5,$4,true,'estimate',$6 FROM agent_accounts WHERE id=$1 RETURNING id::text`, w.AccountID, w.StartsAt, w.EndsAt, w.capacityReadAt, w.capacityKind, w.capacityBucket).Scan(&w.ID); err != nil {
 			return Account{}, nil, err
 		}
 	}
@@ -507,7 +492,7 @@ func windowEstimate(w Window, estimates map[string]int64) int64 {
 func expiredCapacityRefresh(a Account, windows []Window, now time.Time) *Window {
 	var latest time.Time
 	for _, w := range windows {
-		if w.capacityReadAt == nil || w.capacityKind == "refresh" {
+		if w.capacityReadAt == nil || synthetic(w) {
 			continue
 		}
 		if !w.capacityRetired && (w.EndsAt.After(now) || !w.capacityAllowed && now.Sub(*w.capacityReadAt) <= 10*time.Minute) {

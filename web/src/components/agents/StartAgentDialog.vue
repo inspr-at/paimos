@@ -3,7 +3,8 @@
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { listNodes, type WorkNode } from '../../lib/api'
 import { can } from '../../lib/authz'
-import { getRun, listAllSessions, message, type AgentRun, type HarnessSession } from '../../lib/agents'
+import { useSession } from '../../stores/session'
+import { getRun, runNowOnce, listAllSessions, message, type AgentRun, type HarnessSession } from '../../lib/agents'
 import {
   AUTHOR_FAMILIES, authorFamilyFor, chooseStep, emptyChoice, emptyTouch, familyLabel, fetchAccountCatalog, fillDefaults, presentCascade, sessionReport, workRoleFor,
   type AgentAccountCatalog, type AuthorFamily, type CascadeChoice, type CascadeStep, type CascadeTouch, type CatalogGap, type RequestedRun,
@@ -16,6 +17,7 @@ import AppIcon from '../AppIcon.vue'
 // Shared by /agents and TicketWorkspace. The cascade is host, harness, account,
 // model, then thinking. Each later step is filled only from the catalog grant.
 const agents = useAgents()
+const session = useSession()
 const uid = useId()
 const dialog = ref<HTMLDialogElement>()
 const searchInput = ref<HTMLInputElement>()
@@ -62,7 +64,7 @@ const selectionVisible = computed(() => !!view.value.profileId && view.value.eff
 const FILLER = [/^Only one (harness|model) /, /^This model grants one thinking level/, /^These harnesses have an enrolled account/, /^Only one host has/]
 const note = (text: string) => text && !FILLER.some(pattern => pattern.test(text)) ? text : ''
 // The status box below already states an unavailable account's reason.
-const notes = computed(() => ({ host: note(view.value.notes.host), harness: note(view.value.notes.harness), account: view.value.status.detail.includes(view.value.notes.account) ? '' : view.value.notes.account, model: note(view.value.notes.model), effort: note(view.value.notes.effort) }))
+const notes = computed(() => ({ host: note(view.value.notes.host), harness: note(view.value.notes.harness), account: selectedWait.value || view.value.status.detail.includes(view.value.notes.account) ? '' : view.value.notes.account, model: note(view.value.notes.model), effort: note(view.value.notes.effort) }))
 // A closed select cannot wrap: on phones the account option keeps name and plan, and
 // the note below it carries the allowance.
 const narrow = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 600px)').matches)
@@ -70,6 +72,8 @@ const narrowQuery = typeof window !== 'undefined' ? window.matchMedia('(max-widt
 const onNarrow = (event: MediaQueryListEvent) => { narrow.value = event.matches }
 narrowQuery?.addEventListener('change', onNarrow)
 const accountLabel = (label: string) => narrow.value ? label.split(' · ').slice(0, 2).join(' · ') : label
+const selectedWait = computed(() => catalog.value?.hosts.find(h => h.daemon_id === choice.value.hostId)?.harnesses.find(h => h.harness === choice.value.harness)?.accounts.find(a => a.id === choice.value.accountId)?.wait)
+const mayRunNow = computed(() => permitted.value && session.identity?.principal.kind === 'person')
 const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && !!ticket.value && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
 
 async function search(more = false) {
@@ -151,12 +155,12 @@ function changeTicket() {
   void search()
   void nextTick(() => searchInput.value?.focus())
 }
-async function submit() {
+async function submit(runNow = false) {
   if (!canSubmit.value || !ticket.value) return
   busy.value = true; error.value = ''
   const pinned = { ...view.value.requested }
   try {
-    const result = await startAgent({ ticket: ticket.value, agentId: view.value.agentId, profileId: view.value.profileId, accountId: choice.value.accountId })
+    const result = await startAgent({ ticket: ticket.value, agentId: view.value.agentId, profileId: view.value.profileId, accountId: choice.value.accountId, runNow })
     run.value = result.run; reused.value = result.reused; requested.value = pinned
     agents.recordRun(result.run)
     await refresh()
@@ -171,6 +175,13 @@ async function submit() {
       error.value = 'This account no longer allows that model. Nothing was queued, and another account was not used. Refresh the catalog, then choose a model it offers.'
     } else error.value = `${message(e)} Your selections are kept. Retrying checks for an existing work order and run first.`
   }
+  finally { busy.value = false }
+}
+async function overrideQueued() {
+  if (!run.value || busy.value) return
+  busy.value = true; checkError.value = ''
+  try { run.value = await runNowOnce(run.value.id); agents.recordRun(run.value) }
+  catch (e) { checkError.value = message(e) }
   finally { busy.value = false }
 }
 async function refresh() {
@@ -194,7 +205,7 @@ defineExpose({ open })
 
 <template>
   <dialog ref="dialog" class="launch-dialog" :aria-labelledby="`${uid}-title`" @cancel.prevent="close">
-    <form class="launch-card" @submit.prevent="submit">
+    <form class="launch-card" @submit.prevent="submit()">
       <header class="launch-head">
         <h2 :id="`${uid}-title`">Start agent</h2>
         <button type="button" class="icon-btn flat" aria-label="Close start agent" :disabled="busy" @click="close"><AppIcon name="close" /></button>
@@ -283,7 +294,7 @@ defineExpose({ open })
         <div v-if="catalogGap === 'failed' || catalogGap === 'forbidden'" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
         <div v-if="error" class="error" role="alert"><p>{{ error }}</p><button v-if="grantStale" type="button" class="btn sm" @click="loadCatalog">Refresh catalog</button></div>
         <p v-if="!permitted" class="note">Starting an agent requires work-order write and run-create permission.</p>
-        <footer><button type="button" class="btn" :disabled="busy" @click="close">Cancel</button><button type="submit" class="btn primary" :disabled="!canSubmit"><AppIcon :name="busy ? 'clock' : 'arrow'" :size="15" />{{ busy ? 'Queueing…' : 'Queue run' }}</button></footer>
+        <footer><button type="button" class="btn" :disabled="busy" @click="close">Cancel</button><button v-if="mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">Run now once</button><button type="submit" class="btn primary" :disabled="!canSubmit"><AppIcon :name="busy ? 'clock' : 'arrow'" :size="15" />{{ busy ? 'Queueing…' : 'Queue run' }}</button></footer>
       </template>
 
       <template v-else>
@@ -315,6 +326,7 @@ defineExpose({ open })
           </div>
           <p class="note mono">Run {{ run.id.slice(0, 8) }}</p>
         </div>
+        <button v-if="mayRunNow && run.status === 'queued' && run.wait?.run_now_allowed" type="button" class="btn" :disabled="busy" @click="overrideQueued">Run now once</button>
         <p v-if="checkError" class="error" role="alert">{{ checkError }}</p>
         <footer class="result-footer"><button type="button" class="btn ghost" :disabled="checking" @click="refresh"><AppIcon name="refresh" :size="14" />Refresh status</button><button type="button" class="btn" :disabled="busy" @click="close">Close</button><RouterLink class="btn primary" :to="managed ? `/agents/${managed.id}` : '/agents'" @click="close">{{ managed ? 'Open session' : 'Go to Agents' }}<AppIcon name="arrow" :size="15" /></RouterLink></footer>
       </template>

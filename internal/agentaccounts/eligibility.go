@@ -4,6 +4,7 @@ package agentaccounts
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,7 +28,11 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time) (map[string]
 		health.Accounts++
 		if account.State == "available" && probeFresh(account, now) && used[account.ID] < account.MaxParallel {
 			health.Available++
-			if allowanceHeadroom(account.Windows, now) {
+			windows, wait, err := admission(ctx, tx, account, account.Windows, now, used[account.ID], runRow{Purpose: "managed"}, false)
+			if err != nil {
+				return nil, err
+			}
+			if wait == nil && windowWait(windows, now) == nil {
 				health.Dispatchable++
 			}
 		}
@@ -75,22 +80,29 @@ func activeWindows(windows []Window, now time.Time) []Window {
 	}
 	// A current vendor denial fences even explicit manual budgets. Expired or
 	// replaced buckets are history, not permanent account constraints.
+	// Keys are sorted so the surviving windows do not depend on map iteration.
+	keys := make([]string, 0, len(latest))
+	for key := range latest {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
 	usable := !manual
-	for key, w := range latest {
+	kept := make([]string, 0, len(keys))
+	for _, key := range keys {
+		w := latest[key]
 		if w.capacityRetired {
-			delete(latest, key)
 			continue
 		}
 		if !w.capacityAllowed && now.Sub(*w.capacityReadAt) <= 10*time.Minute {
 			return out
 		}
 		if !now.Before(w.EndsAt) {
-			delete(latest, key)
 			continue
 		}
 		if !w.capacityAllowed || now.Before(w.StartsAt) {
 			usable = false
 		}
+		kept = append(kept, key)
 	}
 	for _, w := range windows {
 		if w.capacityReadAt == nil && !now.Before(w.StartsAt) && now.Before(w.EndsAt) {
@@ -98,8 +110,8 @@ func activeWindows(windows []Window, now time.Time) []Window {
 		}
 	}
 	if usable {
-		for _, w := range latest {
-			out = append(out, w)
+		for _, key := range kept {
+			out = append(out, latest[key])
 		}
 	}
 	return out

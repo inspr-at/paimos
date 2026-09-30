@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { machinesForAdd, type AddMachine } from '../../lib/addAccount'
 import { listPairingComputers, type PairingView } from '../../lib/agentPairing'
 import { accountName } from '../../lib/accountCascade'
-import type { AgentAccount } from '../../lib/agents'
+import { approveAccountCapacity, type AgentAccount } from '../../lib/agents'
 import { can } from '../../lib/authz'
 import { brand } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
@@ -85,6 +85,7 @@ async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
     const ok = await confirmAction({ title: `Drain ${accountName(account)}?`, body: 'Running work finishes; no new runs start on this account until you resume it.', confirmLabel: 'Drain account' })
     if (!ok) return
   }
+  if (state === 'available') await approveAccountCapacity(account.id)
   await agents.setAccount(account, state)
 }
 async function refreshAfterAllowance() {

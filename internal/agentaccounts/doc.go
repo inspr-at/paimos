@@ -19,12 +19,13 @@
 // keys. The first eligible role route chooses a profile; the eligible account
 // with greatest known minimum remaining fraction wins, with UUID tie-breaking.
 // Any provisional active window makes the aggregate fraction unknown (null),
-// including mixed measured/provisional windows. With no eligible measured
-// account there is no default. Provisional accounts can still be selected under
+// including mixed measured/provisional windows. With no measured account, the
+// only runnable account is the default. Several unread accounts stay unranked.
+// Provisional accounts can still be selected under
 // existing queue policy: available and per-window remaining/pace_remaining
 // describe ledger headroom, not proof of measured provider allowance. Unknown
 // usage is never measured zero. No role route means no default model, and absent
-// allowance means unavailable.
+// allowance can use the explicitly provisional first-run policy below.
 // Registry initialization remains with /api/models; the catalog is read-only.
 //
 // PUT /api/agent-accounts/{id}/metadata replaces label, plan, host_label and
@@ -52,9 +53,23 @@
 // aging <=window/6, stale beyond, expired at reset. Aging/stale readings allow
 // one estimated 1% refresh job per observation, with no other live run. If all
 // windows reset, a provisional five-minute 1% grant permits that same single
-// refresh; expiry/release never renews it without a new measured observation. Explicit vendor denial fails closed until explicit vendor recovery.
+// refresh; expiry/release never renews it without a new measured observation. A vendor denial waits until the latest denying reset, or one hour when a blind stop names none, then one recovery run per denial and daemon generation may read again. A fresh allowing reading, or a later run that finishes without vendor_limit, clears it.
 // Readings never approve pairing: POST {id}/capacity/approve requires a person
 // with account.manage and records the existing separate ongoing-use approval.
+// AEON-353 permits saving this approval after the person approves pairing,
+// before helper redemption; dispatch still requires redemption and a fresh probe.
+// Without prior readings Codex/Claude get one provisional first-reading run per
+// daemon generation. No parallel second run starts before a real reading. Blind
+// Grok/Cursor/Pi use blindDayPolicy: one at a time, three daily attempts during
+// the owner's work bands; nights/off days retain the normal parallel cap, and
+// runs that start outside those bands do not count toward the three. A
+// vendor_limit signal waits one hour, then one recovery run may try again.
+// That hour is a retry limit, not a guessed vendor window. Run now does not
+// skip the stop or the three-attempt cap. Night pacing stays off for blind
+// harnesses that have no reading.
+// Catalog and queued runs expose structured advisory waits; reservation and
+// claim recheck admission under the account lock. A person's per-run "now"
+// override skips schedule pacing, never holds, truth or ownership fences.
 // Active manual windows override pacing; fresh vendor denial still fences them. Percent reservations hold an
 // initial 1% per job; tokens/dollars never masquerade as vendor quota.
 // Settlement releases that hold without adding usage already in observations.
