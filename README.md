@@ -513,7 +513,8 @@ the socket or token and retains it through shutdown cleanup. The lock file is
 an owned mode-0600 regular file opened without following symlinks; it is retained
 across restarts and is never deleted or renamed by startup, recovery or shutdown.
 After acquiring the lock, startup compares the descriptor's device and inode
-with the named file and retries a bounded number of times if they differ.
+with the file named relative to the pinned private directory handle and retries
+a bounded number of times if they differ.
 Interrupted flock syscalls retry; only contention maps a flock error to busy.
 The descriptor is close-on-exec, so harness children cannot keep the lock alive.
 On macOS, a short directory flock serializes only the lock-file open: concurrent
