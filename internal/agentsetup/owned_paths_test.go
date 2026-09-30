@@ -67,6 +67,9 @@ func TestHomebrewRepositoryAllowlistAndMetadata(t *testing.T) {
 		if got := p.repositoryError(filepath.Join(prefix, "bin", "node")); (got == nil) != want {
 			t.Fatalf("prefix %s accepted=%v, want %v: %v", prefix, got == nil, want, got)
 		}
+		if !repositoryPathWithLstat(filepath.Join(prefix, "aeon-state"), p.lstat) {
+			t.Fatalf("private state accepted repository prefix %s", prefix)
+		}
 	}
 	for _, part := range []string{"/opt/homebrew", "/opt/homebrew/.git"} {
 		for _, bad := range []pathInfoFixture{
@@ -137,6 +140,13 @@ func TestHomebrewLayoutResolution(t *testing.T) {
 			t.Fatal("Homebrew exemption bypassed the workspace boundary")
 		}
 	}
+	state := filepath.Join(prefix, "aeon-state")
+	if err := ValidateStateLocation(state, ""); err == nil || !strings.Contains(err.Error(), "--state-root") {
+		t.Fatal("Homebrew-shaped state root accepted or missing recovery hint", err)
+	}
+	if _, err := os.Lstat(state); !os.IsNotExist(err) {
+		t.Fatal("state validation created private state", err)
+	}
 	for _, harness := range []string{"claude", "codex", "cursor-agent"} {
 		launcher := filepath.Join(prefix, "bin", harness)
 		if err := os.Symlink("../Cellar/node/X/bin/node", launcher); err != nil {
@@ -164,6 +174,34 @@ func TestHomebrewLayoutResolution(t *testing.T) {
 		if err := os.Chmod(bad, info.Mode()); err != nil {
 			t.Fatal(err)
 		}
+	}
+	for _, bad := range []string{node, sdk} {
+		t.Run("group-writable "+filepath.Base(bad), func(t *testing.T) {
+			info, err := os.Stat(bad)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if runtime.GOOS == "darwin" {
+				if err := os.Chown(bad, -1, 80); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Chmod(bad, 0775); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := os.Chmod(bad, info.Mode()); err != nil {
+					t.Fatal(err)
+				}
+			}()
+			path := link
+			if bad == sdk {
+				path = sdk
+			}
+			if _, err := p.pinnedRegular(path, "", bad == node); err == nil || !errors.Is(err, ErrUnsafePath) || !strings.Contains(err.Error(), bad) || !strings.Contains(err.Error(), "writable by group") {
+				t.Fatal("group-writable file accepted or unidentified", bad, err)
+			}
+		})
 	}
 	foreign := p
 	foreign.lstat = func(path string) (os.FileInfo, error) {

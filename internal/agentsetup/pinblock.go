@@ -155,7 +155,7 @@ func pathUnsafe(path, workspace string, executable bool) bool {
 	if err != nil || !filepath.IsAbs(physical) {
 		return false
 	}
-	if repositoryPath(physical) || workspace != "" && within(workspace, physical) {
+	if installedPathPolicy().repositoryError(physical) != nil || workspace != "" && within(workspace, physical) {
 		return true
 	}
 	info, err := os.Stat(physical)
