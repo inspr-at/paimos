@@ -26,6 +26,7 @@ import (
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelregistry"
@@ -91,7 +92,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	pairing := agentpairing.New(d.App, origin, "pairtest")
-	api := &httpapi.Server{Pool: d.App, Modules: []httpapi.Module{am, pairing, agentaccounts.New(d.App), nodes.New(d.App, nil), modelregistry.New(d.App), harness.New(d.App), workorders.New(d.App), agentruns.New(d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
+	api := &httpapi.Server{Pool: d.App, Modules: []httpapi.Module{am, pairing, events.New(d.App), agentaccounts.New(d.App), nodes.New(d.App, nil), modelregistry.New(d.App), harness.New(d.App), workorders.New(d.App), agentruns.New(d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
 		return agentaccounts.Settle(ctx, tx, p, r.ID)
 	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
 	f := &fixture{pairing: pairing, t: t, db: d, h: api.Handler(), tenantID: id, profiles: map[string]string{}}
