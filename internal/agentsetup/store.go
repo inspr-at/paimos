@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -143,7 +144,7 @@ func (s *Store) lockNamedWithFlock(name string, flock func(int, int) error) (*os
 		return nil, ErrUnsafePath
 	}
 	for attempt := 0; attempt < 4; attempt++ {
-		fd, err := unix.Openat(int(s.root.Fd()), name, unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
+		fd, err := s.openLockFile(name)
 		if err != nil {
 			if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.EISDIR) {
 				return nil, fmt.Errorf("open lock %s: %w: %w", name, ErrUnsafePath, err)
@@ -182,6 +183,31 @@ func (s *Store) lockNamedWithFlock(name string, flock func(int, int) error) (*os
 		}
 	}
 	return nil, fmt.Errorf("lock %s changed during acquisition: %w", name, ErrCollision)
+}
+
+func (s *Store) openLockFile(name string) (int, error) {
+	if runtime.GOOS == "darwin" {
+		// Darwin can return ENOENT when two O_CREAT|O_NOFOLLOW opens race
+		// to create the same file, even though its directory still exists.
+		// Serialize only openat on a fresh descriptor of the pinned directory.
+		// Closing it releases this short creation guard before the lifetime
+		// file flock; an actual open failure is still an error, never ErrBusy.
+		guard, err := unix.Openat(int(s.root.Fd()), ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		if err != nil {
+			return -1, fmt.Errorf("open creation guard: %w", err)
+		}
+		defer unix.Close(guard)
+		for {
+			err = unix.Flock(guard, unix.LOCK_EX)
+			if !errors.Is(err, unix.EINTR) {
+				break
+			}
+		}
+		if err != nil {
+			return -1, fmt.Errorf("lock creation guard: %w", err)
+		}
+	}
+	return unix.Openat(int(s.root.Fd()), name, unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 }
 
 // verifyLock requires the retained descriptor to still identify the named,
