@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { onScopeDispose, ref, watch, type Ref } from 'vue'
-import { APIError, createNode, createRelation, deleteNode, deleteRelation, getKinds, getNode, getRelations, listNodes, lookupNodes, moveNode, updateNode, type Kind, type ListItem, type ListParent, type NodePatch, type Relation, type WorkNode } from './api'
+import { APIError, convertNode, createNode, createRelation, deleteNode, deleteRelation, getKinds, getNode, getRelations, listNodes, lookupNodes, moveNode, updateNode, type Kind, type ListItem, type ListParent, type NodePatch, type Relation, type WorkNode } from './api'
 import { liveNodes, type LiveNodeStore, type LiveView, type NodeChange } from './liveNodes'
 import { compareRevision, describeFields } from './liveUpdates'
 import { RefreshRetry } from './refreshRetry'
@@ -547,5 +547,18 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     return { done, total: scope.length, percent: scope.length ? Math.round((done / scope.length) * 100) : 0 }
   }
 
-  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, hold, base, setEstimate, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink, liveFields, liveMessage, liveHeld }
+  async function convert(toKind: string) {
+    const target = item.value
+    if (!target) throw new Error('nothing is open')
+    const copy = base() ?? target
+    rows.learnKinds(await kinds())
+    const sent = rows.mark()
+    const node = await convertNode(target.id, toKind, { ifUnmodifiedSince: copy.updated_at })
+    rows.wrote(node, sent)
+    editing(target.id)?.saved(node)
+    sync(target, null)
+    if (item.value?.id === target.id) await loadChildren()
+  }
+
+  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, hold, base, setEstimate, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink, convert, liveFields, liveMessage, liveHeld }
 }

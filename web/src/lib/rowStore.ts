@@ -26,7 +26,7 @@
 //    optimistic), their projections (amend, for one revision and parent;
 //    child, once per child) and whether a node is gone (isDeleted).
 import { reactive, toRaw } from 'vue'
-import type { ListItem, ListParent, WorkNode } from './api.ts'
+import type { Kind, ListItem, ListParent, WorkNode } from './api.ts'
 import { compareRevision } from './liveUpdates.ts'
 
 // The change an event names (liveNodes' NodeChange, the part the store reads).
@@ -88,14 +88,16 @@ const frozen = (copy: ListItem): ListItem => freeze(clone(copy))
 // over the newest copy, which keeps the list projections (project, parent,
 // epic, lead worker) that a node read does not carry. After a move the
 // parent chip and the epic come from the parent as the store knows it.
-export function fromNode(previous: ListItem | null, node: WorkNode, name: (id: string) => string | undefined = () => undefined, parentOf: (id: string) => ListParent | undefined = () => undefined): ListItem {
+export function fromNode(previous: ListItem | null, node: WorkNode, name: (id: string) => string | undefined = () => undefined, parentOf: (id: string) => ListParent | undefined = () => undefined, kindOf: (id: string) => Pick<Kind, 'slug' | 'label'> | undefined = () => undefined): ListItem {
   const fields = node.fields ?? {}
   const assigneeId = typeof fields.assignee === 'string' && fields.assignee ? fields.assignee : null
   const base: ListItem = previous ?? { ...node, kind_slug: '', kind_label: '', priority: null, assignee: null, parent: null, children_count: 0, project: null }
+  const kind = kindOf(node.kind_id)
   const moved = !!previous && previous.parent_id !== node.parent_id
   const parent = !moved ? {} : placed(node.parent_id, previous!.project, parentOf)
   return {
     ...base, ...node, ...parent,
+    ...(kind ? { kind_slug: kind.slug, kind_label: kind.label } : {}),
     priority: typeof fields.priority === 'string' && fields.priority ? fields.priority : null,
     assignee: assigneeId ? (previous?.assignee?.id === assigneeId ? previous.assignee : { id: assigneeId, name: name(assigneeId) ?? 'Someone' }) : null,
   }
@@ -145,6 +147,7 @@ export class RowStore {
   private clock = 0
   private gapAt = 0
   private names = new Map<string, string>()
+  private kinds = new Map<string, Pick<Kind, 'slug' | 'label'>>()
   // Parents as list copies and moves named them (their chip), for node reads after a move.
   private parents = new Map<string, ListParent>()
   private holders = new Set<() => Iterable<string>>()
@@ -173,7 +176,7 @@ export class RowStore {
   adoptNode(node: WorkNode, sent = this.clock, options: { show?: boolean } = {}): ListItem | null {
     return this.take(node.id, sent, false, () => {
       const entry = this.entries.get(node.id)
-      return frozen(fromNode(entry?.latest ?? entry?.row ?? null, clone(node), id => this.names.get(id), id => this.parents.get(id)))
+      return frozen(fromNode(entry?.latest ?? entry?.row ?? null, clone(node), id => this.names.get(id), id => this.parents.get(id), id => this.kinds.get(id)))
     }, node.updated_at, !!node.deleted_at, options.show ?? false)
   }
   private take(id: string, sent: number, full: boolean, make: () => ListItem, revision: string, deleted: boolean, show: boolean): ListItem | null {
@@ -441,7 +444,7 @@ export class RowStore {
     if (!entry?.row) return base
     const copy = entry.latest && compareRevision(entry.latest.updated_at, node.updated_at) === 0
       ? entry.latest
-      : frozen(fromNode(base, clone(node), key => this.names.get(key), key => this.parents.get(key)))
+      : frozen(fromNode(base, clone(node), key => this.names.get(key), key => this.parents.get(key), key => this.kinds.get(key)))
     if (compareRevision(copy.updated_at, entry.shown?.updated_at) >= 0) this.assign(entry, copy)
     return copy
   }
@@ -454,6 +457,10 @@ export class RowStore {
   pinned(id: string): boolean { return (this.entries.get(id)?.pins ?? 0) > 0 }
 
   // ---------- Names ----------
+  // Kind labels belong to the kind id, so a converted node never keeps its old label.
+  learnKinds(kinds: readonly Pick<Kind, 'id' | 'slug' | 'label'>[]) {
+    for (const kind of kinds) this.kinds.set(kind.id, { slug: kind.slug, label: kind.label })
+  }
   learnName(id: string, name: string) { if (id && name) this.names.set(id, name) }
   learnParent(parent: ListParent) { if (parent.id) this.parents.set(parent.id, { id: parent.id, key: parent.key, title: parent.title, kind_slug: parent.kind_slug }) }
   name(id: string): string | undefined { return this.names.get(id) }
@@ -476,7 +483,7 @@ export class RowStore {
       }
     }
   }
-  clear() { this.entries.clear(); this.names.clear(); this.parents.clear(); this.holders.clear(); this.clock = 0; this.gapAt = 0 }
+  clear() { this.entries.clear(); this.names.clear(); this.kinds.clear(); this.parents.clear(); this.holders.clear(); this.clock = 0; this.gapAt = 0 }
 
   private entry(id: string): Entry {
     let entry = this.entries.get(id)

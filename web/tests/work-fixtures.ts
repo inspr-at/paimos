@@ -479,6 +479,24 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       const { kind_slug: _k, project: _p, ...rest } = node
       return route.fulfill({ status: 201, json: { ...rest, kind_id: input.kind_id, position: '0', deleted_at: null } })
     }
+    const convertPath = /^\/api\/nodes\/([^/]+)\/convert$/.exec(path)
+    if (convertPath && method === 'POST') {
+      const node = data.nodes.find(n => n.id === convertPath[1])
+      if (!node) return route.fulfill({ status: 404, json: { error: 'node not found' } })
+      const to = (body as { to_kind?: string } | null)?.to_kind ?? ''
+      if (!['epic', 'ticket', 'task'].includes(to)) return route.fulfill({ status: 409, json: { error: 'kind is immutable', code: 'kind_change_not_allowed' } })
+      if (to === node.kind_slug) {
+        const { kind_slug: kind, project: _project, ...rest } = node
+        return route.fulfill({ json: { ...rest, kind_id: `k-${kind}`, position: '0', deleted_at: null } })
+      }
+      const from = node.kind_slug
+      node.kind_slug = to
+      node.updated_at = new Date(now + 120_000).toISOString()
+      const list = (data.activity[node.id] ??= [])
+      list.unshift({ id: `kind-${calls.length}`, at: node.updated_at, type: 'change', author: { id: me.id, name: me.name }, changes: [{ field: 'kind', from, to }] })
+      const { kind_slug: kind, project: _project, ...rest } = node
+      return route.fulfill({ json: { ...rest, kind_id: `k-${kind}`, position: '0', deleted_at: null } })
+    }
     const movePath = /^\/api\/nodes\/([^/]+)\/move$/.exec(path)
     if (movePath) {
       const node = data.nodes.find(n => n.id === movePath[1])!

@@ -12,8 +12,9 @@ import { rowStore } from '../src/lib/rowStore'
 import { filtersFromQuery } from '../src/lib/ticketList'
 
 const api = vi.hoisted(() => ({
-  getNode: vi.fn(), updateNode: vi.fn(), deleteNode: vi.fn(), moveNode: vi.fn(), bulkChange: vi.fn(),
+  getNode: vi.fn(), updateNode: vi.fn(), convertNode: vi.fn(), deleteNode: vi.fn(), moveNode: vi.fn(), bulkChange: vi.fn(),
   listNodes: vi.fn(async () => ({ items: [], next_cursor: null })),
+  getKinds: vi.fn(async () => ({ items: [{ id: 'k', slug: 'ticket', label: 'Ticket' }, { id: 'k-epic', slug: 'epic', label: 'Epic' }] })),
   getRelations: vi.fn(async () => ({ items: [] })),
   lookupNodes: vi.fn(async () => ({ items: [] })),
 }))
@@ -556,5 +557,54 @@ describe('review 326f: views ask the row store', () => {
       expect(row.parent?.id).toBe('e2')
       expect(row.epic?.id).toBe('e2')
     } finally { stop() }
+  })
+})
+
+
+describe('AEON-379 conversion through the live row store', () => {
+  it('keeps the converted kind and exact own revision when an older read lands', async () => {
+    const answer = slow()
+    const { ticket, target } = setup()
+    api.convertNode.mockResolvedValueOnce(node({ kind_id: 'k-epic', updated_at: at(5) }))
+    await ticket.convert('epic')
+    expect(api.convertNode).toHaveBeenCalledWith('n1', 'epic', { ifUnmodifiedSince: at(1) })
+    answer(node())
+    await settle()
+    expect(target).toMatchObject({ kind_id: 'k-epic', kind_slug: 'epic', kind_label: 'Epic', updated_at: at(5) })
+    expect(rowStore.latest('n1')).toMatchObject({ kind_slug: 'epic', updated_at: at(5) })
+    expect(rowStore.isOwn('n1', at(5))).toBe(true)
+    expect(rowStore.isOwn('n1', at(6))).toBe(false)
+  })
+
+  it('uses the held revision and leaves a later conversion intact when its answer arrives late', async () => {
+    api.getNode.mockResolvedValueOnce(node())
+    const { ticket, target, busy } = setup()
+    await settle()
+    busy.value = true
+    await nextTick()
+    let answer!: (value: WorkNode) => void
+    api.convertNode.mockImplementationOnce(() => new Promise<WorkNode>(resolve => { answer = resolve }))
+    const converting = ticket.convert('epic')
+    await vi.waitFor(() => expect(api.convertNode).toHaveBeenCalledTimes(1))
+    rowStore.adoptNode(node({ kind_id: 'k', title: 'Converted back elsewhere', updated_at: at(6) }))
+    answer(node({ kind_id: 'k-epic', updated_at: at(5) }))
+    await converting
+    expect(api.convertNode).toHaveBeenCalledWith('n1', 'epic', { ifUnmodifiedSince: at(1) })
+    expect(target).toMatchObject({ kind_slug: 'epic', updated_at: at(5) })
+    busy.value = false
+    await settle()
+    expect(target).toMatchObject({ kind_id: 'k', kind_slug: 'ticket', title: 'Converted back elsewhere', updated_at: at(6) })
+    expect(rowStore.latest('n1')).toMatchObject({ kind_slug: 'ticket', updated_at: at(6) })
+  })
+
+  it('propagates a conversion refusal without marking it as a local write', async () => {
+    api.getNode.mockResolvedValueOnce(node())
+    const { ticket, target } = setup()
+    await settle()
+    const refusal = new APIError(412, 'node has changed')
+    api.convertNode.mockRejectedValueOnce(refusal)
+    await expect(ticket.convert('epic')).rejects.toBe(refusal)
+    expect(target).toMatchObject({ kind_slug: 'ticket', updated_at: at(1) })
+    expect(rowStore.isOwn('n1', at(1))).toBe(false)
   })
 })

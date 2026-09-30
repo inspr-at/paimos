@@ -31,7 +31,7 @@ type NodeChange struct {
 // Event types whose snapshots are nodes (node.project_moved wraps it in
 // "node", node.bulk_changed lists them in "items").
 var nodeChangeTypes = map[string]bool{
-	"node.created": true, "node.updated": true, "node.moved": true,
+	"node.created": true, "node.updated": true, "node.moved": true, "node.kind_changed": true,
 	"node.project_moved": true, "node.deleted": true, "node.bulk_changed": true,
 }
 

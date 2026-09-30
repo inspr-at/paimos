@@ -160,7 +160,7 @@ function writing<T>(send: () => Promise<T>, record: (result: T, sent: number) =>
   return send().then(result => { record(result, sent); return result })
 }
 const wroteNode = (node: WorkNode, sent: number) => { rowStore.wrote(node, sent) }
-export const getKinds = () => json<{ items: Kind[] }>('/kinds')
+export const getKinds = () => json<{ items: Kind[] }>('/kinds').then(result => { rowStore.learnKinds(result.items); return result })
 export const getNode = (id: string) => json<WorkNode>(`/nodes/${idPath(id)}`)
 export const createNode = (body: NodeCreate) => writing(() => json<WorkNode>('/nodes', 'POST', body), wroteNode)
 // ifUnmodifiedSince is the node's updated_at as read; a newer server copy answers 412.
@@ -169,6 +169,8 @@ export const updateNode = (id: string, body: NodePatch, options: { ifUnmodifiedS
 // ifUnmodifiedSince: the node's updated_at as read; the move answers 412 with the current node when it changed.
 export const moveNode = (id: string, parent_id: string | null, before_id?: string | null, options: { ifUnmodifiedSince?: string } = {}) =>
   writing(() => json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}), wroteNode)
+export const convertNode = (id: string, to_kind: string, options: { ifUnmodifiedSince?: string } = {}) =>
+  writing(() => json<WorkNode>(`/nodes/${idPath(id)}/convert`, 'POST', { to_kind }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}), wroteNode)
 // A delete answers the revision of its node.deleted event in the revision
 // header (null from an older server: then nothing proves the event is this
 // tab's). Header names are case-insensitive; this is the wire form.
@@ -265,7 +267,7 @@ export const deleteProjectGroup = (id: string) => json<ProjectGroupWrite>(`/proj
 export const assignProjectGroup = (groupId: string | null, projectIds: string[]) => json<ProjectGroupWrite>('/project-groups/assign', 'POST', { group_id: groupId, project_ids: projectIds })
 export const undoGroupEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 // B2 ticket activity and comments.
-export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent' | 'tags'
+export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent' | 'tags' | 'kind'
 export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }
 export interface ActivityItem {
   id: string; at: string; type: 'comment' | 'change' | 'created'

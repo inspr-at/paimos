@@ -282,6 +282,20 @@ describe('LiveNodeStore', () => {
     expect(rows.latest('n1')?.title).toBe('Renamed')
   })
 
+  it('refetches a kind conversion from the stream and updates its kind projection', async () => {
+    const panel = view(['n1'])
+    rows.learnKinds([{ id: 'k-epic', slug: 'epic', label: 'Epic' }])
+    rows.adoptNode(node('n1', '2026-09-29T10:00:00Z'))
+    store.subscribe(panel.v)
+    latest().ready(40, false)
+    fetchNode.mockResolvedValueOnce(node('n1', '2026-09-29T10:00:01Z', { kind_id: 'k-epic' }))
+    latest().node(41, [{ id: 'n1', fields: ['kind_id'], revision: '2026-09-29T10:00:01Z' }], 'node.kind_changed')
+    await vi.waitFor(() => expect(panel.calls).toHaveLength(1))
+    expect(panel.calls[0].change).toMatchObject({ type: 'node.kind_changed', fields: ['kind_id'] })
+    expect(rows.latest('n1')).toMatchObject({ kind_id: 'k-epic', kind_slug: 'epic', kind_label: 'Epic' })
+    expect(rows.isOwn('n1', '2026-09-29T10:00:01Z')).toBe(false)
+  })
+
   it('does not refetch a node it already has at that revision (the viewer’s own save)', () => {
     const panel = view(['n1'])
     store.subscribe(panel.v)

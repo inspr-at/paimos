@@ -16,6 +16,7 @@ import AttachmentLightbox from './AttachmentLightbox.vue'
 import AttachmentStrip from './AttachmentStrip.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import ChildList from './ChildList.vue'
+import ConvertKindSheet from './ConvertKindSheet.vue'
 import CommentComposer from './CommentComposer.vue'
 import EpicPicker from './EpicPicker.vue'
 import InlineTitle from './InlineTitle.vue'
@@ -78,6 +79,17 @@ const ticket = useTicket(item, {
   live: { busy: liveBusy, me: () => props.me?.id ?? null },
 })
 const activity = useActivity(computed(() => props.item?.id ?? null))
+const convertOpen = ref(false)
+const header = ref<{ focusMore: () => void } | null>(null)
+function finishConvert() {
+  convertOpen.value = false
+  if (item.value) toast(`${item.value.key} is now ${kindLabel(item.value.kind_slug).toLowerCase()}`)
+  activity.load()
+}
+function closeConvert() {
+  convertOpen.value = false
+  void nextTick(() => header.value?.focusMore())
+}
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
 const deletable = computed(() => props.canDelete && !ticket.readOnly.value && !ticket.gone.value)
 const movable = computed(() => props.canMove && !ticket.readOnly.value && !ticket.gone.value)
@@ -305,7 +317,7 @@ const notesSection = ref<InstanceType<typeof MarkdownSection>>()
 const sections = computed(() => [descSection.value, acSection.value, notesSection.value].filter(section => !!section))
 const composer = ref<InstanceType<typeof CommentComposer>>()
 const timeline = ref<InstanceType<typeof ActivityTimeline>>()
-watchEffect(() => { liveBusy.value = editing.value || saving.value || !!title.value?.editing || sections.value.some(section => section.editing) })
+watchEffect(() => { liveBusy.value = convertOpen.value || editing.value || saving.value || !!title.value?.editing || sections.value.some(section => section.editing) })
 // Parts someone else just changed get a brief tint (AEON-326).
 const PROPERTY_FIELDS = ['state', 'parent_id', 'fields.priority', 'fields.assignee', 'fields.estimate', 'fields.eta', 'fields.release']
 const liveTint = computed(() => {
@@ -467,17 +479,19 @@ defineExpose({
     @click.capture="rememberClick" @dragenter="dragEnter" @dragover="dragOverRoot" @dragleave="dragLeaveRoot" @drop="dropFiles" @paste="pasteFiles"
   >
     <TicketHeaderBar
+      ref="header"
       :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :position="position" :mode="mode" :can-write="editable"
       :can-delete="deletable" :can-move="movable && item?.kind_slug === 'ticket'" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
       :can-start-agent="canStartAgent" :open-in-project="openInProject" :back-label="backLabel"
       @copy-key="copy(item?.key ?? ticketKey, item?.key ?? ticketKey)" @copy-link="copy(link(), 'link')" @prev="emit('prev')" @next="emit('next')"
       @expand="emit('expand')" @collapse="emit('collapse')" @new-tab="emit('newTab')" @close="emit('close')" @open-in-project="emit('openInProject')"
-      @move="anchor => openMenu('epic', anchor)" @delete="remove" @back="steps => emit('trailBack', steps)"
+      @move="anchor => openMenu('epic', anchor)" @delete="remove" @convert="convertOpen = true" @back="steps => emit('trailBack', steps)"
       @edit="startEdit()" @save="saveEdit" @cancel="cancelEdit"
       @start-agent="item && startDialog?.open(item)"
     />
     <StartAgentDialog ref="startDialog" />
     <p class="sr-only" role="status" aria-live="polite">{{ ticket.liveMessage.value }}</p>
+    <ConvertKindSheet v-if="convertOpen && item" :item="item" :children="ticket.children.value" :children-loading="ticket.childrenLoading.value" :convert="ticket.convert" @close="closeConvert" @converted="finishConvert" />
 
     <div ref="scroller" class="ws-scroll">
       <div v-if="ticket.gone.value" class="ws-state" role="alert">

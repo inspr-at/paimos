@@ -38,7 +38,7 @@ interface SourceLike {
   close(): void
 }
 
-export const NODE_EVENTS = ['node.created', 'node.updated', 'node.moved', 'node.project_moved', 'node.deleted', 'node.bulk_changed'] as const
+export const NODE_EVENTS = ['node.created', 'node.updated', 'node.moved', 'node.kind_changed', 'node.project_moved', 'node.deleted', 'node.bulk_changed'] as const
 const CLOSED = 2
 
 // The node_changes of one stream event, in client shape.

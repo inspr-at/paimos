@@ -4,7 +4,9 @@ package cli
 
 import "fmt"
 
-// exitError carries a process status. 2 is usage, 3 is not available yet.
+// exitError carries a process status. 2 is usage. 3 means the command stopped
+// without writing: the action is not available yet, or a person has to finish
+// it in the web app.
 type exitError struct {
 	code int
 	msg  string
