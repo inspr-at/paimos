@@ -18,7 +18,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const sessionIndexLockFile = ".lock"
+const (
+	sessionIndexLockFile   = ".lock"
+	sessionIndexSourceFile = "index.source"
+)
+
+// sessionIndexHeld is a test seam. It runs only after the index directory
+// descriptor is validated and the lock is held, and before that operation
+// reads or writes an entry. Production leaves it nil.
+var sessionIndexHeld func(dirfd int, root string)
 
 func sessionIndexRoot() (string, error) {
 	home, err := os.UserHomeDir()
@@ -41,7 +49,15 @@ func lookupSessionIndex(vendor string) (string, string, sessionIndexResult) {
 	if err != nil {
 		return "", "", sessionIndexAbsent
 	}
-	raw, err := readOwnerFile(filepath.Join(root, source), 4096)
+	dirfd, err := openValidatedIndexDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", "", sessionIndexAbsent
+	}
+	if err != nil {
+		return "", "", sessionIndexRejected
+	}
+	defer unix.Close(dirfd)
+	raw, err := readIndexFileAt(dirfd, source, 4096)
 	if errors.Is(err, os.ErrNotExist) {
 		return "", "", sessionIndexAbsent
 	}
@@ -97,22 +113,21 @@ func validOwnerStart(start string) bool {
 		return false
 	}
 	if sec, usec, ok := strings.Cut(start, "."); ok {
-		return !strings.Contains(usec, ".") && decimalToken(sec, 20) && decimalToken(usec, 20)
+		return !strings.Contains(usec, ".") && ownerStampUint(sec) && ownerStampUint(usec)
 	}
 	id, ticks, ok := strings.Cut(start, ":")
-	return ok && !strings.Contains(ticks, ":") && linuxBootID(id) && decimalToken(ticks, 20)
+	return ok && !strings.Contains(ticks, ":") && linuxBootID(id) && ownerStampUint(ticks)
 }
 
-func decimalToken(token string, max int) bool {
-	if token == "" || len(token) > max {
+// ownerStampUint accepts one decimal field of an owner stamp.
+// Both the Darwin second/microsecond fields and the Linux start tick are
+// uint64 values. A longer digit string that overflows uint64 is not a stamp.
+func ownerStampUint(token string) bool {
+	if token == "" || len(token) > 20 {
 		return false
 	}
-	for _, c := range token {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
+	_, err := strconv.ParseUint(token, 10, 64)
+	return err == nil
 }
 
 // linuxBootID is the lowercase UUID printed by /proc/sys/kernel/random/boot_id.
@@ -245,8 +260,8 @@ func writeSessionIndex(source, stateDir string, ownerPID int, ownerStart string)
 	if unix.Lstat(abs, &st) != nil || st.Mode&unix.S_IFMT != unix.S_IFDIR || st.Uid != uint32(os.Getuid()) || st.Mode&0o777 != 0o700 {
 		return errRefusedFile
 	}
-	return withSessionIndexLock(true, func(dirfd int, root string) error {
-		existing, err := readOwnerFile(filepath.Join(root, source), 4096)
+	return withSessionIndexLock(true, func(dirfd int) error {
+		existing, err := readIndexFileAt(dirfd, source, 4096)
 		if err == nil {
 			dir, live := sessionIndexLive(existing)
 			if live && dir != abs {
@@ -256,7 +271,11 @@ func writeSessionIndex(source, stateDir string, ownerPID int, ownerStart string)
 		if err := storeSessionIndexEntry(dirfd, source, abs, ownerPID, ownerStart); err != nil {
 			return err
 		}
-		dropOtherSessionIndexEntries(dirfd, root, source, abs)
+		if err := recordPublishedSource(abs, source); err != nil {
+			_ = unix.Unlinkat(dirfd, source, 0)
+			return err
+		}
+		dropOtherSessionIndexEntries(dirfd, source, abs)
 		return nil
 	})
 }
@@ -266,15 +285,19 @@ func removeSessionIndexForState(stateDir string) {
 	if abs == "" {
 		return
 	}
-	_ = withSessionIndexLock(false, func(dirfd int, root string) error {
-		dropOtherSessionIndexEntries(dirfd, root, "", abs)
+	_ = withSessionIndexLock(false, func(dirfd int) error {
+		if source := publishedSource(abs); source != "" {
+			unlinkIndexIfMatch(dirfd, source, abs)
+		}
+		dropOtherSessionIndexEntries(dirfd, "", abs)
 		return nil
 	})
 }
 
 // withSessionIndexLock serializes publish and removal. create is false for
-// removal so a missing index directory is left absent.
-func withSessionIndexLock(create bool, fn func(dirfd int, root string) error) error {
+// removal so a missing index directory is left absent. The callback receives
+// only the validated directory descriptor; it must not look up the path again.
+func withSessionIndexLock(create bool, fn func(dirfd int) error) error {
 	root, err := sessionIndexRoot()
 	if err != nil {
 		return err
@@ -284,7 +307,7 @@ func withSessionIndexLock(create bool, fn func(dirfd int, root string) error) er
 			return err
 		}
 	}
-	dirfd, err := openNoFollowDir(root)
+	dirfd, err := openValidatedIndexDir(root)
 	if err != nil {
 		return err
 	}
@@ -305,12 +328,25 @@ func withSessionIndexLock(create bool, fn func(dirfd int, root string) error) er
 		return errRefusedFile
 	}
 	defer unix.Flock(lockfd, unix.LOCK_UN)
-	return fn(dirfd, root)
+	if err := validateSessionIndexDir(dirfd, root); err != nil {
+		return err
+	}
+	if sessionIndexHeld != nil {
+		sessionIndexHeld(dirfd, root)
+	}
+	return fn(dirfd)
 }
 
 func storeSessionIndexEntry(dirfd int, source, stateDir string, ownerPID int, ownerStart string) error {
 	payload := stateDir + "\n" + strconv.Itoa(ownerPID) + "\n" + ownerStart + "\n"
 	if len(payload) > 4096 {
+		return errRefusedFile
+	}
+	return writeExclusiveAt(dirfd, source, []byte(payload))
+}
+
+func writeExclusiveAt(dirfd int, name string, payload []byte) error {
+	if !singleComponent(name) || len(payload) == 0 || len(payload) > 4096 {
 		return errRefusedFile
 	}
 	var nonce [8]byte
@@ -323,7 +359,7 @@ func storeSessionIndexEntry(dirfd int, source, stateDir string, ownerPID int, ow
 		return errRefusedFile
 	}
 	f := os.NewFile(uintptr(fd), tmp)
-	_, werr := f.Write([]byte(payload))
+	_, werr := f.Write(payload)
 	if werr == nil {
 		werr = unix.Fchmod(int(f.Fd()), 0o600)
 	}
@@ -335,7 +371,7 @@ func storeSessionIndexEntry(dirfd int, source, stateDir string, ownerPID int, ow
 		_ = unix.Unlinkat(dirfd, tmp, 0)
 		return errRefusedFile
 	}
-	if err := unix.Renameat(dirfd, tmp, dirfd, source); err != nil {
+	if err := unix.Renameat(dirfd, tmp, dirfd, name); err != nil {
 		_ = unix.Unlinkat(dirfd, tmp, 0)
 		return errRefusedFile
 	}
@@ -343,38 +379,191 @@ func storeSessionIndexEntry(dirfd int, source, stateDir string, ownerPID int, ow
 	return nil
 }
 
+// readIndexFileAt reads one regular file relative to dirfd.
+// The directory is the opened descriptor, never a path looked up again.
+func readIndexFileAt(dirfd int, name string, max int) ([]byte, error) {
+	if !singleComponent(name) || max <= 0 {
+		return nil, errRefusedFile
+	}
+	fd, err := unix.Openat(dirfd, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
+	if errors.Is(err, unix.ENOENT) {
+		return nil, os.ErrNotExist
+	}
+	if err != nil {
+		return nil, errRefusedFile
+	}
+	f := os.NewFile(uintptr(fd), name)
+	defer f.Close()
+	var st unix.Stat_t
+	if unix.Fstat(int(f.Fd()), &st) != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1 || st.Uid != uint32(os.Getuid()) || st.Mode&0o777 != 0o600 || st.Size < 0 || st.Size > int64(max) {
+		return nil, errRefusedFile
+	}
+	buf := make([]byte, st.Size)
+	if _, err := io.ReadFull(f, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+func singleComponent(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, "/\\")
+}
+
+// openValidatedIndexDir opens root with O_NOFOLLOW|O_DIRECTORY and accepts it
+// only when this user owns it, its mode is exactly 0700, and no parent from
+// here through the home directory is group- or world-writable or foreign-owned.
+func openValidatedIndexDir(root string) (int, error) {
+	fd, err := openNoFollowDir(root)
+	if err != nil {
+		return -1, err
+	}
+	if err := validateSessionIndexDir(fd, root); err != nil {
+		unix.Close(fd)
+		return -1, err
+	}
+	return fd, nil
+}
+
+func validateSessionIndexDir(fd int, root string) error {
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil || !sessionIndexDirTrusted(st) {
+		return errRefusedFile
+	}
+	return rejectUnsafeIndexParents(root)
+}
+
+func sessionIndexDirTrusted(st unix.Stat_t) bool {
+	return st.Mode&unix.S_IFMT == unix.S_IFDIR && st.Uid == uint32(os.Getuid()) && st.Mode&0o777 == 0o700
+}
+
+func sessionIndexParentTrusted(st unix.Stat_t) bool {
+	return st.Mode&unix.S_IFMT == unix.S_IFDIR && st.Uid == uint32(os.Getuid()) && st.Mode&0o022 == 0
+}
+
+func rejectUnsafeIndexParents(indexRoot string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return errRefusedFile
+	}
+	home = canonicalPrivatePath(home)
+	if home == "" {
+		return errRefusedFile
+	}
+	dir := filepath.Dir(indexRoot)
+	for {
+		rel, err := filepath.Rel(home, dir)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return errRefusedFile
+		}
+		if err := checkIndexParent(dir); err != nil {
+			return err
+		}
+		if dir == home || rel == "." {
+			return nil
+		}
+		next := filepath.Dir(dir)
+		if next == dir {
+			return errRefusedFile
+		}
+		dir = next
+	}
+}
+
+func checkIndexParent(dir string) error {
+	fd, err := openNoFollowDir(dir)
+	if err != nil {
+		return errRefusedFile
+	}
+	defer unix.Close(fd)
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil || !sessionIndexParentTrusted(st) {
+		return errRefusedFile
+	}
+	return nil
+}
+
 // dropOtherSessionIndexEntries unlinks index files whose stored state directory
-// is still stateDir. The compare runs while the index lock is held. keep is
-// left in place; an empty keep drops every match.
-func dropOtherSessionIndexEntries(dirfd int, root, keep, stateDir string) {
+// is still stateDir. Names are read from dirfd in batches and compared with
+// Openat on that same descriptor. keep is left in place; an empty keep drops
+// every match. There is no prefix cap.
+func dropOtherSessionIndexEntries(dirfd int, keep, stateDir string) {
+	for _, name := range indexEntryNames(dirfd) {
+		if name == keep || name == sessionIndexLockFile || strings.HasPrefix(name, ".") {
+			continue
+		}
+		unlinkIndexIfMatch(dirfd, name, stateDir)
+	}
+}
+
+func indexEntryNames(dirfd int) []string {
 	dup, err := unix.Dup(dirfd)
+	if err != nil {
+		return nil
+	}
+	dir := os.NewFile(uintptr(dup), "session-index")
+	defer dir.Close()
+	var names []string
+	for {
+		batch, err := dir.ReadDir(128)
+		for _, entry := range batch {
+			names = append(names, entry.Name())
+		}
+		if err != nil || len(batch) == 0 {
+			return names
+		}
+	}
+}
+
+func unlinkIndexIfMatch(dirfd int, name, stateDir string) {
+	if !validUUID(name) || name != strings.ToLower(name) {
+		return
+	}
+	raw, err := readIndexFileAt(dirfd, name, 4096)
 	if err != nil {
 		return
 	}
-	dir := os.NewFile(uintptr(dup), root)
-	entries, err := dir.ReadDir(-1)
-	closeErr := dir.Close()
-	if err != nil || closeErr != nil {
+	dir, ok := entryStateDir(raw)
+	if !ok || dir != stateDir {
 		return
 	}
-	if len(entries) > 4096 {
-		entries = entries[:4096]
+	_ = unix.Unlinkat(dirfd, name, 0)
+}
+
+func recordPublishedSource(stateDir, source string) error {
+	if !validUUID(source) || source != strings.ToLower(source) {
+		return errRefusedFile
 	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if name == keep || name == sessionIndexLockFile || !validUUID(name) || name != strings.ToLower(name) {
-			continue
-		}
-		raw, err := readOwnerFile(filepath.Join(root, name), 4096)
-		if err != nil {
-			continue
-		}
-		dir, ok := entryStateDir(raw)
-		if !ok || dir != stateDir {
-			continue
-		}
-		_ = unix.Unlinkat(dirfd, name, 0)
+	fd, err := openNoFollowDir(stateDir)
+	if err != nil {
+		return errRefusedFile
 	}
+	defer unix.Close(fd)
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil || !sessionIndexDirTrusted(st) {
+		return errRefusedFile
+	}
+	return writeExclusiveAt(fd, sessionIndexSourceFile, []byte(source+"\n"))
+}
+
+func publishedSource(stateDir string) string {
+	fd, err := openNoFollowDir(stateDir)
+	if err != nil {
+		return ""
+	}
+	defer unix.Close(fd)
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil || !sessionIndexDirTrusted(st) {
+		return ""
+	}
+	raw, err := readIndexFileAt(fd, sessionIndexSourceFile, 256)
+	if err != nil {
+		return ""
+	}
+	source := strings.TrimSuffix(string(raw), "\n")
+	if !validUUID(source) || source != strings.ToLower(source) || source+"\n" != string(raw) {
+		return ""
+	}
+	return source
 }
 
 func readOwnerFile(path string, max int) ([]byte, error) {
@@ -411,8 +600,9 @@ func canonicalPrivatePath(path string) string {
 }
 
 // mkdirPrivate creates abs without following a symlink at any component.
-// Directories from .aeon downward are owner-only. Ancestors such as /Users
-// stay untouched.
+// Directories from .aeon downward must be owned by this user. A directory
+// created here is mode 0700. An existing directory is left unchanged; opening
+// the index rejects a mode other than 0700 and a group- or world-writable parent.
 func mkdirPrivate(abs string) error {
 	abs = canonicalPrivatePath(abs)
 	if abs == "" {
@@ -448,8 +638,8 @@ func mkdirPrivate(abs string) error {
 			return errRefusedFile
 		}
 		// ~/.aeon may already exist for config. Require ownership from there
-		// down, and force 0700 on the index directories without relabeling an
-		// existing config directory.
+		// down. Do not relabel an existing directory; the index open rejects it
+		// when it is not a private 0700 directory.
 		if name == ".aeon" || owned {
 			if st.Uid != uint32(os.Getuid()) {
 				unix.Close(next)
@@ -459,11 +649,9 @@ func mkdirPrivate(abs string) error {
 		if name == ".aeon" {
 			owned = true
 		}
-		if created || (owned && name != ".aeon") {
-			if st.Mode&0o777 != 0o700 && unix.Fchmod(next, 0o700) != nil {
-				unix.Close(next)
-				return errRefusedFile
-			}
+		if created && st.Mode&0o777 != 0o700 && unix.Fchmod(next, 0o700) != nil {
+			unix.Close(next)
+			return errRefusedFile
 		}
 		fd = next
 	}

@@ -736,6 +736,10 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	session.hold = hold
 	defer func() {
 		if err != nil {
+			// The state lock is already held. A busy lock returns above, before
+			// this defer, and leaves the other helper's binding in place.
+			// Use the local hold: a named return replaces session before defers run.
+			releaseSessionIndex(&heartbeatSession{hold: hold})
 			hold.release()
 		}
 	}()
