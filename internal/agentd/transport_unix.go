@@ -148,6 +148,9 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 		}
 		w.Header().Set("Content-Type", "application/json")
 		status := s.Lifecycle(r.URL.Query().Get("account_id"))
+		if r.URL.Query().Get("include_readiness") != "1" {
+			status.AccountStatuses, status.VerificationReasons = nil, nil
+		}
 		if r.URL.Query().Get("include_capacity") == "1" {
 			status.CapacityAccounts = s.CapacityAccounts(r.URL.Query().Get("account_id"))
 		}
@@ -167,6 +170,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 			return
 		}
 		status, err := s.Drain(req)
+		status.AccountStatuses, status.VerificationReasons = nil, nil
 		if err != nil {
 			http.Error(w, "drain rejected", http.StatusConflict)
 			return

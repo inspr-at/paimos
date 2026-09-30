@@ -67,7 +67,7 @@ func (a *verificationBoundaryCounter) Start(context.Context, StartRequest, func(
 	return nil, errors.New("unexpected vendor boundary")
 }
 
-func TestUnsupportedVerificationPollNeverProbesOrLaunches(t *testing.T) {
+func TestUnsupportedVerificationPollProbesWithoutLaunching(t *testing.T) {
 	for _, vendor := range []Adapter{NewCodexAdapter("/unused", nil), NewCursorAdapter("/unused", nil), NewPiAdapter("/unused", nil), NewGrokAdapter()} {
 		t.Run(vendor.Name(), func(t *testing.T) {
 			s, api, _ := claimFixture(t)
@@ -85,14 +85,14 @@ func TestUnsupportedVerificationPollNeverProbesOrLaunches(t *testing.T) {
 			s.adapters = map[string]Adapter{vendor.Name(): adapter}
 			s.accounts[0].Harness = vendor.Name()
 			api.profile.Harness = vendor.Name()
-			if err := s.PollOnce(t.Context()); !errors.Is(err, ErrVerificationUnavailable) {
+			if err := s.PollOnce(t.Context()); err != nil {
 				t.Fatal("missing fail-closed capability refusal", err)
 			}
 			if err := s.PollOnce(t.Context()); err != nil {
 				t.Fatal("same refused run polled again", err)
 			}
-			if adapter.probes != 0 || adapter.starts != 0 || len(api.probes) != 0 || api.routes != 0 || len(api.claimIDs) != 0 || api.profiles != 1 {
-				t.Fatal("unsupported verification reached a probe, route, claim, launch or repeated resolution")
+			if adapter.probes != 2 || adapter.starts != 0 || len(api.probes) != 2 || api.routes != 0 || len(api.claimIDs) != 0 || api.profiles != 1 {
+				t.Fatal("unsupported verification prevented probing or reached a route, launch claim or vendor launch")
 			}
 			if got := s.Lifecycle("").VerificationUnavailable; !slices.Equal(got, []string{"account"}) {
 				t.Fatalf("unbound refusal lost the exact enrollment: %v", got)

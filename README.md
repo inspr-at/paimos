@@ -700,6 +700,40 @@ sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 
 Licence: AGPL-3.0-only.
 
+### Pairing readiness and diagnostics
+
+`aeon-agentd status` reads the last atomic setup snapshot and live daemon status
+without taking `setup.lock`, reconciling enrollment, or performing cleanup.
+Use `pair`/`setup` to resume setup and `disconnect` to resume cleanup. Approved
+but unbound harnesses name the required `add-harness` command. Account checks
+report a 60-second bound from daemon start for each initial account, or from
+that account being added or unblocked by repin; refreshing unchanged accounts
+does not extend the wait. Capacity capture reports a 10-second bound.
+Unsupported or incomplete verification fails with `verification_unavailable`
+and a bounded cause, independently of account probing. Connect-only approval
+creates no verification, and a later approval cancels older queued verification
+on that same computer without interrupting claimed work.
+
+New pairing-owned macOS launchd services write diagnostics to
+`~/Library/Logs/aeon-agentd/{stdout,stderr}.log` in a private `0700` directory.
+Existing receipt-bound service definitions remain owned and unchanged; logging
+is added when a new service is installed. Managed Nix/Home Manager services
+retain their configuration ownership.
+
+The paired daemon writes bounded `agentd polling diagnostic` lines to stderr
+when the set of causes changes, then at most one reminder per cause every
+15 minutes while the set persists. A healthy poll clears the set, so a recurring
+cause is logged immediately. Multiple accounts sharing a cause produce one line:
+`reason=probe_failed` records an account readiness failure (a failed probe/report
+or a retained ownership/reporting block);
+`reason=probe_timeout` confirms an account exhausted its own pending probe wait;
+`reason=queue_unavailable` confirms `Queued()` returned an error before probing;
+`reason=dispatch_not_allowed` confirms a dispatch fence, fence-read failure or
+daemon shutdown prevented polling or an account probe. Correlate these lines
+with read-only `aeon-agentd status --json` for the affected account. Queue errors
+can therefore explain a subsequent probe timeout; the timeout alone does not
+identify the underlying cause. Raw errors and private bindings are not logged.
+
 ### Paired daemon socket paths
 
 Paired mode uses `<setup-root>/daemon/agentd.sock`. If that exceeds the

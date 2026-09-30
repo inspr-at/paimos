@@ -95,19 +95,20 @@ type Verification struct {
 	Task           string    `json:"task"`
 }
 type Enrollment struct {
-	LocalProcesses    string   `json:"local_processes"`
-	AccountingState   string   `json:"accounting_state"`
-	VerificationState string   `json:"verification_state"`
-	VerificationError string   `json:"verification_error"`
-	AccountID         string   `json:"account_id"`
-	AccountKey        string   `json:"account_key"`
-	Harness           string   `json:"harness"`
-	Label             string   `json:"label"`
-	ProfileID         string   `json:"model_profile_id"`
-	State             string   `json:"state"`
-	Cleanup           string   `json:"local_cleanup"`
-	VerificationRunID *string  `json:"verification_run_id"`
-	ActiveRunIDs      []string `json:"active_run_ids"`
+	LocalProcesses     string   `json:"local_processes"`
+	AccountingState    string   `json:"accounting_state"`
+	VerificationState  string   `json:"verification_state"`
+	VerificationError  string   `json:"verification_error"`
+	VerificationReason string   `json:"verification_reason,omitempty"`
+	AccountID          string   `json:"account_id"`
+	AccountKey         string   `json:"account_key"`
+	Harness            string   `json:"harness"`
+	Label              string   `json:"label"`
+	ProfileID          string   `json:"model_profile_id"`
+	State              string   `json:"state"`
+	Cleanup            string   `json:"local_cleanup"`
+	VerificationRunID  *string  `json:"verification_run_id"`
+	ActiveRunIDs       []string `json:"active_run_ids"`
 }
 type View struct {
 	HarnessDetails            map[string]agentsetup.HarnessDetail `json:"harness_details,omitempty"`

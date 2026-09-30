@@ -66,7 +66,7 @@ func (c Client) token() (string, error) {
 
 func (c Client) Lifecycle(ctx context.Context, accountID string) (agentd.LifecycleStatus, error) {
 	var out agentd.LifecycleStatus
-	err := c.lifecycleRequest(ctx, "GET", "/v1/lifecycle?account_id="+url.QueryEscape(accountID), nil, &out)
+	err := c.lifecycleRequest(ctx, "GET", "/v1/lifecycle?include_readiness=1&account_id="+url.QueryEscape(accountID), nil, &out)
 	return out, err
 }
 

@@ -67,3 +67,35 @@ func cancelQueuedRun(ctx context.Context, tx pgx.Tx, id string) error {
  UPDATE account_allowance_windows w SET reserved=w.reserved-t.units FROM totals t WHERE w.id=t.window_id`, id)
 	return err
 }
+
+// A later authenticated approval supersedes only queued verification. Claimed
+// work keeps its ownership, accounting and process lifecycle unchanged.
+func supersedeVerifications(ctx context.Context, tx pgx.Tx, computer, exceptRequest string) error {
+	rows, err := tx.Query(ctx, `SELECT r.id::text FROM agent_runs r
+      JOIN agent_pairing_enrollments e ON e.tenant_id=r.tenant_id AND e.verification_run_id=r.id
+      WHERE e.computer_id=$1 AND ($2='' OR e.request_id<>nullif($2,'')::uuid)
+      AND e.verification_claimed_at IS NULL AND r.purpose='pairing_verification' AND r.status='queued'
+      ORDER BY r.id FOR UPDATE OF r`, computer, exceptRequest)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err = cancelQueuedRun(ctx, tx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}

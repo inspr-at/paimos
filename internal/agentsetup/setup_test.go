@@ -363,7 +363,7 @@ func TestRevokedActiveWorkDrainsThenCleansWithUnsettledAudit(t *testing.T) {
 	}
 	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", SettlementPending: []string{"run"}}
 	l.states[testAccount] = l.states[""]
-	p, err = e.Status(t.Context())
+	p, err = e.Step(t.Context())
 	if err != nil || p.Stage != "disconnected" || !a.computerCleaned {
 		t.Fatalf("idle revoked cleanup did not converge: %s %v", p.Stage, err)
 	}
@@ -374,7 +374,7 @@ func TestRevokedActiveWorkDrainsThenCleansWithUnsettledAudit(t *testing.T) {
 	if err != nil || s.Runtime != "" || s.Device != "" {
 		t.Fatal("runtime or redemption secret retained in snapshot")
 	}
-	if _, err = e.Status(t.Context()); err != nil {
+	if _, err = e.Step(t.Context()); err != nil {
 		t.Fatal("repeated cleanup failed")
 	}
 }

@@ -232,7 +232,7 @@ var _ = time.Second
 // Readiness describes usable accounts, never cleanup or process ownership.
 func TestLifecycleReadinessIsPerHarness(t *testing.T) {
 	s, _, _ := testSupervisor(t)
-	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "checking" || status.HarnessDetails[Codex].Reason != "starting" {
+	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "checking" || status.HarnessDetails[Codex].Reason != "probe_pending" {
 		t.Fatalf("unprobed account is ready: %+v", status)
 	}
 	s.probedAccounts["account"] = true

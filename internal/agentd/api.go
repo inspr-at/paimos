@@ -446,3 +446,10 @@ func ValidateBaseURL(raw string) error {
 	}
 	return errors.New("AEON URL must use HTTPS outside loopback")
 }
+
+// RefuseVerification reports no-launch evidence through the existing claim path.
+func (r *Remote) RefuseVerification(ctx context.Context, run, daemon, generation, reason string) error {
+	return r.Client.Do(ctx, "POST", "/api/runs/"+url.PathEscape(run)+"/claim", map[string]any{
+		"daemon_id": daemon, "daemon_generation": generation, "reservation_ids": []string{}, "verification_unavailable": reason,
+	}, nil)
+}
