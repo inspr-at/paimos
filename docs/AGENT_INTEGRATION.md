@@ -301,10 +301,15 @@ Touch ID prompt on that Mac's screen, not in the SSH terminal. Settings shows
 Saving `local_auth` applies it to every computer and fails closed where
 confirmation cannot run. Saving `aeon` keeps Aeon approval everywhere. The
 daemon's platform and capability report are advisory: a hostile daemon can
-claim another platform or `no_gui` to skip the unsaved default, and it still
-cannot satisfy a saved `local_auth` confirmation. Ancestry and session checks
-are defence in depth, not a guarantee that same-user code cannot request its
-own attach.
+claim another platform or `no_gui` to skip the unsaved default. An impersonator
+holding the pairing state can report `available` and assert confirmation. A
+saved `local_auth` fails closed only for a genuine daemon that cannot run it.
+Touch ID needs a person at the Mac and stops code that can only drive
+terminals or the browser. It is still defence in depth, because a program
+running as you that reads the daemon's pairing state can impersonate the
+daemon and report confirmation. Signing that confirmation with a Secure
+Enclave key is AEON-460. Ancestry and session checks are defence in depth,
+not a guarantee that same-user code cannot request its own attach.
 
 The separate `consent_digest` binds the request ID, snapshot digest and mode,
 using the `aeon.attach.consent.v1` domain. The browser echoes it on approval;

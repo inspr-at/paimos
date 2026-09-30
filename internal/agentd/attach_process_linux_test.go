@@ -40,8 +40,11 @@ func TestAttachLinuxIdentitySkipsAncestorPaths(t *testing.T) {
 		t.Fatal("target observation lost executable or cwd", err)
 	}
 	root, err := observeAttachProcessIdentity(1)
-	if err != nil || root.PID != 1 || root.UID != 0 || root.Started == "" || root.Executable != "" || root.CWD != "" {
+	if err != nil || root.PID != 1 || root.Started == "" || root.Executable != "" || root.CWD != "" {
 		t.Fatal("root ancestor metadata unavailable or includes paths", err)
+	}
+	if root.UID != 0 {
+		t.Skip("PID 1 is not uid 0; rootless or user-namespace sandbox")
 	}
 }
 

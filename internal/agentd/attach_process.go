@@ -61,7 +61,10 @@ func attachPeer(r *http.Request) (attachObservation, error) {
 
 // An injected command launched beneath the selected agent cannot approve it.
 // This is defence in depth, not a boundary against unrestricted same-UID code.
-// Same-user code can open another terminal; Touch ID is the factor it cannot forge.
+// Touch ID needs a person at the Mac and stops code that can only drive
+// terminals or the browser. It is still defence in depth, because a program
+// running as you that reads the daemon's pairing state can impersonate the
+// daemon and report confirmation. A Secure Enclave signature is AEON-460.
 func independentAttachPeer(peer, target attachObservation, observe func(int) (attachObservation, error)) bool {
 	current, err := observe(peer.PID)
 	if err != nil || !sameAttachProcessIdentity(current, peer) || current.UID != target.UID || !current.TTY || current.Session <= 1 || current.Session == current.PID {

@@ -39,12 +39,14 @@ function limitation(computer: LocalAuthComputer): string | null {
   }
 }
 const canPickLocal = computed(() => computers.value.some(computer => computer.capability === 'available'))
-// Stay-off copy only after Mac confirmation is saved, or the person has moved the choice onto it.
-const explicitLocal = computed(() => choice.value === 'local_auth' && (persisted.value || choice.value !== saved.value))
+// "Stay off" is a saved Mac confirmation. Before Save stores that choice, say what saving does on each computer.
+const storedLocal = computed(() => persisted.value && saved.value === 'local_auth' && choice.value === 'local_auth')
+const savingLocal = computed(() => choice.value === 'local_auth' && canPickLocal.value && !storedLocal.value)
 const blocked = computed(() => computers.value.flatMap(computer => {
   const line = limitation(computer)
   if (!line) return []
-  if (explicitLocal.value) return [`${line}, so watches there stay off.`]
+  if (storedLocal.value) return [`${line}, so watches there stay off.`]
+  if (savingLocal.value) return [`${line}. Saving turns watches off there.`]
   if (computer.capability === 'no_gui') return [`${line}, so SSH and headless attaches keep approval in ${brand.value.short_name}.`]
   return [`${line}, so approval stays in ${brand.value.short_name}.`]
 }))
@@ -112,7 +114,7 @@ onBeforeUnmount(() => { operation?.abort(); stopAccess() })
       <footer><span role="status">{{ notice }}</span><button class="btn primary" type="submit" :disabled="busy || !canSave || !can('profile.write')">{{ busy ? 'Saving…' : 'Save setting' }}</button></footer>
     </form>
     <p v-if="error" class="error" role="alert">{{ error }} <button v-if="!saved" class="btn sm" type="button" @click="request()">Try again</button></p>
-    <details><summary><AppIcon name="chevron-right" class="disclosure-chev" :size="12" />About local confirmation</summary><p>Process ancestry and the terminal prompt are defence in depth: a program running as you can still open another terminal, and Touch ID is the check it cannot forge.</p><p>Mac confirmation needs a signed daemon and a graphical login; SSH and headless sessions keep approval in {{ brand.short_name }} unless you save this choice, saving it turns watches off where Touch ID cannot run, and a missing prompt never activates a watch.</p></details>
+    <details><summary><AppIcon name="chevron-right" class="disclosure-chev" :size="12" />About local confirmation</summary><p>Touch ID needs a person at the Mac and stops code that can only drive terminals or the browser. It is still defence in depth, because a program running as you that reads the daemon's pairing state can impersonate the daemon and report confirmation.</p><p>Mac confirmation needs a signed daemon and a graphical login; SSH and headless sessions keep approval in {{ brand.short_name }} unless you save this choice, saving it turns watches off where Touch ID cannot run, and a missing prompt never activates a watch.</p></details>
   </div>
 </template>
 

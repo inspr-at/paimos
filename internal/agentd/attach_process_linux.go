@@ -48,6 +48,7 @@ func linuxAttachStat(raw []byte) (start string, parent, session int, tty bool, e
 
 // Metadata only: /proc/<pid>/stat and the directory uid. exe and cwd are not
 // readable for another user's process, including root-owned sshd, su and sudo.
+// The /proc uid is the effective uid. Non-dumpable processes show as 0.
 func observeAttachProcessIdentity(pid int) (attachObservation, error) {
 	fail := errors.New("kernel process identity unavailable")
 	root := fmt.Sprintf("/proc/%d", pid)
