@@ -14,7 +14,7 @@ const extensions = {
 }
 
 for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) {
-  for (const stage of ['inspire', 'shape'] as const) {
+  for (const stage of ['inspire', 'shape', 'requirements'] as const) {
     test(`${stage} retains extension versions at ${width} ${theme}`, async ({ page }) => {
       const errors = watchErrors(page)
       await page.setViewportSize({ width, height: 1000 })
@@ -22,6 +22,7 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
       await mockWork(page, fixtures())
       const world = journeyWorld(stage)
       Object.assign(world.intake.drafts[0]!, { extensions })
+      if (stage === 'requirements') Object.assign(world.intake.drafts[0]!, { kind: 'requirement', status: 'accepted', target_node_id: 'q-1' })
       await mockJourney(page, world)
       await page.goto('/p/PHAROS/journey')
       const block = page.getByRole('region', { name: 'Extension data' })

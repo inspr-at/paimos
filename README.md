@@ -45,7 +45,8 @@ tickets show each namespace/version in a neutral Extension data disclosure.
 drafts for that node or the requirement that generated its ticket, with empty
 sources/turns and the same `intake.read` permission. This additive native API
 does not implement Aithema's snapshot-only plugin protocol or change Aithema's
-separate `pending_op.payload` limit.
+separate `pending_op.payload` limit (AIT-89); the adapter integration remains
+tracked by AEON-360.
 
 Wide project headers can show an ambient ticket graph (Display → Graph in
 project header). It uses a tilted 3D cloud with an optional elliptic force bias,

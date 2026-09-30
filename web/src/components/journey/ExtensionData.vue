@@ -37,5 +37,5 @@ summary:focus-visible, pre:focus-visible { outline: 2px solid var(--ink-2); outl
 details[open] .chevron { transform: rotate(90deg); }
 .namespace { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--ink-2); }
 .version { flex: none; font: 11px var(--mono); color: var(--ink-3); }
-pre { margin: 0; padding: 0 10px 10px; max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--mono); color: var(--ink); }
+pre { margin: 0; padding: 8px 12px 12px; max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--mono); color: var(--ink); }
 </style>
