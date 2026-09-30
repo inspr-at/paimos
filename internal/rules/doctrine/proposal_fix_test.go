@@ -5,8 +5,10 @@ package doctrine
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -132,9 +135,9 @@ func TestPublicProposalRequiresPrivateCorpusAndBlocksQuotes(t *testing.T) {
 		case "continuation":
 			bad.Explanation = "The silver ledger contains nine emerald diagrams beside the northern window."
 		}
-		beforeWrites := forge.writes
+		beforeWrites, beforeCalls, beforeMinted := forge.writes, forge.calls, forge.minted
 		got := f.call(owner, "POST", endpoint, bad, 422)
-		if !strings.Contains(string(got), "private_doctrine") || strings.Contains(string(got), guardTLDR) || forge.writes != beforeWrites {
+		if !strings.Contains(string(got), "private_doctrine") || strings.Contains(string(got), guardTLDR) || forge.writes != beforeWrites || forge.calls != beforeCalls || forge.minted != beforeMinted {
 			t.Fatalf("private %s reached GitHub or was reflected", field)
 		}
 	}
@@ -339,13 +342,14 @@ func TestPrivateGuardFullTreeAndWriteObservation(t *testing.T) {
 	)
 	paragraph := "The copper observatory keeps seven violet notebooks beneath the eastern stairway. Seasonal planning uses the silver ledger beside the northern window each week."
 	f, forge, m, owner, in := publicProposalFixture(t)
+	fixtureBinary := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 0, 1, 2, 3)
 	f.fake.failBlob = "docs/AGENTS-PROFILE-MARKUS.md"
 	f.fake.commit(privateRepository, fixtureCommit, map[string]string{
 		"docs/AGENTS-KERNEL-PRIVATE.md":        "# Private\n\n## Copy\n\n" + in.Source + "\n\n" + proseLine + "\n\n" + paragraph + "\n",
 		"docs/AGENTS-PROFILE-MARKUS.md":        "# Profile\n\n- " + profileRule + "\n",
 		"commands/secrets.md":                  "# Secrets\n\n- " + commandLine + "\n",
 		"docs/AGENTS-KERNEL-PRIVATE.tldr.yaml": "rules:\n  copper:\n    en: " + guardTLDR + "\n",
-		"assets/blank.dat":                     string([]byte{0, 1, 2, 3}),
+		"assets/blank.png":                     string(fixtureBinary),
 	}, "main")
 	allowCredential(t, m.credentials.Dir, "guard-read", owner.TenantID, privateRepository)
 	if err := os.WriteFile(filepath.Join(m.credentials.Dir, "guard-read"), []byte("fixtureGuardRead319"), 0o600); err != nil {
@@ -361,6 +365,16 @@ func TestPrivateGuardFullTreeAndWriteObservation(t *testing.T) {
 		t.Fatal("unreadable private tree reached GitHub")
 	}
 	f.fake.failBlob = ""
+	blocked := find(f.layer(owner, "POST", "/api/rules/doctrine/sources/"+created.ID+"/index", nil), privateRepository)
+	if blocked.State != "failed" || !strings.Contains(blocked.Error, "assets/blank.png") {
+		t.Fatal("unreviewed binary did not block the private guard with its path")
+	}
+	beforeCalls, beforeMinted := forge.calls, forge.minted
+	f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 422)
+	if forge.calls != beforeCalls || forge.minted != beforeMinted {
+		t.Fatal("binary index failure reached GitHub")
+	}
+	m.binaryAllowlist = map[string]string{"assets/blank.png": fmt.Sprintf("%x", sha256.Sum256(fixtureBinary))}
 	ready := find(f.layer(owner, "POST", "/api/rules/doctrine/sources/"+created.ID+"/index", nil), privateRepository)
 	if ready.Error != "" || ready.State != "ready" {
 		t.Fatalf("reindex %+v", ready)
@@ -469,6 +483,28 @@ func TestWriteReauthorizedBeforeGitHubMutation(t *testing.T) {
 			t.Fatalf("orphaned branch not observed branch=%s orphaned=%s event=%s err=%v", branch, orphaned, event, err)
 		}
 	})
+	t.Run("orphan clears once the pr exists", func(t *testing.T) {
+		f, forge, m, owner, in := publicProposalFixture(t)
+		seedPrivateGuard(t, f, m, owner)
+		forge.beforeRequest = func(r *http.Request) {
+			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/git/refs") {
+				revoke(t, f, owner)
+				forge.beforeRequest = nil
+			}
+		}
+		f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 403)
+		dbtest.BindRole(t, f.d, owner.TenantID, owner.ID, "admin")
+		got := f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 200)
+		var out Proposal
+		if json.Unmarshal(got, &out) != nil || out.Orphaned || out.PRNumber < 1 || out.GateReason != "" || len(forge.pulls) != 1 {
+			t.Fatalf("orphan flag survived a created PR pr=%d orphaned=%v reason=%q pulls=%d", out.PRNumber, out.Orphaned, out.GateReason, len(forge.pulls))
+		}
+		var orphaned, reason, pr string
+		err := f.d.Admin.QueryRow(t.Context(), `SELECT COALESCE(data->>'orphaned',''), COALESCE(data->>'gate_reason',''), COALESCE(data->>'pr_number','') FROM doctrine_proposals WHERE id=$1`, in.RequestID).Scan(&orphaned, &reason, &pr)
+		if err != nil || orphaned == "true" || reason != "" || pr == "" || pr == "0" {
+			t.Fatalf("stored orphan flag survived pr=%s orphaned=%s reason=%s err=%v", pr, orphaned, reason, err)
+		}
+	})
 	t.Run("after pull", func(t *testing.T) {
 		f, forge, m, owner, in := publicProposalFixture(t)
 		seedPrivateGuard(t, f, m, owner)
@@ -547,9 +583,9 @@ func TestPublicPinCannotLaunderPrivateText(t *testing.T) {
 		bad := in
 		bad.RequestID = "31900000-0000-4000-8000-0000000000b1"
 		bad.Explanation = guardRule
-		before := forge.writes
+		before, beforeCalls, beforeMinted := forge.writes, forge.calls, forge.minted
 		got := f.call(owner, "POST", "/api/rules/doctrine/proposals", bad, 422)
-		if !strings.Contains(string(got), "private_doctrine") || bytes.Contains(got, []byte(guardRule)) || forge.writes != before {
+		if !strings.Contains(string(got), "private_doctrine") || bytes.Contains(got, []byte(guardRule)) || forge.writes != before || forge.calls != beforeCalls || forge.minted != beforeMinted {
 			t.Fatal("pinned private text was published")
 		}
 		ok := in
@@ -573,20 +609,17 @@ func TestPublicProposalRejectsNonLatin(t *testing.T) {
 		{"31900000-0000-4000-8000-0000000000c1", "greek capital", "Clarify step \u0391.", "non_latin"},
 		{"31900000-0000-4000-8000-0000000000c2", "armenian", "Clarify step \u0585.", "non_latin"},
 		{"31900000-0000-4000-8000-0000000000c3", "arabic digit", "Clarify step \u0661.", "non_latin"},
-		{"31900000-0000-4000-8000-0000000000c4", "fullwidth digit", "Clarify step \uff11.", "non_latin"},
+		{"31900000-0000-4000-8000-0000000000c4", "arabic digit two", "Clarify step \u0662.", "non_latin"},
 		{"31900000-0000-4000-8000-0000000000c5", "dotless quote", strings.ReplaceAll(guardRule, "i", "\u0131"), "private_doctrine"},
 	}
 	for _, tc := range cases {
 		bad := in
 		bad.Explanation = tc.text
 		bad.RequestID = tc.id
-		beforeWrites, beforeCalls := forge.writes, forge.calls
+		beforeWrites, beforeCalls, beforeMinted := forge.writes, forge.calls, forge.minted
 		got := f.call(owner, "POST", "/api/rules/doctrine/proposals", bad, 422)
-		if !strings.Contains(string(got), tc.code) || bytes.Contains(got, []byte(tc.text)) || forge.writes != beforeWrites {
+		if !strings.Contains(string(got), tc.code) || bytes.Contains(got, []byte(tc.text)) || forge.writes != beforeWrites || forge.calls != beforeCalls || forge.minted != beforeMinted {
 			t.Fatalf("%s reached GitHub or was reflected", tc.name)
-		}
-		if tc.code == "non_latin" && forge.calls != beforeCalls {
-			t.Fatalf("%s reached GitHub", tc.name)
 		}
 	}
 	corpus := quoteCorpus(guardRule)
@@ -594,8 +627,11 @@ func TestPublicProposalRejectsNonLatin(t *testing.T) {
 		if latinPublicText(text) && strings.ContainsRune(text, '\u0131') {
 			continue
 		}
-		if guardPrivateQuotes(corpus, nil, text) == nil {
-			t.Fatal("lookalike quotation accepted")
+		// The generated skeleton does not transliterate an arbitrary alphabet
+		// (the legacy Greek probe even substitutes Gamma for Latin y). Such
+		// text must fail the public-script gate before any quotation lookup.
+		if guardPublic(publicRepository, text) == nil && guardPrivateQuotes(corpus, nil, text) == nil {
+			t.Fatal("lookalike quotation accepted by both public guards")
 		}
 	}
 	if guardPrivateQuotes(corpus, nil, strings.ReplaceAll(guardRule, "i", "\u0131")) == nil {
@@ -604,7 +640,12 @@ func TestPublicProposalRejectsNonLatin(t *testing.T) {
 	if !latinPublicText("Öffentliche Regeln bleiben gültig. äöüÄÖÜß 0123456789") {
 		t.Fatal("Latin letters, umlauts or ASCII digits refused")
 	}
-	if latinPublicText("step \u0391") || latinPublicText("step \u0585") || latinPublicText("step \u0661") || latinPublicText("step \uff11") {
+	for _, text := range []string{"Area is 10 m\u00b2.", "Use \u00bd of the note.", "See the \u2139\ufe0f note.", "Clarify step \uff11.", "Section \u2161."} {
+		if !latinPublicText(text) {
+			t.Fatalf("normalized Latin text refused: %q", text)
+		}
+	}
+	if latinPublicText("step \u0391") || latinPublicText("step \u0585") || latinPublicText("step \u0661") || latinPublicText("step \u00b5") {
 		t.Fatal("non-Latin letter or digit accepted")
 	}
 }
@@ -709,10 +750,10 @@ func TestPrivateGuardRebuildsWhenMissingOrRotated(t *testing.T) {
 	quoted := in
 	quoted.RequestID = "31900000-0000-4000-8000-0000000000d3"
 	quoted.Explanation = guardRule
-	beforeWrites := forge.writes
+	beforeWrites, beforeCalls, beforeMinted := forge.writes, forge.calls, forge.minted
 	got := f.call(owner, "POST", "/api/rules/doctrine/proposals", quoted, 422)
-	if !strings.Contains(string(got), "private_doctrine") || bytes.Contains(got, []byte(guardRule)) || forge.writes != beforeWrites {
-		t.Fatal("rebuilt guard missed a private quotation")
+	if !strings.Contains(string(got), "private_doctrine") || bytes.Contains(got, []byte(guardRule)) || forge.writes != beforeWrites || forge.calls != beforeCalls || forge.minted != beforeMinted {
+		t.Fatal("rebuilt guard missed a private quotation or called GitHub")
 	}
 	var corpus []byte
 	if err := f.d.Admin.QueryRow(t.Context(), `SELECT corpus FROM doctrine_private_guard WHERE source_id=$1`, private.ID).Scan(&corpus); err != nil {
@@ -732,5 +773,96 @@ func TestPrivateQuoteFailureIsGeneric(t *testing.T) {
 	var f *failure
 	if !errors.As(err, &f) || f.Code != "private_doctrine" || strings.Contains(err.Error(), guardRule) {
 		t.Fatal("private match reflected")
+	}
+}
+
+func TestLatinLookalikeFoldAndIdentity(t *testing.T) {
+	if got := normalizeProposalText("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"); got != normalizeProposalText("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz0123456789") {
+		t.Fatalf("casefold changed the skeleton: %q", got)
+	}
+	skeleton := normalizeProposalText(guardRule)
+	for _, attack := range []string{
+		guardRule,
+		strings.ReplaceAll(guardRule, "e", "é"),
+		strings.ReplaceAll(guardRule, "a", "à"),
+		strings.ReplaceAll(guardRule, "e", "e\u0301"),
+		strings.ReplaceAll(guardRule, "e", "e\u0323"),
+		strings.ReplaceAll(guardRule, "o", "o\u0332"),
+		strings.ReplaceAll(guardRule, "a", "ɑ"),
+		strings.ReplaceAll(guardRule, "g", "ɡ"),
+		strings.ReplaceAll(guardRule, "i", "ɩ"),
+		strings.ReplaceAll(guardRule, "o", "ᴏ"),
+		strings.ReplaceAll(guardRule, "c", "ᴄ"),
+		strings.ReplaceAll(guardRule, "s", "ꜱ"),
+		strings.ReplaceAll(guardRule, "s", "ſ"),
+	} {
+		if normalizeProposalText(attack) != skeleton {
+			t.Fatalf("lookalike did not fold onto the Latin skeleton")
+		}
+		if guardPrivateQuotes(quoteCorpus(guardRule), nil, attack) == nil {
+			t.Fatal("Latin lookalike quotation accepted")
+		}
+	}
+	dotted := "I keep seven violet notebooks beneath the eastern stairway for seasonal planning."
+	if normalizeProposalText(strings.ReplaceAll(dotted, "I", "İ")) != normalizeProposalText(dotted) {
+		t.Fatal("dotted capital I did not fold")
+	}
+	variants := []string{
+		"hsb1", "HSB1", "һsb1", "Һsb1", "Нsb1", "Ηsb1", "hѕb1", "hsь1", "hsΒ1",
+		"hsb١", "hsb१", "hsb\U0001d7cf", "hsb¹", "hsb 1",
+		"barta.cm", "barta.сm", "barta.ϲm", "barta.ᴄm", "barta․cm", "bartaꓸcm", "barta．cm", "barta։cm",
+		"pm.barta", "pm.bаrta", "pm.ьarta", "ρm.barta", "pm.bɑrta",
+		"inspr-doctrine-private", "inspr‑doctrine‑private", "inspr‐doctrine‐private",
+		"inspr–doctrine–private", "inspr−doctrine−private", "inspr﹣doctrine﹣private",
+		"inspr doctrine private", "inspr⁃doctrine⁃private", "inspr˗doctrine˗private",
+		"insprーdoctrineーprivate", "inspr─doctrine─private", "inspr➖doctrine➖private",
+		"іnspr-doctrine-private", "ınspr-doctrine-private", "inspr-dօctrine-private", "inspr-doϲtrine-private",
+		"inspr-doctrine-private\u00a0",
+		"markus@", "mаrkus@",
+		"/Users/x", "pm.bɑrta", "ʜsb1", "ınspr-doctrine-private", "markus@barta.cm",
+		"mark\u0301us@", "hs\u0332b1", "／Users／", "∕Users∕", "⁄Users⁄",
+	}
+	if len(variants) != 56 {
+		t.Fatalf("identity corpus has %d variants", len(variants))
+	}
+	missed := 0
+	for _, text := range variants {
+		if guardPublic(publicRepository, "Deploy to "+text+" now.") == nil {
+			t.Logf("synthetic identity missed: %q -> %q", text, normalizeProposalText(text))
+			missed++
+		}
+	}
+	if missed != 0 {
+		t.Fatalf("identity variants missed %d of %d", missed, len(variants))
+	}
+	for _, text := range []string{"Run the public test suite.", "Öffentliche Regeln bleiben gültig.", "Use ² and ½ beside the ℹ️ note."} {
+		if guardPublic(publicRepository, text) != nil {
+			t.Fatalf("benign public text refused: %q", text)
+		}
+	}
+}
+
+func TestGuardSlotWaitsForCapacity(t *testing.T) {
+	for i := 0; i < maxConcurrentGuards; i++ {
+		guardSlots <- struct{}{}
+	}
+	t.Cleanup(func() {
+		for i := 0; i < maxConcurrentGuards; i++ {
+			select {
+			case <-guardSlots:
+			default:
+			}
+		}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := withGuardSlot(ctx, func() error { return nil }); err == nil {
+		t.Fatal("a full guard cap accepted another call")
+	}
+	for i := 0; i < maxConcurrentGuards; i++ {
+		<-guardSlots
+	}
+	if err := withGuardSlot(context.Background(), func() error { return nil }); err != nil {
+		t.Fatal(err)
 	}
 }

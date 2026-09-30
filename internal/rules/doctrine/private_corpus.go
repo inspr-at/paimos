@@ -16,6 +16,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Two concurrent guards are enough to keep an 8 KB check from occupying every
+// core. A caller waits until its request context ends.
+const maxConcurrentGuards = 2
+
+var guardSlots = make(chan struct{}, maxConcurrentGuards)
+
+func withGuardSlot(ctx context.Context, fn func() error) error {
+	select {
+	case guardSlots <- struct{}{}:
+		defer func() { <-guardSlots }()
+		return fn()
+	case <-ctx.Done():
+		return fail(503, "busy", "the doctrine layer is busy; nothing was changed, try again")
+	}
+}
+
 const (
 	// Six contiguous words is the run that blocks a quotation. Whole entries
 	// shorter than that still block once they reach quoteWholeMin, so a
@@ -35,22 +51,24 @@ const (
 // normalised runs, whole entries and shingles, never the private words or the
 // server key. key is the per-tenant HMAC key and stays in memory only.
 type guardCorpus struct {
-	key     []byte
-	keyID   [8]byte
-	runs    map[[16]byte]struct{}
-	wholes  map[uint16]map[[16]byte]struct{}
-	entries []map[[16]byte]struct{}
-	seen    map[[16]byte]struct{}
+	key      []byte
+	keyID    [8]byte
+	policyID [32]byte
+	runs     map[[16]byte]struct{}
+	wholes   map[uint16]map[[16]byte]struct{}
+	entries  []map[[16]byte]struct{}
+	seen     map[[16]byte]struct{}
 }
 
 func newGuardCorpus(key []byte) *guardCorpus {
 	copied := append([]byte(nil), key...)
 	return &guardCorpus{
-		key:    copied,
-		keyID:  guardFingerprint(copied),
-		runs:   map[[16]byte]struct{}{},
-		wholes: map[uint16]map[[16]byte]struct{}{},
-		seen:   map[[16]byte]struct{}{},
+		key:      copied,
+		keyID:    guardFingerprint(copied),
+		policyID: blobPolicyVersion(),
+		runs:     map[[16]byte]struct{}{},
+		wholes:   map[uint16]map[[16]byte]struct{}{},
+		seen:     map[[16]byte]struct{}{},
 	}
 }
 
@@ -327,8 +345,11 @@ func (c *guardCorpus) marshal() ([]byte, error) {
 		return nil, gitFail("the private doctrine guard key is not configured")
 	}
 	var b []byte
-	b = append(b, 'P', 'G', 2)
+	b = append(b, 'P', 'G', 3)
 	b = append(b, c.keyID[:]...)
+	version := normalizerVersion()
+	b = append(b, version[:]...)
+	b = append(b, c.policyID[:]...)
 	b = appendU32(b, len(runs))
 	for _, h := range runs {
 		b = append(b, h[:]...)
@@ -373,16 +394,22 @@ func appendU32(b []byte, n int) []byte {
 	return append(b, buf[:]...)
 }
 
-func unmarshalGuard(raw, key []byte) (*guardCorpus, error) {
-	if len(key) < 32 || len(raw) < 11 || raw[0] != 'P' || raw[1] != 'G' || raw[2] != 2 {
+func unmarshalGuard(raw, key []byte, allowlists ...map[string]string) (*guardCorpus, error) {
+	if len(key) < 32 || len(raw) < 75 || len(raw) > maxCorpusBytes || raw[0] != 'P' || raw[1] != 'G' || raw[2] != 3 {
 		return nil, gitFail("the private doctrine guard could not be read")
 	}
 	id := guardFingerprint(key)
 	if !hmac.Equal(raw[3:11], id[:]) {
 		return nil, gitFail("the private doctrine guard could not be read")
 	}
+	version := normalizerVersion()
+	policy := blobPolicyVersion(allowlists...)
+	if !hmac.Equal(raw[11:43], version[:]) || !hmac.Equal(raw[43:75], policy[:]) {
+		return nil, gitFail("the private doctrine guard needs rebuilding")
+	}
 	c := newGuardCorpus(key)
-	rest := raw[11:]
+	c.policyID = policy
+	rest := raw[75:]
 	var n int
 	var err error
 	if n, rest, err = takeU32(rest, 2_000_000); err != nil {
@@ -462,10 +489,6 @@ func takeU32(b []byte, limit int) (int, []byte, error) {
 	return n, b[4:], nil
 }
 
-// readPrivateCorpus hashes every text blob at commit. Paths are not consulted:
-// narrowing what the index shows must not narrow what a public proposal is
-// checked against. Binary blobs have no doctrine text; anything unreadable
-// fails the build. The returned bytes contain hashes only.
 // mainMatchingFiles keeps cached public blobs that are identical to main's
 // current tree. A configured pin, proposal branch or unmerged SHA does not
 // widen the quotation exemption.
@@ -476,46 +499,17 @@ func mainMatchingFiles(cached []File, tree []Entry) []File {
 	}
 	out := make([]File, 0, len(cached))
 	for _, f := range cached {
-		if f.BlobSHA != "" && current[f.Path] == f.BlobSHA {
+		if f.BlobSHA != "" && current[f.Path] == f.BlobSHA && BlobSHA(f.Content) == f.BlobSHA {
 			out = append(out, f)
 		}
 	}
 	return out
 }
 
-func utf16Text(raw []byte) bool {
-	if len(raw) >= 2 && ((raw[0] == 0xff && raw[1] == 0xfe) || (raw[0] == 0xfe && raw[1] == 0xff)) {
-		return true
-	}
-	if len(raw) < 4 || len(raw)%2 != 0 {
-		return false
-	}
-	nulEven, nulOdd := 0, 0
-	for i, b := range raw {
-		if b != 0 {
-			continue
-		}
-		if i%2 == 0 {
-			nulEven++
-		} else {
-			nulOdd++
-		}
-	}
-	half := len(raw) / 2
-	return nulEven == half || nulOdd == half
-}
-
-func doctrineTextPath(path string) bool {
-	lower := strings.ToLower(path)
-	for _, ext := range []string{".md", ".yaml", ".yml", ".txt", ".json"} {
-		if strings.HasSuffix(lower, ext) {
-			return true
-		}
-	}
-	return false
-}
-
-func readPrivateCorpus(ctx context.Context, r Reader, repository, commit string, key []byte) ([]byte, error) {
+// readPrivateCorpus hashes every UTF-8 text file in the private tree. Paths
+// selected for the visible rule index never narrow this guard. Unsupported
+// bytes block indexing unless an exact reviewed path/hash exception exists.
+func readPrivateCorpus(ctx context.Context, r Reader, repository, commit string, key []byte, allowlists ...map[string]string) ([]byte, error) {
 	if len(key) < 32 {
 		return nil, gitFail("the private doctrine guard key is not configured")
 	}
@@ -527,6 +521,7 @@ func readPrivateCorpus(ctx context.Context, r Reader, repository, commit string,
 		return nil, gitFail("the private doctrine tree has no files")
 	}
 	c := newGuardCorpus(key)
+	c.policyID = blobPolicyVersion(allowlists...)
 	total, texts := 0, 0
 	for _, e := range entries {
 		if e.Size < 0 || e.Size > maxGuardFile {
@@ -540,17 +535,11 @@ func readPrivateCorpus(ctx context.Context, r Reader, repository, commit string,
 			return nil, gitFail("the private doctrine tree is larger than the guard can cover")
 		}
 		total += len(raw)
-		if utf16Text(raw) || (doctrineTextPath(e.Path) && (bytes.Contains(raw, []byte{0}) || !utf8.Valid(raw))) {
-			return nil, gitFail("a private doctrine file is not UTF-8 text")
-		}
-		if bytes.Contains(raw, []byte{0}) {
+		switch classifyPrivateBlob(e.Path, raw, allowlists...) {
+		case blobSkip:
 			continue
-		}
-		if !utf8.Valid(raw) {
-			return nil, gitFail("a private doctrine file is not UTF-8 text")
-		}
-		if len(bytes.TrimSpace(raw)) == 0 {
-			continue
+		case blobReject:
+			return nil, gitFail("private doctrine file is not UTF-8 text: %q", e.Path)
 		}
 		texts++
 		c.add(e.Path, string(raw))

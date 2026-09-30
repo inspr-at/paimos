@@ -35,9 +35,9 @@ onMounted(async () => {
     <article v-for="p in stored" :key="p.id" class="proposal">
       <div class="info">
         <a v-if="p.pr_url" :href="p.pr_url" target="_blank" rel="noopener noreferrer">{{ p.repository.split('/').at(-1) }} · PR #{{ p.pr_number }}</a>
-        <span v-else>{{ p.repository.split('/').at(-1) }} · {{ p.orphaned ? p.branch : 'proposal started' }}</span>
+        <span v-else>{{ p.repository.split('/').at(-1) }} · {{ p.orphaned && !p.pr_number ? p.branch : 'proposal started' }}</span>
         <span class="state">{{ proposalState(p) }}</span>
-        <span v-if="p.orphaned" class="quiet">Branch {{ p.branch }} is on GitHub without a pull request. An admin should delete it.</span>
+        <span v-if="p.orphaned && !p.pr_number" class="quiet">Branch {{ p.branch }} is on GitHub without a pull request. An admin should delete it.</span>
         <span v-if="p.gate_reason && p.state === 'in_review'" class="quiet">{{ p.gate_reason }}</span>
         <a v-if="p.release_url" :href="p.release_url" target="_blank" rel="noopener noreferrer" class="quiet">{{ p.release }}</a>
         <span v-else-if="p.state === 'merged'" class="quiet">{{ p.release_requested ? 'Release requested; waiting for the repository.' : p.approved_by ? 'Merged; release request still pending.' : 'Merged externally; request release in the repository.' }}</span>

@@ -155,6 +155,8 @@ func (g *GitHub) preparePR(ctx context.Context, p *Proposal, files map[string]st
 	if pr.Number < 1 || !validPull(*p, pr) {
 		return gitFail("the PR does not match this proposal")
 	}
+	p.Orphaned = false
+	p.GateReason = ""
 	p.PRURL = fmt.Sprintf("https://github.com/%s/pull/%d", p.Repository, p.PRNumber)
 	return nil
 }

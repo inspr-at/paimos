@@ -13,21 +13,47 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/inspr-at/paimos/internal/workorders"
 	"gopkg.in/yaml.v3"
 )
 
-// Mirrors inspr-modules/scripts/leak-guard.sh (read 2026-09-29), plus
-// general contact/credential shapes. No matched text ever leaves this guard.
-// No allowlist: a proposal cannot grant itself a public-surface exception.
-var publicLeaks = regexp.MustCompile(`(?i)markus@|@barta\.|[a-z0-9.-]+\.cm\b|~/\.inspr/secrets|(?:api[_-]?key|token|password|secret)["' ]*[:=]["' ]*[A-Za-z0-9/+=_-]{16,}|hsb[0-9]|csb[0-9]|mbp[0-9]{4}|agm[0-9]|dsc[0-9]|imac0|pm\.barta|paimos\.agm|hs\.barta|[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}|-----BEGIN .*PRIVATE KEY-----|github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]{16,}|inspr-doctrine-private|/Users/|/home/`)
+// Every literal passes through the same normalizer as the corpus and input.
+// Regex syntax and character classes are not normalization input: UTS #39 also
+// maps ASCII (m -> rn, 1 -> l, 0 -> O), so raw identity regexes are incorrect.
+func identityLiteral(s string) string { return regexp.QuoteMeta(normalizeProposalText(s)) }
+
+func credentialPattern() string {
+	labels := []string{"api_key", "api-key", "apikey", "token", "password", "secret"}
+	for i := range labels {
+		labels[i] = identityLiteral(labels[i])
+	}
+	return `(?:` + strings.Join(labels, "|") + `)["' ]*[:=]["' ]*[a-z0-9/+=_-]{16,}|` +
+		identityLiteral("-----BEGIN ") + `.*` + identityLiteral("PRIVATE KEY-----") + `|` +
+		identityLiteral("github_pat_") + `[a-z0-9_]+|` + identityLiteral("gh") + `[` + normalizeProposalText("pousr") + `]_[a-z0-9_]{16,}`
+}
+
+func publicIdentityPattern() string {
+	patterns := []string{credentialPattern(), `[a-z0-9.-]+\.` + identityLiteral("cm") + `\b`, `[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}`}
+	for _, literal := range []string{"markus@", "@barta.", "~/.inspr/secrets", "pm.barta", "paimos.agm", "hs.barta", "/Users/", "/home/"} {
+		patterns = append(patterns, identityLiteral(literal))
+	}
+	// Whitespace and Unicode dash punctuation are separator variants; soft
+	// hyphens and all other default ignorables have already been removed.
+	patterns = append(patterns, identityLiteral("inspr")+`[^a-z0-9]`+identityLiteral("doctrine")+`[^a-z0-9]`+identityLiteral("private"))
+	digits := `[` + regexp.QuoteMeta(normalizeProposalText("0123456789")) + `]`
+	for _, host := range []string{"hsb", "csb", "agm", "dsc"} {
+		patterns = append(patterns, identityLiteral(host)+`[^a-z0-9]{0,3}`+digits)
+	}
+	patterns = append(patterns, identityLiteral("mbp")+`[^a-z0-9]{0,3}`+digits+`{4}`, identityLiteral("imac")+`[^a-z0-9]{0,3}`+identityLiteral("0"))
+	return strings.Join(patterns, "|")
+}
 
 // Credentials are forbidden in either repository; private routing permits
-// operator identity, never credential values.
-var credentialLeaks = regexp.MustCompile(`(?i)(?:api[_-]?key|token|password|secret)["' ]*[:=]["' ]*[A-Za-z0-9/+=_-]{16,}|-----BEGIN .*PRIVATE KEY-----|github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]{16,}`)
+// operator identity, never credential values. No proposal-controlled exceptions.
+var publicLeaks = regexp.MustCompile(publicIdentityPattern())
+var credentialLeaks = regexp.MustCompile(credentialPattern())
 var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type ProposalInput struct {
@@ -77,6 +103,9 @@ func guardPublic(repository string, texts ...string) error {
 		return nil
 	}
 	for _, text := range texts {
+		if ambiguousPublicText(text) {
+			return fail(422, "ambiguous_text", "This public proposal contains a character whose Unicode compatibility and visual forms disagree. Use ordinary Latin text. Nothing was published.")
+		}
 		if !latinPublicText(text) {
 			return fail(422, "non_latin", "Public proposals may use only Latin letters, including German umlauts and ß, and ASCII digits. Nothing was published.")
 		}
@@ -88,17 +117,27 @@ func guardPublic(repository string, texts ...string) error {
 }
 
 // latinPublicText allows Latin letters, including German umlauts and ß, and
-// ASCII digits. Other letters and digits are refused so a lookalike alphabet
+// ASCII digits. It judges the compatibility form only, so a superscript, a
+// vulgar fraction or an information symbol whose NFKC form is Latin or ASCII
+// is accepted. Other letters and digits are refused so a lookalike alphabet
 // cannot carry a private quotation into a public proposal.
 func latinPublicText(text string) bool {
-	for _, form := range []string{text, norm.NFKC.String(text)} {
-		for _, r := range form {
-			if unicode.IsLetter(r) && !unicode.Is(unicode.Latin, r) {
-				return false
-			}
-			if unicode.IsNumber(r) && (r < '0' || r > '9') {
-				return false
-			}
+	text = norm.NFKC.String(text)
+	text = strings.Map(func(r rune) rune {
+		if isIgnoredFormat(r) {
+			return -1
+		}
+		return r
+	}, text)
+	for _, r := range text {
+		if !unicode.Is(unicode.Latin, r) && !unicode.Is(unicode.Inherited, r) && !unicode.Is(unicode.Common, r) {
+			return false
+		}
+		if unicode.IsLetter(r) && !unicode.Is(unicode.Latin, r) {
+			return false
+		}
+		if unicode.IsNumber(r) && (r < '0' || r > '9') {
+			return false
 		}
 	}
 	return true
@@ -201,66 +240,4 @@ func editRule(s Source, files []File, in ProposalInput) (map[string]string, erro
 		return nil, err
 	}
 	return map[string]string{in.Path: content, SidecarPath(in.Path): string(encoded)}, nil
-}
-
-// Normalize only for comparison; the proposed git bytes remain unchanged.
-// Invisible characters are removed and compatibility forms composed. Cyrillic,
-// Greek, dash and space lookalikes then fold to a Latin skeleton so a
-// homoglyph cannot hide an identity pattern or a private quotation.
-func normalizeProposalText(text string) string {
-	text = norm.NFKC.String(text)
-	text = strings.Map(func(r rune) rune {
-		// Cf includes zero-width joiners/spaces, bidi controls and soft hyphens.
-		// Also remove invisible combining selectors and the grapheme joiner.
-		if unicode.Is(unicode.Cf, r) || r == '\u034f' || r >= '\ufe00' && r <= '\ufe0f' || r >= '\U000e0100' && r <= '\U000e01ef' {
-			return -1
-		}
-		if unicode.Is(unicode.Pd, r) || r == '\u2212' {
-			return '-'
-		}
-		if unicode.Is(unicode.Zs, r) {
-			return ' '
-		}
-		return r
-	}, text)
-	text = foldConfusables(text)
-	folded := cases.Fold().String(norm.NFKC.String(text))
-	return strings.Join(strings.Fields(foldConfusables(folded)), " ")
-}
-
-func foldConfusables(text string) string {
-	return strings.Map(func(r rune) rune {
-		if mapped, ok := confusableFold[r]; ok {
-			return mapped
-		}
-		return r
-	}, text)
-}
-
-func proposalWords(text string) []string {
-	return strings.FieldsFunc(normalizeProposalText(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
-}
-
-// confusableFold maps lowercase Cyrillic and Greek lookalikes to Latin.
-// Case folding has already run; keys are the folded forms.
-var confusableFold = map[rune]rune{
-	'\u0430': 'a', '\u0435': 'e', '\u0451': 'e', '\u043e': 'o', '\u0440': 'p', '\u0441': 'c', '\u0443': 'y', '\u0445': 'x',
-	'\u0456': 'i', '\u0457': 'i', '\u0458': 'j', '\u0455': 's', '\u04bb': 'h', '\u0501': 'd', '\u051b': 'q', '\u051d': 'w',
-	'\u0461': 'w', '\u0475': 'v', '\u04af': 'y', '\u04b1': 'u', '\u04cf': 'l', '\u04c0': 'l', '\u043a': 'k', '\u043c': 'm',
-	'\u0442': 't', '\u0433': 'r', '\u044d': 'e', '\u0454': 'e', '\u0491': 'g', '\u0432': 'b', '\u0431': 'b', '\u04b3': 'h',
-	'\u03b1': 'a', '\u03b5': 'e', '\u03b9': 'i', '\u03ba': 'k', '\u03bf': 'o', '\u03c1': 'p', '\u03c4': 't', '\u03c5': 'u',
-	'\u03bd': 'v', '\u03c7': 'x', '\u03b3': 'y', '\u03b7': 'n', '\u03c9': 'w', '\u03b2': 'b',
-	'\u0131': 'i', '\u0585': 'o',
-}
-
-func init() {
-	for from, to := range confusableFold {
-		upper := unicode.ToUpper(from)
-		if upper == from {
-			continue
-		}
-		if _, ok := confusableFold[upper]; !ok {
-			confusableFold[upper] = to
-		}
-	}
 }

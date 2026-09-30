@@ -35,7 +35,7 @@ func (m *Module) privateGuard(ctx context.Context, tx pgx.Tx, actor tenant.Princ
 		if err != nil {
 			return nil, err
 		}
-		corpus, err := unmarshalGuard(raw, m.guardKey(actor.TenantID))
+		corpus, err := unmarshalGuard(raw, m.guardKey(actor.TenantID), m.binaryAllowlist)
 		if err != nil || corpus.empty() {
 			return nil, unavailable()
 		}

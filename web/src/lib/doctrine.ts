@@ -210,8 +210,8 @@ export const proposeDoctrineChange = (input: DoctrineProposalInput) => proposalR
 export const getDoctrineProposals = async () => (await proposalRequest<{ proposals: DoctrineProposal[] }>('', 'GET')).proposals ?? []
 export const refreshDoctrineProposal = (id: string) => proposalRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/refresh`)
 export const approveDoctrineProposal = (id: string, head: string) => proposalRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/approve`, 'POST', { head_sha: head })
-export function proposalState(p: Pick<DoctrineProposal, 'state' | 'pinned_machines'> & { orphaned?: boolean }): string {
-  if (p.orphaned) return 'Branch left on GitHub'
+export function proposalState(p: Pick<DoctrineProposal, 'state' | 'pinned_machines'> & { orphaned?: boolean; pr_number?: number }): string {
+  if (p.orphaned && !p.pr_number) return 'Branch left on GitHub'
   if (p.state === 'pinned') return `Pinned on ${p.pinned_machines} reported ${p.pinned_machines === 1 ? 'machine' : 'machines'}`
   return { proposed: 'Proposed', in_review: 'In review', merged: 'Merged', released: 'Released', closed: 'Closed' }[p.state]
 }
