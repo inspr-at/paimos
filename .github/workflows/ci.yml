@@ -2,8 +2,18 @@
 name: CI
 
 on:
+  # One run per change (AEON-419): pushes to main, pull requests, and the merge queue.
+  # A bare `push:` also ran on every PR branch push, doubling CI load under the 20-job limit.
   push:
+    branches: [main]
   pull_request:
+  merge_group:
+
+# A newer push to the same pull request supersedes its older run; main and the queue always finish.
+concurrency:
+  # Unique per non-PR run: main pushes and queue runs never share a group, so none is cancelled while pending.
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
