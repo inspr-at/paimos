@@ -4,14 +4,16 @@
 // reads land, then releases the old answers: the old data must never win.
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { archiveAccount, cancelRun, setAccountState, type AgentAccount, type AgentRun } from '../src/lib/agents'
+import { archiveAccount, setAccountState, type AgentAccount } from '../src/lib/agents'
+import { cancelRun, type AgentRunRow } from '../src/lib/agentRows'
+import { wired, wiredPage } from './wire-fixtures'
 import { disconnectComputer, removeComputer, type PairingView } from '../src/lib/agentPairing'
 import type { AccountCapacity, CapacitySchedule, ScheduleOverride } from '../src/lib/capacity'
 import { usePolledData } from '../src/lib/usePolledData'
 import { useAgents } from '../src/stores/agents'
 import { useCapacity } from '../src/stores/capacity'
 
-type Server = { accounts: AgentAccount[]; runs: AgentRun[]; capacity: AccountCapacity[]; schedules: ScheduleOverride[]; computers: PairingView[] }
+type Server = { accounts: AgentAccount[]; runs: AgentRunRow[]; capacity: AccountCapacity[]; schedules: ScheduleOverride[]; computers: PairingView[] }
 let server: Server
 let hold = false
 const held: (() => void)[] = []
@@ -25,10 +27,14 @@ function get<T>(snapshot: () => T): Promise<T> {
 vi.mock('../src/lib/agents', async importOriginal => ({
   ...await importOriginal<typeof import('../src/lib/agents')>(),
   listAccounts: () => get(() => server.accounts),
-  listRuns: () => get(() => ({ items: server.runs, next_cursor: null })),
-  archiveAccount: vi.fn(), cancelRun: vi.fn(), setAccountState: vi.fn(),
-  listAllSessions: async () => ({ items: [], next_cursor: null }), listApprovals: async () => [], listModels: async () => [],
+  archiveAccount: vi.fn(), setAccountState: vi.fn(),
+  listApprovals: async () => [], listModels: async () => [],
   listMessages: async () => ({ items: [] }), listTargets: async () => [],
+}))
+vi.mock('../src/lib/agentRows', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/lib/agentRows')>(),
+  listRuns: () => get(() => wiredPage(server.runs)),
+  cancelRun: vi.fn(), listAllSessions: async () => wiredPage([]),
 }))
 vi.mock('../src/lib/capacity', async importOriginal => ({
   ...await importOriginal<typeof import('../src/lib/capacity')>(),
@@ -56,7 +62,7 @@ beforeEach(() => {
   held.length = 0
   server = {
     accounts: [account('a'), account('b')],
-    runs: [{ id: 'r', agent_principal_id: 'agent', account_id: 'a', status: 'queued' } as AgentRun],
+    runs: [{ id: 'r', agent_principal_id: 'agent', account_id: 'a', status: 'queued', row_version: 1 } as AgentRunRow],
     // reserved_runs stands in for the capacity a queued run holds on its account.
     capacity: ['a', 'b'].map(id => ({ account_id: id, schedule, reserved_runs: id === 'a' ? 1 : 0 }) as unknown as AccountCapacity),
     schedules: [],
@@ -65,15 +71,15 @@ beforeEach(() => {
   // What the server does on each write.
   vi.mocked(archiveAccount).mockImplementation(async id => {
     server.accounts = server.accounts.filter(a => a.id !== id)
-    server.runs = server.runs.map(r => r.account_id === id && r.status === 'queued' ? { ...r, status: 'cancelled' } : r)
+    server.runs = server.runs.map(r => r.account_id === id && r.status === 'queued' ? { ...r, status: 'cancelled', row_version: r.row_version! + 1 } : r)
     server.capacity = server.capacity.filter(c => c.account_id !== id)
     server.computers = server.computers.map(c => ({ ...c, enrollments: c.enrollments.filter(e => e.account_id !== id) }))
     return account(id)
   })
   vi.mocked(cancelRun).mockImplementation(async id => {
-    server.runs = server.runs.map(r => r.id === id ? { ...r, status: 'cancelled' } : r)
+    server.runs = server.runs.map(r => r.id === id ? { ...r, status: 'cancelled', row_version: r.row_version! + 1 } : r)
     server.capacity = server.capacity.map(c => ({ ...c, reserved_runs: 0 }) as AccountCapacity)
-    return server.runs.find(r => r.id === id)!
+    return wired(server.runs.find(r => r.id === id)!)
   })
   vi.mocked(setAccountState).mockImplementation(async (id, state) => {
     server.accounts = server.accounts.map(a => a.id === id ? { ...a, state } : a)

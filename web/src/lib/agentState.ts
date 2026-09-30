@@ -4,6 +4,7 @@
 // can be unit tested.
 import { brand } from './brand.ts'
 import type { AgentRun, Approval, HarnessSession, ProjectMessage } from './agents.ts'
+import type { HarnessSessionRow } from './agentRows.ts'
 
 import { DEFAULT_AGENT_STATE, assessAgentState, type StateReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
 
@@ -32,15 +33,30 @@ export function sessionStatus(session: HarnessSession, now: number, needsYou = f
   return { state, label, ...(reasons.length ? { reasons } : {}), group: STATE_GROUP[assessment.state], tone: STATE_TONE[assessment.state] }
 }
 
-// Mutation/snapshot responses may omit the separately projected state evidence.
-// Preserve known evidence for the same binding, while allowing a new run or stop
-// reason to establish its own state. The ledger decides which answer is newer
-// (ledger.ts), so this only ever receives the newer one.
-export function mergeSessionEvidence(previous: HarnessSession | undefined, incoming: HarnessSession): HarnessSession {
+// Mutation/snapshot responses may omit what only a list or a detail read adds: the
+// separately projected state evidence, the node and agent summaries, the viewer's move
+// permission and the history a detail carries. Preserve known evidence for the same
+// binding, while allowing a new run or stop reason to establish its own state. The
+// ledger decides which answer is newer (ledger.ts), so this only ever receives the
+// newer one.
+export function mergeSessionEvidence(previous: HarnessSessionRow | undefined, incoming: HarnessSessionRow): HarnessSessionRow {
   if (!previous) return incoming
-  if (incoming.run_id !== previous.run_id || incoming.stop_reason !== previous.stop_reason) return incoming
+  const carried: Partial<HarnessSessionRow> = {}
+  const carry = <K extends keyof HarnessSessionRow>(key: K, when = true) => { if (when && incoming[key] === undefined && previous[key] !== undefined) carried[key] = previous[key] }
+  carry('project', incoming.project_id === previous.project_id)
+  carry('ticket', incoming.ticket_node_id === previous.ticket_node_id)
+  carry('agent', incoming.agent_principal_id === previous.agent_principal_id)
+  carry('can_reparent')
+  carry('watch')
+  carry('activity_note_id')
+  // History is read with a detail only. It stays until the next detail read replaces it,
+  // so a panel does not blink between a list row and the detail that follows it.
+  carry('metadata_history')
+  carry('activity_history')
+  if (incoming.run_id !== previous.run_id || incoming.stop_reason !== previous.stop_reason) return { ...incoming, ...carried }
   return {
     ...incoming,
+    ...carried,
     has_problem: incoming.has_problem ?? previous.has_problem,
     vendor_limited: incoming.vendor_limited ?? previous.vendor_limited,
     limit_window: incoming.limit_window ?? previous.limit_window,

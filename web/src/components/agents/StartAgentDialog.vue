@@ -4,7 +4,8 @@ import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { listNodes, type WorkNode } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { useSession } from '../../stores/session'
-import { deletePin, getRun, listPins, putPin, runNowOnce, listAllSessions, message, type AgentRun, type HarnessSession } from '../../lib/agents'
+import { deletePin, listPins, putPin, message, type AgentRun, type HarnessSession } from '../../lib/agents'
+import { getRun, listAllSessions, runNowOnce } from '../../lib/agentRows'
 import {
   AUTHOR_FAMILIES, authorFamilyFor, chooseStep, emptyChoice, emptyTouch, familyLabel, fetchAccountCatalog, fillDefaults, presentCascade, sessionReport, workRoleFor,
   type AgentAccountCatalog, type AuthorFamily, type CascadeChoice, type CascadeStep, type CascadeTouch, type CatalogGap, type RequestedRun,
@@ -38,9 +39,14 @@ const touch = ref<CascadeTouch>(emptyTouch())
 const loading = ref(false)
 const busy = ref(false)
 const error = ref('')
-const run = ref<AgentRun | null>(null)
+// The run and its session are followed by id, always as the ledger holds them: a
+// launch result, a status read or the page's own lists may each bring a newer copy,
+// and a response that arrives late never shows an older one (AEON-449).
+const runId = ref('')
+const run = computed<AgentRun | null>(() => (runId.value && agents.runs[runId.value]) || null)
 const requested = ref<RequestedRun | null>(null)
-const managed = ref<HarnessSession | null>(null)
+const managedId = ref('')
+const managed = computed<HarnessSession | null>(() => (managedId.value && agents.sessionById(managedId.value)) || null)
 const reused = ref(false)
 const grantStale = ref(false)
 const checking = ref(false)
@@ -153,7 +159,7 @@ async function open(initial?: WorkNode) {
   catalog.value = null; catalogGap.value = null; catalogMessage.value = ''
   choice.value = emptyChoice(); touch.value = emptyTouch()
   remember.value = false; remembered.value = ''
-  run.value = null; requested.value = null; managed.value = null; reused.value = false
+  runId.value = ''; requested.value = null; managedId.value = ''; reused.value = false
   error.value = ''; checkError.value = ''; searchError.value = ''; grantStale.value = false
   dialog.value?.showModal()
   void loadCatalog()
@@ -188,9 +194,9 @@ async function submit(runNow = false) {
   try {
     if (choice.value.accountId && remember.value) await putPin({ ticket_id: ticket.value.id, harness: choice.value.harness, account_id: choice.value.accountId })
     else if (remembered.value && !remember.value) await deletePin(ticket.value.id, choice.value.harness)
-    const result = await startAgent({ ticket: ticket.value, agentId: view.value.agentId, profileId: view.value.profileId, accountId: choice.value.accountId, runNow })
-    run.value = result.run; reused.value = result.reused; requested.value = pinned
-    void agents.afterWrite(() => agents.recordRun(result.run))
+    const result = await startAgent({ ticket: ticket.value, agentId: view.value.agentId, profileId: view.value.profileId, accountId: choice.value.accountId, runNow }, { run: agents.admitRun, runs: agents.admitRuns })
+    runId.value = result.run.id; reused.value = result.reused; requested.value = pinned
+    void agents.afterWrite()
     await refresh()
     await nextTick(); dialog.value?.querySelector<HTMLElement>('[data-result]')?.focus()
   } catch (e) {
@@ -210,22 +216,24 @@ async function submit(runNow = false) {
 async function overrideQueued() {
   if (!run.value || busy.value) return
   busy.value = true; checkError.value = ''
-  try { const started = await runNowOnce(run.value.id); run.value = started; void agents.afterWrite(() => agents.recordRun(started)) }
+  try { agents.admitRun(await runNowOnce(run.value.id)); void agents.afterWrite() }
   catch (e) { checkError.value = message(e) }
   finally { busy.value = false }
 }
 async function refresh() {
   if (!run.value || checking.value) return
-  const turn = generation, runId = run.value.id
+  const turn = generation, id = run.value.id
   checking.value = true
   try {
-    const current = await getRun(runId)
+    agents.admitRun(await getRun(id))
     if (turn !== generation || !visible.value) return
-    run.value = current; agents.recordRun(current); checkError.value = ''
-    const page = await listAllSessions({ agent: current.agent_principal_id, limit: 200 })
+    checkError.value = ''
+    const agentId = agents.runs[id]?.agent_principal_id
+    if (!agentId) return
+    const page = await listAllSessions({ agent: agentId, limit: 200 })
     if (turn !== generation || !visible.value) return
-    managed.value = page.items.find(s => s.run_id === runId && s.management_mode === 'managed') ?? null
-    if (managed.value) void agents.refreshSessions()
+    managedId.value = agents.admitSessions(page.items).find(s => s.run_id === id && s.management_mode === 'managed')?.id ?? ''
+    if (managedId.value) void agents.refreshSessions()
   } catch { if (turn === generation) checkError.value = 'Status could not be refreshed. The last reported state is shown.' }
   finally { checking.value = false }
 }

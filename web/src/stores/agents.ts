@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef, triggerRef } from 'vue'
 import { APIError, getNode } from '../lib/api'
 import {
-  decideApproval, getControl, listAccounts, listAllSessions, listApprovals, listMessages, listModels, listRuns, listTargets, requestManagedControl,
-  requestControl, resolveMessage, revokeApproval, sendMessage, setAccountState, archiveAccount, cancelRun,
-  type AgentAccount, type AgentRun, type Approval, type HarnessSession, type ModelProfile, type ProjectMessage, type SessionControl,
+  decideApproval, getControl, listAccounts, listApprovals, listMessages, listModels, listTargets, requestManagedControl,
+  requestControl, resolveMessage, revokeApproval, sendMessage, setAccountState, archiveAccount,
+  type AgentAccount, type AgentRun, type Approval, type HarnessSession, type ModelProfile, type Paged, type ProjectMessage, type SessionControl,
 } from '../lib/agents'
+import { cancelRun, getSession, listAllSessions, listRuns, type AgentRunRow, type HarnessSessionRow } from '../lib/agentRows'
+import type { Wire } from '../lib/wire'
 import { agentName, byStart, byStopped, harnessLabel, heldRequests, mergeSessionEvidence, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
 import { advanceActivity, type ActivityEvidence } from '../lib/liveAgents'
 import { toast } from '../lib/toast'
@@ -15,7 +17,7 @@ import { usePolledData } from '../lib/usePolledData'
 import { useProjects } from './projects'
 import { useAgentAppearance } from '../lib/agentAppearance'
 import { carry, createReadOrder, lowestPosition, onReset, positionOf, readOrdered, stampAt, type ReadOrder } from '../lib/position'
-import { createLedger, type Ledger } from '../lib/ledger'
+import { createLedger, type Admitted, type Ledger } from '../lib/ledger'
 
 // forbidden: not for this person; error: the read failed (any other status).
 export type Availability = 'idle' | 'ready' | 'forbidden' | 'error'
@@ -34,49 +36,58 @@ async function all<T>(items: T[], work: (item: T) => Promise<void>) {
   await Promise.all(Array.from({ length: Math.min(FAN_OUT, items.length) }, worker))
 }
 
-// A page's rows are merged into their ledger as the page arrives, and the page holds
-// the rows that stand: a row an older answer would have rewound is the one held.
-function mergePage<P extends { items: R[] }, R extends { id: string }>(page: P, ledger: Ledger<R>): P {
-  return carry({ ...page, items: ledger.merge(page.items) }, page)
+// A page's rows are judged by their ledger as the page arrives, and the page holds the
+// rows that stand: a row an older answer would have rewound is the one held.
+function mergePage<R extends { id: string }>(page: Paged<Wire<R>>, ledger: Ledger<R>): Paged<Admitted<R>> {
+  return carry({ items: ledger.merge(page.items), next_cursor: page.next_cursor }, page)
 }
+// Pages overlap when the list moves while it is read: each session stands once.
+const once = <R extends { id: string }>(rows: R[]): R[] => [...new Map(rows.map(row => [row.id, row])).values()]
 
 export const useAgents = defineStore('agents', () => {
   const projects = useProjects()
   const { choice: statePreferences, ready: preferencesReady } = useAgentAppearance()
   const now = ref(Date.now())
   // One ledger for every session this page holds, whichever read or write brought
-  // it: the current list, History, a ticket's sessions and the answers to its own
-  // writes. The session's own revision decides which copy is newer, then the
-  // position the server stamped on it, then the order the requests started in.
-  const sessionLedger = createLedger<HarnessSession>({ revisionOf: session => session.revision, combine: mergeSessionEvidence })
-  // The same for runs, which carry no revision of their own: the global list, every
-  // per-agent list and the answers to its own writes, told apart by position.
-  const runLedger = createLedger<AgentRun>()
-  onReset(() => { sessionLedger.clear(); runLedger.clear() })
+  // it: the current list, History, a ticket's sessions, a detail and the answers to
+  // its own writes. Every row reaches it as a Wire row from lib/agentRows.ts, and only
+  // what it admits can be shown or kept: the session's own row_version decides which
+  // copy is newer, then the position of the list snapshot it came from, then the order
+  // the requests started in.
+  const sessionLedger = createLedger<HarnessSessionRow>({ combine: mergeSessionEvidence })
+  // The same for runs: the global list, every per-agent list, a run read on its own and
+  // the answers to its own writes (a launch included).
+  const runLedger = createLedger<AgentRunRow>()
+  // Every session the ledger holds, for a view that follows one by id (a dialog, a panel).
+  const standingSessions = shallowRef(new Map<string, HarnessSession>())
+  sessionLedger.subscribe(ids => {
+    for (const id of ids) standingSessions.value.set(id, sessionLedger.get(id)!)
+    triggerRef(standingSessions)
+  })
+  onReset(() => { sessionLedger.clear(); runLedger.clear(); standingSessions.value = new Map() })
   // The session list and the ticket-scoped reads share one order for what the
   // list holds: the server's position decides, and a tie goes to the read that started later.
   const sessionsOrder = createReadOrder()
-  const sessionsRead = usePolledData<HarnessSession[]>(async (): Promise<HarnessSession[]> => {
+  const sessionsRead = usePolledData(async (): Promise<Wire<HarnessSessionRow>[]> => {
     await preferencesReady
-    const out = new Map<string, HarnessSession>()
+    const out: Wire<HarnessSessionRow>[] = []
     const cursors = new Set<string>()
     const positions: (number | undefined)[] = []
     let cursor: string | undefined
     do {
       const result = await listAllSessions({ cursor, view: 'current' })
       positions.push(positionOf(result))
-      for (const item of result.items) out.set(item.id, item)
+      out.push(...result.items)
       cursor = result.next_cursor ?? undefined
       if (cursor && cursors.has(cursor)) throw new Error('Session pagination did not advance. Please retry.')
       if (cursor) cursors.add(cursor)
     } while (cursor)
-    // Each row keeps the position of the page it came from; the list as a whole
-    // includes what its oldest page did.
-    return stampAt([...out.values()], { position: lowestPosition(positions) })
+    // The list as a whole includes what its oldest page did.
+    return stampAt(out, { position: lowestPosition(positions) })
   }, [] as HarnessSession[], items => {
     activityEvidence.value = new Map(items.map(item => [item.id, advanceActivity(activityEvidence.value.get(item.id), item)]))
     now.value = Math.max(now.value, Date.now())
-  }, { order: sessionsOrder, adopt: rows => sessionLedger.merge(rows) })
+  }, { order: sessionsOrder, adopt: rows => once(sessionLedger.merge(rows)) })
   const sessions = sessionsRead.data
   const activityEvidence = ref(new Map<string, ActivityEvidence>())
   const eventPulseFor = (sessionId: string) => activityEvidence.value.get(sessionId)?.pulse ?? 0
@@ -98,7 +109,7 @@ export const useAgents = defineStore('agents', () => {
   const pendingHeld = ref<Record<string, ProjectMessage[]>>({})
   const threads = ref<Record<string, ProjectMessage[]>>({})
   const addresses = ref<Record<string, string>>({})
-  const runs = ref<Record<string, AgentRun>>({})
+  const runs = shallowRef<Record<string, AgentRun>>({})
   const agentRuns = ref<Record<string, string[]>>({})
   const nodes = ref<Record<string, NodeRef>>({})
   const modelsRead = usePolledData(listModels, [] as ModelProfile[], undefined, { order: createReadOrder() })
@@ -126,8 +137,7 @@ export const useAgents = defineStore('agents', () => {
     for (const id of ids) next[id] = runLedger.get(id)!
     runs.value = next
   })
-  const mergeRuns = (list: AgentRun[]) => runLedger.merge(list)
-  const runsRead = usePolledData(() => listRuns({ limit: 200 }), { items: [] as AgentRun[], next_cursor: null as string | null }, undefined, { order: createReadOrder(), adopt: page => mergePage(page, runLedger) })
+  const runsRead = usePolledData(() => listRuns({ limit: 200 }), { items: [] as AgentRun[], next_cursor: null as string | null } as Paged<AgentRun>, undefined, { order: createReadOrder(), adopt: page => mergePage(page, runLedger) })
   const refreshStale = computed(() => sessionsRead.stale.value || approvalsRead.stale.value || accountsRead.stale.value || modelsRead.stale.value || runsRead.stale.value)
 
   // ---------- Reads ----------
@@ -369,15 +379,33 @@ export const useAgents = defineStore('agents', () => {
     return rereadAfterWrite
   }
 
-  // Preserve summaries locally because the mutation response is a bare session. The
-  // ledger keeps the answer only when no read has brought a newer copy, and the lists
-  // that hold the session follow it.
-  function recordRemoval(removed: HarnessSession) {
+  // The answer to a write that returns a session (a removal, an undo, a move) is a
+  // bare row: the list summaries it lacks stay with the copy held (mergeSessionEvidence).
+  // The ledger keeps it only when no read has brought a newer copy, and the lists that
+  // hold the session follow it.
+  function recordSession(written: Wire<HarnessSessionRow>): HarnessSession {
+    let row!: HarnessSession
+    // afterWrite applies its change before it returns, so the row that stands is known here.
     void afterWrite(() => {
-      const [row] = sessionLedger.merge([carry({ ...sessionLedger.get(removed.id), ...removed }, removed)])
+      [row] = sessionLedger.merge([written])
       if (!sessions.value.some(s => s.id === row.id)) sessions.value = [...sessions.value, row]
     })
+    return row
   }
+  // A session read on its own: the detail the panel shows, with the history only it
+  // carries. The ledger judges it like any other copy; every list that holds the
+  // session follows, and a view that shows it reads the standing row by id.
+  async function loadSessionDetail(projectId: string, sessionId: string, signal?: AbortSignal) {
+    sessionLedger.merge([await getSession(projectId, sessionId, signal)])
+  }
+  // Rows that came with an answer of their own (a dialog's per-agent list): judged by the
+  // ledger, never added to a list. Returns what stands for each.
+  const admitSessions = (rows: Wire<HarnessSessionRow>[]) => sessionLedger.merge(rows)
+  const sessionById = (id: string): HarnessSession | undefined => standingSessions.value.get(id)
+  // A run read or written outside the lists (launch, run now, a single read): the ledger
+  // keeps the newest copy and `runs` follows it.
+  const admitRun = (run: Wire<AgentRunRow>): AgentRun => runLedger.merge([run])[0]
+  const admitRuns = (rows: Wire<AgentRunRow>[]): AgentRun[] => runLedger.merge(rows)
 
   // ---------- Writes ----------
   async function decide(approval: Approval, decision: 'approved' | 'denied', reason: string) {
@@ -437,7 +465,7 @@ export const useAgents = defineStore('agents', () => {
   }
   async function cancelQueuedRun(run: Pick<AgentRun, 'id'>) {
     const cancelled = await cancelRun(run.id)
-    void afterWrite(() => { mergeRuns([cancelled]) })
+    void afterWrite(() => { runLedger.merge([cancelled]) })
   }
   function tick() { now.value = Math.max(now.value, Date.now()) }
   // Bumped by delivery events (AEON-280); an open chat re-reads its message status.
@@ -446,10 +474,9 @@ export const useAgents = defineStore('agents', () => {
 
   return {
     now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, models, eventPulseFor,
-    loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordRemoval, grouped,
+    loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordSession, loadSessionDetail, admitSessions, sessionById, admitRun, admitRuns, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshAccounts, refreshSessions, refreshThread, refreshAgentRuns, tick, deliveryPulse, deliveryChanged,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount, removeAccount, cancelQueuedRun,
     invalidatePolls, afterWrite, onWrite,
-    recordRun: (run: AgentRun) => { mergeRuns([run]) },
   }
 })

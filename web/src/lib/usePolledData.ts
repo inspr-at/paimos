@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { computed, shallowRef, type Ref } from 'vue'
+import { computed, shallowRef, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import { APIError, StaleRequestError } from './api'
 import { positionOf, type ReadOrder } from './position'
 
@@ -20,8 +20,11 @@ export function refreshStatus(previous: RefreshStatus, result: { ok: true; at: n
 // order (AEON-449), the answer's server position decides too: an answer below a
 // write of this tab is asked for again once, one below a newer answer is dropped.
 // adopt turns the answer into the value to keep at the moment it is applied, so a
-// ledger judges its rows with nothing between that and the assignment.
-export function usePolledData<T>(read: () => Promise<T>, initial: T, onSuccess?: (value: T) => void, options: { order?: ReadOrder; adopt?: (value: T) => T } = {}) {
+// ledger judges its rows with nothing between that and the assignment. A read of rows
+// that only a ledger may show (AEON-449) must adopt: what it returns is not the data.
+export function usePolledData<T>(read: () => Promise<T>, initial: T, onSuccess?: (value: T) => void, options?: { order?: ReadOrder }): PolledData<T>
+export function usePolledData<R, T>(read: () => Promise<R>, initial: T, onSuccess: ((value: T) => void) | undefined, options: { order?: ReadOrder; adopt: (value: R) => T }): PolledData<T>
+export function usePolledData<R, T>(read: () => Promise<R>, initial: T, onSuccess?: (value: T) => void, options: { order?: ReadOrder; adopt?: (value: R) => T } = {}): PolledData<T> {
   const { order, adopt } = options
   const data = shallowRef<T>(initial) as Ref<T>
   const status = shallowRef(initialRefreshStatus())
@@ -47,7 +50,7 @@ export function usePolledData<T>(read: () => Promise<T>, initial: T, onSuccess?:
           const verdict = order && ticket ? order.land(ticket, positionOf(value)) : 'apply'
           if (verdict === 'stale') continue
           if (verdict === 'older') return
-          const adopted = adopt ? adopt(value) : value
+          const adopted = adopt ? adopt(value) : value as unknown as T
           data.value = adopted
           onSuccess?.(adopted)
           status.value = refreshStatus(status.value, { ok: true, at: Date.now() })
@@ -67,6 +70,7 @@ export function usePolledData<T>(read: () => Promise<T>, initial: T, onSuccess?:
   }
   return { data, status, stale, refresh, invalidate }
 }
+export interface PolledData<T> { data: Ref<T>; status: ShallowRef<RefreshStatus>; stale: ComputedRef<boolean>; refresh: () => Promise<void>; invalidate: () => void }
 
 // The same lifecycle for every periodic read. Ticks never stack; coming back to
 // a tab or network refreshes immediately, including after a suspended timer.

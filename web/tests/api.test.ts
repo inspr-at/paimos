@@ -99,7 +99,8 @@ test('R1 mutations send JSON, tolerate 204, and surface API failures', async () 
 })
 
 test('R2 reads and mutations use only the human-session contract', async () => {
-  const { listAccounts, getRun, listApprovals, setAccountState, decideApproval, revokeApproval } = await import('../src/lib/agents.ts')
+  const { listAccounts, listApprovals, setAccountState, decideApproval, revokeApproval } = await import('../src/lib/agents.ts')
+  const { getRun } = await import('../src/lib/agentRows.ts')
   const calls: { url: string; method: string; body: unknown }[] = []
   globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -122,7 +123,7 @@ test('R2 reads and mutations use only the human-session contract', async () => {
 })
 
 test('R2 failures retain HTTP status and tolerate non-JSON error bodies', async () => {
-  const { getRun } = await import('../src/lib/agents.ts')
+  const { getRun } = await import('../src/lib/agentRows.ts')
   const { APIError } = await import('../src/lib/api.ts')
   for (const status of [401, 403, 404, 409, 503]) {
     respond({ error: 'Not available' }, status)

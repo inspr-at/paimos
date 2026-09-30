@@ -5,7 +5,8 @@ import { getNode } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
-import { listGroups, runNowOnce, setRunTarget, type AccountGroup, type AgentRun } from '../../lib/agents'
+import { listGroups, setRunTarget, type AccountGroup, type AgentRun } from '../../lib/agents'
+import { runNowOnce } from '../../lib/agentRows'
 import { useSession } from '../../stores/session'
 import { capacityWaitText } from '../../lib/capacityWait'
 import { activeRun, launchState } from '../../lib/startAgent'
@@ -61,7 +62,7 @@ async function move(run: AgentRun, body: { account_id?: string; group_id?: strin
 async function runNow(run: AgentRun) {
   if (busy.value) return
   busy.value = run.id; error.value = ''
-  try { const started = await runNowOnce(run.id); void agents.afterWrite(() => agents.recordRun(started)) }
+  try { const started = await runNowOnce(run.id); void agents.afterWrite(() => { agents.admitRun(started) }) }
   catch (e) { error.value = e instanceof Error ? e.message : 'The run could not be updated.' }
   finally { busy.value = '' }
 }
