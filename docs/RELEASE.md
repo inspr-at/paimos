@@ -260,17 +260,38 @@ only (AEON-438, 2026-09-30). Successful routed jobs record their actual
 future reuse record must preserve that class. Image provenance, attestations and
 pin gates may never reuse that evidence. This change adds no tree-skip mechanism.
 
-A push of a `v*` tag runs `.github/workflows/release.yml`.
+A push of an annotated `v*` tag runs `.github/workflows/release.yml`. Create it with `git tag -a "$tag" -m "Release $tag"`; lightweight tags fail before the image build (AEON-398).
 
-1. Check out the repository with tags, so release history can see earlier coordinates.
-2. Validate the tag and run `scripts/verify-release.mjs --release`. Fail if `version.json` disagrees with the tag.
-3. Refuse a coordinate whose GitHub release already exists, including drafts (the authenticated, paginated release list includes them). macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The Ubuntu job builds Linux `paimos-agentd` statically and all `aeon-cli` targets with CGO off, then checks the darwin binaries.
-4. Generate the release-history manifest embedded in the server image. That file is produced at release time. It is not committed.
-5. Run the image smoke gate. Publishing waits for it.
-6. Refuse a coordinate whose GHCR image tag already exists, including a tag left by a partial earlier run. Push the image to `ghcr.io/inspr-at/aeon:<version>`. There is no `latest` tag.
-7. Create the GitHub release once as a **draft** with the CLI, signed/notarized darwin `paimos-agentd`, Linux `paimos-agentd`, and `SHA256SUMS`. Existing releases are never uploaded to or overwritten. The notes name the image and its digest. A successful tag build ends here; it does not publish the draft or open a Homebrew PR.
-8. The release coordinator deploys that exact image digest through the normal deployment gates and verifies the live server's version and health. Only then publish the existing draft as described below. Failed or incomplete verification leaves it a draft.
-9. Publication triggers `.github/workflows/homebrew-tap.yml` (`release: published`). Its `homebrew-tap` job validates the exact event tag, rejects drafts and prereleases, and reads public release metadata before downloading `SHA256SUMS`. It renders `Formula/aeon-agentd.rb` from that release's darwin checksums and, when `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_KEY` are present in the `homebrew-tap` environment, opens a pull request on `inspr-at/homebrew-tap`. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either secret is absent the job logs `homebrew tap bump skipped: app secrets absent` and succeeds. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
+The `image` job starts independently of the macOS jobs (AEON-407):
+
+1. Check out all tags, validate the calendar coordinate and presentation bundle, and require the tag to match `version.json`.
+2. Refuse an existing GitHub release, including a draft, or an existing GHCR image tag, including one left by a partial run. API lookup failures stop the job.
+3. Generate the release-history manifest embedded in the server image. It is not committed; both image builds use the working directory as their context.
+4. Import the registry cache at `ghcr.io/inspr-at/aeon:buildcache`, build linux/amd64 and load it into Docker. Resolve the loaded tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable local ID. BuildKit's config digest alone is not runnable in every Docker image store.
+5. After smoke passes, export the same build inputs with BuildKit `provenance: mode=max`, push only `ghcr.io/inspr-at/aeon:<version>`, and update the separate registry cache in `mode=max`. There is no `latest` release alias. The first cache import may miss; the build still runs.
+6. Create a GitHub build-provenance attestation for the pushed digest and store it in GHCR. Verify its repository, release workflow, source tag and source commit with `gh attestation verify`. The job exposes `version` and `digest` outputs and records the verified digest in its summary. It cannot succeed if attestation or verification fails.
+
+In parallel, macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The `assets` job waits for both signed darwin targets and the verified image job, builds Linux `paimos-agentd` and all `aeon-cli` targets statically, verifies the darwin binaries and computes `SHA256SUMS` over all eight binaries. It rechecks release immutability, then creates one **draft** GitHub release with all nine assets and the image digest (AEON-356). Existing drafts and published releases are never uploaded to or overwritten. A partial image publication requires a new coordinate rather than a rerun that replaces it.
+
+Publication remains the coordinator's explicit step after deployment and live verification of the exact image digest, version and health. Failed or incomplete verification leaves the release a draft. The tag workflow never opens a tap pull request while the release is draft. Publication triggers `.github/workflows/homebrew-tap.yml` (`release: published`). Its `homebrew-tap` job validates the exact event tag, rejects drafts and prereleases, and reads public release metadata before downloading `SHA256SUMS`. It renders `Formula/aeon-agentd.rb` from that release's darwin checksums and, when `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_KEY` are present in the `homebrew-tap` environment, opens a pull request on `inspr-at/homebrew-tap`. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either secret is absent the job logs `homebrew tap bump skipped: app secrets absent` and succeeds. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
+
+To verify a published image independently, use its exact digest and source commit:
+
+```sh
+gh attestation verify "oci://ghcr.io/inspr-at/aeon@$DIGEST" \
+  --repo inspr-at/paimos \
+  --signer-workflow inspr-at/paimos/.github/workflows/release.yml \
+  --source-ref "refs/tags/v$VERSION" --source-digest "$COMMIT" \
+  --deny-self-hosted-runners
+```
+
+The attestation action uses the existing `packages`, `attestations` and OIDC write scopes only in the image job. Storage-record creation is disabled so no `artifact-metadata` write scope is needed. The image job retains its existing `contents: write` permission so its immutability lookup can see drafts (GitHub restricts draft listings to push access). Only `assets` creates the draft release; signing stays in its existing environment. Every action in these image/release workflows is pinned to a commit.
+
+### Dry runs and timing evidence
+
+`.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. It runs the workflow regression tests, generates offline release history, imports the same registry cache, loads the production build and runs the same smoke gate. Its token has only `contents: read`; it has no signing environment, registry login, cache export, image push, attestation or release creation. Run it on the work branch without creating a release tag. Hosted timing and real attestation verification still require a coordinator-authorized publishing run; a local fixture test does not establish either acceptance criterion.
+
+Baseline evidence: [release run 36647379702](https://github.com/inspr-at/paimos/actions/runs/36647379702), obtained with `gh run view --json jobs,createdAt,updatedAt`, took **641 s (10:41)** from run creation to pushed digest. The release job began after **237 s**; Linux/CLI builds took **99 s**, artifact download **1 s**, history **32 s**, image smoke (including its original build) **119 s**, and build/push **122 s**. Removing the signing dependency and client build/download time gives a conservative structural estimate of **304 s (5:04)** before the new attestation/verification overhead, with cache gains unmeasured. The ≤6 min target and successful test-image verification remain pending a hosted run; do not report this estimate as measured acceptance.
 
 ### Publish after live verification (AEON-356)
 
@@ -292,7 +313,7 @@ Drafts are excluded from public release discovery and GitHub's `latest` endpoint
 
 ## Image smoke gate
 
-`scripts/smoke-image.sh` builds the release image and exercises it before anything is published. It checks the pinned Chromium and tini packages, their licenses, and `NOTICE`. It then starts a disposable Postgres and the server with mounted secret files, and checks startup, the database role, UID 65532, health, and headers. The script's dev mode is only for authenticated upload and quote calls. Live OIDC is not part of the gate, because the database is disposable and has no identity provider.
+`scripts/smoke-image.sh` builds the release image and exercises it before anything is published. CI sets `AEON_SMOKE_IMAGE` to the cached build's immutable image ID, which skips rebuilding and preserves the caller-owned image during cleanup; standalone runs still build and clean up their own disposable image. It checks the pinned Chromium and tini packages, their licenses, and `NOTICE`. It then starts a disposable Postgres and the server with mounted secret files, and checks startup, the database role, UID 65532, health, and headers. The script's dev mode is only for authenticated upload and quote calls. Live OIDC is not part of the gate, because the database is disposable and has no identity provider.
 
 The gate needs Docker. It is a release check, not the day-to-day `just test` run.
 
