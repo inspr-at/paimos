@@ -110,9 +110,10 @@ export function sessionForest<T extends { session: HarnessSession; status: Sessi
       branch.workingCount += child.workingCount
       if (rank(child.group) < rank(branch.group)) branch.group = child.group
     }
-    // Active branches lead, including stopped parents of live descendants; then
-    // start order and UUID. A heartbeat never moves a row (AEON-468).
-    branch.children.sort((a, b) => activityRank(a) - activityRank(b) || byStart(a.view.session, b.view.session))
+    // Active branches lead, including stopped parents of live descendants, in
+    // start order; ended ones follow, latest stop first. UUIDs break ties. A
+    // heartbeat never moves a row (AEON-468).
+    branch.children.sort((a, b) => activityRank(a) - activityRank(b) || (activityRank(a) === 2 ? byStopped : byStart)(a.view.session, b.view.session))
   }
   roots.forEach(summarize)
   return roots

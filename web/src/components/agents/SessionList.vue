@@ -302,8 +302,8 @@ function rowClick(event: MouseEvent, id: string) {
       <div class="thead" role="row">
         <span v-for="column in COLUMNS" :key="column.key" role="columnheader" :class="column.cls" :aria-sort="ariaSort(column.key)">
           <button type="button" class="th-sort" :class="{ on: sort?.key === column.key }" :data-tip="sortTip(column)" @click="sortBy(column.key)">
-            <span class="th-label">{{ column.label }}</span>
-            <span class="sort-mark" aria-hidden="true"><AppIcon v-if="ariaSort(column.key)" :name="effectiveSort.dir === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" :class="{ 'default-sort': !sort }" /></span>
+            <span>{{ column.label }}</span>
+            <span v-if="ariaSort(column.key)" class="sort-mark" aria-hidden="true"><AppIcon :name="effectiveSort.dir === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" :class="{ 'default-sort': !sort }" /></span>
           </button>
         </span>
         <span role="columnheader"><span class="sr-only">Actions</span></span>
@@ -462,15 +462,17 @@ function rowClick(event: MouseEvent, id: string) {
 .quiet-btn[aria-pressed="true"] { background: transparent; box-shadow: none; color: var(--ink-2); }
 .quiet-btn[aria-pressed="true"]:hover { background: var(--row-selected); color: var(--ink); }
 .quiet-btn .count { margin-left: 2px; font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 68px 76px; padding: 0 0 8px; }
+.table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 80px 76px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span { padding: 0 8px; min-width: 0; }
 .right { text-align: right; justify-content: flex-end; }
-/* Each header orders the families by its column; the mark shows key and direction. */
-.th-sort { display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% + 12px); height: 26px; margin: 0 -6px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; white-space: nowrap; }
+/* Each header orders the families by its column; the mark shows key and direction.
+   Labels never clip: right-aligned headers grow leftwards into the free end of the
+   column beside them. :where keeps the container queries able to hide the cell. */
+.th-sort { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 26px; margin: 0 -6px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; white-space: nowrap; }
+:where(.thead > .right) { display: flex; }
 .thead > .right .th-sort { flex-direction: row-reverse; }
-.th-label { overflow: hidden; text-overflow: ellipsis; }
 .th-sort:hover { color: var(--ink); background: var(--row-hover); }
 .th-sort.on { color: var(--teal-ink); }
 .th-sort:focus-visible { box-shadow: var(--focus-ring); }
@@ -591,7 +593,7 @@ function rowClick(event: MouseEvent, id: string) {
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
 /* Estimates need a ticket track wide enough for "overdue 5 min". */
-.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(112px, .48fr) minmax(128px, .82fr) 80px 68px 76px; }
+.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(112px, .48fr) minmax(128px, .82fr) 80px 80px 76px; }
 @container sessions (max-width: 980px) {
   .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 72px 76px; }
   .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(104px, .42fr) minmax(116px, .75fr) 72px 76px; }
@@ -659,7 +661,9 @@ function rowClick(event: MouseEvent, id: string) {
 /* AEON-304: the overflow sits top-right, its icon centred on the title's first line. */
 @container sessions (max-width: 560px) {
   .row > .c-actions { align-self: start; margin-top: calc(var(--title-line) / 2 - 22px); }
-  .card-head { align-items: center; padding: 6px 10px 2px 18px; }
+  /* With Default order showing, the tools take their own line rather than clip. */
+  .card-head { flex-wrap: wrap; align-items: center; padding: 6px 10px 2px 18px; }
+  .head-tools { flex-wrap: wrap; justify-content: flex-end; }
   .head-tools .btn { min-height: 44px; }
 }
 </style>
