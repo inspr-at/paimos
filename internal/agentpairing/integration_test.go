@@ -47,6 +47,7 @@ func nixGuideFixture() *config.PairingNixGuide {
 }
 
 type fixture struct {
+	pairing  *agentpairing.Module
 	t        *testing.T
 	db       *dbtest.DB
 	h        http.Handler
@@ -89,10 +90,11 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := &httpapi.Server{Pool: d.App, Modules: []httpapi.Module{am, agentpairing.New(d.App, origin, "pairtest"), agentaccounts.New(d.App), nodes.New(d.App, nil), modelregistry.New(d.App), harness.New(d.App), workorders.New(d.App), agentruns.New(d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
+	pairing := agentpairing.New(d.App, origin, "pairtest")
+	api := &httpapi.Server{Pool: d.App, Modules: []httpapi.Module{am, pairing, agentaccounts.New(d.App), nodes.New(d.App, nil), modelregistry.New(d.App), harness.New(d.App), workorders.New(d.App), agentruns.New(d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
 		return agentaccounts.Settle(ctx, tx, p, r.ID)
 	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
-	f := &fixture{t: t, db: d, h: api.Handler(), tenantID: id, profiles: map[string]string{}}
+	f := &fixture{pairing: pairing, t: t, db: d, h: api.Handler(), tenantID: id, profiles: map[string]string{}}
 	login := f.call("POST", "/api/auth/dev-login", map[string]string{"email": "pairing@example.test"}, false, "", 200)
 	cookies := login.Result().Cookies()
 	if len(cookies) == 0 {

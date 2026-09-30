@@ -18,3 +18,10 @@ test('watch keeps only the bounded current view', () => {
   assert.equal(result.startsWith('old'), false)
   assert.equal(result.endsWith('new\n'), true)
 })
+
+test('explicit status-only attachment is distinct from default conversation consent', async () => {
+  const { metadataOnlyAttach } = await import('../src/lib/attachWatch.ts')
+  assert.equal(metadataOnlyAttach({ mode: 'lease' }), true)
+  assert.equal(metadataOnlyAttach({}), false)
+  assert.equal(metadataOnlyAttach({ mode: 'unknown' }), false)
+})

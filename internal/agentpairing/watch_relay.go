@@ -95,7 +95,7 @@ func (m *Module) watchAllowed(ctx context.Context, p tenant.Principal, project, 
  JOIN agent_pairing_computers c ON c.tenant_id=a.tenant_id AND c.id=a.computer_id
  JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
  JOIN harness_sessions s ON s.tenant_id=a.tenant_id AND s.id=a.session_id
- WHERE a.project_id=$1 AND a.session_id=$2 AND a.state='active' AND a.lease_until>clock_timestamp()
+ WHERE a.project_id=$1 AND a.session_id=$2 AND coalesce(a.snapshot->>'mode','')='' AND a.state='active' AND a.lease_until>clock_timestamp()
  AND c.state='connected' AND q.state='redeemed' AND s.stopped_at IS NULL AND s.archived_at IS NULL
  AND s.project_id=a.project_id AND s.ticket_node_id=a.ticket_id)`, project, session).Scan(&live)
 		if err != nil {

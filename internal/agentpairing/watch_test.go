@@ -39,7 +39,7 @@ func watchFixture(t *testing.T) (*fixture, string, attachwatch.DeviceRequest) {
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	in.PollKey = nonce()
 	in.Digest = in.Snapshot.Digest()
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
 	return f, key, in
 }
 func requestWatch(t *testing.T, f *fixture, key string, in attachwatch.DeviceRequest) attachwatch.View {
@@ -55,7 +55,9 @@ func requestWatch(t *testing.T, f *fixture, key string, in attachwatch.DeviceReq
 func activateWatch(t *testing.T, f *fixture, key string, in *attachwatch.DeviceRequest) attachwatch.View {
 	t.Helper()
 	v := requestWatch(t, f, key, *in)
-	f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest}, true, "", 200)
+	body := map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}
+	in.ConsentDigest = v.ConsentDigest
+	f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", body, true, "", 200)
 	in.Operation = "poll"
 	in.Digest = v.Digest
 	in.Sequence = 1
@@ -69,7 +71,7 @@ func TestAttachApprovalIdentityAndLease(t *testing.T) {
 	f, key, in := watchFixture(t)
 	v := requestWatch(t, f, key, in)
 	path := "/api/agent-pairing/attach/" + in.RequestID + "/approve"
-	body := map[string]string{"request_digest": v.Digest}
+	body := map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}
 	f.call("POST", path, body, false, key, 403)
 	r := f.request("POST", path, body, true, "")
 	r.Header.Set("Origin", "https://other.test")
@@ -166,6 +168,7 @@ func TestAttachLiveStreamRevokesAndNeverStoresText(t *testing.T) {
 	v := activateWatch(t, f, key, &in)
 	second := in
 	second.Operation = "request"
+	second.ConsentDigest = ""
 	second.RequestID = uuid(t, f.db)
 	second.Snapshot.Process.PID++
 	secondView := activateWatch(t, f, key, &second)
@@ -297,7 +300,8 @@ func TestAttachPairingFileCannotRequestActivateRenewOrUpload(t *testing.T) {
 	}
 	attack(in)
 	v := requestWatch(t, f, key, in)
-	f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest}, true, "", 200)
+	f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200)
+	in.ConsentDigest = v.ConsentDigest
 	in.Operation, in.Sequence = "poll", 1
 	attack(in) // Cannot activate an owner-approved snapshot.
 	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &v)
@@ -329,15 +333,16 @@ func TestAttachDaemonRestartInvalidatesEveryApproval(t *testing.T) {
 			v := requestWatch(t, f, key, in)
 			approval := "/api/agent-pairing/attach/" + in.RequestID + "/approve"
 			if state != "pending" {
-				f.call("POST", approval, map[string]string{"request_digest": v.Digest}, true, "", 200)
+				f.call("POST", approval, map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200)
 			}
 			if state == "active" {
+				in.ConsentDigest = v.ConsentDigest
 				in.Operation, in.Sequence = "poll", 1
 				decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &v)
 			}
 			newKey := nonce()
 			// A registration with a wrong lifecycle proof must not evict the daemon.
-			registration := attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: nonce(), PollKey: newKey}
+			registration := attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: nonce(), PollKey: newKey}
 			f.call("POST", "/api/agent-pairing/attach", registration, false, key, 403)
 			registration.DeviceProof = in.DeviceProof
 			f.call("POST", "/api/agent-pairing/attach", registration, false, key, 200)
@@ -345,7 +350,7 @@ func TestAttachDaemonRestartInvalidatesEveryApproval(t *testing.T) {
 			f.call("POST", "/api/agent-pairing/attach", in, false, key, 403)
 			in.PollKey = newKey
 			f.call("POST", "/api/agent-pairing/attach", in, false, key, 410)
-			f.call("POST", approval, map[string]string{"request_digest": v.Digest}, true, "", 410)
+			f.call("POST", approval, map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 410)
 			if v.SessionID != nil {
 				var stopped bool
 				if err := f.db.Admin.QueryRow(t.Context(), `SELECT stopped_at IS NOT NULL FROM harness_sessions WHERE id=$1`, *v.SessionID).Scan(&stopped); err != nil || !stopped {
@@ -355,6 +360,7 @@ func TestAttachDaemonRestartInvalidatesEveryApproval(t *testing.T) {
 			// Registering a key, including with stolen pairing credentials, never
 			// transfers consent: a fresh request must wait for a fresh owner decision.
 			in.Operation, in.RequestID = "request", uuid(t, f.db)
+			in.ConsentDigest = ""
 			fresh := requestWatch(t, f, key, in)
 			in.Operation, in.Sequence = "poll", 1
 			var waiting attachwatch.View

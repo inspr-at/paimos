@@ -689,8 +689,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/1.3",
-    "sha256": "c5fb34f021d524bcb2bca218fba67e924856e723529fa1cb8261588f6621b828",
+    "version": "harness-session/1.4",
+    "sha256": "11407aa6bf83bf4777bb6f419b7389f13120bf7a9deec24037c75e9ee335ca77",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1244,8 +1244,16 @@
                   "null"
                 ]
               },
+              "mode": {
+                "const": "lease",
+                "type": "string"
+              },
               "owner_id": {
                 "format": "uuid",
+                "type": "string"
+              },
+              "process_state": {
+                "const": "confirmed_exited",
                 "type": "string"
               },
               "request_id": {
@@ -1856,8 +1864,16 @@
                   "null"
                 ]
               },
+              "mode": {
+                "const": "lease",
+                "type": "string"
+              },
               "owner_id": {
                 "format": "uuid",
+                "type": "string"
+              },
+              "process_state": {
+                "const": "confirmed_exited",
                 "type": "string"
               },
               "request_id": {

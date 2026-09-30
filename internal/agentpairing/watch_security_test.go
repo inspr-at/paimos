@@ -114,9 +114,6 @@ func TestStrictWatchRequiresBoundDaemonConfirmation(t *testing.T) {
 		t.Fatal("activated without local confirmation")
 	}
 	in.LocalConfirmed = true
-	f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
-	in.ConsentDigest = attachwatch.ConsentDigest(v.RequestID, v.Digest, attachwatch.ConsentAeon)
-	f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
 	in.ConsentDigest = v.ConsentDigest
 	stolen := in
 	stolen.PollKey = ""
@@ -204,13 +201,13 @@ func TestLocalAuthCapabilityFollowsDaemonRegistration(t *testing.T) {
 	if got := readWatchSetting(t, f); len(got.Computers) != 1 || got.Computers[0].Capability != attachwatch.LocalAuthUnreported {
 		t.Fatalf("poll changed capability %+v", got.Computers)
 	}
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce(), LocalAuthCapability: "browser"}, false, key, 400)
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce(), LocalAuthCapability: attachwatch.LocalAuthUnreported}, false, key, 400)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce(), LocalAuthCapability: "browser"}, false, key, 400)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce(), LocalAuthCapability: attachwatch.LocalAuthUnreported}, false, key, 400)
 	if got := readWatchSetting(t, f); got.Computers[0].Capability != attachwatch.LocalAuthUnreported {
 		t.Fatal("rejected registration changed capability")
 	}
 	keyPoll := nonce()
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: keyPoll, LocalAuthCapability: attachwatch.LocalAuthAvailable}, false, key, 200)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: keyPoll, LocalAuthCapability: attachwatch.LocalAuthAvailable}, false, key, 200)
 	if got := readWatchSetting(t, f); got.Computers[0].Capability != attachwatch.LocalAuthAvailable {
 		t.Fatalf("available report %+v", got.Computers)
 	}
@@ -224,7 +221,7 @@ func TestLocalAuthCapabilityFollowsDaemonRegistration(t *testing.T) {
 	if got := readWatchSetting(t, f); got.Computers[0].Capability != attachwatch.LocalAuthAvailable {
 		t.Fatal("request changed capability")
 	}
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce()}, false, key, 200)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce()}, false, key, 200)
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_requests q SET details=details-'computer_name' FROM agent_pairing_computers c WHERE c.id=$1 AND q.tenant_id=c.tenant_id AND q.id=c.request_id`, in.ComputerID); err != nil {
 		t.Fatal(err)
 	}

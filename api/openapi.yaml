@@ -916,10 +916,13 @@ paths:
   /agent-pairing/attach:
     post:
       operationId: attachDevice
-      summary: Paired daemon requests, activates, renews or detaches a read-only watch
+      summary: Paired daemon requests, activates, renews or ends an attached session
       description: >-
         The single paired-runtime attach route. At daemon startup, register requires the
-        paired bearer, computer lifecycle proof and a fresh memory-only poll_key. Registration
+        paired bearer, computer lifecycle proof and a fresh memory-only poll_key.
+        Protocol-less registrations are acknowledged as registered with protocol 1 so older
+        daemons keep serving; every other attach operation from those keys returns 409
+        update_agentd. Only keys registered with attach_protocol=2 can attach. Registration
         invalidates all earlier watches on that computer, requiring new owner approval.
         All other operations require the paired bearer and registered poll_key; lifecycle
         proof alone is rejected. Neither daemon nor server persists the poll key. Codes never
@@ -931,7 +934,12 @@ paths:
         Missing confirmation never activates; request-supplied policy overrides are refused.
         Registration may report local_auth_capability. Omission is stored as unreported.
         That report is advisory and never satisfies local confirmation. A later poll cannot change it.
-        Text is host-redacted and relayed in memory only, never stored.
+        A snapshot with mode=lease attaches metadata only: transcript and file_id must be
+        empty, text is rejected, and no conversation stream is available. Both modes require
+        consent_digest at approval, activation and every active poll; approval is single-use.
+        The exited operation is only for a kernel confirmation that the pinned process
+        has exited; loss of contact is unreachable.
+        Snapshots without mode select the default conversation watch; status-only is an explicit local choice.
       requestBody:
         required: true
         content:
@@ -950,8 +958,9 @@ paths:
                     additionalProperties: false
                     properties:
                       state: {type: string, const: registered}
+        '400': {description: Invalid attach request; conversation text on status-only or pre-activation polls detaches the attach}
         '403': {description: Registered memory-only poll key required; lifecycle proof only authorizes registration}
-        '409': {description: Snapshot mismatch or poll sequence rejected}
+        '409': {description: 'Snapshot or consent mismatch, poll sequence rejected, or update agentd required'}
         '410': {description: Expired or revoked; new owner approval required}
         '429': {description: Attempt or stream quota exceeded}
   /agent-pairing/attach/lookup:
@@ -990,14 +999,14 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [request_digest]
+              required: [request_digest, consent_digest]
               properties:
                 request_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
-                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Required for local_auth; binds the mode the person reviewed}
+                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Required for both watch and status-only; binds the consent the person reviewed}
       responses:
         '200': {description: 'Approved snapshot; activation requires the registered daemon poll key and, for local_auth, its local confirmation'}
         '403': {description: Same-origin paired owner required}
-        '409': {description: Digest differs from reviewed snapshot}
+        '409': {description: Digest differs from reviewed snapshot or approval already consumed}
         '410': {description: Approval expired or revoked}
   /agent-pairing/attach/{requestId}/revoke:
     parameters:
@@ -6215,7 +6224,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.3']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.4']}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
@@ -6257,7 +6266,18 @@ components:
       type: object
       additionalProperties: false
       required: [computer_id, project_id, ticket_id, host, harness, process, transcript, file_id]
+      description: Mode lease is the explicit status-only option; omitted mode selects the default conversation watch.
+      allOf:
+        - if:
+            required: [mode]
+            properties:
+              mode: {const: lease}
+          then:
+            properties:
+              transcript: {const: ''}
+              file_id: {const: ''}
       properties:
+        mode: {type: string, const: lease}
         computer_id: {type: string, format: uuid}
         project_id: {type: string, format: uuid}
         ticket_id: {type: string, format: uuid}
@@ -6276,24 +6296,25 @@ components:
             operation: {const: register}
           required: [device_proof]
         - properties:
-            operation: {enum: [request, poll, detach]}
+            operation: {enum: [request, poll, detach, exited]}
           required: [request_id, snapshot, request_digest]
       properties:
-        operation: {type: string, enum: [register, request, poll, detach]}
+        operation: {type: string, enum: [register, request, poll, detach, exited]}
         request_id: {type: string, format: uuid}
         computer_id: {type: string, format: uuid}
+        attach_protocol: {type: integer, enum: [1, 2], description: 'Registration only. Omission registers protocol 1; all later attach operations return 409 update_agentd. Protocol 2 declares paired-origin pinning, redirect refusal and kernel checks in both modes. A later request cannot upgrade a registered key.'}
         device_proof: {type: string, writeOnly: true, description: 'Existing computer lifecycle proof; registration only, never watch authority'}
         poll_key: {type: string, pattern: '^[a-f0-9]{64}$', writeOnly: true, description: Fresh daemon-start random key held only in memory; required for every operation}
         snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
         request_digest: {type: string, description: 'Required with the snapshot for request, activation, poll and detachment'}
-        consent_digest: {type: string, description: Echo of the server-selected consent binding; required for strict activation}
+        consent_digest: {type: string, description: Echo of the server-selected consent binding; required for activation and every active poll in both modes}
         local_confirmed: {type: boolean, description: Set only by the daemon after in-process LocalAuthentication; never accepted on the local socket}
         local_auth_capability:
           type: string
           enum: [available, unsupported, unsigned, no_gui, policy]
           description: Registration only. An omitted registration is stored as unreported. A later poll cannot change it. This value never satisfies local confirmation.
         sequence: {type: integer, minimum: 1}
-        text: {type: string, maxLength: 16384, description: Host-redacted new complete records only; no persistence or replay}
+        text: {type: string, maxLength: 16384, description: Default conversation watch only; rejected for mode=lease}
     AttachView:
       type: object
       required: [request_id, request_digest, snapshot, state, expires_at]
@@ -6301,7 +6322,7 @@ components:
         request_id: {type: string, format: uuid}
         request_digest: {type: string}
         snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
-        state: {type: string, enum: [pending, approved, active, detached, unreachable]}
+        state: {type: string, enum: [pending, approved, active, detached, unreachable, confirmed_exited]}
         expires_at: {type: string, format: date-time}
         lease_until: {type: [string, 'null'], format: date-time}
         session_id: {type: [string, 'null'], format: uuid}
@@ -9877,9 +9898,11 @@ components:
           type: object
           description: Content-free attach status, present on attached session detail only
           properties:
+            mode: {type: string, const: lease, description: Metadata only; no conversation viewer}
             request_id: {type: string, format: uuid}
             owner_id: {type: string, format: uuid}
             state: {type: string, enum: [active, detached, unreachable]}
+            process_state: {type: string, const: confirmed_exited, description: Present only for a kernel-confirmed exit; absent means unconfirmed}
             lease_until: {type: [string, 'null'], format: date-time}
         host: {type: string}
         management_mode: {type: string, enum: [managed, unmanaged]}

@@ -819,3 +819,67 @@ Managed agents can pass `target` and an optional `release_node_id` to
 accepts an optional `--target-file JSON`. Verify handoffs retain the preceding
 deploy handoff's recorded target internally when present; neither handoff body
 emits target fields.
+
+### Attach a running session (AEON-352)
+
+From a separate interactive terminal on a paired computer, run
+`aeon-agentd attach --setup-root PATH --pid PID --harness codex --project-id UUID --ticket-id UUID --transcript PATH`.
+**Watch the conversation** is the default; the transcript must be a resolvable
+physical file, as in the AEON-258 mirror. Choose **Status only (no conversation
+text)** at the local prompt, or pass `--status-only` (no transcript needed), to
+report status without reading or sharing conversation text. Missing or unsafe
+transcripts never silently select status-only.
+
+Review the kernel-observed process, physical folder and chosen mode, type `WATCH`
+or `ATTACH` as shown, then enter its nine-digit code under **Agents → Attach
+session** on the paired instance. The approval screen shows the selected mode.
+The computer owner approves the exact snapshot; the code expires in ten minutes.
+Both modes require a consent digest and single-use approval (repeat approval
+returns 409). Keep the terminal open: peer-checked polls renew a 60-second lease.
+Revocation, identity changes and lease expiry require a fresh approval. A stopped
+watch is detached; lost contact is unreachable; only a kernel check confirms exit.
+
+Conversation watching shares only new turns after activation with people
+explicitly granted `harness.watch` in the project. Status-only (`snapshot.mode=lease`)
+opens no transcript, rejects conversation text and has no conversation viewer.
+The project permission remains off for all built-in roles and is never implied
+by `harness.read` or `nodes.read`. Both attach modes require protocol 2. An older
+daemon connecting to a newer server still registers and keeps serving work; its
+attach requests receive HTTP 409 `update_agentd` and cannot create a watch or
+lease. The released older terminal helper shows `local lifecycle request rejected`
+(the daemon's local refusal is `paired instance refused attach`), rather than
+the server's update message. Update agentd, restart it and give fresh approval.
+A newer daemon connecting to an older server receives HTTP 400 on attach
+registration because that server rejects the unknown `attach_protocol` field.
+The daemon logs the server's refusal, disables attach and keeps serving work
+and local control. An attach attempt through that daemon shows
+`local lifecycle request rejected`. After updating the server, restart agentd
+to retry attach registration; there is no in-process registration retry.
+The paired computer's tenant-scoped workspace is the hard cwd allowlist; neither
+`AEON_URL` nor local request fields can override the paired origin. Same-user
+processes are not isolated by this feature.
+
+Security regressions live in `internal/agentd/attach_lease_test.go` (injected
+commands, PID/executable/cwd changes, explicit mode choice, status-only without
+transcript I/O, expiry and offline teardown in both modes),
+`internal/agentpairing/attach_lease_test.go` (atomic approval, isolated session
+leases, expiry/revocation, text refusal and cross-tenant RLS/404), and the
+platform-specific process tests (native macOS/Linux kernel identity and exit).
+`cmd/aeon-agentd/paired_serve_test.go` verifies the paired-origin pin against an
+alternate remote, `AEON_URL` and HTTP redirects before either mode
+can attach. It also runs the real serve loop through registration refusals,
+checks that work polling and local control continue with attach disabled, and
+restarts against an updated server to recover attach. Server regressions verify
+that protocol-less registrations keep daemon identity usable while every attach
+operation requires an update, even if later requests claim protocol 2.
+`TestAttachModesProtectionMatrix` checks consent, mode tampering and terminal
+states in both modes, sending text on refused watch polls. Early text at pending,
+discovery, local-confirmation and activation stages detaches without a session.
+Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
+The status-only text regression backdates the poll clock and observes the relay directly, so rate
+limiting cannot hide a missing content guard. The approval browser spec covers
+both modes and consent policies at 1600/390 pixels in light and dark.
+The reporter contract is `harness-session/1.4`:
+existing state values stay intact; optional `watch.process_state` carries a
+confirmed exit. The existing default-off permission and code-attempt-cap tests
+remain in `internal/agentpairing/watch_test.go`.
