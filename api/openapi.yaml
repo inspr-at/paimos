@@ -4199,7 +4199,10 @@ paths:
         A raster's size is read from every header before it is decoded: a WebP frame must match its VP8X canvas, and animated
         PNG or WebP files and bytes after the image's end are refused.
         SVG is rewritten from an allowlist of drawing elements and attributes; scripts, styles, event handlers, foreignObject,
-        images and every reference outside the file are removed, and cleaned reports it. Person only; requires settings.manage.
+        images, use and symbol elements, and every reference outside the file are removed, and cleaned reports it. A url() is one
+        fragment of the file on fill, stroke, clip-path or mask, with at most a colour fallback on a paint; a mask or clip path never
+        names another; a gradient inherits from one other gradient at most (a chain is a 400); and an SVG whose masks and clip paths
+        expand past 100,000 drawn elements is a 400. Person only; requires settings.manage.
         A change appends tenant.brand_updated.
       requestBody:
         required: true
@@ -4221,7 +4224,7 @@ paths:
   /brand/logo/{variant}:
     get:
       operationId: getBrandLogo
-      description: The workspace's logo image, for any member. Sent with X-Content-Type-Options nosniff and Content-Security-Policy default-src 'none'; sandbox. Immutable when v matches the stored hash.
+      description: The workspace's logo image, for any member, including one who holds only project bindings. Sent with X-Content-Type-Options nosniff and Content-Security-Policy default-src 'none'; sandbox. Immutable when v matches the stored hash.
       parameters:
         - {name: variant, in: path, required: true, schema: {type: string, enum: [light, dark]}}
         - {name: v, in: query, required: false, schema: {type: string}, description: Hash prefix from TenantBrandLogo.url.}
