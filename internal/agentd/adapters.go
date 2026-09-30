@@ -107,6 +107,7 @@ type codexShutdown struct {
 
 type codexProcess struct {
 	capacityParser   capacity.Parser
+	capacityModel    string
 	lastCapacity     []capacity.Reading
 	pendingLimit     *capacity.LimitHit
 	pendingLimitTurn string
@@ -210,7 +211,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		return nil, err
 	}
 	p.limitVendor = Codex
-	cp := &codexProcess{wireProcess: p, done: make(chan bool, 1), persistent: r.InboxEnabled && r.Run.Purpose != VerificationPurpose, idleTimeout: a.IdleTimeout, profile: r.Profile}
+	cp := &codexProcess{wireProcess: p, done: make(chan bool, 1), persistent: r.InboxEnabled && r.Run.Purpose != VerificationPurpose, idleTimeout: a.IdleTimeout, profile: r.Profile, capacityModel: r.Profile.Model}
 	p.setOnEvent(cp.notification)
 	fail := p.failStart
 	op, cancel := operationContext(ctx)
@@ -264,6 +265,9 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	}
 	p.eventMu.Lock()
 	p.threadID = thread.Thread.ID
+	if thread.Model != "" {
+		cp.capacityModel = thread.Model
+	}
 	// An unsupported attribution leaves session tokens unreported; it must not
 	// prevent the existing run protocol and settlement from operating.
 	cp.usage, _ = sessionusage.NewManagedCodex(p.threadID, r.Profile.Model)
