@@ -331,7 +331,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 	}
 	for key := range raw {
 		switch key {
-		case "title", "body", "fields", "state", "kind_id", "type", "kind":
+		case "title", "body", "fields", "estimate_hours", "state", "kind_id", "type", "kind":
 		case "key":
 			return nodeJSON{}, badRequest("key is immutable")
 		case "parent_id":
@@ -375,6 +375,25 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			}
 			node.Estimate = views[id]
 			return nil
+		}
+		if hours, ok := raw["estimate_hours"]; ok {
+			if _, replaces := raw["fields"]; replaces {
+				return badRequest("estimate_hours cannot be combined with fields")
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(current.Fields, &fields); err != nil {
+				return err
+			}
+			for _, key := range []string{"estimate_source", "estimate_by", "estimate_at", "estimate_confirmed"} {
+				delete(fields, key)
+			}
+			fields["estimate_hours"] = hours
+			merged, err := json.Marshal(fields)
+			if err != nil {
+				return err
+			}
+			// Use the normal schema, attribution, event and revision paths.
+			raw["fields"] = merged
 		}
 		nextState, nextFields := current.State, current.Fields
 		sets := []string{"updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')"}

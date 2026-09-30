@@ -109,6 +109,7 @@ func (rt *runtime) cmdIssueCreate() *Command {
 		addFlags: func(fs *flagSet) {
 			benefits.flags(fs)
 			fs.string(&estimate, "estimate", 0, "agent hours: 2h, 90m or 1.5")
+			fs.string(&estimate, "estimate-hours", 0, "agent work hours until ready for review (alias of --estimate)")
 			fs.string(&project, "project", 'p', "project key (required)")
 			fs.string(&title, "title", 0, "title (required)")
 			fs.string(&typ, "type", 0, "epic, ticket, task, …")
@@ -188,6 +189,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 		addFlags: func(fs *flagSet) {
 			benefits.flags(fs)
 			fs.string(&estimate, "estimate", 0, "agent hours: 2h, 90m or 1.5")
+			fs.string(&estimate, "estimate-hours", 0, "agent work hours until ready for review (alias of --estimate)")
 			fs.string(&title, "title", 0, "new title")
 			fs.string(&role, "role", 0, "route role: scout, mechanical, build, build-hard, or review-gate")
 			fs.string(&area, "area", 0, "route area: backend, frontend, full-stack, infra, design, or docs")

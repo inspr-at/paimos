@@ -64,7 +64,7 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 			t.Fatalf("%s attention kinds = %#v", op, kind["enum"])
 		}
 		required, _ := body["required"].([]any)
-		for _, field := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale", "controls", "has_vendor_session_ref"} {
+		for _, field := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale", "controls", "has_vendor_session_ref", "warnings"} {
 			if _, exists := props[field]; !exists {
 				t.Fatalf("%s missing optional %s", op, field)
 			}

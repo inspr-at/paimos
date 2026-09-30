@@ -219,7 +219,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <template v-else> · no heartbeat yet</template>
         </p>
         <p v-if="view.session.phase !== 'stopped' && !view.session.stopped_at && !view.session.archived_at" class="now-meta now-listen"><ListeningLabel :session="view.session" :now="now" /></p>
-        <p v-if="view.ticket && !view.session.stopped_at && etaFromSession(view.session)" class="now-meta now-eta"><EtaCell align="start" labelled :eta="etaFromSession(view.session)" :now="now" /></p>
+        <p v-if="!view.session.stopped_at && !view.session.archived_at && (etaFromSession(view.session) || view.session.phase === 'working')" class="now-meta now-eta"><EtaCell align="start" labelled :eta="etaFromSession(view.session)" :now="now" :missing="view.session.phase === 'working'" /></p>
         <SessionStateEvidence :view="view" :now="now" />
         <ol v-if="timeline.length" class="activity-timeline" aria-label="Recent activity">
           <li v-for="(item, index) in timeline.slice(0, 6)" :key="`${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ item.note }}</span></li>

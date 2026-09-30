@@ -649,6 +649,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 			return err
 		}
 		if kind == "heartbeat" {
+			rt.printHeartbeatWarnings(out, session, leaseFile)
 			if err := rt.reportHeartbeatCapacity(context.Background(), capacityOptions); err != nil {
 				return err
 			}
