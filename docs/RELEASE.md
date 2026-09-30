@@ -20,6 +20,57 @@ with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `C
 
 ## Workflow
 
+### Test runner routing (AEON-438)
+
+CI's hosted `runner-route` job calls `test-runner-route.yml`; test jobs consume
+its JSON `runs_on` output behind an independent event allowlist. Only `push`,
+`merge_group` and `workflow_dispatch` may select `[self-hosted, Linux, ARM64,
+mbp2606]`. Every PR uses `ubuntu-latest`, even with a fresh runner lease or a
+modified router. The manual `Test runner smoke` workflow exercises the same
+router and small Go/Node checks. Normal PR and main CI retain the full Go suite.
+
+Routing is disabled until NIX-600's controller publishes the repository variable
+`AEON_MBP2606_AVAILABILITY` on `inspr-at/paimos` with this value-free shape:
+
+```json
+{"schema":1,"repository":"inspr-at/paimos","os":"linux","arch":"arm64","online":true,"busy":false,"observed_at":"2026-09-30T10:00:00Z","idle_runners":4}
+```
+
+The controller must observe the registered JIT runners, publish only when online
+and idle, refresh at least every 10 seconds, and clear the variable before
+draining/stopping the pool. Records expire after **30 seconds**. An absent,
+invalid, expired, future-dated, offline or busy record selects hosted immediately;
+there is no network wait and no runner administration credential in CI. GitHub's
+[runner-list API](https://docs.github.com/en/rest/actions/self-hosted-runners#list-self-hosted-runners-for-a-repository)
+requires repository Administration read access; that belongs to the host
+controller, not the workflow token. Neither token permissions nor environment
+secrets are added here. The Linux ARM64 pool must provide Docker service-container
+support, Ubuntu-compatible `apt`/`sudo`, Go 1.26 and the shells used by the tests.
+
+For sharded tests, retain the job's existing matrix and commands, add
+`runner-route` to `needs`, copy the Go job's guarded `runs-on`, and set the
+reusable router's `required-idle-runners` input to the whole simultaneous fan-out.
+Insufficient capacity sends the entire batch to hosted. This is an admission
+check, not an atomic reservation: concurrent admissions or a host failure after
+selection remain a queue risk. Before enabling the variable, NIX-600 must keep
+the admitted capacity alive while draining and replenish JIT registrations for
+the accepted batch; never publish a simple persistent `on` flag. Offline/busy
+smoke and full-suite timing must be recorded when the host becomes available.
+
+`go run ./scripts/ci-runner-guard` scans **all** workflow YAML. Its fixture tests
+reject direct labels, unsafe expressions, matrix labels, unguarded router
+outputs, routed jobs with secrets/environments/write permissions, and routed
+release/image/attestation/pin jobs. Unknown dynamic expressions fail closed.
+The hosted `release-check` runs both guard and router tests. Release workflows,
+image build/relink, attestation and pin gates always stay hosted; attestation
+verification must retain `--deny-self-hosted-runners` in its owning gate.
+
+The lead accepted mbp2606 green evidence for tree-keyed reuse of **tests/evals**
+only (AEON-438, 2026-09-30). Successful routed jobs record their actual
+`runner_class=hosted|mbp2606`, source commit and event in the job summary. Any
+future reuse record must preserve that class. Image provenance, attestations and
+pin gates may never reuse that evidence. This change adds no tree-skip mechanism.
+
 A push of a `v*` tag runs `.github/workflows/release.yml`.
 
 1. Check out the repository with tags, so release history can see earlier coordinates.

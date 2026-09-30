@@ -1,0 +1,136 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestRepositoryWorkflows(t *testing.T) {
+	problems, err := checkDirectory("../../.github/workflows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(problems) != 0 {
+		t.Fatal(strings.Join(problems, "\n"))
+	}
+}
+
+func TestUntrustedRunnerSelections(t *testing.T) {
+	for _, selection := range []string{
+		"mbp2606", "[self-hosted, Linux, ARM64, mbp2606]", "[ubuntu-latest, mbp2606]",
+		"${{ needs.runner-route.outputs.runs_on }}", "${{ fromJSON(vars.RUNNER) }}",
+		"${{ github.event_name != 'pull_request' && 'mbp2606' || 'ubuntu-latest' }}",
+		"${{ github.event_name == 'pull_request' && 'mbp2606' || 'ubuntu-latest' }}",
+	} {
+		t.Run(selection, func(t *testing.T) {
+			body := "on: [pull_request, push]\npermissions: {contents: read}\njobs:\n  tests:\n    runs-on: " + selection + "\n    steps: [{run: echo test}]\n"
+			problems, err := checkWorkflow("ci.yml", []byte(body))
+			if err != nil || len(problems) == 0 {
+				t.Fatalf("unsafe selection not rejected: %v %v", problems, err)
+			}
+		})
+	}
+}
+
+func routedWorkflow(id, extra string) string {
+	return "on: [pull_request, push, merge_group, workflow_dispatch]\npermissions: {contents: read}\njobs:\n  runner-route:\n    uses: ./.github/workflows/test-runner-route.yml\n  " + id + ":\n    needs: runner-route\n    runs-on: " + routedRunner + "\n" + extra
+}
+
+func TestProtectedJobsAndSecrets(t *testing.T) {
+	for _, tc := range []struct{ file, id, extra string }{
+		{"release.yml", "tests", ""}, {"release.yaml", "tests", ""},
+		{"test-runner-route.yml", "tests", ""},
+		{"ci.yml", "image", ""}, {"ci.yml", "attestation", ""}, {"ci.yml", "pin-gate", ""},
+		{"ci.yml", "tests", "    environment: release-signing\n"},
+		{"ci.yml", "tests", "    environment: homebrew-tap\n"},
+		{"ci.yml", "tests", "    permissions: {contents: write}\n"},
+		{"ci.yml", "tests", "    env: {KEY: '${{ secrets.APP_KEY }}'}\n"},
+		{"ci.yml", "tests", "    env: {KEY: '${{ toJSON(secrets) }}'}\n"},
+		{"ci.yml", "tests", "    env: {KEY: \"${{ SECRETS [ 'APP_KEY' ] }}\"}\n"},
+		{"ci.yml", "tests", "    steps: [{uses: 'docker/build-push-action@sha'}]\n"},
+		{"ci.yml", "tests", "    steps: [{uses: 'actions/attest-build-provenance@sha'}]\n"},
+		{"ci.yml", "tests", "    steps: [{run: 'bash scripts/smoke-image.sh'}]\n"},
+		{"ci.yml", "tests", "    steps: [{run: 'gh attestation verify --deny-self-hosted-runners'}]\n"},
+	} {
+		t.Run(tc.file+"/"+tc.id+tc.extra, func(t *testing.T) {
+			problems, err := checkWorkflow(tc.file, []byte(routedWorkflow(tc.id, tc.extra)))
+			if err != nil || len(problems) == 0 {
+				t.Fatalf("protected job not rejected: %v %v", problems, err)
+			}
+		})
+	}
+}
+
+func TestCanonicalEventGuard(t *testing.T) {
+	body := routedWorkflow("tests", "    steps: [{run: go test ./...}]\n")
+	problems, err := checkWorkflow("ci.yml", []byte(body))
+	if err != nil || len(problems) != 0 {
+		t.Fatalf("safe route rejected: %v %v", problems, err)
+	}
+	for _, replacement := range []string{
+		strings.Replace(body, `"workflow_dispatch"`, `"pull_request"`, 1),
+		strings.Replace(body, "needs: runner-route", "needs: wrong-route", 1),
+		strings.Replace(body, "test-runner-route.yml", "wrong-route.yml", 1),
+		strings.Replace(body, "contains(fromJSON", "!contains(fromJSON", 1),
+		"env: {KEY: '${{ secrets.APP_KEY }}'}\n" + body,
+	} {
+		problems, err = checkWorkflow("ci.yml", []byte(replacement))
+		if err != nil || len(problems) == 0 {
+			t.Fatalf("broken route not rejected: %v %v", problems, err)
+		}
+	}
+}
+
+func TestMatrixRunnerLabels(t *testing.T) {
+	for _, tc := range []struct {
+		matrix string
+		safe   bool
+	}{
+		{"{runner: [ubuntu-latest, macos-15, macos-15-intel, ubuntu-24.04-arm]}", true},
+		{"{include: [{runner: ubuntu-latest}, {runner: macos-15}]}", true},
+		{"{runner: [ubuntu-latest, mbp2606]}", false},
+		{"{runner: [ubuntu-latest], include: [{runner: mbp2606}]}", false},
+		{"{include: [{runner: [self-hosted, mbp2606]}]}", false},
+		{"${{ fromJSON(needs.matrix.outputs.runners) }}", false},
+	} {
+		body := "on: pull_request\njobs:\n  tests:\n    runs-on: ${{ matrix.runner }}\n    strategy:\n      matrix: " + tc.matrix + "\n"
+		problems, err := checkWorkflow("ci.yml", []byte(body))
+		if err != nil || (len(problems) == 0) != tc.safe {
+			t.Fatalf("matrix %s: %v %v", tc.matrix, problems, err)
+		}
+	}
+}
+
+func TestGuardDiscoversNewWorkflowsAndRejectsInvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := checkDirectory(dir); err == nil {
+		t.Fatal("empty directory accepted")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "new.yaml"), []byte("on: pull_request\njobs:\n  test:\n    runs-on: mbp2606\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	problems, err := checkDirectory(dir)
+	if err != nil || len(problems) != 1 {
+		t.Fatalf("new workflow missed: %v %v", problems, err)
+	}
+	for _, body := range []string{
+		"on: [", "jobs: {}", "jobs:\n  test:\n    runs-on: ubuntu-latest\n    runs-on: mbp2606\n",
+	} {
+		if _, err := checkWorkflow("ci.yml", []byte(body)); err == nil {
+			t.Fatalf("invalid workflow accepted: %s", body)
+		}
+	}
+	for _, body := range []string{
+		"on: pull_request_target\njobs:\n  test:\n    runs-on: ubuntu-latest\n",
+		"on: pull_request\njobs:\n  test:\n    uses: other/repo/.github/workflows/tests.yml@main\n",
+		"on: push\njobs:\n  release:\n    uses: ./.github/workflows/test-runner-smoke.yml\n",
+	} {
+		problems, err := checkWorkflow("ci.yml", []byte(body))
+		if err != nil || len(problems) == 0 {
+			t.Fatalf("opaque/privileged workflow accepted: %v %v", problems, err)
+		}
+	}
+}
