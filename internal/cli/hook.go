@@ -34,7 +34,15 @@ type harnessHookInput struct {
 func (rt *runtime) cmdHook() *Command {
 	root := &Command{Name: "hook", Short: "Install and run session inbox hooks", Use: "hook <claude|codex|install|uninstall>"}
 	for _, harness := range []string{"claude", "codex"} {
-		root.subs = append(root.subs, &Command{Name: harness, Short: "Pull inbox at a harness turn boundary", Use: "hook " + harness + " <PostToolUse|UserPromptSubmit|Stop>", minArgs: 1, maxArgs: 1, run: func(args []string) error {
+		var paired bool
+		root.subs = append(root.subs, &Command{Name: harness, Short: "Pull inbox at a harness turn boundary", Use: "hook " + harness + " <PostToolUse|UserPromptSubmit|Stop>", minArgs: 1, maxArgs: 1, addFlags: func(fs *flagSet) { fs.bool(&paired, "paired", 0, "credential-free paired hook") }, run: func(args []string) error {
+			// S2-4 replaces this bounded no-op with the peer-only exchange.
+			// Dispatch before stdin, config, API clients or socket bearer reads.
+			// Never fall back to the legacy inbox while qualification is pending.
+			if paired {
+				fmt.Fprintln(rt.stderr, "aeon hook: qualification_pending; continuing")
+				return nil
+			}
 			// The outer deadline also bounds blocked stdin, configuration reads and stdout.
 			// The shipped process exits as soon as this returns; canceled workers may not ack.
 			ctx, cancel := context.WithTimeout(context.Background(), hookBudget)

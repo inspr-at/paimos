@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/hookcap"
 )
 
 const apiBase = "/api/agent-pairing"
@@ -51,13 +53,14 @@ type DeviceResponse struct {
 	Digest          string    `json:"request_digest"`
 }
 type ProofRequest struct {
-	Progress        *SetupProgress `json:"progress,omitempty"`
-	TenantID        string         `json:"tenant_id"`
-	RequestID       string         `json:"request_id"`
-	DeviceSecret    secret         `json:"device_secret,omitempty"`
-	LifecycleSecret secret         `json:"lifecycle_secret,omitempty"`
-	Cleaned         []string       `json:"cleanup_confirmed_account_ids,omitempty"`
-	ComputerCleaned bool           `json:"computer_cleanup_confirmed,omitempty"`
+	HookCapabilities []hookcap.Capability `json:"hook_capabilities,omitempty"`
+	Progress         *SetupProgress       `json:"progress,omitempty"`
+	TenantID         string               `json:"tenant_id"`
+	RequestID        string               `json:"request_id"`
+	DeviceSecret     secret               `json:"device_secret,omitempty"`
+	LifecycleSecret  secret               `json:"lifecycle_secret,omitempty"`
+	Cleaned          []string             `json:"cleanup_confirmed_account_ids,omitempty"`
+	ComputerCleaned  bool                 `json:"computer_cleanup_confirmed,omitempty"`
 }
 type SetupProgress struct {
 	State     string `json:"state"`
@@ -90,33 +93,34 @@ type Enrollment struct {
 	ActiveRunIDs      []string `json:"active_run_ids"`
 }
 type View struct {
-	ExistingComputerID string       `json:"existing_computer_id,omitempty"`
-	AccountingState    string       `json:"accounting_state"`
-	SetupState         string       `json:"setup_state"`
-	SetupError         string       `json:"setup_error"`
-	Connectivity       string       `json:"connectivity"`
-	RequestID          string       `json:"request_id"`
-	TenantID           string       `json:"tenant_id"`
-	TenantName         string       `json:"tenant_name"`
-	State              string       `json:"state"`
-	Digest             string       `json:"request_digest"`
-	ExpiresAt          time.Time    `json:"expires_at"`
-	ComputerName       string       `json:"computer_name"`
-	Platform           string       `json:"platform"`
-	Arch               string       `json:"arch"`
-	Workspace          string       `json:"workspace_path"`
-	Capabilities       []string     `json:"capabilities"`
-	Requested          []Candidate  `json:"requested_accounts"`
-	Verification       Verification `json:"verification"`
-	ComputerID         string       `json:"computer_id"`
-	ComputerState      string       `json:"computer_state"`
-	PrincipalID        string       `json:"principal_id"`
-	DaemonID           string       `json:"daemon_id"`
-	RuntimePrefix      string       `json:"runtime_prefix,omitempty"`
-	Cleanup            string       `json:"local_cleanup"`
-	Processes          string       `json:"local_processes"`
-	Enrollments        []Enrollment `json:"enrollments"`
-	Revision           int64        `json:"revision"`
+	HookCapabilities   []hookcap.Capability `json:"hook_capabilities,omitempty"`
+	ExistingComputerID string               `json:"existing_computer_id,omitempty"`
+	AccountingState    string               `json:"accounting_state"`
+	SetupState         string               `json:"setup_state"`
+	SetupError         string               `json:"setup_error"`
+	Connectivity       string               `json:"connectivity"`
+	RequestID          string               `json:"request_id"`
+	TenantID           string               `json:"tenant_id"`
+	TenantName         string               `json:"tenant_name"`
+	State              string               `json:"state"`
+	Digest             string               `json:"request_digest"`
+	ExpiresAt          time.Time            `json:"expires_at"`
+	ComputerName       string               `json:"computer_name"`
+	Platform           string               `json:"platform"`
+	Arch               string               `json:"arch"`
+	Workspace          string               `json:"workspace_path"`
+	Capabilities       []string             `json:"capabilities"`
+	Requested          []Candidate          `json:"requested_accounts"`
+	Verification       Verification         `json:"verification"`
+	ComputerID         string               `json:"computer_id"`
+	ComputerState      string               `json:"computer_state"`
+	PrincipalID        string               `json:"principal_id"`
+	DaemonID           string               `json:"daemon_id"`
+	RuntimePrefix      string               `json:"runtime_prefix,omitempty"`
+	Cleanup            string               `json:"local_cleanup"`
+	Processes          string               `json:"local_processes"`
+	Enrollments        []Enrollment         `json:"enrollments"`
+	Revision           int64                `json:"revision"`
 }
 type Guide struct {
 	InstanceURL       string   `json:"instance_url"`

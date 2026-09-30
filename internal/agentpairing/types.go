@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/jackc/pgx/v5/pgconn"
 	"io"
 	"log/slog"
 	"net/http"
@@ -22,7 +21,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/hookcap"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // CoordinatorPermissions is the CLI coordinator key ceiling (AEON-327).
@@ -72,13 +73,14 @@ type SetupProgress struct {
 }
 
 type proofRequest struct {
-	Progress        *SetupProgress `json:"progress,omitempty"`
-	TenantID        string         `json:"tenant_id"`
-	RequestID       string         `json:"request_id"`
-	DeviceSecret    string         `json:"device_secret,omitempty"`
-	LifecycleSecret string         `json:"lifecycle_secret,omitempty"`
-	Cleaned         []string       `json:"cleanup_confirmed_account_ids,omitempty"`
-	ComputerCleaned bool           `json:"computer_cleanup_confirmed,omitempty"`
+	HookCapabilities []hookcap.Capability `json:"hook_capabilities,omitempty"`
+	Progress         *SetupProgress       `json:"progress,omitempty"`
+	TenantID         string               `json:"tenant_id"`
+	RequestID        string               `json:"request_id"`
+	DeviceSecret     string               `json:"device_secret,omitempty"`
+	LifecycleSecret  string               `json:"lifecycle_secret,omitempty"`
+	Cleaned          []string             `json:"cleanup_confirmed_account_ids,omitempty"`
+	ComputerCleaned  bool                 `json:"computer_cleanup_confirmed,omitempty"`
 }
 type Verification struct {
 	Policy         string    `json:"policy"`
@@ -107,6 +109,7 @@ type Enrollment struct {
 	ActiveRunIDs      []string `json:"active_run_ids"`
 }
 type View struct {
+	HookCapabilities          []hookcap.Capability              `json:"hook_capabilities,omitempty"`
 	VerificationCapabilities  map[string]VerificationCapability `json:"verification_capabilities"`
 	VerificationHelperVersion string                            `json:"verification_helper_version"`
 	ExistingComputerID        string                            `json:"existing_computer_id,omitempty"`

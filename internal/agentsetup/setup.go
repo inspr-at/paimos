@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/grokprobe"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/hookcap"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -83,6 +84,8 @@ type RuntimeConfig struct {
 }
 
 type snapshot struct {
+	HookHome           string                `json:"hook_home,omitempty"`
+	HookCapabilities   []hookcap.Capability  `json:"hook_capabilities,omitempty"`
 	BoundComputer      string                `json:"bound_computer_id,omitempty"`
 	BoundDaemon        string                `json:"bound_daemon_id,omitempty"`
 	BoundPrincipal     string                `json:"bound_principal_id,omitempty"`
@@ -113,19 +116,20 @@ type snapshot struct {
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
-	VersionStatus     string       `json:"version_status,omitempty"`
-	AccountingState   string       `json:"accounting_state,omitempty"`
-	Schema            string       `json:"schema"`
-	Stage             string       `json:"stage"`
-	RequestID         string       `json:"request_id,omitempty"`
-	ComputerID        string       `json:"computer_id,omitempty"`
-	UserCode          string       `json:"user_code,omitempty"`
-	VerificationURI   string       `json:"verification_uri,omitempty"`
-	Accounts          []Enrollment `json:"accounts,omitempty"`
-	LocalProcesses    string       `json:"local_processes"`
-	ServerRevocation  string       `json:"server_revocation,omitempty"`
-	Action            string       `json:"action,omitempty"`
-	RetryAfterSeconds int          `json:"retry_after_seconds,omitempty"`
+	HookCapabilities  []hookcap.Capability `json:"hook_capabilities,omitempty"`
+	VersionStatus     string               `json:"version_status,omitempty"`
+	AccountingState   string               `json:"accounting_state,omitempty"`
+	Schema            string               `json:"schema"`
+	Stage             string               `json:"stage"`
+	RequestID         string               `json:"request_id,omitempty"`
+	ComputerID        string               `json:"computer_id,omitempty"`
+	UserCode          string               `json:"user_code,omitempty"`
+	VerificationURI   string               `json:"verification_uri,omitempty"`
+	Accounts          []Enrollment         `json:"accounts,omitempty"`
+	LocalProcesses    string               `json:"local_processes"`
+	ServerRevocation  string               `json:"server_revocation,omitempty"`
+	Action            string               `json:"action,omitempty"`
+	RetryAfterSeconds int                  `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
 	HarnessErrors                          map[string]string
@@ -164,6 +168,7 @@ type LocalDaemon interface {
 	Status(context.Context, string) (LocalStatus, error)
 }
 type Engine struct {
+	Hooks              *HookInstaller
 	Store              *Store
 	API                PairingAPI
 	Services           *ServiceManager
@@ -217,7 +222,8 @@ func (e *Engine) save(s *snapshot, first bool) error {
 	return e.Store.Write(snapshotName, raw, first)
 }
 func (e *Engine) progress(s *snapshot) Progress {
-	p := Progress{Schema: "aeon.agent-setup.v1", Stage: s.Phase, RequestID: s.Request.RequestID, ComputerID: s.View.ComputerID, Accounts: s.View.Enrollments, LocalProcesses: "unconfirmed"}
+	refreshHookCapabilities(s)
+	p := Progress{HookCapabilities: s.HookCapabilities, Schema: "aeon.agent-setup.v1", Stage: s.Phase, RequestID: s.Request.RequestID, ComputerID: s.View.ComputerID, Accounts: s.View.Enrollments, LocalProcesses: "unconfirmed"}
 	if s.Phase == "awaiting_approval" {
 		p.UserCode = s.Response.UserCode
 		p.VerificationURI = s.Response.VerificationURI
@@ -662,6 +668,12 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		if err != nil {
 			return e.progress(s), err
 		}
+	}
+	if err := e.setupHooks(ctx, s, false); err != nil {
+		return e.progress(s), err
+	}
+	if _, err := e.API.Reconcile(ctx, e.proof(s)); err != nil {
+		return e.progress(s), err
 	}
 	s.Phase = "connected"
 	if s.View.Verification.Mode == "one_per_harness" {
