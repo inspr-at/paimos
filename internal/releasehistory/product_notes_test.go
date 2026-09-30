@@ -160,6 +160,21 @@ func TestPackNotesCommandReservesPublicProjection(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("packnotes: %v %s", err, out)
 	}
+	packed, err := os.ReadFile(filepath.Join(dir, ProductNotesPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := ReadProductNotes(packed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := ReadNoteReservation(dir, s.Version, []string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := bundle.Releases[s.Version]; n.ReleaseChannel != reservation.Channel || n.ReleaseSequence != reservation.Sequence {
+		t.Fatal("snapshot packing lost the own-release channel/sequence", n)
+	}
 	built, err := Build(t.Context(), Options{Repo: dir, Repository: "inspr-at/aeon"})
 	if err != nil {
 		t.Fatal(err)

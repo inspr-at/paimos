@@ -27,6 +27,9 @@
 //   - data/product-notes.json: the reviewed, insert-only public projection of
 //     Aeon's frozen snapshots. packnotes writes it during reservation or from
 //     explicit historical exports. It contains no tenant IDs or hidden text.
+//   - data/product-note-corrections.json: reviewed version/key/digest-bound
+//     corrections applied over public captures, with reasons in notes.corrections.
+//     Frozen originals and hidden membership stay unchanged.
 //   - GitHub (optional, with a token): the release's published_at, the image
 //     reference and digest the release workflow writes into the release notes
 //     ("Container: …" and "Digest: …"), and the CI and Release workflow runs for

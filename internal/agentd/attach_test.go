@@ -293,6 +293,34 @@ func TestAttachBearerAloneCannotJoin(t *testing.T) {
 	}
 }
 
+func TestAttachRootAncestorIsAcceptedWithoutPaths(t *testing.T) {
+	uid := 10
+	proc := func(pid, owner, parent, session int) attachObservation {
+		return attachObservation{Process: attachwatch.Process{PID: pid, UID: owner, Started: "start"}, Parent: parent, Session: session, TTY: true}
+	}
+	peer, target := proc(30, uid, 20, 10), proc(40, uid, 50, 40)
+	graph := map[int]attachObservation{
+		30: peer, 20: proc(20, uid, 10, 10), 10: proc(10, 0, 1, 10),
+		40: target, 50: proc(50, 0, 1, 40),
+	}
+	observe := func(pid int) (attachObservation, error) {
+		p, ok := graph[pid]
+		if !ok {
+			return attachObservation{}, errors.New("missing fixture process")
+		}
+		return p, nil
+	}
+	if !independentAttachPeer(peer, target, observe) {
+		t.Fatal("root sshd or sudo ancestor refused")
+	}
+	foreign := graph[50]
+	foreign.UID = uid + 1
+	graph[50] = foreign
+	if independentAttachPeer(peer, target, observe) {
+		t.Fatal("foreign ancestor accepted")
+	}
+}
+
 func TestAttachSessionAncestryRejectsPTYBypasses(t *testing.T) {
 	for _, attack := range []string{"independent terminal", "injected child", "setsid helper", "double fork dead leader", "target session", "descendant session leader", "lost tty", "ancestry cycle"} {
 		t.Run(attack, func(t *testing.T) {
