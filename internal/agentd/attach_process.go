@@ -60,7 +60,8 @@ func attachPeer(r *http.Request) (attachObservation, error) {
 }
 
 // An injected command launched beneath the selected agent cannot approve it.
-// This is defense in depth, not a boundary against unrestricted same-UID code.
+// This is defence in depth, not a boundary against unrestricted same-UID code.
+// Same-user code can open another terminal; Touch ID is the factor it cannot forge.
 func independentAttachPeer(peer, target attachObservation, observe func(int) (attachObservation, error)) bool {
 	current, err := observe(peer.PID)
 	if err != nil || !sameAttachProcessIdentity(current, peer) || current.UID != target.UID || !current.TTY || current.Session <= 1 || current.Session == current.PID {
@@ -100,6 +101,8 @@ func independentAttachPeer(peer, target attachObservation, observe func(int) (at
 
 // Ancestors need only kernel identity, never their executable or cwd. macOS
 // denies those path reads for root-owned login and sshd-session processes.
+// Linux denies /proc/<pid>/exe and /proc/<pid>/cwd across users, including
+// root-owned sshd, su and sudo.
 func attachProcessIdentity(p attachObservation) attachObservation {
 	p.Executable, p.CWD = "", ""
 	return p

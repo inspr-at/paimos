@@ -277,16 +277,34 @@ stored server-side in `person_watch_security`, scoped to that person and tenant.
 writes require the instance’s origin. The server, never a device request, selects
 one of two modes at approval:
 
-- **Approve in Aeon** (`aeon`, default): same-origin, digest-bound person approval
-  is the consent gate. The terminal WATCH prompt is a best-effort extra factor;
-  a same-user process can emulate its PTY. The approval warns who requested it
-  and shows process, cwd and transcript before the Allow action.
 - **Also confirm on the Mac** (`local_auth`): after browser approval the daemon
   must also complete LocalAuthentication in its own process. No helper, CLI
   flag, local socket field or environment value can assert this result. Until
   confirmation succeeds there is no session, lease or shared text. Cancel,
   timeout, unavailable authentication, loss of the peer, or revocation fails
   closed. Linux and older daemons cannot approve this mode.
+- **Approve in Aeon** (`aeon`): same-origin, digest-bound person approval is the
+  consent gate. The terminal WATCH prompt is a best-effort extra factor; a
+  same-user process can emulate its PTY. The approval warns who requested it
+  and shows process, cwd and transcript before the Allow action. Saving this
+  mode is the opt-out from Mac confirmation. A program running as that user can
+  open another terminal and request the review.
+
+Until the person saves a choice, a pending attach on a Mac whose connected
+daemon reports `available` uses `local_auth`. Linux, SSH to a machine without a
+graphical login, an empty or legacy platform, and a Mac that reports `no_gui`,
+`unsigned`, `policy`, `unsupported` or `unreported` stay on Aeon approval so
+those attaches keep working. SSH to a Mac that reports `available` shows the
+Touch ID prompt on that Mac's screen, not in the SSH terminal. Settings shows
+`local_auth` with `consent_saved: false` when any connected computer reports
+`available`, including when another computer would still approve in Aeon.
+Saving `local_auth` applies it to every computer and fails closed where
+confirmation cannot run. Saving `aeon` keeps Aeon approval everywhere. The
+daemon's platform and capability report are advisory: a hostile daemon can
+claim another platform or `no_gui` to skip the unsaved default, and it still
+cannot satisfy a saved `local_auth` confirmation. Ancestry and session checks
+are defence in depth, not a guarantee that same-user code cannot request its
+own attach.
 
 The separate `consent_digest` binds the request ID, snapshot digest and mode,
 using the `aeon.attach.consent.v1` domain. The browser echoes it on approval;
@@ -389,8 +407,14 @@ aeon-agentd attach --setup-root /absolute/setup-root --pid 1234 --harness codex 
 The local helper reads consent from its controlling terminal, never stdin or a
 flag. It must belong to an existing live terminal session, cannot itself be a
 session leader, and neither its ancestry nor its session leader's ancestry may
-include the target harness. These checks repeat at confirmation and on every
-poll, including immediately before upload. Type `WATCH`, then open the paired
+include the target harness. These checks are defence in depth: they repeat at
+confirmation and on every poll, including immediately before upload, and
+same-user code can still open an independent terminal and request the review.
+Ancestors are identified from kernel metadata only. On Linux that is
+`/proc/<pid>/stat` plus the directory uid, so a root-owned sshd, su or sudo
+ancestor stays acceptable; the target still needs its executable and cwd. On a
+Mac whose daemon reports that Touch ID can run, the unsaved default also
+requires LocalAuthentication before a session exists. Type `WATCH`, then open the paired
 instance's Agents page and choose
 **Attach session**. Review the code and snapshot, then approve. Keep the terminal
 open; Ctrl-C detaches without signalling the harness. Missing helper polls,

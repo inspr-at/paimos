@@ -82,10 +82,11 @@ onBeforeUnmount(() => { close(); stopAccess() })
           <dt>Project ID</dt><dd class="path">{{ review.snapshot.project_id }}</dd>
           <dt>Ticket ID</dt><dd class="path">{{ review.snapshot.ticket_id }}</dd>
           <dt>Snapshot</dt><dd class="path">{{ review.request_digest }}</dd>
-        </dl><p class="limits">{{ metadataOnly ? 'Same-user processes are not isolated.' : 'The mirror is agent-written and unverified; same-user processes are not isolated.' }}</p></details>
+        </dl><p class="limits">{{ metadataOnly ? 'Same-user processes are not isolated. Ancestry checks are defence in depth.' : 'The mirror is agent-written and unverified; same-user processes are not isolated. Ancestry checks are defence in depth.' }}</p></details>
         <p v-if="metadataOnly" class="consent">Session status only; no conversation text is read or shared.</p>
         <p v-else class="consent">New turns will be visible to people explicitly granted conversation access in this project, until you revoke.</p>
         <p v-if="!metadataOnly" class="limits">Only approve a single trust context; redaction is best effort.</p>
+        <p v-if="!strict" class="limits">Linux and a headless Mac keep this approval, and Touch ID is the default only when that Mac can use it.</p>
         <p v-if="localUnavailable" class="consent" role="status">Local confirmation is unavailable on this computer; this setting requires an updated paired Mac daemon.</p>
         <p v-else-if="strict && review.state === 'pending'" class="local-step">Next, confirm on {{ review.snapshot.host }} with Touch ID or your Mac password.</p>
         <p v-if="strict && review.state === 'approved'" role="status">Waiting for confirmation on {{ review.snapshot.host }}. Nothing is shared until you confirm there.</p>

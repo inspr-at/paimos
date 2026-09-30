@@ -18,7 +18,7 @@ const limitation: Record<string, string> = {
 }
 const stayedOff = (capability: string) => `${limitation[capability]}, so watches there stay off.`
 
-async function setup(page: Page, theme: 'light' | 'dark' = 'light', options: { fail?: boolean; mode?: string; computers?: Computer[] } = {}) {
+async function setup(page: Page, theme: 'light' | 'dark' = 'light', options: { fail?: boolean; mode?: string; saved?: boolean; computers?: Computer[] } = {}) {
   const work = fixtures(); work.preferences.theme = { choice: theme }
   await mockWork(page, work)
   await mockSettings(page, settingsData())
@@ -28,6 +28,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', options: { f
     return route.fulfill({ json: value })
   })
   let mode = options.mode ?? 'aeon'
+  let savedFlag = options.saved ?? mode === 'local_auth'
   const computers = options.computers ?? [computer('available')]
   await page.route('**/api/me/security/session-watching', route => {
     if (route.request().method() === 'PUT') {
@@ -35,8 +36,9 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', options: { f
       const body = route.request().postDataJSON()
       expect(Object.keys(body)).toEqual(['consent_mode'])
       mode = body.consent_mode
+      savedFlag = true
     }
-    return route.fulfill({ json: { consent_mode: mode, local_auth_computers: computers } })
+    return route.fulfill({ json: { consent_mode: mode, consent_saved: savedFlag, local_auth_computers: computers } })
   })
 }
 async function open(page: Page, theme: 'light' | 'dark', width: number) {
@@ -58,19 +60,38 @@ async function shot(page: Page, name: string) {
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
   test(`session watching security ${theme} ${width}`, async ({ page }) => {
-    await setup(page, theme)
+    await setup(page, theme, { mode: 'local_auth', saved: false })
     const card = await open(page, theme, width)
-    await expect(card.getByRole('radio', { name: /Approve in / })).toBeChecked()
-    await expect(card.getByRole('radio', { name: /Also confirm on the Mac/ })).toBeEnabled()
+    const aeon = card.getByRole('radio', { name: /Approve in / })
+    const mac = card.getByRole('radio', { name: /Also confirm on the Mac/ })
+    const aeonLabel = card.locator('label').filter({ hasText: 'Approve in' })
+    const macLabel = card.locator('label').filter({ hasText: 'Also confirm on the Mac' })
+    await expect(mac).toBeChecked()
+    await expect(mac).toBeEnabled()
+    await expect(macLabel).toContainText('Default')
+    await expect(aeonLabel).not.toContainText('Default')
     await expect(card).toContainText('After approval here, confirm with Touch ID or your Mac password.')
+    await expect(card).toContainText('This default asks for Touch ID on a Mac that can use it.')
     await expect(card).not.toContainText('stay off')
     await expect(card).toContainText('active watches keep their current approval')
-    await expect(card.getByRole('button', { name: 'Save setting' })).toBeDisabled()
-    await card.getByRole('radio', { name: /Also confirm on the Mac/ }).check()
+    await expect(card.getByRole('button', { name: 'Save setting' })).toBeEnabled()
+    await shot(page, `security-default-${theme}-${width}`)
+    await aeon.check()
+    await expect(card).toContainText('does not ask for Touch ID')
+    await expect(card).not.toContainText('This default asks for Touch ID')
     await card.getByRole('button', { name: 'Save setting' }).click()
     await expect(card.getByRole('status')).toHaveText('Saved for future approvals.')
     await page.reload()
-    await expect(card.getByRole('radio', { name: /Also confirm on the Mac/ })).toBeChecked()
+    await expect(aeon).toBeChecked()
+    await expect(macLabel).toContainText('Default')
+    await expect(aeonLabel).not.toContainText('Default')
+    await expect(card.getByRole('button', { name: 'Save setting' })).toBeDisabled()
+    await expect(card).toContainText('does not ask for Touch ID')
+    await mac.check()
+    await card.getByRole('button', { name: 'Save setting' }).click()
+    await expect(card.getByRole('status')).toHaveText('Saved for future approvals.')
+    await page.reload()
+    await expect(mac).toBeChecked()
     await fits(page, card)
     const audit = await new AxeBuilder({ page }).include('#security').analyze()
     expect(audit.violations).toEqual([])
@@ -84,7 +105,11 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
       const mac = card.getByRole('radio', { name: /Also confirm on the Mac/ })
       await expect(mac).toBeDisabled()
       await expect(card.getByRole('radio', { name: /Approve in / })).toBeChecked()
-      await expect(card).toContainText(`${limitation[capability]}.`)
+      await expect(card.locator('label').filter({ hasText: 'Approve in' })).toContainText('Default')
+      await expect(card.locator('label').filter({ hasText: 'Also confirm on the Mac' })).not.toContainText('Default')
+      await expect(card).toContainText(capability === 'no_gui'
+        ? `${limitation[capability]}, so SSH and headless attaches keep approval in AEON.`
+        : `${limitation[capability]}, so approval stays in AEON.`)
       await expect(card).not.toContainText('stay off')
       await expect(card).not.toContainText('After approval here')
       await expect(card.getByRole('button', { name: 'Save setting' })).toBeDisabled()
@@ -98,20 +123,24 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
   }
 
   test(`mixed computers keep mac confirmation with named exceptions ${theme} ${width}`, async ({ page }) => {
-    await setup(page, theme, { computers: [computer('available'), computer('unsupported', 'Linux builder', '33333333-3333-4333-8333-333333333333')] })
+    await setup(page, theme, { mode: 'local_auth', saved: false, computers: [computer('available'), computer('unsupported', 'Linux builder', '33333333-3333-4333-8333-333333333333')] })
     const card = await open(page, theme, width)
     const mac = card.getByRole('radio', { name: /Also confirm on the Mac/ })
     await expect(mac).toBeEnabled()
-    await expect(card).toContainText('Linux builder cannot confirm on the Mac.')
+    await expect(mac).toBeChecked()
+    await expect(card).toContainText('Linux builder cannot confirm on the Mac, so approval stays in AEON.')
     await expect(card).not.toContainText('stay off')
-    await mac.check()
     await expect(card).toContainText('After approval here, confirm with Touch ID or your Mac password.')
-    await expect(card).toContainText('Linux builder cannot confirm on the Mac, so watches there stay off.')
     await expect(card).not.toContainText('Studio Mac cannot confirm')
+    await expect(card.getByRole('button', { name: 'Save setting' })).toBeEnabled()
     await fits(page, card)
     const audit = await new AxeBuilder({ page }).include('#security').analyze()
     expect(audit.violations).toEqual([])
     await shot(page, `security-mixed-${theme}-${width}`)
+    await card.getByRole('button', { name: 'Save setting' }).click()
+    await page.reload()
+    await expect(mac).toBeChecked()
+    await expect(card).toContainText('Linux builder cannot confirm on the Mac, so watches there stay off.')
   })
 }
 
@@ -145,7 +174,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.reload()
     await expect(card.getByRole('radio', { name: /Approve in / })).toBeChecked()
     await expect(mac).toBeDisabled()
-    await expect(card).toContainText('Studio Mac needs a signed daemon.')
+    await expect(card).toContainText('Studio Mac needs a signed daemon, so approval stays in AEON.')
     await expect(card).not.toContainText('stay off')
   })
 
@@ -153,6 +182,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await setup(page, theme, { computers: [] })
     const card = await open(page, theme, width)
     await expect(card.getByRole('radio', { name: /Also confirm on the Mac/ })).toBeDisabled()
+    await expect(card.locator('label').filter({ hasText: 'Approve in' })).toContainText('Default')
     await expect(card).toContainText('No paired computer has reported Touch ID support.')
     await fits(page, card)
     if (theme === 'light' && width === 390) await shot(page, 'security-none-light-390')

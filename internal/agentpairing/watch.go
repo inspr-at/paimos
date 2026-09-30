@@ -121,7 +121,7 @@ func loadAttach(ctx context.Context, tx pgx.Tx, id string) (attachwatch.View, st
 	}
 	err := tx.QueryRow(ctx, `SELECT id::text,digest,snapshot,state,expires_at,lease_until,session_id::text,owner_id::text,user_code,consent_mode FROM harness_attach_requests WHERE id=$1 FOR UPDATE`, id).Scan(&v.RequestID, &v.Digest, &v.Snapshot, &v.State, &v.ExpiresAt, &v.LeaseUntil, &v.SessionID, &owner, &code, &v.ConsentMode)
 	if err == nil && v.State == "pending" {
-		v.ConsentMode, err = watchConsentMode(ctx, tx, owner)
+		v.ConsentMode, err = effectiveWatchConsent(ctx, tx, owner, v.Snapshot.Platform, v.Snapshot.ComputerID)
 	}
 	v.ConsentDigest = attachwatch.ConsentDigest(v.RequestID, v.Digest, v.ConsentMode)
 	return v, owner, code, err
