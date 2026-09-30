@@ -999,10 +999,10 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [request_digest, consent_digest]
+              required: [request_digest]
               properties:
                 request_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
-                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Required for both watch and status-only; binds the consent the person reviewed}
+                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Optional in the legacy request shape; protocol 2 requires this binding for both watch and status-only approval, otherwise returns 409'}
       responses:
         '200': {description: 'Approved snapshot; activation requires the registered daemon poll key and, for local_auth, its local confirmation'}
         '403': {description: Same-origin paired owner required}
