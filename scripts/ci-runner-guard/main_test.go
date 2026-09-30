@@ -2,6 +2,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -27,9 +28,15 @@ func TestCITriggersAndRequiredChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := checkCITriggersAndRequiredChecks(body); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func checkCITriggersAndRequiredChecks(body []byte) error {
 	var workflow map[string]any
 	if err := yaml.Unmarshal(body, &workflow); err != nil {
-		t.Fatal(err)
+		return err
 	}
 	events := mapping(workflow["on"])
 	var names []string
@@ -38,39 +45,147 @@ func TestCITriggersAndRequiredChecks(t *testing.T) {
 	}
 	sort.Strings(names)
 	if !reflect.DeepEqual(names, []string{"merge_group", "pull_request", "push", "workflow_dispatch"}) {
-		t.Fatalf("CI must cover main, PRs, the merge queue and manual runs exactly once: %v", names)
+		return fmt.Errorf("CI must cover main, PRs, the merge queue and manual runs exactly once: %v", names)
 	}
 	if !reflect.DeepEqual(mapping(events["push"]), map[string]any{"branches": []any{"main"}}) {
-		t.Fatalf("branch and tag pushes outside main must not duplicate PR CI: %v", events["push"])
+		return fmt.Errorf("branch and tag pushes outside main must not duplicate PR CI: %v", events["push"])
 	}
 	if events["pull_request"] != nil {
-		t.Fatalf("required PR checks must run without path or activity filters: %v", events["pull_request"])
+		return fmt.Errorf("required PR checks must run without path or activity filters: %v", events["pull_request"])
 	}
 	if !reflect.DeepEqual(mapping(events["merge_group"]), map[string]any{"types": []any{"checks_requested"}}) {
-		t.Fatalf("merge queue check requests must run CI: %v", events["merge_group"])
+		return fmt.Errorf("merge queue check requests must run CI: %v", events["merge_group"])
+	}
+
+	// YAML parsing rejects duplicate keys. Require the workflow-level mapping;
+	// the Node tests evaluate its group and cancellation expressions by event.
+	concurrency := mapping(workflow["concurrency"])
+	group, groupOK := concurrency["group"].(string)
+	cancel, cancelOK := concurrency["cancel-in-progress"].(string)
+	if len(concurrency) != 2 || !groupOK || group == "" || !cancelOK || cancel == "" {
+		return fmt.Errorf("CI must have one workflow-level concurrency mapping with group and cancel-in-progress expressions")
 	}
 
 	// These are the active main ruleset's contexts. Renaming or conditionally
 	// skipping them would strand a PR or merge queue waiting for its checks.
 	jobs := mapping(workflow["jobs"])
+	for id, value := range jobs {
+		if _, exists := mapping(value)["concurrency"]; exists {
+			return fmt.Errorf("job %q must not override workflow-level concurrency", id)
+		}
+	}
+	for _, id := range []string{"go-test", "go-static", "go-timing", "runner-route"} {
+		job := mapping(jobs[id])
+		if job == nil {
+			return fmt.Errorf("required CI job %q is missing", id)
+		}
+		if id == "go-static" || id == "go-timing" {
+			if _, exists := job["if"]; exists {
+				return fmt.Errorf("required CI job %q must run without an if condition", id)
+			}
+		}
+	}
 	for _, context := range []string{"go", "web", "release-check", "e2e"} {
 		job := mapping(jobs[context])
 		if job == nil {
-			t.Fatalf("required check %q is missing", context)
+			return fmt.Errorf("required check %q is missing", context)
 		}
 		if name, exists := job["name"]; exists && name != context {
-			t.Errorf("required check %q renamed to %v", context, name)
+			return fmt.Errorf("required check %q renamed to %v", context, name)
 		}
 		if context == "go" {
 			if job["if"] != "always()" {
-				t.Errorf("go must report failures even when its dependencies fail: %v", job["if"])
+				return fmt.Errorf("go must report failures even when its dependencies fail: %v", job["if"])
 			}
 			if !reflect.DeepEqual(job["needs"], []any{"go-test", "go-static", "go-timing"}) {
-				t.Errorf("go must gate every shard, static checks and timing: %v", job["needs"])
+				return fmt.Errorf("go must gate every shard, static checks and timing: %v", job["needs"])
 			}
 		} else if job["if"] != nil {
-			t.Errorf("required check %q must run for every CI event: %v", context, job["if"])
+			return fmt.Errorf("required check %q must run for every CI event: %v", context, job["if"])
 		}
+	}
+	return nil
+}
+
+func TestCIContractRejectsMutatedWorkflows(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type mutation struct {
+		name string
+		edit func(map[string]any)
+		want string
+	}
+	cases := []mutation{
+		{"missing-workflow-concurrency", func(w map[string]any) { delete(w, "concurrency") }, "workflow-level concurrency mapping"},
+		{"scalar-workflow-concurrency", func(w map[string]any) { w["concurrency"] = "shared" }, "workflow-level concurrency mapping"},
+		{"missing-cancel-expression", func(w map[string]any) { delete(mapping(w["concurrency"]), "cancel-in-progress") }, "workflow-level concurrency mapping"},
+	}
+	var original map[string]any
+	if err := yaml.Unmarshal(body, &original); err != nil {
+		t.Fatal(err)
+	}
+	for id := range mapping(original["jobs"]) {
+		cases = append(cases, mutation{
+			"job-concurrency-" + id,
+			func(w map[string]any) {
+				mapping(mapping(w["jobs"])[id])["concurrency"] = map[string]any{"group": "shared", "cancel-in-progress": true}
+			},
+			fmt.Sprintf("job %q must not override workflow-level concurrency", id),
+		})
+	}
+	for _, id := range []string{"go-test", "go-static", "go-timing", "runner-route"} {
+		cases = append(cases,
+			mutation{"missing-" + id, func(w map[string]any) { delete(mapping(w["jobs"]), id) }, fmt.Sprintf("required CI job %q is missing", id)},
+			mutation{"renamed-" + id, func(w map[string]any) {
+				jobs := mapping(w["jobs"])
+				jobs[id+"-renamed"] = jobs[id]
+				delete(jobs, id)
+			}, fmt.Sprintf("required CI job %q is missing", id)},
+		)
+	}
+	for _, id := range []string{"go-static", "go-timing"} {
+		for _, condition := range []any{false, "success()", nil} {
+			cases = append(cases, mutation{
+				fmt.Sprintf("conditional-%s-%v", id, condition),
+				func(w map[string]any) { mapping(mapping(w["jobs"])[id])["if"] = condition },
+				fmt.Sprintf("required CI job %q must run without an if condition", id),
+			})
+		}
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var workflow map[string]any
+			if err := yaml.Unmarshal(body, &workflow); err != nil {
+				t.Fatal(err)
+			}
+			tc.edit(workflow)
+			mutated, err := yaml.Marshal(workflow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertCIContractRejectsCopy(t, mutated, tc.want)
+		})
+	}
+	t.Run("duplicate-workflow-concurrency", func(t *testing.T) {
+		mutated := append(append([]byte(nil), body...), []byte("\nconcurrency:\n  group: shared\n  cancel-in-progress: true\n")...)
+		assertCIContractRejectsCopy(t, mutated, `mapping key "concurrency" already defined`)
+	})
+}
+
+func assertCIContractRejectsCopy(t *testing.T, body []byte, want string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ci.yml")
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	copy, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkCITriggersAndRequiredChecks(copy); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("mutated workflow must fail with %q; got %v", want, err)
 	}
 }
 
