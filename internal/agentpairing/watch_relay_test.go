@@ -49,3 +49,13 @@ func TestWatchRelayNoHistoryIsolationAndBounds(t *testing.T) {
 		t.Fatal("plain text rejected")
 	}
 }
+
+// SubscribeAttachForTest observes publication directly, including forbidden modes.
+// HTTP stream rejection alone cannot prove that the relay received nothing.
+func SubscribeAttachForTest(m *Module, key string) (<-chan string, func()) {
+	ch, unsubscribe, ok := m.watch.subscribe(key)
+	if !ok {
+		panic("fixture relay subscription failed")
+	}
+	return ch, unsubscribe
+}

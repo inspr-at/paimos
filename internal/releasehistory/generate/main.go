@@ -4,7 +4,10 @@
 // that the server embeds. The release workflow runs it after a full-depth checkout
 // (tags included) and before the image build:
 //
-//	go run ./internal/releasehistory/generate -repo . -repository inspr-at/aeon
+//	go run ./internal/releasehistory/generate -repo . -repository inspr-at/paimos
+//
+// inspr-at/paimos is the origin name (GITHUB_REPOSITORY). inspr-at/aeon is the
+// same product; product notes match either.
 //
 // With GITHUB_TOKEN in the environment it adds publication times, image digests
 // and CI runs; -offline skips GitHub. The token is never printed.

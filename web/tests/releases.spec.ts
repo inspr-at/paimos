@@ -118,9 +118,31 @@ test('deep links open one release, and the address follows the selection', async
 
 test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searches, c compares, Esc steps back', async ({ page }) => {
   const { history } = await setup(page)
+  // Selecting a release writes the address through a navigation that refreshes
+  // the session, so the address lands after the cursor has moved. Hold those
+  // refreshes and release them only once Compare is showing: the late address
+  // used to be taken as a new selection and the comparison closed under the keys.
+  let armed = false
+  let navigations = 0
+  let releaseNavigations: () => void = () => {}
+  let navigationGate = Promise.resolve()
+  await page.route(/\/api\/me(?:\?|$)/, async route => {
+    if (!armed) { await route.fallback(); return }
+    navigations++
+    try {
+      await navigationGate
+      await route.fallback()
+    } finally { navigations-- }
+  })
+  const historyReady = page.waitForResponse(res => res.ok() && new URL(res.url()).pathname === '/api/releases')
   await page.goto('/releases')
+  await historyReady
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  // The first selection's address has landed. Later ones wait until Compare is open.
+  await expect(page).toHaveURL(new RegExp(`/releases/${escaped(history.current)}(?:$|\\?)`))
+  navigationGate = new Promise(resolve => { releaseNavigations = resolve })
+  armed = true
   await page.keyboard.press('j')
   await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('Enter')
@@ -147,10 +169,18 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
 
   // Compare from the selected release; j and k move the other end.
   await page.keyboard.press('c')
-  const compare = sheet(page).locator('.compare')
+  const compare = sheet(page).locator('section.compare')
+  await expect(compare).toBeVisible()
   await expect(compare.getByRole('heading', { level: 2 })).toContainText('From')
   await expect(compare.locator('.facts')).toContainText('1 release')
-  await page.keyboard.press('j'); await page.keyboard.press('j')
+  await page.keyboard.press('j')
+  await page.keyboard.press('j')
+  // The address catches up here, after both ends are chosen, and the comparison stays.
+  await expect.poll(() => navigations).toBeGreaterThan(0)
+  releaseNavigations()
+  await expect(page).toHaveURL(new RegExp(`/releases/${escaped(history.releases[1].version)}(?:$|\\?)`))
+  await expect.poll(() => navigations).toBe(0)
+  await expect(compare).toBeVisible()
   await expect(compare.locator('.facts')).toContainText('2 releases')
   await expect(compare.locator('.facts')).toContainText('3 tickets')
   await expect(compare.locator('.changes')).toContainText('Other changes')
@@ -165,6 +195,99 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(compare).toHaveCount(0)
   await page.keyboard.press('Escape')
   await expect(sheet(page)).toHaveCount(0)
+})
+
+test('compare follows Back, Forward and an in-app release link', async ({ page }) => {
+  const { history } = await setup(page)
+  const path = (index: number) => `/releases/${history.releases[index].version}`
+  const selected = (index: number) => expect(options(page).nth(index)).toHaveAttribute('aria-selected', 'true')
+  const compare = sheet(page).locator('section.compare')
+  // Client-side, like a release link. A full load would remount the sheet and hide the bug.
+  const openRelease = async (index: number) => {
+    const mark = await page.evaluate(() => {
+      const state = window as unknown as { __releaseNav?: number }
+      state.__releaseNav = (state.__releaseNav ?? 0) + 1
+      return state.__releaseNav
+    })
+    await page.evaluate(async url => {
+      const { router } = await import('/src/router.ts')
+      await router.push(url)
+    }, path(index))
+    expect(await page.evaluate(() => (window as unknown as { __releaseNav?: number }).__releaseNav)).toBe(mark)
+  }
+  await page.goto(path(0))
+  await selected(0)
+  await openRelease(3)
+  await expect(page).toHaveURL(path(3))
+  await selected(3)
+  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.keyboard.press('c')
+  await expect(compare).toBeVisible()
+  await page.goBack()
+  await expect(page).toHaveURL(path(0))
+  await expect(compare).toHaveCount(0)
+  await selected(0)
+  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.keyboard.press('c')
+  await expect(compare).toBeVisible()
+  await page.goForward()
+  await expect(page).toHaveURL(path(3))
+  await expect(compare).toHaveCount(0)
+  await selected(3)
+  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.keyboard.press('c')
+  await expect(compare).toBeVisible()
+  await openRelease(1)
+  await expect(page).toHaveURL(path(1))
+  await expect(compare).toHaveCount(0)
+  await selected(1)
+})
+
+test('a cancelled selection does not swallow the next visit to that release', async ({ page }) => {
+  const { history } = await setup(page)
+  const path = (index: number) => `/releases/${history.releases[index].version}`
+  const selected = (index: number) => expect(options(page).nth(index)).toHaveAttribute('aria-selected', 'true')
+  const compare = sheet(page).locator('section.compare')
+  // Hold the session refresh so j's address never lands. k returns to the
+  // release already in the address, which cancels j. That cancelled version
+  // must not stay an echo, or the next visit would leave Compare open.
+  let armed = false
+  let requests = 0
+  let releaseGate: () => void = () => {}
+  const gate = new Promise<void>(resolve => { releaseGate = resolve })
+  await page.route(/\/api\/me(?:\?|$)/, async route => {
+    if (!armed) { await route.fallback(); return }
+    requests++
+    try {
+      await gate
+      await route.fallback()
+    } finally { requests-- }
+  })
+  await page.goto(path(0))
+  await selected(0)
+  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  armed = true
+  await page.keyboard.press('j')
+  await selected(1)
+  await expect.poll(() => requests).toBe(1)
+  await page.keyboard.press('k')
+  await selected(0)
+  await page.keyboard.press('c')
+  await expect(compare).toBeVisible()
+  await page.keyboard.press('j')
+  await selected(2)
+  armed = false
+  releaseGate()
+  await expect.poll(() => requests).toBe(0)
+  await expect(page).toHaveURL(path(0))
+  await expect(compare).toBeVisible()
+  await page.evaluate(async url => {
+    const { router } = await import('/src/router.ts')
+    await router.push(url)
+  }, path(1))
+  await expect(page).toHaveURL(path(1))
+  await expect(compare).toHaveCount(0)
+  await selected(1)
 })
 
 test('filters follow the feature and fix blocks, and still keep releases with tickets', async ({ page }) => {

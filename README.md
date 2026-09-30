@@ -50,6 +50,49 @@ paimos issue list --project AEON
 paimos mcp
 ```
 
+`aeon capacity next codex` shows the server's next eligible account and parallel
+capacity; `--json` returns the ordered advice. It never reserves quota. The
+Accounts plan uses that same order: soonest weekly/monthly reset, then larger
+available cap, then account ID. Recent own use moves an account behind other
+eligible accounts, without changing its budget. Short windows still constrain
+every admission.
+Workspace readers can request advice across their accounts; paired agents and
+keys with only `account.probe` see only accounts registered by that agent.
+
+Capacity learning uses tenant-local readings and usage only (AEON-388,
+migration 1020). Three matching run samples enable a decaying p75 hold; five
+observed work days enable an Auto reserve normalized to the window's usable
+work hours. Managed overlap is excluded from own-use learning. Blind accounts
+show consumption until a vendor stop and a known or observed cycle support an
+estimate. Estimates carry uncertainty and evidence, never replace a fresh
+measurement, and never lift a vendor denial. Aging readings include observed
+burn; off-day pacing uses learned throughput to spend what would otherwise
+expire. The Accounts disclosure shows evidence and hours/Away/sleep suggestions;
+only an explicit save changes a schedule. Learning state is bounded and
+contains no local paths or credentials.
+
+The learning regression fixtures cover twelve-run p75 holds, five-day Auto
+reserves, blind-limit calibration and replay, exact-model token conversion,
+fresh-measurement precedence, tenant isolation, and weekend throughput. Browser
+coverage exercises the shared Agents/Usage evidence and explicit hours action
+at 1600/390 pixels in light and dark themes.
+
+`aeon capacity next codex --env` prints a shell-quoted config-home export only
+when the selected account belongs to the authenticated local agentd. Use
+`--shell fish` for fish, `--socket` for an explicit daemon socket, or
+`--setup-root` for non-default pairing state. Paths stay on that computer and
+never enter the server response. The command advises outside launchers; it
+does not enforce their consumption.
+
+A terminal vendor-limit failure waits on its account when the reset is within
+20 minutes. Longer stops create one linked retry on the next eligible account
+at the next daemon poll, preserving the work order and any person-selected
+account fence. The original session records the handoff. The local daemon
+requires proof that the previous process stopped and the same recorded workspace
+and branch before continuing. No eligible account means a visible vendor wait;
+Run now once is never inherited by an automatic retry. Account holds remain
+1% until learned run costs are available (AEON-292 T6).
+
 Named instances and the default live in `~/.aeon/config.yaml`. The agent API key is read from `--key-file` or stdin, never echoed, and stored under `~/.aeon/keys/` mode 0600. `AEON_URL` together with `AEON_API_KEY` (or `AEON_API_KEY_FILE`) is a process-only target. When the binary is `paimos`, `PAIMOS_URL` and `PAIMOS_API_KEY` work the same way.
 
 Create a CLI/script identity at **Settings → Access → Agents → New agent**: give it a name, an optional description, a role ceiling, and workspace or selected-project access. A person with `keys.manage` can create it, within their own permissions; agent and role changes are audited together. The next sheet creates its first scoped key and shows it once, with a copy button (manual selection if clipboard access is blocked) and this instance's `paimos --instance <name> auth login --name <name> --url <origin>` command. Paste the key at the hidden terminal prompt. Computer pairing uses agentd and needs no API key; its page links directly to this alternative.
@@ -163,11 +206,46 @@ To remove a pairing, run `aeon-agentd disconnect` and wait for `disconnected` be
 
 Claude dependency pins preserve stable Node and SDK links, including Home Manager links. Each probe and start checks the full link chain, ownership, directory permissions, workspace exclusion and the SDK's declared package entry, then launches the resolved physical paths. Existing physical pins remain supported. To replace old pins after an update, run `aeon-agentd repin --harness claude --node-path /absolute/stable/bin/node --claude-sdk-path /absolute/stable/lib/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs` (add `--state-root` for a nondefault pairing). Omit the dependency flags to discover the current global installation. The command shows old and new paths and versions; `--yes` confirms without prompting, including with `--json` in Home Manager activation. Missing old versions show as unavailable.
 
+On macOS, these checks accept user- or root-owned directories writable by the `admin` group (gid 80), including Homebrew's `bin` and `Cellar`; group-writable files, other writable groups and non-sticky world-writable directories remain unsafe. Linux retains its group-write refusal. The known Homebrew repositories `/opt/homebrew`, `/usr/local/Homebrew` and `/home/linuxbrew/.linuxbrew` qualify as installed package prefixes for executable and dependency pins only when both the prefix and `.git` have trusted ownership and permissions. Private pairing state (`--state-root`) must remain outside every repository, including these Homebrew prefixes. The configured workspace and other repository ancestors remain excluded. Unsafe dependency errors name the offending component and explain how to fix it.
+
+Codex discovery accepts `login status` on stderr and labels a confirmed ChatGPT account without an email as **ChatGPT login**. An explicit `--account-context` still requires a matching reported identity. If a shell guard around npm Codex cannot find Node on the service PATH, discovery retries that same guard with a validated, pinned Node interpreter; it preserves the guard and the workspace/permission checks. Discovery uses the account RPC and does not read vendor credential files.
+
 Repin records local `claude-repin-<id>.json` and `claude-repin-<id>-applied.json` events in private pairing state. The running daemon replaces its Claude adapter after its current Claude processes exit. Historical ownership records and pending accounting remain intact and continue reconciling; they do not prevent adapter replacement. A successful `repinned` result requires the daemon's acknowledgement. After 20 seconds without it, the command returns nonzero with `restart remains pending`; the daemon retries automatically, and a daemon starting with the saved pins acknowledges them directly. An offline daemon must be started through its existing service owner. Repin preserves enrollment, credentials, fences and service definitions; it neither re-pairs nor takes ownership of a Nix/Home Manager service.
 
-A pending or failed repin, or a broken Claude dependency, holds only fresh Claude work. Other harnesses and claim recovery keep polling. Local status reports `ready: false` with a Claude entry in `harness_errors`; setup status shows the repair action instead of `login_required`. The CLI retains its existing approved physical-executable policy, including Homebrew installations; the stricter ownership and directory checks apply to Node and SDK pins.
+A pending or failed repin, or a broken Claude dependency, holds only fresh Claude work. Other harnesses and claim recovery keep polling. Local status keeps `ready: true` when any enrolled, unfenced account is ready; setup and Add harness can report connected as soon as one harness passes its probe, while another still shows starting or needs sign-in.
+
+One status model covers the computer: it is ready while at least one harness can work. A failed start, a hold or a pin block is a detail of that harness or account, never `setup_failed` for the whole computer; a computer that only reports starting harnesses stays provisioning.
+
+`harness_statuses` remains the legacy state map; the additive `harness_details` map carries `{state, reason, fix}`, and the daemon's per-account `blocked_accounts` carry `{account_id, harness, reason, fix}`. Both use one reason vocabulary and one fix form, `fix: {kind, command}` with kinds `repin`, `add_harness`, `login` and `restart`. Reasons are `repin_pending`, `dependency_invalid`, `pin_missing`, `pin_partial`, `pin_drifted`, `pin_invalid`, `pin_unsafe`, `login_required`, `starting`, `harness_failed`, `cli_unavailable` and `profile_permissions`: the `pin_*` codes come from the static pin check before launch, `dependency_invalid` from the runtime check of the same dependencies. Claude pin and dependency problems are fixed with `aeon-agentd repin --harness claude`, the same problems on other harnesses with `aeon-agentd add-harness --harness NAME`, a failed start, unavailable approved executable or pi profile permissions by restoring it and resuming with `aeon-agentd setup`. `/agents` shows the command on the affected harness row; a pending repin says “Waiting for repin” and retries automatically without a command. A ready harness may list `attention_accounts` for a proper subset of its enrollments so a healthy sibling cannot erase a block, and `/agents` shows “1 of 2 accounts needs attention” (need when more than one) from `attention_count` plus the derived fix on that row while each named enrollment keeps its own status. An account omitted from a truncated list is not shown as ready. `aeon-agentd status` prints the same reason and command per harness and per blocked account. Raw `harness_errors` stay local.
+
+Unknown reason or state tokens from newer daemons remain visible as “Needs attention” with the raw code, without a guessed command; a newer state appears only in `harness_details`, never in the closed legacy map. Unenrolled, revoked, malformed-code and mismatched harness reports are dropped without interrupting fence sync or cleanup; one value-free warning is logged per server instance. Advisory detail extensions and legacy string fixes are accepted, and commands are always rebuilt from known reasons. Malformed JSON shapes still fail validation. Missing reports stay absent, offline reports are labelled as last reported, and a legacy daemon clears prior reports when it omits them. The CLI retains its existing approved physical-executable policy, including Homebrew installations; the stricter ownership and directory checks apply to Node and SDK pins.
 
 Invoking the binary as `paimos` gives the paimos-compatible CLI. `PAIMOS_URL` (with `PAIMOS_API_KEY` or `PAIMOS_API_KEY_FILE`) is the process-only target.
+
+Claude accounts offer **Show Aeon in your Claude status line** in Settings → Accounts.
+Only that explicit opt-in lets the enrolled daemon install `aeon statusline` in
+its private Claude home; an existing user status line is preserved. The command
+prints one plan line and sends only the two supported quota windows to the local
+owner-only agentd socket. The registering agent reports at most once per minute,
+including across daemon restarts. The toggle requires `account.manage`. Disabling
+removes only the matching owned entry, even after the executable leaves PATH or
+its installation path changes or contains spaces.
+
+Structured vendor limit hits settle managed runs as `vendor_limit`; sessions show
+Throttled with the vendor's reset when known. Codex model-specific bucket signals
+stop only the matching model; account-wide denials still apply. Known denied
+windows are reported at 100%; missing bounds remain unknown. Accounts publish
+`reading_support` and a tenant-keyed HMAC of a verified vendor account ID, never an
+email, token or local path. Missing verified IDs leave the fingerprint empty.
+Doors with the same fingerprint share allowance windows, outstanding reservations
+and vendor denials within the tenant; group membership and schedules stay on each
+door. Reservations and launch validation recheck project fences and ticket pins.
+Settings displays `aeon use <harness> <account-id>` so labels containing spaces or
+shell metacharacters remain plain display text. The CLI still accepts labels;
+only the local owner-only agentd resolves the selected account's environment.
+Claude idle `get_usage` and Grok billing captures remain disabled until the coordinator verifies a
+quota-neutral exchange and adds an exact-version, exact-binary capability; this
+fixture implementation does not approve a production vendor capture.
 
 Managed `aeon-agentd` Codex runs report fresh app-server thread usage to
 `POST /api/projects/{projectId}/harness-sessions/{sessionId}/usage` with the
@@ -238,6 +316,122 @@ token values in tenant configuration, API requests, logs or this repository.
 
 The dedicated `/api/rules` API stores layers, sets, rules and immutable version
 snapshots as nodes. Generic node/event APIs cannot read or mutate these resources.
+Git-backed doctrine rules (AEON-319) have **Propose change** when the server's
+GitHub App is enabled for the workspace. The editor creates a proposal branch
+and PR in the rule's owning public/private repo, changing its source and git
+TL;DR sidecar together. Public proposals run the `inspr-modules` leak patterns
+against only the changed rule, its TL;DR entry and PR explanation before any
+GitHub call or token mint. Comparison removes every Unicode default-ignorable
+character, applies NFKD, drops combining marks, folds case and uses a vendored
+Unicode 17.0.0 UTS #39 skeleton. Named Latin small capitals are generated from
+UnicodeData as well; ambiguous compatibility/visual forms fail closed. The
+private corpus, public text and identity literals use the same normalizer;
+proposed git bytes stay unchanged. Six-word runs, whole entries of five or more
+words, and substantial four-word shingle overlap are refused.
+Public proposals require a successfully indexed private source with a valid
+credential grant. The quotation guard is an HMAC keyed by
+`AEON_DOCTRINE_GUARD_KEY_FILE` (at least 32 characters; dev without the file uses
+an ephemeral key). Its saved metadata binds the normalization code/table and
+binary policy versions. Startup rebuilds missing, old or rotated guards;
+public proposals fail closed until a compatible guard exists. An unset production
+key or a configured file that does not exist disables PR proposal creation without
+blocking startup or doctrine reads/indexing. Workspace administrators see the
+reason in the Doctrine panel; malformed or unreadable keys remain configuration
+errors. No key or host path is returned in that reason.
+
+Every private-tree file must be UTF-8 text, without control codes other than
+tab, LF and CR. No binary extension, signature or readable-text heuristic skips
+files. A non-text file blocks the guard and the index error names only its path.
+The optional host config `AEON_DOCTRINE_BINARY_ALLOWLIST` is an explicit reviewed
+JSON object of exact repository-relative paths to lowercase SHA-256 digests of
+complete blobs (empty by default). It cannot be set through proposals or source
+configuration. Changing or removing an exception invalidates cached guards.
+
+Public source indexing separately caches the resolved main commit and tree.
+Only matching cached blobs can exempt a private match, for at most five minutes.
+A missing, invalid or stale cache returns `422 public_main_unavailable` without
+fetching; reindex the public source to refresh it. A proposal with no private
+match needs no exemption cache and adds no guard GitHub reads. Normal PR
+preparation still verifies main; if it changed since an exemption was checked,
+reindex and retry. A proposal branch or unchecked pin never grants an exception.
+Public letters must be Latin, including German umlauts and ß; the compatibility
+form admits superscripts, fractions and the information symbol while other
+scripts/digits stay refused. Unchanged file content is excluded.
+
+Regenerate the pinned Unicode table with
+`python3 internal/rules/doctrine/unicodegen/generate.py`, then `gofmt` the output.
+The generator verifies immutable input digests; builds and runtime are offline.
+Credential-shaped text is refused for either repository, including private.
+Git stays authoritative; the database holds request digests, PR references and
+audit metadata, never draft prose or credentials. Keep the same request UUID
+and input when retrying a lost response. Short transactions authorize and reserve
+a bounded proposal lease, then apply GitHub results with a version compare-and-set;
+no database locks span network calls. Refresh reconciles an uncertain merge and
+emits an event only when state changes. Externally observed merges are recorded
+as observations; without prior Aeon approval, request release in the repository.
+
+Host provisioning (no App exists yet): set `AEON_DOCTRINE_APP_ID`,
+`AEON_DOCTRINE_INSTALLATION_ID`, `AEON_DOCTRINE_APP_KEY_REF`,
+`AEON_DOCTRINE_APP_TENANT_ID` and `AEON_DOCTRINE_GATE_LOGIN`. An operator must
+also set `AEON_DOCTRINE_DCO_ACKNOWLEDGED=true` after approving the App's
+contribution/sign-off policy; without it proposals stay disabled. The App's
+bot login and public noreply identity are resolved from GitHub, and commits
+carry that bot's matching DCO trailer (required by the public repo). No
+person's identity or address is copied into public commit metadata. The key reference
+names a PEM RSA key under `AEON_DOCTRINE_CREDENTIALS_DIR`, read only at call time.
+The operator must also provision `<key-ref>.allowlist.json` using the same
+`grants` format as read credentials above, with an explicit tenant/repository
+pair for each writable doctrine repo. Missing, invalid or revoked grants return
+`credential unavailable` before key use or any GitHub request. Proposal,
+refresh and approval operations recheck the grant. App configuration and tenant
+settings cannot grant access to a key by themselves. Every GitHub request,
+including PR writes, is pinned to `https://api.github.com` and refuses redirects.
+The App installation must select exactly `inspr-at/inspr-modules` and
+`inspr-at/inspr-doctrine-private`, with contents + pull requests write (and
+implicit metadata read). Each minted token is narrowed to the proposal
+repository alone and checked against that exact scope and live repository
+visibility. Installation tokens are revoked after use (including validation
+failures), with bounded cancellation-independent cleanup via GitHub’s
+[revocation endpoint](https://docs.github.com/en/rest/apps/installations#revoke-an-installation-access-token).
+A private repo becoming public blocks publication. The configured tenant is the
+sole proposal writer; tenant settings
+cannot grant another workspace access to the central doctrine. The App must
+**not bypass branch protections**. Main must require CI and the independent
+cross-family gate so both remain enforced during a merge race. No direct-main
+write route exists.
+
+The independent repository gate account named by `AEON_DOCTRINE_GATE_LOGIN`
+must post an APPROVED PR review on the exact head, with its complete body:
+`aeon-doctrine-gate: {"verdict":"ok","head_sha":"<head>","checks_green":true,"author_family":"openai","reviewer_family":"anthropic"}`.
+It must independently verify required CI and the explicit cross-family review;
+Aeon cannot supply that evidence itself. Families must differ. Missing, stale,
+dismissed, same-family or negative evidence blocks approval. A person with
+workspace `rules.publish` approves that head; Aeon checks protected-main
+mergeability again and supplies the SHA to GitHub's merge endpoint. Branch
+protections remain the race-safe authority. This uses PR reviews because
+GitHub's checks/status APIs require extra App permissions beyond this ticket's
+scope ([GitHub permissions](https://docs.github.com/en/rest/commits/statuses#get-the-combined-status-for-a-specific-reference)).
+
+After a confirmed merge, Aeon sends `repository_dispatch` type
+`doctrine-release` with `proposal_id`, `merge_commit` and
+`requested_scheme: CalVer3`. The owning repo must install a receiver that
+deduplicates on proposal ID, performs its approved reservation/release flow,
+and publishes a release body line:
+`aeon-doctrine-release: {"proposal_id":"<id>","merge_commit":"<sha>","version_scheme":"CalVer3"}`.
+Aeon never reserves versions, changes consumer pins, or labels dispatch as a
+release. Refresh verifies release provenance and that its tag resolves to the
+merge or a descendant. Until the App, independent gate and release receiver
+are provisioned by the coordinator, the workflow remains disabled/pending.
+No foreign repository workflow was changed for this package.
+
+The state reads proposed → in review → merged → released. A person with
+`settings.manage` can report a verified machine pin through
+`POST /api/rules/doctrine/proposals/{id}/pins` using a SHA-256 machine identity
+and the observed release commit. The UI labels these as **reported** machines;
+this is operator evidence, not automatic fleet discovery, and never changes
+nixcfg, PHAROS or JANUS pins. New observations replace that machine's old pin
+for the repository. Review, merge, release and pin evidence is tenant-isolated.
+
 `rules.read` and `rules.write` are agent-grantable; `rules.publish` is high risk and
 person-only. Company edits require a person with workspace publish authority;
 project edits require that authority in the target project (or in an agent key's
@@ -456,6 +650,18 @@ user toggles it; that choice lasts for the current page session and writes no
 browser storage. Assets and fonts are served locally. The supplied mark is
 preserved at `web/src/assets/brand/aeon-mark.svg` for its later replacement.
 
+The ticket list and Outline share the causal row store and live stream. Field
+changes patch in place; moves, additions, removals and held edits wait behind
+**N updates · Show** (shortcut **U**), or apply after two idle seconds when no
+selection, editor, menu, dialog or drag is active. There is no countdown. The
+Outline retains expansion and tree placement while updates wait, refreshes
+filtered ancestors, and moves successful bulk results immediately. Stream loss
+invalidates outstanding reads before reconnect; older pages cannot overwrite
+locally changed child counts.
+On phones, List and Outline share a bottom-centred updates chip above the safe
+area, footer and selection sheet, with scroll clearance for the last row; the
+desktop action stays in the table header. Lazy pages retain the server's order.
+
 The auth adapter is isolated in `web/src/lib/api.ts`. Pending P0.3 contract
 confirmation, it expects `/api/me` to return
 `{ principal: { id, name, email? }, tenant: { id, name }, dev_mode?: boolean }`.
@@ -471,6 +677,13 @@ No analytics, third-party runtime assets, or optional device storage are added.
 Both version surfaces use the unchanged, verified calendar bundle in Pretty
 mode with brand gold. The shared helper provides reveal and copy interactions;
 `dev` remains plain text. Every production web build verifies the bundle pin.
+
+The connect screen keeps Connect available when a selection mixes verifiable
+and unverifiable harnesses. Clicking it offers **Connect without verification**
+for the whole selection or **Leave them out** to keep only the verifiable
+accounts for review before connecting. Approval currently records one verification
+mode for the selection; no harness is silently excluded or treated as verified.
+When Connect is disabled, its reason appears beside the button.
 
 ```sh
 cd web
@@ -500,11 +713,50 @@ can do the same with `control --setup-root PATH` (exclusive with `--socket`).
 Existing generation-specific socket references remain readable while their
 listener exists. No pairing data migration is required.
 
+`HOME` is needed only for the fallback, so short and existing legacy socket
+paths still resolve when it is unset. If the service and shell resolve different
+fallbacks, the client reports its resolved home, setup root and socket alongside
+the recorded socket; paths under the client's home are shortened to `~`.
+
 `pair`, `setup` and paired `serve` reject an unrepresentable path before
 creating pairing state or contacting the instance. Choose a shorter setup
-root (`--state-root` for pair/setup, `--setup-root` for serve). A lifetime lock
-protects the stable listener. Crash recovery removes only the socket and token
-inodes recorded for that setup and daemon; unrelated files are left untouched.
+root (`--state-root` for pair/setup, `--setup-root` for serve). Every local
+listener takes an exclusive non-blocking lock on `<socket>.lock` before touching
+the socket or token and retains it through shutdown cleanup. The lock file is
+an owned mode-0600 regular file opened without following symlinks; it is retained
+across restarts and is never deleted or renamed by startup, recovery or shutdown.
+After acquiring the lock, startup compares the descriptor's device and inode
+with the file named relative to the pinned private directory handle and retries
+a bounded number of times if they differ.
+Interrupted flock syscalls retry; only contention maps a flock error to busy.
+The descriptor is close-on-exec, so harness children cannot keep the lock alive.
+On macOS, a short directory flock serializes only the lock-file open: concurrent
+`O_CREAT|O_NOFOLLOW` opens can otherwise return `ENOENT` during creation. It is
+released before taking the lifetime file lock; open errors remain errors.
+A second start reports "agentd is already running for this state
+root" and leaves the active listener and token untouched, even when its accept
+queue is full. Clients never take the lock.
+
+The kernel releases the lock after a crash, including SIGKILL. The next owner
+validates all stale socket artifacts through the private directory handle before
+removing any: the socket, token (even without a socket), obsolete owner record,
+and legacy `.s` plus eight hex digit quarantine names. Each must be owned by the
+current uid, mode 0600 and single-linked, with the expected socket or regular-file
+type. Symlinks, hardlinks, foreign owners and unsafe modes refuse startup.
+The verified lifetime lock is the only cleanup authority. Recovery and shutdown
+never probe the socket: on macOS even a live listener can refuse connections
+when its accept queue is full. All cleanup checks and removals are relative to
+the same pinned private directory handle. Lock identity is checked again before
+each removal. Shutdown closes the listener and removes only its recorded
+socket/token inodes while still holding that lock, then releases it. Losing lock
+identity leaves residue for a verified owner to recover. Interruption likewise
+leaves stale artifacts for the next owner; no quarantine is needed.
+This advisory protocol serializes cooperating daemons. A same-uid process that
+deletes or replaces the lock file or directory can disrupt a running daemon;
+this is outside the protection boundary, since it can already signal or kill
+the daemon. The no-symlink, owner, mode and link checks protect against accidental
+or foreign-uid artifacts, not hostile same-uid path mutation.
+Unrelated directory entries are preserved.
 The private token and local control authorization rules remain unchanged.
 
 ### Harness interpreter pins
@@ -514,10 +766,20 @@ Codex, Cursor, Claude and pi. `--node-path` selects an installed Node outside th
 workspace, including for shell wrappers. Setup checks the launcher using the
 service PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) with the pinned Node directory first;
 interactive shell paths and Node injection variables cannot mask missing runtime
-dependencies. The same pin is used for account probes and run launches. Unsafe,
-missing or changed pins block startup rather than reporting a signed-out account.
-Existing npm enrollments without a pin need fresh guided setup; native launchers
-and saved pi bindings remain supported. Paths and interpreter versions stay local.
+dependencies. The same pin is used for account probes and run launches. A missing,
+partial, drifted, invalid, or unsafe pin blocks only that account: the paired
+daemon and its other accounts keep running, and that harness does not launch
+until the pin is fixed. Status names the account, a reason code (`pin_missing`,
+`pin_partial`, `pin_drifted`, `pin_invalid`, `pin_unsafe`), and the fix as the
+same `{kind, command}` object used by harness details. Claude launches with the
+shared Node/SDK pins, so every Claude pin problem, a missing pin included, is
+fixed with `aeon-agentd repin --harness claude`. For Codex, Cursor and pi,
+`aeon-agentd add-harness --harness NAME` renews only the blocked pin of the
+already connected account: the signed-in identity and launcher must match, no
+request or approval is created, and a healthy pin is never replaced. If the
+identity or launcher changed, remove the enrollment and add the harness again.
+Repin and pin renewal never renew authority. Native launchers and saved pi
+bindings remain supported. Paths and interpreter versions stay local.
 
 ### Pi guided setup
 
@@ -527,10 +789,11 @@ its `/login` and `/model` commands first. Setup pins the executable and reads it
 version. For npm's `#!/usr/bin/env node` entrypoint it also resolves Node (or
 uses `--node-path`), pins its physical path and version privately, and prepends
 its directory to the probe and runtime PATH. Node must be installed outside the
-workspace; missing or changed interpreter pins block startup. Setup then checks
+workspace. A missing or changed interpreter pin blocks only that account.
+Setup then checks
 the selected provider/model against pi's public RPC
 `get_available_models` response. `--account-context anthropic` selects a specific
-configured provider instead. The local profile is `~/.pi/agent`; Aeon never
+configured provider instead. For existing native sign-ins the local profile is `~/.pi/agent`; Aeon never
 opens its credential files, inherits provider keys for this check, or sends a
 prompt. This establishes configured authentication, not remote credential
 validity or a person's identity. The approval label names the provider and local
@@ -547,6 +810,31 @@ unavailable: its managed adapter has no qualified no-tools boundary. Connect wit
 set request limits for ongoing work. Pi retains its existing SVG harness icon and
 account allowance pipeline; missing vendor token, cost or capacity readings
 remain unreported, never inferred from a provider name or a successful probe.
+
+For OpenRouter, run `aeon-agentd add-harness --harness pi --provider openrouter`
+on an already paired computer (or append `--harness pi --provider openrouter`
+to `aeon-agentd pair` for a new one). The hidden terminal prompt checks the key
+with `GET https://openrouter.ai/api/v1/key`, without spending tokens, and stores
+it in a new 0700 per-account pi profile with a 0600 `auth.json`. Headless setup
+accepts `--openrouter-env-file /absolute/private/path`: only a literal
+`OPENROUTER_API_KEY` assignment, never shell commands. No key flag, inherited
+provider key, keychain dump, server upload, or key in child arguments/environment.
+Normal native provider setup also accepts `--provider PROVIDER`.
+
+Settings → Accounts lets a person with `account.manage` choose a pi model;
+OpenRouter uses `vendor/model[:variant]`. The server checks its public models
+list with a four-second timeout and a fifteen-minute cache (failed lookups cache
+for thirty seconds). Unconfirmed slugs save as **unknown**. The initial
+OpenRouter option is `stealth/space-bunny-alpha`; edits create immutable model
+profiles for the account catalog/planning selector. Active runs keep their pin;
+previously queued stale choices must be selected again. OpenRouter's underlying
+model family is not assumed, so unknown families cannot qualify for review gates.
+
+Stealth and free models show the provider data note. Local probes report only
+numeric dollar usage, key limit and remaining credits with their reading time;
+missing values stay unknown. Credit amounts are not a renewable allowance window:
+normal request limits and the blind-provider pacing policy still apply. No
+completion call is used to validate a key or a model.
 
 ### Session metadata
 
@@ -690,3 +978,67 @@ Managed agents can pass `target` and an optional `release_node_id` to
 accepts an optional `--target-file JSON`. Verify handoffs retain the preceding
 deploy handoff's recorded target internally when present; neither handoff body
 emits target fields.
+
+### Attach a running session (AEON-352)
+
+From a separate interactive terminal on a paired computer, run
+`aeon-agentd attach --setup-root PATH --pid PID --harness codex --project-id UUID --ticket-id UUID --transcript PATH`.
+**Watch the conversation** is the default; the transcript must be a resolvable
+physical file, as in the AEON-258 mirror. Choose **Status only (no conversation
+text)** at the local prompt, or pass `--status-only` (no transcript needed), to
+report status without reading or sharing conversation text. Missing or unsafe
+transcripts never silently select status-only.
+
+Review the kernel-observed process, physical folder and chosen mode, type `WATCH`
+or `ATTACH` as shown, then enter its nine-digit code under **Agents → Attach
+session** on the paired instance. The approval screen shows the selected mode.
+The computer owner approves the exact snapshot; the code expires in ten minutes.
+Both modes require a consent digest and single-use approval (repeat approval
+returns 409). Keep the terminal open: peer-checked polls renew a 60-second lease.
+Revocation, identity changes and lease expiry require a fresh approval. A stopped
+watch is detached; lost contact is unreachable; only a kernel check confirms exit.
+
+Conversation watching shares only new turns after activation with people
+explicitly granted `harness.watch` in the project. Status-only (`snapshot.mode=lease`)
+opens no transcript, rejects conversation text and has no conversation viewer.
+The project permission remains off for all built-in roles and is never implied
+by `harness.read` or `nodes.read`. Both attach modes require protocol 2. An older
+daemon connecting to a newer server still registers and keeps serving work; its
+attach requests receive HTTP 409 `update_agentd` and cannot create a watch or
+lease. The released older terminal helper shows `local lifecycle request rejected`
+(the daemon's local refusal is `paired instance refused attach`), rather than
+the server's update message. Update agentd, restart it and give fresh approval.
+A newer daemon connecting to an older server receives HTTP 400 on attach
+registration because that server rejects the unknown `attach_protocol` field.
+The daemon logs the server's refusal, disables attach and keeps serving work
+and local control. An attach attempt through that daemon shows
+`local lifecycle request rejected`. After updating the server, restart agentd
+to retry attach registration; there is no in-process registration retry.
+The paired computer's tenant-scoped workspace is the hard cwd allowlist; neither
+`AEON_URL` nor local request fields can override the paired origin. Same-user
+processes are not isolated by this feature.
+
+Security regressions live in `internal/agentd/attach_lease_test.go` (injected
+commands, PID/executable/cwd changes, explicit mode choice, status-only without
+transcript I/O, expiry and offline teardown in both modes),
+`internal/agentpairing/attach_lease_test.go` (atomic approval, isolated session
+leases, expiry/revocation, text refusal and cross-tenant RLS/404), and the
+platform-specific process tests (native macOS/Linux kernel identity and exit).
+`cmd/aeon-agentd/paired_serve_test.go` verifies the paired-origin pin against an
+alternate remote, `AEON_URL` and HTTP redirects before either mode
+can attach. It also runs the real serve loop through registration refusals,
+checks that work polling and local control continue with attach disabled, and
+restarts against an updated server to recover attach. Server regressions verify
+that protocol-less registrations keep daemon identity usable while every attach
+operation requires an update, even if later requests claim protocol 2.
+`TestAttachModesProtectionMatrix` checks consent, mode tampering and terminal
+states in both modes, sending text on refused watch polls. Early text at pending,
+discovery, local-confirmation and activation stages detaches without a session.
+Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
+The status-only text regression backdates the poll clock and observes the relay directly, so rate
+limiting cannot hide a missing content guard. The approval browser spec covers
+both modes and consent policies at 1600/390 pixels in light and dark.
+The reporter contract is `harness-session/1.5`:
+existing state values stay intact; optional `watch.process_state` carries a
+confirmed exit. The existing default-off permission and code-attempt-cap tests
+remain in `internal/agentpairing/watch_test.go`.

@@ -224,6 +224,33 @@ func windowKind(minutes int) string {
 	}
 }
 
+func claudeWindowMinutes(kind string) int {
+	switch kind {
+	case "five_hour":
+		return 300
+	case "seven_day", "seven_day_opus", "seven_day_sonnet", "seven_day_overage_included":
+		return 10080
+	default:
+		return 0
+	}
+}
+
+// ClaudeUnnamedStop is a rejected rate_limit_event that names no window.
+// The caller records a vendor stop; stored windows stay as they were.
+func ClaudeUnnamedStop(raw []byte) bool {
+	if len(raw) > 1<<20 {
+		return false
+	}
+	var in struct {
+		Type string `json:"type"`
+		Info struct {
+			Status string `json:"status"`
+			Kind   string `json:"rateLimitType"`
+		} `json:"rate_limit_info"`
+	}
+	return json.Unmarshal(raw, &in) == nil && in.Type == "rate_limit_event" && in.Info.Status == "rejected" && claudeWindowMinutes(in.Info.Kind) == 0
+}
+
 func Claude(raw []byte, at time.Time) []Reading {
 	if len(raw) > 1<<20 {
 		return nil
@@ -245,6 +272,10 @@ func Claude(raw []byte, at time.Time) []Reading {
 	if json.Unmarshal(raw, &in) != nil || in.Type != "rate_limit_event" {
 		return nil
 	}
+	// A rejection that names no bucket is a vendor stop, not a window update.
+	if in.Info.Status == "rejected" && claudeWindowMinutes(in.Info.Kind) == 0 {
+		return nil
+	}
 	ws := in.Info.Windows
 	if ws == nil {
 		ws = map[string]window{}
@@ -260,13 +291,8 @@ func Claude(raw []byte, at time.Time) []Reading {
 	out := []Reading{}
 	for _, k := range keys {
 		w := ws[k]
-		minutes := 0
-		switch k {
-		case "five_hour":
-			minutes = 300
-		case "seven_day", "seven_day_opus", "seven_day_sonnet", "seven_day_overage_included":
-			minutes = 10080
-		default:
+		minutes := claudeWindowMinutes(k)
+		if minutes == 0 {
 			continue
 		}
 		if w.Utilization == nil || w.Reset == nil || math.IsNaN(*w.Utilization) || *w.Utilization < 0 {
@@ -278,8 +304,12 @@ func Claude(raw []byte, at time.Time) []Reading {
 			v := true
 			allowed = &v
 		case "rejected":
-			v := false
-			allowed = &v
+			// Only the named bucket is denied. A sibling utilization is an
+			// observation and must not clear or spread that denial.
+			if k == in.Info.Kind {
+				v := false
+				allowed = &v
+			}
 		default:
 			continue
 		}
@@ -291,50 +321,66 @@ func Claude(raw []byte, at time.Time) []Reading {
 	return out
 }
 
-// Claude remembers normalized observations so a sparse rejection can fence
-// known windows even when the event contains no utilization. An allowance-only
-// event never freshens old usage; a complete new reading establishes recovery.
+// Claude remembers normalized observations so a sparse rejection can fence the
+// named window even when the event contains no utilization. A rejection that
+// names no window leaves that memory unchanged. An allowance-only event never
+// freshens old usage; a complete new reading establishes recovery.
 func (p *Parser) Claude(raw []byte, at time.Time) []Reading {
 	out := Claude(raw, at)
 	if p.claude == nil {
 		p.claude = map[string]Reading{}
 	}
+	kind := ""
+	namedReject := false
+	if len(raw) <= 1<<20 {
+		var event struct {
+			Type string `json:"type"`
+			Info struct {
+				Status string `json:"status"`
+				Kind   string `json:"rateLimitType"`
+			} `json:"rate_limit_info"`
+		}
+		if json.Unmarshal(raw, &event) == nil && event.Type == "rate_limit_event" && event.Info.Status == "rejected" && claudeWindowMinutes(event.Info.Kind) > 0 {
+			kind = event.Info.Kind
+			namedReject = true
+		}
+	}
+	if len(out) == 0 && !namedReject {
+		return nil
+	}
 	seen := map[string]bool{}
 	for _, r := range out {
+		if prev, ok := p.claude[r.Bucket]; ok && r.OrdinaryUsageAllowed == nil {
+			r.OrdinaryUsageAllowed = prev.OrdinaryUsageAllowed
+			r.ReadAt = prev.ReadAt
+			if !r.ResetsAt.After(r.ReadAt) {
+				r.ResetsAt = prev.ResetsAt
+			}
+		}
 		p.claude[r.Bucket] = r
 		seen[r.Bucket] = true
 	}
-	var event struct {
-		Type string `json:"type"`
-		Info struct {
-			Status string `json:"status"`
-		} `json:"rate_limit_info"`
-	}
-	if len(raw) <= 1<<20 && json.Unmarshal(raw, &event) == nil && event.Type == "rate_limit_event" && event.Info.Status == "rejected" {
-		for k, r := range p.claude {
-			if seen[k] || !r.ResetsAt.After(at) {
-				continue
-			}
+	if namedReject {
+		if r, ok := p.claude[kind]; ok && !seen[kind] && r.ResetsAt.After(at) {
 			no := false
 			r.OrdinaryUsageAllowed = &no
 			r.ReadAt = at
-			p.claude[k] = r
-			out = append(out, r)
+			p.claude[kind] = r
 		}
 	}
-	if len(out) == 0 {
-		return nil
-	}
-	out = out[:0]
-	keys := []string{}
+	keys := make([]string, 0, len(p.claude))
 	for k, r := range p.claude {
 		if !r.ResetsAt.After(at) {
 			delete(p.claude, k)
-		} else {
-			keys = append(keys, k)
+			continue
 		}
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		return nil
 	}
 	sort.Strings(keys)
+	out = out[:0]
 	for _, k := range keys {
 		out = append(out, p.claude[k])
 	}

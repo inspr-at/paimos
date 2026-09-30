@@ -3,6 +3,8 @@ package main
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -116,21 +118,29 @@ func TestReleaseSignsDarwinAgentdBeforeChecksums(t *testing.T) {
 }
 
 func TestReleaseHomebrewTapBumpUsesEnvironmentSecrets(t *testing.T) {
-	workflow := readRepo(t, ".github/workflows/release.yml")
-	before, tap, ok := strings.Cut(workflow, "\n  homebrew-tap:\n")
-	if !ok {
-		t.Fatal("release workflow has no homebrew-tap job")
+	build := readRepo(t, ".github/workflows/release.yml")
+	if strings.Contains(build, "HOMEBREW_TAP_APP_") || strings.Contains(build, "homebrew-tap-pr.mjs") {
+		t.Fatal("the tag build must not access tap secrets or open a tap PR")
 	}
-	if strings.Contains(before, "HOMEBREW_TAP_APP_") {
-		t.Fatal("homebrew app secrets appear before the homebrew-tap job")
+	tap := readRepo(t, ".github/workflows/homebrew-tap.yml")
+	var wf releaseWorkflow
+	if err := yaml.Unmarshal([]byte(tap), &wf); err != nil {
+		t.Fatalf("homebrew-tap.yml: %v", err)
+	}
+	if want := map[string]any{"release": map[string]any{"types": []any{"published"}}}; !reflect.DeepEqual(wf.On, want) {
+		t.Fatalf("tap workflow must trigger only on release publication, got %#v", wf.On)
 	}
 	for _, needle := range []string{
-		"needs: release",
+		"github.event.release.draft == false",
+		"github.event.release.prerelease == false",
+		"ref: ${{ github.event.release.tag_name }}",
+		"contents: read",
 		"environment: homebrew-tap",
+		`node scripts/release-tag.mjs "$RELEASE_TAG"`,
 		"node scripts/homebrew-tap-pr.mjs",
 		"secrets.HOMEBREW_TAP_APP_ID",
 		"secrets.HOMEBREW_TAP_APP_KEY",
-		"needs.release.outputs.version",
+		"steps.version.outputs.version",
 	} {
 		if !strings.Contains(tap, needle) {
 			t.Fatalf("homebrew-tap job missing %s", needle)
@@ -141,6 +151,83 @@ func TestReleaseHomebrewTapBumpUsesEnvironmentSecrets(t *testing.T) {
 	}
 	if strings.Contains(tap, "homebrew tap bump skipped") {
 		t.Fatal("the skip line belongs in the script, which checks both secrets before minting a token")
+	}
+}
+
+func TestReleaseCreatesDraftUntilExplicitPublication(t *testing.T) {
+	workflow := readRepo(t, ".github/workflows/release.yml")
+	var wf releaseWorkflow
+	if err := yaml.Unmarshal([]byte(workflow), &wf); err != nil {
+		t.Fatalf("release.yml: %v", err)
+	}
+	creates := 0
+	for _, job := range wf.Jobs {
+		for _, step := range job.Steps {
+			if strings.Contains(step.Run, "gh release edit") || strings.Contains(step.Run, "--draft=false") {
+				t.Fatal("the tag build must never publish a draft")
+			}
+			if strings.Contains(step.Run, "gh release create") {
+				creates++
+				if !strings.Contains(step.Run, "--draft ") || !strings.Contains(step.Run, "--verify-tag ") {
+					t.Fatal("release creation must draft the existing tag")
+				}
+			}
+		}
+	}
+	if creates != 1 {
+		t.Fatalf("want one draft creation step, got %d", creates)
+	}
+	if !strings.Contains(workflow, `gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100"`) {
+		t.Fatal("release immutability guard must list drafts as well as published releases")
+	}
+}
+
+func TestReleaseExistingDraftGuardFailsClosed(t *testing.T) {
+	var wf releaseWorkflow
+	if err := yaml.Unmarshal([]byte(readRepo(t, ".github/workflows/release.yml")), &wf); err != nil {
+		t.Fatal(err)
+	}
+	var guard string
+	for _, step := range wf.Jobs["release"].Steps {
+		if step.Name == "Reject an existing GitHub release" {
+			guard = step.Run
+		}
+	}
+	if guard == "" {
+		t.Fatal("release immutability guard missing")
+	}
+	const tag = "v260929203122.0.0"
+	for _, tc := range []struct {
+		name string
+		tags string
+		fail bool
+		code string
+	}{
+		{"new coordinate", "v260929113854.0.0\n", false, "0"},
+		{"existing draft or published coordinate", tag + "\n", true, "0"},
+		{"existing on later page", strings.Repeat("v260929113854.0.0\n", 1000) + tag + "\n", true, "0"},
+		{"early match drains long list", tag + "\n" + strings.Repeat("v260929113854.0.0\n", 10000), true, "0"},
+		{"API unavailable", "", true, "7"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "tags"), []byte(tc.tags), 0600); err != nil {
+				t.Fatal(err)
+			}
+			// No credentials or network: exercise the actual workflow shell with a
+			// paginated gh response fixture, including failure and pipefail cases.
+			stub := "#!/bin/sh\ncat tags\nexit " + tc.code + "\n"
+			if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(stub), 0700); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("/bin/bash", "-c", guard)
+			cmd.Dir = dir
+			cmd.Env = []string{"PATH=" + dir + ":/usr/bin:/bin", "VERSION=" + strings.TrimPrefix(tag, "v"), "GITHUB_REPOSITORY=inspr-at/paimos"}
+			out, err := cmd.CombinedOutput()
+			if (err != nil) != tc.fail {
+				t.Fatalf("guard failure = %v, want %v: %s", err, tc.fail, out)
+			}
+		})
 	}
 }
 

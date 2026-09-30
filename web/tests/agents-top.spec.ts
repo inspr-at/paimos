@@ -61,18 +61,24 @@ test('nothing waits: no Needs you, a compact live line, and accounts with one pl
   await expect(line.getByRole('button', { name: /working/ })).toBeVisible()
   await expect(cap(page).locator('.cap-meta')).toHaveText('5 of 6 ready')
   await expect(pool(page, 'codex').locator('.pool-plan')).toHaveText('Pro · weekly')
-  await expect(pool(page, 'codex').locator('.plan')).toHaveText('Today: ~6% of Spare, then ~15% of Main — soonest reset first, so each lands at 0% as it resets.')
+  // Keep for you (AEON-375, Auto 30%): Spare's last 9% is kept for you, so today's plan is Main's.
+  await expect(pool(page, 'codex').locator('.plan')).toHaveText('Today: ~15% of Main, keeping ~30% for you. Spare is kept for you until tomorrow 18:02.')
   await expect(pool(page, 'codex').locator('.acct .nm')).toHaveText(['Spare', 'Main', 'Studio'])
   const studio = page.locator(`[data-account="${ACCOUNTS.studio}"]`)
   await expect(studio.locator('.source')).toHaveText('Read on studio · 3 h ago · offline')
   await expect(studio.locator('.today')).toHaveText('waits for studio')
-  await expect(page.locator(`[data-account="${ACCOUNTS.claude}"] .win5`)).toHaveText('5-hour window 60% left · resets 16:40')
-  await expect(pool(page, 'claude').locator('.plan')).toContainText('Today: use up to ~10% of Claude (4% so far) — on track to finish at 0% by Fri 22:00, before it resets Sun 11:00.')
+  await expect(page.locator(`[data-account="${ACCOUNTS.claude}"] .win5`)).toHaveText('5-hour window 60% left · keeps 16% for you · resets 16:40')
+  await expect(pool(page, 'claude').locator('.plan')).toHaveText('Today: use up to ~10% of Claude (4% so far) — on track to finish at 0% by Fri 22:00, before it resets Sun 11:00. Its 5-hour window keeps ~16% for you until 16:40.')
   await expect(pool(page, 'grok').locator('.plan')).toContainText('(fresh week)')
   await expect(pool(page, 'cursor').locator('.plan')).toHaveText('Ahead of pace: 7% used today, the plan was ~6%. Agents ease off Cursor until tomorrow.')
   await expect(page.locator(`[data-account="${ACCOUNTS.cursor}"] .today`)).toHaveText('7% of ~6% · ahead')
   // The gauge carries today's share and the stop tick; the meter names them.
-  await expect(page.locator(`[data-account="${ACCOUNTS.spare}"] [role="meter"]`)).toHaveAttribute('aria-label', "Spare: 9% left, today's share 6%, 2% used today")
+  await expect(page.locator(`[data-account="${ACCOUNTS.spare}"] [role="meter"]`)).toHaveAttribute('aria-label', "Spare: 9% left, 9% kept for you, today's share 6%, 2% used today")
+  await expect(page.locator(`[data-account="${ACCOUNTS.spare}"] .today`)).toHaveText('kept for you')
+  await expect(page.locator(`[data-account="${ACCOUNTS.main}"] [role="meter"]`)).toHaveAttribute('aria-label', "Main: 42% left, 30% kept for you, today's share 15%, 3% used today")
+  await expect(cap(page).getByRole('button', { name: 'Keep for you Auto · ~30%' })).toBeVisible()
+  await expect(cap(page).getByRole('region', { name: 'The plan' })).toHaveCount(0)
+  await expect(cap(page).locator('.cap-foot')).toContainText('kept for you')
   // No coloured edge accents anywhere in the new top (AGENTS.md rule 11).
   const edges = await page.locator('.cap, .cap *, .live-line, .live-line *').evaluateAll(els => els.filter(el => { const s = getComputedStyle(el); return ['Left', 'Top'].some(side => parseFloat(s[`border${side}Width` as 'borderLeftWidth']) >= 3 && s[`border${side}Style` as 'borderLeftStyle'] !== 'none') }).length)
   expect(edges).toBe(0)
@@ -196,7 +202,7 @@ test('Sprint and Hold from the pool menu, and back to the plan', async ({ page }
   await expect(pool(page, 'codex').locator('.override')).toHaveCount(0)
   expect(capacity.puts.at(-1)).toEqual({ scope: 'pool', pool: 'codex', schedule: null })
   await pool(page, 'grok').getByRole('button', { name: 'Grok: sprint or hold' }).click()
-  await page.getByRole('menu').getByRole('menuitem', { name: /Hold/ }).click()
+  await page.getByRole('menu').getByRole('menuitem', { name: 'Hold until I resume' }).click()
   await expect(pool(page, 'grok').locator('.plan')).toHaveText("On hold. Agents leave Grok alone until you resume; today's share moves to the coming days.")
   await expect(page.locator(`[data-account="${ACCOUNTS.grok}"] .today`)).toHaveText('on hold')
   // A schedule change carries the Hold along instead of leaving a stale copy.
@@ -205,13 +211,169 @@ test('Sprint and Hold from the pool menu, and back to the plan', async ({ page }
   expect(capacity.schedules.find(e => e.pool === 'grok')?.schedule.override).toBe('hold')
 })
 
+// AEON-375: Keep for you, the runway reserve. One choice in the header, Auto by
+// default, keyboard-complete, with the server's live preview.
+test('Keep for you: the popover is keyboard-complete, previews live and saves one choice', async ({ page }) => {
+  const { capacity } = await setup(page)
+  await open(page)
+  const button = cap(page).getByRole('button', { name: 'Keep for you Auto · ~30%' })
+  await button.focus()
+  await page.keyboard.press('Enter')
+  const ed = page.getByRole('dialog', { name: 'Keep for you' })
+  await expect(ed.getByRole('heading', { name: 'Keep for you' })).toBeFocused()
+  await expect(ed.getByRole('radio', { name: /Auto/ })).toBeChecked()
+  // Arrows move between the radios; the stepper takes ↑/↓ and selects the share.
+  await ed.getByRole('radio', { name: /Auto/ }).focus()
+  await page.keyboard.press('ArrowDown')
+  await expect(ed.getByRole('radio', { name: /A fixed share/ })).toBeChecked()
+  const share = ed.getByRole('spinbutton', { name: 'Fixed share' })
+  await share.focus()
+  await page.keyboard.press('ArrowUp')
+  await page.keyboard.press('ArrowUp')
+  await expect(share).toHaveAttribute('aria-valuenow', '40')
+  await page.keyboard.press('End')
+  await expect(share).toHaveAttribute('aria-valuenow', '80')
+  await expect(ed.getByRole('button', { name: 'Keep 5% more' })).toBeDisabled()
+  await page.keyboard.press('Home')
+  await page.keyboard.press('ArrowUp')
+  await expect(share).toHaveAttribute('aria-valuenow', '15')
+  // The preview asks the server to pace the draft, reserve included.
+  await expect.poll(() => (capacity.previews.at(-1) as { schedule?: { reserve?: string; reserve_percent?: number } } | undefined)?.schedule).toMatchObject({ reserve: 'fixed', reserve_percent: 15 })
+  await expect(ed.locator('.pv li.changed').first()).toBeVisible()
+  // Per vendor writes a pool's own choice; the preview carries it.
+  await ed.getByRole('button', { name: 'Per vendor' }).click()
+  await ed.getByLabel('Codex: keep for you').selectOption('off')
+  await expect.poll(() => (capacity.previews.at(-1) as { pool_reserves?: { pool: string; reserve: string }[] }).pool_reserves?.find(r => r.pool === 'codex')?.reserve).toBe('off')
+  await expect(ed.locator('.pv li').first()).toContainText('Today: ~6% of Spare, then ~15% of Main')
+  await ed.getByRole('button', { name: 'Save' }).click()
+  await expect(ed).toHaveCount(0)
+  await expect(page.getByText('Saved. Agents leave you room while you work.')).toBeVisible()
+  expect(capacity.puts.find(p => (p as { scope: string }).scope === 'user')).toMatchObject({ scope: 'user', carry_overrides: true, schedule: { reserve: 'fixed', reserve_percent: 15 } })
+  expect(capacity.puts.at(-1)).toMatchObject({ scope: 'pool', pool: 'codex', schedule: { reserve: 'off' } })
+  await expect(cap(page).getByRole('button', { name: 'Keep for you 15%' })).toBeVisible()
+  await expect(pool(page, 'codex').locator('.plan')).toHaveText('Today: ~6% of Spare, then ~15% of Main.')
+  // Esc closes without saving and returns focus to the header item.
+  await cap(page).getByRole('button', { name: /^Keep for you/ }).click()
+  await ed.getByRole('radio', { name: /Nothing/ }).check()
+  await page.keyboard.press('Escape')
+  await expect(ed).toHaveCount(0)
+  await expect(cap(page).getByRole('button', { name: /^Keep for you/ })).toBeFocused()
+  await expect(cap(page).getByRole('button', { name: 'Keep for you 15%' })).toBeVisible()
+  // Reset to default: Auto, every pool follows it again.
+  await cap(page).getByRole('button', { name: /^Keep for you/ }).click()
+  await ed.getByRole('button', { name: 'Reset to default' }).click()
+  await expect(ed.getByRole('radio', { name: /Auto/ })).toBeChecked()
+  await ed.getByRole('button', { name: 'Save' }).click()
+  await expect(ed).toHaveCount(0)
+  expect(capacity.puts.at(-1)).toEqual({ scope: 'pool', pool: 'codex', schedule: null })
+  await expect(cap(page).getByRole('button', { name: 'Keep for you Auto · ~30%' })).toBeVisible()
+})
+
+test('Keep for you: a numeric per-vendor share previews and saves that share', async ({ page }) => {
+  const { capacity } = await setup(page)
+  await open(page)
+  await cap(page).getByRole('button', { name: /^Keep for you/ }).click()
+  const ed = page.getByRole('dialog', { name: 'Keep for you' })
+  await ed.getByRole('button', { name: 'Per vendor' }).click()
+  await ed.getByLabel('Codex: keep for you').selectOption('40')
+  await expect(ed.getByLabel('Codex: keep for you')).toHaveValue('40')
+  const codexReserve = () => (capacity.previews.at(-1) as { pool_reserves?: { pool: string; reserve: string; reserve_percent?: number }[] } | undefined)?.pool_reserves?.find(r => r.pool === 'codex')
+  await expect.poll(codexReserve).toEqual({ pool: 'codex', reserve: 'fixed', reserve_percent: 40 })
+  await expect(ed.getByText('The preview could not be updated')).toHaveCount(0)
+  await expect(ed.locator('.pv li').first()).toContainText('keeping ~40% for you')
+  await ed.getByRole('button', { name: 'Save' }).click()
+  await expect(ed).toHaveCount(0)
+  await expect(page.getByText('Saved. Agents leave you room while you work.')).toBeVisible()
+  const saved = capacity.puts.find(p => (p as { pool?: string }).pool === 'codex') as { scope: string; pool: string; schedule: { reserve?: string; reserve_percent?: number; percent?: number } }
+  expect(saved).toMatchObject({ scope: 'pool', pool: 'codex', schedule: { reserve: 'fixed', reserve_percent: 40 } })
+  expect(saved.schedule).not.toHaveProperty('percent')
+  await expect(pool(page, 'codex').locator('.plan')).toHaveText('Today: ~15% of Main, keeping ~40% for you. Spare is kept for you until tomorrow 18:02.')
+})
+
+test("Keep for you: I'm away until… is one save and one header chip", async ({ page }) => {
+  const { capacity } = await setup(page)
+  await open(page)
+  await cap(page).getByRole('button', { name: /^Keep for you/ }).click()
+  const ed = page.getByRole('dialog', { name: 'Keep for you' })
+  await ed.getByRole('button', { name: 'Mon 5 Oct 08:00' }).click()
+  await expect(ed.getByRole('button', { name: 'Mon 5 Oct 08:00' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(ed).toContainText('Agents use everything left until Mon 5 Oct, across resets.')
+  await expect.poll(() => (capacity.previews.at(-1) as { schedule?: { override?: string } } | undefined)?.schedule?.override).toBe('away')
+  await ed.getByRole('button', { name: 'Save' }).click()
+  await expect(ed).toHaveCount(0)
+  expect(capacity.puts.at(-1)).toMatchObject({ scope: 'user', schedule: { override: 'away', override_until: new Date(Date.parse('2026-10-05T06:00:00Z')).toISOString(), reserve: 'auto' } })
+  await expect(cap(page).locator('.away-chip')).toContainText('Away until Mon 5 Oct')
+  await expect(pool(page, 'claude').locator('.plan')).toHaveText("Away: agents may use all 37% of Claude until you're back.")
+  await expect(page.locator(`[data-account="${ACCOUNTS.main}"] .today`)).toHaveText('all 42%')
+  // A work-week change keeps Away; the chip ends it.
+  await cap(page).getByRole('radiogroup', { name: 'Work days a week' }).getByRole('radio', { name: '6' }).click()
+  await expect.poll(() => (capacity.puts.at(-1) as { schedule: { override?: string } }).schedule.override).toBe('away')
+  await cap(page).getByRole('button', { name: 'Back now: end Away' }).click()
+  await expect(cap(page).locator('.away-chip')).toHaveCount(0)
+  expect((capacity.puts.at(-1) as { schedule: { override?: string } }).schedule.override).toBeUndefined()
+})
+
+test('the one-time plan card: Looks right saves Auto; on a release 11 schedule, Turn off saves off', async ({ page }) => {
+  const { capacity } = await setup(page, { planCard: 'first' })
+  await open(page)
+  const card = cap(page).getByRole('region', { name: 'The plan' })
+  await expect(card).toHaveText(/Here's the plan\. Agents work alongside you Mon–Fri, 08:00–22:00, pace each account to its reset, and leave you about 30% of every limit while you work\./)
+  await card.getByRole('button', { name: 'Change' }).click()
+  await expect(card).toHaveCount(0)
+  await expect(cap(page).getByRole('radio', { name: '5' })).toBeFocused()
+  expect(capacity.puts).toHaveLength(0)
+  await page.reload()
+  await expect(card).toBeVisible()
+  await card.getByRole('button', { name: 'Looks right' }).click()
+  await expect(card).toHaveCount(0)
+  expect(capacity.puts.at(-1)).toMatchObject({ scope: 'user', schedule: { reserve: 'auto' } })
+})
+
+test('the plan card on a release 11 schedule offers Turn off', async ({ page }) => {
+  const { capacity } = await setup(page, { planCard: 'new' })
+  await open(page)
+  const card = cap(page).getByRole('region', { name: 'The plan' })
+  await expect(card).toContainText('New: agents now leave you room while you work, about 30% of every limit.')
+  await card.getByRole('button', { name: 'Turn off' }).click()
+  await expect(card).toHaveCount(0)
+  expect(capacity.puts.at(-1)).toMatchObject({ scope: 'user', schedule: { reserve: 'off' } })
+  await expect(cap(page).getByRole('button', { name: 'Keep for you Nothing' })).toBeVisible()
+  await expect(pool(page, 'codex').locator('.plan')).toHaveText('Today: ~6% of Spare, then ~15% of Main.')
+})
+
+test('Hold for 2 hours or until tomorrow’s hours, with a pool’s own reserve kept', async ({ page }) => {
+  const { capacity } = await setup(page)
+  await open(page)
+  await pool(page, 'grok').getByRole('button', { name: 'Grok: sprint or hold' }).click()
+  const menu = page.getByRole('menu', { name: 'Grok: sprint or hold' })
+  await expect(menu.getByRole('menuitem', { name: 'Hold for 2 hours' })).toContainText('until 16:02')
+  await expect(menu.getByRole('menuitem', { name: 'Hold until tomorrow 08:00' })).toBeVisible()
+  // Arrow keys reach every duration.
+  await page.keyboard.press('ArrowDown')
+  await expect(menu.getByRole('menuitem', { name: 'Hold for 2 hours' })).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(pool(page, 'grok').locator('.plan')).toHaveText("On hold until 16:02. Agents leave Grok alone until then; today's share moves to the coming days.")
+  expect(capacity.puts.at(-1)).toMatchObject({ scope: 'pool', pool: 'grok', schedule: { override: 'hold', override_until: new Date(Date.parse('2026-09-29T14:02:00Z')).toISOString() } })
+  // A pool with its own reserve keeps it through Hold and back to the plan.
+  await cap(page).getByRole('button', { name: /^Keep for you/ }).click()
+  const ed = page.getByRole('dialog', { name: 'Keep for you' })
+  await ed.getByRole('button', { name: 'Per vendor' }).click()
+  await ed.getByLabel('Grok: keep for you').selectOption('50')
+  await ed.getByRole('button', { name: 'Save' }).click()
+  await expect(ed).toHaveCount(0)
+  expect(capacity.schedules.find(e => e.pool === 'grok')?.schedule).toMatchObject({ override: 'hold', reserve: 'fixed', reserve_percent: 50 })
+  await pool(page, 'grok').getByRole('button', { name: 'Back to the plan' }).click()
+  await expect(pool(page, 'grok').locator('.override')).toHaveCount(0)
+  expect(capacity.puts.at(-1)).toMatchObject({ scope: 'pool', pool: 'grok', schedule: { override: '', reserve: 'fixed', reserve_percent: 50 } })
+})
+
 // AEON-299 review 1: a save that fails says so, keeps the editor open, and the
 // page shows what the server still has; nothing reads "Saved".
 test('a failed schedule save keeps the editor open and changes nothing', async ({ page }) => {
   const { capacity } = await setup(page)
   await open(page)
   await pool(page, 'grok').getByRole('button', { name: 'Grok: sprint or hold' }).click()
-  await page.getByRole('menu').getByRole('menuitem', { name: /Hold/ }).click()
+  await page.getByRole('menu').getByRole('menuitem', { name: 'Hold until I resume' }).click()
   await expect(pool(page, 'grok').locator('.override')).toBeVisible()
   let failures = 0
   await page.route('**/api/agent-accounts/capacity/schedule', route => {
@@ -310,7 +472,7 @@ test('stale readings, % used per account and globally, and Manage accounts', asy
   await expect(page.locator(`[data-account="${ACCOUNTS.claude}"] .win5`)).toContainText('40% used')
   await cap(page).getByRole('link', { name: /Manage/ }).click()
   await expect(page).toHaveURL('/settings/accounts')
-  await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('Spare')
+  await expect(page.locator('#agent-accounts')).toContainText('Spare')
 })
 
 test('without account.manage the pacing controls stay visible but inert', async ({ page }) => {
@@ -319,6 +481,7 @@ test('without account.manage the pacing controls stay visible but inert', async 
   await expect(cap(page).getByRole('radio', { name: '6' })).toBeDisabled()
   await expect(cap(page).getByRole('switch', { name: 'Agents at night' })).toBeDisabled()
   await expect(cap(page).getByRole('button', { name: 'Customize work week' })).toBeDisabled()
+  await expect(cap(page).getByRole('button', { name: /^Keep for you/ })).toBeDisabled()
   await expect(pool(page, 'codex').getByRole('button', { name: /sprint or hold/ })).toHaveCount(0)
 })
 
@@ -344,7 +507,7 @@ test.describe('phone', () => {
     // AEON-299 review 5: with a toast in the background, focus never leaves the
     // sheet, from the heading or anywhere else, and the page behind is inert.
     await pool(page, 'codex').getByRole('button', { name: 'Codex: sprint or hold' }).click()
-    await page.getByRole('menuitem', { name: /Hold/ }).click()
+    await page.getByRole('menuitem', { name: 'Hold until I resume' }).click()
     await expect(page.locator('.toast').first()).toBeVisible()
     await cap(page).getByRole('button', { name: 'Customize work week' }).click()
     const trap = page.getByRole('dialog', { name: 'Work week' })
@@ -358,6 +521,17 @@ test.describe('phone', () => {
     await page.keyboard.press('Escape')
     await expect(trap).toHaveCount(0)
     await expect(page.locator('#app')).not.toHaveAttribute('inert', '')
+    // Keep for you is a bottom sheet with sticky Cancel and Save.
+    await cap(page).getByRole('button', { name: /^Keep for you/ }).click()
+    const keep = page.getByRole('dialog', { name: 'Keep for you' })
+    await expect(keep).toHaveAttribute('aria-modal', 'true')
+    expect(Math.round((await keep.boundingBox())!.width)).toBe(390)
+    await expect(keep.getByRole('button', { name: 'Save' })).toBeInViewport()
+    await page.keyboard.press('Escape')
+    await expect(keep).toHaveCount(0)
+    await expect(page.locator('#app')).not.toHaveAttribute('inert', '')
+    await expect(cap(page).getByRole('button', { name: /^Keep for you/ })).toBeFocused()
+    expect(await noScroll(page)).toBe(true)
     // The pool menu opens under its button, in view, with focus on the first choice.
     await pool(page, 'claude').getByRole('button', { name: 'Claude: sprint or hold' }).click()
     const menu = page.getByRole('menu')
@@ -378,7 +552,7 @@ const SHOT_STATES: Shot[] = [
   { name: 'sprint-hold', act: async page => {
     await pool(page, 'codex').getByRole('button', { name: 'Codex: sprint or hold' }).click(); await page.getByRole('menuitem', { name: /Sprint/ }).click()
     await expect(pool(page, 'codex').locator('.override')).toBeVisible()
-    await pool(page, 'grok').getByRole('button', { name: 'Grok: sprint or hold' }).click(); await page.getByRole('menuitem', { name: /Hold/ }).click()
+    await pool(page, 'grok').getByRole('button', { name: 'Grok: sprint or hold' }).click(); await page.getByRole('menuitem', { name: 'Hold for 2 hours' }).click()
     await expect(pool(page, 'grok').locator('.override')).toBeVisible()
   } },
   { name: 'menu', act: async page => { await pool(page, 'claude').getByRole('button', { name: 'Claude: sprint or hold' }).click(); await expect(page.getByRole('menu')).toBeVisible() } },
@@ -405,6 +579,21 @@ const SHOT_STATES: Shot[] = [
     await ed.getByRole('radio', { name: 'Off' }).click()
     await ed.getByRole('button', { name: /^06:00 to/ }).click(); await ed.getByRole('button', { name: /^12:00 to/ }).click()
   } },
+  { name: 'keep-editor', act: async page => {
+    await cap(page).getByRole('button', { name: /^Keep for you/ }).click()
+    const ed = page.getByRole('dialog', { name: 'Keep for you' })
+    await ed.getByRole('radio', { name: /A fixed share/ }).check()
+    await ed.getByRole('button', { name: 'Per vendor' }).click()
+    await ed.getByLabel('Codex: keep for you').selectOption('off')
+    await expect(ed.locator('.pv li.changed').first()).toBeVisible()
+  } },
+  { name: 'away', options: { away: true } },
+  { name: 'hold-2h', act: async page => {
+    await pool(page, 'grok').getByRole('button', { name: 'Grok: sprint or hold' }).click(); await page.getByRole('menuitem', { name: 'Hold for 2 hours' }).click()
+    await expect(pool(page, 'grok').locator('.plan')).toContainText('On hold until')
+  } },
+  { name: 'plan-first', options: { planCard: 'first' } },
+  { name: 'plan-new', options: { planCard: 'new' } },
   { name: 'custom-closed', act: async page => {
     await cap(page).getByRole('button', { name: 'Customize work week' }).click()
     const ed = page.getByRole('dialog', { name: 'Work week' })
@@ -437,3 +626,33 @@ test.describe('screenshots', () => {
     for (const theme of ['light', 'dark'] as const) for (const width of widths) await shoot(browser, shot, width, theme)
   })
 })
+
+
+for (const width of [390, 1600]) for (const theme of ['light', 'dark'] as const) {
+  test(`server routing order and parallel advice at ${width} ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 2600 : 1100 })
+    await page.emulateMedia({ colorScheme: theme })
+    const { capacity } = await setup(page, { reserve: 'off' })
+    // Return accounts backwards; only server rank drives the plan.
+    let reversed = false
+    await page.route('**/api/agent-accounts/capacity', async route => {
+      const data = capacity.handle('/api/agent-accounts/capacity', 'GET', null)!.json as { account_id: string; routing?: { rank: number; available_slots: number } }[]
+      for (const item of data) item.routing = { rank: item.account_id === ACCOUNTS.spare ? (reversed ? 2 : 1) : item.account_id === ACCOUNTS.main ? (reversed ? 1 : 2) : 0, available_slots: [ACCOUNTS.main, ACCOUNTS.spare].includes(item.account_id) ? 1 : 0 }
+      await route.fulfill({ json: data.reverse() })
+    })
+    await open(page)
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await expect(pool(page, 'codex').locator('.acct .nm')).toHaveText(['Spare', 'Main', 'Studio'])
+    await expect(pool(page, 'codex').locator('.plan')).toContainText('~6% of Spare, then ~15% of Main')
+    await expect(pool(page, 'codex').locator('.plan')).toContainText('2 agents can run in parallel on Codex right now.')
+    expect(await noScroll(page)).toBe(true)
+    if (process.env.AEON383_SHOTS) {
+      mkdirSync(process.env.AEON383_SHOTS, { recursive: true })
+      await cap(page).screenshot({ path: `${process.env.AEON383_SHOTS}/routing-${width}-${theme}.png` })
+    }
+    reversed = true
+    await page.reload()
+    await expect(pool(page, 'codex').locator('.acct .nm')).toHaveText(['Main', 'Spare', 'Studio'])
+    await expect(pool(page, 'codex').locator('.plan')).toContainText('~15% of Main, then ~6% of Spare')
+  })
+}

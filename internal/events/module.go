@@ -134,15 +134,19 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, afte
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
 		for rows.Next() {
 			e, err := scanEvent(rows)
 			if err != nil {
+				rows.Close()
 				return err
 			}
 			result.Items = append(result.Items, e)
 		}
-		return rows.Err()
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return attachNodeChanges(ctx, tx, p.TenantID, result.Items)
 	})
 	if len(result.Items) > limit {
 		result.Items = result.Items[:limit]

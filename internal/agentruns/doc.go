@@ -29,6 +29,11 @@
 // no eligible chosen account means queued, never an implicit fallback. Omitted
 // or null keeps automatic routing. Existing New constructors and run.create /
 // account.route permissions apply; the coordinator needs no additional wiring.
+// AEON-353 adds person-only capacity_override=now at creation or via POST
+// /api/runs/{id}/capacity-override while queued. It is run-scoped, idempotent
+// and audited; capacity routing still checks approval, hold, vendor truth,
+// probe freshness, models and concurrency. Queued responses include advisory
+// structured wait reasons without reserving capacity.
 //
 // Agent keys require exact run.read, run.create, run.claim or run.telemetry
 // scopes. People may create/read runs; queue, claim and telemetry are agent-only.

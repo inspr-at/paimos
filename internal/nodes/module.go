@@ -55,6 +55,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/nodes/{nodeId}", m.handleGetNode)
 	mux.HandleFunc("PATCH /api/nodes/{nodeId}", m.handleUpdateNode)
 	mux.HandleFunc("DELETE /api/nodes/{nodeId}", m.handleDeleteNode)
+	mux.HandleFunc("POST /api/nodes/{nodeId}/convert", m.handleConvertNode)
 	mux.HandleFunc("POST /api/nodes/{nodeId}/move", m.handleMoveNode)
 	mux.HandleFunc("POST /api/nodes/{nodeId}/project-move", m.handleProjectMove)
 	mux.HandleFunc("GET /api/tickets/graph", m.handleTicketGraph)

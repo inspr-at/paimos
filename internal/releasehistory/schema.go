@@ -64,7 +64,8 @@ type Change struct {
 	// Group is the display group (features, fixes, other), set when the
 	// history is served. Empty on the version bump and on an unannotated manifest.
 	Group string `json:"group,omitempty"`
-	// Linked is the current pill and benefit of each visible linked ticket.
+	// Linked is the frozen pill and benefit of each visible linked ticket for
+	// Aeon; other products may opt into the legacy live TicketSource.
 	// Hidden tickets are omitted. Empty on other changes, the version bump,
 	// and when ticket lookup is off or failed.
 	Linked []TicketNote `json:"linked_tickets,omitempty"`

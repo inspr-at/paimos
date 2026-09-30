@@ -53,6 +53,7 @@ let opener: HTMLElement | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
 let controller: AbortController | null = null
 let searched = ''
+let searchGen = 0
 
 const routeProject = computed(() => typeof route.params.projectKey === 'string' ? projects.byRouteKey(route.params.projectKey) : undefined)
 const scopeProject = computed(() => scope.value ? projects.byRouteKey(scope.value) : undefined)
@@ -116,13 +117,20 @@ const groups = computed<Group[]>(() => assemble(query.value, {
   projects: scope.value ? [] : projectResults(query.value, projects.projects.map(p => ({ id: p.id, routeKey: p.routeKey, title: p.title, description: p.description, archived: p.archived }))),
   actions: actionResults(query.value, actions.value),
 }))
-const flat = computed(() => groups.value.flatMap(group => group.items))
 const showSkeleton = computed(() => loading.value && !!query.value && !listed.value.length && !hits.value.length && !knowledgeHits.value.length)
+// A newer search is in flight. Keep the actions that already match the query, and
+// hide tickets from the previous query so they cannot sit above that action.
+const shownGroups = computed(() => {
+  const pending = loading.value && !!query.value && searched !== query.value
+  return pending ? groups.value.filter(group => group.id === 'actions') : groups.value
+})
+const flat = computed(() => shownGroups.value.flatMap(group => group.items))
 const empty = computed(() => !!query.value && !loading.value && !failed.value && searched === query.value && !flat.value.length)
 watch(flat, () => { if (active.value >= flat.value.length) active.value = 0 })
 
 async function search() {
   const q = query.value
+  const gen = ++searchGen
   controller?.abort()
   if (!q) { listed.value = []; hits.value = []; knowledgeHits.value = []; loading.value = false; searched = ''; return }
   controller = new AbortController()
@@ -131,6 +139,7 @@ async function search() {
   const within = scopeProject.value?.id
   const key = keyQuery(q)
   try {
+    if (gen !== searchGen) return
     if (!workKinds.value.size) workKinds.value = await workKindMap()
     // A key prefix ("PHAROS-29") is a key lookup; words also go to the hybrid search
     // (lib/ticketSearch, shared with the relation picker).
@@ -139,17 +148,18 @@ async function search() {
       // Knowledge reads titles, slugs and text; it never holds up the rest.
       key ? Promise.resolve({ items: [] as KnowledgeItem[] }) : listKnowledge({ q, project_id: within, limit: 8 }, signal).catch(() => ({ items: [] as KnowledgeItem[] })),
     ])
-    if (signal.aborted) return
+    if (signal.aborted || gen !== searchGen) return
     listed.value = work.listed
     hits.value = work.hits
     knowledgeHits.value = knowledge.items
     searched = q
     active.value = 0
   } catch (e) {
-    if (signal.aborted) return
+    if (signal.aborted || gen !== searchGen) return
     failed.value = e instanceof Error ? e.message : 'Search is unavailable'
   } finally {
-    if (!signal.aborted) loading.value = false
+    // The latest search clears the spinner even when it aborted an older request.
+    if (gen === searchGen) loading.value = false
   }
 }
 watch([term, scope], () => {
@@ -160,15 +170,18 @@ watch([term, scope], () => {
 })
 
 // ---------- Open, close, choose ----------
-async function open() {
-  if (dialog.value?.open) { input.value?.select(); return }
+function open() {
+  if (dialog.value?.open) { input.value?.focus(); input.value?.select(); return }
   opener = document.activeElement as HTMLElement
   scope.value = routeProject.value?.routeKey ?? null
-  term.value = ''; listed.value = []; hits.value = []; knowledgeHits.value = []; failed.value = ''; active.value = 0; searched = ''
+  controller?.abort()
+  searchGen++
+  term.value = ''; listed.value = []; hits.value = []; knowledgeHits.value = []; failed.value = ''; loading.value = false; active.value = 0; searched = ''
   void projects.load()
   if (routeProject.value) void loadViews(routeProject.value.id)
+  // Focus before returning. The shortcut handler does not await open(), and the
+  // keys that follow have to land in this input.
   dialog.value?.showModal()
-  await nextTick()
   input.value?.focus()
 }
 function close() { controller?.abort(); dialog.value?.close(); opener?.focus({ preventScroll: true }) }
@@ -235,7 +248,7 @@ function move(step: number) {
 function jumpGroup(step: number) {
   const starts: number[] = []
   let index = 0
-  for (const group of groups.value) { starts.push(index); index += group.items.length }
+  for (const group of shownGroups.value) { starts.push(index); index += group.items.length }
   if (starts.length < 2) return
   const current = starts.reduce((found, start, i) => active.value >= start ? i : found, 0)
   active.value = starts[(current + step + starts.length) % starts.length]
@@ -280,10 +293,7 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
       <button type="button" class="cancel" @click="close">Cancel</button>
 
       <div id="palette-results" ref="list" class="results" role="listbox" :aria-label="query ? 'Results' : 'Recent and actions'" :class="{ stale: loading && !showSkeleton }">
-        <div v-if="showSkeleton" class="skeleton-lines" aria-hidden="true">
-          <span v-for="i in 5" :key="i" class="line"><span class="skeleton dot" /><span class="skeleton key-sk" /><span class="skeleton" :style="{ width: `${34 + ((i * 29) % 40)}%` }" /></span>
-        </div>
-        <div v-else-if="failed" class="state" role="alert">
+        <div v-if="failed && !shownGroups.length" class="state" role="alert">
           <AppIcon name="alert" :size="18" class="state-icon danger" />
           <p><strong>Search is not answering.</strong> {{ failed }}</p>
           <button type="button" class="btn sm" @click="search()">Try again</button>
@@ -295,7 +305,10 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
           <button v-if="scope" type="button" class="btn sm" @click="scope = null; input?.focus()">Search everywhere</button>
         </div>
         <template v-else>
-          <section v-for="group in groups" :key="group.id" class="group" role="group" :aria-label="group.label">
+          <div v-if="showSkeleton" class="skeleton-lines" aria-hidden="true">
+            <span v-for="i in 5" :key="i" class="line"><span class="skeleton dot" /><span class="skeleton key-sk" /><span class="skeleton" :style="{ width: `${34 + ((i * 29) % 40)}%` }" /></span>
+          </div>
+          <section v-for="group in shownGroups" :key="group.id" class="group" role="group" :aria-label="group.label">
             <p class="group-label eyebrow" aria-hidden="true">{{ group.label }}</p>
             <div
               v-for="result in group.items" :id="`palette-item-${indexOf(result)}`" :key="result.id" class="item" :class="[result.type, { active: indexOf(result) === active }]"

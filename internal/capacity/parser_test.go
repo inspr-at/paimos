@@ -43,12 +43,13 @@ func TestClaudeFractionWindows(t *testing.T) {
 	now := instant("2026-09-28T08:00:00Z")
 	raw := fmt.Sprintf(`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day_opus","utilization":1.2,"resetsAt":%d,"unifiedWindows":{"five_hour":{"utilization":0.42,"resetsAt":%d},"seven_day":{"utilization":0.3,"resetsAt":%d}}}}`, now.Add(24*time.Hour).Unix(), now.Add(time.Hour).Unix(), now.Add(24*time.Hour).Unix())
 	got := Claude([]byte(raw), now)
-	if len(got) != 3 || got[0].UsedPercent != 42 || got[1].UsedPercent != 30 || got[2].UsedPercent != 100 {
+	if len(got) != 3 || got[0].Bucket != "five_hour" || got[0].UsedPercent != 42 || got[1].UsedPercent != 30 || got[2].Bucket != "seven_day_opus" || got[2].UsedPercent != 100 {
 		t.Fatal(got)
 	}
 	for _, v := range got {
-		if v.Routable(now) {
-			t.Fatal("rejection ignored")
+		denied := v.Bucket == "seven_day_opus"
+		if v.Routable(now) == denied || (v.OrdinaryUsageAllowed == nil) == denied {
+			t.Fatalf("bucket %s routable=%t allowed=%v", v.Bucket, v.Routable(now), v.OrdinaryUsageAllowed)
 		}
 	}
 	if got := Claude([]byte(`{"type":"assistant","message":{"usage":{"input_tokens":12}}}`), now); len(got) != 0 {
@@ -138,5 +139,51 @@ func TestClaudeSparseSnapshotPreservesTimesAndExpiresPeers(t *testing.T) {
 	got = p.Claude([]byte(short), now.Add(2*time.Minute))
 	if len(got) != 1 || got[0].WindowKind != "5h" {
 		t.Fatal(got)
+	}
+}
+
+func TestClaudeRejectionDeniesOnlyTheNamedWindow(t *testing.T) {
+	now := time.Now().UTC()
+	p := Parser{}
+	weeklyAt := now
+	weekly := fmt.Sprintf(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"seven_day","utilization":0.2,"resetsAt":%d}}`, now.Add(48*time.Hour).Unix())
+	five := fmt.Sprintf(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour","utilization":0.4,"resetsAt":%d}}`, now.Add(2*time.Hour).Unix())
+	if len(p.Claude([]byte(weekly), weeklyAt)) != 1 || len(p.Claude([]byte(five), now.Add(time.Second))) != 2 {
+		t.Fatal("missing baseline")
+	}
+	named := fmt.Sprintf(`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour","utilization":0.9,"resetsAt":%d,"unifiedWindows":{"seven_day":{"utilization":0.25,"resetsAt":%d}}}}`, now.Add(2*time.Hour).Unix(), now.Add(48*time.Hour).Unix())
+	got := p.Claude([]byte(named), now.Add(2*time.Second))
+	if len(got) != 2 {
+		t.Fatal(got)
+	}
+	for _, v := range got {
+		switch v.Bucket {
+		case "five_hour":
+			if v.OrdinaryUsageAllowed == nil || *v.OrdinaryUsageAllowed {
+				t.Fatal("named window stayed allowed", v)
+			}
+		case "seven_day":
+			if v.OrdinaryUsageAllowed == nil || !*v.OrdinaryUsageAllowed || !v.ReadAt.Equal(weeklyAt) {
+				t.Fatal("peer window changed", v)
+			}
+		default:
+			t.Fatal(v.Bucket)
+		}
+	}
+	sparse := p.Claude([]byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour"}}`), now.Add(3*time.Second))
+	if len(sparse) != 2 || sparse[1].Bucket != "seven_day" || sparse[1].OrdinaryUsageAllowed == nil || !*sparse[1].OrdinaryUsageAllowed || !sparse[1].ReadAt.Equal(weeklyAt) {
+		t.Fatal("sparse named rejection spread", sparse)
+	}
+	unnamed := []byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","unifiedWindows":{"seven_day":{"utilization":0.9,"resetsAt":` + fmt.Sprint(now.Add(48*time.Hour).Unix()) + `}}}}`)
+	if !ClaudeUnnamedStop(unnamed) || ClaudeUnnamedStop([]byte(named)) || ClaudeUnnamedStop([]byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}`)) {
+		t.Fatal("unnamed stop detection")
+	}
+	if got := p.Claude(unnamed, now.Add(4*time.Second)); len(got) != 0 {
+		t.Fatal("unnamed rejection rewrote windows", got)
+	}
+	later := fmt.Sprintf(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour","utilization":0.1,"resetsAt":%d}}`, now.Add(2*time.Hour).Unix())
+	got = p.Claude([]byte(later), now.Add(5*time.Second))
+	if len(got) != 2 || !got[1].ReadAt.Equal(weeklyAt) || got[1].OrdinaryUsageAllowed == nil || !*got[1].OrdinaryUsageAllowed {
+		t.Fatal("peer lost after unnamed stop", got)
 	}
 }

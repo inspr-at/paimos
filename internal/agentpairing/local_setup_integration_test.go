@@ -44,9 +44,10 @@ func (x localSetupExecutor) Run(_ context.Context, c agentsetup.Command) ([]byte
 }
 
 type localSetupDaemon struct {
-	root   string
-	active map[string]bool
-	fenced map[string]bool
+	root     string
+	active   map[string]bool
+	fenced   map[string]bool
+	statuses map[string]string
 }
 
 func (d *localSetupDaemon) daemonID() (string, error) {
@@ -81,7 +82,7 @@ func (d *localSetupDaemon) Status(_ context.Context, account string) (agentsetup
 	} else if d.active[account] {
 		state = "running"
 	}
-	return agentsetup.LocalStatus{Ready: true, DaemonID: id, State: state}, nil
+	return agentsetup.LocalStatus{Ready: true, DaemonID: id, State: state, HarnessStatuses: d.statuses}, nil
 }
 
 func physicalSetupTemp(t *testing.T) string {
@@ -243,6 +244,11 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 		t.Fatal("selective cleanup removed shared authority or other account")
 	}
 	assertNoRuntimeKey(t, string(key), p)
+	local.statuses = map[string]string{"pi": "future_state", "codex": "future_state", "cursor": "ready"}
+	delete(local.fenced, first)
+	if err := e.SyncFences(t.Context()); err != nil || !local.fenced[first] || local.fenced[second] {
+		t.Fatal("unknown telemetry prevented HTTP fence synchronization", err)
+	}
 	local.active[second] = true
 	p, err = e.Disconnect(t.Context(), "")
 	if err != nil || p.Stage != "draining" || !local.fenced[""] {

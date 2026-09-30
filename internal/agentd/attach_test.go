@@ -170,7 +170,7 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 			v := time.Now().Add(attachwatch.Lease)
 			until = &v
 		}
-		return attachwatch.View{RequestID: in.RequestID, Digest: in.Snapshot.Digest(), Snapshot: in.Snapshot, State: state, UserCode: "123456789", LeaseUntil: until}, nil
+		return attachwatch.View{ConsentMode: attachwatch.ConsentAeon, ConsentDigest: attachwatch.ConsentDigest(in.RequestID, in.Snapshot.Digest(), attachwatch.ConsentAeon), RequestID: in.RequestID, Digest: in.Snapshot.Digest(), Snapshot: in.Snapshot, State: state, UserCode: "123456789", LeaseUntil: until}, nil
 	}
 	m, err := NewAttachManager(AttachConfig{Origin: "https://paired.test", ComputerID: "11111111-1111-4111-8111-111111111111", Host: "fixture", Workspace: root, Executables: map[string]string{"codex": exe}, Exchange: exchange})
 	if err != nil {
@@ -346,7 +346,7 @@ func TestAttachRechecksAncestryAndSessionOnConfirmAndEveryPoll(t *testing.T) {
 					if in.Operation == "poll" {
 						state = "active"
 					}
-					return attachwatch.View{RequestID: in.RequestID, Digest: in.Digest, Snapshot: in.Snapshot, State: state}, nil
+					return attachwatch.View{ConsentMode: attachwatch.ConsentAeon, ConsentDigest: attachwatch.ConsentDigest(in.RequestID, in.Snapshot.Digest(), attachwatch.ConsentAeon), RequestID: in.RequestID, Digest: in.Digest, Snapshot: in.Snapshot, State: state}, nil
 				}})
 				if err != nil {
 					t.Fatal(err)

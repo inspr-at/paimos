@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentdwire"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/version"
 )
@@ -39,7 +41,7 @@ func (l localPairing) client() (agentdwire.Client, error) {
 	return agentdwire.OpenClient(filepath.Join(l.root, "daemon"))
 }
 func localStatus(s agentd.LifecycleStatus) agentsetup.LocalStatus {
-	return agentsetup.LocalStatus{HarnessErrors: s.HarnessErrors, ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults}
+	return agentsetup.LocalStatus{HarnessDetails: s.HarnessDetails, HarnessStatuses: s.HarnessStatuses, HarnessErrors: s.HarnessErrors, ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults, BlockedAccounts: append([]agentsetup.BlockedAccount(nil), s.BlockedAccounts...)}
 }
 func (l localPairing) Status(ctx context.Context, account string) (agentsetup.LocalStatus, error) {
 	if l.supervisor != nil {
@@ -127,6 +129,9 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	f.StringVar(&tenantSlug, "tenant", "", "tenant slug (defaults to instance guide)")
 	f.StringVar(&workspace, "workspace", "", "approved physical working folder")
 	f.StringVar(&computer, "computer-name", "", "computer display name")
+	var provider, openRouterFile string
+	f.StringVar(&provider, "provider", "", "pi provider ID; openrouter prompts for the key locally")
+	f.StringVar(&openRouterFile, "openrouter-env-file", "", "owner-selected private file containing OPENROUTER_API_KEY")
 	f.Var(&harnesses, "harness", "selected harness; repeat for another harness")
 	f.StringVar(&contextLabel, "account-context", "", "Expected account identity (pi: configured provider ID)")
 	f.StringVar(&account, "account-id", "", "remove only this enrolled account")
@@ -157,6 +162,18 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	} else if yes {
 		return errors.New("--yes is only supported for repin")
 	}
+	if provider != "" && (len(harnesses) != 1 || harnesses[0] != "pi" || !piprobe.ValidProvider(provider) || command != "setup" && command != "add-harness") {
+		return errors.New("--provider requires setup or add-harness with --harness pi")
+	}
+	if provider != "" && contextLabel != "" && contextLabel != provider {
+		return errors.New("provider and account context differ")
+	}
+	if openRouterFile != "" && provider != "openrouter" {
+		return errors.New("--openrouter-env-file requires --provider openrouter")
+	}
+	if provider != "" {
+		contextLabel = provider
+	}
 	prompt := setupPrompt{in: bufio.NewReader(in), out: out, json: jsonOutput}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -181,6 +198,10 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	}
 	if command == "setup" {
 		if _, err := agentsetup.ResolveSocketPath(filepath.Join(root, "daemon"), nil); err != nil {
+			var tooLong *agentsetup.SocketPathLengthError
+			if errors.As(err, &tooLong) {
+				return fmt.Errorf("%w Use a shorter --state-root.", err)
+			}
 			return err
 		}
 	}
@@ -275,7 +296,22 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 			}
 		}
 		for _, h := range harnesses {
-			c, e := d.Detect(ctx, h, contextLabel)
+			var c agentsetup.Candidate
+			var e error
+			if h == "pi" && provider == "openrouter" {
+				var key string
+				if openRouterFile != "" {
+					key, e = agentsetup.OpenRouterKeyFile(openRouterFile)
+				} else {
+					key, e = readOpenRouterKey(in, out)
+				}
+				if e == nil {
+					c, e = d.PrepareOpenRouter(ctx, root, key, openrouter.Client{})
+				}
+				key = ""
+			} else {
+				c, e = d.Detect(ctx, h, contextLabel)
+			}
 			if e != nil {
 				stage := "login_required"
 				if errors.Is(e, piprobe.ErrStart) || errors.Is(e, piprobe.ErrPrivateProfile) {
@@ -491,5 +527,35 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 		}
 	}
 	_, err := fmt.Fprintf(out, "%s: %s\n", p.Stage, p.Action)
-	return err
+	if err != nil {
+		return err
+	}
+	// One line per harness that is not ready, then per blocked account; both
+	// use the shared reason codes and fix commands.
+	harnesses := make([]string, 0, len(p.HarnessDetails))
+	for harness, detail := range p.HarnessDetails {
+		if detail.State != "ready" {
+			harnesses = append(harnesses, harness)
+		}
+	}
+	sort.Strings(harnesses)
+	for _, harness := range harnesses {
+		detail := p.HarnessDetails[harness]
+		line := "harness " + harness + " " + detail.State
+		if detail.Reason != "" {
+			line += " reason " + detail.Reason
+		}
+		if detail.Fix.Command != "" {
+			line += " fix " + detail.Fix.Command
+		}
+		if _, err = fmt.Fprintln(out, line); err != nil {
+			return err
+		}
+	}
+	for _, blocked := range p.BlockedAccounts {
+		if _, err = fmt.Fprintf(out, "blocked account %s harness %s reason %s fix %s\n", blocked.AccountID, blocked.Harness, blocked.Reason, blocked.Fix.Command); err != nil {
+			return err
+		}
+	}
+	return nil
 }

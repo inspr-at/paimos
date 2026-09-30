@@ -4,12 +4,13 @@ import { api } from './api.ts'
 export type WatchConsentMode = 'aeon' | 'local_auth'
 export type LocalAuthCapability = 'available' | 'unsupported' | 'unsigned' | 'no_gui' | 'policy' | 'unreported'
 export interface LocalAuthComputer { computer_id: string; name: string; capability: LocalAuthCapability }
-export interface AttachStatus { request_id: string; owner_id: string; state: 'active' | 'detached' | 'unreachable'; lease_until: string | null }
+export const metadataOnlyAttach = (snapshot: { mode?: string }) => snapshot.mode === 'lease'
+export interface AttachStatus { mode?: 'lease'; process_state?: 'confirmed_exited'; request_id: string; owner_id: string; state: 'active' | 'detached' | 'unreachable'; lease_until: string | null }
 export interface AttachReview {
   consent_mode?: WatchConsentMode; consent_digest?: string
-  request_id: string; request_digest: string; state: 'pending' | 'approved' | 'active' | 'detached' | 'unreachable'; expires_at: string
+  request_id: string; request_digest: string; state: 'pending' | 'approved' | 'active' | 'detached' | 'unreachable' | 'confirmed_exited'; expires_at: string
   snapshot: {
-    platform?: 'darwin' | 'linux'; computer_id: string; project_id: string; ticket_id: string; host: string; harness: string; transcript: string; file_id: string
+    mode?: 'lease'; platform?: 'darwin' | 'linux'; computer_id: string; project_id: string; ticket_id: string; host: string; harness: string; transcript: string; file_id: string
     process: { pid: number; uid: number; started: string; executable: string; cwd: string }
   }
 }

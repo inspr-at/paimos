@@ -874,3 +874,32 @@ func decisionOf(t *testing.T, f fixture, source string) string {
 	}
 	return decision
 }
+
+func TestAnalysisLearningAdapterPreservesCurrentInbox(t *testing.T) {
+	f := setup(t)
+	comment := addComment(t, f, f.ticket, "#process-learning Renumber at integration.")
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		page, err := AnalysisLearnings(t.Context(), tx, f.a.TenantID, f.project)
+		if err != nil {
+			return err
+		}
+		if page.Truncated || len(page.Items) != 1 || page.Items[0].ID != commentLearningID(f.ticket, comment) || page.Items[0].NodeID != f.ticket || page.Items[0].Text != "Renumber at integration" {
+			t.Fatalf("analysis lost live learning: %+v", page)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviseComment(t, f, f.ticket, comment, "Tag removed.", false)
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		page, err := AnalysisLearnings(t.Context(), tx, f.a.TenantID, f.project)
+		if len(page.Items) != 0 {
+			t.Fatal("analysis kept stale learning")
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

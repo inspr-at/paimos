@@ -146,6 +146,28 @@ func recordIndexError(ctx context.Context, tx pgx.Tx, id, message string) error 
 	return err
 }
 
+// storeGuardCorpus replaces the hash corpus for a private source. A nil corpus
+// clears it (public sources have none). The bytes are hashes only.
+func storeGuardCorpus(ctx context.Context, tx pgx.Tx, tenantID string, s Source, corpus []byte) error {
+	if corpus == nil {
+		_, err := tx.Exec(ctx, `DELETE FROM doctrine_private_guard WHERE source_id=$1`, s.ID)
+		return err
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO doctrine_private_guard(tenant_id, source_id, commit_sha, corpus) VALUES ($1,$2,$3,$4)
+		ON CONFLICT (tenant_id, source_id) DO UPDATE SET commit_sha=EXCLUDED.commit_sha, corpus=EXCLUDED.corpus`,
+		tenantID, s.ID, s.Commit, corpus)
+	return err
+}
+
+func loadGuardCorpus(ctx context.Context, tx pgx.Tx, s Source) ([]byte, error) {
+	var raw []byte
+	err := tx.QueryRow(ctx, `SELECT corpus FROM doctrine_private_guard WHERE source_id=$1 AND commit_sha=$2`, s.ID, s.Commit).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return raw, err
+}
+
 func cachedFiles(ctx context.Context, tx pgx.Tx, s Source) ([]File, error) {
 	rows, err := tx.Query(ctx, `SELECT path, blob_sha, content FROM doctrine_cache WHERE source_id=$1 AND commit_sha=$2 ORDER BY path`, s.ID, s.Commit)
 	if err != nil {

@@ -25,22 +25,26 @@ type DrainRequest struct {
 // LifecycleStatus does not conflate telemetry acceptance with observed exit.
 // Only a drained status permits removing a pairing-owned service or credential.
 type LifecycleStatus struct {
-	ProfilePermissions      bool                    `json:"profile_permissions,omitempty"`
-	HarnessFailed           bool                    `json:"harness_failed,omitempty"`
-	HarnessErrors           map[string]string       `json:"harness_errors,omitempty"`
-	CapacityAccounts        []CapacityAccountStatus `json:"capacity_accounts,omitzero"`
-	LoginRequired           bool                    `json:"login_required"`
-	VerificationUnavailable []string                `json:"verification_unavailable_account_ids"`
-	Ready                   bool                    `json:"ready"`
-	DaemonID                string                  `json:"daemon_id"`
-	Generation              string                  `json:"generation"`
-	State                   string                  `json:"state"`
-	ActiveRunIDs            []string                `json:"active_run_ids"`
-	UnconfirmedRunIDs       []string                `json:"unconfirmed_run_ids"`
-	SettlementPendingRunIDs []string                `json:"settlement_pending_run_ids"`
-	FencedAccountIDs        []string                `json:"fenced_account_ids"`
-	AllFenced               bool                    `json:"all_fenced"`
-	VerificationResults     map[string]string       `json:"verification_results"`
+	ProfilePermissions      bool                                `json:"profile_permissions,omitempty"`
+	HarnessFailed           bool                                `json:"harness_failed,omitempty"`
+	HarnessFailedAccountIDs []string                            `json:"harness_failed_account_ids,omitempty"`
+	BlockedAccounts         []agentsetup.BlockedAccount         `json:"blocked_accounts,omitempty"`
+	HarnessDetails          map[string]agentsetup.HarnessDetail `json:"harness_details,omitempty"`
+	HarnessStatuses         map[string]string                   `json:"harness_statuses,omitempty"`
+	HarnessErrors           map[string]string                   `json:"harness_errors,omitempty"`
+	CapacityAccounts        []CapacityAccountStatus             `json:"capacity_accounts,omitzero"`
+	LoginRequired           bool                                `json:"login_required"`
+	VerificationUnavailable []string                            `json:"verification_unavailable_account_ids"`
+	Ready                   bool                                `json:"ready"`
+	DaemonID                string                              `json:"daemon_id"`
+	Generation              string                              `json:"generation"`
+	State                   string                              `json:"state"`
+	ActiveRunIDs            []string                            `json:"active_run_ids"`
+	UnconfirmedRunIDs       []string                            `json:"unconfirmed_run_ids"`
+	SettlementPendingRunIDs []string                            `json:"settlement_pending_run_ids"`
+	FencedAccountIDs        []string                            `json:"fenced_account_ids"`
+	AllFenced               bool                                `json:"all_fenced"`
+	VerificationResults     map[string]string                   `json:"verification_results"`
 }
 
 func fenceName(account string) string {
@@ -134,44 +138,83 @@ func (s *Supervisor) Drain(req DrainRequest) (LifecycleStatus, error) {
 func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	v := LifecycleStatus{DaemonID: s.daemonID, Generation: s.generation, State: "drained", ActiveRunIDs: []string{}, UnconfirmedRunIDs: []string{}, SettlementPendingRunIDs: []string{}, FencedAccountIDs: []string{}, VerificationResults: map[string]string{}, HarnessErrors: map[string]string{}}
 	s.mu.Lock()
-	v.Ready = len(s.accounts) > 0
+	v.HarnessStatuses = map[string]string{}
+	v.HarnessDetails = map[string]agentsetup.HarnessDetail{}
 	if s.capacityCapturing {
 		v.State = "capturing"
 		v.Ready = false
 	}
 	v.AllFenced, _ = s.readFence("")
+	launchable := 0
+	perHarness := map[string][]harnessAccountState{}
 	for _, a := range s.accounts {
+		status, reason := "checking", "starting"
 		fenced, e := s.readFence(a.ID)
+		if a.DependencyBlocked {
+			v.HarnessFailedAccountIDs = append(v.HarnessFailedAccountIDs, a.ID)
+			v.BlockedAccounts = append(v.BlockedAccounts, blockedReport(a))
+		}
 		if fenced || e != nil {
 			v.FencedAccountIDs = append(v.FencedAccountIDs, a.ID)
+		}
+		if v.AllFenced || fenced || e != nil {
+			status, reason = "draining", ""
 		} else {
+			// Fenced accounts cannot launch, so only live ones report failures.
+			v.ProfilePermissions = v.ProfilePermissions || s.profilePermissions[a.ID]
+			v.HarnessFailed = v.HarnessFailed || s.harnessFailed[a.ID] && !a.DependencyBlocked
+			if !a.DependencyBlocked {
+				launchable++
+			}
 			issue := s.harnessHolds[a.Harness]
+			reason = s.harnessHoldReasons[a.Harness]
 			if issue == "" {
-				issue = s.dependencyErrors[a.Harness]
+				issue = s.dependencyErrors[a.ID]
+				reason = s.dependencyReasons[a.ID]
 			}
 			if issue != "" {
 				v.HarnessErrors[a.Harness] = issue
-				v.Ready = false
-			}
-			if !s.probedAccounts[a.ID] || s.blockedAccounts[a.ID] {
-				v.Ready = false
-			}
-			if s.loginRequired[a.ID] && issue == "" {
-				v.LoginRequired = true
-			}
-			if s.profilePermissions[a.ID] {
+				status = "blocked"
+				if reason == "" {
+					reason = "dependency_invalid"
+				}
+			} else if a.DependencyBlocked {
+				status, reason = "blocked", blockedReport(a).Reason
+			} else if s.profilePermissions[a.ID] {
+				status, reason = "blocked", "profile_permissions"
 				v.ProfilePermissions = true
+			} else if s.harnessFailed[a.ID] {
+				status, reason = "blocked", "harness_failed"
+			} else if s.loginRequired[a.ID] {
+				status, reason = "login_required", "login_required"
+				v.LoginRequired = true
+			} else if s.probedAccounts[a.ID] && !s.blockedAccounts[a.ID] {
+				status, reason = "ready", ""
+				v.Ready = true
+			} else {
+				reason = "starting"
 			}
-			if s.harnessFailed[a.ID] {
-				v.HarnessFailed = true
-			}
-			if adapter, ok := s.adapters[a.Harness].(VerificationAdapter); !ok || !adapter.VerificationSupported() {
+			// A pin-blocked account stays unlaunchable; its verification waits
+			// for the repair instead of being refused.
+			if adapter, ok := s.adapters[a.Harness].(VerificationAdapter); !a.DependencyBlocked && (!ok || !adapter.VerificationSupported()) {
 				v.VerificationUnavailable = append(v.VerificationUnavailable, a.ID)
 			}
 		}
+		perHarness[a.Harness] = append(perHarness[a.Harness], harnessAccountState{id: a.ID, status: status, reason: reason})
 	}
-	if s.capacityCapturing && (s.closing || v.AllFenced || len(v.FencedAccountIDs) > 0) {
-		v.State = "draining"
+	assignHarnessReports(&v, perHarness)
+	// One ready harness keeps the computer ready. Blocks stay per account and
+	// per harness; HarnessFailed only summarizes a computer that cannot work.
+	if v.Ready {
+		v.HarnessFailed = false
+	} else if launchable == 0 && len(v.BlockedAccounts) > 0 {
+		v.HarnessFailed = true
+	}
+	if s.capacityCapturing {
+		v.Ready = false
+		if s.closing || v.AllFenced || len(v.FencedAccountIDs) > 0 {
+			v.State = "draining"
+		}
 	}
 	entries := make([]*owned, 0, len(s.runs))
 	for _, e := range s.runs {
@@ -217,7 +260,89 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	sort.Strings(v.UnconfirmedRunIDs)
 	sort.Strings(v.SettlementPendingRunIDs)
 	sort.Strings(v.FencedAccountIDs)
+	sort.Strings(v.HarnessFailedAccountIDs)
+	sort.Slice(v.BlockedAccounts, func(i, j int) bool {
+		if v.BlockedAccounts[i].AccountID == v.BlockedAccounts[j].AccountID {
+			return v.BlockedAccounts[i].Harness < v.BlockedAccounts[j].Harness
+		}
+		return v.BlockedAccounts[i].AccountID < v.BlockedAccounts[j].AccountID
+	})
 	return v
+}
+
+// harnessAccountState is one account's contribution to its harness report.
+// The type stays at package scope because a function cannot declare a named type.
+type harnessAccountState struct {
+	id, status, reason string
+}
+
+// assignHarnessReports keeps a harness ready when any account can work, and
+// records the blocked or unsigned siblings in attention_accounts. A healthy
+// account must not erase those blocks. When nobody is ready, the most
+// actionable state wins; equal ranks keep the first account. Checking,
+// starting and draining are not attention. A fenced account cannot hide a live one.
+func assignHarnessReports(v *LifecycleStatus, perHarness map[string][]harnessAccountState) {
+	priority := map[string]int{"draining": 1, "checking": 2, "login_required": 3, "blocked": 4, "ready": 5}
+	for harness, accounts := range perHarness {
+		ids := make([]string, 0, len(accounts))
+		ready := false
+		var pending []agentsetup.AccountAttention
+		for _, account := range accounts {
+			ids = append(ids, account.id)
+			if account.status == "ready" {
+				ready = true
+			}
+		}
+		if ready {
+			for _, account := range accounts {
+				if account.status != "blocked" && account.status != "login_required" {
+					continue
+				}
+				reason := account.reason
+				if reason == "" {
+					reason = account.status
+				}
+				pending = append(pending, agentsetup.AccountAttention{AccountID: account.id, Reason: reason})
+			}
+			if attention := agentsetup.PartialAttention(harness, ids, "ready", pending); len(attention.Accounts) > 0 {
+				if detail, ok := agentsetup.HarnessReport(harness, "ready", ""); ok {
+					detail.Attention = attention.Accounts
+					detail.AttentionCount = attention.Count
+					detail.AttentionTruncated = attention.Truncated
+					v.HarnessStatuses[harness] = "ready"
+					v.HarnessDetails[harness] = detail
+					continue
+				}
+			}
+		}
+		bestStatus, bestReason := "", ""
+		bestPriority := 0
+		for _, account := range accounts {
+			rank := priority[account.status]
+			if rank > bestPriority {
+				bestPriority = rank
+				bestStatus = account.status
+				bestReason = account.reason
+			}
+		}
+		if bestStatus == "" {
+			continue
+		}
+		v.HarnessStatuses[harness] = bestStatus
+		if detail, ok := agentsetup.HarnessReport(harness, bestStatus, bestReason); ok {
+			v.HarnessDetails[harness] = detail
+		} else {
+			delete(v.HarnessDetails, harness)
+		}
+	}
+}
+
+func blockedReport(a EnrolledAccount) agentsetup.BlockedAccount {
+	reason := a.PinReason
+	if reason == "" {
+		reason = agentsetup.PinMissing
+	}
+	return agentsetup.BlockedAccount{AccountID: a.ID, Harness: a.Harness, Reason: reason, Fix: agentsetup.RecoveryFix(a.Harness, reason)}
 }
 
 func (s *Supervisor) freezeOnError(account string) {
@@ -252,6 +377,25 @@ func (s *Supervisor) handleRunError(entry *owned, err error) {
 	}
 }
 
+// harnessHeld reports a harness hold, or a dependency failure or pin block on
+// every enrolled account of the harness. Callers hold s.mu.
+func (s *Supervisor) harnessHeld(harness string) bool {
+	if s.harnessHolds[harness] != "" {
+		return true
+	}
+	enrolled := false
+	for _, a := range s.accounts {
+		if a.Harness != harness {
+			continue
+		}
+		enrolled = true
+		if !a.DependencyBlocked && s.dependencyErrors[a.ID] == "" {
+			return false
+		}
+	}
+	return enrolled
+}
+
 func (s *Supervisor) accountAvailable(account string) bool {
 	if !s.dispatchAllowed(account) {
 		return false
@@ -259,7 +403,7 @@ func (s *Supervisor) accountAvailable(account string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, a := range s.accounts {
-		if a.ID == account && (s.harnessHolds[a.Harness] != "" || s.dependencyErrors[a.Harness] != "") {
+		if a.ID == account && (a.DependencyBlocked || s.harnessHolds[a.Harness] != "" || s.dependencyErrors[a.ID] != "") {
 			return false
 		}
 	}
@@ -270,6 +414,11 @@ func (s *Supervisor) accountAvailable(account string) bool {
 // lifecycle fences or touching processes. An empty reason releases the hold;
 // a successful account probe is still required before dispatch resumes.
 func (s *Supervisor) SetHarnessHold(harness, reason string) {
+	s.SetHarnessHoldWithReason(harness, "dependency_invalid", reason)
+}
+
+// SetHarnessHoldWithReason keeps wire reason codes independent of local diagnostics.
+func (s *Supervisor) SetHarnessHoldWithReason(harness, code, reason string) {
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
 	s.mu.Lock()
@@ -277,11 +426,16 @@ func (s *Supervisor) SetHarnessHold(harness, reason string) {
 	if s.harnessHolds == nil {
 		s.harnessHolds = map[string]string{}
 	}
+	if s.harnessHoldReasons == nil {
+		s.harnessHoldReasons = map[string]string{}
+	}
 	if reason == "" {
 		delete(s.harnessHolds, harness)
+		delete(s.harnessHoldReasons, harness)
 		return
 	}
 	s.harnessHolds[harness] = reason
+	s.harnessHoldReasons[harness] = code
 	for _, a := range s.accounts {
 		if a.Harness == harness {
 			delete(s.probedAccounts, a.ID)
@@ -351,7 +505,7 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 	}
 	merged := append([]EnrolledAccount(nil), s.accounts...)
 	for _, a := range accounts {
-		if a.ID == "" || a.Key == "" || configured[a.Harness] == nil {
+		if a.ID == "" || a.Key == "" || (configured[a.Harness] == nil && !a.DependencyBlocked) {
 			return ErrScope
 		}
 		found := false
@@ -369,6 +523,29 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 		}
 		if !found {
 			merged = append(merged, a)
+		} else {
+			for i := range merged {
+				if merged[i].ID != a.ID {
+					continue
+				}
+				wasBlocked := merged[i].DependencyBlocked
+				merged[i].DependencyBlocked = a.DependencyBlocked
+				merged[i].PinReason = a.PinReason
+				merged[i].PinFix = a.PinFix
+				if wasBlocked && !a.DependencyBlocked {
+					delete(s.blockedAccounts, a.ID)
+					if s.harnessFailed != nil {
+						delete(s.harnessFailed, a.ID)
+					}
+				}
+			}
+		}
+		if a.DependencyBlocked {
+			s.blockedAccounts[a.ID] = true
+			if s.harnessFailed == nil {
+				s.harnessFailed = map[string]bool{}
+			}
+			s.harnessFailed[a.ID] = true
 		}
 	}
 	s.accounts = merged
@@ -410,7 +587,13 @@ func (s *Supervisor) RestartClaude(ctx context.Context, adapter *ClaudeAdapter) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closing || s.adapters[Claude] == nil {
+	// A repin may install the adapter a pin block withheld at cold start, but
+	// never one for a computer without an approved Claude enrollment.
+	enrolled := false
+	for _, account := range s.accounts {
+		enrolled = enrolled || account.Harness == Claude
+	}
+	if s.closing || !enrolled {
 		return ErrScope
 	}
 	s.adapters[Claude] = adapter
@@ -421,4 +604,22 @@ func (s *Supervisor) RestartClaude(ctx context.Context, adapter *ClaudeAdapter) 
 		}
 	}
 	return nil
+}
+
+// PinHealthMatches reports whether enrolled accounts already carry the same
+// per-account pin block as the latest runtime classification.
+func (s *Supervisor) PinHealthMatches(accounts []EnrolledAccount) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	byID := make(map[string]EnrolledAccount, len(s.accounts))
+	for _, account := range s.accounts {
+		byID[account.ID] = account
+	}
+	for _, account := range accounts {
+		old, ok := byID[account.ID]
+		if !ok || old.DependencyBlocked != account.DependencyBlocked || old.PinReason != account.PinReason || old.PinFix != account.PinFix {
+			return false
+		}
+	}
+	return true
 }
