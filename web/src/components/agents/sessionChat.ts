@@ -4,7 +4,7 @@
 // watermark is the highest sent_event_id this person has had in view. The server
 // marker follows the person across devices; this browser's copy is the offline
 // fallback.
-import type { MessageStatus } from '../../lib/agents.ts'
+import type { HarnessSession, MessageStatus, ProjectMessage } from '../../lib/agents.ts'
 import type { MessageGroup } from './sessionMessages.ts'
 
 export type SessionTab = 'overview' | 'messages'
@@ -118,6 +118,97 @@ export function statusTip(status: MessageStatus, format: (iso: string) => string
   }
 }
 export const statusDone = (status?: MessageStatus) => status?.status === 'read' || status?.status === 'not_delivered'
+
+// The status route accepts at most this many ids. Delivered, read and
+// not_delivered are terminal for the outstanding queue. A missing receipt, or
+// one that is still sent, is outstanding. The first look, when nothing is
+// known, asks for the newest batch so the thread can paint those receipts.
+// The next look asks for every id still outstanding, in batches of this size,
+// so 250 sends are covered within two refreshes and a delivered receipt cannot
+// keep an older send out. Messages on screen that are already delivered are
+// asked after the outstanding ids, so they can still move to read.
+export const receiptBatchLimit = 100
+const terminalReceipt = (status?: MessageStatus) =>
+  status?.status === 'delivered' || status?.status === 'read' || status?.status === 'not_delivered'
+
+export function receiptQueryBatches(
+  boundIds: readonly string[],
+  visibleIds: readonly string[],
+  statuses: Readonly<Record<string, MessageStatus | undefined>>,
+  limit = receiptBatchLimit,
+): string[][] {
+  const unique: string[] = []
+  const seen = new Set<string>()
+  for (const id of [...boundIds, ...visibleIds]) {
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    unique.push(id)
+  }
+  const outstanding = unique.filter(id => !terminalReceipt(statuses[id]))
+  const known = unique.some(id => statuses[id])
+  const queued = !known && outstanding.length > limit ? outstanding.slice(-limit) : outstanding
+  const batches: string[][] = []
+  for (let i = 0; i < queued.length; i += limit) batches.push(queued.slice(i, i + limit))
+  const taken = new Set(queued)
+  const readWatch: string[] = []
+  const watched = new Set<string>()
+  for (const id of visibleIds) {
+    if (!id || watched.has(id) || taken.has(id) || statuses[id]?.status !== 'delivered') continue
+    watched.add(id)
+    readWatch.push(id)
+  }
+  const follow = readWatch.slice(-limit)
+  if (follow.length) {
+    const last = batches.at(-1)
+    if (last && last.length + follow.length <= limit) last.push(...follow)
+    else batches.push(follow)
+  }
+  return batches
+}
+
+// A live session with neither a stored vendor reference nor a hook read so far
+// cannot take the message until its inbox hook runs (AEON-369).
+export const hookDeliveryNotice = "Delivered when the session's inbox hook runs."
+export function awaitsInboxHook(session: Pick<HarnessSession, 'phase' | 'stopped_at' | 'archived_at' | 'has_vendor_session_ref' | 'inbox_seen_via'>): boolean {
+  if (session.phase === 'stopped' || session.stopped_at || session.archived_at) return false
+  if (session.has_vendor_session_ref || session.inbox_seen_via === 'hook') return false
+  return true
+}
+
+// This viewer's sends to the session, taken from the loaded thread. Receipts
+// are sender-only, so the outstanding set can be rebuilt after a reload.
+export function sessionBoundSends(
+  messages: readonly Pick<ProjectMessage, 'id' | 'sender_principal_id' | 'recipient_session_id'>[],
+  sessionId: string,
+  viewerId: string,
+): string[] {
+  if (!sessionId || !viewerId) return []
+  const ids: string[] = []
+  const seen = new Set<string>()
+  for (const message of messages) {
+    if (message.recipient_session_id !== sessionId || message.sender_principal_id !== viewerId || seen.has(message.id)) continue
+    seen.add(message.id)
+    ids.push(message.id)
+  }
+  return ids
+}
+
+// Receipts for sends this view is waiting on. Delivered and read are finished.
+// not_delivered is finished too: that message shows its own failure.
+// A missing receipt is still waiting.
+export interface HookReceipts { waiting: string[]; failed: MessageStatus[] }
+export function hookReceipts(pendingIds: readonly string[], statuses: Readonly<Record<string, MessageStatus | undefined>>): HookReceipts {
+  const waiting: string[] = []
+  const failed: MessageStatus[] = []
+  for (const id of pendingIds) {
+    const status = statuses[id]
+    if (status?.status === 'not_delivered') failed.push(status)
+    else if (status?.status === 'delivered' || status?.status === 'read') continue
+    else waiting.push(id)
+  }
+  return { waiting, failed }
+}
+export const hookNoticeVisible = (awaits: boolean, receipts: HookReceipts) => awaits && receipts.waiting.length > 0
 
 // Within this distance of the end the thread counts as read to the bottom.
 export const nearBottom = (el: { scrollHeight: number; scrollTop: number; clientHeight: number }, slack = 32) =>

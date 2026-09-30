@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
@@ -40,6 +41,9 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	MaxRunDuration    time.Duration
 	CapacityInterval  time.Duration
+	// PollDiagnostic receives bounded cause codes on changes and 15-minute
+	// reminders only, never raw errors or bindings.
+	PollDiagnostic func(string)
 }
 
 type replay struct {
@@ -52,6 +56,7 @@ type replay struct {
 // Record contains only local process provenance and bounded control digests.
 // The journal is AEON v2; classic journals are never opened implicitly.
 type Record struct {
+	VerificationReason    string `json:"verification_reason,omitempty"`
 	BudgetStopReason      string `json:"budget_stop_reason,omitempty"`
 	BudgetStopUnconfirmed bool   `json:"budget_stop_unconfirmed,omitempty"`
 	// Only launchPrepared proves that adapter.Start has never been called.
@@ -63,6 +68,7 @@ type Record struct {
 	ExitObserved  bool   `json:"exit_observed,omitempty"`
 	// LaunchRev and LaunchDefaultRev are the workspace HEAD and the default
 	// branch's commit at launch, the base of the run's commit evidence.
+	LaunchBranch     string            `json:"launch_branch,omitempty"`
 	LaunchRev        string            `json:"launch_rev,omitempty"`
 	LaunchDefaultRev string            `json:"launch_default_rev,omitempty"`
 	Pending          []Telemetry       `json:"pending,omitempty"`
@@ -99,6 +105,7 @@ type owned struct {
 	metadataPending []harnessMetadata
 	usage           *sessionUsageReporter
 	capacityPending map[string]capacity.Reading
+	vendorLimit     *capacity.LimitHit
 	inboxCapable    bool
 	pending         []HarnessControl
 	process         Process
@@ -120,6 +127,14 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	startedAt           time.Time
+	capacityStartedAt   time.Time
+	capacityAccountID   string
+	quotaKey            []byte // Tenant HMAC key, memory only; never passed to a child.
+	signalsPublished    map[string]AccountSignals
+	statuslineMu        sync.Mutex
+	statuslinePlans     map[string]statuslinePlan
+	statuslineEnabled   map[string]bool
 	capacityInterval    time.Duration
 	capacityLast        map[string]time.Time
 	capacitySaved       map[string]time.Time
@@ -127,33 +142,38 @@ type Supervisor struct {
 	capacityCapturing   bool
 	maxTokens, maxTurns int64
 	profilePermissions  map[string]bool
-
-	dispatchMu        sync.Mutex
-	state             *agentsetup.Store
-	closing           bool
-	blockedAccounts   map[string]bool
-	probedAccounts    map[string]bool
-	loginRequired     map[string]bool
-	harnessHolds      map[string]string
-	dependencyErrors  map[string]string
-	harnessFailed     map[string]bool
-	mu                sync.Mutex
-	api               API
-	journal           *localjournal.Journal[Record]
-	lock              *os.File
-	adapters          map[string]Adapter
-	runs              map[string]*owned
-	tenantID          string
-	principalID       string
-	daemonID          string
-	generation        string
-	workspace         string
-	estimates         map[string]int64
-	accounts          []EnrolledAccount
-	heartbeatInterval time.Duration
-	maxRunDuration    time.Duration
-	prepareScratch    func(string) (string, error)
-	newHarnessID      func() (string, error)
+	harnessFailed       map[string]bool
+	dispatchMu          sync.Mutex
+	state               *agentsetup.Store
+	closing             bool
+	blockedAccounts     map[string]bool
+	probedAccounts      map[string]bool
+	probePendingSince   map[string]time.Time // Protected by mu; reset only for a new probe lifecycle.
+	pollDiagnostic      func(string)
+	pollDiagnosticMu    sync.Mutex
+	pollDiagnosticLast  map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
+	loginRequired       map[string]bool
+	harnessHoldReasons  map[string]string
+	dependencyReasons   map[string]string
+	harnessHolds        map[string]string
+	dependencyErrors    map[string]string
+	mu                  sync.Mutex
+	api                 API
+	journal             *localjournal.Journal[Record]
+	lock                *os.File
+	adapters            map[string]Adapter
+	runs                map[string]*owned
+	tenantID            string
+	principalID         string
+	daemonID            string
+	generation          string
+	workspace           string
+	estimates           map[string]int64
+	accounts            []EnrolledAccount
+	heartbeatInterval   time.Duration
+	maxRunDuration      time.Duration
+	prepareScratch      func(string) (string, error)
+	newHarnessID        func() (string, error)
 	// lifetime is the daemon context. Cancelling it ends a clean Codex idle
 	// wait so shutdown does not sit out the wake window. A busy turn is left
 	// to finish; the idle wait is not armed again afterwards.
@@ -190,14 +210,23 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 			return nil, errors.New("duplicate or invalid adapter")
 		}
 		if claude, ok := a.(*ClaudeAdapter); ok {
-			bound := *claude
+			bound := claude.clone()
 			bound.Workspace = c.Workspace
-			a = &bound
+			a = bound
 		}
 		adapters[a.Name()] = a
 	}
 	if len(adapters) == 0 {
-		return nil, errors.New("no adapters configured")
+		blockedOnly := len(c.Accounts) > 0
+		for _, account := range c.Accounts {
+			if !account.DependencyBlocked {
+				blockedOnly = false
+				break
+			}
+		}
+		if !blockedOnly {
+			return nil, errors.New("no adapters configured")
+		}
 	}
 	if c.CapacityInterval == 0 {
 		c.CapacityInterval = 5 * time.Minute
@@ -234,11 +263,13 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		}
 	}
 	for _, account := range c.Accounts {
-		if account.ID == "" || account.Key == "" || adapters[account.Harness] == nil {
+		if account.ID == "" || account.Key == "" || (adapters[account.Harness] == nil && !account.DependencyBlocked) {
 			return nil, errors.New("invalid local account enrollment")
 		}
-		if _, ok := adapters[account.Harness].(AccountProber); !ok {
-			return nil, errors.New("adapter has no account probe")
+		if adapters[account.Harness] != nil {
+			if _, ok := adapters[account.Harness].(AccountProber); !ok {
+				return nil, errors.New("adapter has no account probe")
+			}
 		}
 	}
 	state, err := agentsetup.OpenStore(c.StateRoot, true)
@@ -288,9 +319,13 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
-		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx}
+		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic}
+	s.probePendingSince = make(map[string]time.Time, len(s.accounts))
+	for _, account := range s.accounts {
+		s.probePendingSince[account.ID] = s.startedAt
+	}
 	if err := s.loadCapacityCaptures(); err != nil {
 		return nil, err
 	}
@@ -318,6 +353,15 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		}
 		if err := reporter.PublishAccountMetadata(ctx, account.ID, *account.Metadata); err != nil {
 			return nil, err
+		}
+	}
+	if s.harnessFailed == nil {
+		s.harnessFailed = map[string]bool{}
+	}
+	for _, account := range s.accounts {
+		if account.DependencyBlocked {
+			s.blockedAccounts[account.ID] = true
+			s.harnessFailed[account.ID] = true
 		}
 	}
 	keepLock = true
@@ -361,20 +405,28 @@ func (s *Supervisor) Status() []Record {
 // harness session, so they cannot race a separate principal-wide inbox poll.
 // A missing or stale reservation fails closed and leaves the run queued.
 func (s *Supervisor) PollOnce(ctx context.Context) error {
+	diagnostic := ""
+	defer func() { s.reportPollDiagnostic(diagnostic) }()
 	// Recover no-launch claims before a fresh probe changes account generation.
 	recoveryErr := s.recoverUnlaunched(ctx)
 	s.settlePending(ctx)
 	if !s.dispatchAllowed("") {
+		diagnostic = "dispatch_not_allowed"
 		return nil
 	}
 	runs, err := s.api.Queued(ctx)
 	if err != nil {
+		diagnostic = "queue_unavailable"
 		return err
 	}
 	failures := []error{recoveryErr}
 	s.mu.Lock()
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
 	adapters := map[string]Adapter{}
+	pendingProbes := make(map[string]time.Time, len(accounts))
+	for _, account := range accounts {
+		pendingProbes[account.ID] = s.probePendingSince[account.ID]
+	}
 	for k, v := range s.adapters {
 		adapters[k] = v
 	}
@@ -386,27 +438,26 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 		fenced, fenceErr := s.readFence(account.ID)
 		if fenced || fenceErr != nil {
+			diagnostic = "dispatch_not_allowed"
 			continue
 		}
-		// Account probes can start vendor executables. A refused verification
-		// must not reach one merely because health probing precedes dispatch.
-		probeBlocked := false
-		for _, run := range runs {
-			if run.AgentPrincipalID == s.principalID && run.Purpose == VerificationPurpose && run.requestedAccount() == account.ID && validQueuedExecutionMode(run, adapters[account.Harness]) != nil {
-				probeBlocked = true
-				break
+		if account.DependencyBlocked {
+			if err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, false); err != nil {
+				failures = append(failures, errors.New("account probe unavailable"))
 			}
-		}
-		if probeBlocked {
-			s.mu.Lock()
-			s.probedAccounts[account.ID] = false
-			s.mu.Unlock()
 			continue
 		}
+		// Account health is independent of optional verification. Refusing a
+		// verification never prevents the enrolled account's normal probe.
 		probe := adapters[account.Harness].(AccountProber)
 		s.mu.Lock()
 		hold := s.harnessHolds[account.Harness]
+		pendingSince := pendingProbes[account.ID]
+		current := s.probePendingSince[account.ID].Equal(pendingSince)
 		s.mu.Unlock()
+		if !current {
+			continue
+		}
 		// A held harness (AEON-342) is not probed and reports unavailable.
 		status := probeUnavailable
 		var dependencyErr, probeErr error
@@ -438,7 +489,28 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 				status = probeAccount(ctx, probe, account.Key)
 			}
 		}
+		if pi, ok := probe.(*PiAdapter); ok && hold == "" {
+			pi.probeMu.Lock()
+			cached := pi.probes[account.Key]
+			if status.OK {
+				status.OpenRouterCredits = cached.credits
+			}
+			if errors.Is(probeErr, openrouter.ErrKey) {
+				status.Failure = ProbeAuthFailed
+				probeErr = nil
+			} else if errors.Is(probeErr, openrouter.ErrUnavailable) {
+				status.Failure = ProbeUnavailable
+				probeErr = nil
+			}
+			pi.probeMu.Unlock()
+		}
 		available := status.OK
+		s.mu.Lock()
+		current = s.probePendingSince[account.ID].Equal(pendingSince)
+		s.mu.Unlock()
+		if !current {
+			continue
+		}
 		var err error
 		if reporter, ok := s.api.(ProbeStatusReporter); ok {
 			err = reporter.ProbeStatus(ctx, account.ID, s.daemonID, s.generation, status)
@@ -446,31 +518,53 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			err = s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
 		}
 		s.mu.Lock()
+		// A concurrent repin/hold release starts a new probe lifecycle. The old
+		// adapter's in-flight result cannot consume that wait or establish local readiness.
+		if !s.probePendingSince[account.ID].Equal(pendingSince) {
+			s.mu.Unlock()
+			continue
+		}
 		if s.dependencyErrors == nil {
 			s.dependencyErrors = map[string]string{}
 		}
 		if dependencyErr != nil {
-			s.dependencyErrors[account.Harness] = dependencyErr.Error()
+			s.dependencyErrors[account.ID] = dependencyErr.Error()
+			if s.dependencyReasons == nil {
+				s.dependencyReasons = map[string]string{}
+			}
+			reason := "harness_failed"
+			var issue *agentsetup.HarnessIssue
+			if errors.As(dependencyErr, &issue) {
+				reason = issue.Reason
+			}
+			if errors.Is(dependencyErr, piprobe.ErrPrivateProfile) {
+				reason = "profile_permissions"
+			}
+			s.dependencyReasons[account.ID] = reason
 		} else if hold == "" {
-			delete(s.dependencyErrors, account.Harness)
+			delete(s.dependencyErrors, account.ID)
+			delete(s.dependencyReasons, account.ID)
 		}
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
+		delete(s.probePendingSince, account.ID)
 		// Only a confirmed sign-out asks the person to sign in again; a hold or a
 		// local dependency failure never does (AEON-342).
 		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed && hold == "" && dependencyErr == nil && probeErr == nil
 		if s.harnessFailed == nil {
 			s.harnessFailed = map[string]bool{}
 		}
-		s.harnessFailed[account.ID] = probeErr != nil
+		s.harnessFailed[account.ID] = probeErr != nil || dependencyErr != nil
 		if s.profilePermissions == nil {
 			s.profilePermissions = map[string]bool{}
 		}
-		s.profilePermissions[account.ID] = errors.Is(probeErr, piprobe.ErrPrivateProfile)
+		s.profilePermissions[account.ID] = errors.Is(probeErr, piprobe.ErrPrivateProfile) || errors.Is(dependencyErr, piprobe.ErrPrivateProfile)
 		s.mu.Unlock()
 		if probeErr != nil {
 			failures = append(failures, errors.New("harness failed to start"))
 		}
+		// A harness that fails to start is a per-harness hold reported through
+		// Lifecycle, not a poll failure: siblings keep polling and dispatching.
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
 		}
@@ -485,6 +579,55 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func (s *Supervisor) reportPollDiagnostic(reason string) {
+	s.reportPollDiagnosticAt(reason, time.Now())
+}
+
+func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
+	if s.pollDiagnostic == nil {
+		return
+	}
+	reasons := make([]string, 0, 3)
+	if reason != "" {
+		reasons = append(reasons, reason)
+	}
+	// Multiple accounts produce at most one line per readiness cause per poll.
+	failed, timedOut := false, false
+	for _, detail := range s.lifecycleAt("", now).AccountStatuses {
+		failed = failed || detail.Reason == "probe_failed"
+		timedOut = timedOut || detail.Reason == "probe_timeout"
+	}
+	if failed {
+		reasons = append(reasons, "probe_failed")
+	}
+	if timedOut {
+		reasons = append(reasons, "probe_timeout")
+	}
+	s.pollDiagnosticMu.Lock()
+	changed := len(reasons) != len(s.pollDiagnosticLast)
+	for _, reason := range reasons {
+		if _, ok := s.pollDiagnosticLast[reason]; !ok {
+			changed = true
+		}
+	}
+	next := make(map[string]time.Time, len(reasons))
+	var emit []string
+	for _, reason := range reasons {
+		last := s.pollDiagnosticLast[reason]
+		if changed || now.Sub(last) >= 15*time.Minute {
+			emit = append(emit, reason)
+			last = now
+		}
+		next[reason] = last
+	}
+	// Dropping cleared reasons makes their next occurrence an immediate change.
+	s.pollDiagnosticLast = next
+	s.pollDiagnosticMu.Unlock()
+	for _, reason := range emit {
+		s.pollDiagnostic(reason)
+	}
 }
 
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
@@ -510,6 +653,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		retry := entry.record.LaunchState == launchPrepared && entry.record.State == "claim_pending" && entry.record.Generation == s.generation
 		entry.mu.Unlock()
 		if !retry {
+			entry.mu.Lock()
+			refused, reason := entry.record.LaunchState == launchRefused, entry.record.VerificationReason
+			entry.mu.Unlock()
+			if refused {
+				return s.reportVerificationRefusal(ctx, run, reason)
+			}
 			return nil
 		}
 		if err := s.reconcileUnlaunched(ctx, entry); err != nil {
@@ -533,24 +682,47 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			break
 		}
 	}
-	adapter := s.adapters[profile.Harness]
-	if adapter == nil || profile.ID == "" {
-		return ErrUnsupported
-	}
 	// A harness hold must also cover direct starts and runs whose account is
 	// chosen by routing, rather than only queued runs with an account ID.
 	s.mu.Lock()
-	held := s.harnessHolds[profile.Harness] != "" || s.dependencyErrors[profile.Harness] != ""
+	held := s.harnessHeld(profile.Harness)
+	adapter := s.adapters[profile.Harness]
 	s.mu.Unlock()
+	if run.Purpose == VerificationPurpose {
+		reason := ""
+		if adapter == nil || profile.ID == "" {
+			reason = "local_binding_missing"
+		} else if err := validQueuedExecutionMode(run, adapter); err != nil {
+			reason = "binding_incomplete"
+			if errors.Is(err, ErrVerificationUnavailable) {
+				reason = "adapter_unsupported"
+			}
+		}
+		if reason == "" {
+			found := false
+			for _, a := range s.accounts {
+				if a.ID == run.requestedAccount() && a.Harness == profile.Harness && !a.DependencyBlocked {
+					found = true
+				}
+			}
+			if !found {
+				reason = "local_binding_missing"
+			}
+		}
+		if reason != "" {
+			if err := s.refuseVerification(run, reason); err != nil {
+				return err
+			}
+			return s.reportVerificationRefusal(ctx, run, reason)
+		}
+	}
 	if held {
 		return ErrDraining
 	}
+	if adapter == nil || profile.ID == "" {
+		return ErrUnsupported
+	}
 	if err := validQueuedExecutionMode(run, adapter); err != nil {
-		if errors.Is(err, ErrVerificationUnavailable) && entry == nil {
-			if saveErr := s.refuseVerification(run); saveErr != nil {
-				return saveErr
-			}
-		}
 		return err
 	}
 	verification := run.Purpose == VerificationPurpose
@@ -613,6 +785,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if !verification {
 		if output, branchErr := exec.CommandContext(ctx, "git", "-C", s.workspace, "branch", "--show-current").Output(); branchErr == nil {
 			branch = strings.TrimSpace(string(output))
+		}
+		if run.CapacityHandoff {
+			if err := s.validateCapacityHandoff(run, branch); err != nil {
+				return err
+			}
+			prompt += "\n\nContinue the stopped attempt " + run.RetryOfRunID + ". Inspect its existing work and local changes before continuing; do not redo completed work."
 		}
 		prompt += "\n\nRun contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Use the Aeon tools to comment, check criteria, attach evidence, request approval, reply, and set status. Use aeon_terminal for tests and a local commit; never push without person approval. Report the commit ID and remaining blockers in your final reply."
 	}
@@ -825,6 +1003,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	intent := entry.record
 	intent.LaunchState, intent.State = launchAttempted, "starting"
 	intent.LaunchRev, intent.LaunchDefaultRev = launchRev, launchDefault
+	intent.LaunchBranch = branch
 	err = s.journal.Put(intent)
 	if err == nil {
 		entry.record = intent
@@ -950,6 +1129,10 @@ func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 	s.observeBudget(entry, ev)
+	if ev.VendorLimit != nil {
+		s.observeVendorLimit(entry, ev.VendorLimit)
+		return
+	}
 	if ev.Activity == "busy" || ev.Activity == "idle" {
 		entry.mu.Lock()
 		entry.harness.Activity = ev.Activity
@@ -1067,8 +1250,9 @@ func (s *Supervisor) monitor(entry *owned) {
 	forced := entry.forceRequested
 	protocolFailed := entry.protocolFailed
 	budgetReason := entry.budgetStopReason()
+	limit := entry.vendorLimit
 	entry.mu.Unlock()
-	if err == nil && !protocolFailed {
+	if err == nil && !protocolFailed && limit == nil {
 		if evidence, ok := proc.(EvidenceProcess); ok {
 			answer := evidence.Evidence()
 			if answer == "" {
@@ -1084,6 +1268,9 @@ func (s *Supervisor) monitor(entry *owned) {
 	if err != nil {
 		status, code = "failed", "child_exit_failed"
 	}
+	if limit != nil {
+		status, code = "failed", "vendor_limit"
+	}
 	if stopped {
 		status, code = "cancelled", ""
 	}
@@ -1095,7 +1282,12 @@ func (s *Supervisor) monitor(entry *owned) {
 	entry.mu.Lock()
 	launchRev, launchDefault := entry.record.LaunchRev, entry.record.LaunchDefaultRev
 	entry.mu.Unlock()
-	reportErr := s.update(ctx, entry, Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: runCommits(ctx, s.workspace, launchRev, launchDefault)})
+	s.flushCapacity(ctx, entry)
+	final := Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: runCommits(ctx, s.workspace, launchRev, launchDefault)}
+	if code == "vendor_limit" {
+		final.LimitWindow, final.LimitResetsAt = limit.Window, limit.ResetsAt
+	}
+	reportErr := s.update(ctx, entry, final)
 	entry.mu.Lock()
 	doneRequested := entry.doneRequested
 	entry.mu.Unlock()
@@ -1118,6 +1310,9 @@ func (s *Supervisor) monitor(entry *owned) {
 		if forced {
 			reason = "force_stopped"
 		}
+	}
+	if code == "vendor_limit" {
+		reason = "vendor_limit"
 	}
 	if budgetReason != "" {
 		reason = budgetReason

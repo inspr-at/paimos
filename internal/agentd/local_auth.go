@@ -3,8 +3,8 @@ package agentd
 
 import "context"
 
-// LocalAuthenticator is injected in tests only. Production uses LocalAuthentication
-// inside agentd; no socket field, helper, command or environment can confirm it.
+// LocalAuthenticator remains a test fixture for the older OS confirmation path.
+// Production attach uses the pairing-pinned Secure Enclave signer instead.
 type LocalAuthenticator interface {
 	Confirm(context.Context, string) error
 }

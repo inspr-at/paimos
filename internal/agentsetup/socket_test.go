@@ -58,7 +58,8 @@ func TestSocketPathDefaultAndFallbackByteLimits(t *testing.T) {
 				}
 			}
 			// Multibyte paths are measured in bytes, not username characters.
-			if _, err := resolveSocketPath(goos, "/Users/"+strings.Repeat("é", 64), "/"+strings.Repeat("s", 150), nil); err == nil || !strings.Contains(err.Error(), "Use a shorter --setup-root") {
+			var tooLong *SocketPathLengthError
+			if _, err := resolveSocketPath(goos, "/Users/"+strings.Repeat("é", 64), "/"+strings.Repeat("s", 150), nil); !errors.As(err, &tooLong) {
 				t.Fatalf("impossible path: %v", err)
 			}
 			a, _ := resolveSocketPath(goos, home, "/"+strings.Repeat("a", 150), nil)
@@ -67,6 +68,21 @@ func TestSocketPathDefaultAndFallbackByteLimits(t *testing.T) {
 				t.Fatal("different roots share a fallback")
 			}
 		})
+	}
+}
+
+func TestSocketPathNeedsHomeOnlyForFallback(t *testing.T) {
+	t.Setenv("HOME", "")
+	state := "/private/aeon-state/daemon"
+	ref := &ControlReference{Socket: "agentd.sock", DaemonID: "daemon", Generation: strings.Repeat("a", 32)}
+	for _, reference := range []*ControlReference{nil, ref} {
+		path, err := ResolveSocketPath(state, reference)
+		if err != nil || path != filepath.Join(state, "agentd.sock") {
+			t.Fatalf("short path without HOME: %q %v", path, err)
+		}
+	}
+	if _, err := ResolveSocketPath("/"+strings.Repeat("s", 150), nil); err == nil || !strings.Contains(err.Error(), "fallback requires a user home") {
+		t.Fatalf("fallback without HOME: %v", err)
 	}
 }
 
@@ -92,6 +108,10 @@ func TestSocketPathLegacyDiscoveryAndReferenceRejection(t *testing.T) {
 	path, err := resolveSocketPath("darwin", home, state, ref)
 	if err != nil || path != legacy {
 		t.Fatalf("legacy discovery: %q %v", path, err)
+	}
+	t.Setenv("HOME", "")
+	if path, err := ResolveSocketPath(state, ref); err != nil || path != legacy {
+		t.Fatalf("legacy discovery without HOME: %q %v", path, err)
 	}
 	l.Close()
 	path, err = resolveSocketPath("darwin", home, state, ref)

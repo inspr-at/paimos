@@ -65,7 +65,7 @@ darwin_agentd() {
     exit 1
   fi
   out="dist/paimos-agentd-darwin-${arch}"
-  CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" go build -trimpath -ldflags "$ldflags $team_ldflag" -o "$out" ./cmd/aeon-agentd
+  CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" go build -tags aeon_enclave -trimpath -ldflags "$ldflags $team_ldflag" -o "$out" ./cmd/aeon-agentd
   require_buildinfo "$out" darwin "$arch" 1
   require_team "$out"
   if ! otool -L "$out" | grep -F -q 'LocalAuthentication.framework'; then

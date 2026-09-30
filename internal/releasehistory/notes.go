@@ -49,6 +49,7 @@ type NoteSnapshot struct {
 	Tickets          []NoteTicket `json:"tickets"`
 }
 type NoteTicket struct {
+	Group       string          `json:"group,omitempty"`
 	ID          string          `json:"id"`
 	Key         string          `json:"key"`
 	Position    int             `json:"position"`
@@ -57,6 +58,7 @@ type NoteTicket struct {
 	Unavailable string          `json:"unavailable"`
 }
 type NoteItem struct {
+	Group     string `json:"group,omitempty"`
 	ID        string `json:"id"`
 	Key       string `json:"key"`
 	PillEN    string `json:"pill_en"`
@@ -65,15 +67,17 @@ type NoteItem struct {
 	BenefitDE string `json:"benefit_de"`
 }
 type Notes struct {
-	Source              string     `json:"source"`
-	Fallback            string     `json:"fallback,omitempty"`
-	SHA256              string     `json:"snapshot_sha256"`
-	CapturedAt          *time.Time `json:"captured_at"`
-	Revision            int64      `json:"release_revision"`
-	Items               []NoteItem `json:"items"`
-	Gaps                []string   `json:"gaps"`
-	Hidden              int        `json:"hidden"`
-	WrittenAfterRelease bool       `json:"written_after_release,omitempty"`
+	Corrections         []NoteCorrection `json:"corrections,omitempty"`
+	PublicItems         []TicketNote     `json:"public_items,omitempty"`
+	Source              string           `json:"source"`
+	Fallback            string           `json:"fallback,omitempty"`
+	SHA256              string           `json:"snapshot_sha256"`
+	CapturedAt          *time.Time       `json:"captured_at"`
+	Revision            int64            `json:"release_revision"`
+	Items               []NoteItem       `json:"items"`
+	Gaps                []string         `json:"gaps"`
+	Hidden              int              `json:"hidden"`
+	WrittenAfterRelease bool             `json:"written_after_release,omitempty"`
 }
 
 func MissingNotes() *Notes {
@@ -128,6 +132,9 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 	seen := map[string][]byte{}
 	keys := map[string]string{}
 	for _, t := range s.Tickets {
+		if t.Group != "" && t.Group != GroupFeatures && t.Group != GroupFixes && t.Group != GroupOther {
+			return nil, fmt.Errorf("invalid snapshot ticket group")
+		}
 		if !noteUUID.MatchString(t.ID) {
 			return nil, fmt.Errorf("invalid snapshot ticket identity")
 		}
@@ -169,7 +176,10 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 			out.Gaps = append(out.Gaps, label+": ticket fields unavailable")
 			continue
 		}
-		hidden, _ := fields["hide_from_release_notes"].(bool)
+		hidden, validFlag := fields["hide_from_release_notes"].(bool)
+		if flag, present := fields["hide_from_release_notes"]; present && (!validFlag || flag == nil) {
+			return nil, fmt.Errorf("invalid snapshot hide flag")
+		}
 		if hidden {
 			out.Hidden++
 			continue
@@ -177,9 +187,14 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 		issues := ticketbenefits.Issues(t.Fields)
 		if len(issues) > 0 {
 			out.Gaps = append(out.Gaps, label+": "+strings.Join(issues, "; "))
-			continue
 		}
-		out.Items = append(out.Items, NoteItem{ID: t.ID, Key: t.Key, PillEN: fields["pill_en"].(string), PillDE: fields["pill_de"].(string), BenefitEN: fields["benefit_en"].(string), BenefitDE: fields["benefit_de"].(string)})
+		// Keep the captured language when a translation is missing. Completion
+		// validation remains strict; historical readers must not discard it.
+		text := func(key string) string { value, _ := fields[key].(string); return value }
+		item := NoteItem{ID: t.ID, Key: t.Key, Group: t.Group, PillEN: text("pill_en"), PillDE: text("pill_de"), BenefitEN: text("benefit_en"), BenefitDE: text("benefit_de")}
+		if strings.TrimSpace(item.PillEN+item.PillDE+item.BenefitEN+item.BenefitDE) != "" {
+			out.Items = append(out.Items, item)
+		}
 	}
 	return out, nil
 }

@@ -92,7 +92,7 @@ Homebrew-owned services use `$(brew --prefix)/opt/aeon-agentd/bin/aeon-agentd`, 
 
 Before qualifying an upgraded macOS release, verify the new daemon’s executable identity and native Touch ID attach behavior on that daemon: cancel must refuse attachment, a fresh successful Touch ID approval must attach, and stale approval must not transfer from the old process. A matching CLI version, signing check, old-daemon approval or fixture test is not native Touch ID evidence. This fix does not supply that hardware-backed release qualification.
 
-Rerun `pair` to resume setup; use `status` to inspect the pairing, `add-harness` to offer newly available harnesses (or supply `--harness NAME`), and `disconnect --account-id UUID` to remove one enrollment; omit `--account-id` for the whole computer. When an older agentd is earlier on PATH, add a harness with the same binary: `env "$(brew --prefix)/bin/aeon-agentd" add-harness` or `env "$HOME/.nix-profile/bin/aeon-agentd" add-harness`. Add `--state-root ROOT` when using a nondefault pairing. New harnesses still need fresh person approval. A drain waits for owned work; offline revocation may leave local cleanup or run accounting unconfirmed. These commands never remove vendor login stores or project files.
+Rerun `pair` to resume setup; use `status` to inspect the pairing, `add-harness` to offer newly available harnesses (or supply `--harness NAME`), and `disconnect --account-id UUID` to remove one enrollment; omit `--account-id` for the whole computer. When an older agentd is earlier on PATH, add a harness with the same binary: `env "$(brew --prefix)/bin/aeon-agentd" add-harness` or `env "$HOME/.nix-profile/bin/aeon-agentd" add-harness`. Add `--state-root ROOT` when using a nondefault pairing. New harnesses still need fresh person approval. `status` prints the reason code and fix command for each harness that is not ready and each blocked account; the computer stays ready while any harness works. For an already connected Codex, Cursor or pi account whose interpreter pin is blocked, `add-harness --harness NAME` renews only that pin, without a new request; Claude pins use `repin --harness claude`. A drain waits for owned work; offline revocation may leave local cleanup or run accounting unconfirmed. These commands never remove vendor login stores or project files.
 
 After revocation, denial or expiry, keep the old state for status and cleanup. Pair again using `pair --url 'INSTANCE_ORIGIN_FROM_GUIDE' --state-root /absolute/new/private-folder`, with a new empty folder outside the working folder and repositories; approve its new code in the browser. Nothing clears, reuses or renews the previous authority automatically. For Nix/Home Manager, the configuration owner must review the service's new state root and finish the old pairing's drain/cleanup before activation.
 
@@ -163,7 +163,7 @@ Bind each launched harness to its **Aeon generation**, using exactly one of:
 - `AEON_SESSION_FILE`: an owned, regular, non-symlink file containing that UUID and an optional newline.
 - `AEON_SESSION_STATE_DIR`: the existing `harness run-heartbeat --state-dir` directory; the hook reads only its `session.id`, never the lease. This lets a hook observe a newly registered generation without changing the environment.
 
-The explicit ID wins over the file, and the explicit file wins over the state directory. An invalid explicit binding fails open with a content-free diagnostic and does not fall through. When none of those is set, the hook posts the harness input `session_id` to `POST /api/inbox/session-binding` and pulls with the returned Aeon generation. The vendor id is not an Aeon UUID and is never used as one. No unique active match is a quiet no-op. `aeon harness register` and `harness run-heartbeat` send `vendor_session_ref` when the harness provides one: `CLAUDE_CODE_SESSION_ID` for `--harness claude`, and `CODEX_SESSION_ID` or else `CODEX_THREAD_ID` for `--harness codex`. The value is recorded only when it differs from the private session ref and the worker lease. A registration whose private ref is already that vendor id matches the same lookup. Do not set one global Aeon session ID for unrelated sessions. Hook credentials need `inbox.read` and `inbox.send`; acknowledgement and this lookup both use `inbox.send`.
+The explicit ID wins over the file, and the explicit file wins over the state directory. An invalid explicit binding fails open with a content-free diagnostic and does not fall through. When none of those is set, the hook reads `session_id` from the hook JSON and resolves a UUID through `~/.aeon/sessions/index/<session-uuid>`. That file is mode 0600, owner-only, and not a symlink. Its text is three lines: the absolute `harness run-heartbeat --state-dir`, the owner pid, and that process's start time. Publish and removal take a lock file in the index directory. The helper writes the entry when it starts with `--source-session` and refuses startup, naming that source UUID, when another live state directory already holds it. It removes the entry on every shutdown path, including owner exit, SIGTERM, and a failed `/stop`, and only when the entry still names its own state directory. The hook uses the directory's `session.id` only while `state.json` is that same live generation and the recorded owner is still that process. A stopped generation, a dead or reused owner pid, a symlink, or any other unreadable index entry is a quiet no-op and does not fall through. A UUID `session_id` with no live index entry is a quiet no-op: no `POST /api/inbox/session-binding` and no stderr. A non-UUID harness session id still posts to that endpoint and pulls with the returned Aeon generation. The vendor id is not an Aeon UUID and is never used as one. No unique active match is a quiet no-op. `aeon harness register` and `harness run-heartbeat` send `vendor_session_ref` when the harness provides one: `CLAUDE_CODE_SESSION_ID` for `--harness claude`, and `CODEX_SESSION_ID` or else `CODEX_THREAD_ID` for `--harness codex`. The value is recorded only when it differs from the private session ref and the worker lease. A registration whose private ref is already that vendor id matches the same lookup. Do not set one global Aeon session ID for unrelated sessions. Hook credentials need `inbox.read` and `inbox.send`; acknowledgement and this lookup both use `inbox.send`.
 
 Install from the operator's shell with the released binary and the intended instance/configuration:
 
@@ -172,7 +172,7 @@ aeon --instance ppm hook install --harness claude --scope user --dry-run
 aeon --instance ppm hook install --harness claude --scope user
 ```
 
-Use `--scope project` from the project root to edit the personal `.claude/settings.local.json` (never the shared `.claude/settings.json`); user scope edits `~/.claude/settings.json` (or `CLAUDE_CONFIG_DIR/settings.json`). Review the changes in Claude's `/hooks` and restart the session as required by the harness. The installer prints only its owned hook additions/removals, preserves unrelated settings and hooks, shell-quotes the executable/configuration paths, writes atomically, and is idempotent.
+Use `--scope project` from the project root to edit the personal `.claude/settings.local.json` (never the shared `.claude/settings.json`); user scope edits `~/.claude/settings.json` (or `CLAUDE_CONFIG_DIR/settings.json`). Review the changes in Claude's `/hooks` and restart the session as required by the harness. The installer prints its owned hook additions/removals and the hook's own binding precedence. An explicit `AEON_SESSION_ID`, `AEON_SESSION_FILE`, or `AEON_SESSION_STATE_DIR` wins over the index. A live match prints `bound: <label>`. With none set, the label is the live generation for `CLAUDE_CODE_SESSION_ID` (or the Codex session id), or `not bound: run harness run-heartbeat with --source-session`. An invalid explicit binding prints `not bound: explicit session binding is invalid`; an unavailable one prints `not bound: explicit session binding is unavailable`. Neither falls through to the index. When the explicit generation and the index disagree, the status stays `bound:` to the explicit generation and the next line is `conflict: session index binds a different generation`. It preserves unrelated settings and hooks, shell-quotes the executable/configuration paths, writes atomically, and is idempotent.
 
 Before replacing existing settings, install and uninstall save the exact previous bytes to a private (0600) timestamped sibling `settings.json.backup-<UTC timestamp>-<unique suffix>` (using the actual settings filename). No-op and dry-run commands create no backup. Unrelated values retain their JSON string spelling where possible, including literal `&`, `<`, and `>`; indentation/key order may change. Invalid JSON, symlinks, and detected concurrent edits are refused. `--dry-run` writes nothing.
 
@@ -277,53 +277,86 @@ stored server-side in `person_watch_security`, scoped to that person and tenant.
 writes require the instance’s origin. The server, never a device request, selects
 one of two modes at approval:
 
-- **Approve in Aeon** (`aeon`, default): same-origin, digest-bound person approval
+- **Approve in Aeon** (`aeon`): same-origin, digest-bound person approval
   is the consent gate. The terminal WATCH prompt is a best-effort extra factor;
   a same-user process can emulate its PTY. The approval warns who requested it
-  and shows process, cwd and transcript before the Allow action.
-- **Also confirm on the Mac** (`local_auth`): after browser approval the daemon
-  must also complete LocalAuthentication in its own process. No helper, CLI
-  flag, local socket field or environment value can assert this result. Until
-  confirmation succeeds there is no session, lease or shared text. Cancel,
-  timeout, unavailable authentication, loss of the peer, or revocation fails
-  closed. Linux and older daemons cannot approve this mode.
+  and shows process, cwd and transcript before the Allow action. Saving this
+  mode opts out of Mac confirmation. A program running as that user can open
+  another terminal and request the review.
+- **Also confirm on the Mac** (`local_auth`): on an upgraded pairing, browser
+  approval issues a random, one-use `local_auth_nonce`. The daemon signs
+  `SHA-256("aeon.attach.local-consent.v1\0" + consent_digest + "\0" + nonce)`
+  with the pairing's P-256 Secure Enclave key. The wire signature is base64
+  ASN.1 DER ECDSA. The server verifies it against the immutable public key pinned
+  by browser-approved pairing, then consumes the nonce in the session/lease
+  transaction. A bare `local_confirmed: true`, wrong key, nonce, stale digest,
+  expired approval or replay is refused. No text is accepted before activation.
+  Changing biometric enrollment invalidates the key; re-pair to restore Touch ID.
 
-The separate `consent_digest` binds the request ID, snapshot digest and mode,
-using the `aeon.attach.consent.v1` domain. The browser echoes it on approval;
-a stale review is rejected after a setting change. The daemon validates it,
-then echoes it with its authenticated confirmation for strict activation.
-Only the memory-key-authenticated exchange can carry that assertion; it is a
-trusted-daemon assertion, not remote OS attestation. A replacement daemon that
-registers using stolen pairing credentials still needs fresh browser approval,
-but the server cannot verify its executable or LocalAuthentication result.
-Preventing that same-user replacement requires the separately tracked protected
-device identity/installer boundary; this mode does not claim that protection.
-Pending requests read the current setting; approved and active requests retain the
-pinned mode. Changing settings neither upgrades nor downgrades existing watches.
-Mode A retains the original snapshot digest and accepts legacy A approvals.
+Until the person saves a choice, a pending attach on an upgraded Mac whose
+connected daemon reports `available` uses `local_auth`. Linux, older pairings,
+SSH to a machine without a graphical login, an empty or legacy platform,
+and a Mac that reports `no_gui`,
+`unsigned`, `policy`, `unsupported` or `unreported` stay on Aeon approval so
+those attaches keep working. SSH to a Mac that reports `available` shows the
+Touch ID prompt on that Mac's screen, not in the SSH terminal. Settings shows
+`local_auth` with `consent_saved: false` when any connected computer reports
+`available` and has a browser-pinned key, including when another computer would
+still approve in Aeon. Saving `local_auth` applies it to every upgraded computer
+and fails closed where confirmation cannot run; pairings without a key retain
+Aeon approval until re-paired. Saving `aeon` keeps Aeon approval everywhere. The
+daemon's platform and capability report are advisory: a hostile daemon can
+claim another platform or `no_gui` to skip the unsaved default. A saved
+`local_auth` on an upgraded pairing requires the pinned key's signature;
+capability reports cannot substitute for that proof. Touch ID needs a person
+at the Mac. Ancestry and session checks are defence in depth, not a guarantee
+that same-user code cannot request its own attach.
 
-Native Mac confirmation needs `CGO_ENABLED=1`, Apple's Foundation,
-LocalAuthentication and Security frameworks, and an installed executable named
-`paimos-agentd` (the pairing installer) or `aeon-agentd` (the Nix package) with
-a valid Developer ID signature by the team the build expects, hardened runtime and no
-get-task-allow, library-validation or DYLD-environment exceptions. It validates
-the running process through `SecCodeCopySelf`/`SecCodeCheckValidity`, checks for
-a graphical login, and evaluates a fresh `LAContext` with
-[`deviceOwnerAuthentication`](https://developer.apple.com/documentation/localauthentication/lapolicy/deviceownerauthentication).
-The OS supplies Touch ID/device-password authentication (and other OS-supported
-owner factors); the reason names the harness session PID and host. Contexts
-are never reused. The prompt is asynchronous, remains revocable during polling,
-and times out after 90 seconds. These checks do not replace installer provenance
-or same-user OS isolation. Release darwin `paimos-agentd` is built with
-`CGO_ENABLED=1` and links LocalAuthentication. Linux `paimos-agentd`, `aeon-cli`,
-and the server image stay `CGO_ENABLED=0`. The Nix `aeon-agentd` package uses
-the same split. At watch registration the daemon reports a non-interactive
-capability: `available`, `unsupported`, `unsigned`, `no_gui`, or `policy`.
-An omitted report is stored as `unreported`. Settings lists that report for
-the signed-in person's connected computers and does not offer Mac confirmation
-unless one reports `available`. Unsigned, ad-hoc, and headless builds still
-fail closed. A signed interactive Touch ID acceptance check remains release
-qualification.
+The `consent_digest` binds request ID, snapshot digest and mode with the
+`aeon.attach.consent.v1` domain. Settings changes affect pending requests;
+approved and active watches retain their pin. Existing pairings without a key
+use Aeon approval until re-paired, even if they report Touch ID availability.
+Settings says “upgrade this computer’s pairing to enable Touch ID”. Migration
+1047 ends in-flight watches approved under the old boolean protocol, requiring
+fresh consent. Daemon registration cannot install or replace a public key, and
+Add harness preserves both the public key and the original local key identity.
+
+Release Darwin builds enable `-tags aeon_enclave` with `CGO_ENABLED=1` and link
+Apple's Security, Foundation and LocalAuthentication frameworks. The native
+boundary validates the running hardened Developer ID daemon, team `P66J39QV6V`,
+identifier `paimos-agentd`, and refuses debugging, DYLD environment or disabled
+library validation. At pairing it creates a non-exportable P-256 key using
+`kSecAttrTokenIDSecureEnclave`, `biometryCurrentSet` and `privateKeyUsage`.
+Every signature uses a fresh cancellable `LAContext`, without authentication
+reuse or a password fallback. Cancellation, expiry, revocation and changed
+process identity fail closed. Unsigned/Nix development builds do not enable
+this path. Linux remains CGO-free and uses Aeon approval.
+
+In the same release build, private pairing state (including device, runtime and
+lifecycle capabilities) and the runtime bearer live in Keychain generic-password
+items. Their ACL trusts the validated daemon's designated requirement, with
+root as ACL owner rather than the user's UID. Existing items must have the same
+code signing requirement and restrictive ACL; permissive pre-created items are
+refused. Requirement introspection is weak-linked and fails closed if macOS
+cannot provide it. Reads suppress authorization prompts and an ACL denial never
+falls back to disk. First access imports existing
+`pairing.json` and `runtime.key`, verifies the persisted item, overwrites the
+exact private source inode, and unlinks it. Interrupted cleanup resumes safely;
+symlinks, hardlinks and conflicting state are refused. Overwriting does not
+promise physical erasure of APFS snapshots or backups. Public `runtime.json`
+remains on disk; it contains no bearer or private key. Its server address,
+computer/tenant/principal identities, approved folder and local key identity
+must match the protected pairing before cold-start lifecycle or bearer requests;
+changing that disk file cannot redirect credentials.
+
+The server verifies possession of the browser-pinned key; this is not remote
+hardware attestation. A new pairing still needs the person to trust the installed
+daemon and review the requested computer. Automated tests use an injectable
+signer and cover server proof verification, migration and unsigned native denial.
+A signed interactive Mac qualification must additionally prove actual enclave
+creation, Touch ID success/cancel, changed-biometry invalidation and Keychain ACL
+refusal to a separate unsigned process before release. Local unsigned checks do
+not supply that hardware or ACL qualification.
 
 ### Signed release daemon (AEON-285)
 
@@ -338,10 +371,11 @@ see them. Signing happens before `SHA256SUMS` is computed.
 
 `scripts/build-release-binaries.sh` embeds the expected team through
 `-X github.com/inspr-at/paimos/internal/agentd.expectedTeamID=P66J39QV6V`
-(`AEON_DEVELOPER_ID_TEAM` overrides it). The daemon compares the team of its own
-valid signature with that value. An empty value (development and Nix builds),
-an ad-hoc signature or another team reports `unsigned` and refuses Mac
-confirmation with an explicit message.
+for the existing signing diagnostics (`AEON_DEVELOPER_ID_TEAM` overrides that
+value). The enclave and Keychain boundary additionally requires the fixed team
+`P66J39QV6V`, identifier `paimos-agentd` and hardened runtime; changing a build
+variable cannot relax it. Development/Nix builds without `aeon_enclave`, ad-hoc
+signatures and other teams report `unsigned` and refuse Mac confirmation.
 
 Bare binaries cannot be stapled, so Gatekeeper looks the notarization ticket up
 online on first run. To verify a downloaded daemon:
@@ -389,8 +423,15 @@ aeon-agentd attach --setup-root /absolute/setup-root --pid 1234 --harness codex 
 The local helper reads consent from its controlling terminal, never stdin or a
 flag. It must belong to an existing live terminal session, cannot itself be a
 session leader, and neither its ancestry nor its session leader's ancestry may
-include the target harness. These checks repeat at confirmation and on every
-poll, including immediately before upload. Type `WATCH`, then open the paired
+include the target harness. These checks are defence in depth: they repeat at
+confirmation and on every poll, including immediately before upload, and
+same-user code can still open an independent terminal and request the review.
+Ancestors are identified from kernel metadata only. On Linux that is
+`/proc/<pid>/stat` plus the directory uid, so a root-owned sshd, su or sudo
+ancestor stays acceptable; the target still needs its executable and cwd. On a
+Mac with an upgraded pairing whose daemon reports that Touch ID can run, the
+unsaved default also requires an enclave-signed confirmation before a session
+exists. Type `WATCH`, then open the paired
 instance's Agents page and choose
 **Attach session**. Review the code and snapshot, then approve. Keep the terminal
 open; Ctrl-C detaches without signalling the harness. Missing helper polls,
@@ -468,3 +509,11 @@ aeon outcome record --ticket AEON-286 --kind review_verdict \
 ```
 
 `--kind` is `review_verdict`, `fix_round`, `ci_result` or `revert`. A review verdict is `--verdict ok` or `--verdict changes`, and may name `--author-family` and `--blocking-count`. A fix round needs `--round`. A CI result needs `--result pass` or `--result fail`, `--repo` and `--pr`, and may name the check with `--name`. A revert needs `--summary`. `--session` is the harness session UUID when the work had one. `--rules-version` may be omitted; it stays empty until a rules version is recorded. Marking a ticket done, accepted or delivered, and publishing a release, are recorded automatically. Completion records the time from the first worker marker, or from the first move to in progress, and the harness session when one is known. A published release records the same session. Do not post those two kinds.
+
+## Outcome proposals (AEON-378)
+
+The server's daily deterministic analysis runs for the configured doctrine App tenant. Defaults are a 14-day window, three affected tickets, more than two fix rounds, five open draft reservations and five draft attempts per UTC day. `doctrine.Options.Analysis` bounds these host settings. There is no LLM client or summarizer setting: token use is zero. Runs are claimed durably once per UTC day; an uncertain GitHub write retains its slot and request UUID for the next day's retry. Each tenant/rule has at most one active analysis reservation, including unfinished writes. Analysis never approves, merges, releases, changes a pin or reverts a rule.
+
+Outcomes, exception votes and the current learnings inbox are grouped by the server-recorded merged instruction version at the observation time, harness and ticket kind. Missing provenance is left unattributed. Fixed vocabulary classes (validation, security, scope), high fix rounds, CI failures, reverts and exception votes map to one matching indexed rule. Ambiguous or absent targets become internal notes. The proposed clarification uses the AEON-319 path, creates a GitHub draft with `aeon-proposal`, and passes the same main-file and private-quotation guards. Private-text refusals become internal notes; an unavailable private guard retains its reservation for the next daily retry. Private evidence text and workspace URLs never enter the public PR; its fixed explanation includes the recurrence count, baseline and intended direction. Ticket/event references remain in Settings → Agent rules → Proposals, available only to people with workspace `rules.read`, `outcome.read` and `knowledge.read`.
+
+After an observed merge, comparison requires a later rules version with instruction provenance matching the complete changed file hash, in the same harness and ticket kind, and at least three eligible observations. A repository pin alone never proves use. If the harness does not report those bytes, the comparison stays pending. Baseline context includes review rounds, fix rounds, CI failures, reverts, exception votes and time to done. Rates include successful observations; review and fix rounds use each ticket's highest recorded round. Exception and revert rates describe observed tickets, not silent/unobserved work. A completed comparison adds one System-authored ticket comment with sample sizes and the delta; it is descriptive, not causal. Findings persist references, aggregate numbers and hashes, never proposed rule prose. Scans are bounded at 5,000 samples and 500 projects and refuse a truncated learnings page rather than propose from an incomplete scan. Tests inject a fake forge and must never contact real GitHub.

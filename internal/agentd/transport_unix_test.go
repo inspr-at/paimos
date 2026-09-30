@@ -71,7 +71,7 @@ func TestLocalSocketAuthAndBound(t *testing.T) {
 		t.Fatalf("authenticated status %d", response.StatusCode)
 	}
 	// Capacity is opt-in, preserving strict lifecycle decoders during upgrades.
-	for _, query := range []string{"", "?include_capacity=1", "?include_capacity=1&account_id=missing"} {
+	for _, query := range []string{"", "?include_capacity=1", "?include_capacity=1&account_id=missing", "?include_readiness=1"} {
 		request, _ = http.NewRequest("GET", "http://agentd/v1/lifecycle"+query, nil)
 		request.Header.Set("Authorization", "Bearer "+string(token))
 		response, err = client.Do(request)
@@ -84,8 +84,12 @@ func TestLocalSocketAuthAndBound(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		_, readiness := body["account_statuses"]
+		if readiness != strings.Contains(query, "include_readiness=1") {
+			t.Fatal("readiness changed legacy lifecycle contract")
+		}
 		_, present := body["capacity_accounts"]
-		if present != (query != "") {
+		if present != strings.Contains(query, "include_capacity=1") {
 			t.Fatal("capacity changed the ordinary lifecycle contract")
 		}
 		if strings.Contains(query, "missing") && string(body["capacity_accounts"]) != "[]" {

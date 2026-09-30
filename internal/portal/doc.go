@@ -15,6 +15,9 @@
 // tenant setting defaults off, and a closed portal answers the same 404 as an
 // unknown address. Published release notes are the frozen snapshot for the
 // one project linked on the pace screen, and only after that link turns
-// release history on. A pace link alone publishes nothing. llms.txt and
-// catalog.json repeat only that public document.
+// release history on. A pace link alone publishes nothing. The public roadmap
+// is a separate whitelist (pill, benefit, target, status) for tickets a person
+// approved. It does not wait for release history. A shipped ticket already
+// visible there leaves the roadmap. llms.txt and catalog.json repeat only
+// that public document, plus a roadmap link when an item exists.
 package portal

@@ -21,6 +21,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 )
@@ -48,6 +50,7 @@ type Choice struct {
 	Provider   string `json:"provider,omitempty"`
 }
 type Details struct {
+	LocalAuthPublicKey string   `json:"local_auth_public_key,omitempty"`
 	ComputerName       string   `json:"computer_name"`
 	Platform           string   `json:"platform"`
 	Arch               string   `json:"arch"`
@@ -67,8 +70,10 @@ type deviceRequest struct {
 	ExistingProof string `json:"existing_lifecycle_secret,omitempty"`
 }
 type SetupProgress struct {
-	State     string `json:"state"`
-	ErrorCode string `json:"error_code,omitempty"`
+	HarnessDetails  map[string]agentsetup.HarnessDetail `json:"harness_details,omitempty"`
+	HarnessStatuses map[string]string                   `json:"harness_statuses,omitempty"`
+	State           string                              `json:"state"`
+	ErrorCode       string                              `json:"error_code,omitempty"`
 }
 
 type proofRequest struct {
@@ -92,51 +97,55 @@ type Verification struct {
 	Task           string    `json:"task"`
 }
 type Enrollment struct {
-	LocalProcesses    string   `json:"local_processes"`
-	AccountingState   string   `json:"accounting_state"`
-	VerificationState string   `json:"verification_state"`
-	VerificationError string   `json:"verification_error"`
-	AccountID         string   `json:"account_id"`
-	AccountKey        string   `json:"account_key"`
-	Harness           string   `json:"harness"`
-	Label             string   `json:"label"`
-	ProfileID         string   `json:"model_profile_id"`
-	State             string   `json:"state"`
-	Cleanup           string   `json:"local_cleanup"`
-	VerificationRunID *string  `json:"verification_run_id"`
-	ActiveRunIDs      []string `json:"active_run_ids"`
+	LocalProcesses     string   `json:"local_processes"`
+	AccountingState    string   `json:"accounting_state"`
+	VerificationState  string   `json:"verification_state"`
+	VerificationError  string   `json:"verification_error"`
+	VerificationReason string   `json:"verification_reason,omitempty"`
+	AccountID          string   `json:"account_id"`
+	AccountKey         string   `json:"account_key"`
+	Harness            string   `json:"harness"`
+	Label              string   `json:"label"`
+	ProfileID          string   `json:"model_profile_id"`
+	State              string   `json:"state"`
+	Cleanup            string   `json:"local_cleanup"`
+	VerificationRunID  *string  `json:"verification_run_id"`
+	ActiveRunIDs       []string `json:"active_run_ids"`
 }
 type View struct {
-	VerificationCapabilities  map[string]VerificationCapability `json:"verification_capabilities"`
-	VerificationHelperVersion string                            `json:"verification_helper_version"`
-	ExistingComputerID        string                            `json:"existing_computer_id,omitempty"`
-	AccountingState           string                            `json:"accounting_state"`
-	SetupState                string                            `json:"setup_state"`
-	SetupError                string                            `json:"setup_error"`
-	LastSeenAt                *time.Time                        `json:"last_seen_at"`
-	Connectivity              string                            `json:"connectivity"`
-	RequestID                 string                            `json:"request_id"`
-	TenantID                  string                            `json:"tenant_id"`
-	TenantName                string                            `json:"tenant_name"`
-	State                     string                            `json:"state"`
-	Digest                    string                            `json:"request_digest"`
-	ExpiresAt                 time.Time                         `json:"expires_at"`
-	ComputerName              string                            `json:"computer_name"`
-	Platform                  string                            `json:"platform"`
-	Arch                      string                            `json:"arch"`
-	Workspace                 string                            `json:"workspace_path"`
-	Capabilities              []string                          `json:"capabilities"`
-	Requested                 []Choice                          `json:"requested_accounts"`
-	Verification              Verification                      `json:"verification"`
-	ComputerID                *string                           `json:"computer_id"`
-	ComputerState             *string                           `json:"computer_state"`
-	PrincipalID               *string                           `json:"principal_id"`
-	DaemonID                  *string                           `json:"daemon_id"`
-	RuntimePrefix             string                            `json:"runtime_prefix,omitempty"`
-	Cleanup                   string                            `json:"local_cleanup"`
-	Processes                 string                            `json:"local_processes"`
-	Enrollments               []Enrollment                      `json:"enrollments"`
-	Revision                  int64                             `json:"revision"`
+	HarnessDetails            map[string]agentsetup.HarnessDetail `json:"harness_details,omitempty"`
+	HarnessStatuses           map[string]string                   `json:"harness_statuses,omitempty"`
+	VerificationCapabilities  map[string]VerificationCapability   `json:"verification_capabilities"`
+	VerificationHelperVersion string                              `json:"verification_helper_version"`
+	ExistingComputerID        string                              `json:"existing_computer_id,omitempty"`
+	AccountingState           string                              `json:"accounting_state"`
+	SetupState                string                              `json:"setup_state"`
+	SetupError                string                              `json:"setup_error"`
+	LastSeenAt                *time.Time                          `json:"last_seen_at"`
+	ArchivedAt                *time.Time                          `json:"archived_at,omitempty"`
+	Connectivity              string                              `json:"connectivity"`
+	RequestID                 string                              `json:"request_id"`
+	TenantID                  string                              `json:"tenant_id"`
+	TenantName                string                              `json:"tenant_name"`
+	State                     string                              `json:"state"`
+	Digest                    string                              `json:"request_digest"`
+	ExpiresAt                 time.Time                           `json:"expires_at"`
+	ComputerName              string                              `json:"computer_name"`
+	Platform                  string                              `json:"platform"`
+	Arch                      string                              `json:"arch"`
+	Workspace                 string                              `json:"workspace_path"`
+	Capabilities              []string                            `json:"capabilities"`
+	Requested                 []Choice                            `json:"requested_accounts"`
+	Verification              Verification                        `json:"verification"`
+	ComputerID                *string                             `json:"computer_id"`
+	ComputerState             *string                             `json:"computer_state"`
+	PrincipalID               *string                             `json:"principal_id"`
+	DaemonID                  *string                             `json:"daemon_id"`
+	RuntimePrefix             string                              `json:"runtime_prefix,omitempty"`
+	Cleanup                   string                              `json:"local_cleanup"`
+	Processes                 string                              `json:"local_processes"`
+	Enrollments               []Enrollment                        `json:"enrollments"`
+	Revision                  int64                               `json:"revision"`
 }
 type record struct {
 	ID, TenantID, Code, DeviceHash, RuntimeHash, LifecycleHash, Digest, State string
@@ -192,6 +201,9 @@ func safeText(s string, max int) bool {
 	return len(s) > 0 && len(s) <= max && strings.TrimSpace(s) == s && utf8.ValidString(s) && !strings.ContainsFunc(s, unicode.IsControl)
 }
 func validateDevice(in deviceRequest) error {
+	if in.LocalAuthPublicKey != "" && (in.Platform != "darwin" || attachwatch.LocalAuthPublicKey(in.LocalAuthPublicKey) == nil) {
+		return fail(400, "invalid_request", "valid Mac P-256 public key required")
+	}
 	if !uuidRE.MatchString(in.RequestID) || (in.TenantID == "") == (in.TenantSlug == "") || in.TenantID != "" && !uuidRE.MatchString(in.TenantID) || !hashRE.MatchString(in.DeviceHash) || !hashRE.MatchString(in.RuntimeHash) || !hashRE.MatchString(in.LifecycleHash) || in.DeviceHash == in.RuntimeHash || in.DeviceHash == in.LifecycleHash || in.RuntimeHash == in.LifecycleHash {
 		return fail(400, "invalid_request", "distinct commitments, request UUID and exactly one tenant selector required")
 	}

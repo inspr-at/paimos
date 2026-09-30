@@ -13,11 +13,13 @@ import (
 )
 
 type watchSetting struct {
-	ConsentMode string `json:"consent_mode"`
-	Computers   []struct {
-		ComputerID string `json:"computer_id"`
-		Name       string `json:"name"`
-		Capability string `json:"capability"`
+	ConsentMode  string `json:"consent_mode"`
+	ConsentSaved bool   `json:"consent_saved"`
+	Computers    []struct {
+		ComputerID      string `json:"computer_id"`
+		Name            string `json:"name"`
+		Capability      string `json:"capability"`
+		PairingUpgraded bool   `json:"pairing_upgraded"`
 	} `json:"local_auth_computers"`
 }
 
@@ -93,7 +95,7 @@ func TestWatchSecurityIsPersonOnlySameOriginAndTenantScoped(t *testing.T) {
 	}
 }
 func TestStrictWatchRequiresBoundDaemonConfirmation(t *testing.T) {
-	f, key, in := watchFixture(t)
+	f, key, in, signer := upgradedWatchFixture(t)
 	setWatchMode(f, attachwatch.ConsentLocalAuth)
 	in.Snapshot.Platform = "darwin"
 	in.Digest = in.Snapshot.Digest()
@@ -114,10 +116,11 @@ func TestStrictWatchRequiresBoundDaemonConfirmation(t *testing.T) {
 		t.Fatal("activated without local confirmation")
 	}
 	in.LocalConfirmed = true
-	f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
-	in.ConsentDigest = attachwatch.ConsentDigest(v.RequestID, v.Digest, attachwatch.ConsentAeon)
-	f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
 	in.ConsentDigest = v.ConsentDigest
+	f.call("POST", "/api/agent-pairing/attach", in, false, key, 403)
+	in.LocalConfirmed = false
+	in.LocalAuthNonce = waiting.LocalAuthNonce
+	in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, waiting.LocalAuthNonce)
 	stolen := in
 	stolen.PollKey = ""
 	f.call("POST", "/api/agent-pairing/attach", stolen, false, key, 403)
@@ -133,7 +136,7 @@ func TestStrictWatchRequiresBoundDaemonConfirmation(t *testing.T) {
 	}
 }
 func TestWatchSecurityCannotBeDowngradedByRequestOrStaleReview(t *testing.T) {
-	f, key, in := watchFixture(t)
+	f, key, in, _ := upgradedWatchFixture(t)
 	in.Snapshot.Platform = "darwin"
 	in.Digest = in.Snapshot.Digest()
 	in.ConsentDigest = attachwatch.ConsentDigest(in.RequestID, in.Digest, attachwatch.ConsentAeon)
@@ -154,7 +157,7 @@ func TestWatchSecurityCannotBeDowngradedByRequestOrStaleReview(t *testing.T) {
 func TestStrictWatchUnavailableOnLinuxAndLegacyDaemon(t *testing.T) {
 	for _, platform := range []string{"linux", ""} {
 		t.Run(platform, func(t *testing.T) {
-			f, key, in := watchFixture(t)
+			f, key, in, _ := upgradedWatchFixture(t)
 			setWatchMode(f, attachwatch.ConsentLocalAuth)
 			in.Snapshot.Platform = platform
 			in.Digest = in.Snapshot.Digest()
@@ -204,13 +207,13 @@ func TestLocalAuthCapabilityFollowsDaemonRegistration(t *testing.T) {
 	if got := readWatchSetting(t, f); len(got.Computers) != 1 || got.Computers[0].Capability != attachwatch.LocalAuthUnreported {
 		t.Fatalf("poll changed capability %+v", got.Computers)
 	}
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce(), LocalAuthCapability: "browser"}, false, key, 400)
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce(), LocalAuthCapability: attachwatch.LocalAuthUnreported}, false, key, 400)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce(), LocalAuthCapability: "browser"}, false, key, 400)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce(), LocalAuthCapability: attachwatch.LocalAuthUnreported}, false, key, 400)
 	if got := readWatchSetting(t, f); got.Computers[0].Capability != attachwatch.LocalAuthUnreported {
 		t.Fatal("rejected registration changed capability")
 	}
 	keyPoll := nonce()
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: keyPoll, LocalAuthCapability: attachwatch.LocalAuthAvailable}, false, key, 200)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: keyPoll, LocalAuthCapability: attachwatch.LocalAuthAvailable}, false, key, 200)
 	if got := readWatchSetting(t, f); got.Computers[0].Capability != attachwatch.LocalAuthAvailable {
 		t.Fatalf("available report %+v", got.Computers)
 	}
@@ -224,7 +227,7 @@ func TestLocalAuthCapabilityFollowsDaemonRegistration(t *testing.T) {
 	if got := readWatchSetting(t, f); got.Computers[0].Capability != attachwatch.LocalAuthAvailable {
 		t.Fatal("request changed capability")
 	}
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce()}, false, key, 200)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce()}, false, key, 200)
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_requests q SET details=details-'computer_name' FROM agent_pairing_computers c WHERE c.id=$1 AND q.tenant_id=c.tenant_id AND q.id=c.request_id`, in.ComputerID); err != nil {
 		t.Fatal(err)
 	}
@@ -246,4 +249,100 @@ func TestLocalAuthCapabilityFollowsDaemonRegistration(t *testing.T) {
 	if got := readWatchSetting(t, f); got.ConsentMode != attachwatch.ConsentAeon || len(got.Computers) != 0 {
 		t.Fatalf("other person saw %+v", got)
 	}
+}
+
+func registerCapability(t *testing.T, f *fixture, key string, in *attachwatch.DeviceRequest, capability string) {
+	t.Helper()
+	poll := nonce()
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: poll, LocalAuthCapability: capability}, false, key, 200)
+	in.PollKey = poll
+}
+
+func finishAeonWatch(t *testing.T, f *fixture, key string, in *attachwatch.DeviceRequest, v attachwatch.View) {
+	t.Helper()
+	f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200)
+	in.Operation = "poll"
+	in.Digest = v.Digest
+	in.ConsentDigest = v.ConsentDigest
+	in.Sequence = 1
+	var active attachwatch.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &active)
+	if active.State != "active" || active.SessionID == nil {
+		t.Fatal("aeon watch did not activate")
+	}
+}
+
+func TestTouchIDDefaultIsMacOnlyUntilSaved(t *testing.T) {
+	t.Run("darwin available", func(t *testing.T) {
+		f, key, in, signer := upgradedWatchFixture(t)
+		registerCapability(t, f, key, &in, attachwatch.LocalAuthAvailable)
+		in.Snapshot.Platform = "darwin"
+		v := requestWatch(t, f, key, in)
+		if v.ConsentMode != attachwatch.ConsentLocalAuth {
+			t.Fatalf("unsaved mac default %s", v.ConsentMode)
+		}
+		if got := readWatchSetting(t, f); got.ConsentMode != attachwatch.ConsentLocalAuth || got.ConsentSaved || !got.Computers[0].PairingUpgraded {
+			t.Fatalf("settings %+v", got)
+		}
+		f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200)
+		in.Operation, in.Sequence = "poll", 1
+		in.Digest = v.Digest
+		var waiting attachwatch.View
+		decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &waiting)
+		if waiting.State != "approved" || waiting.SessionID != nil || waiting.LeaseUntil != nil || waiting.ConsentMode != attachwatch.ConsentLocalAuth {
+			t.Fatal("activated without local confirmation")
+		}
+		in.LocalConfirmed = true
+		in.ConsentDigest = v.ConsentDigest
+		f.call("POST", "/api/agent-pairing/attach", in, false, key, 403)
+		in.LocalConfirmed = false
+		in.LocalAuthNonce = waiting.LocalAuthNonce
+		in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce)
+		decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &waiting)
+		if waiting.State != "active" || waiting.SessionID == nil {
+			t.Fatal("confirmed watch did not activate")
+		}
+	})
+	for _, capability := range []string{attachwatch.LocalAuthNoGUI, attachwatch.LocalAuthPolicy, attachwatch.LocalAuthUnsigned} {
+		t.Run(capability, func(t *testing.T) {
+			f, key, in, _ := upgradedWatchFixture(t)
+			registerCapability(t, f, key, &in, capability)
+			in.Snapshot.Platform = "darwin"
+			v := requestWatch(t, f, key, in)
+			if v.ConsentMode != attachwatch.ConsentAeon {
+				t.Fatalf("headless or incapable mac left aeon: %s", v.ConsentMode)
+			}
+			if got := readWatchSetting(t, f); got.ConsentMode != attachwatch.ConsentAeon || got.ConsentSaved {
+				t.Fatalf("settings %+v", got)
+			}
+			finishAeonWatch(t, f, key, &in, v)
+		})
+	}
+	t.Run("linux available", func(t *testing.T) {
+		f, key, in, _ := upgradedWatchFixture(t)
+		registerCapability(t, f, key, &in, attachwatch.LocalAuthAvailable)
+		in.Snapshot.Platform = "linux"
+		v := requestWatch(t, f, key, in)
+		if v.ConsentMode != attachwatch.ConsentAeon {
+			t.Fatalf("linux request used %s", v.ConsentMode)
+		}
+		if got := readWatchSetting(t, f); got.ConsentMode != attachwatch.ConsentLocalAuth || got.ConsentSaved {
+			t.Fatalf("settings display %+v", got)
+		}
+		finishAeonWatch(t, f, key, &in, v)
+	})
+	t.Run("saved aeon opt-out", func(t *testing.T) {
+		f, key, in, _ := upgradedWatchFixture(t)
+		registerCapability(t, f, key, &in, attachwatch.LocalAuthAvailable)
+		setWatchMode(f, attachwatch.ConsentAeon)
+		in.Snapshot.Platform = "darwin"
+		v := requestWatch(t, f, key, in)
+		if v.ConsentMode != attachwatch.ConsentAeon {
+			t.Fatalf("saved opt-out used %s", v.ConsentMode)
+		}
+		if got := readWatchSetting(t, f); got.ConsentMode != attachwatch.ConsentAeon || !got.ConsentSaved {
+			t.Fatalf("settings %+v", got)
+		}
+		finishAeonWatch(t, f, key, &in, v)
+	})
 }

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Pure rules for the agents workspace: what state a session is in, which group it
-// belongs to, what an approval asks for and how risky it is, and how an account's
-// allowance window is pacing. Free of Vue so it can be unit tested.
+// belongs to, and what an approval asks for and how risky it is. Free of Vue so it
+// can be unit tested.
 import { brand } from './brand.ts'
-import { paceFraction, type AgentRun, type AllowanceWindow, type Approval, type HarnessSession, type ProjectMessage } from './agents.ts'
+import type { AgentRun, Approval, HarnessSession, ProjectMessage } from './agents.ts'
 
 import { DEFAULT_AGENT_STATE, assessAgentState, type StateReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
 
@@ -42,6 +42,9 @@ export function mergeSessionEvidence(previous: HarnessSession | undefined, incom
   return {
     ...incoming,
     has_problem: incoming.has_problem ?? previous.has_problem,
+    vendor_limited: incoming.vendor_limited ?? previous.vendor_limited,
+    limit_window: incoming.limit_window ?? previous.limit_window,
+    limit_resets_at: incoming.limit_resets_at ?? previous.limit_resets_at,
     needs_attention: incoming.needs_attention ?? previous.needs_attention,
     attention_reasons: incoming.attention_reasons ?? previous.attention_reasons,
     run_status: incoming.run_status !== undefined ? incoming.run_status : previous.run_status,
@@ -62,6 +65,12 @@ export function agentName(session: Pick<HarnessSession, 'agent_principal_id' | '
   const name = address?.split(':')[1]
   return session.display_label?.trim() || name || session.agent?.name || session.host
 }
+
+// Live sessions keep the order they started in, stopped ones lead with the latest
+// stop; UUIDs break ties. Heartbeats only decide state, never position (AEON-468).
+const byId = (a: HarnessSession, b: HarnessSession) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+export const byStart = (a: HarnessSession, b: HarnessSession) => Date.parse(a.created_at) - Date.parse(b.created_at) || byId(a, b)
+export const byStopped = (a: HarnessSession, b: HarnessSession) => Date.parse(b.stopped_at ?? b.created_at) - Date.parse(a.stopped_at ?? a.created_at) || byId(a, b)
 
 export interface SessionBranch<T> {
   view: T; children: SessionBranch<T>[]; group: SessionGroup; liveCount: number; workingCount: number; count: number
@@ -89,7 +98,6 @@ export function sessionForest<T extends { session: HarnessSession; status: Sessi
   }
   const rank = (group: SessionGroup) => GROUPS.findIndex(g => g.id === group)
   const activityRank = (branch: SessionBranch<T>) => branch.workingCount ? 0 : branch.liveCount ? 1 : 2
-  const beat = (s: HarnessSession) => Date.parse(s.heartbeat_at ?? s.created_at)
   const summarize = (branch: SessionBranch<T>) => {
     const s = branch.view.session
     branch.liveCount = s.phase === 'stopped' || s.stopped_at ? 0 : 1
@@ -102,10 +110,10 @@ export function sessionForest<T extends { session: HarnessSession; status: Sessi
       branch.workingCount += child.workingCount
       if (rank(child.group) < rank(branch.group)) branch.group = child.group
     }
-    // Active branches lead, including stopped parents of live descendants.
-    // UUIDs break heartbeat ties; keyed rows retain their identity on refresh.
-    branch.children.sort((a, b) => activityRank(a) - activityRank(b)
-      || beat(b.view.session) - beat(a.view.session) || a.view.session.id.localeCompare(b.view.session.id))
+    // Active branches lead, including stopped parents of live descendants, in
+    // start order; ended ones follow, latest stop first. UUIDs break ties. A
+    // heartbeat never moves a row (AEON-468).
+    branch.children.sort((a, b) => activityRank(a) - activityRank(b) || (activityRank(a) === 2 ? byStopped : byStart)(a.view.session, b.view.session))
   }
   roots.forEach(summarize)
   return roots
@@ -127,9 +135,8 @@ export function groupSessions(sessions: HarnessSession[], now: number, needs: (s
     const status = sessionStatus(session, now, needs(session))
     buckets[status.group].push({ session, status })
   }
-  const beat = (s: HarnessSession) => Date.parse(s.heartbeat_at ?? s.created_at)
-  for (const group of ['problem', 'unresponsive', 'needs', 'awaiting', 'throttled', 'working', 'idle'] as const) buckets[group].sort((a, b) => beat(b.session) - beat(a.session))
-  buckets.stopped.sort((a, b) => Date.parse(b.session.stopped_at ?? b.session.created_at) - Date.parse(a.session.stopped_at ?? a.session.created_at))
+  for (const group of ['problem', 'unresponsive', 'needs', 'awaiting', 'throttled', 'working', 'idle'] as const) buckets[group].sort((a, b) => byStart(a.session, b.session))
+  buckets.stopped.sort((a, b) => byStopped(a.session, b.session))
   return buckets
 }
 
@@ -226,26 +233,6 @@ export const expiresSoon = (approval: Approval, now: number) => Date.parse(appro
 
 // ---------- Held action requests ----------
 export const heldRequests = (messages: ProjectMessage[]) => messages.filter(m => m.is_action_request && !m.human_resolution_outcome)
-
-// ---------- Allowance windows ----------
-export type Pace = 'ahead' | 'on' | 'under'
-export interface WindowSummary { window: AllowanceWindow; left: number; pace: Pace; expected: number; used: number; resetsIn: number }
-export function windowSummary(window: AllowanceWindow, now: number): WindowSummary | null {
-  const start = Date.parse(window.starts_at), end = Date.parse(window.ends_at)
-  if (!(now >= start && now < end) || window.allowance <= 0) return null
-  const used = Math.min(1, (window.used + window.reserved) / window.allowance)
-  const expected = paceFraction(window.pace_model, (now - start) / (end - start), window.burst_ratio)
-  const pace: Pace = used > expected + 0.02 ? 'ahead' : used < expected - 0.15 ? 'under' : 'on'
-  return { window, left: Math.max(0, 1 - used), pace, expected, used, resetsIn: end - now }
-}
-// The window that binds first: the active one with the least left.
-export function bindingWindow(windows: AllowanceWindow[] | undefined, now: number) {
-  const summaries = (windows ?? []).map(w => windowSummary(w, now)).filter((w): w is WindowSummary => !!w)
-  const measured = summaries.filter(w => !w.window.provisional)
-  return (measured.length ? measured : summaries).sort((a, b) => a.left - b.left)[0] ?? null
-}
-export const PACE_LABEL: Record<Pace, string> = { ahead: 'Ahead of pace', on: 'On pace', under: 'Room to spare' }
-export const UNIT_LABEL: Record<AllowanceWindow['unit'], string> = { requests: 'requests', tokens: 'tokens', cost_micros: 'spend', percent: 'percent' }
 
 // Why a typed control cannot be sent right now, or '' when it can. Controls exist
 // only for sessions Aeon owns that advertise them, one at a time.

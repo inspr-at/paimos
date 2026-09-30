@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { compare, presentChanges, releaseCopy, releasedAt, releaseName, span, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { compare, presentCompare, releaseCopy, releasedAt, releaseName, span, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { absoluteTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
@@ -15,9 +15,10 @@ const props = defineProps<{ releases: Release[]; from: string; to: string | null
 const emit = defineEmits<{ swap: []; exit: [] }>()
 const result = computed(() => props.to && props.to !== props.from ? compare(props.releases, props.from, props.to) : null)
 const count = computed(() => result.value ? result.value.groups.features.length + result.value.groups.fixes.length + result.value.groups.other.length : 0)
-// The range reads like one release: a block per linked ticket, and a chip only
-// for tickets that head no block.
-const lines = computed(() => result.value ? presentChanges(result.value.changes, props.lang) : null)
+// The range reads like one release. The server's changes[].group places each
+// commit, with or without note text, and a shared commit stays in that group.
+// A chip is only for a ticket that heads no block.
+const lines = computed(() => result.value ? presentCompare(result.value.changes, props.lang) : null)
 // Each release's name, with the language it is shown in for the fallback badge.
 const names = computed(() => new Map((result.value?.releases ?? []).map(r => [r.version, releaseName(r, props.lang)])))
 const rangeTitle = (r: Release) => names.value.get(r.version) ?? { text: '', lang: props.lang }

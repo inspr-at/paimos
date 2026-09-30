@@ -79,6 +79,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/catalog.json", m.catalogFile)
 	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/llms.txt", m.llms)
 	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/releases", m.releases)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/roadmap", m.roadmap)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/roadmap.json", m.roadmap)
 	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/wishes", m.submitWish)
 	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/wishes/{wishKey}/votes", m.vote)
 	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/corrections", m.submitCorrection)
@@ -89,6 +91,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 func (m *Module) MountPublic(mux *http.ServeMux) {
 	mux.HandleFunc("GET /portal/{tenantSlug}/llms.txt", m.llms)
 	mux.HandleFunc("GET /portal/{tenantSlug}/catalog.json", m.catalogFile)
+	mux.HandleFunc("GET /portal/{tenantSlug}/roadmap.json", m.roadmap)
 }
 
 func write(w http.ResponseWriter, status int, value any) {

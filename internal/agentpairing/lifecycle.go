@@ -3,8 +3,10 @@ package agentpairing
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -250,7 +252,7 @@ func disconnectRequest(ctx context.Context, tx pgx.Tx, rec record) error {
 	}
 	return nil
 }
-func cleanup(ctx context.Context, tx pgx.Tx, computer string, in proofRequest) error {
+func (m *Module) cleanup(ctx context.Context, tx pgx.Tx, computer string, in proofRequest) error {
 	changed := false
 	if in.Progress != nil {
 		switch in.Progress.State {
@@ -263,7 +265,12 @@ func cleanup(ctx context.Context, tx pgx.Tx, computer string, in proofRequest) e
 		default:
 			return fail(400, "invalid_request", "unknown setup error")
 		}
-		if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET setup_state=$2,setup_error=$3,last_seen_at=clock_timestamp() WHERE id=$1 AND state='connected'`, computer, in.Progress.State, in.Progress.ErrorCode); err != nil {
+		statuses, details, err := m.harnessReports(ctx, tx, computer, in.Progress)
+		if err != nil {
+			return err
+		}
+		// A legacy daemon omits reports. Clear stale state after a downgrade.
+		if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET setup_state=$2,setup_error=$3,harness_statuses=$4,harness_details=$5,last_seen_at=clock_timestamp() WHERE id=$1 AND state='connected'`, computer, in.Progress.State, in.Progress.ErrorCode, statuses, details); err != nil {
 			return err
 		}
 	}
@@ -310,4 +317,70 @@ func cleanup(ctx context.Context, tx pgx.Tx, computer string, in proofRequest) e
 		return audit(ctx, tx, tenant.Principal{ID: principal, TenantID: tenantID, Kind: tenant.Agent}, "agent_pairing.cleanup_acknowledged", map[string]any{"computer_id": computer, "account_ids": in.Cleaned, "computer_cleanup_confirmed": in.ComputerCleaned})
 	}
 	return nil
+}
+
+// harnessReports treats optional telemetry as advisory: version skew must not
+// prevent lifecycle fences or cleanup acknowledgements from being reconciled.
+func (m *Module) harnessReports(ctx context.Context, tx pgx.Tx, computer string, progress *SetupProgress) (map[string]string, map[string]agentsetup.HarnessDetail, error) {
+	statuses := map[string]string{}
+	details := map[string]agentsetup.HarnessDetail{}
+	enrolled := map[string]bool{}
+	enrolledAccounts := map[string][]string{}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT a.harness, e.account_id::text FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$1 AND e.state<>'revoked'`, computer)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var harness, accountID string
+		if err := rows.Scan(&harness, &accountID); err != nil {
+			return nil, nil, err
+		}
+		enrolled[harness] = true
+		enrolledAccounts[harness] = append(enrolledAccounts[harness], accountID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	dropped := false
+	for harness, status := range progress.HarnessStatuses {
+		if _, ok := agentsetup.HarnessReport(harness, status, ""); !ok || !enrolled[harness] {
+			dropped = true
+			continue
+		}
+		// A newer state token stays in harness_details; the legacy map keeps
+		// its closed set for older readers.
+		if agentsetup.KnownHarnessState(status) {
+			statuses[harness] = status
+		}
+	}
+	for harness, report := range progress.HarnessDetails {
+		detail, ok := agentsetup.HarnessReport(harness, report.State, report.Reason)
+		legacy, hasLegacy := progress.HarnessStatuses[harness]
+		if !ok || !enrolled[harness] || hasLegacy && legacy != report.State {
+			dropped = true
+			continue
+		}
+		if agentsetup.KnownHarnessState(detail.State) {
+			statuses[harness] = detail.State
+		}
+		// Never persist client-supplied commands, paths or diagnostics: the
+		// fix is derived from the harness and reason code. Attention on a
+		// non-ready report is ignored. A ready report keeps only enrolled
+		// accounts that are a proper subset and still need a fix.
+		if detail.State == "ready" {
+			block := agentsetup.ResolveAttention(harness, detail.State, enrolledAccounts[harness], report.Attention, report.AttentionCount, report.AttentionTruncated)
+			detail.Attention = block.Accounts
+			detail.AttentionCount = block.Count
+			detail.AttentionTruncated = block.Truncated
+		}
+		details[harness] = detail
+	}
+	if dropped {
+		m.ignoredHarnessReport.Do(func() {
+			// Once per module lifetime; no untrusted keys or values enter logs.
+			slog.Warn("ignored unsupported or unenrolled pairing harness report; lifecycle reconciliation continues")
+		})
+	}
+	return statuses, details, nil
 }

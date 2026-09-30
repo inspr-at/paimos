@@ -22,6 +22,7 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 var hashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type Details struct {
+	LocalAuthPublicKey string      `json:"local_auth_public_key,omitempty"`
 	ComputerName       string      `json:"computer_name"`
 	Platform           string      `json:"platform"`
 	Arch               string      `json:"arch"`
@@ -60,8 +61,10 @@ type ProofRequest struct {
 	ComputerCleaned bool           `json:"computer_cleanup_confirmed,omitempty"`
 }
 type SetupProgress struct {
-	State     string `json:"state"`
-	ErrorCode string `json:"error_code,omitempty"`
+	HarnessDetails  map[string]HarnessDetail `json:"harness_details,omitempty"`
+	HarnessStatuses map[string]string        `json:"harness_statuses,omitempty"`
+	State           string                   `json:"state"`
+	ErrorCode       string                   `json:"error_code,omitempty"`
 }
 type Verification struct {
 	Policy         string    `json:"policy"`
@@ -75,48 +78,51 @@ type Verification struct {
 	Task           string    `json:"task"`
 }
 type Enrollment struct {
-	AccountingState   string   `json:"accounting_state"`
-	LocalProcesses    string   `json:"local_processes"`
-	VerificationState string   `json:"verification_state"`
-	VerificationError string   `json:"verification_error"`
-	AccountID         string   `json:"account_id"`
-	AccountKey        string   `json:"account_key"`
-	Harness           string   `json:"harness"`
-	Label             string   `json:"label"`
-	ProfileID         string   `json:"model_profile_id"`
-	State             string   `json:"state"`
-	Cleanup           string   `json:"local_cleanup"`
-	VerificationRunID string   `json:"verification_run_id"`
-	ActiveRunIDs      []string `json:"active_run_ids"`
+	AccountingState    string   `json:"accounting_state"`
+	LocalProcesses     string   `json:"local_processes"`
+	VerificationState  string   `json:"verification_state"`
+	VerificationError  string   `json:"verification_error"`
+	VerificationReason string   `json:"verification_reason,omitempty"`
+	AccountID          string   `json:"account_id"`
+	AccountKey         string   `json:"account_key"`
+	Harness            string   `json:"harness"`
+	Label              string   `json:"label"`
+	ProfileID          string   `json:"model_profile_id"`
+	State              string   `json:"state"`
+	Cleanup            string   `json:"local_cleanup"`
+	VerificationRunID  string   `json:"verification_run_id"`
+	ActiveRunIDs       []string `json:"active_run_ids"`
 }
 type View struct {
-	ExistingComputerID string       `json:"existing_computer_id,omitempty"`
-	AccountingState    string       `json:"accounting_state"`
-	SetupState         string       `json:"setup_state"`
-	SetupError         string       `json:"setup_error"`
-	Connectivity       string       `json:"connectivity"`
-	RequestID          string       `json:"request_id"`
-	TenantID           string       `json:"tenant_id"`
-	TenantName         string       `json:"tenant_name"`
-	State              string       `json:"state"`
-	Digest             string       `json:"request_digest"`
-	ExpiresAt          time.Time    `json:"expires_at"`
-	ComputerName       string       `json:"computer_name"`
-	Platform           string       `json:"platform"`
-	Arch               string       `json:"arch"`
-	Workspace          string       `json:"workspace_path"`
-	Capabilities       []string     `json:"capabilities"`
-	Requested          []Candidate  `json:"requested_accounts"`
-	Verification       Verification `json:"verification"`
-	ComputerID         string       `json:"computer_id"`
-	ComputerState      string       `json:"computer_state"`
-	PrincipalID        string       `json:"principal_id"`
-	DaemonID           string       `json:"daemon_id"`
-	RuntimePrefix      string       `json:"runtime_prefix,omitempty"`
-	Cleanup            string       `json:"local_cleanup"`
-	Processes          string       `json:"local_processes"`
-	Enrollments        []Enrollment `json:"enrollments"`
-	Revision           int64        `json:"revision"`
+	HarnessDetails     map[string]HarnessDetail `json:"harness_details,omitempty"`
+	HarnessStatuses    map[string]string        `json:"harness_statuses,omitempty"`
+	ExistingComputerID string                   `json:"existing_computer_id,omitempty"`
+	AccountingState    string                   `json:"accounting_state"`
+	SetupState         string                   `json:"setup_state"`
+	SetupError         string                   `json:"setup_error"`
+	Connectivity       string                   `json:"connectivity"`
+	RequestID          string                   `json:"request_id"`
+	TenantID           string                   `json:"tenant_id"`
+	TenantName         string                   `json:"tenant_name"`
+	State              string                   `json:"state"`
+	Digest             string                   `json:"request_digest"`
+	ExpiresAt          time.Time                `json:"expires_at"`
+	ComputerName       string                   `json:"computer_name"`
+	Platform           string                   `json:"platform"`
+	Arch               string                   `json:"arch"`
+	Workspace          string                   `json:"workspace_path"`
+	Capabilities       []string                 `json:"capabilities"`
+	Requested          []Candidate              `json:"requested_accounts"`
+	Verification       Verification             `json:"verification"`
+	ComputerID         string                   `json:"computer_id"`
+	ComputerState      string                   `json:"computer_state"`
+	PrincipalID        string                   `json:"principal_id"`
+	DaemonID           string                   `json:"daemon_id"`
+	RuntimePrefix      string                   `json:"runtime_prefix,omitempty"`
+	Cleanup            string                   `json:"local_cleanup"`
+	Processes          string                   `json:"local_processes"`
+	Enrollments        []Enrollment             `json:"enrollments"`
+	Revision           int64                    `json:"revision"`
 }
 type Guide struct {
 	InstanceURL       string   `json:"instance_url"`

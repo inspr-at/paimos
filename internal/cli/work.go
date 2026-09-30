@@ -334,6 +334,15 @@ func (rt *runtime) createIssue(in issueInput) error {
 	if err := rt.do(http.MethodPost, "/api/nodes", body, &created); err != nil {
 		return err
 	}
+	if (kindName == "ticket" || kindName == "task") && in.Estimate == "" && !validEstimate(fieldMap(created.Fields)["estimate_hours"]) {
+		found := false
+		for _, warning := range created.Warnings {
+			found = found || strings.Contains(warning, "fields.estimate_hours")
+		}
+		if !found {
+			created.Warnings = append(created.Warnings, "add an agent-hours estimate in fields.estimate_hours")
+		}
+	}
 	created.Warnings = withEstimateHints(created.Warnings)
 	kinds, err := rt.loadKinds()
 	if err != nil {
@@ -372,12 +381,35 @@ type issuePatch struct {
 	Area           string
 }
 
+// noteKindUpdate refuses a different kind before any write. The same kind is a
+// no-op and is reported; the caller must not send the kind to the API.
+func (rt *runtime) noteKindUpdate(ref, requested string) error {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return nil
+	}
+	n, err := rt.nodeByKey(ref)
+	if err != nil {
+		return err
+	}
+	kinds, err := rt.loadKinds()
+	if err != nil {
+		return err
+	}
+	current := kinds.slug(n.KindID)
+	if current == requested {
+		fmt.Fprintf(rt.stdout, "kind is already %s\n", current)
+		return nil
+	}
+	return rt.fail(fmt.Errorf("kind_change_not_allowed: %s → %s; use \"aeon issue convert %s --to %s\"", current, requested, n.Key, requested), "")
+}
+
 func (rt *runtime) updateIssue(in issuePatch) error {
 	if strings.HasPrefix(strings.TrimSpace(in.Ref), "id:") {
 		return usagef("id:<n> is a classic numeric id; pass the issue key")
 	}
-	if strings.TrimSpace(in.Type) != "" && !issueKinds[in.Type] {
-		return usagef("unknown issue type %q (kind is immutable; create a node of that kind)", in.Type)
+	if err := rt.noteKindUpdate(in.Ref, in.Type); err != nil {
+		return err
 	}
 	n, err := rt.nodeByKey(in.Ref)
 	if err != nil {
@@ -522,6 +554,35 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 		return nil
 	}
 	fmt.Fprintf(rt.stdout, "✓ updated %s\n", view.IssueKey)
+	return nil
+}
+
+// convertIssue never converts. The CLI holds an agent key, and kind conversion
+// is a person action in the web app. Lookups are read-only and only build the
+// link and check that --to is an issue-family kind.
+func (rt *runtime) convertIssue(ref, to string) error {
+	if strings.HasPrefix(strings.TrimSpace(ref), "id:") {
+		return usagef("id:<n> is a classic numeric id; pass the issue key")
+	}
+	n, nodeErr := rt.nodeByKey(ref)
+	kinds, kindsErr := rt.loadKinds()
+	if kindsErr == nil {
+		if err := requireIssueFamilyTarget(kinds, to); err != nil {
+			return err
+		}
+	}
+	key := strings.TrimSpace(ref)
+	if nodeErr == nil && n.Key != "" {
+		key = n.Key
+	}
+	return &exitError{code: 3, msg: fmt.Sprintf("Converting a kind needs a person. Open %s, then ⋯ → Convert to %s.", rt.ticketWebURL(key), to)}
+}
+
+func requireIssueFamilyTarget(kinds kindTable, to string) error {
+	kind, ok := kinds.bySlug[to]
+	if !ok || !issueFamilyKind(kind) {
+		return usagef("--to %q is not an issue kind", to)
+	}
 	return nil
 }
 

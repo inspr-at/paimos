@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -189,7 +190,7 @@ func TestSetupCannotClaimConnectedBeforeAccountProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, err := e.Step(t.Context())
-	if err != nil || p.Stage != "provisioning" {
+	if err != nil || p.Stage != "blocked" || !strings.Contains(p.Action, "supplied no account readiness reason") {
 		t.Fatal("approval/socket mistaken for account connectivity")
 	}
 }
@@ -311,8 +312,10 @@ func TestTypedProgressDistinguishesMissingLoginAndUnsafeVerification(t *testing.
 	if err != nil || p.Stage != "blocked" || !strings.Contains(p.Action, "harness failed to start") {
 		t.Fatal("startup failure presented as login required", err)
 	}
-	if err = e.SyncFences(t.Context()); err != nil || a.progress == nil || a.progress.State != "setup_failed" || a.progress.ErrorCode != "installation_failed" {
-		t.Fatal("startup failure lost during reconciliation", err)
+	// A harness that fails to start is a per-harness hold, never setup_failed
+	// for the whole computer (AEON-347/348).
+	if err = e.SyncFences(t.Context()); err != nil || a.progress == nil || a.progress.State != "connected" || a.progress.ErrorCode != "" {
+		t.Fatal("startup failure became a computer-wide setup failure", err, a.progress)
 	}
 	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", HarnessFailed: true, ProfilePermissions: true}
 	p, err = e.Status(t.Context())
@@ -321,6 +324,9 @@ func TestTypedProgressDistinguishesMissingLoginAndUnsafeVerification(t *testing.
 	}
 	a.view.Enrollments[0].VerificationRunID = otherAccount
 	a.view.Enrollments[0].VerificationState = "queued"
+	if err := e.SyncFences(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", Ready: true, VerificationUnavailable: []string{testAccount}}
 	p, err = e.Status(t.Context())
 	if err != nil || p.Stage != "verification_unavailable" {
@@ -340,6 +346,9 @@ func TestTypedProgressDistinguishesMissingLoginAndUnsafeVerification(t *testing.
 		t.Fatal("verification refusal claimed unconfirmed connectivity")
 	}
 	a.view.Enrollments[0].VerificationState = "unavailable"
+	if err := e.SyncFences(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", Ready: true}
 	p, err = e.Status(t.Context())
 	if err != nil || p.Stage != "verification_unavailable" {
@@ -351,14 +360,50 @@ func TestStatusSurfacesClaudeDependencyAndRepinFailures(t *testing.T) {
 	for _, issue := range []string{"Claude dependencies changed/invalid: run aeon-agentd repin --harness claude", "Claude repin pending: waiting for active Claude runs to exit", "Claude CLI executable changed or unavailable; restore the approved physical executable, then retry"} {
 		e, a, l, o, _ := engineFixture(t)
 		approveFixture(t, e, a, o)
-		l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "unconfirmed", HarnessErrors: map[string]string{"claude": issue}}
+		l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "unconfirmed", HarnessErrors: map[string]string{"claude": issue}, HarnessStatuses: map[string]string{"claude": "blocked"}}
 		p, err := e.Status(t.Context())
 		if err != nil || p.Stage != "blocked" || p.Action != issue || p.LocalProcesses != "unconfirmed" {
 			t.Fatal("specific Claude failure was hidden", p, err)
 		}
 		progress := observedProgress(a.view, l.states[""])
-		if progress.State != "setup_failed" || progress.ErrorCode != "installation_failed" {
-			t.Fatal("dependency failure reported as sign-in or ready")
+		if progress.State != "connected" || progress.ErrorCode != "" || progress.HarnessStatuses["claude"] != "blocked" {
+			t.Fatal("runtime hold confused with installation failure or harness readiness")
+		}
+		if err = e.SyncFences(t.Context()); err != nil || a.progress == nil || a.progress.State != "connected" || a.progress.HarnessStatuses["claude"] != "blocked" {
+			t.Fatal("runtime hold lost during reconciliation", err)
+		}
+	}
+}
+
+func TestReadyHarnessKeepsComputerConnectedDuringOtherLogin(t *testing.T) {
+	p := observedProgress(View{}, LocalStatus{Ready: true, LoginRequired: true, HarnessStatuses: map[string]string{"claude": "login_required", "codex": "ready"}})
+	if p.State != "connected" || p.ErrorCode != "" || p.HarnessStatuses["claude"] != "login_required" || p.HarnessStatuses["codex"] != "ready" {
+		t.Fatalf("one login hid healthy harness: %+v", p)
+	}
+}
+
+func TestHarnessDetailsSurviveSetupStatusAndReconcile(t *testing.T) {
+	for _, reason := range []string{"repin_pending", "dependency_invalid", "pin_missing"} {
+		e, a, l, o, _ := engineFixture(t)
+		approveFixture(t, e, a, o)
+		detail, ok := HarnessReport("claude", "blocked", reason)
+		if !ok {
+			t.Fatal("unsupported shared reason")
+		}
+		l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "unconfirmed", Ready: true, HarnessErrors: map[string]string{"claude": "local-only diagnostic"}, HarnessStatuses: map[string]string{"claude": "blocked", "codex": "ready"}, HarnessDetails: map[string]HarnessDetail{"claude": detail, "codex": {State: "ready"}}}
+		p, err := e.Status(t.Context())
+		if err != nil || !reflect.DeepEqual(p.HarnessDetails["claude"], detail) || p.HarnessStatuses["codex"] != "ready" {
+			t.Fatal("setup status lost details", err)
+		}
+		if reason == "repin_pending" && (p.Stage != "repin_pending" || !strings.Contains(p.Action, "Waiting for repin")) {
+			t.Fatal("normal repin wait presented as fault")
+		}
+		if err := e.SyncFences(t.Context()); err != nil || a.progress == nil || a.progress.State != "connected" || !reflect.DeepEqual(a.progress.HarnessDetails["claude"], detail) {
+			t.Fatal("reconcile lost harness reason/fix", err)
+		}
+		raw, err := json.Marshal(a.progress)
+		if err != nil || strings.Contains(string(raw), "local-only diagnostic") {
+			t.Fatal("local diagnostics escaped into pairing progress")
 		}
 	}
 }

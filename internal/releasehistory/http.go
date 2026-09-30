@@ -146,10 +146,16 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteError(w, http.StatusNotFound, "no such release in this build's history")
 }
 
-// annotated adds group and linked ticket benefits to h (the embedded history
-// with any note backfills applied). A lookup error, or no source, returns h
-// unchanged.
+// annotated derives Aeon's groups from the selected frozen capture. A capture
+// without a group, and a release with no capture, take only the group from the
+// live classification of every commit ticket. A capture that already records a
+// group keeps it, and commit tickets that capture does not name take the same
+// group-only classification. Other products retain their legacy ticket source;
+// lookup errors leave their embedded history unchanged.
 func (m *Module) annotated(ctx context.Context, h History) History {
+	if aeonHistory(h) {
+		return m.annotateAeon(ctx, h)
+	}
 	if m.tickets == nil {
 		return h
 	}
@@ -164,4 +170,24 @@ func (m *Module) annotated(ctx context.Context, h History) History {
 		return h
 	}
 	return withGroups(h, meta)
+}
+
+// annotateAeon keeps captured pill and benefit text. Live classification
+// supplies features or fixes for every commit ticket when the capture stored
+// no group or the release has no capture, and for commit tickets a grouped
+// capture does not name. Only Bug and PublicBenefit are used. Note stays nil.
+func (m *Module) annotateAeon(ctx context.Context, h History) History {
+	keys := classificationLookupKeys(h)
+	var live map[string]TicketMeta
+	if len(keys) > 0 && m != nil && m.tickets != nil {
+		if p, ok := tenant.PrincipalFrom(ctx); ok && p.TenantID != "" {
+			meta, err := m.tickets(ctx, p.TenantID, keys)
+			if err != nil {
+				slog.Warn("release change groups left without live classification", "err", err)
+			} else {
+				live = meta
+			}
+		}
+	}
+	return withFrozenGroups(h, live)
 }

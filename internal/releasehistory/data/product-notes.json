@@ -1,0 +1,3453 @@
+{
+  "schema": "aeon.product-release-notes.v1",
+  "product": "PAIMOS AEON",
+  "repository": "inspr-at/aeon",
+  "releases": {
+    "260923134631.0.0": {
+      "snapshot_sha256": "cb4c755faee366ecf153e04439699334612ec0fcb1976222427757ff4997126c",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-8",
+          "pill_en": "Secure sign-in",
+          "pill_de": "Sichere Anmeldung",
+          "benefit_en": "People sign in with their INSPR account, and agents get their own limited access keys instead of sharing a person's login.",
+          "benefit_de": "Die Anmeldung erfolgt mit dem INSPR-Konto, und Agenten erhalten eigene, eingeschränkte Zugangsschlüssel, statt ein persönliches Login zu teilen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-10",
+          "pill_en": "Light and dark app",
+          "pill_de": "Helles und dunkles Design",
+          "benefit_en": "Aeon opens with its own sign-in page, home screen and navigation, in a light or a dark look.",
+          "benefit_de": "Aeon startet mit eigener Anmeldeseite, Startseite und Navigation, wahlweise im hellen oder dunklen Design.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-11",
+          "pill_en": "New Aeon logo",
+          "pill_de": "Neues Aeon-Logo",
+          "benefit_en": "Aeon has its own mark and app icon, so it is easy to spot among your browser tabs.",
+          "benefit_de": "Aeon hat ein eigenes Logo und Symbol, das sich zwischen den Browser-Tabs leicht wiederfindet.",
+          "group": "features"
+        }
+      ]
+    },
+    "260923140805.0.0": {
+      "snapshot_sha256": "04e60b48d166857d5325011e853ce2619ac1b2edb7bb5b9b0dc13c6645d68f5a",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": []
+    },
+    "260923143005.0.0": {
+      "snapshot_sha256": "eeb6095dfb778fdd8aebc6cad16448e602a6216387ad6e6a66c9f44fab702df1",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-19",
+          "pill_en": "Flexible work tree",
+          "pill_de": "Flexibler Arbeitsbaum",
+          "benefit_en": "Work is organised in a tree of any depth with kinds and labels you define yourself, and long lists can be filtered and paged.",
+          "benefit_de": "Arbeit wird in einem Baum beliebiger Tiefe mit selbst definierten Arten und Bezeichnungen organisiert, und lange Listen lassen sich filtern und seitenweise durchgehen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-21",
+          "pill_en": "Search in both languages",
+          "pill_de": "Suche Deutsch und Englisch",
+          "benefit_en": "Tickets and knowledge can be found by keywords or by meaning, in German and English.",
+          "benefit_de": "Tickets und Wissen lassen sich über Stichwörter oder über die Bedeutung finden, auf Deutsch und Englisch.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-17",
+          "pill_en": "Classic data imported",
+          "pill_de": "Klassik-Daten übernommen",
+          "benefit_en": "Projects, tickets, comments, history and knowledge entries from classic Paimos are in Aeon with their ticket keys unchanged.",
+          "benefit_de": "Projekte, Tickets, Kommentare, Verläufe und Wissenseinträge aus dem klassischen Paimos sind in Aeon, mit unveränderten Ticketschlüsseln.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-23",
+          "pill_en": "Tree and list views",
+          "pill_de": "Baum- und Listenansicht",
+          "benefit_en": "Work can be browsed as a tree or a list, everything is searchable, and Markdown is read and edited in a side panel, all updating live.",
+          "benefit_de": "Arbeit lässt sich als Baum oder Liste durchstöbern, alles ist durchsuchbar, und Markdown wird in einer Seitenleiste gelesen und bearbeitet, alles mit Live-Aktualisierung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-18",
+          "pill_en": "Command line and MCP",
+          "pill_de": "Kommandozeile und MCP",
+          "benefit_en": "Tickets, knowledge and search work from the terminal with the familiar paimos commands, and AI assistants can use Aeon through MCP.",
+          "benefit_de": "Tickets, Wissen und Suche lassen sich im Terminal mit den gewohnten paimos-Befehlen nutzen, und KI-Assistenten können Aeon über MCP verwenden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-20",
+          "pill_en": "Live updates and undo",
+          "pill_de": "Live-Updates und Rückgängig",
+          "benefit_en": "Changes show up right away, every change is recorded, and the last one can be undone.",
+          "benefit_de": "Änderungen erscheinen sofort, jede Änderung wird festgehalten, und die letzte lässt sich rückgängig machen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-22",
+          "pill_en": "Saved views",
+          "pill_de": "Gespeicherte Ansichten",
+          "benefit_en": "A set of filters can be saved as a view and shared with the team.",
+          "benefit_de": "Filter lassen sich als Ansicht speichern und mit dem Team teilen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260923152659.0.0": {
+      "snapshot_sha256": "073ef0e344ff5fd2b2cfac209e5e259793351fba04982a53fe4ad1e55d8cb04c",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-17",
+          "pill_en": "Classic data imported",
+          "pill_de": "Klassik-Daten übernommen",
+          "benefit_en": "Projects, tickets, comments, history and knowledge entries from classic Paimos are in Aeon with their ticket keys unchanged.",
+          "benefit_de": "Projekte, Tickets, Kommentare, Verläufe und Wissenseinträge aus dem klassischen Paimos sind in Aeon, mit unveränderten Ticketschlüsseln.",
+          "group": "features"
+        }
+      ]
+    },
+    "260923154901.0.0": {
+      "snapshot_sha256": "d2773fe269e126641af5b838fe9b814739434c897c3feaa5dcba777c18e529d8",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-26",
+          "pill_en": "Agents run with Aeon",
+          "pill_de": "Agenten arbeiten mit Aeon",
+          "benefit_en": "Codex, Claude, Pi, Cursor and Grok agents can work against Aeon and report what they do.",
+          "benefit_de": "Agenten von Codex, Claude, Pi, Cursor und Grok können mit Aeon arbeiten und berichten, was sie tun.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-30",
+          "pill_en": "Model choice and pacing",
+          "pill_de": "Modellwahl und Auslastung",
+          "benefit_en": "A model is picked by role, and agent work is spread across accounts so each allowance lasts the whole week.",
+          "benefit_de": "Ein Modell wird nach Rolle gewählt, und Agentenarbeit wird auf Konten verteilt, damit jedes Kontingent die ganze Woche reicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-27",
+          "pill_en": "Agent inbox",
+          "pill_de": "Posteingang für Agenten",
+          "benefit_en": "Every person and agent has an inbox that keeps messages until they are read and answered, and an agent can be woken by a webhook.",
+          "benefit_de": "Jede Person und jeder Agent hat einen Posteingang, der Nachrichten bis zum Lesen und Beantworten aufbewahrt, und ein Agent lässt sich per Webhook wecken.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-17",
+          "pill_en": "Classic data imported",
+          "pill_de": "Klassik-Daten übernommen",
+          "benefit_en": "Projects, tickets, comments, history and knowledge entries from classic Paimos are in Aeon with their ticket keys unchanged.",
+          "benefit_de": "Projekte, Tickets, Kommentare, Verläufe und Wissenseinträge aus dem klassischen Paimos sind in Aeon, mit unveränderten Ticketschlüsseln.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-31",
+          "pill_en": "Agents workspace",
+          "pill_de": "Arbeitsbereich für Agenten",
+          "benefit_en": "Agents, their runs, the approvals waiting for a decision and the usage pace are shown in one live view.",
+          "benefit_de": "Agenten, ihre Läufe, wartende Freigaben und das Verbrauchstempo erscheinen in einer Live-Ansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-28",
+          "pill_en": "Work orders and runs",
+          "pill_de": "Aufträge und Läufe",
+          "benefit_en": "An agent can be given a work order with checkable criteria and a budget, and each run is followed with what it used.",
+          "benefit_de": "Ein Agent kann einen Auftrag mit prüfbaren Kriterien und Budget erhalten, und jeder Lauf wird samt Verbrauch nachvollzogen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-29",
+          "pill_en": "Approvals for agents",
+          "pill_de": "Freigaben für Agenten",
+          "benefit_en": "Agents propose and people approve, and each agent only gets the permissions it has been given.",
+          "benefit_de": "Agenten schlagen vor und Menschen geben frei, und jeder Agent erhält nur die Berechtigungen, die ihm zugewiesen wurden.",
+          "group": "features"
+        }
+      ]
+    },
+    "260923161128.0.0": {
+      "snapshot_sha256": "2de05b737161dbd79d7946d9be012470f0ed6144a9709af3c45af2c4db16efcc",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-17",
+          "pill_en": "Classic data imported",
+          "pill_de": "Klassik-Daten übernommen",
+          "benefit_en": "Projects, tickets, comments, history and knowledge entries from classic Paimos are in Aeon with their ticket keys unchanged.",
+          "benefit_de": "Projekte, Tickets, Kommentare, Verläufe und Wissenseinträge aus dem klassischen Paimos sind in Aeon, mit unveränderten Ticketschlüsseln.",
+          "group": "features"
+        }
+      ]
+    },
+    "260923173841.0.0": {
+      "snapshot_sha256": "1630e6c934c17f475963caf3321cc77e3bc6b7767924d6b7660f8063c9c243f6",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-38",
+          "pill_en": "Plugins per workspace",
+          "pill_de": "Plugins pro Arbeitsbereich",
+          "benefit_en": "First-party plugins can be switched on for a workspace and extend Aeon at defined places.",
+          "benefit_de": "Eigene Plugins lassen sich pro Arbeitsbereich einschalten und erweitern Aeon an festgelegten Stellen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-17",
+          "pill_en": "Classic data imported",
+          "pill_de": "Klassik-Daten übernommen",
+          "benefit_en": "Projects, tickets, comments, history and knowledge entries from classic Paimos are in Aeon with their ticket keys unchanged.",
+          "benefit_de": "Projekte, Tickets, Kommentare, Verläufe und Wissenseinträge aus dem klassischen Paimos sind in Aeon, mit unveränderten Ticketschlüsseln.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-40",
+          "pill_en": "More classic links kept",
+          "pill_de": "Mehr Klassik-Verknüpfungen",
+          "benefit_en": "Relations such as blocks, follows and related, and release membership from classic Paimos now carry over into Aeon.",
+          "benefit_de": "Verknüpfungen wie blockiert, folgt aus und verwandt sowie Release-Zuordnungen aus dem klassischen Paimos werden jetzt in Aeon übernommen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-39",
+          "pill_en": "Project journey",
+          "pill_de": "Projekt-Journey ansehen",
+          "benefit_en": "A project can be followed from Inspire to Live with its next action, approval gates, requirements, release plan and deployment, on real data.",
+          "benefit_de": "Ein Projekt lässt sich von Inspire bis Live verfolgen, mit nächster Aktion, Freigaben, Anforderungen, Releaseplan und Deployment auf echten Daten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-34",
+          "pill_en": "One clear next step",
+          "pill_de": "Ein klarer nächster Schritt",
+          "benefit_en": "Every project shows its stage and the one next action, and approval gates wait for a person's decision.",
+          "benefit_de": "Jedes Projekt zeigt seine Phase und die eine nächste Aktion, und Freigabe-Schritte warten auf die Entscheidung einer Person.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-36",
+          "pill_en": "Cited project intake",
+          "pill_de": "Belegter Projekteinstieg",
+          "benefit_en": "Sources, transcripts and briefs turn into requirement drafts with citations, and people's own edits are never overwritten.",
+          "benefit_de": "Quellen, Transkripte und Briefings werden zu Anforderungsentwürfen mit Quellenangaben, und eigene Änderungen werden nie überschrieben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-37",
+          "pill_en": "Deploy and access handoffs",
+          "pill_de": "Deploy- und Zugangsübergaben",
+          "benefit_en": "Deployments and access changes are handed to Pharos and Janus with evidence and a result, so every step can be checked.",
+          "benefit_de": "Deployments und Zugangsänderungen gehen mit Nachweis und Ergebnis an Pharos und Janus, sodass sich jeder Schritt prüfen lässt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-35",
+          "pill_en": "Requirements to releases",
+          "pill_de": "Anforderungen bis Release",
+          "benefit_en": "Requirements turn into features and tickets, and a release is planned by choosing what goes in, with partial choices remembered.",
+          "benefit_de": "Aus Anforderungen werden Features und Tickets, und ein Release wird geplant, indem ausgewählt wird, was hineinkommt, wobei Teilauswahlen gemerkt werden.",
+          "group": "features"
+        }
+      ]
+    },
+    "260923180522.0.0": {
+      "snapshot_sha256": "ebf12db8a0caa582aad8cf57d31361ada135284c22f46c2771b82e6d15de61e0",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-40",
+          "pill_en": "More classic links kept",
+          "pill_de": "Mehr Klassik-Verknüpfungen",
+          "benefit_en": "Relations such as blocks, follows and related, and release membership from classic Paimos now carry over into Aeon.",
+          "benefit_de": "Verknüpfungen wie blockiert, folgt aus und verwandt sowie Release-Zuordnungen aus dem klassischen Paimos werden jetzt in Aeon übernommen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260923185021.0.0": {
+      "snapshot_sha256": "0d01854127d8ff4a3bb4423becccb50252638606fca7bd0435f8601068e05b88",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-47",
+          "pill_en": "Time tracking",
+          "pill_de": "Stunden erfassen",
+          "benefit_en": "Hours can be logged against tickets and cost units, periods approved, and totals seen up the tree.",
+          "benefit_de": "Stunden lassen sich auf Tickets und Kostenstellen erfassen, Zeiträume freigeben, und Summen sind entlang des Baums sichtbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-44",
+          "pill_en": "Cost units",
+          "pill_de": "Kostenstellen verwalten",
+          "benefit_en": "Cost units and their rates can be managed, including the ones imported from classic Paimos.",
+          "benefit_de": "Kostenstellen und ihre Sätze lassen sich verwalten, auch die aus dem klassischen Paimos importierten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-49",
+          "pill_en": "Business area",
+          "pill_de": "Bereich Business",
+          "benefit_en": "Quotes, customers, hours and cost units share one Business area with common navigation.",
+          "benefit_de": "Angebote, Kunden, Stunden und Kostenstellen teilen sich einen Bereich Business mit gemeinsamer Navigation.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-46",
+          "pill_en": "Quotes with versions",
+          "pill_de": "Angebote mit Versionen",
+          "benefit_en": "Quotes keep every version, the customer's acceptance is recorded, and the layout is ready for PDF.",
+          "benefit_de": "Angebote behalten jede Version, die Zustimmung des Kunden wird festgehalten, und das Layout ist PDF-tauglich.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-45",
+          "pill_en": "Customer records",
+          "pill_de": "Kunden und Kontakte",
+          "benefit_en": "Customers and their contacts are kept in Aeon and can be connected to projects.",
+          "benefit_de": "Kunden und ihre Kontakte werden in Aeon geführt und lassen sich mit Projekten verknüpfen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-40",
+          "pill_en": "More classic links kept",
+          "pill_de": "Mehr Klassik-Verknüpfungen",
+          "benefit_en": "Relations such as blocks, follows and related, and release membership from classic Paimos now carry over into Aeon.",
+          "benefit_de": "Verknüpfungen wie blockiert, folgt aus und verwandt sowie Release-Zuordnungen aus dem klassischen Paimos werden jetzt in Aeon übernommen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260923193604.0.0": {
+      "snapshot_sha256": "42b27f62484c2ef7c66d9660f79fa92b423c0e8ef8baee802ade37491dfb2e16",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-52",
+          "pill_en": "Downloadable agent daemon",
+          "pill_de": "Agent-Daemon zum Download",
+          "benefit_en": "The agent daemon is attached to every release for macOS and Linux, with checksums to verify it.",
+          "benefit_de": "Der Agent-Daemon hängt an jedem Release für macOS und Linux, samt Prüfsummen zur Verifikation.",
+          "group": "features"
+        }
+      ]
+    },
+    "260923215400.0.0": {
+      "snapshot_sha256": "3568411b1e0fe210c2d61c1c601aff949bc45470b7e72481f357e15f9f9c67f1",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-58",
+          "pill_en": "Fast project ticket table",
+          "pill_de": "Schnelle Projekt-Ticketliste",
+          "benefit_en": "Projects are the entry point, and their tickets show as a sortable table with filters, grouping, inline status, keyboard shortcuts and a phone layout.",
+          "benefit_de": "Projekte sind der Einstieg, und ihre Tickets erscheinen als sortierbare Tabelle mit Filtern, Gruppierung, Status direkt in der Zeile, Tastaturkürzeln und Handy-Layout.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-57",
+          "pill_en": "Filter and sort lists",
+          "pill_de": "Listen filtern und sortieren",
+          "benefit_en": "Ticket lists can be filtered by several kinds, states and priorities at once and sorted, with counts for each filter.",
+          "benefit_de": "Ticketlisten lassen sich nach mehreren Arten, Status und Prioritäten gleichzeitig filtern und sortieren, mit Zählern je Filter.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-60",
+          "pill_en": "Correct states and assignees",
+          "pill_de": "Richtige Status und Zuständige",
+          "benefit_en": "Imported tickets show their real status and assignee, and 'in progress' is counted the same way everywhere.",
+          "benefit_de": "Importierte Tickets zeigen ihren echten Status und ihre zuständige Person, und 'In Arbeit' wird überall gleich gezählt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-59",
+          "pill_en": "Ticket activity timeline",
+          "pill_de": "Ticket-Aktivität im Verlauf",
+          "benefit_en": "A ticket's comments and its change history appear together in one timeline.",
+          "benefit_de": "Kommentare und Änderungsverlauf eines Tickets erscheinen gemeinsam in einer Zeitleiste.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-55",
+          "pill_en": "Remaining commands work",
+          "pill_de": "Restliche Befehle funktionieren",
+          "benefit_en": "Knowledge types for external systems and related projects, anchors, skill rendering and sync checks now work as before.",
+          "benefit_de": "Wissenstypen für externe Systeme und verwandte Projekte, Anker, Skill-Ausgabe und Abgleichsprüfungen funktionieren jetzt wie gewohnt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-53",
+          "pill_en": "Harness commands work",
+          "pill_de": "Harness-Befehle funktionieren",
+          "benefit_en": "The paimos commands to register, inspect, interrupt and stop agent sessions work on Aeon as before.",
+          "benefit_de": "Die paimos-Befehle zum Registrieren, Ansehen, Unterbrechen und Stoppen von Agentensitzungen funktionieren in Aeon wie gewohnt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-54",
+          "pill_en": "Require a reply",
+          "pill_de": "Antwort einfordern",
+          "benefit_en": "Messages can go to a specific agent and demand a reply, and requests that need a person are held for a human.",
+          "benefit_de": "Nachrichten können an einen bestimmten Agenten gehen und eine Antwort verlangen, und Anfragen, die eine Person brauchen, werden für Menschen zurückgehalten.",
+          "group": "features"
+        }
+      ]
+    },
+    "260923225830.0.0": {
+      "snapshot_sha256": "18937fddf420ed23834f8cfab8667aaaa971c2129d8fa25eca2d3c02d005fe1e",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-61",
+          "pill_en": "Ticket side panel",
+          "pill_de": "Ticket in Seitenleiste",
+          "benefit_en": "A ticket opens beside the list, where title, status, priority and assignee can be edited, Markdown read, relations and activity seen, and new tickets created quickly.",
+          "benefit_de": "Ein Ticket öffnet sich neben der Liste, wo sich Titel, Status, Priorität und Zuständige ändern, Markdown lesen, Verknüpfungen und Aktivität ansehen und schnell neue Tickets anlegen lassen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-62",
+          "pill_en": "Real names, not handles",
+          "pill_de": "Echte Namen statt Kürzel",
+          "benefit_en": "Imported classic users are linked to the people who sign in, so a person's name shows instead of a short handle.",
+          "benefit_de": "Importierte Klassik-Nutzer sind mit den angemeldeten Personen verknüpft, sodass statt eines Kürzels der Name erscheint.",
+          "group": "features"
+        }
+      ]
+    },
+    "260923235214.0.0": {
+      "snapshot_sha256": "ae636eb697e65b0624eeb103b38ab0360cb783556bce82f88dd620171cc17659",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-63",
+          "pill_en": "Project outline tree",
+          "pill_de": "Projektgliederung als Baum",
+          "benefit_en": "Epics, tickets and tasks appear as a fast keyboard-first tree with the ticket panel beside it.",
+          "benefit_de": "Epics, Tickets und Aufgaben erscheinen als schneller, per Tastatur bedienbarer Baum, mit dem Ticket-Panel daneben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-64",
+          "pill_en": "Safe ticket moves",
+          "pill_de": "Sichere Ticket-Verschiebungen",
+          "benefit_en": "Moving a ticket that someone else just changed is now refused with a clear conflict instead of silently overwriting their edit.",
+          "benefit_de": "Wird ein Ticket verschoben, das gerade jemand geändert hat, gibt es jetzt einen klaren Konflikt, statt die Änderung stillschweigend zu überschreiben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-58",
+          "pill_en": "Fast project ticket table",
+          "pill_de": "Schnelle Projekt-Ticketliste",
+          "benefit_en": "Projects are the entry point, and their tickets show as a sortable table with filters, grouping, inline status, keyboard shortcuts and a phone layout.",
+          "benefit_de": "Projekte sind der Einstieg, und ihre Tickets erscheinen als sortierbare Tabelle mit Filtern, Gruppierung, Status direkt in der Zeile, Tastaturkürzeln und Handy-Layout.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924003305.0.0": {
+      "snapshot_sha256": "77e347a0af85494f17f639e8ab63f785fcbbbf0ee1e7ef797a7ecb669870bebb",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-65",
+          "pill_en": "Command palette",
+          "pill_de": "Neue Befehlspalette",
+          "benefit_en": "Cmd-K jumps to tickets, projects and actions, and the sign-in, account and error pages look and feel more polished.",
+          "benefit_de": "Mit Cmd-K geht es direkt zu Tickets, Projekten und Aktionen, und Anmeldung, Konto und Fehlerseiten wirken runder.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924020145.0.0": {
+      "snapshot_sha256": "f44a4058fb684cc8ace4eba0dd901adca7e8c5cfacf2c1036b3fafce0b8cd3aa",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-67",
+          "pill_en": "Agents at a glance",
+          "pill_de": "Agenten im Blick",
+          "benefit_en": "Live agent sessions and runs with their tickets, and the approvals queue, appear in one polished view.",
+          "benefit_de": "Laufende Agentensitzungen und Läufe samt Tickets sowie die Freigabe-Warteschlange erscheinen in einer aufgeräumten Ansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-66",
+          "pill_en": "Clearer sign-in errors",
+          "pill_de": "Verständlichere Anmeldefehler",
+          "benefit_en": "When sign-in fails, you land back on the sign-in page with a short reason instead of a bare error page, and linked accounts show your name.",
+          "benefit_de": "Schlägt die Anmeldung fehl, erscheint wieder die Anmeldeseite mit einer kurzen Begründung statt einer nackten Fehlerseite, und verknüpfte Konten zeigen den richtigen Namen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-68",
+          "pill_en": "Sessions across projects",
+          "pill_de": "Sitzungen projektübergreifend",
+          "benefit_en": "Agent sessions are listed across all projects and can be filtered by state, agent, project or ticket.",
+          "benefit_de": "Agentensitzungen werden über alle Projekte gelistet und lassen sich nach Status, Agent, Projekt oder Ticket filtern.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924023936.0.0": {
+      "snapshot_sha256": "b586b1ffcdff27cf1794ff4fcf72d82843892ab9d7acabefb7aaac07bfa84525",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-69",
+          "pill_en": "Consistent screens",
+          "pill_de": "Einheitliche Bildschirme",
+          "benefit_en": "Every screen was checked for spacing, focus, keyboard use and speed on desktop and phone, in both light and dark.",
+          "benefit_de": "Jeder Bildschirm wurde auf Abstände, Fokus, Tastaturbedienung und Tempo geprüft, auf Desktop und Handy, hell und dunkel.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924080611.0.0": {
+      "snapshot_sha256": "aed479c7614a27935b9617ee26dd1551c3cec912e49f88010569a5392f325f7a",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-70",
+          "pill_en": "Polished Business area",
+          "pill_de": "Überarbeiteter Bereich Business",
+          "benefit_en": "Quotes, hours, customers and cost units get the same polished look and feel as the ticket screens.",
+          "benefit_de": "Angebote, Stunden, Kunden und Kostenstellen erhalten dasselbe überarbeitete Erscheinungsbild wie die Ticket-Ansichten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-72",
+          "pill_en": "File attachments",
+          "pill_de": "Dateien an Tickets",
+          "benefit_en": "Files can be attached to tickets, with thumbnails for images.",
+          "benefit_de": "Dateien lassen sich an Tickets anhängen, mit Vorschaubildern für Bilder.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924090430.0.0": {
+      "snapshot_sha256": "b129dc721fa2975c25a86ad13feb98dc568272ff1d1559fd90835940b6f40a26",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-74",
+          "pill_en": "Made for wide screens",
+          "pill_de": "Für große Bildschirme",
+          "benefit_en": "Large screens are used with more, resizable columns, a whole ticket can be edited in an edit mode, and attached screen designs open in a zoomable lightbox.",
+          "benefit_de": "Große Bildschirme werden mit mehr, in der Breite änderbaren Spalten genutzt, ein ganzes Ticket lässt sich im Bearbeitungsmodus ändern, und angehängte Entwürfe öffnen sich in einer zoombaren Großansicht.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924092015.0.0": {
+      "snapshot_sha256": "3254ce66b9f569148fd91ea794eb6e87c17cbeeac437ea0f9b254a0a98106256",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-72",
+          "pill_en": "File attachments",
+          "pill_de": "Dateien an Tickets",
+          "benefit_en": "Files can be attached to tickets, with thumbnails for images.",
+          "benefit_de": "Dateien lassen sich an Tickets anhängen, mit Vorschaubildern für Bilder.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924101407.0.0": {
+      "snapshot_sha256": "adddb752a0796e7abffad0e2be64786170aaaa1f7bc08f2548cae8b2c42dffbd",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-72",
+          "pill_en": "File attachments",
+          "pill_de": "Dateien an Tickets",
+          "benefit_en": "Files can be attached to tickets, with thumbnails for images.",
+          "benefit_de": "Dateien lassen sich an Tickets anhängen, mit Vorschaubildern für Bilder.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924105615.0.0": {
+      "snapshot_sha256": "c19b13a04096c7ca67cdf24adbcb890c1bb74f8aee307d594821ab52d07e012e",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-77",
+          "pill_en": "Journey on real data",
+          "pill_de": "Journey mit echten Daten",
+          "benefit_en": "The project journey from Inspire to Live works on real projects with the release walker, in the polished Aeon look.",
+          "benefit_de": "Die Projekt-Journey von Inspire bis Live läuft auf echten Projekten mit dem Release-Walker, im überarbeiteten Aeon-Look.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-78",
+          "pill_en": "Journey works past Plan",
+          "pill_de": "Journey über Plan hinaus",
+          "benefit_en": "Imported projects can now be carried through the journey beyond the Plan stage.",
+          "benefit_de": "Importierte Projekte lassen sich jetzt in der Journey über die Phase Plan hinaus weiterführen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924110804.0.0": {
+      "snapshot_sha256": "11e565bc4fa60d52f3c2bbe18441fdb19db82444a5239af9685987be8b9e010e",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-72",
+          "pill_en": "File attachments",
+          "pill_de": "Dateien an Tickets",
+          "benefit_en": "Files can be attached to tickets, with thumbnails for images.",
+          "benefit_de": "Dateien lassen sich an Tickets anhängen, mit Vorschaubildern für Bilder.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-79",
+          "pill_en": "Tickets to releases",
+          "pill_de": "Tickets zum Release hinzufügen",
+          "benefit_en": "Existing tickets can be added to a release plan, and it shows whether a stage comes from recorded journey history.",
+          "benefit_de": "Bestehende Tickets lassen sich einem Releaseplan hinzufügen, und es ist ersichtlich, ob eine Phase aus der aufgezeichneten Journey stammt.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924120053.0.0": {
+      "snapshot_sha256": "b4af8f5b718498c665986820e277ce0cb6abc9047f8fdbe1d4568b9c8cc4d297",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-72",
+          "pill_en": "File attachments",
+          "pill_de": "Dateien an Tickets",
+          "benefit_en": "Files can be attached to tickets, with thumbnails for images.",
+          "benefit_de": "Dateien lassen sich an Tickets anhängen, mit Vorschaubildern für Bilder.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924135825.0.0": {
+      "snapshot_sha256": "9443b957106ac055d016e75ae606e015f9770c10cdc28c446e7989298feee938",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-67",
+          "pill_en": "Agents at a glance",
+          "pill_de": "Agenten im Blick",
+          "benefit_en": "Live agent sessions and runs with their tickets, and the approvals queue, appear in one polished view.",
+          "benefit_de": "Laufende Agentensitzungen und Läufe samt Tickets sowie die Freigabe-Warteschlange erscheinen in einer aufgeräumten Ansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-75",
+          "pill_en": "Fix time entries",
+          "pill_de": "Zeiteinträge korrigieren",
+          "benefit_en": "A time entry can be edited or deleted instead of adding a correcting entry.",
+          "benefit_de": "Ein Zeiteintrag lässt sich bearbeiten oder löschen, statt einen Korrektureintrag anzulegen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924141244.0.0": {
+      "snapshot_sha256": "f84cc7d7aec5efda490282bbf21493a72a4695c4e047f96b03e6aa8999f9edb3",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-75",
+          "pill_en": "Fix time entries",
+          "pill_de": "Zeiteinträge korrigieren",
+          "benefit_en": "A time entry can be edited or deleted instead of adding a correcting entry.",
+          "benefit_de": "Ein Zeiteintrag lässt sich bearbeiten oder löschen, statt einen Korrektureintrag anzulegen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924153851.0.0": {
+      "snapshot_sha256": "486cc41d13ac3182347522aa2b34c46274943eda0206e5208c94707754468e23",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-83",
+          "pill_en": "Release history",
+          "pill_de": "Neuer Versionsverlauf",
+          "benefit_en": "A release history shows what changed in every version, and the footer now stays in view while scrolling.",
+          "benefit_de": "Ein Versionsverlauf zeigt, was sich in jeder Version geändert hat, und die Fußzeile bleibt beim Scrollen sichtbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-85",
+          "pill_en": "Friendly greetings",
+          "pill_de": "Freundliche Begrüßung",
+          "benefit_en": "Every page load greets you with a warm line, and the same one never shows twice in a row.",
+          "benefit_de": "Jede Seite begrüßt mit einer freundlichen Zeile, und dieselbe erscheint nie zweimal hintereinander.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-86",
+          "pill_en": "Personal profile",
+          "pill_de": "Persönliches Profil",
+          "benefit_en": "Name, short name, initials and avatar can be set, and profiles from classic Paimos come along.",
+          "benefit_de": "Name, Kürzel, Initialen und Avatar lassen sich festlegen, und Profile aus dem klassischen Paimos werden übernommen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-56",
+          "pill_en": "Polished everyday screens",
+          "pill_de": "Ausgefeilte Alltagsansichten",
+          "benefit_en": "The everyday screens (projects, ticket list, ticket detail and outline) are rebuilt with less clutter and finished polish, on desktop and phone, in light and dark.",
+          "benefit_de": "Die Alltagsansichten (Projekte, Ticketliste, Ticketdetail und Gliederung) sind aufgeräumter und fertig ausgefeilt, auf Desktop und Handy, hell und dunkel.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924163237.0.0": {
+      "snapshot_sha256": "0d3388e57c795475e26a76cca310fd6e2926e1dc08b74beb140b95de63ca14ed",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-84",
+          "pill_en": "Three main places",
+          "pill_de": "Drei Hauptbereiche",
+          "benefit_en": "The header offers Projects, Agents and Business, with Business tabs including Customers and a Settings page.",
+          "benefit_de": "Die Kopfzeile bietet Projekte, Agenten und Business, mit Business-Tabs inklusive Kunden und einer Einstellungsseite.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-88",
+          "pill_en": "Quote document editor",
+          "pill_de": "Editor für Angebote",
+          "benefit_en": "Quotes are written as a document with sections, positions and lists, with undo and redo, and keyboard and paste handled properly.",
+          "benefit_de": "Angebote werden als Dokument mit Abschnitten, Positionen und Listen geschrieben, mit Rückgängig und Wiederholen sowie sauberer Tastatur- und Einfügefunktion.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-85",
+          "pill_en": "Friendly greetings",
+          "pill_de": "Freundliche Begrüßung",
+          "benefit_en": "Every page load greets you with a warm line, and the same one never shows twice in a row.",
+          "benefit_de": "Jede Seite begrüßt mit einer freundlichen Zeile, und dieselbe erscheint nie zweimal hintereinander.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924170915.0.0": {
+      "snapshot_sha256": "f782a146552e655441f3e96c995c0cfbf63cc24e3a4966a3fab789f982da745d",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-86",
+          "pill_en": "Personal profile",
+          "pill_de": "Persönliches Profil",
+          "benefit_en": "Name, short name, initials and avatar can be set, and profiles from classic Paimos come along.",
+          "benefit_de": "Name, Kürzel, Initialen und Avatar lassen sich festlegen, und Profile aus dem klassischen Paimos werden übernommen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-89",
+          "pill_en": "Quote PDF and links",
+          "pill_de": "Angebots-PDF und Links",
+          "benefit_en": "A quote turns into a PDF, and customers get a private link to view and accept it, with confirmations.",
+          "benefit_de": "Ein Angebot wird zum PDF, und Kunden erhalten einen privaten Link zum Ansehen und Annehmen, samt Bestätigungen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-90",
+          "pill_en": "Editing quotes together",
+          "pill_de": "Angebote gemeinsam bearbeiten",
+          "benefit_en": "A quote shows who else is editing it, and work is recovered if a save conflicts or the page reloads.",
+          "benefit_de": "Ein Angebot zeigt, wer es sonst gerade bearbeitet, und die Arbeit bleibt erhalten, wenn ein Speichern kollidiert oder die Seite neu lädt.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924172923.0.0": {
+      "snapshot_sha256": "022cc200fbc882de2ba811750bde978db31901f7e7c8d8c69ea4690639e4cc95",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-89",
+          "pill_en": "Quote PDF and links",
+          "pill_de": "Angebots-PDF und Links",
+          "benefit_en": "A quote turns into a PDF, and customers get a private link to view and accept it, with confirmations.",
+          "benefit_de": "Ein Angebot wird zum PDF, und Kunden erhalten einen privaten Link zum Ansehen und Annehmen, samt Bestätigungen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924174551.0.0": {
+      "snapshot_sha256": "b97f8c720074ee630454816aeda3e2ba13b60613d696271e38215a280c25729d",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-86",
+          "pill_en": "Personal profile",
+          "pill_de": "Persönliches Profil",
+          "benefit_en": "Name, short name, initials and avatar can be set, and profiles from classic Paimos come along.",
+          "benefit_de": "Name, Kürzel, Initialen und Avatar lassen sich festlegen, und Profile aus dem klassischen Paimos werden übernommen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-89",
+          "pill_en": "Quote PDF and links",
+          "pill_de": "Angebots-PDF und Links",
+          "benefit_en": "A quote turns into a PDF, and customers get a private link to view and accept it, with confirmations.",
+          "benefit_de": "Ein Angebot wird zum PDF, und Kunden erhalten einen privaten Link zum Ansehen und Annehmen, samt Bestätigungen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924181452.0.0": {
+      "snapshot_sha256": "6036d05fd1606651534ee3fcf5fbcd09447736429c1801abd3265feffa2caada",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-93",
+          "pill_en": "Customers in Business",
+          "pill_de": "Kunden im Business",
+          "benefit_en": "Customers appear with contacts, addresses, related projects, quotes, hours and notes, and can be created or edited.",
+          "benefit_de": "Kunden erscheinen mit Kontakten, Adressen, zugehörigen Projekten, Angeboten, Stunden und Notizen und lassen sich anlegen und bearbeiten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-84",
+          "pill_en": "Three main places",
+          "pill_de": "Drei Hauptbereiche",
+          "benefit_en": "The header offers Projects, Agents and Business, with Business tabs including Customers and a Settings page.",
+          "benefit_de": "Die Kopfzeile bietet Projekte, Agenten und Business, mit Business-Tabs inklusive Kunden und einer Einstellungsseite.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924182829.0.0": {
+      "snapshot_sha256": "918dfc37673185b5cb8e30e5b84a5edc0cbfc2e87d69672f31f2f07b8893c0cd",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": []
+    },
+    "260924190255.0.0": {
+      "snapshot_sha256": "567bbcd8b6b3365b85bf3bb3135979b5cd99a09118432c3fa612e69a6dc86148",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-96",
+          "pill_en": "Quote format inspector",
+          "pill_de": "Formatierung für Angebote",
+          "benefit_en": "Quotes can be formatted with an inspector, a title bar and editor controls.",
+          "benefit_de": "Angebote lassen sich mit einem Inspektor, einer Titelleiste und Editor-Steuerelementen formatieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-97",
+          "pill_en": "Customer PDF links open",
+          "pill_de": "Kunden-PDF-Links öffnen",
+          "benefit_en": "Public quote PDF links open again instead of showing a not-found page.",
+          "benefit_de": "Öffentliche Angebots-PDF-Links öffnen sich wieder, statt eine Seite nicht gefunden zu zeigen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924202446.0.0": {
+      "snapshot_sha256": "cece2cc88af91731d64ae73b40b722e40a122bc292c387fc437c6d378b25a94d",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-99",
+          "pill_en": "Quotes in the workspace",
+          "pill_de": "Angebote im Arbeitsbereich",
+          "benefit_en": "Quotes open inside Aeon beside customer details and attachments, docked or full screen, without losing the editing session.",
+          "benefit_de": "Angebote öffnen sich direkt in Aeon neben Kundendaten und Anhängen, angedockt oder im Vollbild, ohne die Bearbeitung zu verlieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-100",
+          "pill_en": "Fuller quote features",
+          "pill_de": "Vollständigere Angebote",
+          "benefit_en": "Quote numbering, public customer links, acceptance and confirmations now match what classic Paimos offered.",
+          "benefit_de": "Angebotsnummern, öffentliche Kundenlinks, Annahme und Bestätigungen entsprechen jetzt dem Umfang des klassischen Paimos.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-101",
+          "pill_en": "Steadier co-editing",
+          "pill_de": "Stabileres gemeinsames Bearbeiten",
+          "benefit_en": "Editing a quote together shows more faithfully who is where and picks up remote changes.",
+          "benefit_de": "Beim gemeinsamen Bearbeiten eines Angebots ist genauer zu sehen, wer wo ist, und Änderungen anderer werden übernommen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924213323.0.0": {
+      "snapshot_sha256": "0fd822c11b03f05494699a3bafde2dae009612a76970b432d516f5c5061c8c5e",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-102",
+          "pill_en": "Remaining quote features",
+          "pill_de": "Restliche Angebotsfunktionen",
+          "benefit_en": "Quote features that had been put off are now complete.",
+          "benefit_de": "Angebotsfunktionen, die zurückgestellt waren, sind jetzt vollständig.",
+          "group": "features"
+        }
+      ]
+    },
+    "260924214847.0.0": {
+      "snapshot_sha256": "3ec06350024fec39ef04c969cf5315a931815d71a921a37d4f79fd647a6d66ed",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-103",
+          "pill_en": "AI note rewrite",
+          "pill_de": "KI überarbeitet Notizen",
+          "benefit_en": "AI can propose a rewrite of a customer note, which is reviewed before anything changes.",
+          "benefit_de": "Die KI kann eine Überarbeitung einer Kundennotiz vorschlagen, die geprüft wird, bevor sich etwas ändert.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925013352.0.0": {
+      "snapshot_sha256": "cdc77668f3d84d27c6f8790e4bd6fa8c279a507dfa8e8c8ff2c84e0c8f2a2e60",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-109",
+          "pill_en": "Quick quote actions",
+          "pill_de": "Schnelle Angebotsaktionen",
+          "benefit_en": "A quote can be duplicated or deleted right from the list, and a row menu offers every action possible in its current state.",
+          "benefit_de": "Ein Angebot lässt sich direkt in der Liste duplizieren oder löschen, und ein Zeilenmenü bietet jede Aktion, die im aktuellen Zustand möglich ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-107",
+          "pill_en": "More commands work",
+          "pill_de": "Weitere Befehle funktionieren",
+          "benefit_en": "Knowledge, onboarding, session lifecycle and the remaining paimos commands work on the command line.",
+          "benefit_de": "Wissen, Onboarding, Sitzungsverwaltung und die übrigen paimos-Befehle funktionieren auf der Kommandozeile.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925030702.0.0": {
+      "snapshot_sha256": "239495a026ec24aeea5561f680c9fa228e30c2c45340b13d811c040446fc0d39",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-110",
+          "pill_en": "Company quote designs",
+          "pill_de": "Angebotsdesign pro Firma",
+          "benefit_en": "Each company can have its own quote look with fonts, colours, layout, footer and language settings.",
+          "benefit_de": "Jede Firma kann ein eigenes Angebotsdesign mit Schriften, Farben, Layout, Fußzeile und Spracheinstellungen haben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-106",
+          "pill_en": "Messaging commands work",
+          "pill_de": "Nachrichtenbefehle funktionieren",
+          "benefit_en": "Sending and listening for messages, with targets and deliveries, works from the command line as it did in classic Paimos.",
+          "benefit_de": "Nachrichten senden und empfangen, samt Zielen und Zustellungen, funktioniert auf der Kommandozeile wie im klassischen Paimos.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-111",
+          "pill_en": "Import offers from classic",
+          "pill_de": "Angebote aus Klassik importieren",
+          "benefit_en": "Existing quotes from classic Paimos can be brought over read-only, with their origin recorded.",
+          "benefit_de": "Bestehende Angebote aus dem klassischen Paimos lassen sich schreibgeschützt übernehmen, mit festgehaltener Herkunft.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-107",
+          "pill_en": "More commands work",
+          "pill_de": "Weitere Befehle funktionieren",
+          "benefit_en": "Knowledge, onboarding, session lifecycle and the remaining paimos commands work on the command line.",
+          "benefit_de": "Wissen, Onboarding, Sitzungsverwaltung und die übrigen paimos-Befehle funktionieren auf der Kommandozeile.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-109",
+          "pill_en": "Quick quote actions",
+          "pill_de": "Schnelle Angebotsaktionen",
+          "benefit_en": "A quote can be duplicated or deleted right from the list, and a row menu offers every action possible in its current state.",
+          "benefit_de": "Ein Angebot lässt sich direkt in der Liste duplizieren oder löschen, und ein Zeilenmenü bietet jede Aktion, die im aktuellen Zustand möglich ist.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925032936.0.0": {
+      "snapshot_sha256": "deaea52d16c84e182894f0da6524e24a60c5f2b0c4eee43931ab045a5e182902",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-113",
+          "pill_en": "Quotes look like before",
+          "pill_de": "Angebote wie zuvor",
+          "benefit_en": "Imported quotes render with the same page layout as in classic Paimos.",
+          "benefit_de": "Importierte Angebote erscheinen im selben Seitenlayout wie im klassischen Paimos.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925040559.0.0": {
+      "snapshot_sha256": "d2fa957787b2e280c3d37179085b60d9bd8dcdd81f224f760115e7ee7e4ffcd1",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": []
+    },
+    "260925045650.0.0": {
+      "snapshot_sha256": "abb54970d060c8d1ae057af5b9928eb1daf492b12d47400d195600fdc0c23065",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": []
+    },
+    "260925054834.0.0": {
+      "snapshot_sha256": "ad93fd1ca3202dd992d501ba200d697c43711866cf3738532b0046403e9274f7",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-99",
+          "pill_en": "Quotes in the workspace",
+          "pill_de": "Angebote im Arbeitsbereich",
+          "benefit_en": "Quotes open inside Aeon beside customer details and attachments, docked or full screen, without losing the editing session.",
+          "benefit_de": "Angebote öffnen sich direkt in Aeon neben Kundendaten und Anhängen, angedockt oder im Vollbild, ohne die Bearbeitung zu verlieren.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925065536.0.0": {
+      "snapshot_sha256": "9af2519c298743877fba4a178e1555f0b0c31ca225219e7dcf4e72c2fcdbbeb2",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": []
+    },
+    "260925081247.0.0": {
+      "snapshot_sha256": "b71433f8383797a220d4c3d3fe14e2179c2ae862b562b486f45ce39783d8d9ec",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": []
+    },
+    "260925090550.0.0": {
+      "snapshot_sha256": "97956f10a689319bcd0425b0558a1a840e3ada4dec1a79bd4faee3d9abcbc1a6",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-122",
+          "pill_en": "Imported drafts save",
+          "pill_de": "Importierte Entwürfe speichern",
+          "benefit_en": "An imported quote draft can be saved again instead of failing with an error.",
+          "benefit_de": "Ein importierter Angebotsentwurf lässt sich wieder speichern, statt mit einem Fehler zu scheitern.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925110255.0.0": {
+      "snapshot_sha256": "bfee6ca49879d277ec4a32a8b7370df7818dc105f28c5834f722b6edf2064c98",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-123",
+          "pill_en": "Easier taps, cleaner layout",
+          "pill_de": "Leichter tippen, sauberes Layout",
+          "benefit_en": "Buttons are easier to tap on a phone, and overlapping elements, layout jumps and overflow are fixed.",
+          "benefit_de": "Schaltflächen lassen sich am Handy leichter treffen, und überlappende Elemente, springendes Layout und überlaufende Inhalte sind behoben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-127",
+          "pill_en": "Remaining commands work",
+          "pill_de": "Weitere Befehle verfügbar",
+          "benefit_en": "Relations, projects, tags, attachments and more work from the command line as in classic Paimos.",
+          "benefit_de": "Verknüpfungen, Projekte, Tags, Anhänge und mehr funktionieren auf der Kommandozeile wie im klassischen Paimos.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925141137.0.0": {
+      "snapshot_sha256": "fc62e0ca1d7bb95b95423f5a3c4e16d5f6cc12b758a78861051f2bcb3e84c201",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-126",
+          "pill_en": "Knowledge in Aeon",
+          "pill_de": "Wissen in Aeon",
+          "benefit_en": "Project runbooks, guidelines and memory entries can be browsed in Aeon, as in classic Paimos.",
+          "benefit_de": "Runbooks, Richtlinien und Gedächtniseinträge der Projekte lassen sich in Aeon durchsuchen, wie im klassischen Paimos.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-128",
+          "pill_en": "Views and filters",
+          "pill_de": "Ansichten und Filter",
+          "benefit_en": "Saved views, a filter builder, grouping and column sets work as they did in classic Paimos.",
+          "benefit_de": "Gespeicherte Ansichten, Filter-Editor, Gruppierung und Spaltensätze funktionieren wie im klassischen Paimos.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-136",
+          "pill_en": "Project groups and cards",
+          "pill_de": "Projektgruppen und Karten",
+          "benefit_en": "Projects can be grouped with groups shown or hidden, viewed as cards, shown with chosen columns and aligned status counts.",
+          "benefit_de": "Projekte lassen sich gruppieren, Gruppen ein- oder ausblenden, als Karten anzeigen und mit gewählten Spalten und ausgerichteten Statuszahlen darstellen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-134",
+          "pill_en": "Customer links protected",
+          "pill_de": "Kundenlinks geschützt",
+          "benefit_en": "Active customer quote links are stored encrypted, so reading the database cannot reveal them.",
+          "benefit_de": "Aktive Kunden-Angebotslinks werden verschlüsselt gespeichert, sodass sie sich aus der Datenbank nicht auslesen lassen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-135",
+          "pill_en": "Rename tags everywhere",
+          "pill_de": "Tags überall umbenennen",
+          "benefit_en": "A tag can be renamed or deleted in one step across every ticket that uses it.",
+          "benefit_de": "Ein Tag lässt sich in einem Schritt in allen Tickets umbenennen oder löschen, die ihn nutzen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925144844.0.0": {
+      "snapshot_sha256": "3b0f8218c69cbcdb748cf1d99de64650cb74c79601e56aa3801543f0da0e8a6f",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": []
+    },
+    "260925150544.0.0": {
+      "snapshot_sha256": "3da7d5b16e2050b426ab8d3f96db97a2f46689f0aa0d0aed2fffc7ce70da8d2a",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-138",
+          "pill_en": "Knowledge entries open",
+          "pill_de": "Wissenseinträge öffnen sich",
+          "benefit_en": "Imported knowledge entries open again instead of leading nowhere.",
+          "benefit_de": "Importierte Wissenseinträge öffnen sich wieder, statt ins Leere zu führen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-106",
+          "pill_en": "Messaging commands work",
+          "pill_de": "Nachrichtenbefehle funktionieren",
+          "benefit_en": "Sending and listening for messages, with targets and deliveries, works from the command line as it did in classic Paimos.",
+          "benefit_de": "Nachrichten senden und empfangen, samt Zielen und Zustellungen, funktioniert auf der Kommandozeile wie im klassischen Paimos.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925153844.0.0": {
+      "snapshot_sha256": "46fa3c703a5132adacbe8664aef77b6bbe98b31cb582ee239e823d226633d4c9",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-143",
+          "pill_en": "Imported items all open",
+          "pill_de": "Importiertes öffnet sich überall",
+          "benefit_en": "Everything imported from classic Paimos now opens in its own screen.",
+          "benefit_de": "Alles, was aus dem klassischen Paimos importiert wurde, öffnet sich jetzt in seiner eigenen Ansicht.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925175201.0.0": {
+      "snapshot_sha256": "cf874df505f8c16fcdcb445f5f142330eb502f8690537dec1718cd7bbca9b159",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-146",
+          "pill_en": "3D knowledge graph",
+          "pill_de": "Wissen als 3D-Graph",
+          "benefit_en": "Knowledge entries and how they link appear in a 3D bubble graph, next to the list.",
+          "benefit_de": "Wissenseinträge und ihre Verknüpfungen erscheinen in einem 3D-Blasengraphen, neben der Liste.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925213523.0.0": {
+      "snapshot_sha256": "b2ca42aef19596323eb8f85b34e92399fadb9107b24dfae8554ea7e8ce06f740",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-149",
+          "pill_en": "Stricter agent access",
+          "pill_de": "Strengerer Agentenzugriff",
+          "benefit_en": "Agents can only do what their key and role allow, and only admins can approve high-risk requests or change schemas.",
+          "benefit_de": "Agenten dürfen nur, was ihr Schlüssel und ihre Rolle erlauben, und nur Admins geben riskante Anfragen frei oder ändern Schemata.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-154",
+          "pill_en": "Pick ticket relations",
+          "pill_de": "Ticket-Verknüpfungen wählen",
+          "benefit_en": "Tickets are linked by picking a relation type and finding the other ticket by key or title, and removal can be undone.",
+          "benefit_de": "Tickets werden verknüpft, indem eine Verknüpfungsart gewählt und das andere Ticket per Schlüssel oder Titel gefunden wird, und das Entfernen lässt sich rückgängig machen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-139",
+          "pill_en": "Complete journey view",
+          "pill_de": "Vollständige Journey-Ansicht",
+          "benefit_en": "Every journey stage shows real content for imported projects or an honest next step.",
+          "benefit_de": "Jede Journey-Phase zeigt bei importierten Projekten echte Inhalte oder einen ehrlichen nächsten Schritt.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925222406.0.0": {
+      "snapshot_sha256": "5f79a71a5ee272cdb7cabcbecb2c541f9dc77093ed67b0bc232131f8177e9c1c",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-145",
+          "pill_en": "Knowledge preview pane",
+          "pill_de": "Wissen mit Vorschau",
+          "benefit_en": "On wide screens, an entry picked on the left is read on the right without leaving the list.",
+          "benefit_de": "Auf breiten Bildschirmen wird ein links gewählter Eintrag rechts gelesen, ohne die Liste zu verlassen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925232340.0.0": {
+      "snapshot_sha256": "02a82bbd02f0c888ff954f9ece2cad72104e1f7dacc6d75cb99863dc13e856f2",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-152",
+          "pill_en": "Roles and permissions",
+          "pill_de": "Rollen und Berechtigungen",
+          "benefit_en": "People can have built-in or custom roles, and every action checks that they may do it.",
+          "benefit_de": "Personen können eingebaute oder eigene Rollen haben, und jede Aktion prüft, ob sie ausgeführt werden darf.",
+          "group": "features"
+        }
+      ]
+    },
+    "260925234356.0.0": {
+      "snapshot_sha256": "c5e1d849c7a30fd5e19158bb3700641a8168a56438fbd9c59bc47e3e503698c3",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-152",
+          "pill_en": "Roles and permissions",
+          "pill_de": "Rollen und Berechtigungen",
+          "benefit_en": "People can have built-in or custom roles, and every action checks that they may do it.",
+          "benefit_de": "Personen können eingebaute oder eigene Rollen haben, und jede Aktion prüft, ob sie ausgeführt werden darf.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926010821.0.0": {
+      "snapshot_sha256": "802f69ab53c77d57feaa516d03bdb20a516510d2c2bb1e345b4414a8299a285d",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-152",
+          "pill_en": "Roles and permissions",
+          "pill_de": "Rollen und Berechtigungen",
+          "benefit_en": "People can have built-in or custom roles, and every action checks that they may do it.",
+          "benefit_de": "Personen können eingebaute oder eigene Rollen haben, und jede Aktion prüft, ob sie ausgeführt werden darf.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926041436.0.0": {
+      "snapshot_sha256": "1929ae4bda65f11a663a5a0e386fdb349f8cd6bcd44796515667bded8c5ffc36",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-153",
+          "pill_en": "Project access and guests",
+          "pill_de": "Projektzugriff und Gäste",
+          "benefit_en": "People can be limited to specific projects, and guests only see what is shared with them.",
+          "benefit_de": "Personen lassen sich auf bestimmte Projekte beschränken, und Gäste sehen nur, was mit ihnen geteilt wird.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926064658.0.0": {
+      "snapshot_sha256": "ab554a999572d9e886511220a9af59dbe6b7929f9df89ce78be97a5750afe46c",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-161",
+          "pill_en": "Install with Nix",
+          "pill_de": "Installation mit Nix",
+          "benefit_en": "The command line tool and agent daemon can be installed with Nix.",
+          "benefit_de": "Das Kommandozeilenwerkzeug und der Agent-Daemon lassen sich mit Nix installieren.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926071154.0.0": {
+      "snapshot_sha256": "7bfe8aa235dea31ec0c08e917b044cb8f37dc513e351583c0aec6c3c93f49372",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": []
+    },
+    "260926083057.0.0": {
+      "snapshot_sha256": "69bae4302475af0321c9a7021a5d62bc2f72b4d21444a5b0bd16bcd0ed1e3e81",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-155",
+          "pill_en": "Neutral quote design",
+          "pill_de": "Neutrales Angebotsdesign",
+          "benefit_en": "Quotes in the INSPR workspace use the neutral INSPR design, and ACME Labs examples show every feature of the quote builder.",
+          "benefit_de": "Angebote im INSPR-Workspace nutzen das neutrale INSPR-Design; ACME-Labs-Beispiele zeigen alle Funktionen des Angebotseditors.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-159",
+          "pill_en": "Journey stays in sync",
+          "pill_de": "Verschobene Tickets bleiben stimmig",
+          "benefit_en": "Moving a ticket to another project also moves it in that project's journey.",
+          "benefit_de": "Wird ein Ticket in ein anderes Projekt verschoben, wandert es auch in der Journey dieses Projekts mit.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926085451.0.0": {
+      "snapshot_sha256": "7dc84dd5a60f8e856f7542c8eff843f6e4d02f6dd7dd916fac446eca3e360e25",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-148",
+          "pill_en": "Members and roles",
+          "pill_de": "Mitglieder und Rollen",
+          "benefit_en": "People can be invited and deactivated, roles set including custom ones, project access controlled and an access log reviewed.",
+          "benefit_de": "Personen lassen sich einladen und deaktivieren, Rollen inklusive eigener vergeben, der Projektzugriff steuern und ein Zugriffsprotokoll prüfen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-166",
+          "pill_en": "Public documentation",
+          "pill_de": "Öffentliche Dokumentation",
+          "benefit_en": "Guides for connecting agents, planning work and releasing are public, and a demo dataset makes sample screens easy.",
+          "benefit_de": "Anleitungen zum Anbinden von Agenten, Planen und Veröffentlichen sind öffentlich, und ein Demo-Datensatz erleichtert Beispielansichten.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926093605.0.0": {
+      "snapshot_sha256": "b027a6cd3db306649642200eed041ab37a0d92233fc64e944dfc22a387a84eae",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-170",
+          "pill_en": "Lists stay responsive",
+          "pill_de": "Listen bleiben reaktionsschnell",
+          "benefit_en": "Ticket lists no longer hang right after large bulk changes.",
+          "benefit_de": "Ticketlisten hängen nach großen Massenänderungen nicht mehr.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926095249.0.0": {
+      "snapshot_sha256": "9adbb98ce839065d9103150721057a0a30fd9b01e787d0db6fced2148574ea5a",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-171",
+          "pill_en": "Approvals name the agent",
+          "pill_de": "Freigaben nennen den Agenten",
+          "benefit_en": "Approval cards show the agent's name instead of a short id.",
+          "benefit_de": "Freigabekarten zeigen den Namen des Agenten statt einer Kurz-ID.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926103235.0.0": {
+      "snapshot_sha256": "c40f595b49201c3d6bfebcaae1fb160fa05226792eb7d6e9afae5f6af4a5cf0d",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-175",
+          "pill_en": "Old links still work",
+          "pill_de": "Alte Links funktionieren weiter",
+          "benefit_en": "Links to classic Paimos tickets, projects and pages land on the matching page in Aeon.",
+          "benefit_de": "Links auf Tickets, Projekte und Seiten im klassischen Paimos führen zur passenden Seite in Aeon.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926135024.0.0": {
+      "snapshot_sha256": "6b61f9404e1d512fdcf90a8f331a39daec225f6956b4aec39a2fbbe591b13716",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-173",
+          "pill_en": "Release tickets open beside",
+          "pill_de": "Release-Tickets öffnen daneben",
+          "benefit_en": "A ticket key in the release history opens the ticket in a side panel.",
+          "benefit_de": "Ein Ticketschlüssel im Versionsverlauf öffnet das Ticket in einer Seitenleiste.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-174",
+          "pill_en": "Sort icons, custom order",
+          "pill_de": "Sortiersymbole, eigene Reihenfolge",
+          "benefit_en": "Each sort option on Projects has an icon, the button shows the current sort, and cards can be put in a custom order.",
+          "benefit_de": "Jede Sortieroption bei Projekten hat ein Symbol, die Schaltfläche zeigt die aktuelle Sortierung, und Karten lassen sich in eine eigene Reihenfolge bringen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926151716.0.0": {
+      "snapshot_sha256": "85e2ebed30a80f5a0228dc7d758239a00106f4d682288178aef3b9b300f106f7",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-181",
+          "pill_en": "Start agents here",
+          "pill_de": "Agenten hier starten",
+          "benefit_en": "Start an agent from /agents or a ticket by choosing the ticket, model and account.",
+          "benefit_de": "Ein Agent lässt sich unter /agents oder am Ticket starten: Ticket, Modell und Konto wählen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-185",
+          "pill_en": "Subagents on Agents",
+          "pill_de": "Unteragenten bei Agenten",
+          "benefit_en": "Every worker a lead agent starts appears as a child session under it on the Agents page.",
+          "benefit_de": "Jeder Worker, den ein Leitagent startet, erscheint auf der Agenten-Seite als Untersitzung darunter.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-183",
+          "pill_en": "Real usage numbers",
+          "pill_de": "Echte Verbrauchszahlen",
+          "benefit_en": "Pacing uses the tokens and turns the agents really used, not estimates.",
+          "benefit_de": "Das Pacing nutzt die tatsächlich verbrauchten Tokens und Runden statt Schätzungen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-182",
+          "pill_en": "No stranded runs",
+          "pill_de": "Keine hängenden Läufe",
+          "benefit_en": "A run only goes to a computer that has the chosen account, so it never waits forever.",
+          "benefit_de": "Ein Lauf geht nur an einen Rechner mit dem gewählten Konto und bleibt nie hängen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-180",
+          "pill_en": "Aeon runs agents",
+          "pill_de": "Aeon startet Agenten",
+          "benefit_en": "Agents that Aeon starts on your computer show up on /agents and obey Interrupt and Stop.",
+          "benefit_de": "Von Aeon gestartete Agenten erscheinen unter /agents und reagieren auf Unterbrechen und Stoppen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926153431.0.0": {
+      "snapshot_sha256": "530137095715969c75f416ef744a96da6aa384b41ae6f0fb79f0484cce5d16c8",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-184",
+          "pill_en": "Live agent animation",
+          "pill_de": "Live-Animation für Agenten",
+          "benefit_en": "A small animation on project cards and rows shows when an agent is actively working on the project.",
+          "benefit_de": "Eine kleine Animation auf Projektkarten und -zeilen zeigt, wenn ein Agent gerade am Projekt arbeitet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-186",
+          "pill_en": "Agent key expiry",
+          "pill_de": "Ablauf von Agentenschlüsseln",
+          "benefit_en": "An agent key's expiry can be seen and set, a rotation reminder appears, and the key row buttons line up.",
+          "benefit_de": "Der Ablauf eines Agentenschlüssels ist sichtbar und einstellbar, eine Erinnerung zum Erneuern erscheint, und die Schaltflächen in der Schlüsselzeile fluchten.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926162107.0.0": {
+      "snapshot_sha256": "9659dbd382eef793f872dda5b964255e28169301fe77772ef124707456fc4f59",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-189",
+          "pill_en": "Plan cards fit",
+          "pill_de": "Plan-Karten passen",
+          "benefit_en": "In the journey Plan stage, long ticket titles no longer spill out of the backlog card and run under the decision card.",
+          "benefit_de": "In der Journey-Phase Plan laufen lange Tickettitel nicht mehr aus der Backlog-Karte heraus und unter die Entscheidungskarte.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926164818.0.0": {
+      "snapshot_sha256": "dfe029394247153744414a09078e964ac95001dd61661fe6933647c2b94100c0",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-190",
+          "pill_en": "Agents can finish tickets",
+          "pill_de": "Agenten schließen Tickets ab",
+          "benefit_en": "Agents started from Aeon can comment, set status, attach evidence and run tests and commits safely, so they can complete a ticket.",
+          "benefit_de": "Von Aeon gestartete Agenten können kommentieren, Status setzen, Belege anfügen und Tests und Commits sicher ausführen, um ein Ticket abzuschließen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-191",
+          "pill_en": "Working agents first",
+          "pill_de": "Aktive Agenten zuerst",
+          "benefit_en": "On Agents, working sessions come first and stopped ones are collapsed, so it is clear who is working.",
+          "benefit_de": "Auf der Agenten-Seite stehen aktive Sitzungen zuerst und beendete sind eingeklappt, sodass sofort erkennbar ist, wer arbeitet.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926170637.0.0": {
+      "snapshot_sha256": "5503efbbd34006dc8472bee83022a16284dfe894106b089f26fadb2b459fb5c1",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": []
+    },
+    "260926185841.0.0": {
+      "snapshot_sha256": "74c01e6a203b21033eb51fd511d26002f30a985969afea348cf80860d975e729",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-184",
+          "pill_en": "Live agent animation",
+          "pill_de": "Live-Animation für Agenten",
+          "benefit_en": "A small animation on project cards and rows shows when an agent is actively working on the project.",
+          "benefit_de": "Eine kleine Animation auf Projektkarten und -zeilen zeigt, wenn ein Agent gerade am Projekt arbeitet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-192",
+          "pill_en": "What agents do now",
+          "pill_de": "Was Agenten gerade tun",
+          "benefit_en": "The session table and detail panel show what an agent is doing now instead of 'Not reported' filler.",
+          "benefit_de": "Sitzungstabelle und Detailbereich zeigen, was ein Agent gerade tut, statt 'Nicht gemeldet' als Füllwert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-194",
+          "pill_en": "Glass knowledge graph",
+          "pill_de": "Gläserner Wissensgraph",
+          "benefit_en": "The knowledge graph gets glass bubbles, smart labels, working motion controls, a focus mode and smooth 60 FPS.",
+          "benefit_de": "Der Wissensgraph erhält Glasblasen, kluge Beschriftungen, funktionierende Bewegungssteuerung, einen Fokusmodus und flüssige 60 Bilder pro Sekunde.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926195056.0.0": {
+      "snapshot_sha256": "41cb7d80c7545712567d335ce33ebb19d2e8d1c5e8d0dca9bd6fdfbbadd1a89b",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-195",
+          "pill_en": "Project page sections",
+          "pill_de": "Abschnitte der Projektseite",
+          "benefit_en": "The project page has Tickets, Journey and Knowledge tabs, with views inside each, instead of one mixed switch.",
+          "benefit_de": "Die Projektseite hat die Tabs Tickets, Journey und Wissen mit Ansichten darin, statt eines gemischten Schalters.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-198",
+          "pill_en": "Tickets graph view",
+          "pill_de": "Tickets als Graph",
+          "benefit_en": "A project's tickets and epics and how they relate appear as an interactive graph.",
+          "benefit_de": "Die Tickets und Epics eines Projekts und ihre Beziehungen erscheinen als interaktiver Graph.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926210025.0.0": {
+      "snapshot_sha256": "6c79b182324889fd74207ecffb8f267fbba2b516f35d5f5a8a63d926d378ca74",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-184",
+          "pill_en": "Live agent animation",
+          "pill_de": "Live-Animation für Agenten",
+          "benefit_en": "A small animation on project cards and rows shows when an agent is actively working on the project.",
+          "benefit_de": "Eine kleine Animation auf Projektkarten und -zeilen zeigt, wenn ein Agent gerade am Projekt arbeitet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-203",
+          "pill_en": "Slower graph orbit",
+          "pill_de": "Langsamere Graph-Drehung",
+          "benefit_en": "The 3D graph orbits at half speed by default with an adjustable speed, and labels fade and glide.",
+          "benefit_de": "Der 3D-Graph dreht sich standardmäßig halb so schnell, die Geschwindigkeit ist einstellbar, und Beschriftungen blenden weich ein und aus.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-202",
+          "pill_en": "Ticket peek everywhere",
+          "pill_de": "Ticket-Vorschau überall",
+          "benefit_en": "A ticket clicked in Agents or a graph opens in a right sidebar, with a link to open it in the project.",
+          "benefit_de": "Ein Ticket, das in Agenten oder einem Graphen angeklickt wird, öffnet sich in einer rechten Seitenleiste, mit Link zum Öffnen im Projekt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-201",
+          "pill_en": "Calmer data loading",
+          "pill_de": "Ruhigeres Laden von Daten",
+          "benefit_en": "Pages keep showing the last data and retry quietly when a request times out, instead of replacing it with an error.",
+          "benefit_de": "Seiten zeigen bei einer Zeitüberschreitung weiter die letzten Daten und versuchen es still erneut, statt sie durch einen Fehler zu ersetzen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260926213753.0.0": {
+      "snapshot_sha256": "5e40c7e1e8cfb4e5db5309c06ccf54526d1c9559cfe7edb99aa2597a91d99f8c",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-200",
+          "pill_en": "Graph glimpse in header",
+          "pill_de": "Graph-Vorschau im Kopf",
+          "benefit_en": "The project header shows a small glimpse of the ticket graph.",
+          "benefit_de": "Der Projektkopf zeigt eine kleine Vorschau des Ticketgraphen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-206",
+          "pill_en": "Ticket keys open peek",
+          "pill_de": "Ticketschlüssel öffnen Vorschau",
+          "benefit_en": "Ticket keys in Markdown text open the ticket in the side panel, and web addresses become clickable links.",
+          "benefit_de": "Ticketschlüssel in Markdown-Texten öffnen das Ticket in der Seitenleiste, und Webadressen werden anklickbare Links.",
+          "group": "features"
+        }
+      ]
+    },
+    "260927045735.0.0": {
+      "snapshot_sha256": "037d0ca9330f0376bce50d84055b8c14e9de8812da880220fac7bd141f7ad162",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-95",
+          "pill_en": "All column dividers drag",
+          "pill_de": "Alle Spaltentrenner verschiebbar",
+          "benefit_en": "Every divider between ticket list columns can be dragged, including the one next to the title.",
+          "benefit_de": "Jeder Trenner zwischen den Spalten der Ticketliste lässt sich verschieben, auch der neben dem Titel.",
+          "group": "features"
+        }
+      ]
+    },
+    "260927053712.0.0": {
+      "snapshot_sha256": "71dca2f35b47fbbd250c24d6b95a2a5dd3549ec072f34db8d688808ce50ef370",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-133",
+          "pill_en": "Safe quote links",
+          "pill_de": "Sichere Angebotslinks",
+          "benefit_en": "Customer quote links stay fast and cannot be brute-forced, even with several Aeon servers.",
+          "benefit_de": "Angebotslinks für Kunden bleiben schnell und lassen sich nicht durchprobieren, auch mit mehreren Aeon-Servern.",
+          "group": "features"
+        }
+      ]
+    },
+    "260927061901.0.0": {
+      "snapshot_sha256": "09bd6a4cca84ad4e5807a6427dd5c5b3862a790722c62d1a10c16f0199b2e88f",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-56",
+          "pill_en": "Polished everyday screens",
+          "pill_de": "Ausgefeilte Alltagsansichten",
+          "benefit_en": "The everyday screens (projects, ticket list, ticket detail and outline) are rebuilt with less clutter and finished polish, on desktop and phone, in light and dark.",
+          "benefit_de": "Die Alltagsansichten (Projekte, Ticketliste, Ticketdetail und Gliederung) sind aufgeräumter und fertig ausgefeilt, auf Desktop und Handy, hell und dunkel.",
+          "group": "features"
+        }
+      ]
+    },
+    "260927071728.0.0": {
+      "snapshot_sha256": "e222d423cc22da665c91a27d1c57e7f0a6501123d7d559ed1dccaff980d732dc",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-210",
+          "pill_en": "Expired approval shown right",
+          "pill_de": "Abgelaufene Freigabe korrekt",
+          "benefit_en": "An expired approval on the decision card is no longer shown as approved, and it says why the action is unavailable.",
+          "benefit_de": "Eine abgelaufene Freigabe wird auf der Entscheidungskarte nicht mehr als freigegeben dargestellt, und es steht da, warum die Aktion nicht möglich ist.",
+          "group": "features"
+        }
+      ]
+    },
+    "260927090745.0.0": {
+      "snapshot_sha256": "50d0f4fa2968fbe9345e1c678809417e11af54b162a59ed307ae1fb0e017298e",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-213",
+          "pill_en": "Model and effort shown",
+          "pill_de": "Modell und Effort sichtbar",
+          "benefit_en": "/agents shows each session's harness, model, thinking effort and subscription.",
+          "benefit_de": "/agents zeigt Harness, Modell, Denkaufwand und Abo jeder Session.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-214",
+          "pill_en": "Session work visible",
+          "pill_de": "Session-Arbeit sichtbar",
+          "benefit_en": "The session detail shows the brief, worktree, branch and commits of the run.",
+          "benefit_de": "Die Session-Details zeigen Auftrag, Worktree, Branch und Commits des Laufs.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-200",
+          "pill_en": "Graph glimpse in header",
+          "pill_de": "Graph-Vorschau im Kopf",
+          "benefit_en": "The project header shows a small glimpse of the ticket graph.",
+          "benefit_de": "Der Projektkopf zeigt eine kleine Vorschau des Ticketgraphen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260927101716.0.0": {
+      "snapshot_sha256": "83e942ef6ae8a290da80dbd1932c9019d7d9daef8ad4764779428deff86b5840",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-221",
+          "pill_en": "Agent state colours",
+          "pill_de": "Farben für Agentenstatus",
+          "benefit_en": "One set of colours shows agent state everywhere: green working, yellow needs attention, violet throttled, red problem, grey idle.",
+          "benefit_de": "Ein einheitliches Farbschema zeigt den Agentenstatus überall: grün arbeitet, gelb braucht Aufmerksamkeit, violett gedrosselt, rot Problem, grau ruhig.",
+          "group": "features"
+        }
+      ]
+    },
+    "260927112915.0.0": {
+      "snapshot_sha256": "94421bc1f63e4835673627479f8ce4e7f00c99b60f4f7dd82d7a47dc99a1f612",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-221",
+          "pill_en": "Agent state colours",
+          "pill_de": "Farben für Agentenstatus",
+          "benefit_en": "One set of colours shows agent state everywhere: green working, yellow needs attention, violet throttled, red problem, grey idle.",
+          "benefit_de": "Ein einheitliches Farbschema zeigt den Agentenstatus überall: grün arbeitet, gelb braucht Aufmerksamkeit, violett gedrosselt, rot Problem, grau ruhig.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-200",
+          "pill_en": "Graph glimpse in header",
+          "pill_de": "Graph-Vorschau im Kopf",
+          "benefit_en": "The project header shows a small glimpse of the ticket graph.",
+          "benefit_de": "Der Projektkopf zeigt eine kleine Vorschau des Ticketgraphen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-223",
+          "pill_en": "Model changes visible",
+          "pill_de": "Modellwechsel sichtbar",
+          "benefit_en": "Switching model or effort mid-session shows on /agents with a short history.",
+          "benefit_de": "Wechselt eine Session Modell oder Effort, zeigt /agents das samt kurzer Historie.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-215",
+          "pill_en": "Tokens per session",
+          "pill_de": "Tokens pro Session",
+          "benefit_en": "Each session reports its tokens and an estimated cost per model and subscription.",
+          "benefit_de": "Jede Session meldet Tokens und geschätzte Kosten je Modell und Abo.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-222",
+          "pill_en": "Renames reach Aeon",
+          "pill_de": "Umbenennen erreicht Aeon",
+          "benefit_en": "Renaming a session in the harness updates its name on /agents.",
+          "benefit_de": "Eine in der Harness umbenannte Session zeigt den neuen Namen unter /agents.",
+          "group": "features"
+        }
+      ]
+    },
+    "260927120613.0.0": {
+      "snapshot_sha256": "5e387d245c0709ecdc20c5d302a646a7cafc54d07fdcd8714b0167226e594cec",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-230",
+          "pill_en": "Tidier session rows",
+          "pill_de": "Aufgeräumte Sitzungszeilen",
+          "benefit_en": "Session rows show the intended result first, with inline labels, subtle bot badges and model logos.",
+          "benefit_de": "Sitzungszeilen zeigen zuerst das beabsichtigte Ergebnis, mit Beschriftungen in der Zeile, dezenten Bot-Abzeichen und Modell-Logos.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-228",
+          "pill_en": "Safe session recovery",
+          "pill_de": "Sichere Session-Bereinigung",
+          "benefit_en": "Stale sessions can be archived, and owned processes force-stopped safely with history kept.",
+          "benefit_de": "Veraltete Sessions lassen sich archivieren und eigene Prozesse sicher stoppen; die Historie bleibt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-231",
+          "pill_en": "Safer force stop",
+          "pill_de": "Sichereres Zwangsstoppen",
+          "benefit_en": "Force stop can never hit an unrelated process that reused a PID.",
+          "benefit_de": "Zwangsstoppen trifft nie einen fremden Prozess mit wiederverwendeter PID.",
+          "group": "features"
+        }
+      ]
+    },
+    "260927134617.0.0": {
+      "snapshot_sha256": "5308e7da0b3a04e03b6210424cd1dadf3864f8b6da193292d8bffc597a2078a2",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-217",
+          "pill_en": "Cost dashboard",
+          "pill_de": "Kosten im Überblick",
+          "benefit_en": "See spend and tokens by project, model and subscription over time, plus the most expensive tickets.",
+          "benefit_de": "Ausgaben und Tokens je Projekt, Modell und Abo im Zeitverlauf, dazu die teuersten Tickets.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-209",
+          "pill_en": "Smoother deploys",
+          "pill_de": "Sanftere Updates",
+          "benefit_en": "Aeon drains open requests before a restart, so updates interrupt less.",
+          "benefit_de": "Aeon beendet offene Anfragen vor einem Neustart, Updates stören weniger.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-219",
+          "pill_en": "Instruction provenance",
+          "pill_de": "Herkunft der Anweisungen",
+          "benefit_en": "Each agent session records which versions of its instruction files, skills, prompt template and merged rules it ran with, so results trace back to the exact instructions.",
+          "benefit_de": "Jede Agent-Sitzung hält fest, mit welchen Versionen von Anweisungsdateien, Skills, Prompt-Vorlage und zusammengeführten Regeln sie gearbeitet hat, damit Ergebnisse auf die genauen Anweisungen zurückführbar sind.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-227",
+          "pill_en": "Add tickets to releases",
+          "pill_de": "Tickets zu Releases hinzufügen",
+          "benefit_en": "Existing tickets can be added to a release from the journey Plan, or from the Tickets view into a new or existing release.",
+          "benefit_de": "Bestehende Tickets lassen sich in der Journey-Planung oder aus der Ticketansicht einem neuen oder bestehenden Release hinzufügen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-216",
+          "pill_en": "Agent work per ticket",
+          "pill_de": "Agentenarbeit pro Ticket",
+          "benefit_en": "Every ticket shows which agent sessions worked on it, with model, tokens, estimated cost and time, summed per ticket and epic.",
+          "benefit_de": "Jedes Ticket zeigt, welche Agentensitzungen daran gearbeitet haben, mit Modell, Tokens, geschätzten Kosten und Zeit, summiert pro Ticket und Epic.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-210",
+          "pill_en": "Expired approval shown right",
+          "pill_de": "Abgelaufene Freigabe korrekt",
+          "benefit_en": "An expired approval on the decision card is no longer shown as approved, and it says why the action is unavailable.",
+          "benefit_de": "Eine abgelaufene Freigabe wird auf der Entscheidungskarte nicht mehr als freigegeben dargestellt, und es steht da, warum die Aktion nicht möglich ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-226",
+          "pill_en": "Choose the account",
+          "pill_de": "Konto frei wählen",
+          "benefit_en": "Agents start on a chosen subscription account, and sessions show which account they use.",
+          "benefit_de": "Agenten starten auf einem gewählten Abo-Konto; Sessions zeigen ihr Konto.",
+          "group": "features"
+        }
+      ]
+    },
+    "260927160212.0.0": {
+      "snapshot_sha256": "a70c7f1c3123abea690b488fc057db336d23a9b9358cc314bc3833bb755b1f55",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-233",
+          "pill_en": "Workers in Assignee",
+          "pill_de": "Bearbeiter in Zuständig-Spalte",
+          "benefit_en": "The Assignee column shows which agent is actively working on a ticket, instead of a dash.",
+          "benefit_de": "Die Spalte Zuständig zeigt, welcher Agent gerade an einem Ticket arbeitet, statt eines Strichs.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-215",
+          "pill_en": "Tokens per session",
+          "pill_de": "Tokens pro Session",
+          "benefit_en": "Each session reports its tokens and an estimated cost per model and subscription.",
+          "benefit_de": "Jede Session meldet Tokens und geschätzte Kosten je Modell und Abo.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-232",
+          "pill_en": "Ticket controls aligned",
+          "pill_de": "Ticket-Steuerung in einer Zeile",
+          "benefit_en": "On desktop the New ticket button sits next to the view selector again instead of dropping below it.",
+          "benefit_de": "Am Desktop steht die Schaltfläche Neues Ticket wieder neben der Ansichtsauswahl, statt darunter zu rutschen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-227",
+          "pill_en": "Add tickets to releases",
+          "pill_de": "Tickets zu Releases hinzufügen",
+          "benefit_en": "Existing tickets can be added to a release from the journey Plan, or from the Tickets view into a new or existing release.",
+          "benefit_de": "Bestehende Tickets lassen sich in der Journey-Planung oder aus der Ticketansicht einem neuen oder bestehenden Release hinzufügen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-223",
+          "pill_en": "Model changes visible",
+          "pill_de": "Modellwechsel sichtbar",
+          "benefit_en": "Switching model or effort mid-session shows on /agents with a short history.",
+          "benefit_de": "Wechselt eine Session Modell oder Effort, zeigt /agents das samt kurzer Historie.",
+          "group": "features"
+        }
+      ]
+    },
+    "260927181849.0.0": {
+      "snapshot_sha256": "987c988e88ac58f40fe643879acbaf6fa670e026f83518047e38555a52f8484c",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-234",
+          "pill_en": "Renewable journey gates",
+          "pill_de": "Erneuerbare Journey-Freigaben",
+          "benefit_en": "Expired standing approvals in the journey can be renewed, so a deployment can continue safely.",
+          "benefit_de": "Abgelaufene Dauer-Freigaben in der Journey lassen sich erneuern, sodass ein Deployment sicher weiterlaufen kann.",
+          "group": "features"
+        }
+      ]
+    },
+    "260928055400.0.0": {
+      "snapshot_sha256": "38e8a8789bf9ac460ec7fa983c4a367410a9dea2477e6c51d7066871f69a2270",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-239",
+          "pill_en": "Easy unpairing",
+          "pill_de": "Einfach entkoppeln",
+          "benefit_en": "One agent account or a whole paired computer can be disconnected in a few steps, with a clear explanation of what happens.",
+          "benefit_de": "Ein Agentenkonto oder ein ganzer gekoppelter Computer lässt sich in wenigen Schritten trennen, mit klarer Erklärung, was passiert.",
+          "group": "features"
+        }
+      ]
+    },
+    "260928080324.0.0": {
+      "snapshot_sha256": "4d154c501e45d3ea216eae2e2e68f999e218945ad28ea0d185fd0a616d89f93c",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-243",
+          "pill_en": "Accurate project agent count",
+          "pill_de": "Genaue Agentenzahl im Projekt",
+          "benefit_en": "The agent pill on projects counts only active sessions and takes just one subtle line.",
+          "benefit_de": "Die Agenten-Anzeige bei Projekten zählt nur aktive Sitzungen und braucht nur eine dezente Zeile.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-240",
+          "pill_en": "Accurate waiting reasons",
+          "pill_de": "Genaue Wartegründe",
+          "benefit_en": "Sessions show their own reason for waiting, and working agents are no longer all marked as blocked.",
+          "benefit_de": "Sitzungen zeigen ihren eigenen Wartegrund, und arbeitende Agenten werden nicht mehr alle als blockiert markiert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-222",
+          "pill_en": "Renames reach Aeon",
+          "pill_de": "Umbenennen erreicht Aeon",
+          "benefit_en": "Renaming a session in the harness updates its name on /agents.",
+          "benefit_de": "Eine in der Harness umbenannte Session zeigt den neuen Namen unter /agents.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-241",
+          "pill_en": "Friendlier Robot 2",
+          "pill_de": "Freundlicherer Roboter 2",
+          "benefit_en": "Robot 2 now has a gentle smile while working instead of a mouth that looked like broken teeth.",
+          "benefit_de": "Roboter 2 lächelt bei der Arbeit jetzt sanft, statt einen Mund zu haben, der wie kaputte Zähne aussah.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-200",
+          "pill_en": "Graph glimpse in header",
+          "pill_de": "Graph-Vorschau im Kopf",
+          "benefit_en": "The project header shows a small glimpse of the ticket graph.",
+          "benefit_de": "Der Projektkopf zeigt eine kleine Vorschau des Ticketgraphen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260928085354.0.0": {
+      "snapshot_sha256": "42a54b8dd0d9108593115620ee1c8fa0c20897c9cc95c38c4640afa4cba74428",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-242",
+          "pill_en": "Agent indicator settings",
+          "pill_de": "Einstellungen für Agentenanzeige",
+          "benefit_en": "Ring and icon size of the agent indicator can be set separately, with a compact picker and colour-vision friendly palettes.",
+          "benefit_de": "Ring- und Symbolgröße der Agentenanzeige lassen sich getrennt einstellen, mit kompakter Auswahl und farbsehfreundlichen Paletten.",
+          "group": "features"
+        }
+      ]
+    },
+    "260928111408.0.0": {
+      "snapshot_sha256": "096474c4eb99b2d4d4e798d5194a324e7d4183b748016c0e9256034f2d8d36ea",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-223",
+          "pill_en": "Model changes visible",
+          "pill_de": "Modellwechsel sichtbar",
+          "benefit_en": "Switching model or effort mid-session shows on /agents with a short history.",
+          "benefit_de": "Wechselt eine Session Modell oder Effort, zeigt /agents das samt kurzer Historie.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-222",
+          "pill_en": "Renames reach Aeon",
+          "pill_de": "Umbenennen erreicht Aeon",
+          "benefit_en": "Renaming a session in the harness updates its name on /agents.",
+          "benefit_de": "Eine in der Harness umbenannte Session zeigt den neuen Namen unter /agents.",
+          "group": "features"
+        }
+      ]
+    },
+    "260928130526.0.0": {
+      "snapshot_sha256": "54f8b08e9d90189a17e7dbc731ddf8cfa3390aa793952e9673fa6b84ee4d5c45",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-248",
+          "pill_en": "Versioned agent rules",
+          "pill_de": "Versionierte Agentenregeln",
+          "benefit_en": "Rules can be drafted and versioned with explicit scope and publication permissions. Published versions remain immutable with an audit trail.",
+          "benefit_de": "Regeln lassen sich mit eindeutigem Geltungsbereich und geregelter Veröffentlichung verwalten. Veröffentlichte Versionen bleiben unveränderlich und nachvollziehbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-256",
+          "pill_en": "Clear release notes",
+          "pill_de": "Verständliche Release Notes",
+          "benefit_en": "Every ticket says in plain words what you gain, and release notes show exactly that, in English and German.",
+          "benefit_de": "Jedes Ticket sagt in einfachen Worten, was es bringt, und die Release Notes zeigen genau das, auf Deutsch und Englisch.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-252",
+          "pill_en": "Tick and duplicate rules",
+          "pill_de": "Regeln abhaken und duplizieren",
+          "benefit_en": "In the rules editor you switch sets and single rules on or off with a tick and duplicate a rule as a starting point. A failed switch rolls back, and duplicate wording is flagged.",
+          "benefit_de": "Im Regeleditor lassen sich Sets und einzelne Regeln per Häkchen ein- und ausschalten und Regeln als Vorlage duplizieren. Ein fehlgeschlagenes Umschalten wird zurückgenommen, doppelte Formulierungen werden markiert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-250",
+          "pill_en": "Traceable rule imports",
+          "pill_de": "Nachvollziehbare Regelimporte",
+          "benefit_en": "Explicit instruction files can be compared and prepared as rule drafts with source lineage. Unresolved choices stay visible and nothing is published automatically.",
+          "benefit_de": "Ausgewählte Anweisungsdateien lassen sich mit Herkunftsnachweisen als Regelentwürfe vorbereiten. Offene Entscheidungen bleiben sichtbar; es erfolgt keine automatische Veröffentlichung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-254",
+          "pill_en": "Honest message status",
+          "pill_de": "Klarer Nachrichtenstatus",
+          "benefit_en": "Message commands distinguish storage from confirmed delivery and show when the receiver status is unavailable. Senders can inspect an existing message without sending it again.",
+          "benefit_de": "Nachrichtenbefehle unterscheiden Speicherung und bestätigte Zustellung und zeigen fehlende Empfangsinformationen klar an. Der Status einer vorhandenen Nachricht lässt sich ohne erneutes Senden prüfen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260928141717.0.0": {
+      "snapshot_sha256": "441e82a3e8c1de479eae9292d0920fa7ed78700e9c0cfc6f70ff3d562810f194",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-252",
+          "pill_en": "Tick and duplicate rules",
+          "pill_de": "Regeln abhaken und duplizieren",
+          "benefit_en": "In the rules editor you switch sets and single rules on or off with a tick and duplicate a rule as a starting point. A failed switch rolls back, and duplicate wording is flagged.",
+          "benefit_de": "Im Regeleditor lassen sich Sets und einzelne Regeln per Häkchen ein- und ausschalten und Regeln als Vorlage duplizieren. Ein fehlgeschlagenes Umschalten wird zurückgenommen, doppelte Formulierungen werden markiert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-251",
+          "pill_en": "Compare loaded rules",
+          "pill_de": "Geladene Regeln vergleichen",
+          "benefit_en": "One command compares the instruction files a harness actually loads with Aeon's merged rules for that repo and shows what matches, what is only local and what differs. Only hashes and counts are uploaded, never the text.",
+          "benefit_de": "Ein Befehl vergleicht die Anweisungsdateien, die ein Harness tatsächlich lädt, mit den zusammengeführten Regeln von Aeon für dieses Repo und zeigt, was übereinstimmt, was nur lokal existiert und was abweicht. Hochgeladen werden nur Hashes und Zählwerte, nie der Text.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-261",
+          "pill_en": "Classic retired",
+          "pill_de": "Klassik abgeschaltet",
+          "benefit_en": "Everything runs on Aeon alone: one system, no old copy to keep in sync or secure.",
+          "benefit_de": "Alles läuft nur noch auf Aeon: ein System, keine alte Kopie mehr, die gepflegt oder abgesichert werden muss.",
+          "group": "features"
+        }
+      ]
+    },
+    "260928143846.0.0": {
+      "snapshot_sha256": "cf7b6d3ca0a490bfeb6b9fa4c50c7a7faaa004b406344392db75c5f2136da8d2",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": []
+    },
+    "260928150616.0.0": {
+      "snapshot_sha256": "56e8f2157580de08ac83c1fd04302f4108eac7d15f81842dda4defc73531e2bc",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-250",
+          "pill_en": "Traceable rule imports",
+          "pill_de": "Nachvollziehbare Regelimporte",
+          "benefit_en": "Explicit instruction files can be compared and prepared as rule drafts with source lineage. Unresolved choices stay visible and nothing is published automatically.",
+          "benefit_de": "Ausgewählte Anweisungsdateien lassen sich mit Herkunftsnachweisen als Regelentwürfe vorbereiten. Offene Entscheidungen bleiben sichtbar; es erfolgt keine automatische Veröffentlichung.",
+          "group": "features"
+        }
+      ]
+    },
+    "260928155912.0.0": {
+      "snapshot_sha256": "a8e4d55d71d40f3baa40845eb57b280b10ff59a17a504c9ff5d62884a6023d0a",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-252",
+          "pill_en": "Tick and duplicate rules",
+          "pill_de": "Regeln abhaken und duplizieren",
+          "benefit_en": "In the rules editor you switch sets and single rules on or off with a tick and duplicate a rule as a starting point. A failed switch rolls back, and duplicate wording is flagged.",
+          "benefit_de": "Im Regeleditor lassen sich Sets und einzelne Regeln per Häkchen ein- und ausschalten und Regeln als Vorlage duplizieren. Ein fehlgeschlagenes Umschalten wird zurückgenommen, doppelte Formulierungen werden markiert.",
+          "group": "features"
+        }
+      ]
+    },
+    "260928214842.0.0": {
+      "snapshot_sha256": "26f3e79188281f540cda5d432d699f2c74a4050bf3aafa29c96157c064cc54cf",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-266",
+          "pill_en": "Calmer screens",
+          "pill_de": "Ruhigere Oberflächen",
+          "benefit_en": "Agents, usage, journey, tickets and pairing are calmer and clearer, on desktop and phone.",
+          "benefit_de": "Agents, Nutzung, Journey, Tickets und Kopplung sind ruhiger und klarer, am Desktop und am Handy.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-261",
+          "pill_en": "Classic retired",
+          "pill_de": "Klassik abgeschaltet",
+          "benefit_en": "Everything runs on Aeon alone: one system, no old copy to keep in sync or secure.",
+          "benefit_de": "Alles läuft nur noch auf Aeon: ein System, keine alte Kopie mehr, die gepflegt oder abgesichert werden muss.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-264",
+          "pill_en": "Long names stay visible",
+          "pill_de": "Lange Namen bleiben sichtbar",
+          "benefit_en": "A long customer name stays readable in the list, instead of disappearing until you hover.",
+          "benefit_de": "Ein langer Kundenname bleibt in der Liste lesbar, statt erst beim Darüberfahren zu erscheinen.",
+          "group": "features"
+        }
+      ]
+    },
+    "260928223247.0.0": {
+      "snapshot_sha256": "850c31731762a0aca7fbac8840ac402b9f4ceec8976688c6cd75f301b8863a48",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-265",
+          "pill_en": "Remove ghost agents",
+          "pill_de": "Geister-Agenten entfernen",
+          "benefit_en": "Stuck or finished sessions can be removed from Agents in a few clicks, whatever state they are in.",
+          "benefit_de": "Hängende oder beendete Sessions lassen sich mit wenigen Klicks aus Agents entfernen, egal in welchem Zustand.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-256",
+          "pill_en": "Clear release notes",
+          "pill_de": "Verständliche Release Notes",
+          "benefit_en": "Every ticket says in plain words what you gain, and release notes show exactly that, in English and German.",
+          "benefit_de": "Jedes Ticket sagt in einfachen Worten, was es bringt, und die Release Notes zeigen genau das, auf Deutsch und Englisch.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-267",
+          "pill_en": "Messages per session",
+          "pill_de": "Nachrichten pro Session",
+          "benefit_en": "A message sent from a session reaches exactly that session, and ended sessions no longer collect messages.",
+          "benefit_de": "Eine Nachricht aus einer Session erreicht genau diese Session; beendete Sessions sammeln keine Nachrichten mehr.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-155",
+          "pill_en": "Neutral quote design",
+          "pill_de": "Neutrales Angebotsdesign",
+          "benefit_en": "Quotes in the INSPR workspace use the neutral INSPR design, and ACME Labs examples show every feature of the quote builder.",
+          "benefit_de": "Angebote im INSPR-Workspace nutzen das neutrale INSPR-Design; ACME-Labs-Beispiele zeigen alle Funktionen des Angebotseditors.",
+          "group": "features"
+        }
+      ]
+    },
+    "260929000754.0.0": {
+      "snapshot_sha256": "9cdf492a59072be465b6fef571040ed66391efac5f97c718a297a1808bab0cbf",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-263",
+          "pill_en": "Rules made simple",
+          "pill_de": "Regeln einfach gemacht",
+          "benefit_en": "The rules page shows what applies and what is waiting, and publishes all waiting sets with one confirmation.",
+          "benefit_de": "Die Regelseite zeigt, was gilt und was wartet, und veröffentlicht alle wartenden Sets mit einer Bestätigung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-269",
+          "pill_en": "No more ghost rows",
+          "pill_de": "Keine Geisterzeilen mehr",
+          "benefit_en": "Sessions you start yourself show their name, model and work on Agents and disappear when they end.",
+          "benefit_de": "Selbst gestartete Sessions zeigen Name, Modell und Arbeit unter Agents und verschwinden, wenn sie enden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-266",
+          "pill_en": "Calmer screens",
+          "pill_de": "Ruhigere Oberflächen",
+          "benefit_en": "Agents, usage, journey, tickets and pairing are calmer and clearer, on desktop and phone.",
+          "benefit_de": "Agents, Nutzung, Journey, Tickets und Kopplung sind ruhiger und klarer, am Desktop und am Handy.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-262",
+          "pill_en": "See when it's done",
+          "pill_de": "Fertigstellung auf einen Blick",
+          "benefit_en": "Every ticket an agent works on shows how long until it is ready and until it is live, kept up to date automatically.",
+          "benefit_de": "Jedes Ticket, an dem ein Agent arbeitet, zeigt, wie lange es noch dauert, bis es fertig und bis es live ist, automatisch aktuell gehalten.",
+          "group": "features"
+        }
+      ]
+    },
+    "260929052224.0.0": {
+      "snapshot_sha256": "3bad80a38cba2ceba9d80471407ad966eb724e84dd14b102e2a64b661a7ddb2c",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-260",
+          "pill_en": "Steer agents from Aeon",
+          "pill_de": "Agenten aus Aeon steuern",
+          "benefit_en": "Sessions started from Aeon can be steered, paused and stopped from the browser, inside a safe sandbox.",
+          "benefit_de": "Aus Aeon gestartete Sitzungen lassen sich im Browser steuern, pausieren und stoppen, in einer sicheren Umgebung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-271",
+          "pill_en": "Reliable force stop",
+          "pill_de": "Zuverlässiges Zwangsstoppen",
+          "benefit_en": "Force stop stays available for live sessions even when server clocks drift.",
+          "benefit_de": "Zwangsstoppen bleibt für laufende Sessions verfügbar, auch wenn Serveruhren abweichen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-270",
+          "pill_en": "No double usage writes",
+          "pill_de": "Keine doppelten Verbrauchsdaten",
+          "benefit_en": "Usage is never written again after a session was archived.",
+          "benefit_de": "Nach dem Archivieren einer Session wird kein Verbrauch mehr nachgeschrieben.",
+          "group": "features"
+        }
+      ]
+    },
+    "260929062507.0.0": {
+      "snapshot_sha256": "f6de45627b70a6958b1a4dae22ac80102232178cf06b0d9ce47618bce45cd28c",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-273",
+          "pill_en": "Chat fits iPhone",
+          "pill_de": "Chat passt aufs iPhone",
+          "benefit_en": "Session chat now fits your iPhone screen, with its own Messages tab, a read indicator and a jump to the latest message.",
+          "benefit_de": "Der Sitzungs-Chat passt jetzt auf den iPhone-Bildschirm, mit eigenem Nachrichten-Tab, Lesebestätigung und Sprung zur neuesten Nachricht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-225",
+          "pill_en": "Change running sessions",
+          "pill_de": "Laufende Sitzungen ändern",
+          "benefit_en": "Request a new name or model for an interactive session and it is applied in the running session.",
+          "benefit_de": "Du kannst für eine interaktive Sitzung einen neuen Namen oder ein anderes Modell anfordern, und es wird in der laufenden Sitzung übernommen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-224",
+          "pill_en": "Control managed sessions",
+          "pill_de": "Sitzungen fernsteuern",
+          "benefit_en": "Rename a managed session and set its model and thinking level from the agents page.",
+          "benefit_de": "Du kannst eine verwaltete Sitzung umbenennen und Modell sowie Denkstufe direkt auf der Agentenseite setzen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-274",
+          "pill_en": "Quotes open reliably",
+          "pill_de": "Angebote öffnen zuverlässig",
+          "benefit_en": "Quotes with incomplete profile data no longer crash and open normally.",
+          "benefit_de": "Angebote mit unvollständigen Profildaten stürzen nicht mehr ab und öffnen sich normal.",
+          "group": "fixes"
+        }
+      ]
+    },
+    "260929072754.0.0": {
+      "snapshot_sha256": "3d881217923ba28ab93f3292cdc267fe65ba1a10f7c20fcdbb38f0ff6ef011ab",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-258",
+          "pill_en": "Watch running sessions",
+          "pill_de": "Laufende Sitzungen mitverfolgen",
+          "benefit_en": "You can attach to an agent session already running on your computer and follow it live, read-only. You decide per person whether each watch needs your approval.",
+          "benefit_de": "Eine bereits laufende Agent-Sitzung auf dem eigenen Rechner lässt sich anhängen und live, nur lesend, mitverfolgen. Pro Person ist einstellbar, ob jedes Mitlesen eine Freigabe braucht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-277",
+          "pill_en": "Compact phone panel",
+          "pill_de": "Kompaktes Handy-Panel",
+          "benefit_en": "On phones the managed-session panel takes less room and its buttons are easier to tap. ETA staleness now uses the server's clock, so it stays right even when your device clock is off.",
+          "benefit_de": "Auf dem Handy braucht das Panel verwalteter Sitzungen weniger Platz und die Schaltflächen sind leichter zu treffen. Veraltete Zeitschätzungen richten sich nach der Serveruhr und stimmen auch bei falsch gehender Geräteuhr.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-284",
+          "pill_en": "Clearer medium priority",
+          "pill_de": "Klarere mittlere Priorität",
+          "benefit_en": "The medium priority icon now matches the high and low chevrons, so priorities read at a glance.",
+          "benefit_de": "Das Symbol für mittlere Priorität passt jetzt zu den Pfeilen für hoch und niedrig, damit Prioritäten auf einen Blick lesbar sind.",
+          "group": "features"
+        }
+      ]
+    },
+    "260929082208.0.0": {
+      "snapshot_sha256": "0d4a654794693698f5b6c69ae4659a731fbbf139c6fe8be7592bec18d8943d1d",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-211",
+          "pill_en": "Deploy target on screen",
+          "pill_de": "Deploy-Ziel sichtbar",
+          "benefit_en": "Deploy approvals show the target host or environment and what changes there, directly on the approval card, in Needs you on /agents and on the Journey deploy stage. A request without a named target says so plainly.",
+          "benefit_de": "Deploy-Freigaben zeigen Zielserver oder Umgebung und was sich dort ändert direkt auf der Freigabekarte, unter Needs you in /agents und in der Deploy-Stufe der Journey. Fehlt ein Ziel, steht das klar dort.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-218",
+          "pill_en": "Flag rework on deliveries",
+          "pill_de": "Nacharbeit melden",
+          "benefit_en": "Silence means an agent delivery was fine. When it was not, mark the ticket session as needing rework with a reason, optionally with a 1 to 5 rating, tags and a comment.",
+          "benefit_de": "Ohne Rückmeldung gilt eine Agent-Lieferung als in Ordnung. War sie es nicht, lässt sich die Ticket-Sitzung mit Begründung als nacharbeitsbedürftig markieren, optional mit Bewertung von 1 bis 5, Tags und Kommentar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-293",
+          "pill_en": "Readable risk chip",
+          "pill_de": "Lesbarer Risiko-Chip",
+          "benefit_en": "The high-risk chip on the Journey deploy stage now meets WCAG AA contrast in light mode.",
+          "benefit_de": "Der Chip für hohes Risiko in der Deploy-Stufe der Journey erfüllt jetzt im hellen Modus den WCAG-AA-Kontrast.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-219",
+          "pill_en": "Instruction provenance",
+          "pill_de": "Herkunft der Anweisungen",
+          "benefit_en": "Each agent session records which versions of its instruction files, skills, prompt template and merged rules it ran with, so results trace back to the exact instructions.",
+          "benefit_de": "Jede Agent-Sitzung hält fest, mit welchen Versionen von Anweisungsdateien, Skills, Prompt-Vorlage und zusammengeführten Regeln sie gearbeitet hat, damit Ergebnisse auf die genauen Anweisungen zurückführbar sind.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-276",
+          "pill_en": "Read state across devices",
+          "pill_de": "Lesestand geräteübergreifend",
+          "benefit_en": "Which session messages you have read now follows you across browsers and devices. This browser keeps a copy for when you are offline.",
+          "benefit_de": "Welche Sitzungsnachrichten gelesen sind, gilt jetzt über Browser und Geräte hinweg. Der Browser behält eine Kopie für den Offline-Fall.",
+          "group": "features"
+        }
+      ]
+    },
+    "260929091245.0.0": {
+      "snapshot_sha256": "7c5c4df240dba4935a669d82f3eeba2a16a6cfd6663f4019fe1623d21b12bc8d",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-289",
+          "pill_en": "Changes grouped by ticket",
+          "pill_de": "Änderungen nach Ticket gruppiert",
+          "benefit_en": "Release changes now sort into Features, Fixes and Other by the tickets they belong to, so you see at a glance what a release delivered.",
+          "benefit_de": "Die Änderungen eines Releases werden jetzt anhand ihrer Tickets in Features, Fehlerbehebungen und Sonstiges eingeordnet, sodass auf einen Blick sichtbar ist, was ein Release bringt.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-250",
+          "pill_en": "Traceable rule imports",
+          "pill_de": "Nachvollziehbare Regelimporte",
+          "benefit_en": "Explicit instruction files can be compared and prepared as rule drafts with source lineage. Unresolved choices stay visible and nothing is published automatically.",
+          "benefit_de": "Ausgewählte Anweisungsdateien lassen sich mit Herkunftsnachweisen als Regelentwürfe vorbereiten. Offene Entscheidungen bleiben sichtbar; es erfolgt keine automatische Veröffentlichung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-290",
+          "pill_en": "Notes for older releases",
+          "pill_de": "Release-Notes für ältere Releases",
+          "benefit_en": "Releases published before release notes were frozen now show their user benefits too, clearly labelled as written after the release.",
+          "benefit_de": "Auch Releases aus der Zeit vor eingefrorenen Release-Notes zeigen jetzt ihren Nutzen, deutlich als nachträglich verfasst gekennzeichnet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-295",
+          "pill_en": "One benefit per ticket",
+          "pill_de": "Ein Nutzen pro Ticket",
+          "benefit_en": "Each feature or fix in a release shows one plain-language benefit line; the commits sit behind a disclosure you can open from the keyboard or search.",
+          "benefit_de": "Jedes Feature und jede Fehlerbehebung eines Releases zeigt eine verständliche Nutzenzeile; die Commits liegen dahinter und lassen sich per Tastatur oder Suche aufklappen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-252",
+          "pill_en": "Tick and duplicate rules",
+          "pill_de": "Regeln abhaken und duplizieren",
+          "benefit_en": "In the rules editor you switch sets and single rules on or off with a tick and duplicate a rule as a starting point. A failed switch rolls back, and duplicate wording is flagged.",
+          "benefit_de": "Im Regeleditor lassen sich Sets und einzelne Regeln per Häkchen ein- und ausschalten und Regeln als Vorlage duplizieren. Ein fehlgeschlagenes Umschalten wird zurückgenommen, doppelte Formulierungen werden markiert.",
+          "group": "features"
+        }
+      ]
+    },
+    "260929095359.0.0": {
+      "snapshot_sha256": "178658db6cdc6601c656a5f4b91859087a4d5b2423ddf55e0245430be0e67414",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-279",
+          "pill_en": "Messages always arrive",
+          "pill_de": "Nachrichten kommen an",
+          "benefit_en": "Messages to agents reach their session at the next step or come back as clearly not delivered, and you can see read receipts and who is listening.",
+          "benefit_de": "Nachrichten an Agenten erreichen ihre Sitzung beim nächsten Schritt oder kommen klar als nicht zugestellt zurück; Lesebestätigungen und wer zuhört sind sichtbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-280",
+          "pill_en": "Delivered or told",
+          "pill_de": "Zugestellt oder gemeldet",
+          "benefit_en": "Messages to agent sessions now have a delivery deadline. If a session does not confirm in time you get one clear \"Not delivered\" notice instead of silence, the chat shows Sent, Delivered and Read, and /agents shows whether each session is listening.",
+          "benefit_de": "Nachrichten an Agenten-Sitzungen haben jetzt eine Zustellfrist. Bestätigt eine Sitzung nicht rechtzeitig, bekommst du eine klare Meldung „Nicht zugestellt“ statt Stille, der Chat zeigt Gesendet, Zugestellt und Gelesen, und /agents zeigt, ob eine Sitzung zuhört.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-282",
+          "pill_en": "Idle workers receive",
+          "pill_de": "Wartende Worker empfangen",
+          "benefit_en": "Managed workers now receive messages while idle: a waiting session is woken and continues on the same thread, so follow-up instructions reach workers that have finished a turn.",
+          "benefit_de": "Verwaltete Worker empfangen Nachrichten jetzt auch im Leerlauf: Eine wartende Sitzung wird geweckt und setzt im selben Thread fort, so erreichen Folgeanweisungen auch Worker, die einen Zug beendet haben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-281",
+          "pill_en": "Inbox hooks",
+          "pill_de": "Hooks für den Posteingang",
+          "benefit_en": "Claude Code and Codex sessions can install Aeon hooks that pick up session messages at every turn, so messages arrive without the agent having to start a watcher.",
+          "benefit_de": "Claude-Code- und Codex-Sitzungen können Aeon-Hooks installieren, die Sitzungsnachrichten bei jedem Zug abholen. Nachrichten kommen an, ohne dass der Agent selbst einen Beobachter starten muss.",
+          "group": "features"
+        }
+      ]
+    },
+    "260929113854.0.0": {
+      "snapshot_sha256": "a67863d8dd2de256bbaca9b10302f1ff1095d71920d92b11c6ff71996041c050",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-291",
+          "pill_en": "Dead sessions tidy themselves",
+          "pill_de": "Tote Sitzungen räumen auf",
+          "benefit_en": "A session that stops sending heartbeats is closed as \"Lost contact\" after a configurable number of minutes, and the session menu offers only actions that work. Removing a session can be undone, and History keeps every earlier run.",
+          "benefit_de": "Eine Sitzung ohne Lebenszeichen wird nach einstellbaren Minuten als „Kontakt verloren“ geschlossen, und das Sitzungsmenü bietet nur Aktionen an, die auch funktionieren. Das Entfernen einer Sitzung lässt sich rückgängig machen, und der Verlauf behält alle früheren Läufe.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-304",
+          "pill_en": "Session list fits phones",
+          "pill_de": "Sitzungsliste passt aufs Handy",
+          "benefit_en": "On a phone each session is one compact row: title, time and menu stay on one line, details fit in one line below, and the header keeps only what matters.",
+          "benefit_de": "Auf dem Handy ist jede Sitzung eine kompakte Zeile: Titel, Zeit und Menü stehen in einer Zeile, die Details passen in eine Zeile darunter, und die Kopfzeile zeigt nur das Wichtige.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-251",
+          "pill_en": "Compare loaded rules",
+          "pill_de": "Geladene Regeln vergleichen",
+          "benefit_en": "One command compares the instruction files a harness actually loads with Aeon's merged rules for that repo and shows what matches, what is only local and what differs. Only hashes and counts are uploaded, never the text.",
+          "benefit_de": "Ein Befehl vergleicht die Anweisungsdateien, die ein Harness tatsächlich lädt, mit den zusammengeführten Regeln von Aeon für dieses Repo und zeigt, was übereinstimmt, was nur lokal existiert und was abweicht. Hochgeladen werden nur Hashes und Zählwerte, nie der Text.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-285",
+          "pill_en": "Signed Mac agent",
+          "pill_de": "Signierter Mac-Agent",
+          "benefit_en": "The Mac agent daemon now ships signed with a Developer ID and notarized by Apple, the prerequisite for confirming a session watch with Touch ID.",
+          "benefit_de": "Der Mac-Agent-Dienst wird jetzt mit einer Developer ID signiert und von Apple notarisiert ausgeliefert – die Voraussetzung, um das Beobachten einer Sitzung mit Touch ID zu bestätigen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-303",
+          "pill_en": "Done asks for notes",
+          "pill_de": "Erledigt fragt nach Notizen",
+          "benefit_en": "Moving a ticket to Done without release-note texts now opens a short dialog that asks for them, from the ticket list, a bulk selection or the ticket itself, instead of showing an error.",
+          "benefit_de": "Wird ein Ticket ohne Release-Texte auf Erledigt gesetzt, öffnet sich jetzt ein kurzer Dialog, der danach fragt – in der Ticketliste, bei einer Mehrfachauswahl und im Ticket selbst – statt eine Fehlermeldung zu zeigen.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-302",
+          "pill_en": "Complete project counts",
+          "pill_de": "Vollständige Projektzahlen",
+          "benefit_en": "Project cards and headers now count open and blocked tickets as open, so the numbers match the ticket list. Hiding closed work and sorting by status use the same rules.",
+          "benefit_de": "Projektkarten und Kopfzeilen zählen offene und blockierte Tickets jetzt als offen, sodass die Zahlen zur Ticketliste passen. „Erledigte ausblenden“ und die Sortierung nach Status folgen denselben Regeln.",
+          "group": "fixes"
+        }
+      ]
+    },
+    "260929162827.0.0": {
+      "snapshot_sha256": "9a0b3347a638557463ada264ca8ee4e9b57548ad493826d60aec4cda58328250",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-299",
+          "pill_en": "Today's plan on Agents",
+          "pill_de": "Tagesplan für die Agenten",
+          "benefit_en": "The top of Agents shows each account with today's plan and its remaining capacity, shows Needs you only when something waits for you, and keeps live work in one compact line. Schedules and days off are configurable.",
+          "benefit_de": "Oben auf der Agentenseite steht jedes Konto mit dem heutigen Plan und der verbleibenden Kapazität. „Braucht dich“ erscheint nur, wenn etwas auf dich wartet, und laufende Arbeit steht in einer kompakten Zeile. Zeitpläne und freie Tage sind einstellbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-309",
+          "pill_en": "Clearer version pill",
+          "pill_de": "Klarere Versionsanzeige",
+          "benefit_en": "New releases follow INSPR-CalVer3: the version pill shows the release time in six readable segments, with seconds on hover, focus or tap, and copying still gives the exact version. Earlier releases stay unchanged as history.",
+          "benefit_de": "Neue Releases folgen INSPR-CalVer3: Die Versionsanzeige zeigt den Release-Zeitpunkt in sechs lesbaren Teilen, Sekunden beim Überfahren, Fokussieren oder Antippen, und Kopieren liefert weiterhin die exakte Version. Frühere Releases bleiben unverändert als Verlauf.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-323",
+          "pill_en": "Switch language and view",
+          "pill_de": "Sprache und Ansicht wählen",
+          "benefit_en": "The release history can be read in English or German and as user benefits or as technical changes, with one click each.",
+          "benefit_de": "Die Versionshistorie lässt sich mit je einem Klick auf Englisch oder Deutsch und als Nutzen oder als technische Änderungen lesen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-332",
+          "pill_en": "Clearer medium priority",
+          "pill_de": "Klarere mittlere Priorität",
+          "benefit_en": "Medium priority shows as a clear outline diamond that matches the high and low arrows.",
+          "benefit_de": "Mittlere Priorität erscheint als klare Raute im Stil der Pfeile für hoch und niedrig.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-331",
+          "pill_en": "Blocked as real state",
+          "pill_de": "Blockiert als echter Status",
+          "benefit_en": "Tickets that wait on something outside can be marked Blocked from the status menu and are easy to spot by their own icon.",
+          "benefit_de": "Tickets, die auf etwas von außen warten, lassen sich im Statusmenü als Blockiert markieren und sind an ihrem eigenen Symbol leicht zu erkennen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-316",
+          "pill_en": "Track agent work",
+          "pill_de": "Agentenarbeit im Blick",
+          "benefit_en": "Sorting by assignee now groups tickets by the agent working on them, and compact Progress and ETA columns show how far along each ticket is.",
+          "benefit_de": "Die Sortierung nach Zuständigen gruppiert Tickets jetzt auch nach dem arbeitenden Agenten, und kompakte Spalten für Fortschritt und ETA zeigen, wie weit jedes Ticket ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-322",
+          "pill_en": "Restarts keep the team",
+          "pill_de": "Neustart behält das Team",
+          "benefit_en": "When the lead agent restarts, its running workers move to the new session automatically, and short review and fix runs show up on /agents too.",
+          "benefit_de": "Startet der leitende Agent neu, wandern seine laufenden Worker automatisch zur neuen Sitzung, und kurze Prüf- und Korrekturläufe erscheinen ebenfalls unter /agents.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-325",
+          "pill_en": "One clear update notice",
+          "pill_de": "Ein klarer Update-Hinweis",
+          "benefit_en": "After an update the release history shows one clear notice with a reload button instead of two confusing banners.",
+          "benefit_de": "Nach einem Update zeigt die Versionshistorie einen klaren Hinweis mit Neu-laden-Knopf statt zweier verwirrender Banner.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-305",
+          "pill_en": "Named release pages",
+          "pill_de": "Releases mit Namen",
+          "benefit_en": "Each release shows a name, a one-sentence headline and a short introduction above its benefit rows, and backfilled releases look exactly like current ones.",
+          "benefit_de": "Jedes Release zeigt einen Namen, eine Überschrift in einem Satz und eine kurze Einleitung über den Nutzen-Zeilen. Nachgetragene Releases sehen genauso aus wie aktuelle.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-288",
+          "pill_en": "Learnings become rule drafts",
+          "pill_de": "Lernpunkte werden Regelentwürfe",
+          "benefit_en": "Accepting a learning can prefill a rule draft in a chosen rule set and layer, linked back to its ticket or comment; publishing the rule stays a person's approval. Candidate text that looks like a credential is never stored.",
+          "benefit_de": "Beim Übernehmen eines Lernpunkts kann ein Regelentwurf in einem gewählten Regelsatz und einer Ebene vorbefüllt werden, mit Verweis auf das Ticket oder den Kommentar. Die Veröffentlichung bleibt die Freigabe einer Person. Text, der wie ein Zugangsdaten-Wert aussieht, wird nie gespeichert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-324",
+          "pill_en": "Clearer estimates",
+          "pill_de": "Klarere Schätzungen",
+          "benefit_en": "Estimates now also show on phone cards and epics explain how many of their tickets are estimated.",
+          "benefit_de": "Schätzungen erscheinen jetzt auch auf den Handy-Karten, und Epics zeigen, wie viele ihrer Tickets geschätzt sind.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-313",
+          "pill_en": "Two-way session chat",
+          "pill_de": "Sitzungschat in beide Richtungen",
+          "benefit_en": "A session's Messages tab shows your questions and the agent's answers as one chronological thread, marks what was answered and leaves unrelated inbox history out.",
+          "benefit_de": "Der Nachrichten-Tab einer Sitzung zeigt deine Fragen und die Antworten des Agenten als einen zeitlich geordneten Verlauf, markiert Beantwortetes und lässt fremden Posteingangs-Verlauf weg.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-315",
+          "pill_en": "Clear preview permissions",
+          "pill_de": "Klare Rechte bei Vorschau",
+          "benefit_en": "The session file preview lists the named agents you can preview first and shows the others disabled with a plain reason, such as who created the agent's key.",
+          "benefit_de": "Die Vorschau der Sitzungsdatei zeigt zuerst die benannten Agenten, die du ansehen darfst, und die übrigen deaktiviert mit einem klaren Grund, etwa wer den Schlüssel des Agenten erstellt hat.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-314",
+          "pill_en": "Readable agent rules",
+          "pill_de": "Lesbare Regeln für Agenten",
+          "benefit_en": "Rule sets and rules carry short explanations for people, the preview is a table of explanation and exact rule that can be filtered by harness, and a workspace budget with per-layer caps shows how much of the session file each layer uses.",
+          "benefit_de": "Regelsätze und Regeln haben kurze Erklärungen für Menschen, die Vorschau ist eine Tabelle aus Erklärung und genauer Regel mit Filter nach Harness, und ein Budget pro Arbeitsbereich mit Grenzen je Ebene zeigt, wie viel der Sitzungsdatei jede Ebene belegt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-300",
+          "pill_en": "Usage reported automatically",
+          "pill_de": "Nutzung wird automatisch gemeldet",
+          "benefit_en": "Every session and run reports its token usage, including cached and reasoning tokens, from Claude, Codex, Cursor and Grok. List prices estimate API costs, while subscription usage is shown without an invented cost.",
+          "benefit_de": "Jede Sitzung und jeder Lauf meldet den Token-Verbrauch, einschließlich zwischengespeicherter und Reasoning-Tokens, aus Claude, Codex, Cursor und Grok. Listenpreise schätzen API-Kosten, während Abo-Nutzung ohne erfundene Kosten angezeigt wird.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-312",
+          "pill_en": "Gear and avatar menus",
+          "pill_de": "Zahnrad- und Avatarmenü",
+          "benefit_en": "The header has a gear menu for the app and workspace (settings, agent keys, system status, help and feedback) and an avatar menu for you, including theme and version.",
+          "benefit_de": "Die Kopfzeile hat ein Zahnradmenü für App und Arbeitsbereich (Einstellungen, Agenten-Schlüssel, Systemstatus, Hilfe und Feedback) und ein Avatarmenü für dich, mit Design und Version.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-317",
+          "pill_en": "Estimates on every ticket",
+          "pill_de": "Schätzung für jedes Ticket",
+          "benefit_en": "Every ticket shows roughly how many agent hours it needs, drafted automatically and easy to correct.",
+          "benefit_de": "Jedes Ticket zeigt, wie viele Agentenstunden es ungefähr braucht, automatisch vorgeschlagen und leicht korrigierbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-311",
+          "pill_en": "Hooks bind automatically",
+          "pill_de": "Hooks verbinden sich automatisch",
+          "benefit_en": "The inbox hook finds its own Aeon session without extra environment variables, and replying to a message the hook just delivered works.",
+          "benefit_de": "Der Posteingangs-Hook findet seine Aeon-Sitzung ohne zusätzliche Umgebungsvariablen, und die Antwort auf eine gerade zugestellte Nachricht funktioniert.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-286",
+          "pill_en": "Measured agent outcomes",
+          "pill_de": "Gemessene Ergebnisse der Agenten",
+          "benefit_en": "Review verdicts, fix rounds, CI results and reverts are recorded as append-only outcome events, and finishing a ticket or publishing a release is captured automatically, so agent work can be compared by model, harness and rules version.",
+          "benefit_de": "Review-Urteile, Korrekturrunden, CI-Ergebnisse und Rücknahmen werden als unveränderliche Ergebnis-Ereignisse erfasst, und das Abschließen eines Tickets oder das Veröffentlichen eines Releases wird automatisch festgehalten. So lässt sich die Arbeit der Agenten nach Modell, Harness und Regelversion vergleichen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-298",
+          "pill_en": "Usage status fallback",
+          "pill_de": "Nutzungsstand als Rückfallebene",
+          "benefit_en": "When a harness reports no capacity itself, agentd reads the vendor's usage status for Codex, Grok and Claude in a minimal environment without reading credentials; Cursor honestly reports that no reading is available.",
+          "benefit_de": "Meldet ein Harness selbst keine Kapazität, liest agentd den Nutzungsstand des Anbieters für Codex, Grok und Claude in einer minimalen Umgebung, ohne Zugangsdaten zu lesen. Für Cursor wird ehrlich gemeldet, dass kein Messwert verfügbar ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-306",
+          "pill_en": "Agentd stops promptly",
+          "pill_de": "Agentd stoppt sofort",
+          "benefit_en": "Stopping or upgrading agentd no longer waits out a managed Codex session's idle window: an idle session is closed cleanly within seconds, while busy turns still finish.",
+          "benefit_de": "Beim Stoppen oder Aktualisieren wartet agentd nicht mehr das Leerlauffenster einer verwalteten Codex-Sitzung ab: Eine ruhende Sitzung wird in Sekunden sauber beendet, laufende Arbeit darf weiterhin fertig werden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-308",
+          "pill_en": "Flow pill in footer",
+          "pill_de": "Ablauf-Pille in der Fußzeile",
+          "benefit_en": "The project's next-step pill sits in the centre of the sticky footer, so it stays visible while you scroll.",
+          "benefit_de": "Die Pille mit dem nächsten Projektschritt sitzt in der Mitte der fixierten Fußzeile und bleibt beim Scrollen sichtbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-307",
+          "pill_en": "Correct listening label",
+          "pill_de": "Richtige Anzeige beim Zuhören",
+          "benefit_en": "A session that receives messages through its hook keeps showing the hook as its listening path instead of switching to an acknowledgement.",
+          "benefit_de": "Eine Sitzung, die Nachrichten über ihren Hook empfängt, zeigt weiterhin den Hook als Empfangsweg an, statt auf eine Bestätigung umzuspringen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-297",
+          "pill_en": "Accounts report capacity",
+          "pill_de": "Konten melden ihre Kapazität",
+          "benefit_en": "Agent accounts report how much of each usage window is used, how long the window is and when it resets. Routing uses these readings instead of hand-entered windows, which stay available as an override.",
+          "benefit_de": "Agenten-Konten melden, wie viel jedes Nutzungsfensters verbraucht ist, wie lang das Fenster ist und wann es zurückgesetzt wird. Die Verteilung der Arbeit nutzt diese Messwerte statt von Hand eingetragener Fenster, die als Übersteuerung erhalten bleiben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-275",
+          "pill_en": "Learnings reach the runbook",
+          "pill_de": "Lernpunkte landen im Runbook",
+          "benefit_en": "Closed tickets, review verdicts and incident comments are tagged as candidate learnings automatically and collected in a learnings inbox, where a person accepts them into the knowledge changelog or dismisses them.",
+          "benefit_de": "Abgeschlossene Tickets, Review-Urteile und Vorfall-Kommentare werden automatisch als mögliche Lernpunkte markiert und in einem Posteingang gesammelt. Dort übernimmt eine Person sie ins Wissens-Änderungsprotokoll oder verwirft sie.",
+          "group": "features"
+        }
+      ]
+    },
+    "260929193046.0.0": {
+      "snapshot_sha256": "56e6449f5a2a7c2e583b9de6f564d02428ffad69c12b5945e81ff38f2ef053bd",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-318",
+          "pill_en": "Doctrine read from git",
+          "pill_de": "Doktrin direkt aus Git",
+          "benefit_en": "Rules settings show the INSPR doctrine read-only from git at its pinned release, with the exact lines and links. Aeon keeps no copy of its own, and private sources need an operator-approved credential.",
+          "benefit_de": "Die Regel-Einstellungen zeigen die INSPR-Doktrin schreibgeschützt aus Git im festgelegten Release, mit den genauen Zeilen und Links. Aeon hält keine eigene Kopie, und private Quellen brauchen einen vom Betreiber freigegebenen Zugang.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-334",
+          "pill_en": "pi as a harness",
+          "pill_de": "pi als Harness",
+          "benefit_en": "Computers can now also offer the pi coding agent to Aeon, set up through the same guided pairing.",
+          "benefit_de": "Rechner können jetzt auch den Coding-Agenten pi für Aeon anbieten, eingerichtet über dieselbe geführte Kopplung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-329",
+          "pill_en": "Plan work with real numbers",
+          "pill_de": "Planen mit echten Zahlen",
+          "benefit_en": "Every ticket shows who should build it, how many tokens it took or will take, and what that costs at list price and in real charges.",
+          "benefit_de": "Jedes Ticket zeigt, wer es bauen sollte, wie viele Tokens es brauchte oder brauchen wird und was das zum Listenpreis und tatsächlich kostet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-346",
+          "pill_en": "Create agents directly",
+          "pill_de": "Agenten direkt anlegen",
+          "benefit_en": "Admins can create an agent and its key in one step, instead of going round in circles between pairing and key pages.",
+          "benefit_de": "Admins können einen Agenten samt Schlüssel in einem Schritt anlegen, statt zwischen Kopplung und Schlüsselseiten im Kreis zu laufen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-301",
+          "pill_en": "One Usage page",
+          "pill_de": "Eine Seite für Nutzung",
+          "benefit_en": "Capacity and usage are one page: what each account has left right now and, for the chosen days, the work done, tokens with honest coverage, agent time, waste and tickets, without placeholder dashes.",
+          "benefit_de": "Kapazität und Nutzung sind eine Seite: was jedem Konto gerade bleibt und für die gewählten Tage erledigte Arbeit, Tokens mit ehrlicher Abdeckung, Agentenzeit, Verschwendung und Tickets, ohne Platzhalter-Striche.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-328",
+          "pill_en": "Larger rule budgets",
+          "pill_de": "Größeres Regelbudget",
+          "benefit_en": "Admins can allow larger rule files once every connected agent supports them, without breaking older ones.",
+          "benefit_de": "Admins können größere Regeldateien erlauben, sobald alle verbundenen Agenten sie unterstützen, ohne ältere zu stören.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-320",
+          "pill_en": "No doubled rules",
+          "pill_de": "Keine doppelten Regeln",
+          "benefit_en": "Each rule reaches agents through exactly one channel: the session file leaves out rules the doctrine already delivers, publishing such a copy is refused, and aeon doctor checks computers for drift and doubling.",
+          "benefit_de": "Jede Regel erreicht Agenten über genau einen Weg: Die Sitzungsdatei lässt Regeln weg, die schon die Doktrin liefert, eine solche Kopie wird nicht veröffentlicht, und aeon doctor prüft Rechner auf Abweichungen und Doppelungen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-345",
+          "pill_en": "Faster session chat",
+          "pill_de": "Schnellerer Sitzungs-Chat",
+          "benefit_en": "Long session conversations load quickly and open at the first unread message.",
+          "benefit_de": "Lange Sitzungsgespräche laden schnell und öffnen bei der ersten ungelesenen Nachricht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-339",
+          "pill_en": "Two-command Mac setup",
+          "pill_de": "Mac-Setup in zwei Befehlen",
+          "benefit_en": "Connect a Mac without Nix in two commands: install with Homebrew, then pair and approve in the browser. Updates keep the connection. After brew upgrade, restart the service so the new version runs.",
+          "benefit_de": "Ein Mac ohne Nix wird mit zwei Befehlen verbunden: mit Homebrew installieren, dann koppeln und im Browser bestätigen. Updates behalten die Verbindung. Nach brew upgrade den Dienst neu starten, damit die neue Version läuft.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-350",
+          "pill_en": "Steadier agent controls",
+          "pill_de": "Stabilere Agentensteuerung",
+          "benefit_en": "Agent controls and inbox deliveries keep working even when computer clocks drift.",
+          "benefit_de": "Agentensteuerung und Posteingangs-Zustellungen funktionieren auch bei abweichenden Rechneruhren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-343",
+          "pill_en": "Reliable session heartbeat",
+          "pill_de": "Verlässlicher Sitzungs-Herzschlag",
+          "benefit_en": "Sessions that attach themselves to Aeon stay visible and live instead of hanging in 'starting'.",
+          "benefit_de": "Sitzungen, die sich selbst mit Aeon verbinden, bleiben sichtbar und aktiv, statt in 'startet' zu hängen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-340",
+          "pill_en": "Small UI polish",
+          "pill_de": "Kleiner UI-Feinschliff",
+          "benefit_en": "Blocked and New are easier to tell apart in dark mode, and the release history is a bit leaner.",
+          "benefit_de": "Blockiert und Neu sind im dunklen Modus leichter zu unterscheiden, und die Versionshistorie arbeitet etwas schlanker.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-342",
+          "pill_en": "Claude survives updates",
+          "pill_de": "Claude übersteht Updates",
+          "benefit_en": "A computer's Claude connection keeps working after Node or the Claude SDK are updated by the system configuration.",
+          "benefit_de": "Die Claude-Verbindung eines Rechners funktioniert weiter, nachdem Node oder das Claude-SDK durch die Systemkonfiguration aktualisiert wurden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-344",
+          "pill_en": "Adjust agent key rights",
+          "pill_de": "Agentenschlüssel anpassen",
+          "benefit_en": "Admins can give an agent key a missing permission with a click instead of creating and installing a new key.",
+          "benefit_de": "Admins können einem Agentenschlüssel eine fehlende Berechtigung per Klick geben, statt einen neuen Schlüssel zu erstellen und einzurichten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-341",
+          "pill_en": "Harnesses start reliably",
+          "pill_de": "Harnesses starten verlässlich",
+          "benefit_en": "Agent tools installed via npm start reliably under the background service instead of looking signed out.",
+          "benefit_de": "Per npm installierte Agenten-Werkzeuge starten im Hintergrunddienst zuverlässig, statt abgemeldet zu wirken.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-335",
+          "pill_en": "Faster assignee sorting",
+          "pill_de": "Schnellere Sortierung",
+          "benefit_en": "Sorting large ticket lists by assignee stays fast.",
+          "benefit_de": "Große Ticketlisten lassen sich weiterhin schnell nach Zuständigen sortieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-327",
+          "pill_en": "Agents can plan properly",
+          "pill_de": "Agenten planen richtig",
+          "benefit_en": "Coordinating agents can read the model registry and the rule sets they need, so model choices follow the registry instead of guesses.",
+          "benefit_de": "Koordinierende Agenten können die Modellliste und die nötigen Regelsätze lesen, damit Modellwahlen der Liste folgen statt Schätzungen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-336",
+          "pill_en": "Every change is recorded",
+          "pill_de": "Jede Änderung protokolliert",
+          "benefit_en": "Automatic changes made by Aeon itself now appear in a ticket's history like any other change.",
+          "benefit_de": "Automatische Änderungen durch Aeon selbst erscheinen jetzt wie jede andere Änderung in der Ticket-Historie.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-330",
+          "pill_en": "Sturdier agent messages",
+          "pill_de": "Robustere Agentennachrichten",
+          "benefit_en": "Agents can always send a message, even when their environment points at a session that isn't theirs or is broken.",
+          "benefit_de": "Agenten können immer eine Nachricht senden, auch wenn ihre Umgebung auf eine fremde oder defekte Sitzung zeigt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-338",
+          "pill_en": "Clearer pairing guide",
+          "pill_de": "Klarere Kopplungsanleitung",
+          "benefit_en": "The pairing guide shows only what fits your setup and explains mistakes before they happen.",
+          "benefit_de": "Die Kopplungsanleitung zeigt nur, was zur eigenen Umgebung passt, und erklärt Fehler, bevor sie passieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-333",
+          "pill_en": "Pair a computer quickly",
+          "pill_de": "Rechner schnell koppeln",
+          "benefit_en": "Connecting a computer, including Nix-managed ones, is one short command plus entering a code in the browser.",
+          "benefit_de": "Einen Rechner zu verbinden, auch mit Nix verwaltete, ist ein kurzer Befehl plus ein Code im Browser.",
+          "group": "features"
+        }
+      ]
+    },
+    "260929203122.0.0": {
+      "snapshot_sha256": "c341250884caab6a06466110934334dd1b15cef428d25fc6f0b0b9e1f47fd4e6",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-367",
+          "pill_en": "Keys without scope cap",
+          "pill_de": "Schlüssel ohne Scope-Limit",
+          "benefit_en": "An agent key can hold every permission its role allows; the old limit of 32 scopes is gone.",
+          "benefit_de": "Ein Agenten-Schlüssel kann alle Berechtigungen seiner Rolle tragen; das alte Limit von 32 Scopes entfällt.",
+          "group": "features"
+        }
+      ]
+    },
+    "260929215406.0.0": {
+      "snapshot_sha256": "c70dc9e137c536067e7c222383c9478436c8564ad26958a60d84e69ba91a8d92",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-376",
+          "pill_en": "Pairing works everywhere",
+          "pill_de": "Koppeln klappt überall",
+          "benefit_en": "A paired computer's agentd now starts on every Mac, whatever the username length.",
+          "benefit_de": "Der agentd eines gekoppelten Rechners startet jetzt auf jedem Mac, unabhängig von der Länge des Benutzernamens.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-365",
+          "pill_en": "Add accounts easily",
+          "pill_de": "Konten einfach hinzufügen",
+          "benefit_en": "Settings shows how to add a vendor account to a connected machine, with the exact commands to copy.",
+          "benefit_de": "Die Einstellungen zeigen, wie ein Anbieter-Konto auf einem verbundenen Rechner hinzukommt, mit den genauen Befehlen zum Kopieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-368",
+          "pill_en": "Clear pairing errors",
+          "pill_de": "Klare Kopplungsfehler",
+          "benefit_en": "If pairing fails because the terminal sits in a folder that no longer exists, agentd says so plainly instead of blaming the harness installation.",
+          "benefit_de": "Scheitert das Koppeln, weil das Terminal in einem gelöschten Ordner steht, sagt agentd das klar, statt die Harness-Installation zu beschuldigen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-355",
+          "pill_en": "Accounts card fits",
+          "pill_de": "Kontenkarte passt",
+          "benefit_en": "The Accounts card on the Agents page fits every screen width without text spilling out on the right.",
+          "benefit_de": "Die Kontenkarte auf der Agenten-Seite passt bei jeder Bildschirmbreite, ohne dass rechts Text herausläuft.",
+          "group": "features"
+        }
+      ]
+    },
+    "260929232203.0.0": {
+      "snapshot_sha256": "ad26b061e4e2eed66a4eb216a4154eefa8c678f10305747d3cecfa367ce610e9",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-358",
+          "pill_en": "Pairing guide that works",
+          "pill_de": "Kopplungsanleitung, die funktioniert",
+          "benefit_en": "Connecting a computer works on the first try: the page starts with the install step, its commands run the right agentd, and Nix Macs are pointed to the Nix option.",
+          "benefit_de": "Einen Rechner verbinden klappt beim ersten Versuch: Die Seite beginnt mit der Installation, die Befehle starten den richtigen agentd, und Nix-Macs werden zur Nix-Option geführt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-365",
+          "pill_en": "Add accounts easily",
+          "pill_de": "Konten einfach hinzufügen",
+          "benefit_en": "Settings shows how to add a vendor account to a connected machine, with the exact commands to copy.",
+          "benefit_de": "Die Einstellungen zeigen, wie ein Anbieter-Konto auf einem verbundenen Rechner hinzukommt, mit den genauen Befehlen zum Kopieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-357",
+          "pill_en": "Release history opens right",
+          "pill_de": "Versionshistorie öffnet richtig",
+          "benefit_en": "The Release history entry in the header menu opens the full list of releases.",
+          "benefit_de": "Der Eintrag Versionshistorie im Kopfmenü öffnet die vollständige Liste aller Versionen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-371",
+          "pill_en": "Glanceable release notes",
+          "pill_de": "Versionshinweise auf einen Blick",
+          "benefit_en": "Each change in the release notes carries a small symbol for feature, fix or other, so the list reads faster.",
+          "benefit_de": "Jede Änderung in den Versionshinweisen trägt ein kleines Symbol für Funktion, Korrektur oder Sonstiges, damit sich die Liste schneller liest.",
+          "group": "features"
+        }
+      ]
+    },
+    "260930074921.0.0": {
+      "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",
+      "captured_at": "2026-09-30T09:09:33Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-399",
+          "pill_en": "Works with Homebrew",
+          "pill_de": "Läuft mit Homebrew",
+          "benefit_en": "Pairing a Mac works with Homebrew's own Node, and if a path is unsafe the message names exactly which one and why.",
+          "benefit_de": "Das Koppeln eines Macs funktioniert mit dem Node aus Homebrew, und bei einem unsicheren Pfad nennt die Meldung genau welchen und warum.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-400",
+          "pill_en": "Clear connect step",
+          "pill_de": "Klarer Verbinden-Schritt",
+          "benefit_en": "Connecting your machine never stalls on a greyed-out button: the screen says which harnesses are verified and connects the rest.",
+          "benefit_de": "Das Verbinden deines Rechners bleibt nie an einem ausgegrauten Knopf hängen: Der Bildschirm sagt, welche Harnesses geprüft werden, und verbindet die übrigen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-398",
+          "pill_en": "Complete release history",
+          "pill_de": "Vollständige Release-Historie",
+          "benefit_en": "Every earlier release now shows its features and fixes on all instances, not only the newest ones.",
+          "benefit_de": "Jedes frühere Release zeigt jetzt auf allen Instanzen seine Features und Fixes, nicht nur die neuesten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-396",
+          "pill_en": "Steadier tests",
+          "pill_de": "Stabilere Tests",
+          "benefit_en": "The copy button no longer covers the worker link on narrow screens, and releases stop tripping over flaky checks.",
+          "benefit_de": "Die Kopieren-Schaltfläche verdeckt auf schmalen Bildschirmen nicht mehr den Worker-Link, und Releases stolpern nicht mehr über wackelige Tests.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-379",
+          "pill_en": "Change ticket type",
+          "pill_de": "Tickettyp ändern",
+          "benefit_en": "A ticket that grows into an epic can be converted in place, instead of the change silently doing nothing.",
+          "benefit_de": "Ein Ticket, das zu einem Epic wächst, lässt sich direkt umwandeln, statt dass die Änderung stillschweigend nichts bewirkt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-389",
+          "pill_en": "Account groups",
+          "pill_de": "Kontengruppen pro Login",
+          "benefit_en": "Group accounts per project, count one login on two computers once, pin a ticket to an account, and switch your terminal to an account with one command.",
+          "benefit_de": "Konten pro Projekt gruppieren, ein Konto auf zwei Rechnern nur einmal zählen, ein Ticket an ein Konto binden und das Terminal mit einem Befehl auf ein Konto umstellen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-388",
+          "pill_en": "Aeon learns your limits",
+          "pill_de": "Aeon lernt deine Limits",
+          "benefit_en": "Aeon learns what a run costs, how much you use yourself and where blind vendors stop, and shows how sure it is.",
+          "benefit_de": "Aeon lernt, was ein Lauf kostet, wie viel du selbst nutzt und wo Anbieter ohne Anzeige stoppen, und zeigt, wie sicher es ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-384",
+          "pill_en": "Accounts without forms",
+          "pill_de": "Konten ohne Formulare",
+          "benefit_en": "Account settings show what Aeon measured and learned; an optional one-sentence limit replaces the old allowance form.",
+          "benefit_de": "Die Konteneinstellungen zeigen, was Aeon gemessen und gelernt hat; ein optionales Limit in einem Satz ersetzt das alte Kontingent-Formular.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-385",
+          "pill_en": "Live outline",
+          "pill_de": "Gliederung live aktualisiert",
+          "benefit_en": "The project outline updates live like the ticket list, and bulk moves show up right away.",
+          "benefit_de": "Die Projektgliederung aktualisiert sich live wie die Ticketliste, und Massenverschiebungen erscheinen sofort.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-383",
+          "pill_en": "Smarter account order",
+          "pill_de": "Klügere Kontenreihenfolge",
+          "benefit_en": "Agents use the account whose limit resets first, and when a vendor stops a run, the work moves to the next account by itself.",
+          "benefit_de": "Agenten nutzen zuerst das Konto, dessen Limit am frühesten zurückgesetzt wird; stoppt ein Anbieter einen Lauf, geht die Arbeit selbstständig ans nächste Konto.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-378",
+          "pill_en": "Aeon proposes rule fixes",
+          "pill_de": "Aeon schlägt Regelkorrekturen vor",
+          "benefit_en": "Aeon spots recurring problems in its agents' work and proposes rule changes as drafts with evidence; you decide what gets published.",
+          "benefit_de": "Aeon erkennt wiederkehrende Probleme in der Arbeit der Agenten und schlägt Regeländerungen mit Belegen als Entwurf vor; veröffentlicht wird nur, was du freigibst.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-375",
+          "pill_en": "Keep for you",
+          "pill_de": "Für dich reserviert",
+          "benefit_en": "Agents leave you your usual share of every limit while you work, and use what would expire anyway before a reset. One setting, Auto by default.",
+          "benefit_de": "Agenten lassen dir während deiner Arbeitszeit deinen üblichen Anteil jedes Limits und nutzen vor einem Reset, was sonst verfallen würde. Eine Einstellung, standardmäßig Auto.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-372",
+          "pill_en": "Release switches work",
+          "pill_de": "Versions-Umschalter funktionieren",
+          "benefit_en": "The language and Highlights/Details switches in the release history work wherever you open it.",
+          "benefit_de": "Die Umschalter für Sprache und Highlights/Details in der Versionshistorie funktionieren, egal wo sie geöffnet wird.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-369",
+          "pill_en": "Message any live session",
+          "pill_de": "Jede laufende Sitzung anschreiben",
+          "benefit_en": "You can send a message to any running agent session from its panel on the Agents page, with no extra setup.",
+          "benefit_de": "Jede laufende Agenten-Sitzung lässt sich direkt aus ihrem Bereich auf der Agenten-Seite anschreiben, ohne zusätzliche Einrichtung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-326",
+          "pill_en": "Lists stay current",
+          "pill_de": "Listen bleiben aktuell",
+          "benefit_en": "Lists and ticket views update live when someone else changes a ticket, without jumping rows or losing your selection.",
+          "benefit_de": "Listen und Ticketansichten aktualisieren sich live, wenn jemand anderes ein Ticket ändert, ohne springende Zeilen und ohne die Auswahl zu verlieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-374",
+          "pill_en": "pi runs OpenRouter models",
+          "pill_de": "pi mit OpenRouter-Modellen",
+          "benefit_en": "A pi agent can run any OpenRouter model: pick the model in Settings, and the key stays on your machine.",
+          "benefit_de": "Ein pi-Agent kann jedes OpenRouter-Modell nutzen: Das Modell wird in den Einstellungen gewählt, der Schlüssel bleibt auf dem eigenen Rechner.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-354",
+          "pill_en": "Honest vendor limits",
+          "pill_de": "Ehrliche Anbieterlimits",
+          "benefit_en": "When a vendor says stop, Aeon knows it at once, shows until when, and counts the same login on two computers only once.",
+          "benefit_de": "Meldet ein Anbieter ein Limit, weiß Aeon es sofort, zeigt bis wann, und zählt dasselbe Konto auf zwei Rechnern nur einmal.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-353",
+          "pill_en": "Agents start without setup",
+          "pill_de": "Agenten starten ohne Einrichtung",
+          "benefit_en": "Approve your accounts once when pairing and agents can start right away; when a run has to wait, Aeon says why and until when.",
+          "benefit_de": "Konten werden beim Koppeln einmal freigegeben, danach starten Agenten sofort; muss ein Lauf warten, nennt Aeon Grund und Zeitpunkt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-347",
+          "pill_en": "One account blocks alone",
+          "pill_de": "Nur das betroffene Konto",
+          "benefit_en": "One outdated agent setup on a computer no longer stops all its other agents.",
+          "benefit_de": "Eine veraltete Agenten-Einrichtung auf einem Rechner stoppt nicht mehr alle anderen Agenten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-352",
+          "pill_en": "Attach running agents",
+          "pill_de": "Laufende Agenten anbinden",
+          "benefit_en": "A session already running in a terminal can be attached to Aeon after its owner approves, so it shows up with a truthful status.",
+          "benefit_de": "Eine bereits laufende Terminal-Sitzung lässt sich nach Zustimmung des Besitzers an Aeon anbinden und erscheint dort mit ehrlichem Status.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-329",
+          "pill_en": "Plan with real numbers",
+          "pill_de": "Planen mit echten Zahlen",
+          "benefit_en": "Every ticket shows who should build it, how many tokens it took or will take, and what that costs at list price and in real charges.",
+          "benefit_de": "Jedes Ticket zeigt, wer es bauen sollte, wie viele Tokens es brauchte oder brauchen wird und was das zum Listenpreis und tatsächlich kostet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-319",
+          "pill_en": "Rules become pull requests",
+          "pill_de": "Regeln als Pull Requests",
+          "benefit_en": "A rule change you make in Aeon becomes a reviewed pull request to the doctrine repository, and approving it merges and releases it.",
+          "benefit_de": "Eine Regeländerung in Aeon wird zu einem geprüften Pull Request im Doktrin-Repository; die Freigabe führt ihn zusammen und veröffentlicht ihn.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-348",
+          "pill_en": "Clearer computer status",
+          "pill_de": "Klarerer Rechnerstatus",
+          "benefit_en": "When one agent tool on a computer needs attention, the others stay visibly ready.",
+          "benefit_de": "Braucht ein Agenten-Werkzeug auf einem Rechner Aufmerksamkeit, bleiben die anderen sichtbar bereit.",
+          "group": "features"
+        }
+      ]
+    },
+    "260930094206.0.0": {
+      "snapshot_sha256": "ac6a53b384d63d55a8b7e77b21372fb375a8f883493f7d54c60967c3e7320934",
+      "captured_at": "2026-09-30T11:53:24Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-435",
+          "pill_en": "Verified agent attach",
+          "pill_de": "Geprüfter Agent Anschluss",
+          "benefit_en": "Claude, Codex and Cursor attach only when their vendor signature is verified against the expected Team ID, so a look-alike program cannot pose as an agent.",
+          "benefit_de": "Claude, Codex und Cursor werden nur angebunden, wenn ihre Herstellersignatur gegen die erwartete Team-ID geprüft ist, so kann sich kein Imitat als Agent ausgeben.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-401",
+          "pill_en": "Pairing says why",
+          "pill_de": "Kopplung nennt den Grund",
+          "benefit_en": "Pairing no longer waits silently: it names the approved harness that is not yet bound, and checking status never changes anything.",
+          "benefit_de": "Die Kopplung wartet nicht mehr stumm: Sie nennt das freigegebene Harness, das noch nicht gebunden ist, und die Statusabfrage ändert nichts.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-398",
+          "pill_en": "Complete release history",
+          "pill_de": "Vollständige Release-Historie",
+          "benefit_en": "Every earlier release now shows its features and fixes on all instances, not only the newest ones.",
+          "benefit_de": "Jedes frühere Release zeigt jetzt auf allen Instanzen seine Features und Fixes, nicht nur die neuesten.",
+          "group": "features"
+        }
+      ]
+    },
+    "260930115354.0.0": {
+      "snapshot_sha256": "60149218f2504aa9232bcb34f6cc083e0f249ea67eecc5387a2a95660f53f1bf",
+      "captured_at": "2026-09-30T13:08:22Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-441",
+          "pill_en": "Safer attach",
+          "pill_de": "Sichereres Andocken",
+          "benefit_en": "Only the genuine, running Claude or Codex program can be attached to your session.",
+          "benefit_de": "Nur das echte, laufende Claude- oder Codex-Programm kann an deine Sitzung angedockt werden.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-439",
+          "pill_en": "Attach from any terminal",
+          "pill_de": "Aus jedem Terminal anhängen",
+          "benefit_en": "You can attach to a running agent session straight from Terminal or Ghostty, no tmux workaround needed.",
+          "benefit_de": "Du kannst dich direkt aus Terminal oder Ghostty an eine laufende Agentensitzung anhängen, ohne Umweg über tmux.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-402",
+          "pill_en": "Cancel queued runs",
+          "pill_de": "Wartende Läufe abbrechen",
+          "benefit_en": "You can cancel a run that is still waiting and tidy away computers you no longer use, straight from /agents.",
+          "benefit_de": "Du kannst einen noch wartenden Lauf abbrechen und nicht mehr genutzte Rechner direkt in /agents aufräumen.",
+          "group": "features"
+        }
+      ]
+    }
+  }
+}

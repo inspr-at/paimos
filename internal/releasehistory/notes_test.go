@@ -35,7 +35,7 @@ func TestNotesSnapshotLanguagesHiddenGapsAndDuplicates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(notes.Items) != 1 || notes.Hidden != 1 || len(notes.Gaps) != 1 || len(notes.SHA256) != 64 || notes.Items[0].BenefitDE != "Tickets erklären den Nutzen." || notes.Fallback != "" {
+	if len(notes.Items) != 2 || notes.Hidden != 1 || len(notes.Gaps) != 1 || len(notes.SHA256) != 64 || notes.Items[0].BenefitDE != "Tickets erklären den Nutzen." || notes.Items[1].PillEN != "No translation" || notes.Fallback != "" {
 		t.Fatalf("notes: %+v", notes)
 	}
 	encoded, _ := json.Marshal(notes)

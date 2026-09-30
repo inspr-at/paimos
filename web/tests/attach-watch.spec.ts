@@ -123,12 +123,15 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByText('Requested by a process on Markus’s MacBook.', { exact: false })).toBeVisible()
     await expect(dialog.getByText('Only allow if you started this watch yourself.')).toBeVisible()
+    await expect(dialog.getByText('Watch the conversation', { exact: true })).toBeVisible()
+    await expect(dialog.getByText('Status only (no conversation text)', { exact: true })).toHaveCount(0)
     await expect(dialog.getByText('PID 4812 · UID 501')).toBeVisible()
     // The actual bytes being approved must be visible without opening details.
     await expect(dialog.locator('details')).not.toHaveAttribute('open', '')
     await expect(dialog.locator(':scope > dl').getByText(snapshot.transcript, { exact: true })).toBeVisible()
     await expect(dialog.locator(':scope > dl').getByText(snapshot.file_id, { exact: true })).toBeVisible()
     await expect(dialog.getByRole('button', { name: consent_mode === 'local_auth' ? 'Allow and confirm on Mac' : 'Allow live watch' })).toBeVisible()
+    await expect(dialog).not.toContainText('Linux and a headless Mac keep this approval')
     await expect(dialog).toContainText('PDF worker image')
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
     expect((await new AxeBuilder({ page }).include('dialog').analyze()).violations).toEqual([])
@@ -164,6 +167,98 @@ test('strict approval cannot proceed on a Linux daemon', async ({ page }) => {
   await page.getByLabel('Attach code', { exact: true }).fill('123456789')
   await page.getByRole('button', { name: 'Review session' }).click()
   await expect(page.getByRole('dialog')).toContainText('Local confirmation is unavailable on this computer')
+  await expect(page.getByRole('dialog')).not.toContainText('Linux and a headless Mac keep this approval')
   await expect(page.getByRole('button', { name: 'Allow and confirm on Mac' })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Decline', exact: true })).toBeEnabled()
 })
+
+test('an Aeon approval on Linux says that computer keeps this approval', async ({ page }) => {
+  await setup(page)
+  await page.route('**/api/agent-pairing/attach/lookup', route => route.fulfill({ json: {
+    request_id: 'linux-fixture', request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64), consent_mode: 'aeon', state: 'pending', expires_at: new Date(Date.now() + 600_000).toISOString(),
+    snapshot: { platform: 'linux', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Linux workstation', harness: 'codex', transcript: '/home/owner/session.jsonl', file_id: '1:234', process: { pid: 4812, uid: 1000, started: 'fixture', executable: '/usr/bin/codex', cwd: '/home/owner/work' } },
+  } }))
+  await page.route('**/api/nodes/p-pharos', route => route.fulfill({ json: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' } }))
+  await page.route('**/api/nodes/n-2', route => route.fulfill({ json: { id: 'n-2', key: 'PHAROS-12', title: 'PDF worker image' } }))
+  await page.goto('/agents')
+  await page.getByRole('button', { name: 'Attach session', exact: true }).click()
+  await page.getByLabel('Attach code', { exact: true }).fill('123456789')
+  await page.getByRole('button', { name: 'Review session' }).click()
+  await expect(page.getByRole('dialog')).toContainText('Linux and a headless Mac keep this approval, and Touch ID is the default only when that Mac can use it.')
+})
+
+for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) for (const consent_mode of ['aeon', 'local_auth'] as const) {
+  test(`metadata-only attach approval and status ${theme} ${width} ${consent_mode}`, async ({ page }) => {
+    const worker = await setup(page, true, theme)
+    Object.assign(worker.watch!, { mode: 'lease' })
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto(`/agents/${worker.id}`)
+    await expect(page.getByRole('heading', { name: 'Attached session' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Watch live', exact: true })).toHaveCount(0)
+    expect(await page.evaluate(() => (window as unknown as { attachChannels: { url: string }[] }).attachChannels.filter(c => c.url.endsWith('/watch')).length)).toBe(0)
+    await page.getByRole('button', { name: 'Close session details' }).click()
+    const review = {
+      request_id: 'lease-fixture', request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64), consent_mode, state: 'pending', expires_at: new Date(Date.now() + 600_000).toISOString(),
+      snapshot: { mode: 'lease', platform: 'darwin', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Markus’s MacBook', harness: 'codex', transcript: '', file_id: '', process: { pid: 4812, uid: 501, started: '2026-09-29T17:00:00Z', executable: '/opt/homebrew/bin/codex', cwd: '/Users/markus/Code/pharos' } },
+    }
+    await page.route('**/api/nodes/p-pharos', route => route.fulfill({ json: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' } }))
+    await page.route('**/api/nodes/n-2', route => route.fulfill({ json: { id: 'n-2', key: 'PHAROS-12', title: 'PDF worker image' } }))
+    let approvals = 0
+    await page.route('**/api/agent-pairing/attach/**', async route => {
+      expect(route.request().url()).not.toContain('123456789')
+      if (route.request().url().endsWith('/lookup')) {
+        expect(route.request().postDataJSON()).toEqual({ user_code: '123456789' })
+        return route.fulfill({ json: review })
+      }
+      expect(route.request().postDataJSON()).toEqual({ request_digest: review.request_digest, consent_digest: review.consent_digest })
+      approvals++
+      return route.fulfill({ json: { ...review, state: 'approved' } })
+    })
+    await page.getByRole('button', { name: 'Attach session', exact: true }).click()
+    await page.getByLabel('Attach code', { exact: true }).fill('123 456 789')
+    await page.getByRole('button', { name: 'Review session' }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByRole('heading', { name: 'Attach a running session' })).toBeVisible()
+    await expect(dialog).toContainText('PDF worker image')
+    await expect(dialog).toContainText('Session status only; no conversation text is read or shared.')
+    await expect(dialog.getByText('Status only (no conversation text)', { exact: true })).toBeVisible()
+    await expect(dialog.getByText('Watch the conversation', { exact: true })).toHaveCount(0)
+    await expect(dialog).not.toContainText('Linux and a headless Mac keep this approval')
+    await expect(dialog).toContainText('Requested by a process on Markus’s MacBook.')
+    await expect(dialog.getByText('Transcript', { exact: true })).toHaveCount(0)
+    await expect(dialog.getByText('New turns will be visible', { exact: false })).toHaveCount(0)
+    expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+    expect((await new AxeBuilder({ page }).include('dialog').analyze()).violations).toEqual([])
+    mkdirSync(shots, { recursive: true })
+    await page.screenshot({ path: `${shots}/lease-approval-${consent_mode}-${theme}-${width}.png` })
+    const action = consent_mode === 'local_auth' ? 'Allow and confirm on Mac' : 'Allow attach'
+    await dialog.getByRole('button', { name: action, exact: true }).click()
+    await expect(dialog).toContainText(consent_mode === 'local_auth' ? 'Waiting for confirmation on Markus’s MacBook. Nothing is shared until you confirm there.' : 'Approved. Keep the attach terminal open to report session status.')
+    await expect(dialog.getByRole('button', { name: action, exact: true })).toHaveCount(0)
+    await expect(dialog.getByRole('button', { name: 'Detach session', exact: true })).toBeVisible()
+    expect(approvals).toBe(1)
+  })
+}
+
+for (const state of ['detached', 'unreachable', 'confirmed_exited'] as const) {
+  test(`metadata-only terminal state ${state}`, async ({ page }) => {
+    const worker = await setup(page, true)
+    Object.assign(worker.watch!, { mode: 'lease', state: state === 'confirmed_exited' ? 'detached' : state, ...(state === 'confirmed_exited' ? { process_state: 'confirmed_exited' } : {}) })
+    await page.goto(`/agents/${worker.id}`)
+    await expect(page.getByRole('heading', { name: 'Attached session' })).toBeVisible()
+    await expect(page.getByText(state === 'confirmed_exited' ? 'Process exit confirmed.' : `Session ${state}. Process exit is unconfirmed.`)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Watch live', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Detach session', exact: true })).toHaveCount(0)
+  })
+}
+
+for (const state of ['detached', 'unreachable', 'confirmed_exited'] as const) {
+  test(`conversation watch terminal state ${state}`, async ({ page }) => {
+    const worker = await setup(page, true)
+    Object.assign(worker.watch!, { state: state === 'confirmed_exited' ? 'detached' : state, ...(state === 'confirmed_exited' ? { process_state: 'confirmed_exited' } : {}) })
+    await page.goto(`/agents/${worker.id}`)
+    await expect(page.getByRole('heading', { name: 'Live conversation' })).toBeVisible()
+    await expect(page.getByText(state === 'confirmed_exited' ? 'Process exit confirmed.' : `Watch ${state}. Process exit is unconfirmed.`)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Watch live', exact: true })).toHaveCount(0)
+  })
+}

@@ -8,14 +8,16 @@ import (
 	"strings"
 )
 
-// Catalog, release history, llms.txt and catalog.json accept HEAD because
-// net/http serves HEAD for a registered GET. Wishes, votes and corrections
-// are POST only; other methods stay authenticated.
+// Catalog, release history, roadmap, llms.txt, catalog.json and roadmap.json
+// accept HEAD because net/http serves HEAD for a registered GET. Wishes, votes
+// and corrections are POST only; other methods stay authenticated.
 const (
 	portalCatalogPattern     = "GET /api/public/portal/{tenantSlug}"
 	portalCatalogFilePattern = "GET /api/public/portal/{tenantSlug}/catalog.json"
 	portalLlmsPattern        = "GET /api/public/portal/{tenantSlug}/llms.txt"
 	portalReleasesPattern    = "GET /api/public/portal/{tenantSlug}/releases"
+	portalRoadmapPattern     = "GET /api/public/portal/{tenantSlug}/roadmap"
+	portalRoadmapFilePattern = "GET /api/public/portal/{tenantSlug}/roadmap.json"
 	portalWishPattern        = "POST /api/public/portal/{tenantSlug}/wishes"
 	portalVotePattern        = "POST /api/public/portal/{tenantSlug}/wishes/{wishKey}/votes"
 	portalCorrectionPattern  = "POST /api/public/portal/{tenantSlug}/corrections"
@@ -28,6 +30,8 @@ var (
 	portalWishKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$`)
 )
 
+// publicPortalRequest classifies a canonical portal URL for the customer
+// allow helper. Session refresh does not call it.
 func publicPortalRequest(r *http.Request) bool {
 	kind := portalPublicKind(r)
 	if kind == "" {
@@ -44,6 +48,10 @@ func publicPortalRequest(r *http.Request) bool {
 		return kind == "llms"
 	case portalReleasesPattern:
 		return kind == "releases"
+	case portalRoadmapPattern:
+		return kind == "roadmap"
+	case portalRoadmapFilePattern:
+		return kind == "roadmap-file"
 	case portalWishPattern:
 		return kind == "wish"
 	case portalVotePattern:
@@ -78,6 +86,14 @@ func portalPublicKind(r *http.Request) string {
 		case "releases":
 			if r.Method == http.MethodGet || r.Method == http.MethodHead {
 				return "releases"
+			}
+		case "roadmap":
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				return "roadmap"
+			}
+		case "roadmap.json":
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				return "roadmap-file"
 			}
 		case "llms.txt":
 			if r.Method == http.MethodGet || r.Method == http.MethodHead {

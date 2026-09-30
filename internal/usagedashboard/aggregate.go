@@ -725,7 +725,7 @@ func loadAllowance(ctx context.Context, tx pgx.Tx, p tenant.Principal, now time.
 		       )
 		  FROM account_allowance_windows w
 		  JOIN agent_accounts a ON a.tenant_id = w.tenant_id AND a.id = w.account_id
-		 WHERE w.starts_at <= $1 AND w.ends_at > $1
+		 WHERE w.starts_at <= $1 AND w.ends_at > $1 AND w.removed_at IS NULL
 		 ORDER BY a.label, w.unit, w.id`, now)
 	if err != nil {
 		return out, err

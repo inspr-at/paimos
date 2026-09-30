@@ -4,12 +4,15 @@ import { computed, onMounted, ref } from 'vue'
 import BizIcon from '../business/BizIcon.vue'
 import DoctrineFileCard from './DoctrineFileCard.vue'
 import DoctrineSourceDialog from './DoctrineSourceDialog.vue'
+import DoctrineProposalDialog from './DoctrineProposalDialog.vue'
+import DoctrineProposals from './DoctrineProposals.vue'
+import DoctrineInbox from './DoctrineInbox.vue'
 import { can } from '../../lib/authz'
 import { toast } from '../../lib/toast'
 import { useSession } from '../../stores/session'
 import {
   DoctrineError, doctrineMessage, getDoctrine, indexDoctrineSource, pinLine, repoName, stateLine,
-  type DoctrineLayer, type DoctrineSource,
+  type DoctrineLayer, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineProposal,
 } from '../../lib/doctrine'
 
 // The INSPR doctrine, read-only, as git holds it at the pinned release. Agents
@@ -21,6 +24,13 @@ const layer = ref<DoctrineLayer | null>(null)
 const loadError = ref('')
 const editing = ref<{ source?: DoctrineSource } | null>(null)
 const reading = ref('')
+const proposing = ref<{ source: DoctrineSource; file: DoctrineFile; rule: DoctrineRule }>()
+const latestProposal = ref<DoctrineProposal>()
+const canPropose = computed(() => !!layer.value?.proposals_enabled && can('rules.write'))
+function proposed(proposal: DoctrineProposal) { latestProposal.value = proposal; proposing.value = undefined; toast('Pull request created') }
+// Agent-proposed changes waiting for a person (AEON-444).
+const person = computed(() => session.identity?.principal.kind === 'person')
+const waiting = ref(0)
 
 const canManage = computed(() => session.identity?.principal.kind !== 'agent' && can('settings.manage'))
 const sources = computed(() => layer.value?.sources ?? [])
@@ -65,8 +75,8 @@ onMounted(load)
     <header class="head">
       <span class="mark" aria-hidden="true"><BizIcon name="book" :size="15" /></span>
       <div class="titles">
-        <h3 id="doctrine-title">Doctrine</h3>
-        <p>Read-only, as git holds it. Agents get it through their harness files.</p>
+        <h3 id="doctrine-title">Doctrine<RouterLink v-if="waiting" class="waiting" :to="{ hash: '#doctrine-inbox' }" :aria-label="`${waiting} proposed ${waiting === 1 ? 'change' : 'changes'}`" :data-tip="`${waiting} proposed ${waiting === 1 ? 'change waits' : 'changes wait'} for review`">{{ waiting }}</RouterLink></h3>
+        <p>Pinned in git. Agents get it through their harness files.</p>
       </div>
       <button v-if="canManage && sources.length" type="button" class="btn sm ghost" @click="editing = {}"><BizIcon name="plus" :size="14" />Link repository</button>
     </header>
@@ -77,6 +87,8 @@ onMounted(load)
       <p class="quiet">No doctrine repository linked.</p>
       <button type="button" class="btn sm" @click="editing = {}"><BizIcon name="link" :size="14" />Link repository</button>
     </div>
+
+    <DoctrineInbox v-if="layer?.proposals_enabled && person" :sources="sources" @proposed="p => latestProposal = p" @count="n => waiting = n" />
 
     <div v-for="source in sources" :key="source.id" class="source">
       <div class="source-head">
@@ -99,10 +111,13 @@ onMounted(load)
         <button v-if="canManage" type="button" class="link" :disabled="!!reading" @click="reread(source)">{{ reading === source.id ? 'Reading…' : 'Try again' }}</button>
       </p>
       <div v-if="source.files.length" class="files">
-        <DoctrineFileCard v-for="file in source.files" :key="file.path" :file="file" />
+        <DoctrineFileCard v-for="file in source.files" :key="file.path" :file="file" :can-propose="canPropose && ['inspr-at/inspr-modules', 'inspr-at/inspr-doctrine-private'].includes(source.repository)" @propose="rule => proposing = { source, file, rule }" />
       </div>
     </div>
 
+    <p v-if="canManage && layer?.proposals_disabled_reason" class="quiet" role="status">{{ layer.proposals_disabled_reason }}</p>
+    <DoctrineProposals v-if="layer?.proposals_enabled" :latest="latestProposal" />
+    <DoctrineProposalDialog v-if="proposing" v-bind="proposing" @close="proposing = undefined" @saved="proposed" />
     <DoctrineSourceDialog v-if="editing" :source="editing.source" @close="editing = null" @saved="saved" />
   </section>
 </template>
@@ -112,7 +127,11 @@ onMounted(load)
 .head { display: flex; align-items: flex-start; gap: 12px; }
 .mark { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-top: 1px; border-radius: 50%; background: var(--surface-2); color: var(--ink-3); }
 .titles { flex: 1; min-width: 0; }
-.titles h3 { margin: 0; font-size: 15px; font-weight: 650; }
+.titles h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 650; }
+/* The waiting count: a neutral pill, never a coloured edge. */
+.waiting { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); font-size: 11.5px; font-weight: 650; font-variant-numeric: tabular-nums; text-decoration: none; }
+@media (hover: hover) { .waiting:hover { color: var(--ink); } }
+.waiting:focus-visible { box-shadow: var(--focus-ring); outline: none; }
 .titles p { margin: 2px 0 0; color: var(--ink-3); font-size: 13px; }
 .quiet { margin: 0; color: var(--ink-3); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .link { padding: 0; border: 0; background: none; color: var(--teal-ink); font: inherit; font-weight: 600; cursor: pointer; }

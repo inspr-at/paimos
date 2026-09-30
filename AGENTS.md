@@ -33,7 +33,7 @@ scripts/             release checks
 7. **Never** read or print secrets, never touch other worktrees, never run destructive git (`reset --hard`, `clean -f`, `push --force`).
 8. When done: `pct` 100, a one-paragraph summary in `note`, and a final commit.
 9. **No reviews by other models.** Do not run cross-family or any other review gates per package, and never call other model CLIs (claude, codex, grok, cursor-agent) yourself. QA is consolidated per release by the coordinator (Markus, 2026-09-23).
-10. **Classic Paimos is retired.** The cutover is done (2026-09-26, AEON-43); its removal is tracked in AEON-261. Never build on classic or bring it back; old pm.barta.cm links resolve through `/from-classic`. The business instance pm.augmentoring.com is not part of Aeon: never change it (Markus, 2026-09-28).
+10. **Classic Paimos is retired.** The cutover is done (2026-09-26, AEON-43); its removal is tracked in AEON-261. Never build on classic or bring it back; old pm.barta.cm links resolve through `/from-classic`. pm.augmentoring.com (business trust context) follows each live-verified Aeon release via the documented PMA bump flow only (agm-nixcfg pin, backup first, tickets in the pma tracker, never PPM); no other changes there (Markus, 2026-09-30).
 11. **No colored edge accents in the UI.** Never mark selection, emphasis or state with a colored bar or thick border on the left or top edge of a row, card, callout, toast or panel; it is the classic AI-generated UI tell. Use a subtle full tint, a hairline outline or ring, elevation, or type weight instead (Markus, 2026-09-24).
 
 ## Style

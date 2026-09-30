@@ -294,6 +294,37 @@ func TestMCPWhoamiAndStubs(t *testing.T) {
 	names := map[string]bool{}
 	for _, tool := range listed.Tools {
 		names[tool.Name] = true
+		if tool.Name == "issue_create" {
+			raw, err := json.Marshal(tool.InputSchema)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var schema struct {
+				Properties map[string]struct {
+					Type  any `json:"type"`
+					Items struct {
+						Type string `json:"type"`
+					} `json:"items"`
+				} `json:"properties"`
+			}
+			if err := json.Unmarshal(raw, &schema); err != nil {
+				t.Fatal(err)
+			}
+			hasType := func(value any, want string) bool {
+				if types, ok := value.([]any); ok {
+					for _, typ := range types {
+						if typ == want {
+							return true
+						}
+					}
+					return false
+				}
+				return value == want
+			}
+			if !hasType(schema.Properties["bug"].Type, "boolean") || !hasType(schema.Properties["tags"].Type, "array") || schema.Properties["tags"].Items.Type != "string" {
+				t.Fatalf("issue_create does not expose the CLI fix marker and tags: %s", raw)
+			}
+		}
 	}
 	for _, name := range []string{"whoami", "issue_list", "issue_get", "issue_create", "issue_update", "issue_comment", "knowledge_list", "knowledge_get", "knowledge_create", "knowledge_update", "search"} {
 		if !names[name] {
@@ -322,6 +353,16 @@ func TestMCPWhoamiAndStubs(t *testing.T) {
 	}
 	if !res.IsError || !strings.Contains(toolText(res), "issue_list arrives in R1") {
 		t.Fatalf("issue_list %#v text %q", res.IsError, toolText(res))
+	}
+	res, err = session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "issue_create",
+		Arguments: map[string]any{"project": "AEON", "title": "Repair", "bug": true, "tags": []string{"process-learning", "bug"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(toolText(res), "issue_create arrives in R1") {
+		t.Fatalf("fix marker arguments rejected before the existing placeholder: %q", toolText(res))
 	}
 	res, err = session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "search",

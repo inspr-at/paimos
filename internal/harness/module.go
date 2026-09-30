@@ -41,6 +41,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -189,6 +190,9 @@ type Session struct {
 	// until it pulls once; clients derive Listening from the age.
 	InboxSeenAt  *time.Time `json:"inbox_seen_at,omitempty"`
 	InboxSeenVia string     `json:"inbox_seen_via,omitempty"`
+	// AEON-369: true when a vendor session reference is stored. The reference
+	// itself is never returned. Omitted when absent.
+	HasVendorSessionRef bool `json:"has_vendor_session_ref,omitempty"`
 }
 
 type ActivityNote struct {
@@ -320,11 +324,15 @@ func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
 	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID)
+	if err != nil {
+		return s, err
+	}
 	if progress != nil {
 		value := int(*progress)
 		s.ProgressPct = &value
 	}
-	return s, err
+	s.HasVendorSessionRef = len(s.vendorRefDigest) > 0
+	return s, nil
 }
 func project(ctx context.Context, tx pgx.Tx, id string) error {
 	if !workorders.UUID(id) {
@@ -377,11 +385,10 @@ func fillVendorRef(ctx context.Context, tx pgx.Tx, existing *Session, vendor []b
 			return registrationConflict(err)
 		}
 		existing.vendorRefDigest = vendor
-		return nil
-	}
-	if subtle.ConstantTimeCompare(existing.vendorRefDigest, vendor) != 1 {
+	} else if subtle.ConstantTimeCompare(existing.vendorRefDigest, vendor) != 1 {
 		return workorders.Fail(409, "active generation conflicts with registration")
 	}
+	existing.HasVendorSessionRef = true
 	return nil
 }
 
@@ -979,6 +986,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		eta_ready_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_ready_at END,
 		eta_live_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_live_at END,
 		progress_pct=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE progress_pct END,
+		missing_progress_beats=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN 0 ELSE missing_progress_beats END,
 		eta_reported_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_reported_at END,
 		revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape))
 	if err != nil {
@@ -1106,7 +1114,12 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = m.stampSessions(ctx, tx, []*Session{&s}); err != nil {
 		return nil, err
 	}
-	return reporterSession(s), nil
+	warnings, err := heartbeatEstimateWarnings(ctx, tx, s, in.ProgressPct)
+	if err != nil {
+		slog.Warn("harness heartbeat guidance failed", "session_id", s.ID, "error", err)
+		warnings = []EstimateWarning{}
+	}
+	return heartbeatResponse{reporterSession(s), warnings}, nil
 }
 func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {

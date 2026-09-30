@@ -40,6 +40,22 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 			t.Fatalf("missing %s in %#v", op, shape)
 		}
 		props, _ := body["properties"].(map[string]any)
+		watch, _ := props["watch"].(map[string]any)
+		watchProps, _ := watch["properties"].(map[string]any)
+		watchRequired, _ := watch["required"].([]any)
+		for _, field := range []string{"mode", "process_state"} {
+			if _, exists := watchProps[field]; !exists || isRequired(watchRequired, field) {
+				t.Fatalf("%s watch.%s must be optional", op, field)
+			}
+		}
+		watchMode, _ := watchProps["mode"].(map[string]any)
+		if watchMode["const"] != "lease" {
+			t.Fatalf("%s watch.mode must describe status-only leases", op)
+		}
+		watchState, _ := watchProps["state"].(map[string]any)
+		if !reflect.DeepEqual(watchState["enum"], []any{"active", "detached", "unreachable"}) {
+			t.Fatalf("%s changed the existing watch state enum", op)
+		}
 		reasons, _ := props["attention_reasons"].(map[string]any)
 		items, _ := reasons["items"].(map[string]any)
 		kindProps, _ := items["properties"].(map[string]any)
@@ -48,7 +64,7 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 			t.Fatalf("%s attention kinds = %#v", op, kind["enum"])
 		}
 		required, _ := body["required"].([]any)
-		for _, field := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale", "controls"} {
+		for _, field := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale", "controls", "has_vendor_session_ref", "warnings"} {
 			if _, exists := props[field]; !exists {
 				t.Fatalf("%s missing optional %s", op, field)
 			}

@@ -33,8 +33,7 @@ func verificationSupported(harness string) bool {
 // Cursor ACP inherits the shared MCP lease when session/new receives an empty
 // mcpServers array (CLI 2026.09.18-9a7762b, 1006.index.js). Ask mode does not bind
 // an empty tool inventory, and ACP exposes no supported override for that lease.
-// See https://cursor.com/docs/cli/acp#MCP-servers. Block before the account probe
-// or session startup until a qualified isolation mechanism is available.
+// See https://cursor.com/docs/cli/acp#MCP-servers. Block verification session startup until a qualified isolation mechanism is available.
 // The 2026.09.26-dd393fe package still resolves tools from mcpLease in ACP,
 // loads team hooks, and exposes only internal CLI tool-filter headers. Moving
 // CURSOR_CONFIG_DIR and selecting ask is not a qualified no-tools boundary.
@@ -62,7 +61,7 @@ func validExecutionMode(r Run, adapter Adapter) error {
 }
 
 // A queued verification is deliberately unbound until the server reserves its
-// approved account. Check immutable policy/capability before probing or routing;
+// approved account. Check immutable policy/capability before routing;
 // adapters still require the strict, routed binding in validExecutionMode.
 func validQueuedExecutionMode(r Run, adapter Adapter) error {
 	if r.Purpose == "" || r.Purpose == "managed" {
@@ -78,6 +77,9 @@ func validQueuedExecutionMode(r Run, adapter Adapter) error {
 			return ErrVerificationUnavailable
 		}
 		return fmt.Errorf("%w: %s", ErrVerificationUnavailable, reason)
+	}
+	if r.requestedAccount() == "" || (r.AccountID != "" && r.RequestedAccountID != "" && r.AccountID != r.RequestedAccountID) {
+		return errors.New("verification account binding is incomplete or unsafe")
 	}
 	if r.VerificationTask != VerificationTask || r.MaxDurationSeconds == nil || *r.MaxDurationSeconds < 1 || *r.MaxDurationSeconds > 60 || r.VerificationPolicy != "read_only" || r.RepositoryMutationAllowed == nil || *r.RepositoryMutationAllowed {
 		return errors.New("verification binding is incomplete or unsafe")

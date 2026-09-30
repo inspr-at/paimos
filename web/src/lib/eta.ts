@@ -21,6 +21,7 @@ export interface EtaInput {
 }
 
 export interface TicketEta {
+  has_working_session?: boolean
   eta_ready_at?: string | null
   eta_live_at?: string | null
   progress_pct?: number | null

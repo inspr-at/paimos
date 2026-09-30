@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Release image dry run
+
+# Branch/PR validation has no signing environment, registry writes or release
+# publication. The tag workflow remains the sole publisher and attester.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/release-image-check.yml
+      - scripts/smoke-image.sh
+      - scripts/releaseworkflow/**
+      - Dockerfile
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-image-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image-dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+      - name: Check release workflow invariants
+        run: go test ./scripts/releaseworkflow
+      - name: Validate version and presentation bundle
+        id: version
+        run: |
+          set -euo pipefail
+          metadata="$(node scripts/verify-release.mjs --release)"
+          node --input-type=module -e 'import { appendFileSync } from "node:fs"; appendFileSync(process.env.GITHUB_OUTPUT, "version=" + JSON.parse(process.argv[1]).version + "\n");' "$metadata"
+      - name: Release history fixture
+        run: go run ./internal/releasehistory/generate -repo . -repository "$GITHUB_REPOSITORY" -offline
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Build cached smoke image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          provenance: false
+          tags: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}
+          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:buildcache
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+      - name: Resolve loaded smoke image
+        id: smoke-image
+        env:
+          SMOKE_TAG: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          image="$(docker image ls --quiet --no-trunc "$SMOKE_TAG")"
+          if [[ ! "$image" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo 'Expected exactly one loaded smoke image' >&2
+            exit 1
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+      - name: Smoke production image
+        env:
+          AEON_SMOKE_IMAGE: ${{ steps.smoke-image.outputs.image }}
+          AEON_SMOKE_VERSION: ${{ steps.version.outputs.version }}
+        run: bash scripts/smoke-image.sh
+      - name: Record dry run
+        run: echo 'Release image built and smoked; nothing pushed, attested or published.' >> "$GITHUB_STEP_SUMMARY"

@@ -58,9 +58,9 @@ test.describe('wide lists', () => {
     const menu = page.getByRole('dialog', { name: 'Display options' })
     await menu.getByRole('checkbox', { name: 'Priority' }).uncheck()
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Assignee', 'Updated'])
-    // Alt+Up moves Updated before Assignee.
+    // Alt+Up moves Updated before Assignee (past the planning columns, AEON-329).
     await menu.getByRole('checkbox', { name: 'Updated' }).focus()
-    for (let i = 0; i < 7; i++) await page.keyboard.press('Alt+ArrowUp')
+    for (let i = 0; i < 11; i++) await page.keyboard.press('Alt+ArrowUp')
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee'])
     await menu.getByRole('checkbox', { name: 'Estimate' }).check()
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee', 'Estimate'])

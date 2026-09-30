@@ -15,11 +15,18 @@ import (
 	"unicode/utf8"
 )
 
+// ModeLease binds content-free attachment into the immutable approval snapshot.
+const ModeLease = "lease"
+
+// Protocol requires origin pinning, redirect refusal and kernel identity checks
+// for both conversation watches and status-only leases.
+const Protocol = 2
+
 const ConsentAeon = "aeon"
 const ConsentLocalAuth = "local_auth"
 
 // Daemon-reported LocalAuthentication capability. These values are advisory:
-// only an in-process confirmation activates a strict watch.
+// only a signature from the pairing-pinned key activates a strict watch.
 const (
 	LocalAuthAvailable   = "available"
 	LocalAuthUnsupported = "unsupported"
@@ -49,6 +56,7 @@ type Process struct {
 	CWD        string `json:"cwd"`
 }
 type Snapshot struct {
+	Mode       string  `json:"mode,omitempty"`
 	ComputerID string  `json:"computer_id"`
 	ProjectID  string  `json:"project_id"`
 	TicketID   string  `json:"ticket_id"`
@@ -75,10 +83,17 @@ func Within(root, cwd string) bool {
 	return PhysicalPath(root) && PhysicalPath(cwd) && (cwd == root || strings.HasPrefix(cwd, root+"/"))
 }
 func (s Snapshot) Valid() bool {
-	return (s.Platform == "" || s.Platform == "darwin" || s.Platform == "linux") && Text(s.Host, 128) && Text(s.FileID, 128) && s.Process.PID > 0 && s.Process.UID >= 0 && Text(s.Process.Started, 128) && PhysicalPath(s.Process.Executable) && PhysicalPath(s.Process.CWD) && PhysicalPath(s.Transcript) && (s.Harness == "codex" || s.Harness == "claude" || s.Harness == "cursor" || s.Harness == "grok")
+	content := s.Mode == "" && Text(s.FileID, 128) && PhysicalPath(s.Transcript)
+	if s.Mode == ModeLease {
+		content = s.Transcript == "" && s.FileID == ""
+	}
+	return content && (s.Platform == "" || s.Platform == "darwin" || s.Platform == "linux") && Text(s.Host, 128) && s.Process.PID > 0 && s.Process.UID >= 0 && Text(s.Process.Started, 128) && PhysicalPath(s.Process.Executable) && PhysicalPath(s.Process.CWD) && (s.Harness == "codex" || s.Harness == "claude" || s.Harness == "cursor" || s.Harness == "grok")
 }
 
 type DeviceRequest struct {
+	LocalAuthNonce      string   `json:"local_auth_nonce,omitempty"`
+	LocalAuthSignature  string   `json:"local_auth_signature,omitempty"`
+	AttachProtocol      int      `json:"attach_protocol,omitempty"`
 	ConsentDigest       string   `json:"consent_digest,omitempty"`
 	LocalConfirmed      bool     `json:"local_confirmed,omitempty"`
 	Operation           string   `json:"operation"`
@@ -93,8 +108,8 @@ type DeviceRequest struct {
 	LocalAuthCapability string   `json:"local_auth_capability,omitempty"`
 }
 
-// ConsentDigest preserves the v1 snapshot digest for old mode-A clients while
-// binding new approvals to this request and the mode selected by the server.
+// ConsentDigest binds approval to this request, its snapshot (including the
+// chosen content mode) and the consent policy selected by the server.
 func ConsentDigest(requestID, snapshotDigest, mode string) string {
 	h := sha256.Sum256([]byte("aeon.attach.consent.v1\x00" + requestID + "\x00" + snapshotDigest + "\x00" + mode))
 	return hex.EncodeToString(h[:])
@@ -102,14 +117,15 @@ func ConsentDigest(requestID, snapshotDigest, mode string) string {
 func ConsentModeValid(mode string) bool { return mode == ConsentAeon || mode == ConsentLocalAuth }
 
 type View struct {
-	ConsentMode   string     `json:"consent_mode"`
-	ConsentDigest string     `json:"consent_digest"`
-	RequestID     string     `json:"request_id"`
-	Digest        string     `json:"request_digest"`
-	Snapshot      Snapshot   `json:"snapshot"`
-	State         string     `json:"state"`
-	ExpiresAt     time.Time  `json:"expires_at"`
-	LeaseUntil    *time.Time `json:"lease_until"`
-	SessionID     *string    `json:"session_id"`
-	UserCode      string     `json:"user_code,omitempty"`
+	LocalAuthNonce string     `json:"local_auth_nonce,omitempty"`
+	ConsentMode    string     `json:"consent_mode"`
+	ConsentDigest  string     `json:"consent_digest"`
+	RequestID      string     `json:"request_id"`
+	Digest         string     `json:"request_digest"`
+	Snapshot       Snapshot   `json:"snapshot"`
+	State          string     `json:"state"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	LeaseUntil     *time.Time `json:"lease_until"`
+	SessionID      *string    `json:"session_id"`
+	UserCode       string     `json:"user_code,omitempty"`
 }

@@ -155,6 +155,9 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 		// Resolve classic issue parents after every node exists. Project parent is
 		// the fallback for missing or out-of-scope ancestors.
 		for iid, item := range issueRows {
+			if importKindConflict(r.Conflicts, stringField(item, "issue_key")) {
+				continue
+			}
 			parentSource, ok := intField(item, "parent_id")
 			if !ok {
 				continue
@@ -183,6 +186,11 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 			for _, rel := range d.Relations {
 				sourceID, _ := intField(rel, "source_id")
 				targetID, _ := intField(rel, "target_id")
+				// A recorded kind conflict leaves that node untouched. Skip a
+				// relation listed on it or aimed at it, including parent_id.
+				if relationTouchesKindConflict(r.Conflicts, issueRows, iid, sourceID, targetID) {
+					continue
+				}
 				typ := stringField(rel, "type")
 				ref, err := importEvent(ctx, tx, tenantID, actor, nodeID, "import.relation", s.SourceID, rel, "id", typ+":"+strconv.FormatInt(sourceID, 10)+":"+strconv.FormatInt(targetID, 10))
 				if err != nil {
@@ -396,9 +404,11 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 	if err != nil {
 		return "", false, false, err
 	}
-	var id, oldTitle, oldBody, oldState string
+	var id, oldTitle, oldBody, oldState, oldKindID, oldKind string
 	var oldFields, beforeJSON []byte
-	err = tx.QueryRow(ctx, `SELECT id,title,body,state,fields,to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND key=$2`, tenantID, key).Scan(&id, &oldTitle, &oldBody, &oldState, &oldFields, &beforeJSON)
+	err = tx.QueryRow(ctx, `SELECT n.id,n.title,n.body,n.state,n.fields,to_jsonb(n),n.kind_id::text,k.slug
+		FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+		WHERE n.tenant_id=$1 AND n.key=$2`, tenantID, key).Scan(&id, &oldTitle, &oldBody, &oldState, &oldFields, &beforeJSON, &oldKindID, &oldKind)
 	created := errors.Is(err, pgx.ErrNoRows)
 	if err != nil && !created {
 		return "", false, false, err
@@ -411,6 +421,18 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 		classic, _ := old["classic"].(map[string]any)
 		if classic["source_id"] != sourceID {
 			return "", false, false, fmt.Errorf("key %s belongs to another source", key)
+		}
+		if !strings.EqualFold(oldKindID, kindID) {
+			var requested string
+			if err := tx.QueryRow(ctx, `SELECT slug FROM node_kinds WHERE tenant_id=$1 AND id=$2`, tenantID, kindID).Scan(&requested); err != nil {
+				return "", false, false, err
+			}
+			classicID, _ := intField(original, "id")
+			*conflicts = appendConflict(*conflicts, ImportConflict{
+				ClassicID: classicID, Key: key, Reason: "kind_change_not_allowed",
+				CurrentKind: oldKind, RequestedKind: requested,
+			})
+			return id, false, false, nil
 		}
 		var now any
 		var prior any
@@ -453,6 +475,25 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 		Before: rawSnapshot(beforeJSON), After: json.RawMessage(afterJSON),
 	})
 	return id, created, !created, err
+}
+
+func importKindConflict(conflicts []ImportConflict, key string) bool {
+	for _, item := range conflicts {
+		if item.Key == key && item.Reason == "kind_change_not_allowed" {
+			return true
+		}
+	}
+	return false
+}
+
+func relationTouchesKindConflict(conflicts []ImportConflict, rows map[int64]Record, ids ...int64) bool {
+	for _, id := range ids {
+		key := stringField(rows[id], "issue_key")
+		if key != "" && importKindConflict(conflicts, key) {
+			return true
+		}
+	}
+	return false
 }
 
 func appendConflict(existing []ImportConflict, next ImportConflict) []ImportConflict {

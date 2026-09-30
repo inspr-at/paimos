@@ -133,6 +133,7 @@ func redact(msg, secret string) string {
 
 func (rt *runtime) root() *Command {
 	subs := []*Command{
+		rt.cmdStatusline(),
 		rt.cmdAuth(),
 		rt.cmdKeys(),
 		rt.cmdWhoami(""),
@@ -144,6 +145,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdRulesTLDR(),
 		rt.cmdRulesCompare(),
 		rt.cmdRules(),
+		rt.cmdDoctrine(),
 		rt.cmdTag(),
 		rt.cmdAttach(),
 		rt.cmdExternalStage(),
@@ -154,6 +156,8 @@ func (rt *runtime) root() *Command {
 		rt.cmdKnowledge(),
 		rt.cmdSearch("search"),
 		rt.cmdModel(),
+		rt.cmdCapacity(),
+		rt.cmdUse(),
 		rt.cmdOnboard(),
 		rt.cmdSession(),
 		rt.cmdHook(),

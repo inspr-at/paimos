@@ -228,12 +228,10 @@ test('a person reviews real accounts, can leave a harness out, and does not trea
   await page.getByRole('checkbox', { name: 'Connect Cursor' }).uncheck()
   await expect(review.getByText('Codex can’t be verified.')).toBeVisible()
   await expect(verify).toBeDisabled()
-  await page.getByRole('radio', { name: /Set ongoing limits/ }).check()
-  await expect(page.getByText('Cost in micros')).toHaveCount(0)
-  await expect(page.getByText('Tokens')).toHaveCount(0)
-  await expect(page.getByRole('spinbutton', { name: 'Requests', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Connect your machine', exact: true })).toBeEnabled()
-  await page.getByRole('radio', { name: /Keep ongoing runs paused/ }).check()
+  await expect(page.getByRole('radio', { name: /Let agents use these accounts/ })).toBeChecked()
+  await expect(page.getByRole('spinbutton', { name: 'Requests', exact: true })).toHaveCount(0)
+  await expect(page.getByText('Set ongoing limits')).toHaveCount(0)
+  await page.getByRole('radio', { name: /Keep agents paused/ }).check()
 
   await page.getByRole('button', { name: 'Connect your machine', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Setting up' })).toBeVisible()
@@ -285,7 +283,7 @@ test('add harness is labeled from the request, and an agent cannot approve', asy
   await page.getByRole('button', { name: 'Look up code' }).click()
   await expect(page.getByRole('heading', { name: 'Add a harness' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Add harness', exact: true })).toBeDisabled()
-  await expect(page.getByText('Only a signed-in person who can manage accounts can connect this computer.')).toBeVisible()
+  await expect(page.getByText('Only a signed-in person who can manage accounts can connect or deny this computer.')).toBeVisible()
 })
 
 test('the last install choice is remembered in this browser', async ({ page }) => {

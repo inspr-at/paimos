@@ -1,19 +1,24 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import {
-  PairingError, activeRunIds, applyComputerListRefresh, describeComputerStatus, disconnectComputer, disconnectConfirm,
+  PairingError, activeRunIds, applyComputerListRefresh, computerRemoval, describeComputerStatus, removeComputer, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, disconnectComputer, disconnectConfirm,
   disconnectEnrollment, getPairingComputer, lastActiveLabel, listPairingComputers, pairingReadGeneration, pairingScopeKey,
   platformCaption, type DisconnectMode, type PairingPermissions, type PairingView,
 } from '../../lib/agentPairing'
 import { onAccessChange } from '../../lib/authz'
 import { harnessLabel } from '../../lib/agentState'
 import { brand } from '../../lib/brand'
+import { confirmAction } from '../../lib/confirm'
+import { toast } from '../../lib/toast'
 import { usePoller } from '../../lib/usePolledData'
+import { useAgents } from '../../stores/agents'
 import HarnessMark from './HarnessMark.vue'
 
 const props = defineProps<{ permissions: PairingPermissions; compactEmpty?: boolean; embedded?: boolean }>()
+const emit = defineEmits<{ loaded: [computers: PairingView[]] }>()
+const agents = useAgents()
 
 const computers = ref<PairingView[]>([])
 const state = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -26,6 +31,11 @@ const dialog = ref<HTMLDialogElement>()
 const drainButton = ref<HTMLButtonElement>()
 const pending = ref<{ view: PairingView; scope: 'computer' | 'enrollment'; accountId?: string } | null>(null)
 
+// Revoked computers fold into one quiet disclosure under the live ones (AEON-402).
+const active = computed(() => computers.value.filter(item => item.computer_state !== 'revoked'))
+const revoked = computed(() => computers.value.filter(item => item.computer_state === 'revoked'))
+const revokedOpen = ref(false)
+const root = ref<HTMLElement>()
 const visible = computed(() => state.value === 'loading' || state.value === 'error' || computers.value.length > 0 || (state.value === 'ready' && !props.compactEmpty))
 const confirm = computed(() => {
   const request = pending.value
@@ -74,8 +84,15 @@ let loadTurn = 0
 watch(() => props.permissions.canListComputers, can => { if (can) void load(); else dropSignedInList() }, { immediate: true })
 const stopAccess = onAccessChange(change => { if (change === 'reset') dropSignedInList() })
 const poller = usePoller(() => load(), 20_000, { enabled: () => props.permissions.canListComputers })
+// Every write on /agents drops this list's read in flight and reads it again (AEON-402).
+const stopWrites = agents.onWrite({ invalidate: supersedeLoads, refresh: load })
 onMounted(() => poller.start())
-onBeforeUnmount(() => { stopAccess(); poller.stop() })
+onBeforeUnmount(() => { stopAccess(); stopWrites(); poller.stop() })
+
+function supersedeLoads() {
+  loadTurn += 1
+  refreshing.value = false
+}
 
 function dropSignedInList() {
   computers.value = []
@@ -104,6 +121,7 @@ async function load() {
     state.value = 'ready'
     message.value = ''
     nextStep.value = ''
+    emit('loaded', computers.value)
   } catch (error) {
     if (error instanceof PairingError && error.code === 'session_reset') return
     if (turn !== loadTurn || started !== pairingReadGeneration() || !props.permissions.canListComputers) return
@@ -123,8 +141,16 @@ function statusOf(computer: PairingView) {
 function harnesses(computer: PairingView) {
   return computer.enrollments.filter(item => item.state !== 'revoked')
 }
+function reportedHarnesses(computer: PairingView) {
+  return [...new Set(harnesses(computer).map(item => item.harness))]
+}
+function hasHarnessReports(computer: PairingView) {
+  return reportedHarnesses(computer).some(harness => describeHarnessStatus(computer, harness))
+}
+const removal = (computer: PairingView) => computerRemoval(computer, props.permissions)
+// A computer that never confirmed is removed, not disconnected: one action per row.
 function canChange(computer: PairingView) {
-  return props.permissions.canDisconnect && (computer.computer_state === 'connected' || computer.computer_state === 'draining')
+  return props.permissions.canDisconnect && (computer.computer_state === 'connected' || computer.computer_state === 'draining') && !removal(computer).allowed
 }
 function toggle(id: string) { openId.value = openId.value === id ? '' : id }
 // A missing report is shown as nothing, not as a filler word.
@@ -167,7 +193,7 @@ async function commit(mode: DisconnectMode) {
       ? await disconnectEnrollment(fresh, request.accountId, mode, props.permissions)
       : await disconnectComputer(fresh, mode, props.permissions)
     if (started !== pairingReadGeneration()) return
-    replace(next)
+    void agents.afterWrite(() => replace(next))
     closeDialog()
   } catch (error) {
     if (started !== pairingReadGeneration()) return
@@ -175,6 +201,45 @@ async function commit(mode: DisconnectMode) {
     if (error instanceof PairingError && error.code === 'conflict' && request.view.computer_id) {
       try { replace(await getPairingComputer(request.view.computer_id)) } catch { /* The conflict message already asks for a fresh review. */ }
     }
+  } finally { if (started === pairingReadGeneration()) busy.value = '' }
+}
+
+async function remove(computer: PairingView) {
+  if (busy.value) return
+  const bindings = computer.enrollments.length
+  const ok = await confirmAction({
+    title: `Remove ${computer.computer_name}?`,
+    body: 'It leaves this list. Its history stays in the audit log.',
+    points: [
+      computer.computer_state !== 'revoked' ? 'Its approval is revoked first, so it can no longer connect with it.' : '',
+      bindings ? `${bindings === 1 ? 'Its account binding leaves' : `Its ${bindings} account bindings leave`} Accounts too.` : '',
+    ].filter(Boolean),
+    confirmLabel: 'Remove', danger: true,
+  })
+  if (!ok) return
+  const started = pairingReadGeneration()
+  const key = keyOf(computer)
+  const list = computer.computer_state === 'revoked' ? revoked : active
+  const index = list.value.findIndex(item => keyOf(item) === key)
+  busy.value = `remove:${key}`
+  message.value = ''
+  nextStep.value = ''
+  try {
+    await removeComputer(computer, props.permissions)
+    if (started !== pairingReadGeneration()) return
+    // Its account bindings leave Accounts and capacity too: the shared stores re-read.
+    void agents.afterWrite(() => { computers.value = computers.value.filter(item => keyOf(item) !== key) })
+    toast(`Removed ${computer.computer_name}. Its history stays in the audit log.`)
+    // A disabled button takes no focus: settle busy before moving focus.
+    busy.value = ''
+    await nextTick()
+    // Focus the next Remove in the same group, else the disclosure or the title.
+    const buttons = [...(root.value?.querySelectorAll<HTMLElement>(computer.computer_state === 'revoked' ? '.revoked-list .remove-computer' : '.list .remove-computer') ?? [])]
+    const next = buttons[Math.min(index, buttons.length - 1)] ?? root.value?.querySelector<HTMLElement>('.revoked-toggle') ?? root.value?.querySelector<HTMLElement>('h2')
+    next?.focus()
+  } catch (error) {
+    if (started !== pairingReadGeneration()) return
+    assign(error, 'The computer was not removed.')
   } finally { if (started === pairingReadGeneration()) busy.value = '' }
 }
 
@@ -195,10 +260,10 @@ function assign(error: unknown, fallback: string) {
 </script>
 
 <template>
-  <section v-if="visible" class="computers" :class="{ embedded }" aria-labelledby="computers-title">
+  <section v-if="visible" ref="root" class="computers" :class="{ embedded }" aria-labelledby="computers-title">
     <header class="head">
-      <h2 id="computers-title">Connected computers</h2>
-      <span v-if="computers.length" class="count mono">{{ computers.length }}</span>
+      <h2 id="computers-title" tabindex="-1">Connected computers</h2>
+      <span v-if="active.length" class="count mono">{{ active.length }}</span>
       <span class="spacer" />
       <button v-if="permissions.canListComputers" type="button" class="icon-btn sm flat" :disabled="refreshing" :aria-label="refreshing ? 'Refreshing computers' : 'Refresh computers'" :data-tip="refreshing ? 'Refreshing…' : 'Refresh'" @click="load"><AppIcon name="refresh" :size="15" /></button>
       <RouterLink v-if="permissions.canApprove && !embedded" class="btn sm" to="/agents/register-agent"><AppIcon name="plus" :size="14" />Add computer</RouterLink>
@@ -207,12 +272,13 @@ function assign(error: unknown, fallback: string) {
     <p v-if="state === 'loading'" class="muted">Loading paired computers…</p>
     <p v-else-if="state === 'error'" class="problem" role="alert">{{ message }} <button type="button" class="btn sm" @click="load">Try again</button></p>
     <p v-else-if="!computers.length" class="muted">No computers are connected in this workspace yet.</p>
+    <p v-else-if="!active.length" class="muted">No computer is connected right now.</p>
 
-    <div v-else class="list">
+    <div v-if="state === 'ready' && active.length" class="list">
       <div class="sheet" aria-hidden="true">
         <span>Computer</span><span>Harnesses</span><span>Status</span><span>Last active</span><span />
       </div>
-      <article v-for="computer in computers" :key="keyOf(computer)" class="computer" :class="{ open: openId === keyOf(computer) }">
+      <article v-for="computer in active" :key="keyOf(computer)" class="computer" :class="{ open: openId === keyOf(computer), 'has-reports': hasHarnessReports(computer) }">
         <div class="identity">
           <span class="glyph"><AppIcon name="monitor" :size="16" /></span>
           <div class="identity-text">
@@ -226,7 +292,17 @@ function assign(error: unknown, fallback: string) {
             </p>
           </div>
         </div>
-        <p class="harness-line">
+        <div v-if="hasHarnessReports(computer)" class="harness-line reported">
+          <span v-for="harness in reportedHarnesses(computer)" :key="harness" class="harness-report">
+            <HarnessMark :harness="harness" :size="14" />
+            <span class="harness-report-text" :title="[harnessLabel(harness), describeHarnessStatus(computer, harness)].filter(Boolean).join(' · ')">
+              <span>{{ harnessLabel(harness) }}<span v-if="describeHarnessStatus(computer, harness)" class="harness-state"> · {{ describeHarnessStatus(computer, harness) }}</span></span>
+              <span v-if="describeHarnessHint(computer, harness)" class="harness-hint">{{ describeHarnessHint(computer, harness) }}</span>
+              <code v-if="describeHarnessFix(computer, harness)" class="harness-fix">{{ describeHarnessFix(computer, harness) }}</code>
+            </span>
+          </span>
+        </div>
+        <p v-else class="harness-line">
           <HarnessMark v-for="enrollment in harnesses(computer)" :key="enrollment.account_id" :harness="enrollment.harness" :size="14" />
           <span>{{ harnesses(computer).length }} {{ harnesses(computer).length === 1 ? 'harness' : 'harnesses' }}</span>
         </p>
@@ -234,6 +310,7 @@ function assign(error: unknown, fallback: string) {
         <p class="meta last-active">{{ lastActive(computer) }}</p>
         <div class="actions">
           <button v-if="canChange(computer)" type="button" class="btn sm ghost" @click="openDialog(computer, 'computer')">Disconnect</button>
+          <button v-else-if="removal(computer).allowed" type="button" class="btn sm ghost remove-computer" :disabled="!!busy" @click="remove(computer)">{{ busy === `remove:${keyOf(computer)}` ? 'Removing…' : 'Remove' }}<span class="sr-only"> {{ computer.computer_name }}</span></button>
           <button
             type="button" class="icon-btn sm flat details-toggle" :aria-expanded="openId === keyOf(computer)" :aria-label="`${openId === keyOf(computer) ? 'Hide' : 'Show'} details for ${computer.computer_name}`"
             :data-tip="openId === keyOf(computer) ? 'Hide details' : 'Details'" @click="toggle(keyOf(computer))"
@@ -245,7 +322,7 @@ function assign(error: unknown, fallback: string) {
             <li v-for="enrollment in computer.enrollments" :key="enrollment.account_id">
               <HarnessMark :harness="enrollment.harness" :size="14" />
               <span class="enrollment-name">{{ harnessLabel(enrollment.harness) }} · {{ enrollment.label }}</span>
-              <span class="enrollment-meta">{{ enrollment.state }}<template v-if="enrollment.verification_state && enrollment.verification_state !== 'not_selected'"> · verification {{ enrollment.verification_state === 'unavailable' ? 'unavailable' : enrollment.verification_state.replace(/_/g, ' ') }}</template><template v-if="enrollment.local_processes"> · {{ enrollment.local_processes }} local processes</template><template v-if="enrollment.accounting_state === 'unconfirmed'"> · accounting unconfirmed</template></span>
+              <span class="enrollment-meta">{{ enrollment.state === 'connected' ? describeEnrollmentStatus(computer, enrollment) || enrollment.state : enrollment.state }}<template v-if="enrollment.verification_state && enrollment.verification_state !== 'not_selected'"> · verification {{ enrollment.verification_state === 'unavailable' ? 'unavailable' : enrollment.verification_state.replace(/_/g, ' ') }}</template><template v-if="enrollment.local_processes"> · {{ enrollment.local_processes }} local processes</template><template v-if="enrollment.accounting_state === 'unconfirmed'"> · accounting unconfirmed</template></span>
               <span v-if="enrollment.verification_error && enrollment.verification_error !== 'verification_unavailable'" class="enrollment-meta">{{ enrollment.verification_error }}</span>
               <button v-if="canChange(computer) && enrollment.state !== 'revoked'" type="button" class="btn sm ghost remove" @click="openDialog(computer, 'enrollment', enrollment.account_id)">Remove<span class="sr-only"> {{ enrollment.label }} from {{ brand.short_name }}</span></button>
             </li>
@@ -253,6 +330,20 @@ function assign(error: unknown, fallback: string) {
           <RouterLink v-if="computer.computer_state === 'connected' && computer.computer_id" class="btn sm add-harness" :to="`/agents/register-agent?computer=${computer.computer_id}`"><AppIcon name="plus" :size="13" />Add harness</RouterLink>
         </div>
       </article>
+    </div>
+    <div v-if="state === 'ready' && revoked.length" class="revoked">
+      <button type="button" class="revoked-toggle" :aria-expanded="revokedOpen" aria-controls="revoked-list" @click="revokedOpen = !revokedOpen">
+        <AppIcon name="chevron-right" :size="14" class="chev" />Revoked ({{ revoked.length }})
+      </button>
+      <ul v-if="revokedOpen" id="revoked-list" class="revoked-list">
+        <li v-for="computer in revoked" :key="keyOf(computer)" :title="`${statusOf(computer).detail} ${statusOf(computer).next}`">
+          <span class="glyph small"><AppIcon name="monitor" :size="14" /></span>
+          <span class="revoked-name">{{ computer.computer_name }}</span>
+          <span class="revoked-meta">{{ [platformCaption(computer.platform, computer.arch), lastActive(computer)].filter(Boolean).join(' · ') }}</span>
+          <button v-if="removal(computer).allowed" type="button" class="btn sm ghost remove-computer" :disabled="!!busy" @click="remove(computer)">{{ busy === `remove:${keyOf(computer)}` ? 'Removing…' : 'Remove' }}<span class="sr-only"> {{ computer.computer_name }}</span></button>
+          <span v-else-if="removal(computer).reason" class="revoked-reason">{{ removal(computer).reason }}</span>
+        </li>
+      </ul>
     </div>
     <p v-if="message && state !== 'error'" class="problem" role="alert">{{ message }}</p>
     <p v-if="nextStep" class="next-step">{{ nextStep }}</p>
@@ -311,6 +402,14 @@ function assign(error: unknown, fallback: string) {
 .path-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .path-tail { flex: none; white-space: nowrap; }
 .harness-line, .status { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink); font-size: 13px; white-space: nowrap; }
+.harness-line.reported { display: grid; gap: 10px; }
+.harness-report { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.harness-report-text { display: grid; gap: 3px; min-width: 0; white-space: normal; }
+.harness-report-text > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.harness-report :deep(svg) { flex-shrink: 0; margin-top: 2px; }
+.harness-fix, .harness-hint { font-size: 12px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
+.harness-fix { font-family: var(--mono); }
+.harness-state { color: var(--ink-2); }
 .last-active { font-size: 12.5px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st-backlog); }
 .dot[data-state="Connected"] { background: var(--ok); }
@@ -326,6 +425,21 @@ function assign(error: unknown, fallback: string) {
 .enrollment-name { color: var(--ink); font-weight: 550; }
 .enrollment-meta { color: var(--ink-3); }
 .remove { margin-left: auto; }
+.head h2:focus { outline: none; }
+.revoked { padding: 2px 4px 2px; border-top: 1px solid var(--line); }
+.revoked-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 8px 0 6px; border: 0; border-radius: 8px; background: none; color: var(--ink-2); font: 550 12.5px/1 var(--font); cursor: pointer; }
+@media (hover: hover) { .revoked-toggle:hover { background: var(--row-hover); color: var(--ink); } }
+.revoked-toggle:focus-visible { box-shadow: var(--focus-ring); }
+.revoked-toggle .chev { transition: transform .2s ease; }
+.revoked-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .revoked-toggle .chev { transition: none; } }
+.revoked-list { display: grid; margin: 0; padding: 0 0 4px; list-style: none; }
+.revoked-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 40px; padding: 4px 6px; color: var(--ink-2); font-size: 13px; }
+.glyph.small { width: 26px; height: 26px; border-radius: 7px; }
+.revoked-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 550; }
+.revoked-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; }
+.revoked-list .remove-computer, .revoked-reason { margin-left: auto; flex: none; }
+.revoked-reason { color: var(--ink-3); font-size: 12px; }
 .disconnect { width: min(420px, calc(100vw - 32px)); padding: 0; border: 0; background: transparent; color: var(--ink); }
 .disconnect::backdrop { background: var(--scrim); }
 .panel { padding: 18px 18px 16px; border: 1px solid var(--glass-edge); border-radius: 16px; background: var(--surface-raised); box-shadow: var(--shadow-pop); }
@@ -343,6 +457,7 @@ function assign(error: unknown, fallback: string) {
   .computers { padding: 4px 4px 6px; }
   .sheet { display: none; }
   .computer { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id actions" "harness actions" "status actions"; row-gap: 4px; }
+  .computer.has-reports { grid-template-areas: "id actions" "harness harness" "status status"; }
   .identity { grid-area: id; }
   .harness-line { grid-area: harness; padding-left: 42px; }
   .status { grid-area: status; padding-left: 42px; }

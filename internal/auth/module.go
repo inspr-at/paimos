@@ -71,25 +71,24 @@ func Attach(srv *httpapi.Server, cfg Config) (*Module, error) {
 }
 
 // Mount adds the auth and agent-key routes. POST /api/auth/dev-login is
-// registered only when AEON_ENV=dev.
+// always registered so the matched pattern stays the public declaration.
+// The handler returns 404 unless AEON_ENV=dev, and it never mints a session then.
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/login", m.handleLogin)
 	mux.HandleFunc("GET /api/auth/callback", m.handleCallback)
 	mux.HandleFunc("POST /api/auth/logout", m.handleLogout)
+	mux.HandleFunc("POST /api/auth/dev-login", m.handleDevLogin)
 	mux.HandleFunc("GET /api/me", reportercontract.WithHeader(reportercontract.Me, m.handleMe))
 	mux.HandleFunc("POST /api/agent-keys", m.handleCreateAgentKey)
 	mux.HandleFunc("GET /api/agent-keys", m.handleListAgentKeys)
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
 	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
-	if m.cfg.Dev() {
-		mux.HandleFunc("POST /api/auth/dev-login", m.handleDevLogin)
-	}
 }
 
 // Middleware resolves a session cookie or an agent bearer token onto the
-// request context. Unauthenticated /api requests, other than health, readiness,
-// version, /api/auth/*, /api/public/quotes/* and the public portal routes, get 401 JSON.
+// request context. Unauthenticated /api requests get 401 JSON unless the
+// matched pattern is a public declaration (authz.PatternIsPublic).
 func (m *Module) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, kind, err := m.authenticate(r)
@@ -102,11 +101,13 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		}
 		switch kind {
 		case credStale:
-			if r.URL.Path != "/api/auth/logout" {
+			// Public responses can be cached. A Set-Cookie there would store
+			// the session clear next to the page. Auth handlers clear their own.
+			if !publicRequest(r) {
 				m.clearSessionCookie(w)
 			}
 		case credSession:
-			if r.URL.Path != "/api/auth/logout" {
+			if !publicRequest(r) {
 				if c, cErr := r.Cookie(sessionCookieName); cErr == nil {
 					m.setSessionCookie(w, c.Value)
 				}
@@ -261,6 +262,11 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "releases":
+		// Build history is readable by agents. Presentation writes remain person-only.
+		if read && (len(parts) == 1 || len(parts) == 2 && parts[1] != "") {
+			return "releases.read", true
+		}
 	case "rules":
 		// Dedicated rules routes are an explicit agent allowlist. Publishing and
 		// restoring remain person-only regardless of any key's supplied scopes.
@@ -461,8 +467,27 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "run.claim", true
 		}
 	case "agent-accounts":
-		if r.Method == "GET" && len(parts) == 3 && parts[2] == "readings" {
-			return "account.probe", true
+		if len(parts) == 3 {
+			switch parts[2] {
+			case "readings":
+				if r.Method == http.MethodGet || r.Method == http.MethodPost {
+					return "account.probe", true
+				}
+			case "signals":
+				if r.Method == http.MethodPut {
+					return "account.probe", true
+				}
+			case "quota-key":
+				if r.Method == http.MethodPost {
+					return "account.probe", true
+				}
+			case "statusline":
+				// People opt in. A paired agent may only read the decision.
+				if r.Method == http.MethodGet {
+					return "account.probe", true
+				}
+				return "", false
+			}
 		}
 		if read {
 			return "account.read", true
@@ -470,7 +495,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if r.Method == "POST" && len(parts) == 2 && parts[1] == "route" {
 			return "account.route", true
 		}
-		if r.Method == "POST" && len(parts) == 3 && (parts[2] == "probe" || parts[2] == "readings") {
+		if r.Method == "POST" && len(parts) == 3 && parts[2] == "probe" {
 			return "account.probe", true
 		}
 		return "account.manage", true
@@ -535,13 +560,18 @@ func agentHasScope(have []string, want string) bool {
 	return hasScope(have, want) || authz.CoordinatorCeiling(have, want)
 }
 
+// publicRequest is true only for a route the router matched to a public
+// declaration. Percent-encoding, dot segments and repeated slashes are not
+// consulted: when the router accepts them, they carry that same pattern.
 func publicRequest(r *http.Request) bool {
-	return isPublicAPI(r.URL.Path) || publicPortalRequest(r) || agentpairing.PublicRoute(r.Method, r.URL.Path)
+	return r != nil && authz.PatternIsPublic(r.Pattern)
 }
 func protectedRequest(r *http.Request) bool {
-	return strings.HasPrefix(r.URL.Path, "/api/") && !publicRequest(r)
+	return r != nil && r.URL != nil && strings.HasPrefix(r.URL.Path, "/api/") && !publicRequest(r)
 }
 
+// isPublicAPI is the path list for readiness checks and the customer allow
+// helper. It is not the session gate; that is publicRequest.
 func isPublicAPI(path string) bool {
 	switch path {
 	case "/api/health", "/api/ready", "/api/version":

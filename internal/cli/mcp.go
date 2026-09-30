@@ -5,6 +5,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -35,7 +36,10 @@ func (rt *runtime) mcpServer() *mcp.Server {
 	addR1Tool(s, "issue_list", "List issues.", issueListArgs{})
 	addR1Tool(s, "issue_get", "Fetch one issue by key.", issueRefArgs{})
 	addR1Tool(s, "issue_create", "Create an issue.", issueCreateArgs{})
-	addR1Tool(s, "issue_update", "Update an issue.", issueUpdateArgs{})
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "issue_update",
+		Description: "Update an issue. A type or kind is refused with kind_change_not_allowed; other updates arrive in R1.",
+	}, rt.toolIssueUpdate)
 	addR1Tool(s, "issue_comment", "Comment on an issue.", issueCommentArgs{})
 	addR1Tool(s, "knowledge_list", "List knowledge entries.", knowledgeListArgs{})
 	addR1Tool(s, "knowledge_get", "Fetch one knowledge entry.", knowledgeGetArgs{})
@@ -61,11 +65,13 @@ type issueRefArgs struct {
 }
 
 type issueCreateArgs struct {
-	Project     string `json:"project" jsonschema:"project key"`
-	Title       string `json:"title" jsonschema:"issue title"`
-	Type        string `json:"type,omitempty" jsonschema:"issue type"`
-	Status      string `json:"status,omitempty" jsonschema:"initial status"`
-	Description string `json:"description,omitempty" jsonschema:"description markdown"`
+	Project     string   `json:"project" jsonschema:"project key"`
+	Title       string   `json:"title" jsonschema:"issue title"`
+	Type        string   `json:"type,omitempty" jsonschema:"issue type"`
+	Status      string   `json:"status,omitempty" jsonschema:"initial status"`
+	Description string   `json:"description,omitempty" jsonschema:"description markdown"`
+	Tags        []string `json:"tags,omitempty" jsonschema:"tag names preserved when filing the issue"`
+	Bug         bool     `json:"bug,omitempty" jsonschema:"mark a repair as a fix in release notes by adding the bug tag while preserving the issue type"`
 }
 
 type issueUpdateArgs struct {
@@ -73,6 +79,40 @@ type issueUpdateArgs struct {
 	Title       string `json:"title,omitempty" jsonschema:"new title"`
 	Status      string `json:"status,omitempty" jsonschema:"new status"`
 	Description string `json:"description,omitempty" jsonschema:"new description markdown"`
+	Type        string `json:"type,omitempty" jsonschema:"issue kind slug; a change is refused"`
+	Kind        string `json:"kind,omitempty" jsonschema:"issue kind slug; a change is refused"`
+}
+
+func (rt *runtime) toolIssueUpdate(ctx context.Context, _ *mcp.CallToolRequest, in issueUpdateArgs) (*mcp.CallToolResult, any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	requested := strings.TrimSpace(in.Kind)
+	if typ := strings.TrimSpace(in.Type); typ != "" {
+		if requested != "" && requested != typ {
+			return nil, nil, errors.New("kind and type disagree")
+		}
+		requested = typ
+	}
+	if requested == "" {
+		return nil, nil, errors.New("issue_update arrives in R1")
+	}
+	n, err := rt.nodeByKey(strings.TrimSpace(in.Ref))
+	if err != nil {
+		return nil, nil, err
+	}
+	kinds, err := rt.loadKinds()
+	if err != nil {
+		return nil, nil, err
+	}
+	current := kinds.slug(n.KindID)
+	if current == requested {
+		if strings.TrimSpace(in.Title) != "" || strings.TrimSpace(in.Status) != "" || strings.TrimSpace(in.Description) != "" {
+			return nil, nil, errors.New("issue_update arrives in R1")
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "kind is already " + current}}}, nil, nil
+	}
+	return nil, nil, errors.New("kind_change_not_allowed")
 }
 
 type issueCommentArgs struct {

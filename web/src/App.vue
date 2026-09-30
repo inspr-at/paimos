@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { isNavigationFailure, useRoute, useRouter } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
 import ConfirmHost from './components/ConfirmHost.vue'
 import DoneGateHost from './components/DoneGateHost.vue'
@@ -87,6 +87,9 @@ function openRunningRelease() { openReleases(releases.current || 'current') }
 // filter hides the selected release moves the selection) both land: each
 // replace carries what is still on its way, until the address has it.
 const releasesNext = reactive<{ version?: string; query: Record<string, string> }>({ query: {} })
+const releasesSheet = ref<{ navigationSettled: (version: string | undefined, failure: unknown) => void } | null>(null)
+// A newer replace supersedes an older one still waiting on the session.
+let releasesNav = 0
 watch(() => route.fullPath, () => {
   if (releasesNext.version === releasesTarget.value) delete releasesNext.version
   for (const [key, value] of Object.entries(releasesNext.query)) if (route.query[key] === value) delete releasesNext.query[key]
@@ -96,8 +99,19 @@ function replaceReleases() {
   // Keep the history's language and view (and any other query) across versions.
   const query = { ...route.query, ...releasesNext.query }
   const version = releasesNext.version
-  if (releasesRoute.value) void router.replace({ path: version ? `/releases/${version}` : route.path, query, hash: route.hash })
-  else void router.replace({ path: route.path, query: version ? { ...query, releases: version } : query, hash: route.hash })
+  const token = ++releasesNav
+  const location = releasesRoute.value
+    ? { path: version ? `/releases/${version}` : route.path, query, hash: route.hash }
+    : { path: route.path, query: version ? { ...query, releases: version } : query, hash: route.hash }
+  // Cancelled, duplicated and rejected replaces never change the address.
+  // Only the latest request can drop its echo; an older failure must not.
+  void router.replace(location).then(failure => {
+    if (token !== releasesNav) return
+    releasesSheet.value?.navigationSettled(version, isNavigationFailure(failure) ? failure : null)
+  }, error => {
+    if (token !== releasesNav) return
+    releasesSheet.value?.navigationSettled(version, error)
+  })
 }
 function selectRelease(version: string) {
   if ((releasesNext.version ?? releasesTarget.value) === version) return
@@ -218,7 +232,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
     </main>
     <!-- A row of the shell: the page, docked panels and toasts all end above it. -->
     <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openRunningRelease" @pill="onFlowPill" />
-    <ReleasesSheet v-if="releasesOpen" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
+    <ReleasesSheet v-if="releasesOpen" ref="releasesSheet" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
     <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
     <ToastHost />
     <ConfirmHost />

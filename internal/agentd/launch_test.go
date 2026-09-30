@@ -309,12 +309,12 @@ func TestLaunchErrorCannotProveNoFork(t *testing.T) {
 	}
 }
 
-func TestVerificationRefusalPersistsAndDoesNotPollAgain(t *testing.T) {
+func TestVerificationRefusalPersistsAndDoesNotLaunchAgain(t *testing.T) {
 	s, api, adapter := claimFixture(t)
 	api.run.Purpose = VerificationPurpose
 	api.server = api.run
 	s.adapters[Codex] = &fakeAdapter{proc: adapter.proc}
-	if err := s.PollOnce(t.Context()); !errors.Is(err, ErrVerificationUnavailable) {
+	if err := s.PollOnce(t.Context()); err != nil {
 		t.Fatal("missing typed verification refusal")
 	}
 	if err := s.PollOnce(t.Context()); err != nil || api.profiles != 1 || api.routes != 0 || len(api.claimIDs) != 0 {
@@ -381,4 +381,17 @@ func TestOfflineNoForkEvidenceRequiresExplicitMarker(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (a *claimFaultAPI) RefuseVerification(_ context.Context, _, _, _, reason string) error {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	if reason == "" {
+		return errors.New("missing refusal cause")
+	}
+	if a.reportErr != nil {
+		return a.reportErr
+	}
+	a.server.Status = "failed"
+	return nil
 }

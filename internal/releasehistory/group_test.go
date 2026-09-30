@@ -97,7 +97,9 @@ func TestGroupChange(t *testing.T) {
 }
 
 func TestServeGroups(t *testing.T) {
-	h := History{Schema: Schema, Product: "PAIMOS AEON", Releases: []Release{{
+	// Other products retain their explicit TicketSource compatibility; Aeon's
+	// frozen path is covered by TestProductNotesNeverReadLiveTickets.
+	h := History{Schema: Schema, Product: "Another product", Releases: []Release{{
 		Version: "260929062507.0.0", Tag: "v260929062507.0.0", State: StatePublished, Headline: "stable100",
 		Tickets: []string{"AEON-273", "AEON-274"},
 		Changes: []Change{

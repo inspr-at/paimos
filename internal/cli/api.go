@@ -37,10 +37,50 @@ type nodePage struct {
 }
 
 type apiKind struct {
-	ID          string `json:"id"`
-	Slug        string `json:"slug"`
-	Label       string `json:"label"`
-	ShortPrefix string `json:"short_prefix"`
+	ID          string          `json:"id"`
+	Slug        string          `json:"slug"`
+	Label       string          `json:"label"`
+	ShortPrefix string          `json:"short_prefix"`
+	Icon        string          `json:"icon,omitempty"`
+	FieldSchema json.RawMessage `json:"field_schema,omitempty"`
+}
+
+// issueFamilyKind matches the server and the web convert sheet. An explicit
+// issue_family boolean wins. Otherwise the seeded issue names, and a kind that
+// still uses one of those icons, are the family.
+func issueFamilyKind(kind apiKind) bool {
+	if marked, ok := explicitIssueFamily(kind.FieldSchema); ok {
+		return marked
+	}
+	return seededIssueName(kind.Slug) || seededIssueName(kind.Icon)
+}
+
+func explicitIssueFamily(raw json.RawMessage) (marked, ok bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false, false
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return false, false
+	}
+	value, exists := obj["issue_family"]
+	if !exists {
+		return false, false
+	}
+	flag, isBool := value.(bool)
+	if !isBool {
+		return false, false
+	}
+	return flag, true
+}
+
+func seededIssueName(name string) bool {
+	switch name {
+	case "epic", "ticket", "task":
+		return true
+	default:
+		return false
+	}
 }
 
 type kindPage struct {
@@ -91,6 +131,18 @@ func (rt *runtime) doHeadersCtx(ctx context.Context, method, path string, body, 
 		return rt.fail(err, c.Token)
 	}
 	return nil
+}
+
+func (rt *runtime) ticketWebURL(key string) string {
+	base := ""
+	if inst, err := rt.resolve(); err == nil {
+		base = strings.TrimRight(inst.URL, "/")
+	}
+	prefix := keyPrefix(key)
+	if prefix == "" {
+		return base + "/p/" + url.PathEscape(key)
+	}
+	return base + "/p/" + url.PathEscape(prefix) + "/" + url.PathEscape(key)
 }
 
 func (rt *runtime) loadKinds() (kindTable, error) {

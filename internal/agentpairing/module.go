@@ -26,6 +26,7 @@ import (
 )
 
 type Module struct {
+	ignoredHarnessReport  sync.Once
 	pool                  *pgxpool.Pool
 	origin, defaultTenant string
 	mu                    sync.Mutex
@@ -69,6 +70,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agent-pairing/computers/{computerId}", m.person("account.read", m.get))
 	mux.HandleFunc("POST /api/agent-pairing/computers/{computerId}/disconnect", m.person("account.manage", m.disconnect))
 	mux.HandleFunc("POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/disconnect", m.person("account.manage", m.disconnect))
+	mux.HandleFunc("POST /api/agent-pairing/computers/{computerId}/remove", m.person("account.manage", m.remove))
 	mux.HandleFunc("GET /api/agent-pairing/self", m.self)
 	mux.HandleFunc("POST /api/agent-pairing/self/disconnect", m.self)
 }
@@ -243,7 +245,7 @@ func (m *Module) device(w http.ResponseWriter, r *http.Request) {
 			if state != "connected" {
 				return fail(409, "pairing_revoked", "computer is disconnecting or revoked; pair afresh")
 			}
-			if in.RuntimeHash != runtime || in.LifecycleHash != h || in.Workspace != original.Workspace || in.Platform != original.Platform || in.Arch != original.Arch || in.ComputerName != original.ComputerName {
+			if in.LocalAuthPublicKey != original.LocalAuthPublicKey || in.RuntimeHash != runtime || in.LifecycleHash != h || in.Workspace != original.Workspace || in.Platform != original.Platform || in.Arch != original.Arch || in.ComputerName != original.ComputerName {
 				return fail(409, "conflict", "existing computer binding must remain unchanged")
 			}
 		}
@@ -412,7 +414,7 @@ func (m *Module) proof(w http.ResponseWriter, r *http.Request, reconcile bool) {
 			if err = finalizeDrain(r.Context(), tx, *rec.ComputerID); err != nil {
 				return err
 			}
-			if err = cleanup(r.Context(), tx, *rec.ComputerID, in); err != nil {
+			if err = m.cleanup(r.Context(), tx, *rec.ComputerID, in); err != nil {
 				return err
 			}
 		} else if rec.State == "approved" {
