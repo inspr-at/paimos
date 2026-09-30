@@ -6,6 +6,8 @@ package agentd
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,12 +16,40 @@ import (
 	"time"
 )
 
+// attachWrapperChildSelector is the exact -test.run value of the inert
+// procargs fixtures. A normal go test invocation adds further flags and does
+// not use this argv by itself.
+const attachWrapperChildSelector = "-test.run=^TestAttachExecWrapperChild$"
+
+// attachWrapperFixtureArgv reports whether argv is one of the inert children
+// this package execs while AEON_ATTACH_WRAPPER_CHILD=1:
+//
+//	[executable, "-test.run=^TestAttachExecWrapperChild$"]
+//	["", "-test.run=^TestAttachExecWrapperChild$"]
+//	["", "", "-test.run=^TestAttachExecWrapperChild$"]
+func attachWrapperFixtureArgv(argv []string) bool {
+	switch len(argv) {
+	case 2:
+		return argv[1] == attachWrapperChildSelector
+	case 3:
+		return argv[0] == "" && argv[1] == "" && argv[2] == attachWrapperChildSelector
+	default:
+		return false
+	}
+}
+
 // TestMain keeps a procargs fixture from running this package's tests.
 // An argv of ["", "", "-test.run=…"] stops flag parsing at the second empty
 // entry, so -test.run never selects the sleeping helper. The child marker is
-// handled here, before m.Run, and the process stays inert until the parent kills it.
+// handled here, before m.Run, only for that exact fixture argv. Any other
+// argv with the marker fails immediately: an inherited marker must not sleep
+// and exit 0 without running the suite.
 func TestMain(m *testing.M) {
 	if os.Getenv("AEON_ATTACH_WRAPPER_CHILD") == "1" {
+		if !attachWrapperFixtureArgv(os.Args) {
+			fmt.Fprintf(os.Stderr, "agentd: AEON_ATTACH_WRAPPER_CHILD=1 is not an attach procargs fixture argv: %q\n", os.Args)
+			os.Exit(2)
+		}
 		if marker := os.Getenv("AEON_ATTACH_WRAPPER_MARKER"); marker != "" {
 			if err := os.WriteFile(marker, []byte("inert"), 0o600); err != nil {
 				os.Exit(1)
@@ -258,8 +288,8 @@ func TestAttachProcargsReadsFixtureEnvironment(t *testing.T) {
 	denied := startProcargsFixture(t, []string{"PATH=/usr/bin:/bin", "BUN_OPTIONS=--preload /fixture/marker.cjs", "FOO=BUN_OPTIONS=--preload /fixture/other.cjs", "NODE_OPTIONS=--require /fixture/marker.cjs"})
 	allowed := startProcargsFixture(t, []string{"PATH=/usr/bin:/bin", "BUN_INSTALL=/opt/homebrew", "BUN_OPTIONS=", "NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem", "NODE_OPTIONS=--require /fixture/marker.cjs"})
 	other := startProcargsFixture(t, []string{"PATH=/usr/bin:/bin", "BUN_BE_BUN=1"})
-	empty := startProcargsArgvFixture(t, []string{"", "-test.run=^TestAttachExecWrapperChild$"}, []string{"PATH=/usr/bin:/bin", "BUN_OPTIONS=--preload /fixture/marker.cjs"})
-	pair := startProcargsArgvFixture(t, []string{"", "", "-test.run=^TestAttachExecWrapperChild$"}, []string{"PATH=/usr/bin:/bin", "BUN_BE_BUN=1"})
+	empty := startProcargsArgvFixture(t, []string{"", attachWrapperChildSelector}, []string{"PATH=/usr/bin:/bin", "BUN_OPTIONS=--preload /fixture/marker.cjs"})
+	pair := startProcargsArgvFixture(t, []string{"", "", attachWrapperChildSelector}, []string{"PATH=/usr/bin:/bin", "BUN_BE_BUN=1"})
 	if decision, err := readAttachProcargs(denied); err != nil || decision != claudeRuntimeInjected {
 		t.Fatal("live Claude BUN_OPTIONS was not refused", err)
 	}
@@ -291,7 +321,7 @@ func TestAttachProcargsEmptyArgvStaysInert(t *testing.T) {
 	}
 	marker := filepath.Join(t.TempDir(), "marker")
 	cmd := exec.Command(self)
-	cmd.Args = []string{"", "", "-test.run=^TestAttachExecWrapperChild$"}
+	cmd.Args = []string{"", "", attachWrapperChildSelector}
 	cmd.Env = []string{
 		"PATH=/usr/bin:/bin",
 		"BUN_BE_BUN=1",
@@ -336,13 +366,74 @@ func TestAttachProcargsEmptyArgvStaysInert(t *testing.T) {
 	}
 }
 
+func TestAttachWrapperFixtureArgv(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, argv := range [][]string{
+		{exe, attachWrapperChildSelector},
+		{"", attachWrapperChildSelector},
+		{"", "", attachWrapperChildSelector},
+	} {
+		if !attachWrapperFixtureArgv(argv) {
+			t.Fatalf("fixture argv %q rejected", argv)
+		}
+	}
+	normal := []string{exe, "-test.run=^TestAttachWrapperFixtureArgv$", "-test.paniconexit0", "-test.count=1"}
+	if attachWrapperFixtureArgv(normal) || attachWrapperFixtureArgv(os.Args) {
+		t.Fatalf("normal argv treated as a fixture: test %q process %q", normal, os.Args)
+	}
+}
+
+func TestAttachWrapperMarkerNormalArgvDoesNotSkip(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(self,
+		"-test.run=^TestAttachWrapperMarkerNormalArgvDoesNotSkip$",
+		"-test.count=1",
+		"-test.paniconexit0",
+	)
+	cmd.Env = []string{
+		"PATH=/usr/bin:/bin",
+		"HOME=" + t.TempDir(),
+		"AEON_ATTACH_WRAPPER_CHILD=1",
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	})
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() == 0 {
+			t.Fatalf("normal argv with wrapper marker result %v, stderr %q", err, stderr.String())
+		}
+		if !bytes.Contains(stderr.Bytes(), []byte("not an attach procargs fixture")) {
+			t.Fatalf("wrapper marker mismatch was not reported: %q", stderr.String())
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("normal argv with wrapper marker slept instead of failing")
+	}
+}
+
 func startProcargsFixture(t *testing.T, env []string) string {
 	t.Helper()
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return startProcargsArgvFixture(t, []string{self, "-test.run=^TestAttachExecWrapperChild$"}, env)
+	return startProcargsArgvFixture(t, []string{self, attachWrapperChildSelector}, env)
 }
 
 func startProcargsArgvFixture(t *testing.T, argv, env []string) string {
