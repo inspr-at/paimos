@@ -5199,7 +5199,9 @@ paths:
       summary: Read intake history
       description: Aithema's current source, transcript and draft history; accepted and superseded proposals remain visible with citations.
       security: *auth
-      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: node_id, in: query, schema: {type: string, format: uuid}, description: Return accepted drafts for this node or the requirement that generated this ticket; sources and turns are empty. Requires the same intake.read permission.}
       responses:
         '200': {description: Intake snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSnapshot'}}}}
         '404': {$ref: '#/components/responses/Error'}
@@ -8716,10 +8718,27 @@ components:
         target_node_id: {type: string, format: uuid}
         title: {type: string, minLength: 1}
         body: {type: string}
+        extensions: {$ref: '#/components/schemas/IntakeExtensions'}
+        document_bytes:
+          type: string
+          description: Original Aithema review snapshot JSON, preserved as text. Extensions are extracted from its single confirmed, unbound item; an explicit extensions map must match those exact bytes. This native draft envelope retains its required projection fields. The complete request is limited to 1 MiB, allowing a 64 KiB canonical extension map plus JSON escaping and projection overhead.
         base_event_id: {type: integer, minimum: 0, description: Last target-node event observed by Aithema; zero for a new target}
         citations: {type: array, minItems: 1, items: {$ref: '#/components/schemas/IntakeCitation'}}
         ticket_suggestions: {type: array, items: {$ref: '#/components/schemas/IntakeTicketSuggestion'}}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
+    IntakeExtensions:
+      type: object
+      maxProperties: 8
+      description: Aithema item.extensions, preserved without reshaping. Registry and canonical 16 KiB instance / 64 KiB map validation belong to Aithema; Aeon checks the envelope and retains unknown namespaces. Evidence strings are not trimmed or normalized. Changing the raw map or document on an idempotent retry returns 409.
+      additionalProperties: false
+      patternProperties:
+        '^x-[a-z0-9]+(\.[a-z0-9-]+)+@(0|[1-9][0-9]*)$':
+          type: object
+          additionalProperties: false
+          required: [version, data]
+          properties:
+            version: {type: string, maxLength: 33, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', description: Major must match the map key}
+            data: {}
     IntakeTicketSuggestion:
       type: object
       additionalProperties: false

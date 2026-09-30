@@ -35,6 +35,60 @@ func openHeartbeatHold(path string) (heartbeatHold, error) {
 	return hold, nil
 }
 
+// acceptHeartbeatConfigDir opens or creates ~/.aeon. Config already lives
+// there at 0755, so an existing directory is accepted when this user owns it
+// and it is not group- or world-writable. A missing directory is created at
+// 0700. The directory is never relabeled and a final symlink is refused.
+func acceptHeartbeatConfigDir(path string) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	abs = filepath.Clean(abs)
+	if abs == string(os.PathSeparator) {
+		return errHeartbeatState
+	}
+	info, lerr := os.Lstat(abs)
+	created := false
+	switch {
+	case lerr == nil && info.Mode()&os.ModeSymlink != 0:
+		return errHeartbeatState
+	case errors.Is(lerr, os.ErrNotExist):
+		if err := os.Mkdir(abs, 0o700); err != nil {
+			return err
+		}
+		created = true
+	case lerr != nil:
+		return lerr
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(abs))
+	if err != nil {
+		return err
+	}
+	parentFD, err := unix.Open(parent, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(parentFD)
+	fd, err := unix.Openat(parentFD, filepath.Base(abs), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return errHeartbeatState
+	}
+	defer unix.Close(fd)
+	if created && unix.Fchmod(fd, 0o700) != nil {
+		return errHeartbeatState
+	}
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil || st.Mode&unix.S_IFMT != unix.S_IFDIR || st.Uid != uint32(os.Getuid()) {
+		return errHeartbeatState
+	}
+	perm := st.Mode & 0o777
+	if perm&0o022 != 0 || perm&0o200 == 0 {
+		return errHeartbeatState
+	}
+	return nil
+}
+
 // openPrivateHeartbeatDir opens the state directory without following a final
 // symlink. An existing directory must already be owned by this user and mode
 // 0700; creation is the only path that sets those bits.

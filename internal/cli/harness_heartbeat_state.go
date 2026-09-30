@@ -48,6 +48,7 @@ type heartbeatDisk struct {
 	OwnerStart            string                  `json:"owner_start,omitempty"`
 	BoundWorktree         string                  `json:"bound_worktree,omitempty"`
 	BoundBranch           string                  `json:"bound_branch,omitempty"`
+	BoundTicket           string                  `json:"bound_ticket,omitempty"`
 	StartedUnix           int64                   `json:"started_unix,omitempty"`
 	CommitCursor          string                  `json:"commit_cursor,omitempty"`
 	Terminal              bool                    `json:"terminal,omitempty"`

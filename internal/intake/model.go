@@ -82,6 +82,8 @@ type draftWrite struct {
 	TargetNodeID    *string           `json:"target_node_id"`
 	Title           string            `json:"title"`
 	Body            string            `json:"body"`
+	Extensions      json.RawMessage   `json:"extensions,omitempty"`
+	DocumentBytes   *string           `json:"document_bytes,omitempty"`
 	BaseEventID     *int64            `json:"base_event_id"`
 	Citations       []citationWrite   `json:"citations"`
 	Suggestions     []suggestionWrite `json:"ticket_suggestions"`
@@ -94,6 +96,8 @@ type draftView struct {
 	TargetNodeID    *string          `json:"target_node_id,omitempty"`
 	Title           string           `json:"title"`
 	Body            string           `json:"body"`
+	Extensions      json.RawMessage  `json:"extensions,omitempty"`
+	DocumentBytes   *string          `json:"document_bytes,omitempty"`
 	BaseEventID     int64            `json:"base_event_id"`
 	Citations       []citationWrite  `json:"citations"`
 	Suggestions     []suggestionView `json:"ticket_suggestions"`
