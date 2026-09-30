@@ -21,7 +21,8 @@ eight jobs. Ordinary spec files stay together; audit states each create their ow
 browser contexts. New specs are discovered from Playwright's full list and run
 even before they have a saved timing in `web/playwright.ui.weights.json`.
 Each job logs `AEON_UI_TIMINGS` with milliseconds per file or audit state for
-rebalancing. CI builds the app, test galleries and browser-imported modules in
+rebalancing. Balance estimates exclude job setup; check the seven-minute job
+budget against actual CI wall times. CI builds the app, test galleries and browser-imported modules in
 one test-mode module graph, retaining source URLs for fault injection. Local targeted
 runs default to the dev server. Stable tests have no retries; the three tagged quarantine tests get
 two retries, and `PW_NIGHTLY=1` disables those retries. The web gate also rejects
