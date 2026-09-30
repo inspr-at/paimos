@@ -3476,6 +3476,30 @@ paths:
         '204': {description: Target disabled}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/reviews:
+    get:
+      operationId: listTicketReviews
+      summary: Cross-family review results for this ticket
+      description: Newest first, bounded to 50 reviews. A gate opens only for a completed, vendor-reported, other-family review of the exact commit range. No merge is performed.
+      security: *auth
+      parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Reviews, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TicketReview'}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: requestTicketReview
+      summary: Queue an independent managed review of a commit range
+      description: Requires work_orders.write and run.create on the ticket. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection.
+      security: *auth
+      parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TicketReviewCreate'}}}}
+      responses:
+        '201': {description: Review (queued or blocked), content: {application/json: {schema: {$ref: '#/components/schemas/TicketReview'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /work-orders:
     get:
       operationId: listWorkOrders
@@ -4487,7 +4511,9 @@ paths:
       operationId: listQueuedRuns
       description: Agent daemon sees queued runs for its principal only. Polling is a fallback when webhook wakes are missed. The daemon poll omits per-run wait; people read it on the run.
       security: [{agentKey: []}]
-      parameters: [{$ref: '#/components/parameters/Limit'}]
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {name: X-Aeon-Review-Policy, in: header, schema: {type: string, enum: [no_tools_v1]}, description: Advertise no_tools_v1 to receive review runs. Legacy daemons receive ordinary runs only.}
       responses:
         '200': {description: Queued runs, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}}}}
         '403': {$ref: '#/components/responses/Error'}
@@ -4504,7 +4530,9 @@ paths:
       operationId: claimAgentRun
       description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts.
       security: [{agentKey: []}]
-      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-Aeon-Review-Policy, in: header, schema: {type: string, enum: [no_tools_v1]}, description: Required for review claims. Ordinary run claims are unchanged.}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunClaim'}}}}
       responses:
         '200': {description: Claimed run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
@@ -10172,6 +10200,8 @@ components:
       required: [node_id, status, revision, criteria, created_at, updated_at]
       properties:
         node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [build, review]}
+        review: {$ref: '#/components/schemas/ReviewBinding'}
         status: {type: string, enum: [draft, ready, running, blocked, done, cancelled]}
         revision: {type: integer, format: int64}
         requested_by_principal_id: {type: string, format: uuid}
@@ -10181,6 +10211,69 @@ components:
         criteria: {type: array, items: {$ref: '#/components/schemas/WorkCriterion'}}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    TicketReviewCreate:
+      type: object
+      additionalProperties: false
+      required: [request_id, repository, base_sha, head_sha]
+      properties:
+        request_id: {type: string, format: uuid}
+        repository: {type: string, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$', maxLength: 200}
+        base_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
+        head_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
+        author_run_id: {type: string, format: uuid}
+        author_family: {type: string, enum: [openai, anthropic, xai, cursor], description: Person-only declaration for a change outside managed runs.}
+        pull_request: {type: integer, minimum: 1}
+    ReviewBinding:
+      type: object
+      required: [ticket_node_id, repository, base_sha, head_sha, author_family]
+      properties:
+        ticket_node_id: {type: string, format: uuid}
+        repository: {type: string}
+        base_sha: {type: string}
+        head_sha: {type: string}
+        author_family: {type: string}
+        ticket_snapshot: {type: string, description: Immutable ticket and acceptance-criteria snapshot supplied on the managed work order.}
+        author_run_id: {type: [string, 'null'], format: uuid}
+        reviewer_profile_id: {type: [string, 'null'], format: uuid}
+        reviewer_family: {type: [string, 'null']}
+        pull_request: {type: [integer, 'null']}
+    ReviewFinding:
+      type: object
+      required: [severity, file, line, message]
+      properties:
+        severity: {type: string, enum: [critical, high, medium, low]}
+        file: {type: string}
+        line: {type: integer, minimum: 1}
+        message: {type: string}
+    ReviewResult:
+      type: object
+      required: [verdict, findings, reason]
+      properties:
+        verdict: {type: string, enum: ['', ok, changes]}
+        findings: {type: array, items: {$ref: '#/components/schemas/ReviewFinding'}}
+        reason: {type: string, description: A missing or malformed final verdict keeps the gate closed.}
+    TicketReview:
+      allOf:
+        - {$ref: '#/components/schemas/ReviewBinding'}
+        - type: object
+          required: [work_order_id, request_id, status, gate_open, gate_reason, ladder, result, created_at, github_status]
+          properties:
+            work_order_id: {type: string, format: uuid}
+            request_id: {type: string, format: uuid}
+            run_id: {type: [string, 'null'], format: uuid}
+            status: {type: string, enum: [blocked, queued, starting, running, waiting, completed, failed, cancelled, ownership_lost]}
+            reviewer_model: {type: [string, 'null']}
+            reviewer_effort: {type: [string, 'null']}
+            reviewer_profile_version: {type: [string, 'null']}
+            effective_model: {type: [string, 'null']}
+            gate_open: {type: boolean}
+            gate_reason: {type: string}
+            result: {$ref: '#/components/schemas/ReviewResult'}
+            ladder: {type: array, items: {type: object, required: [profile_id, selected, skip_reasons], properties: {profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
+            cost_micros: {type: [integer, 'null'], format: int64, description: Reported USD cost; null when cost was not measured.}
+            duration_seconds: {type: [integer, 'null'], format: int64}
+            created_at: {type: string, format: date-time}
+            github_status: {type: string, enum: [unconfigured, pending, success, failure, error, stale]}
     WorkEvidenceWrite:
       type: object
       required: [kind, reference]
@@ -10932,6 +11025,7 @@ components:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
+        read_only_review: {type: boolean, description: A pinned review run using a qualified no-tools adapter; repository_mutation_allowed is false.}
         verification_error: {type: string, enum: [verification_unavailable], description: Present only for a verification refused before launch.}
         verification_reason: {type: string, enum: [adapter_unsupported, binding_incomplete, local_binding_missing], description: Bounded cause for verification_unavailable; never vendor diagnostics.}
         capacity_override: {type: string, enum: ['', now]}
@@ -10984,6 +11078,14 @@ components:
         error_code: {type: string, enum: [event_stream_bound, app_server_protocol, child_exit_failed, turn_failed, child_stop_failed, ownership_lost, reporter_unavailable, workspace_conflict, decision_refused, vendor_limit]}
         limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Present only when reported by the vendor.}
         limit_resets_at: {type: string, format: date-time, description: Present only when reported by the vendor.}
+        review_range:
+          type: object
+          description: Optional exact range produced by a completed builder run. Automatically requests an independent review of that run's parent ticket, subject to the caller's existing work_orders.write and run.create permissions. Reviewer runs cannot request recursive reviews.
+          required: [repository, base_sha, head_sha]
+          properties:
+            repository: {type: string, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'}
+            base_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
+            head_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
         git_commits:
           type: array
           maxItems: 20
