@@ -84,7 +84,7 @@ func TestClaimSharedQuotaWindowKeepsDoorOwnership(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET account_id=$2 WHERE id=(SELECT window_id FROM account_reservations WHERE run_id=$1)`, run.ID, sibling)
 		return err
 	})
-	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 409, nil)
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody([]string{uuid()}), 409, nil)
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=repeat('ab',32),quota_pool_fingerprint=repeat('ab',32) WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1)`, run.ID)
 		return err

@@ -324,6 +324,14 @@ func claimPermission(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run) 
 	return nil
 }
 
+func releaseObsoleteClaim(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, reason string) (any, error) {
+	if err := agentaccounts.Release(ctx, tx, p, v.ID, "", ""); err != nil {
+		return nil, err
+	}
+	// Returning the failure as the response commits the release before the 409.
+	return workorders.Fail(http.StatusConflict, reason), nil
+}
+
 func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
 		Daemon       string   `json:"daemon_id"`
@@ -398,12 +406,13 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
    AND EXISTS(SELECT 1 FROM agent_runs owned WHERE owned.id=r.run_id AND owned.purpose='managed')))),w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp()
   AND (w.capacity_read_at IS NULL OR (w.capacity_allowed AND NOT w.capacity_retired AND (w.capacity_read_at>=clock_timestamp()-interval '10 minutes' OR w.capacity_refresh_run IS NOT DISTINCT FROM r.run_id) AND w.used+w.reserved<=w.allowance))
 	 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
-	 WHERE r.run_id=$1 ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID, *v.AccountID)
+	 WHERE r.run_id=$1 AND r.state<>'released' ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID, *v.AccountID)
 	if err != nil {
 		return nil, err
 	}
 	count := 0
 	valid := true
+	quotaValid := true
 	active := true
 	for rows.Next() {
 		var id, state string
@@ -413,7 +422,8 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			return nil, err
 		}
 		count++
-		valid = valid && seen[id] && quotaMatches
+		valid = valid && seen[id]
+		quotaValid = quotaValid && quotaMatches
 		active = active && state == "active" && current
 	}
 	rows.Close()
@@ -421,6 +431,12 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, err
 	}
 	if !valid || count != len(seen) {
+		return nil, workorders.Fail(409, "reservation set mismatch")
+	}
+	if !quotaValid {
+		if v.Status == "queued" && v.Purpose == "managed" {
+			return releaseObsoleteClaim(ctx, tx, p, v, "quota_pool_changed")
+		}
 		return nil, workorders.Fail(409, "reservation set mismatch")
 	}
 	if err = agentpairing.AccountFence(ctx, tx, *v.AccountID, v.Status != "queued"); err != nil {
@@ -436,6 +452,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, workorders.Fail(409, "reservation or daemon probe is not eligible")
 	}
 	if err := agentaccounts.ValidateReservedCapacity(ctx, tx, v.ID, *v.AccountID); err != nil {
+		if v.Purpose == "managed" && agentaccounts.ReservedRouteChanged(err) {
+			return releaseObsoleteClaim(ctx, tx, p, v, "account_moved_out_of_group")
+		}
 		return nil, workorders.Fail(409, "reserved capacity is not eligible")
 	}
 	if o.Assignee != nil && *o.Assignee != v.AgentID {

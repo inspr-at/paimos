@@ -463,7 +463,16 @@ func patchGroup(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, i
 		}
 	}
 	if exclusive && len(projects) == 0 {
-		return AccountGroup{}, fail(http.StatusBadRequest, "an exclusive group needs a project")
+		// Hidden stored fences still satisfy exclusivity after a partial PATCH.
+		var hidden bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_group_projects gp
+ WHERE gp.group_id=$1::uuid AND NOT EXISTS(SELECT 1 FROM nodes n
+ WHERE n.tenant_id=gp.tenant_id AND n.id=gp.project_id AND n.deleted_at IS NULL))`, id).Scan(&hidden); err != nil {
+			return AccountGroup{}, err
+		}
+		if !hidden {
+			return AccountGroup{}, fail(http.StatusBadRequest, "an exclusive group needs a project")
+		}
 	}
 	if in.Harness != "" && in.Harness != before.Harness {
 		return AccountGroup{}, fail(http.StatusBadRequest, "invalid group")
@@ -506,13 +515,16 @@ func replaceGroupMembers(ctx context.Context, tx pgx.Tx, id, harness string, acc
 	if int(tag.RowsAffected()) != len(accounts) {
 		return fail(http.StatusBadRequest, "invalid account")
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM account_group_projects WHERE group_id=$1::uuid`, id); err != nil {
+	// RLS on nodes makes this replacement touch only visible live projects.
+	// Omitted hidden memberships remain stored and never enter the response.
+	if _, err := tx.Exec(ctx, `DELETE FROM account_group_projects gp WHERE group_id=$1::uuid
+ AND EXISTS(SELECT 1 FROM nodes n WHERE n.tenant_id=gp.tenant_id AND n.id=gp.project_id AND n.deleted_at IS NULL)`, id); err != nil {
 		return err
 	}
 	if len(projects) == 0 {
 		return nil
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO account_group_projects(tenant_id, group_id, project_id) SELECT tenant_id, id, x::uuid FROM account_groups, unnest($2::text[]) AS x WHERE id=$1::uuid`, id, projects)
+	_, err = tx.Exec(ctx, `INSERT INTO account_group_projects(tenant_id, group_id, project_id) SELECT tenant_id, id, x::uuid FROM account_groups, unnest($2::text[]) AS x WHERE id=$1::uuid ON CONFLICT DO NOTHING`, id, projects)
 	return groupDBErr(err)
 }
 

@@ -211,6 +211,14 @@ type routeCommitError struct{ err error }
 func (e *routeCommitError) Error() string { return e.err.Error() }
 func (e *routeCommitError) Unwrap() error { return e.err }
 
+// ReservedRouteChanged identifies obsolete fences whose queued holds can be
+// released. Other admission failures must retain the normal rollback behavior.
+func ReservedRouteChanged(err error) bool {
+	var conflict *httpError
+	return errors.As(err, &conflict) && conflict.status == http.StatusConflict &&
+		(conflict.code == "account_moved_out_of_group" || conflict.code == "quota_pool_changed")
+}
+
 func rerouteMovedAccount(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal, run runRow, daemonID string, accountIDs []string, estimates map[string]int64, reason string) (RouteResult, error) {
 	if err := Release(ctx, tx, p, run.ID, "", ""); err != nil {
 		return RouteResult{}, err

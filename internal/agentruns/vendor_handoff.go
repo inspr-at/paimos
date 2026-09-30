@@ -118,6 +118,10 @@ func retryVendorStops(ctx context.Context, tx pgx.Tx, p tenant.Principal) error 
 		if err != nil {
 			return err
 		}
+		if _, err = tx.Exec(ctx, `INSERT INTO account_run_targets(tenant_id,run_id,group_id)
+ SELECT tenant_id,$2,group_id FROM account_run_targets WHERE run_id=$1`, id, retry.ID); err != nil {
+			return err
+		}
 		if _, err = tx.Exec(ctx, `UPDATE agent_runs SET vendor_retry_pending=false WHERE id=$1`, id); err != nil {
 			return err
 		}

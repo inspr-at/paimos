@@ -76,6 +76,12 @@ func confirmQuotaPool(ctx context.Context, tx pgx.Tx, p tenant.Principal, in quo
 	fingerprint := ""
 	if *in.Confirmed {
 		fingerprint = in.QuotaFingerprint
+		// Consent names the complete pool. An existing sibling must not join
+		// the selected accounts unless the person explicitly named it too.
+		if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET quota_pool_fingerprint=''
+ WHERE harness=$1 AND quota_pool_fingerprint=$2 AND NOT (id::text=ANY($3::text[]))`, harness, fingerprint, ids); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET quota_pool_fingerprint=$2 WHERE id::text=ANY($1::text[])`, ids, fingerprint); err != nil {
 		return err
