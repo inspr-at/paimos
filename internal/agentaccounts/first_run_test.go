@@ -1004,9 +1004,10 @@ func TestBlindSpentRecoveryDoesNotSayReading(t *testing.T) {
 	s := capacity.DefaultSchedule()
 	s.Timezone = "UTC"
 	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &s}), 204, nil)
-	// AEON-448: derive the vendor stop from the same fixed clock as the admission checks below;
-	// time.Now() made the 1-hour vendor window overlap `day` between 11:00 and 12:00 UTC on 2026-09-30.
-	day := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	// AEON-448: the vendor stop and every admission time come from one fixed clock, far enough in the
+	// past that the setup's database now() (mustRoute) is always after the 1-hour vendor window.
+	// A Wednesday, like the original 2026-09-30, so the default schedule's weekday rules are unchanged.
+	day := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
 	stop := day.Add(-2 * time.Hour)
 	cause := insertRun(t, person, runner, profile)
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
@@ -1044,7 +1045,7 @@ func TestBlindSpentRecoveryDoesNotSayReading(t *testing.T) {
 	if w := admit(day); w == nil || w.Code != "reading" || w.ReadAt != nil || w.Timezone != "UTC" || w.RunNowAllowed {
 		t.Fatalf("daytime spent grant: %+v", w)
 	}
-	night := time.Date(2026, 9, 30, 23, 0, 0, 0, time.UTC)
+	night := time.Date(2026, 9, 2, 23, 0, 0, 0, time.UTC)
 	next := s.NextStart(night.Add(time.Second), false)
 	if w := admit(night); w == nil || w.Code != "schedule" || w.RunNowAllowed || w.Until == nil || next == nil || !w.Until.Equal(*next) {
 		t.Fatalf("night spent grant: %+v next=%v", w, next)
