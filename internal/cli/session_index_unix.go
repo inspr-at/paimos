@@ -88,21 +88,48 @@ func parseSessionIndexEntry(raw []byte) (sessionIndexEntry, bool) {
 	return sessionIndexEntry{StateDir: dir, OwnerPID: pid, OwnerStart: lines[2]}, true
 }
 
+// validOwnerStart accepts only the stamps readOwnerStamp emits.
+// Darwin is seconds.microseconds. Linux is the kernel boot UUID, a colon,
+// and the process start tick. A path, a second separator, or other text is
+// not an owner identity.
 func validOwnerStart(start string) bool {
-	if start == "" || len(start) > 64 || start[0] == '.' || start[len(start)-1] == '.' {
+	if start == "" || len(start) > 64 || strings.ContainsAny(start, " \t\r\n\x00/\\") {
 		return false
 	}
-	dots := 0
-	for _, c := range start {
-		switch {
-		case c >= '0' && c <= '9':
-		case c == '.':
-			dots++
-			if dots > 1 {
+	if sec, usec, ok := strings.Cut(start, "."); ok {
+		return !strings.Contains(usec, ".") && decimalToken(sec, 20) && decimalToken(usec, 20)
+	}
+	id, ticks, ok := strings.Cut(start, ":")
+	return ok && !strings.Contains(ticks, ":") && linuxBootID(id) && decimalToken(ticks, 20)
+}
+
+func decimalToken(token string, max int) bool {
+	if token == "" || len(token) > max {
+		return false
+	}
+	for _, c := range token {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// linuxBootID is the lowercase UUID printed by /proc/sys/kernel/random/boot_id.
+func linuxBootID(id string) bool {
+	parts := strings.Split(id, "-")
+	if len(parts) != 5 {
+		return false
+	}
+	widths := [5]int{8, 4, 4, 4, 12}
+	for i, part := range parts {
+		if len(part) != widths[i] {
+			return false
+		}
+		for _, c := range part {
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 				return false
 			}
-		default:
-			return false
 		}
 	}
 	return true

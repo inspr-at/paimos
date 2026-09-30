@@ -626,3 +626,55 @@ func mustIndexRoot(t *testing.T) string {
 	}
 	return root
 }
+
+func TestCurrentOwnerStampIsPublishable(t *testing.T) {
+	_, start := currentOwner(t)
+	if !validOwnerStart(start) {
+		t.Fatalf("live owner stamp rejected: %q", start)
+	}
+}
+
+func TestValidOwnerStartAcceptsBothPlatformStamps(t *testing.T) {
+	const linuxStamp = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee:42"
+	for _, start := range []string{"1.2", "0.1", "1690000000.123456", linuxStamp, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee:0"} {
+		if !validOwnerStart(start) {
+			t.Fatalf("rejected %q", start)
+		}
+	}
+	for _, start := range []string{
+		"", ".", "1.", ".1", "1", "1.2.3", "1..2", "../x", "/tmp/x",
+		"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+		"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee:",
+		"AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE:1",
+		"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee:1:2",
+		"not-a-boot-id:1",
+		"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee:01x",
+		"1.2\n3",
+		strings.Repeat("1", 21) + ".2",
+	} {
+		if validOwnerStart(start) {
+			t.Fatalf("accepted %q", start)
+		}
+	}
+}
+
+func TestSessionIndexStoresLinuxOwnerStampWithoutBindingIt(t *testing.T) {
+	useIndexHome(t)
+	dir := t.TempDir()
+	writeIndexState(t, dir, indexAeonID, "Website", "")
+	const start = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee:42"
+	if err := writeSessionIndex(indexSourceID, dir, os.Getpid(), start); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := readOwnerFile(filepath.Join(mustIndexRoot(t), indexSourceID), 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := parseSessionIndexEntry(raw)
+	if !ok || entry.OwnerStart != start || entry.OwnerPID != os.Getpid() {
+		t.Fatalf("stored entry %+v ok %v", entry, ok)
+	}
+	if _, _, result := lookupSessionIndex(indexSourceID); result != sessionIndexRejected {
+		t.Fatalf("synthetic linux stamp bound: %d", result)
+	}
+}
