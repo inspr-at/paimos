@@ -224,9 +224,9 @@ for (const width of [1600, 390]) {
       await expect(sheet).not.toContainText('No public release notes')
       await expect(notes).not.toContainText('is required')
       if (width === 390) await sheet.getByRole('button', { name: 'All releases' }).click()
-      // An empty capture names no benefits, so the codename is the row title (AEON-430), never the Git headline.
-      await expect(row.locator('.headline')).toHaveCount(1)
-      await expect(row.locator('.headline.codename-title')).toHaveText(current.codename!)
+      // An empty capture names no benefits, so the row carries no headline line at all: the codename is the row title (AEON-430), never the Git headline.
+      await expect(row.locator('.headline')).toHaveCount(0)
+      await expect(row.locator('.row-name .rn-name')).toHaveText(current.codename!)
       await expect(row.getByText('Historical tag headline')).toHaveCount(0)
       if (process.env.SHOTS && hidden && width === 390) {
         for (const theme of ['light', 'dark']) {
