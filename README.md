@@ -511,7 +511,12 @@ root (`--state-root` for pair/setup, `--setup-root` for serve). Every local
 listener takes an exclusive non-blocking lock on `<socket>.lock` before touching
 the socket or token and retains it through shutdown cleanup. The lock file is
 an owned mode-0600 regular file opened without following symlinks; it is retained
-across restarts. A second start reports "agentd is already running for this state
+across restarts and is never deleted or renamed by startup, recovery or shutdown.
+After acquiring the lock, startup compares the descriptor's device and inode
+with the named file and retries a bounded number of times if they differ.
+Interrupted lock syscalls retry; only lock contention reports busy. The descriptor
+is close-on-exec, so harness children cannot keep the lock alive.
+A second start reports "agentd is already running for this state
 root" and leaves the active listener and token untouched. Clients never take
 the lock.
 
@@ -520,9 +525,18 @@ validates all stale socket artifacts through the private directory handle before
 removing any: the socket, token (even without a socket), obsolete owner record,
 and legacy `.s` plus eight hex digit quarantine names. Each must be owned by the
 current uid, mode 0600 and single-linked, with the expected socket or regular-file
-type. Symlinks, foreign owners and unsafe modes refuse startup. Recovery does not
-probe connections or quarantine files; interruption simply leaves stale artifacts
-for the next lock owner to clean. Unrelated directory entries are preserved.
+type. Symlinks, hardlinks, foreign owners and unsafe modes refuse startup.
+Recovery never deletes a socket that accepts a connection, even if the running
+daemon's lock file was externally unlinked or replaced. A successful connection
+reports the same already-running refusal and preserves all socket artifacts;
+only connection refusal permits stale-socket cleanup, and ambiguous probe errors
+refuse cleanup. Lock identity is checked again before each removal, including
+shutdown, which also requires the listener's recorded socket/token inodes.
+Losing lock identity leaves residue for a verified owner to recover. Interruption
+likewise leaves stale artifacts for the next owner; no quarantine is needed.
+This advisory protocol serializes cooperating daemons; it does not defend
+against hostile code with the same uid swapping paths between checks and unlink.
+Unrelated directory entries are preserved.
 The private token and local control authorization rules remain unchanged.
 
 ### Harness interpreter pins

@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -81,6 +82,10 @@ func TestPairedSocketProcessFixture(t *testing.T) {
 	} else {
 		local, err := ServePairedLocal(s, args[2])
 		if errors.Is(err, agentsetup.ErrBusy) {
+			if !strings.Contains(err.Error(), "agentd is already running for this state root") {
+				t.Fatalf("unclear busy refusal: %v", err)
+			}
+			fmt.Println(err)
 			fmt.Println("busy")
 			return
 		}
@@ -94,16 +99,18 @@ func TestPairedSocketProcessFixture(t *testing.T) {
 }
 
 type socketProcess struct {
-	cmd   *exec.Cmd
-	input io.WriteCloser
-	lines <-chan string
+	cmd    *exec.Cmd
+	input  io.WriteCloser
+	lines  <-chan string
+	done   chan struct{}
+	mu     sync.Mutex
+	output strings.Builder
 }
 
 func startSocketProcess(t *testing.T, s *Supervisor, socket, mode string) *socketProcess {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestPairedSocketProcessFixture$", "--", s.state.Path(), s.DaemonID(), socket, mode)
 	cmd.Env = append(os.Environ(), "AEON_SOCKET_PROCESS_FIXTURE=1")
-	cmd.Stderr = os.Stderr
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -112,24 +119,42 @@ func startSocketProcess(t *testing.T, s *Supervisor, socket, mode string) *socke
 	if err != nil {
 		t.Fatal(err)
 	}
+	cmd.Stderr = cmd.Stdout // capture the complete combined child diagnostic stream
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	p := &socketProcess{cmd: cmd, input: input}
+	p := &socketProcess{cmd: cmd, input: input, done: make(chan struct{})}
 	t.Cleanup(func() {
 		_ = input.Close()
 		_ = cmd.Process.Kill()
+		<-p.done
 		if cmd.ProcessState == nil {
 			_ = cmd.Wait()
+		}
+		if t.Failed() {
+			t.Logf("socket fixture full output:\n%s", p.diagnostics())
 		}
 	})
 	lines := make(chan string, 8)
 	p.lines = lines
 	go func() {
+		defer close(p.done)
 		defer close(lines)
 		scanner := bufio.NewScanner(output)
+		scanner.Buffer(make([]byte, 4096), 1<<20)
 		for scanner.Scan() {
-			lines <- scanner.Text()
+			line := scanner.Text()
+			p.mu.Lock()
+			p.output.WriteString(line + "\n")
+			p.mu.Unlock()
+			if line == "waiting" || line == "ready" || line == "busy" {
+				lines <- line
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			p.mu.Lock()
+			fmt.Fprintf(&p.output, "read fixture output: %v\n", err)
+			p.mu.Unlock()
 		}
 	}()
 	if got := p.line(t); got != "waiting" {
@@ -138,13 +163,22 @@ func startSocketProcess(t *testing.T, s *Supervisor, socket, mode string) *socke
 	return p
 }
 
+func (p *socketProcess) diagnostics() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.output.String()
+}
+
 func (p *socketProcess) line(t *testing.T) string {
 	t.Helper()
 	select {
-	case line := <-p.lines:
+	case line, ok := <-p.lines:
+		if !ok {
+			t.Fatalf("socket fixture exited before readiness; full output:\n%s", p.diagnostics())
+		}
 		return line
 	case <-time.After(15 * time.Second):
-		t.Fatal("socket fixture timed out")
+		t.Fatalf("socket fixture timed out; output so far:\n%s", p.diagnostics())
 		return ""
 	}
 }
@@ -161,6 +195,7 @@ func (p *socketProcess) kill(t *testing.T) {
 	if err := p.cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
+	<-p.done
 	if err := p.cmd.Wait(); err == nil {
 		t.Fatal("fixture did not die from SIGKILL")
 	}
@@ -211,6 +246,9 @@ func TestPairedSocketLiveLockAndSIGKILLRecovery(t *testing.T) {
 			t.Fatalf("clean shutdown residue: %s: %v", path, err)
 		}
 	}
+	if info, err := os.Lstat(socket + ".lock"); err != nil || !os.SameFile(before["agentd.sock.lock"], info) {
+		t.Fatalf("shutdown changed the permanent lock inode: %v", err)
+	}
 	next, err := ServePairedLocal(s, socket)
 	if err != nil {
 		t.Fatal(err)
@@ -255,6 +293,12 @@ func TestPairedSocketRecoversLegacyQuarantineCrash(t *testing.T) {
 }
 
 func TestPairedSocketConcurrentProcessesExactlyOneWins(t *testing.T) {
+	for trial := 0; trial < 20; trial++ {
+		t.Run(fmt.Sprint(trial), testPairedSocketConcurrentProcesses)
+	}
+}
+
+func testPairedSocketConcurrentProcesses(t *testing.T) {
 	s, _, _ := testSupervisor(t)
 	defer s.Close(context.Background())
 	socket := filepath.Join(socketTestDir(t), "agentd.sock")
@@ -266,6 +310,82 @@ func TestPairedSocketConcurrentProcessesExactlyOneWins(t *testing.T) {
 	if !(first == "ready" && second == "busy" || first == "busy" && second == "ready") {
 		t.Fatalf("concurrent startup results: %q, %q", first, second)
 	}
+	assertSocketConnects(t, socket)
+}
+
+func TestPairedSocketLiveListenerSurvivesLostLockPath(t *testing.T) {
+	for _, mutation := range []string{"unlink", "replace"} {
+		t.Run(mutation, func(t *testing.T) {
+			s, _, _ := testSupervisor(t)
+			defer s.Close(context.Background())
+			socket := filepath.Join(socketTestDir(t), "agentd.sock")
+			child := startSocketProcess(t, s, socket, "normal")
+			child.start(t)
+			if got := child.line(t); got != "ready" {
+				t.Fatalf("fixture startup: %q", got)
+			}
+			if mutation == "unlink" {
+				if err := os.Remove(socket + ".lock"); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.WriteFile(socket+".replacement", nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(socket+".replacement", socket+".lock"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := socketArtifacts(t, filepath.Dir(socket))
+			contender := startSocketProcess(t, s, socket, "normal")
+			contender.start(t)
+			if got := contender.line(t); got != "busy" {
+				t.Fatalf("lost-lock live listener accepted another start: %q", got)
+			}
+			if mutation == "unlink" {
+				// A replacement lock may be created, but the socket and token
+				// must retain their exact inode, mode, size and timestamps.
+				info, err := os.Lstat(socket + ".lock")
+				if err != nil {
+					t.Fatal(err)
+				}
+				before["agentd.sock.lock"] = info
+			}
+			assertSocketArtifacts(t, filepath.Dir(socket), before)
+			assertSocketConnects(t, socket)
+			child.kill(t)
+			local, err := ServePairedLocal(s, socket)
+			if err != nil {
+				t.Fatalf("lost-lock SIGKILL recovery: %v", err)
+			}
+			defer local.Close()
+			assertSocketConnects(t, socket)
+		})
+	}
+}
+
+func TestPairedSocketShutdownRequiresVerifiedLock(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	defer s.Close(context.Background())
+	socket := filepath.Join(socketTestDir(t), "agentd.sock")
+	local, err := ServePairedLocal(s, socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+	if err := os.Remove(socket + ".lock"); err != nil {
+		t.Fatal(err)
+	}
+	before := socketArtifacts(t, filepath.Dir(socket))
+	if err := local.Close(); !errors.Is(err, agentsetup.ErrCollision) {
+		t.Fatalf("shutdown accepted lost lock identity: %v", err)
+	}
+	assertSocketArtifacts(t, filepath.Dir(socket), before)
+	next, err := ServePairedLocal(s, socket)
+	if err != nil {
+		t.Fatalf("shutdown residue recovery: %v", err)
+	}
+	defer next.Close()
 	assertSocketConnects(t, socket)
 }
 

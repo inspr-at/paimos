@@ -133,15 +133,80 @@ func (s *Store) LockNamed(name string) (*os.File, error) {
 	return s.lockNamed(name)
 }
 func (s *Store) lockNamed(name string) (*os.File, error) {
-	f, err := s.open(name, unix.O_RDWR|unix.O_CREAT)
-	if err != nil {
-		return nil, err
+	return s.lockNamedWithFlock(name, unix.Flock)
+}
+
+// The injectable syscall keeps EINTR and replacement races testable without a
+// process-global hook. Lock files are permanent: never unlink or rename them.
+func (s *Store) lockNamedWithFlock(name string, flock func(int, int) error) (*os.File, error) {
+	if !validName(name) || s.root == nil {
+		return nil, ErrUnsafePath
 	}
-	if unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB) != nil {
+	for attempt := 0; attempt < 4; attempt++ {
+		fd, err := unix.Openat(int(s.root.Fd()), name, unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
+		if err != nil {
+			if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.EISDIR) {
+				return nil, fmt.Errorf("open lock %s: %w: %w", name, ErrUnsafePath, err)
+			}
+			return nil, fmt.Errorf("open lock %s: %w", name, err)
+		}
+		f := os.NewFile(uintptr(fd), "private-lock")
+		var st unix.Stat_t
+		if err := unix.Fstat(fd, &st); err != nil {
+			f.Close()
+			return nil, fmt.Errorf("stat lock %s: %w", name, err)
+		}
+		if !privateArtifact(&st, unix.S_IFREG) {
+			f.Close()
+			return nil, fmt.Errorf("validate lock %s: %w", name, ErrUnsafePath)
+		}
+		for {
+			err = flock(fd, unix.LOCK_EX|unix.LOCK_NB)
+			if !errors.Is(err, unix.EINTR) {
+				break
+			}
+		}
+		if err != nil {
+			f.Close()
+			if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
+				return nil, ErrBusy
+			}
+			return nil, fmt.Errorf("flock %s: %w", name, err)
+		}
+		if err = s.verifyLock(name, f); err == nil {
+			return f, nil
+		}
 		f.Close()
-		return nil, ErrBusy
+		if !errors.Is(err, ErrCollision) {
+			return nil, err
+		}
 	}
-	return f, nil
+	return nil, fmt.Errorf("lock %s changed during acquisition: %w", name, ErrCollision)
+}
+
+// verifyLock requires the retained descriptor to still identify the named,
+// private lock inode. An orphaned descriptor does not authorize cleanup.
+func (s *Store) verifyLock(name string, lock *os.File) error {
+	if !validName(name) || s.root == nil || lock == nil {
+		return ErrUnsafePath
+	}
+	var held, named unix.Stat_t
+	if err := unix.Fstat(int(lock.Fd()), &held); err != nil {
+		return fmt.Errorf("stat held lock %s: %w", name, err)
+	}
+	if err := unix.Fstatat(int(s.root.Fd()), name, &named, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		if errors.Is(err, unix.ENOENT) {
+			return fmt.Errorf("lock %s disappeared: %w", name, ErrCollision)
+		}
+		return fmt.Errorf("stat named lock %s: %w", name, err)
+	}
+	if held.Dev != named.Dev || held.Ino != named.Ino {
+		return fmt.Errorf("lock %s was replaced: %w", name, ErrCollision)
+	}
+	if !privateArtifact(&held, unix.S_IFREG) || !privateArtifact(&named, unix.S_IFREG) {
+		return fmt.Errorf("validate held lock %s: %w", name, ErrUnsafePath)
+	}
+	return nil
 }
 
 func (s *Store) open(name string, flags int) (*os.File, error) {
