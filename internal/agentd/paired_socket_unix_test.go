@@ -389,6 +389,37 @@ func TestPairedSocketShutdownRequiresVerifiedLock(t *testing.T) {
 	assertSocketConnects(t, socket)
 }
 
+func TestPairedSocketShutdownPreservesStillLiveSocket(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	defer s.Close(context.Background())
+	socket := filepath.Join(socketTestDir(t), "agentd.sock")
+	local, err := ServePairedLocal(s, socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+	// A duplicated listener descriptor can outlive http.Server.Close. Even
+	// shutdown with the right lock must preserve a socket that still accepts.
+	duplicate, err := local.Listener.(*net.UnixListener).File()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer duplicate.Close()
+	before := socketArtifacts(t, filepath.Dir(socket))
+	if err := local.Close(); !errors.Is(err, agentsetup.ErrBusy) {
+		t.Fatalf("shutdown removed a still-live listener: %v", err)
+	}
+	assertSocketArtifacts(t, filepath.Dir(socket), before)
+	assertSocketConnects(t, socket)
+	duplicate.Close()
+	next, err := ServePairedLocal(s, socket)
+	if err != nil {
+		t.Fatalf("duplicate listener residue recovery: %v", err)
+	}
+	defer next.Close()
+	assertSocketConnects(t, socket)
+}
+
 func socketArtifacts(t *testing.T, dir string) map[string]os.FileInfo {
 	t.Helper()
 	entries, err := os.ReadDir(dir)

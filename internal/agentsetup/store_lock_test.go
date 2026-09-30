@@ -112,6 +112,40 @@ func TestStoreLockMissingDirectoryIsNotBusy(t *testing.T) {
 	}
 }
 
+func TestStoreConcurrentLockAcquisition(t *testing.T) {
+	for trial := 0; trial < 20; trial++ {
+		s := testStore(t)
+		other, err := OpenStore(s.Path(), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { other.Close() })
+		type result struct {
+			lock *os.File
+			err  error
+		}
+		start := make(chan struct{})
+		results := make(chan result, 2)
+		for _, store := range []*Store{s, other} {
+			go func() {
+				<-start
+				lock, err := store.LockNamed("concurrent.lock")
+				results <- result{lock, err}
+			}()
+		}
+		close(start)
+		a, b := <-results, <-results
+		for _, r := range []result{a, b} {
+			if r.lock != nil {
+				r.lock.Close()
+			}
+		}
+		if !(a.err == nil && errors.Is(b.err, ErrBusy) || b.err == nil && errors.Is(a.err, ErrBusy)) {
+			t.Fatalf("concurrent lock trial %d: %v / %v", trial, a.err, b.err)
+		}
+	}
+}
+
 func TestStoreLockNotInheritedByHarness(t *testing.T) {
 	s := testStore(t)
 	lock, err := s.LockNamed("child.lock")

@@ -196,6 +196,9 @@ func (l *LocalServer) Close() error {
 			defer l.release()
 		}
 		l.closeErr = l.Server.Close()
+		// Serve runs in a goroutine and may not have registered the listener
+		// with http.Server yet when startup is immediately followed by Close.
+		_ = l.Listener.Close()
 		if l.cleanup != nil {
 			l.closeErr = errors.Join(l.closeErr, l.cleanup())
 		}
