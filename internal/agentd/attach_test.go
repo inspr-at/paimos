@@ -165,6 +165,7 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 	target := attachObservation{Process: attachwatch.Process{PID: 4000, UID: os.Getuid(), Started: "agent-start", Executable: exe, CWD: root}, Parent: 1, TTY: true}
 	var sent []attachwatch.DeviceRequest
 	failNetwork := false
+	serverExpiry := time.Now().Add(10 * time.Minute).UTC().Truncate(time.Second)
 	exchange := func(_ context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 		sent = append(sent, in)
 		if failNetwork {
@@ -177,7 +178,7 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 			v := time.Now().Add(attachwatch.Lease)
 			until = &v
 		}
-		return attachwatch.View{ConsentMode: attachwatch.ConsentAeon, ConsentDigest: attachwatch.ConsentDigest(in.RequestID, in.Snapshot.Digest(), attachwatch.ConsentAeon), RequestID: in.RequestID, Digest: in.Snapshot.Digest(), Snapshot: in.Snapshot, State: state, UserCode: "123456789", LeaseUntil: until}, nil
+		return attachwatch.View{ConsentMode: attachwatch.ConsentAeon, ConsentDigest: attachwatch.ConsentDigest(in.RequestID, in.Snapshot.Digest(), attachwatch.ConsentAeon), RequestID: in.RequestID, Digest: in.Snapshot.Digest(), Snapshot: in.Snapshot, State: state, UserCode: "123456789", LeaseUntil: until, ExpiresAt: serverExpiry}, nil
 	}
 	m, err := NewAttachManager(AttachConfig{Origin: "https://paired.test", ComputerID: "11111111-1111-4111-8111-111111111111", Host: "fixture", Workspace: root, Executables: map[string]string{"codex": exe}, Exchange: exchange})
 	if err != nil {
@@ -214,9 +215,16 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 	if _, err = m.handle(t.Context(), badPeer, AttachLocalRequest{Operation: "confirm", ID: v.ID, Digest: v.Digest}); err == nil {
 		t.Fatal("other peer confirmed")
 	}
+	if v.ExpiresAt != nil {
+		t.Fatal("a preview has no server expiry yet")
+	}
 	v, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: "confirm", ID: v.ID, Digest: v.Digest})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The helper tells the person how long the code lives from the server's expiry.
+	if v.ExpiresAt == nil || !v.ExpiresAt.Equal(serverExpiry) || v.Code != "123456789" {
+		t.Fatalf("confirmed view lacks the server expiry or code: %+v", v)
 	}
 	appendAttach(t, path, "before browser approval\n")
 	poll := func() (AttachLocalView, error) {

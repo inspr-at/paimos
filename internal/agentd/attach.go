@@ -79,6 +79,9 @@ type AttachLocalView struct {
 	State       string               `json:"state"`
 	Code        string               `json:"user_code,omitempty"`
 	SessionID   *string              `json:"session_id,omitempty"`
+	// ExpiresAt is the server's expiry of a request that waits for approval; the
+	// helper uses it to say how long the code stays valid.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 func NewAttachManager(c AttachConfig) (*AttachManager, error) {
@@ -95,7 +98,12 @@ func NewAttachManager(c AttachConfig) (*AttachManager, error) {
 	return &AttachManager{cfg: c, observe: observeAttachProcess, ancestry: observeAttachProcessIdentity, signature: inspectAttachSignature, sessions: make(map[string]*localAttach)}, nil
 }
 func (m *AttachManager) localView(id string, s *localAttach) AttachLocalView {
-	return AttachLocalView{ConsentMode: s.view.ConsentMode, ID: id, Origin: m.cfg.Origin, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), State: s.view.State, Code: s.view.UserCode, SessionID: s.view.SessionID}
+	v := AttachLocalView{ConsentMode: s.view.ConsentMode, ID: id, Origin: m.cfg.Origin, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), State: s.view.State, Code: s.view.UserCode, SessionID: s.view.SessionID}
+	if !s.view.ExpiresAt.IsZero() {
+		expires := s.view.ExpiresAt
+		v.ExpiresAt = &expires
+	}
+	return v
 }
 func (m *AttachManager) request(s *localAttach, id, operation string) attachwatch.DeviceRequest {
 	return attachwatch.DeviceRequest{Operation: operation, RequestID: id, ComputerID: m.cfg.ComputerID, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), Sequence: s.sequence}

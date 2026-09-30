@@ -173,34 +173,119 @@ func attachCommand(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Open %s/agents and review attach code %s. Keep this terminal open; Ctrl-C detaches.\n", view.Origin, view.Code)
+	fmt.Fprint(out, attachApprovalNotice(view.Origin, view.Code, view.ExpiresAt, time.Now()))
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	previous := view.State
 	for {
 		select {
 		case <-ctx.Done():
+			fmt.Fprintln(out, "Detached. Nothing is shared.")
 			return nil
 		case <-ticker.C:
 			next, err := client.Attach(ctx, agentd.AttachLocalRequest{Operation: "poll", ID: view.ID, Digest: view.Digest})
 			if err != nil {
-				return errors.New("attach ended or unreachable; start a new attach to resume")
+				return attachPollFailure(previous, view.ExpiresAt, time.Now())
 			}
 			if next.State == "confirmed_exited" || next.State == "detached" || next.State == "unreachable" {
-				fmt.Fprintf(out, "Attach: %s\n", next.State)
+				fmt.Fprintln(out, attachEndedLine(next.State, previous))
 				return nil
 			}
 			if next.Reason != "" {
 				return errors.New(next.Reason)
 			}
-			if next.State == "approved" && previous != "approved" && next.ConsentMode == attachwatch.ConsentLocalAuth {
-				fmt.Fprintln(out, "Waiting for local confirmation on the paired Mac; watch is not active yet.")
-			}
 			if next.State != previous {
-				fmt.Fprintf(out, "Attach: %s\n", next.State)
+				fmt.Fprintln(out, attachStateLine(next.State, next.ConsentMode, in.StatusOnly))
 				previous = next.State
 			}
 		}
+	}
+}
+
+// Where to approve, said once the request waits. The link carries the code in the
+// URL fragment, which no server, proxy or referrer ever receives, and the page
+// drops it from the address bar on arrival; opening it only fills the code in.
+// Approval stays a person's click on the review. A code that is not nine digits
+// gets no link, so nothing but digits is ever put into a URL.
+func attachApprovalNotice(origin, code string, expires *time.Time, now time.Time) string {
+	var b strings.Builder
+	b.WriteString("Waiting for your approval in Aeon")
+	if left := attachTimeLeft(expires, now); left != "" {
+		fmt.Fprintf(&b, " (expires in %s)", left)
+	}
+	b.WriteString(".\n")
+	if len(code) != 9 || strings.Trim(code, "0123456789") != "" {
+		fmt.Fprintf(&b, "  Open %s/agents \u2192 Attach session and enter the attach code.\n", origin)
+	} else {
+		fmt.Fprintf(&b, "  Open %s/agents \u2192 Attach session and enter code %s-%s-%s\n", origin, code[:3], code[3:6], code[6:])
+		fmt.Fprintf(&b, "  or open this link, which fills the code in (you still approve):\n  %s/agents#attach=%s\n", origin, code)
+	}
+	b.WriteString("Keep this terminal open; Ctrl-C detaches.\n")
+	return b.String()
+}
+
+// The server's expiry, shown relative to now. A clock that disagrees with the
+// server by more than the request's lifetime is not trusted: say nothing.
+func attachTimeLeft(expires *time.Time, now time.Time) string {
+	if expires == nil {
+		return ""
+	}
+	left := expires.Sub(now)
+	switch {
+	case left <= 0 || left > 15*time.Minute:
+		return ""
+	case left < 90*time.Second:
+		return fmt.Sprintf("%d s", int(left.Round(time.Second)/time.Second))
+	default:
+		return fmt.Sprintf("%d min", int(left.Round(time.Minute)/time.Minute))
+	}
+}
+
+// Progress after approval. A pending request is announced once by the notice above.
+func attachStateLine(state, consentMode string, statusOnly bool) string {
+	switch {
+	case state == "approved" && consentMode == attachwatch.ConsentLocalAuth:
+		return "Approved in Aeon. Waiting for local confirmation on the paired Mac; nothing is shared yet."
+	case state == "approved":
+		return "Approved in Aeon. Connecting\u2026"
+	case state == "active" && statusOnly:
+		return "Attached. Session status is reported until you detach (Ctrl-C) or revoke it in Aeon."
+	case state == "active":
+		return "Attached. New turns are shared until you revoke it in Aeon or press Ctrl-C."
+	default:
+		return "Attach: " + state
+	}
+}
+
+// A request that never got past approval names the two ways that happens.
+func attachEndedLine(state, previous string) string {
+	switch {
+	case state == "confirmed_exited":
+		return "Attach: the session exited."
+	case state == "unreachable" && previous != "active":
+		return "The attach request expired before it was approved. Run attach again."
+	case state == "detached" && previous == "pending":
+		return "The attach request was declined or cancelled in Aeon. Run attach again."
+	case state == "detached" && previous == "approved":
+		return "The approval was withdrawn before the attach started. Run attach again."
+	default:
+		return "Attach: " + state
+	}
+}
+
+// Every refused poll ends the attach. Which way it ended is what the person needs
+// to know: still waiting when the code's lifetime ran out, or answered in Aeon.
+func attachPollFailure(previous string, expires *time.Time, now time.Time) error {
+	switch previous {
+	case "pending":
+		if expires != nil && !now.Before(expires.Add(-5*time.Second)) {
+			return errors.New("the attach request expired before it was approved; run attach again")
+		}
+		return errors.New("the attach request was declined, cancelled or expired in Aeon; run attach again")
+	case "approved":
+		return errors.New("the approval ended before the attach started; run attach again")
+	default:
+		return errors.New("the attach ended or lost contact; run attach again to resume")
 	}
 }
 
