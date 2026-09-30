@@ -429,6 +429,65 @@ func TestPairingAddHarnessAndFreshRepair(t *testing.T) {
 	}
 }
 
+// AEON-470: re-pairing a computer must not pile up runtime identities. A fresh
+// pairing retires the identity of a revoked computer with the same name; a
+// computer that is still connected, or one with another name, is never touched.
+func TestPairingFreshRepairRetiresTheReplacedRuntimeIdentity(t *testing.T) {
+	f := newFixture(t)
+	status := func(principal string) string {
+		t.Helper()
+		var s string
+		if err := f.db.Admin.QueryRow(t.Context(), `SELECT status FROM principals WHERE id=$1::uuid`, principal).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	pair := func() agentpairing.View {
+		t.Helper()
+		p := f.propose("claude")
+		f.approve(p, "connect_only")
+		return f.redeem(p)
+	}
+	disconnect := func(v agentpairing.View) {
+		t.Helper()
+		f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "", 200)
+	}
+	old, other := pair(), pair()
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE principals SET name='Other workstation' WHERE id=$1::uuid`, *other.PrincipalID); err != nil {
+		t.Fatal(err)
+	}
+	disconnect(old)
+	disconnect(other)
+	if status(*old.PrincipalID) != "active" {
+		t.Fatal("revoking a computer alone changed its identity; only a fresh pairing retires it")
+	}
+
+	fresh := pair()
+	if got := status(*old.PrincipalID); got != "deactivated" {
+		t.Fatalf("the replaced identity is %q, want deactivated", got)
+	}
+	if status(*other.PrincipalID) != "active" || status(*fresh.PrincipalID) != "active" {
+		t.Fatal("a computer with another name, or the new pairing, was retired")
+	}
+	var keys, events int
+	var replacedBy, actor string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM agent_keys WHERE principal_id=$1::uuid AND revoked_at IS NULL`, *old.PrincipalID).Scan(&keys); err != nil || keys != 0 {
+		t.Fatalf("the retired identity keeps %d keys: %v", keys, err)
+	}
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*),coalesce(max(after->>'replaced_by'),''),coalesce(max(actor_principal_id::text),'') FROM events WHERE type='principal.deactivated' AND after->>'principal_id'=$1`, *old.PrincipalID).Scan(&events, &replacedBy, &actor); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 || replacedBy != *fresh.PrincipalID || actor != f.person {
+		t.Fatalf("retirement audit: %d events, replaced_by %q, actor %q", events, replacedBy, actor)
+	}
+
+	// A second pairing while the first is still connected keeps it.
+	next := pair()
+	if status(*fresh.PrincipalID) != "active" || status(*next.PrincipalID) != "active" {
+		t.Fatal("a connected computer's identity was retired by another pairing")
+	}
+}
+
 func TestPairingExpiryAttemptsAndRateLimit(t *testing.T) {
 	f := newFixture(t)
 	p := f.propose("claude")

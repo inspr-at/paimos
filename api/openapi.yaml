@@ -1355,12 +1355,13 @@ paths:
   /members/{principal_id}/deactivate:
     post:
       operationId: deactivateMember
+      description: Person-only (members.manage is never agent-grantable). Works for people and for agent identities; deactivating either revokes its sessions and every non-revoked key. Internal service identities are refused with 403.
       parameters:
         - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
         '200': {description: Deactivated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
         '403': {description: Permission denied}
-        '409': {description: 'Last active owner, or already deactivated'}
+        '409': {description: 'Last active owner, already deactivated, or a connected computer (disconnect it under Agents first; code connected_computer)'}
   /members/{principal_id}/reactivate:
     post:
       operationId: reactivateMember
@@ -1872,7 +1873,7 @@ paths:
         "404":
           description: Agent or rotation key not found in this tenant
         "409":
-          description: Rotation key was already revoked or rotated
+          description: Rotation key was already revoked or rotated, or the agent is deactivated (reactivate it first)
   /agent-keys/{id}/scopes:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -8179,6 +8180,8 @@ components:
         key_count: {type: integer}
         last_seen_at: {type: [string, 'null'], format: date-time}
         service: {type: boolean}
+        status: {type: string, enum: [active, deactivated], description: 'Deactivated agents hold no usable key and leave the working list; POST /members/{principal_id}/reactivate brings the identity back (its revoked keys stay revoked).'}
+        connected_computer: {type: boolean, description: 'Present and true for the runtime identity of a paired computer that is still connected; disconnect the computer before deactivating it.'}
         preview:
           description: Whether this caller may preview the agent's session file (members directory). creator_name is present only for workspace owners and admins, and only when another person holds a current key.
           type: object

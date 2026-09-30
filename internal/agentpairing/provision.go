@@ -162,6 +162,9 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			if _, err = tx.Exec(ctx, `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,local_auth_public_key) VALUES($1,$2,$2,$3,$4,$5,$6,$7)`, p.TenantID, computer, principal, key, daemon, rec.LifecycleHash, rec.Details.LocalAuthPublicKey); err != nil {
 				return err
 			}
+			if err = retireReplaced(ctx, tx, p, rec.Details.ComputerName, principal); err != nil {
+				return err
+			}
 		}
 		if rec.Details.ExistingComputerID != "" {
 			if err = supersedeVerifications(ctx, tx, computer, rec.ID); err != nil {
@@ -217,6 +220,40 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		return
 	}
 	reply(w, out)
+}
+
+// retireReplaced deactivates the runtime identities a fresh pairing replaces:
+// those of revoked computers with the same name that are still active. They
+// hold only revoked keys, so re-pairing a laptop leaves one identity behind,
+// not one more each time. A computer that is still connected is never touched.
+func retireReplaced(ctx context.Context, tx pgx.Tx, p tenant.Principal, name, replacedBy string) error {
+	rows, err := tx.Query(ctx, `SELECT pr.id::text FROM agent_pairing_computers c
+		JOIN principals pr ON pr.tenant_id=c.tenant_id AND pr.id=c.principal_id
+		WHERE c.tenant_id=$1 AND c.state='revoked' AND pr.kind='agent' AND pr.status='active' AND pr.name=$2 AND pr.id<>$3
+		ORDER BY c.created_at,c.id FOR UPDATE OF pr`, p.TenantID, name, replacedBy)
+	if err != nil {
+		return err
+	}
+	var old []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		old = append(old, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range old {
+		if _, err = authz.RetireAgentTx(ctx, tx, p, id, map[string]any{"replaced_by": replacedBy}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func verificationJob(ctx context.Context, tx pgx.Tx, p tenant.Principal, computer, principal, account string, a Choice, expires time.Time) error {
 	var project *string
