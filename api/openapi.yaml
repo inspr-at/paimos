@@ -712,7 +712,7 @@ paths:
           content:
             application/json:
               schema: {"$ref": "#/components/schemas/DoctrineProposal"}
-        "400": {description: Invalid edit, no change, or a rule without a TL;DR}
+        "400": {description: "Invalid edit, no change, or a rule without a TL;DR"}
         "403": {description: "Permission denied, or a locked rule (locked_rule)"}
         "404": {description: Unknown source or ticket}
         "409": {description: "Stale rule or pin, request id conflict, an open proposal for this rule (rule_proposal_open), or a full inbox (inbox_full)"}
@@ -773,7 +773,7 @@ paths:
               schema: {"$ref": "#/components/schemas/DoctrineProposal"}
         "403": {description: A person with workspace rules.write sends proposals to git}
         "409": {description: "Not waiting, busy, stale rule or source, or a conflicting earlier attempt"}
-        "422": {description: Refused text, as for proposeDoctrineChange}
+        "422": {description: "Refused text, as for proposeDoctrineChange"}
         "503": {description: App not configured or outcome uncertain; repeat the request}
   /rules/doctrine/inbox/{proposalId}/dismiss:
     parameters:
