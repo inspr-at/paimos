@@ -180,9 +180,16 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
     await expect(general.locator('[role="meter"]')).toHaveCount(1)
     await expect(grouped.locator('[role="meter"]')).toHaveCount(0)
     await expect(grouped.locator(`[data-account="${spare.id}"]`)).toBeVisible()
-    await expect(grouped.getByText('Shares quota with Studio', { exact: true })).toBeVisible()
+    await expect(grouped.getByText('Shares quota with Studio.', { exact: true })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-    if (shots) { mkdirSync(shots, { recursive: true }); await card.screenshot({ path: join(shots, `shared-pools-${width}-${theme}.png`) }) }
+    if (shots) {
+      mkdirSync(shots, { recursive: true })
+      // The app scrolls inside its shell. Fit the complete card for capture.
+      await page.setViewportSize({ width, height: width === 390 ? 3400 : 1400 })
+      await card.scrollIntoViewIfNeeded()
+      await card.screenshot({ path: join(shots, `shared-pools-${width}-${theme}.png`) })
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    }
     await page.goto('/settings/accounts')
     const row = page.getByRole('listitem').filter({ hasText: `aeon use codex ${spare.id}` })
     await expect(row).toContainText(spare.label)

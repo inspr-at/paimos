@@ -382,7 +382,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
             <span v-else class="today quiet">{{ cell.text }}</span>
           </template>
           <span class="resets" :data-tip="row.primary ? whenFull(row.primary.reading.resets_at) : undefined">{{ row.primary ? `resets ${when(row.primary.reading.resets_at, now)}` : '' }}</span>
-          <span class="source" :title="sourceLine(row, now)">{{ sourceLine(row, now) }}</span>
+          <span v-if="!row.sharedQuotaName" class="source" :title="sourceLine(row, now)">{{ sourceLine(row, now) }}</span>
           <CapacityLearning class="row-learning" :learning="row.learning" :host="row.host" :now="now" :may-manage="mayManage" :saving="busy" @hours="useHours(row)" @away="openEditor('keep', $event)" />
         </li>
       </ul>
