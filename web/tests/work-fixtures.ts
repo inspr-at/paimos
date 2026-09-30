@@ -557,7 +557,12 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
             const plan = (n: MockNode) => (options.readOnly || options.liveStatus === 403) ? null : planningSortValue({ kind_slug: n.kind_slug, fields: n.fields, planning: n.planning }, field as PlanningColumn)
             const x = plan(a), y = plan(b)
             if ((x === null) !== (y === null)) return x === null ? 1 : -1
-            if (x !== null && y !== null && x !== y) return (x < y ? -1 : 1) * (desc ? -1 : 1)
+            if (x !== null && y !== null && x !== y) {
+              const before = typeof x === 'bigint' && typeof y === 'bigint' ? x < y
+                : typeof x === 'number' && typeof y === 'number' ? x < y
+                : String(x) < String(y)
+              return (before ? -1 : 1) * (desc ? -1 : 1)
+            }
             continue
           }
           const value = (n: MockNode): string | number => field === 'estimate' ? (n.kind_slug === 'epic' ? n.estimate?.hours ?? 0 : Number(n.fields.estimate_hours ?? 0)) : field === 'state' ? (STATE_ORDER.indexOf(normal(n.state)) + 1 || 99)

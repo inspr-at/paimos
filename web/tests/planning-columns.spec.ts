@@ -12,7 +12,18 @@ const keys = (page: Page) => page.locator('tr.ticket-row:not(.ghost) .key').allT
 const astra = { label: 'Codex astra · xhigh', profile: 'codex-astra-xhigh', harness: 'codex', model: 'gpt-6-astra', effort: 'xhigh', revision: '3f9a1c2b' }
 const opus = { label: 'Claude opus · high', profile: 'claude-opus-high', harness: 'claude', model: 'opus', effort: 'high', revision: '3f9a1c2b' }
 const tokens = (spent: number | null, estimated: number | null, calibration?: TicketPlanning['tokens']['calibration']) => ({ spent, input: spent ?? 0, output: 0, cached: Math.round((spent ?? 0) * 0.8), sessions: spent === null ? 0 : 2, unreported: 0, estimated, ...(calibration ? { calibration } : {}) })
-const cost = (list: [string | null, string | null], paid: [string | null, string | null], plans: string[] = []) => ({ list_spent: list[0], list_estimated: list[1], list_unpriced: false, paid_spent: paid[0], paid_estimated: paid[1], paid_unknown: false, plans })
+function usdMicros(value: string | null): string | null {
+  if (value === null) return null
+  const [whole, frac = ''] = value.split('.')
+  const digits = `${whole}${frac.padEnd(6, '0').slice(0, 6)}`.replace(/^0+(?=\d)/, '')
+  return digits === '' ? '0' : digits
+}
+const cost = (list: [string | null, string | null], paid: [string | null, string | null], plans: string[] = []) => ({
+  list_spent: list[0], list_estimated: list[1], list_unpriced: false,
+  paid_spent: paid[0], paid_estimated: paid[1], paid_unknown: false, plans,
+  list_cost_micros: usdMicros(list[0]) ?? usdMicros(list[1]),
+  paid_micros: usdMicros(paid[0]) ?? usdMicros(paid[1]),
+})
 const PLANNING = ['model', 'tokens', 'list_cost', 'paid']
 
 function world(): Fixtures {

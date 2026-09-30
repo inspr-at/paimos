@@ -387,8 +387,14 @@ export function valueLabel(dimension: Dimension, value: string, context: OptionC
 // Client-side ordering with the same keys as the list API, for siblings in the Outline
 // that come from different requests (matches and their ancestors).
 const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 }
+function lessThan(x: string | number | bigint, y: string | number | bigint): boolean {
+  if (typeof x === 'bigint' && typeof y === 'bigint') return x < y
+  if (typeof x === 'number' && typeof y === 'number') return x < y
+  if (typeof x === 'string' && typeof y === 'string') return x < y
+  return false
+}
 export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => number {
-  const value = (row: ListItem, field: SortKey['field']): string | number => {
+  const value = (row: ListItem, field: SortKey['field']): string | number | bigint => {
     switch (field) {
       case 'state': return statusMeta(row.state).order
       case 'priority': return PRIORITY_RANK[row.priority ?? ''] ?? 3
@@ -422,7 +428,7 @@ export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => numb
       }
       if (missing(a, key.field) !== missing(b, key.field)) return missing(a, key.field) ? 1 : -1
       const x = value(a, key.field), y = value(b, key.field)
-      if (x !== y) return (x < y ? -1 : 1) * (key.desc ? -1 : 1)
+      if (x !== y) return (lessThan(x, y) ? -1 : 1) * (key.desc ? -1 : 1)
     }
     return a.id === b.id ? 0 : a.id < b.id ? -1 : 1
   }

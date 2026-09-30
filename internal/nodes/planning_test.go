@@ -127,6 +127,25 @@ func TestPlanningSampleOf(t *testing.T) {
 	}
 }
 
+func TestSortMicrosDecimal(t *testing.T) {
+	n := func(v int64) *int64 { return &v }
+	got := sortMicros(n(10000000000000001), n(1))
+	if got == nil || *got != "10000000000000001" {
+		t.Fatalf("spent wins: %v", got)
+	}
+	got = sortMicros(nil, n(10000000000000002))
+	if got == nil || *got != "10000000000000002" {
+		t.Fatalf("estimate: %v", got)
+	}
+	if sortMicros(nil, nil) != nil || sortMicros(n(-1), nil) != nil {
+		t.Fatal("absent or negative")
+	}
+	zero := sortMicros(n(0), n(9_000_000))
+	if zero == nil || *zero != "0" {
+		t.Fatalf("zero spent: %v", zero)
+	}
+}
+
 func TestUSDFromMicros(t *testing.T) {
 	n := func(v int64) *int64 { return &v }
 	cases := []struct {

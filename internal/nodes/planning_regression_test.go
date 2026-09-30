@@ -223,6 +223,24 @@ func TestPlanningRoundedCostTie(t *testing.T) {
 	}
 }
 
+// fixedMicros is the decimal integer of a six-place USD string, without leading zeros.
+func fixedMicros(usd string) string {
+	if usd == "" {
+		return ""
+	}
+	whole, frac, _ := strings.Cut(usd, ".")
+	if len(frac) > 6 {
+		frac = frac[:6]
+	} else {
+		frac += strings.Repeat("0", 6-len(frac))
+	}
+	digits := strings.TrimLeft(whole+frac, "0")
+	if digits == "" {
+		return "0"
+	}
+	return digits
+}
+
 // 1.000001 h × $13.50 is 13.5000135 and rounds once to 13.500014 micro-dollars.
 // A spent row of that same figure ties by id; the neighbouring boundaries do too.
 func TestPlanningCostMicrosAgree(t *testing.T) {
@@ -290,6 +308,13 @@ func TestPlanningCostMicrosAgree(t *testing.T) {
 			}
 			if got(view.Cost.ListSpent) != spent || got(view.Cost.PaidSpent) != spent || got(view.Cost.ListEstimated) != estimated || got(view.Cost.PaidEstimated) != estimated {
 				t.Fatalf("%s via %s: list %q/%q paid %q/%q", key, sort, got(view.Cost.ListSpent), got(view.Cost.ListEstimated), got(view.Cost.PaidSpent), got(view.Cost.PaidEstimated))
+			}
+			wantMicros := fixedMicros(spent)
+			if wantMicros == "" {
+				wantMicros = fixedMicros(estimated)
+			}
+			if got(view.Cost.ListCostMicros) != wantMicros || got(view.Cost.PaidMicros) != wantMicros {
+				t.Fatalf("%s via %s: micros list %q paid %q, want %q", key, sort, got(view.Cost.ListCostMicros), got(view.Cost.PaidMicros), wantMicros)
 			}
 		}
 	}

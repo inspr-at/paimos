@@ -87,15 +87,16 @@ test('presence and sort values follow the list API', () => {
   assert.equal(planningSortValue(rows[1]!, 'model'), null)
   assert.equal(compareModelSort(rows[0]!, rows[1]!, false), -1)
   assert.equal(planningSortValue(rows[0]!, 'tokens'), 5)
-  assert.equal(planningSortValue(rows[0]!, 'list_cost'), 1)
+  assert.equal(planningSortValue(rows[0]!, 'list_cost'), null)
+  assert.equal(planningSortValue({ ...rows[0]!, planning: { ...rows[0]!.planning!, cost: cost({ list_spent: '1', list_cost_micros: '1000000' }) } }, 'list_cost'), 1000000n)
   assert.equal(planningSortValue(rows[0]!, 'paid'), null)
 })
 
 test('numeric planning sorts use spent else estimated, null last and ID ties', () => {
-  const high = { ...row({ tokens: tokens(null, 100_000_000), cost: cost({ list_estimated: '100', paid_estimated: '100' }) }), id: 'a' } as ListItem
-  const low = { ...row({ tokens: tokens(null, 10_000_000), cost: cost({ list_estimated: '10', paid_estimated: '10' }) }), id: 'c' } as ListItem
+  const high = { ...row({ tokens: tokens(null, 100_000_000), cost: cost({ list_estimated: '100', paid_estimated: '100', list_cost_micros: '100000000', paid_micros: '100000000' }) }), id: 'a' } as ListItem
+  const low = { ...row({ tokens: tokens(null, 10_000_000), cost: cost({ list_estimated: '10', paid_estimated: '10', list_cost_micros: '10000000', paid_micros: '10000000' }) }), id: 'c' } as ListItem
   const tie = { ...low, id: 'b' }
-  const zero = { ...row({ tokens: tokens(0, 200_000_000), cost: cost({ list_spent: '0', list_estimated: '200', paid_spent: '0', paid_estimated: '200' }) }), id: 'd' } as ListItem
+  const zero = { ...row({ tokens: tokens(0, 200_000_000), cost: cost({ list_spent: '0', list_estimated: '200', paid_spent: '0', paid_estimated: '200', list_cost_micros: '0', paid_micros: '0' }) }), id: 'd' } as ListItem
   const empty = { ...row(undefined), id: 'e' } as ListItem
   for (const field of ['tokens', 'list_cost', 'paid'] as const) {
     const rows = [high, low, empty, zero, tie]
@@ -104,6 +105,32 @@ test('numeric planning sorts use spent else estimated, null last and ID ties', (
     assert.deepEqual([...rows].sort(asc).map(r => r.id), ['d', 'b', 'c', 'a', 'e'])
     assert.deepEqual([...rows].sort(desc).map(r => r.id), ['a', 'b', 'c', 'd', 'e'])
     assert.equal(asc(low, low), 0)
+  }
+})
+
+test('cost sort compares micro-dollar integers past the float mantissa', () => {
+  const item = (id: string, usd: string, micros: string) => ({
+    ...row({ cost: cost({ list_spent: usd, paid_spent: usd, list_cost_micros: micros, paid_micros: micros }) }),
+    id,
+  }) as ListItem
+  // These two USD strings collapse to one JS number; the lower id holds the larger amount.
+  const low = item('b', '10000000000.000001', '10000000000000001')
+  const high = item('a', '10000000000.000002', '10000000000000002')
+  const tie = item('c', '10000000000.000001', '10000000000000001')
+  // A shorter integer must still sort before a longer one.
+  const narrow = item('n', '0.000999', '999')
+  const wide = item('w', '0.001000', '1000')
+  for (const field of ['list_cost', 'paid'] as const) {
+    assert.equal(planningSortValue(low, field), 10000000000000001n)
+    assert.equal(planningSortValue(high, field), 10000000000000002n)
+    const asc = compareRows([{ field, desc: false }])
+    const desc = compareRows([{ field, desc: true }])
+    assert.deepEqual([high, low].sort(asc).map(r => r.id), ['b', 'a'])
+    assert.deepEqual([low, high].sort(desc).map(r => r.id), ['a', 'b'])
+    assert.deepEqual([tie, low].sort(asc).map(r => r.id), ['b', 'c'])
+    assert.deepEqual([tie, low].sort(desc).map(r => r.id), ['b', 'c'])
+    assert.deepEqual([wide, narrow].sort(asc).map(r => r.id), ['n', 'w'])
+    assert.deepEqual([narrow, wide].sort(desc).map(r => r.id), ['w', 'n'])
   }
 })
 

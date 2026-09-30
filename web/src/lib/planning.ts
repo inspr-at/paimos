@@ -15,6 +15,10 @@ export interface PlanningCost {
   list_spent: string | null; list_estimated: string | null; list_unpriced: boolean
   paid_spent: string | null; paid_estimated: string | null; paid_unknown: boolean
   plans: string[]
+  // Integer micro-dollars of the sort key (spent when present, otherwise the
+  // estimate). Display stays on the USD strings above.
+  list_cost_micros?: string | null
+  paid_micros?: string | null
 }
 export interface TicketPlanning {
   route: PlanningRoute | null
@@ -59,6 +63,11 @@ function num(value: string | null | undefined): number | null {
   if (value === null || value === undefined) return null
   const n = Number(value)
   return Number.isFinite(n) ? n : null
+}
+/** The API's micro-dollar sort key. A float cannot separate 10^10 dollars plus one micro. */
+function integerMicros(value: string | null | undefined): bigint | null {
+  if (value == null || !/^[0-9]+$/.test(value)) return null
+  return BigInt(value)
 }
 const ROLE_LABEL: Record<string, string> = { scout: 'Scout', mechanical: 'Mechanical', build: 'Build', 'build-hard': 'Build hard', 'review-gate': 'Review gate' }
 function text(fields: Record<string, unknown>, key: string): string {
@@ -204,13 +213,13 @@ export function compareModelSort(a: PlanningRow, b: PlanningRow, desc: boolean):
   if (xa !== ya) return (xa < ya ? -1 : 1) * dir
   return 0
 }
-/** The list API's order for a numeric planning sort key: null sorts last in both directions. */
-export function planningSortValue(row: PlanningRow, field: PlanningColumn): number | string | null {
+/** The list API's order for a numeric planning sort key: null sorts last in both directions. Cost keys are integer micro-dollars. */
+export function planningSortValue(row: PlanningRow, field: PlanningColumn): number | string | bigint | null {
   switch (field) {
     case 'model': { const order = modelOrder(row); return order ? `${order.rank}:${order.area}` : null }
     case 'tokens': return row.planning?.tokens.spent ?? row.planning?.tokens.estimated ?? null
-    case 'list_cost': return num(row.planning?.cost?.list_spent) ?? num(row.planning?.cost?.list_estimated)
-    case 'paid': return num(row.planning?.cost?.paid_spent) ?? num(row.planning?.cost?.paid_estimated)
+    case 'list_cost': return integerMicros(row.planning?.cost?.list_cost_micros)
+    case 'paid': return integerMicros(row.planning?.cost?.paid_micros)
   }
 }
 /** Screen-reader text for one planning cell; empty when the cell has nothing to explain. */

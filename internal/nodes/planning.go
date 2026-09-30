@@ -101,6 +101,11 @@ type planningCost struct {
 	// route's harness has no billing on record yet.
 	PaidUnknown bool     `json:"paid_unknown"`
 	Plans       []string `json:"plans"`
+	// ListCostMicros and PaidMicros are the sort keys as integer micro-dollars,
+	// decimal strings: spent when present, otherwise the estimate. A client
+	// compares them as integers. The USD strings above stay the display.
+	ListCostMicros *string `json:"list_cost_micros"`
+	PaidMicros     *string `json:"paid_micros"`
 }
 type planningChildren struct {
 	Total     int `json:"total"`
@@ -502,6 +507,21 @@ func usdFromMicros(v *int64) *string {
 	return &s
 }
 
+// sortMicros is the integer the list orders by: spent when SQL produced it,
+// otherwise the estimate. A decimal string keeps every micro-dollar, including
+// values a JSON number cannot tell apart.
+func sortMicros(spent, est *int64) *string {
+	v := spent
+	if v == nil {
+		v = est
+	}
+	if v == nil || *v < 0 {
+		return nil
+	}
+	s := strconv.FormatInt(*v, 10)
+	return &s
+}
+
 // planRoute is one resolved role, shared by every row with that role. view
 // is nil when the registry selected nothing.
 type planRoute struct {
@@ -646,6 +666,8 @@ func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisib
 			view.Cost.ListEstimated = usdFromMicros(money.listEst)
 			view.Cost.PaidSpent = usdFromMicros(money.paidSpent)
 			view.Cost.PaidEstimated = usdFromMicros(money.paidEst)
+			view.Cost.ListCostMicros = sortMicros(money.listSpent, money.listEst)
+			view.Cost.PaidMicros = sortMicros(money.paidSpent, money.paidEst)
 		}
 	}
 	if view.Route == nil && view.RouteGap == "" && view.Tokens.Sessions == 0 && view.Tokens.Estimated == nil {
