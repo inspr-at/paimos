@@ -4,7 +4,6 @@ package agentaccounts
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
@@ -720,11 +719,9 @@ func publicUseAccount(a UseAccount) bool {
 	if a.QuotaFingerprint != "" && !fingerprintRE.MatchString(a.QuotaFingerprint) {
 		return false
 	}
-	blob, err := json.Marshal(a)
-	if err != nil {
-		return false
-	}
-	lower := strings.ToLower(string(blob))
+	// Validate values, not JSON escapes: a quoted display label legitimately
+	// serializes with backslashes and must still resolve by its stable ID.
+	lower := strings.ToLower(strings.Join([]string{a.AccountID, a.DaemonID, a.Harness, a.Label, a.HostLabel, a.QuotaFingerprint}, " "))
 	for _, bad := range []string{"/users", "codex_home", "claude_config", "socket", "\\"} {
 		if strings.Contains(lower, bad) {
 			return false

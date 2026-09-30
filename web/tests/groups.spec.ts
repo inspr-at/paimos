@@ -33,7 +33,7 @@ function windowOf() {
   }
 }
 
-async function desk(page: Page, theme: 'light' | 'dark') {
+async function desk(page: Page, theme: 'light' | 'dark', splitQuota = false) {
   await page.clock.install({ time: new Date(now) })
   const work = fixtures()
   work.preferences.theme = { choice: theme }
@@ -48,6 +48,7 @@ async function desk(page: Page, theme: 'light' | 'dark') {
   const claude = data.accounts.find(account => account.harness === 'claude')!
   Object.assign(spare, { label: 'Spare', host_label: 'mbp2607', quota_fingerprint: fingerprint, daemon_id: 'mbp2607' })
   data.accounts.push({ ...spare, id: studioId, account_key: 'codex-studio', label: 'Studio', host_label: 'studio', daemon_id: 'studio', quota_fingerprint: fingerprint })
+  if (splitQuota) Object.assign(spare, { group_id: 'bb000000-0000-4000-8000-000000000389', group_name: 'Client login' })
   Object.assign(claude, { group_id: clientGroup, group_name: 'Client', host_label: 'imac0' })
   data.runs.push({
     id: queuedId, work_order_id: 'n-1', agent_principal_id: claude.registered_by_principal_id, model_profile_id: modelId,
@@ -160,5 +161,33 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
     expect(mock.pins).toEqual([])
     expect(mock.calls.some(call => call.method === 'PUT' && call.path === '/api/agent-accounts/pins')).toBe(false)
     noPath(mock.calls.find(call => call.path.includes('/pins'))?.body)
+  })
+}
+
+
+for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) {
+  test(`shared login keeps both group pools ${width} ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    const { spare } = await desk(page, theme, true)
+    spare.label = "Spare's account; (false) $HOME"
+    await page.goto('/agents')
+    const card = page.locator('section.cap')
+    const general = card.locator('[data-pool="codex"]')
+    const grouped = card.locator('[data-pool="group:bb000000-0000-4000-8000-000000000389"]')
+    await expect(general).toBeVisible()
+    await expect(grouped).toBeVisible()
+    await expect(general.locator('[role="meter"]')).toHaveCount(1)
+    await expect(grouped.locator('[role="meter"]')).toHaveCount(0)
+    await expect(grouped.locator(`[data-account="${spare.id}"]`)).toBeVisible()
+    await expect(grouped.getByText('Shares quota with Studio', { exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    if (shots) { mkdirSync(shots, { recursive: true }); await card.screenshot({ path: join(shots, `shared-pools-${width}-${theme}.png`) }) }
+    await page.goto('/settings/accounts')
+    const row = page.getByRole('listitem').filter({ hasText: `aeon use codex ${spare.id}` })
+    await expect(row).toContainText(spare.label)
+    await expect(row.locator('.use-line')).toHaveText(`aeon use codex ${spare.id}`)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    if (shots) await row.screenshot({ path: join(shots, `safe-command-${width}-${theme}.png`) })
   })
 }

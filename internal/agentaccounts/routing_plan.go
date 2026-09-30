@@ -314,7 +314,7 @@ func VendorRetryAt(ctx context.Context, tx pgx.Tx, accountID string, now time.Ti
 	}
 	// Some adapters report 100% without an authority bit.
 	var until *time.Time
-	err = tx.QueryRow(ctx, `SELECT max(resets_at) FROM (SELECT DISTINCT ON(window_kind,bucket) resets_at,used_percent FROM account_capacity_readings WHERE account_id=$1 AND source<>'estimate' ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r WHERE used_percent>=100 AND resets_at>$2`, accountID, now).Scan(&until)
+	err = tx.QueryRow(ctx, `SELECT max(resets_at) FROM (SELECT DISTINCT ON(window_kind,bucket) resets_at,used_percent FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`) AND source<>'estimate' ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r WHERE used_percent>=100 AND resets_at>$2`, accountID, now).Scan(&until)
 	if err != nil {
 		return time.Time{}, false, err
 	}

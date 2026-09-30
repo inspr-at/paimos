@@ -210,7 +210,7 @@ func TestSharedQuotaDenialBlocksReservedSiblingAtLaunch(t *testing.T) {
 func TestUseAccountIDRetainsLabelAndOwnership(t *testing.T) {
 	reset(t)
 	admin, runner, _, token, mod := groupFixture(t)
-	label := "Claude Max; $(false) 'quoted'"
+	label := `Claude Max; $(false) "quoted" 'apostrophe'`
 	a := groupAccount(t, mod, admin, runner, token, "safe-key", "daemon-a", label, "studio")
 	var out UseResult
 	callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/use?harness=codex&account_id="+a.ID, "", 200, &out)
@@ -220,4 +220,20 @@ func TestUseAccountIDRetainsLabelAndOwnership(t *testing.T) {
 	callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/use?harness=codex&account_id="+a.ID+"&label=Main", "", 400, nil)
 	foreign := makePrincipal(t, "foreign-use-id", "person", "Other", []string{"admin"})
 	callStatus(t, mod, &foreign, "", "GET", "/api/agent-accounts/use?harness=codex&account_id="+a.ID, "", 404, nil)
+}
+
+func TestSharedQuotaRetryUsesSiblingsResetWithoutAuthorityBit(t *testing.T) {
+	admin, runner, _, token, mod, doors, now := sharedFixture(t)
+	reading := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 100, ReadAt: now.Add(time.Second), ResetsAt: now.Add(3 * time.Hour), Source: "harness"}
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+doors[0].ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{reading}}), 204, nil)
+	seed(t, admin, func(tx pgx.Tx) error {
+		until, known, err := VendorRetryAt(t.Context(), tx, doors[1].ID, now.Add(2*time.Second))
+		if err != nil {
+			return err
+		}
+		if !known || !until.Equal(reading.ResetsAt) {
+			t.Fatalf("sibling reset ignored: %v known=%v", until, known)
+		}
+		return nil
+	})
 }
