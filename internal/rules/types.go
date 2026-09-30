@@ -21,7 +21,11 @@ import (
 
 // MaxBytes is the supported client ceiling; LegacyMaxBytes remains the default
 // and the delivery limit for clients that have not reported a capability.
-const MaxBytes = 64000
+const MaxBytes = 512000
+
+// MaxBudgetBytes is the product ceiling for a workspace's always-on budget.
+// Client transport capacity is separate so a 500 KB file has headroom.
+const MaxBudgetBytes = 500000
 const LegacyMaxBytes = 12000
 const MinBudgetBytes = 2000
 
@@ -346,22 +350,35 @@ func normalizeNote(s string) (string, error) {
 	}
 	return s, nil
 }
+
+// Delivery priorities are also the merge precedence. Compatibility cuts keep
+// all locked rules first, then whole normal rules in this order, with identity
+// ascending within a priority. Never change this order implicitly (AEON-432).
+const (
+	priorityCompany = iota
+	priorityProject
+	priorityPerson
+	priorityAgentRole
+	priorityNamedAgent
+	priorityTask
+)
+
 func (s Scope) rank() int {
 	switch s.Layer {
 	case "company":
-		return 0
+		return priorityCompany
 	case "project":
-		return 1
+		return priorityProject
 	case "person":
-		return 2
+		return priorityPerson
 	default:
 		if s.Role != "" {
-			return 3
+			return priorityAgentRole
 		}
 		if s.TaskID == "" {
-			return 4
+			return priorityNamedAgent
 		}
-		return 5
+		return priorityTask
 	}
 }
 func (s Scope) matches(c Context) bool {

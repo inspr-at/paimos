@@ -18,6 +18,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/piprobe"
+	"github.com/inspr-at/paimos/internal/rules"
 )
 
 // TestFakeVendorProcess is invoked only through a private test wrapper. It
@@ -28,6 +29,7 @@ func TestFakeVendorProcess(t *testing.T) {
 		return
 	}
 	read := bufio.NewScanner(os.Stdin)
+	read.Buffer(make([]byte, 4096), 8<<20)
 	write := json.NewEncoder(os.Stdout)
 	for read.Scan() {
 		var frame struct {
@@ -89,6 +91,23 @@ func TestFakeVendorProcess(t *testing.T) {
 				result = map[string]any{"account": map[string]string{"type": "chatgpt"}}
 			}
 		case "thread/start":
+			if strings.HasPrefix(vendor, "codex_rules_") {
+				var expected int
+				if _, err := fmt.Sscanf(vendor, "codex_rules_%d", &expected); err != nil {
+					os.Exit(2)
+				}
+				var request struct {
+					Params struct {
+						Rules  string `json:"developerInstructions"`
+						Config struct {
+							Maximum int `json:"project_doc_max_bytes"`
+						} `json:"config"`
+					} `json:"params"`
+				}
+				if json.Unmarshal(read.Bytes(), &request) != nil || request.Params.Config.Maximum != expected || request.Params.Rules != strings.Repeat("<", expected) {
+					os.Exit(2)
+				}
+			}
 			result = map[string]any{"thread": map[string]string{"id": "thread-1"}}
 			if vendor == "codex_metadata" {
 				result = map[string]any{"thread": map[string]string{"id": "thread-1"}, "model": "model-a", "reasoningEffort": "high"}
@@ -251,6 +270,44 @@ func TestCodexAppServerProtocolAndSteer(t *testing.T) {
 	}
 	if err := p.Stop(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCodexLaunchReceivesExactRulesAndProjectDocAllowance(t *testing.T) {
+	for _, size := range []int{rules.CodexProjectDocMaxBytes + 1, rules.MaxBudgetBytes, rules.MaxBytes} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			r := adapterRequest(t)
+			r.Rules = strings.Repeat("<", size) // sixfold JSON expansion at 500 KB
+			home, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.Chmod(home, 0700); err != nil {
+				t.Fatal(err)
+			}
+			a := NewCodexAdapter(fakeVendorPath(t, fmt.Sprintf("codex_rules_%d", size)), map[string]string{"account": home})
+			a.SetExpectedEmails(map[string]string{"account": "agent@example.test"})
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			p, err := a.Start(ctx, r, func(AdapterEvent) {})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = p.Stop(ctx); err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{home, r.Workspace} {
+				entries, err := os.ReadDir(path)
+				if err != nil || len(entries) != 0 {
+					t.Fatal("launch wrote persistent rules/config", err)
+				}
+			}
+		})
+	}
+	r := adapterRequest(t)
+	r.Rules = strings.Repeat("x", rules.MaxBytes+1)
+	if _, err := NewCodexAdapter("/unused", nil).Start(t.Context(), r, func(AdapterEvent) {}); err == nil {
+		t.Fatal("oversized rules accepted")
 	}
 }
 

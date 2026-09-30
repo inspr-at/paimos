@@ -20,7 +20,7 @@ import (
 func TestRulesClientReceivesAndRendersByteCeiling(t *testing.T) {
 	c := rules.Context{TenantID: "10000000-0000-4000-8000-000000000001", ProjectID: "10000000-0000-4000-8000-000000000002", PersonID: "10000000-0000-4000-8000-000000000003", AgentID: "10000000-0000-4000-8000-000000000004", Role: "builder", Harness: "codex"}
 	floor := "- [safety] Preserve safety.\n"
-	for _, size := range []int{12000, 12001, 64000, 64001} {
+	for _, size := range []int{12000, 12001, 64000, rules.MaxBytes, rules.MaxBytes + 1} {
 		body := rules.SessionHeader + floor
 		body += strings.Repeat("<", size-len(body)-1) + "\n"
 		sum := sha256.Sum256([]byte(body))

@@ -5,7 +5,6 @@ package rules
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -49,15 +48,19 @@ type BudgetView struct {
 }
 
 func budgetView(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Budget) (BudgetView, error) {
-	ceiling, blockers, err := clientCeiling(ctx, tx)
+	ceiling, clients, err := clientCeiling(ctx, tx)
 	if err != nil {
 		return BudgetView{}, err
 	}
 	view := BudgetView{Budget: b, DefaultBytes: LegacyMaxBytes, MinBytes: MinBudgetBytes, CeilingBytes: ceiling, MinLayerBytes: MinLayerBytes}
-	// The ceiling is public to rules readers, but tenant-wide host/version
+	// The product ceiling is public to rules readers, but tenant-wide host/version
 	// inventory is workspace administration data, not project membership data.
 	if p.Kind == tenant.Person && authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{}) == nil {
-		view.BlockingClients, view.BlockingClientsMore = listedBlockers(blockers)
+		for i := range clients {
+			clients[i].DeliveredMaxBytes = min(b.MaxBytes, clients[i].Maximum)
+			clients[i].Truncated = clients[i].Maximum < b.MaxBytes
+		}
+		view.BlockingClients, view.BlockingClientsMore = listedBlockers(clients)
 	}
 	return view, nil
 }
@@ -90,13 +93,6 @@ func (m *Module) putBudget(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	if err := lockClientGate(ctx, tx); err != nil {
 		return nil, err
-	}
-	ceiling, _, err := clientCeiling(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	if in.MaxBytes > LegacyMaxBytes && in.MaxBytes > ceiling {
-		return nil, fail(409, "rules_clients_incompatible", fmt.Sprintf("clients active in the last seven days support up to %d bytes; upgrade the blocking clients before raising the budget", ceiling))
 	}
 	before, err := LoadBudget(ctx, tx)
 	if err != nil {
