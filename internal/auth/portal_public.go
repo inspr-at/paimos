@@ -30,6 +30,8 @@ var (
 	portalWishKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$`)
 )
 
+// publicPortalRequest classifies a canonical portal URL for the customer
+// allow helper. Session refresh does not call it.
 func publicPortalRequest(r *http.Request) bool {
 	kind := portalPublicKind(r)
 	if kind == "" {

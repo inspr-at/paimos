@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -78,7 +79,7 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 	}))
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/api/public/quotes/tenant/token"},
-		{http.MethodGet, "/api/public/quotes/tenant/token/accept"},
+		{http.MethodPost, "/api/public/quotes/tenant/token/accept"},
 		{http.MethodGet, "/api/public/quotes/tenant/token/pdf"},
 		{http.MethodGet, "/api/public/portal/harbour"},
 		{http.MethodHead, "/api/public/portal/harbour"},
@@ -99,6 +100,12 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(route.method, route.path, nil)
 		switch {
+		case route.method == http.MethodGet && route.path == "/api/public/quotes/tenant/token":
+			req.Pattern = "GET /api/public/quotes/{publicTenant}/{token}"
+		case route.method == http.MethodGet && route.path == "/api/public/quotes/tenant/token/pdf":
+			req.Pattern = "GET /api/public/quotes/{publicTenant}/{token}/pdf"
+		case route.method == http.MethodPost && route.path == "/api/public/quotes/tenant/token/accept":
+			req.Pattern = "POST /api/public/quotes/{publicTenant}/{token}/accept"
 		case (route.method == http.MethodGet || route.method == http.MethodHead) && strings.HasSuffix(route.path, "/releases"):
 			req.Pattern = portalReleasesPattern
 		case (route.method == http.MethodGet || route.method == http.MethodHead) && strings.HasSuffix(route.path, "/roadmap.json"):
@@ -127,6 +134,7 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/quotes"},
 		{http.MethodGet, "/api/quotes/id/versions/1/public-link"},
 		{http.MethodGet, "/api/quotes/id/versions/1/public-link/revoke"},
+		{http.MethodGet, "/api/public/quotes/tenant/token/accept"},
 		{http.MethodGet, "/api/public/quotes"},
 		{http.MethodGet, "/api/public/quotesx/tenant/token"},
 		{http.MethodGet, "/api/public/quotes-other/tenant/token"},
@@ -211,33 +219,66 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("portal path with a foreign pattern: %d", rec.Code)
 	}
+	// The matched declaration wins. A public pattern stays public when the URL
+	// text names a different portal operation or an encoded segment.
 	correction := httptest.NewRequest(http.MethodPost, "/api/public/portal/harbour/corrections", nil)
 	correction.Pattern = portalCatalogPattern
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, correction)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("correction path with the catalog pattern: %d", rec.Code)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("catalog declaration on a correction URL: %d", rec.Code)
 	}
 	releases := httptest.NewRequest(http.MethodGet, "/api/public/portal/harbour/releases", nil)
 	releases.Pattern = portalCatalogPattern
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, releases)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("releases path with the catalog pattern: %d", rec.Code)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("catalog declaration on a releases URL: %d", rec.Code)
 	}
-	roadmap := httptest.NewRequest(http.MethodGet, "/api/public/portal/harbour/roadmap", nil)
-	roadmap.Pattern = portalCatalogPattern
+	roadmap := httptest.NewRequest(http.MethodGet, "/api/public/portal/harbour/%72oadmap", nil)
+	roadmap.Pattern = portalRoadmapPattern
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, roadmap)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("roadmap path with the catalog pattern: %d", rec.Code)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("encoded roadmap: %d", rec.Code)
 	}
 	roadmapFile := httptest.NewRequest(http.MethodGet, "/api/public/portal/harbour/roadmap.json", nil)
 	roadmapFile.Pattern = portalRoadmapPattern
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, roadmapFile)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("roadmap declaration on the file URL: %d", rec.Code)
+	}
+	bare := httptest.NewRequest(http.MethodGet, "/api/public/portal/harbour/roadmap", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, bare)
 	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("roadmap file with the page pattern: %d", rec.Code)
+		t.Errorf("roadmap URL without a matched pattern: %d", rec.Code)
+	}
+}
+
+func TestPublicRequestFollowsMatchedDeclaration(t *testing.T) {
+	public, private := 0, 0
+	for pattern, declaration := range authz.RoutePermissions {
+		req := httptest.NewRequest(http.MethodGet, "/api/%2e%2e/%72%6f%6f//x", nil)
+		req.Pattern = pattern
+		got := publicRequest(req)
+		want := declaration == authz.PublicRoute
+		if got != want {
+			t.Errorf("%s: public=%t authority=%t", pattern, want, got)
+		}
+		if want {
+			public++
+		} else {
+			private++
+		}
+	}
+	if public == 0 || private == 0 {
+		t.Fatalf("declarations public=%d private=%d", public, private)
+	}
+	bare := httptest.NewRequest(http.MethodGet, "/api/public/portal/harbour/roadmap", nil)
+	if publicRequest(bare) {
+		t.Fatal("unmatched URL is not a public route")
 	}
 }
 
