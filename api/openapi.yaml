@@ -10442,7 +10442,7 @@ components:
       properties:
         amount: {type: integer, format: int64, minimum: 1, maximum: 1000000000000000, description: At most 100 for percent. Money is in cost_micros.}
         unit: {type: string, enum: [percent, runs, requests, tokens, cost_micros]}
-        period: {type: string, enum: [day, week, month], description: Local calendar day, week (Monday first) or month of the account owner's schedule timezone.}
+        period: {type: string, enum: [day, week, month], description: 'Local calendar day, week (Monday first) or month of the account owner''s schedule timezone.'}
     AccountLimitRule:
       allOf:
         - {$ref: '#/components/schemas/AccountLimitWrite'}
