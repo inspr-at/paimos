@@ -79,6 +79,13 @@ func TestObservedCapacityPreservesSeparatePairingApproval(t *testing.T) {
 	f.claim(v, e, key, reservationIDs(check), 200)
 	f.telemetry(v, e, key, 200)
 	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/capacity/approve", nil, true, "", 204)
+	// Round the clock: the managed route must not depend on the hour the test runs.
+	always := capacity.DefaultSchedule("UTC")
+	for i := range always.Week {
+		always.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	always.Reserve = capacity.ReserveOff
+	f.call("PUT", "/api/agent-accounts/capacity/schedule", map[string]any{"scope": "user", "schedule": always}, true, "", 204)
 	route := routeWithUnits(t, f, v, e, key, managed.ID, map[string]int{"requests": 1}, 200)
 	if len(route.Reservations) != 1 || route.Reservations[0].Unit != "percent" {
 		t.Fatal(route)
