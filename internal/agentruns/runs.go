@@ -31,7 +31,7 @@ type Run struct {
 	MaxDurationSeconds        int                         `json:"max_duration_seconds,omitempty"`
 	VerificationPolicy        string                      `json:"verification_policy,omitempty"`
 	RepositoryMutationAllowed bool                        `json:"repository_mutation_allowed"`
-	RowVersion                int64                       `json:"row_version"`
+	RowVersion                int64                       `json:"row_version,omitempty"`
 	ID                        string                      `json:"id"`
 	OrderID                   string                      `json:"work_order_id"`
 	AgentID                   string                      `json:"agent_principal_id"`

@@ -175,7 +175,7 @@ type Session struct {
 	Activity                                                        string            `json:"activity"`
 	ActivitySequence                                                int64             `json:"activity_sequence"`
 	Revision                                                        int64             `json:"revision"`
-	RowVersion                                                      int64             `json:"row_version"`
+	RowVersion                                                      int64             `json:"row_version,omitempty"`
 	HeartbeatAt                                                     *time.Time        `json:"heartbeat_at"`
 	StoppedAt                                                       *time.Time        `json:"stopped_at"`
 	StopReason                                                      *string           `json:"stop_reason"`

@@ -35,7 +35,7 @@ import (
 //     never merges a write's body by this position.
 //
 // A session or a run is merged by the row's own revision instead: row_version
-// grows inside the statement that changes the row (migration 1050), so a larger
+// grows inside the statement that changes the row (migration 1051), so a larger
 // one is always the newer copy, whichever answer carries it. The position only
 // orders the reads of one collection and holds the write floor.
 //
