@@ -14,6 +14,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/releasehistory/codename"
 )
 
 // MaxChanges bounds one release's change list; the rest is counted, not listed.
@@ -37,6 +39,7 @@ type versionFile struct {
 	Version                 string   `json:"version"`
 	ReleaseChannel          string   `json:"release_channel"`
 	ReleaseSequence         int      `json:"release_sequence"`
+	Codename                string   `json:"codename"`
 	ReservedAt              string   `json:"reserved_at"`
 	Ticket                  string   `json:"ticket"`
 	UnpublishedReservations []string `json:"unpublished_reservations"`
@@ -79,6 +82,10 @@ func Build(ctx context.Context, opts Options) (History, error) {
 		return History{}, err
 	}
 
+	// named holds each sequence with the codename its version.json recorded,
+	// for codename.Guard.
+	named := []codename.Named{{Sequence: head.ReleaseSequence, Name: head.Codename}}
+
 	// Oldest first, so each release knows the one before it.
 	byVersion := map[string]bool{}
 	previousPublished, previousAny := "", ""
@@ -105,6 +112,11 @@ func Build(ctx context.Context, opts Options) (History, error) {
 				r.Tickets = Tickets(atTag.Ticket, headline)
 			}
 		}
+		stamp := ""
+		if strings.TrimPrefix(atTag.Version, "v") == tag.version {
+			stamp = atTag.Codename
+		}
+		named = append(named, codename.Named{Sequence: r.ReleaseSequence, Name: stamp})
 		if len(r.Tickets) == 0 {
 			r.Tickets = Tickets(headline)
 		}
@@ -186,6 +198,9 @@ func Build(ctx context.Context, opts Options) (History, error) {
 				h.Releases[i].Evidence.Unavailable = append(h.Releases[i].Evidence.Unavailable, "GitHub was not consulted for this build, so the publication time, image digest and CI runs are not recorded.")
 			}
 		}
+	}
+	if err := codename.Guard(named); err != nil {
+		return History{}, err
 	}
 	return WithCodenames(h), nil
 }

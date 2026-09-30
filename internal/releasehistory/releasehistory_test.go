@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/releasehistory/codename"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -358,5 +359,54 @@ func TestWithCodenames(t *testing.T) {
 	}
 	if h.Releases[0].Codename != "Stale Name" || h.Releases[2].Codename != "" {
 		t.Fatal("WithCodenames must copy the releases")
+	}
+}
+
+// Build refuses a history whose version.json recorded a codename the lists no
+// longer give its sequence, so `just release-history` fails before a rename.
+func TestBuildRefusesRenamedCodename(t *testing.T) {
+	dir := repo(t)
+	path := filepath.Join(dir, "version.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := func(name string) {
+		t.Helper()
+		out := strings.Replace(string(raw), `"release_sequence":2,`, `"release_sequence":2,"codename":"`+name+`",`, 1)
+		if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stamp(codename.Codename(2))
+	if _, err := Build(context.Background(), Options{Repo: dir}); err != nil {
+		t.Fatalf("recorded name: %v", err)
+	}
+	stamp("Renamed Release")
+	if _, err := Build(context.Background(), Options{Repo: dir}); err == nil || !strings.Contains(err.Error(), "Renamed Release") {
+		t.Fatalf("renamed codename: err %v", err)
+	}
+}
+
+// The lists this binary names releases with keep every name already shown:
+// the embedded manifest's and the reservation's in version.json (AEON-430).
+func TestRepositoryCodenames(t *testing.T) {
+	h, err := Embedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var named []codename.Named
+	for _, r := range h.Releases {
+		named = append(named, codename.Named{Sequence: r.ReleaseSequence, Name: r.Codename})
+	}
+	if raw, err := os.ReadFile("../../version.json"); err == nil {
+		var v versionFile
+		if err := json.Unmarshal(raw, &v); err != nil {
+			t.Fatal(err)
+		}
+		named = append(named, codename.Named{Sequence: v.ReleaseSequence, Name: v.Codename})
+	}
+	if err := codename.Guard(named); err != nil {
+		t.Fatal(err)
 	}
 }

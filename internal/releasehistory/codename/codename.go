@@ -68,6 +68,18 @@ func LetterCapacity(letter byte) int {
 	return defaultLists.letterCapacity(int(letter)-'A', defaultLists.latest())
 }
 
+// Named is a release sequence and the codename already recorded for it: the
+// name stamped into its version.json or shown for it. Name is "" when none was
+// recorded, as for releases reserved before codenames.
+type Named struct {
+	Sequence int
+	Name     string
+}
+
+// Guard fails when the newest lists would rename a release that already has a
+// sequence; see Lists.Guard.
+func Guard(named []Named) error { return defaultLists.Guard(named) }
+
 // word is one list entry. It is eligible from since up to, not including, retired.
 type word struct {
 	text           string
@@ -355,6 +367,27 @@ func (l *Lists) epoch(seq int) int {
 func (l *Lists) denied(li, a, n, seq int) bool {
 	s, ok := l.deny[li][[2]int{a, n}]
 	return ok && s <= seq
+}
+
+// Guard fails when these lists would rename a release that already has a
+// sequence. A recorded name must still be its sequence's name. A release
+// without one cannot be checked by name, so once there is a version after 1,
+// the newest version must start above it: its "from S" must be above every
+// sequence reserved or published before it was added. Version 1 is exempt.
+func (l *Lists) Guard(named []Named) error {
+	for _, r := range named {
+		if r.Sequence < 1 {
+			continue
+		}
+		if r.Name != "" {
+			if now := l.Name(r.Sequence); now != r.Name {
+				return fmt.Errorf("codename: release %d is %q but the lists now name it %q; never change a published name", r.Sequence, r.Name, now)
+			}
+		} else if l.version > 1 && r.Sequence >= l.latest() {
+			return fmt.Errorf("codename: version %d from %d would rename release %d, which has no recorded codename; start it above every reserved sequence", l.version, l.latest(), r.Sequence)
+		}
+	}
+	return nil
 }
 
 // Capacity is how many distinct names all letters hold at seq.

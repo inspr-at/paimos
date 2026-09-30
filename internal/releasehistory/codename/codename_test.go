@@ -481,6 +481,41 @@ func TestAppendingKeepsOldNames(t *testing.T) {
 	}
 }
 
+// A new version must start above every release without a recorded name, and
+// may never change a recorded one; version 1 is exempt.
+func TestGuard(t *testing.T) {
+	base := minimal("A adj Amber Astral Atomic\nA noun Aurora Array Axis\n")
+	v2 := func(from int) *Lists {
+		return mustParse(base + fmt.Sprintf("version 2 from %d\nA adj Azure\nA noun Apogee\nretire Aurora\n", from))
+	}
+	v1 := mustParse(base)
+	published := []Named{{Sequence: 1}, {Sequence: 4}, {Sequence: 11}}
+	if err := v1.Guard(published); err != nil {
+		t.Fatalf("version 1: %v", err)
+	}
+	for _, from := range []int{2, 10, 11} {
+		if err := v2(from).Guard(published); err == nil {
+			t.Errorf("version 2 from %d passed with release 11 published", from)
+		}
+	}
+	if err := v2(12).Guard(published); err != nil {
+		t.Fatalf("version 2 from 12: %v", err)
+	}
+	// Releases reserved under version 2 record their names and keep passing.
+	l := v2(12)
+	later := append(published, Named{Sequence: 13, Name: l.Name(13)}, Named{Sequence: 40, Name: l.Name(40)})
+	if err := l.Guard(later); err != nil {
+		t.Fatalf("recorded version 2 names: %v", err)
+	}
+	// A recorded name the lists no longer give fails, even below the new version.
+	if err := l.Guard([]Named{{Sequence: 4, Name: v1.Name(4) + "x"}}); err == nil {
+		t.Fatal("a changed recorded name passed")
+	}
+	if err := l.Guard([]Named{{Sequence: 13}}); err == nil {
+		t.Fatal("an unrecorded release at the new version's first sequence passed")
+	}
+}
+
 // minimal is a word list with the cycle A B C, a's lines for A and one
 // placeholder name for B and C.
 func minimal(a string) string {

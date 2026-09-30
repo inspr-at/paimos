@@ -151,7 +151,7 @@ differs from the sequence's. The codename is presentation only: the version
 stays the identity, and every earlier release has its name from the same
 function. To change the lists, append a new `version N from S` block with `S`
 above every reserved sequence; never edit, reorder or delete a line, so no
-existing name moves. Two-word collisions with obscure titles are an accepted
+existing name moves. `codename.Guard` enforces this in `just release-history` (and `TestGuard`, `TestRepositoryCodenames`): a recorded codename must stay its sequence's name, and a version after 1 must start above every release without one. Two-word collisions with obscure titles are an accepted
 residual risk. A reported collision is added to the pair deny list in the next
 list version; names of already-published releases never change.
 
