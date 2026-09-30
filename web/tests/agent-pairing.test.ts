@@ -14,7 +14,7 @@ import {
   chooseInstallMethod, homebrewPendingNote, installMethods, readPairingInstallMethod, writePairingInstallMethod,
   isAddHarness, pairingScopeKey, setHarnessAccount,
   addHarnessTargetProblem, applyComputerListRefresh, discardPairingReads, formatAllowanceMoment,
-  pairingReadGeneration, unsupportedVerification, approvePairedAccounts,
+  pairingReadGeneration, unsupportedVerification, verifiableAccountKeys, connectDisabledReason, approvePairedAccounts,
   type PairingGuide, type PairingView, type RequestedAccount,
 } from '../src/lib/agentPairing.ts'
 
@@ -607,6 +607,23 @@ test('unsupported verification blocks the selected harness and connect only does
   })
   const blocked = unsupportedVerification(current, ['claude-1', 'codex-1', 'cursor-1'])
   assert.deepEqual(blocked.map(item => item.harness), ['codex', 'cursor'])
+  // AEON-400: excluding unsupported harnesses is an explicit selection change;
+  // the approval still verifies all remaining selections under the existing contract.
+  const retained = verifiableAccountKeys(current, ['claude-1', 'codex-1', 'cursor-1'])
+  assert.deepEqual(retained, ['claude-1'])
+  assert.deepEqual(verifiableAccountKeys(current, ['codex-1', 'cursor-1', 'unknown']), [])
+  assert.deepEqual(verifiableAccountKeys(current, []), [])
+  const mixed = planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: ['claude-1', 'codex-1', 'cursor-1'], permissions: person })
+  assert.equal(mixed.ok, false)
+  const withoutVerification = planApproval({ view: current, choice: 'connect_only', selectedAccountKeys: ['claude-1', 'codex-1', 'cursor-1'], permissions: person })
+  assert.deepEqual(withoutVerification, { ok: true, body: { request_digest: DIGEST, verification: 'connect_only', selected_account_keys: ['claude-1', 'codex-1', 'cursor-1'] } })
+  assert.deepEqual(planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: retained, permissions: person }), {
+    ok: true, body: { request_digest: DIGEST, verification: 'one_per_harness', selected_account_keys: ['claude-1'] },
+  })
+  for (const permissions of [reader, agent]) {
+    assert.equal(planApproval({ view: current, choice: 'connect_only', selectedAccountKeys: ['claude-1', 'codex-1'], permissions }).ok, false)
+    assert.equal(planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: retained, permissions }).ok, false)
+  }
   assert.match(blocked[0]?.reason ?? '', /Codex/)
   assert.doesNotMatch(blocked.map(item => item.reason).join(' '), /installation failed/i)
   const denied = planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: ['codex-1'], permissions: person })
@@ -618,8 +635,25 @@ test('unsupported verification blocks the selected harness and connect only does
   assert.equal(connectOnly.ok, true)
   if (connectOnly.ok) assert.equal(connectOnly.body.verification, 'connect_only')
   const unspoken = view({ verification_capabilities: undefined })
+  assert.deepEqual(verifiableAccountKeys(unspoken, ['cursor-1']), [])
   const quiet = planApproval({ view: unspoken, choice: 'one_per_harness', selectedAccountKeys: ['cursor-1'], permissions: person })
   assert.equal(quiet.ok, false)
+})
+
+test('every disabled Connect state gives an actionable reason; mixed verification is a choice', () => {
+  const ready = { busy: '', canApprove: true, selectedAccountKeys: ['claude-1', 'codex-1'], targetProblem: null }
+  assert.equal(connectDisabledReason(ready), null)
+  assert.equal(connectDisabledReason({ ...ready, selectedAccountKeys: [] }), 'Choose at least one harness.')
+  assert.equal(connectDisabledReason({ ...ready, canApprove: false }), 'Only a signed-in person who can manage accounts can connect this computer.')
+  assert.equal(connectDisabledReason({ ...ready, busy: 'approve' }), 'Connecting this computer…')
+  assert.equal(connectDisabledReason({ ...ready, busy: 'deny' }), 'Denying this request…')
+  assert.equal(connectDisabledReason({ ...ready, busy: 'lookup' }), 'Wait for the current action to finish.')
+  for (const code of ['missing', 'mismatch', 'name'] as const) {
+    const targetProblem = { code, message: 'Computer mismatch', next: 'Review the computer.' }
+    assert.equal(connectDisabledReason({ ...ready, targetProblem }), code === 'name'
+      ? 'The computer name must match the computer you opened.'
+      : 'Use the matching code, or review this as a new computer.')
+  }
 })
 
 test('old connect-only enrollment does not block a new verified harness, and a later run is not verification', () => {

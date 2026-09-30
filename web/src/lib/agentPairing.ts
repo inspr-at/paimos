@@ -577,10 +577,34 @@ export function unsupportedVerification(view: Pick<PairingView, 'verification_ca
   return blocked
 }
 
+/** Keep only explicitly selected, published verifiable accounts; never add an account. */
+export function verifiableAccountKeys(view: Pick<PairingView, 'verification_capabilities' | 'requested_accounts'>, keys: readonly string[]): string[] {
+  return view.requested_accounts
+    .filter(account => keys.includes(account.account_key) && view.verification_capabilities?.[account.harness]?.supported)
+    .map(account => account.account_key)
+}
+
 export interface AddHarnessTargetProblem {
   code: 'missing' | 'mismatch' | 'name'
   message: string
   next: string
+}
+
+/** The button and its adjacent explanation share one source for every disabled state. */
+export function connectDisabledReason(input: {
+  busy: string
+  canApprove: boolean
+  selectedAccountKeys: readonly string[]
+  targetProblem: AddHarnessTargetProblem | null
+}): string | null {
+  if (input.busy === 'approve') return 'Connecting this computer…'
+  if (input.busy === 'deny') return 'Denying this request…'
+  if (input.busy) return 'Wait for the current action to finish.'
+  if (!input.canApprove) return 'Only a signed-in person who can manage accounts can connect this computer.'
+  if (!input.selectedAccountKeys.length) return 'Choose at least one harness.'
+  if (input.targetProblem?.code === 'name') return 'The computer name must match the computer you opened.'
+  if (input.targetProblem) return 'Use the matching code, or review this as a new computer.'
+  return null
 }
 
 /** Connect stays off until the reviewed request is the opened computer, or the person starts a new-computer review. */

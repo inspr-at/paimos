@@ -678,6 +678,13 @@ Both version surfaces use the unchanged, verified calendar bundle in Pretty
 mode with brand gold. The shared helper provides reveal and copy interactions;
 `dev` remains plain text. Every production web build verifies the bundle pin.
 
+The connect screen keeps Connect available when a selection mixes verifiable
+and unverifiable harnesses. Clicking it offers **Connect without verification**
+for the whole selection or **Leave them out** to keep only the verifiable
+accounts for review before connecting. Approval currently records one verification
+mode for the selection; no harness is silently excluded or treated as verified.
+When Connect is disabled, its reason appears beside the button.
+
 ```sh
 cd web
 npm run test:unit
