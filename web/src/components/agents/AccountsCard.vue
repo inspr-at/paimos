@@ -1,230 +1,189 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { createWindow, type AgentAccount, type AllowanceWrite } from '../../lib/agents'
+import { computed, onMounted, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
+import { accountName, accountPlan } from '../../lib/accountCascade'
+import { limitSummary, nameClashes, readingSupport, setByYou } from '../../lib/accountLimits'
+import type { AgentAccount } from '../../lib/agents'
 import { can } from '../../lib/authz'
-import { accountName, accountPlan, allowanceWindowLabel } from '../../lib/accountCascade'
-import { PACE_LABEL, UNIT_LABEL, bindingWindow, duration, harnessLabel } from '../../lib/agentState'
-import type { Availability } from '../../stores/agents'
+import { HARNESS_NAME, POOL_ORDER, type AccountState } from '../../lib/capacity'
+import { useAgents, type Availability } from '../../stores/agents'
+import { useCapacity } from '../../stores/capacity'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
-import AllowanceWindowForm from './AllowanceWindowForm.vue'
-import ClaudeStatuslineToggle from '../settings/ClaudeStatuslineToggle.vue'
-import { ABSENT_ALLOWANCE, allowanceFailure, beginSave, findSavedAllowance, holdUncertain, releaseHeld, settleSave, UNCERTAIN_ALLOWANCE, type HeldAllowance } from './allowanceWindow'
+import AccountDetail from './AccountDetail.vue'
+import HarnessMark from './HarnessMark.vue'
 
-// Per account: the window that binds first, how much of it is left and whether use
-// is running ahead of the pace the window allows. Admins can drain or resume.
-// A person with account.manage can add one allowance window for the open account.
+// Settings → Accounts (AEON-384): every vendor account, grouped by vendor,
+// with how Aeon reads it and whether agents may use it. A row opens its
+// detail inline: name, windows, last readings and the Advanced limit. There is
+// no allowance form: limits are observed, and a limit by hand is one sentence.
+// The card's header (SettingsCard) keeps its aside slot for "Add an account".
 const props = defineProps<{ accounts: AgentAccount[]; state: Availability; now: number; admin: boolean; set: (account: AgentAccount, state: AgentAccount['state']) => Promise<void> }>()
-const emit = defineEmits<{ 'allowance-created': [] }>()
 const session = useSession()
+const agents = useAgents()
+const capacity = useCapacity()
+onMounted(() => { void capacity.load() })
 const mayManage = computed(() => session.identity?.principal.kind === 'person' && can('account.manage'))
 const busy = ref('')
 const error = ref('')
-const editingId = ref('')
-const flight = ref<number | null>(null)
-const serverMessage = ref('')
-const uncertain = ref(false)
-const allowanceStatus = ref('')
-const pending = ref<Record<string, HeldAllowance>>({})
-let generation = 0
-const rows = computed(() => [...props.accounts]
-  .map(account => ({ account, window: bindingWindow(account.windows, props.now) }))
-  .sort((a, b) => (a.account.state === 'available' ? 0 : 1) - (b.account.state === 'available' ? 0 : 1) || allowanceRank(a.window) - allowanceRank(b.window)))
-function allowanceRank(window: ReturnType<typeof bindingWindow>) {
-  if (!window) return 2
-  if (window.window.provisional) return 1.5
-  return window.left
+const open = ref('')
+const renameAt = ref('')
+const renameActivation = ref(0)
+const renameTrigger = ref<HTMLElement | null>(null)
+
+const rowOf = computed(() => new Map(capacity.rows.map(r => [r.id, r])))
+const clashes = computed(() => nameClashes(props.accounts))
+const groups = computed(() => {
+  const byHarness = new Map<string, AgentAccount[]>()
+  for (const a of props.accounts) byHarness.set(a.harness, [...(byHarness.get(a.harness) ?? []), a])
+  const order = (h: string) => { const i = POOL_ORDER.indexOf(h); return i < 0 ? 99 : i }
+  return [...byHarness.entries()].sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b)).map(([harness, list]) => ({
+    harness, name: HARNESS_NAME[harness] ?? harness,
+    accounts: [...list].sort((x, y) => accountName(x).localeCompare(accountName(y)) || x.id.localeCompare(y.id)),
+  }))
+})
+const host = (a: AgentAccount) => rowOf.value.get(a.id)?.host || a.host_label || ''
+const agentsAllowed = (a: AgentAccount) => a.state === 'available' && a.ongoing_use_approved !== false
+// Only what needs a word: a normal, usable account shows none.
+const STATE_TEXT: Partial<Record<AccountState, string>> = { signin: 'Sign in again', offline: 'Offline', unavailable: "Couldn't check", paused: 'Paused' }
+const stateOf = (a: AgentAccount): AccountState => rowOf.value.get(a.id)?.state ?? (a.state === 'draining' ? 'paused' : 'live')
+function limitChip(a: AgentAccount): string {
+  const rule = capacity.byAccount.get(a.id)?.limit
+  if (rule) return `Limit · ${limitSummary(rule)}`
+  return setByYou(a.windows, props.now).length ? 'Set by you' : ''
 }
-function agentsAllowed(account: AgentAccount) { return account.state === 'available' && account.ongoing_use_approved !== false }
-async function toggle(account: AgentAccount) {
+
+function toggleOpen(id: string) {
+  open.value = open.value === id ? '' : id
+  renameAt.value = ''
+}
+function nameIt(id: string, event: Event) {
+  renameTrigger.value = event.currentTarget as HTMLElement
+  open.value = id; renameAt.value = id; renameActivation.value++
+}
+// A click on the row's quiet parts opens it; its buttons act on their own.
+function onHead(event: MouseEvent, id: string) {
+  if ((event.target as HTMLElement).closest('button, a, input, select')) return
+  toggleOpen(id)
+}
+async function toggleUse(account: AgentAccount) {
   busy.value = account.id; error.value = ''
   try { await props.set(account, agentsAllowed(account) ? 'draining' : 'available') }
   catch (e) { error.value = e instanceof Error ? e.message : 'The account did not change. Please try again.' }
   finally { busy.value = '' }
 }
-function showPending(accountId: string) {
-  if (pending.value[accountId]) {
-    uncertain.value = true
-    serverMessage.value = UNCERTAIN_ALLOWANCE
-  } else {
-    uncertain.value = false
-    serverMessage.value = ''
-  }
-}
-function openAllowance(accountId: string) {
-  if (flight.value !== null || editingId.value === accountId) return
-  generation += 1
-  editingId.value = accountId
-  allowanceStatus.value = ''
-  showPending(accountId)
-}
-function closeAllowance() {
-  generation += 1
-  editingId.value = ''
-  serverMessage.value = ''
-  uncertain.value = false
-}
-function reviseAllowance(accountId: string) {
-  pending.value = releaseHeld(pending.value, accountId)
-  uncertain.value = false
-  serverMessage.value = ''
-}
-async function saveAllowance(account: AgentAccount, body: AllowanceWrite) {
-  const accountId = account.id
-  const name = accountName(account)
-  const started = generation
-  const decision = beginSave({ busy: flight.value !== null, editingId: editingId.value, accountId, generation: started, body, now: props.now })
-  if (decision.action === 'ignore') return
-  if (decision.action === 'invalid') { serverMessage.value = decision.message; uncertain.value = false; return }
-  flight.value = started
-  serverMessage.value = ''
-  try {
-    await createWindow(accountId, body)
-    applySettlement(settleSave({
-      outcome: 'saved', message: '', accountName: name, startedAccountId: accountId, startedGeneration: started,
-      currentAccountId: editingId.value, currentGeneration: generation,
-    }))
-  } catch (caught) {
-    const failure = allowanceFailure(caught)
-    if (failure.kind === 'uncertain') pending.value = holdUncertain(pending.value, accountId, name, body)
-    applySettlement(settleSave({
-      outcome: failure.kind === 'uncertain' ? 'uncertain' : 'rejected', message: failure.message, accountName: name,
-      startedAccountId: accountId, startedGeneration: started, currentAccountId: editingId.value, currentGeneration: generation,
-    }))
-  } finally {
-    if (flight.value === started) flight.value = null
-  }
-}
-function applySettlement(settled: ReturnType<typeof settleSave>) {
-  if (settled.clearAccountId) pending.value = releaseHeld(pending.value, settled.clearAccountId)
-  if (settled.refresh) emit('allowance-created')
-  if (settled.closeForm) editingId.value = ''
-  uncertain.value = settled.uncertain
-  serverMessage.value = settled.formMessage ?? ''
-  if (settled.status) allowanceStatus.value = settled.status
-}
-async function checkAllowance(account: AgentAccount) {
-  const held = pending.value[account.id]
-  if (!held || flight.value !== null || editingId.value !== account.id) return
-  const started = generation
-  flight.value = started
-  const match = await findSavedAllowance(account.id, held.body)
-  if (flight.value === started) flight.value = null
-  if (generation !== started || editingId.value !== account.id) return
-  if (match === 'saved') {
-    pending.value = releaseHeld(pending.value, account.id)
-    uncertain.value = false
-    serverMessage.value = ''
-    editingId.value = ''
-    allowanceStatus.value = `Allowance window saved for ${held.name}.`
-    emit('allowance-created')
-    return
-  }
-  if (match === 'absent') {
-    pending.value = releaseHeld(pending.value, account.id)
-    uncertain.value = false
-    serverMessage.value = ABSENT_ALLOWANCE
-    return
-  }
-  uncertain.value = true
-  serverMessage.value = UNCERTAIN_ALLOWANCE
-}
-watch(mayManage, allowed => { if (!allowed) closeAllowance() })
-const stateLabel: Record<AgentAccount['state'], string> = { available: 'Available', draining: 'Draining', unavailable: 'Unavailable' }
+async function changed() { await Promise.all([agents.refreshAccounts(), capacity.refreshCapacity()]) }
+watch(() => props.accounts.map(a => a.id).join(), () => { if (open.value && !props.accounts.some(a => a.id === open.value)) open.value = '' })
 </script>
 
 <template>
-  <!-- Lives inside the "Accounts and pacing" disclosure, whose summary is the visible
-       title; the heading stays for the region's name only. -->
-  <section class="accounts" aria-labelledby="accounts-title">
-    <h2 id="accounts-title" class="sr-only">Accounts and pacing</h2>
-    <p v-if="state === 'forbidden'" class="note">Accounts and their allowances are visible to workspace admins.</p>
+  <div class="accounts">
+    <p v-if="state === 'forbidden'" class="note">Accounts are visible to workspace admins.</p>
     <p v-else-if="state === 'error'" class="note" role="alert">Accounts could not be loaded right now.</p>
     <div v-else-if="state === 'idle'" class="sk"><span class="skeleton" /><span class="skeleton short" /><span class="skeleton" /></div>
-    <p v-else-if="!accounts.length" class="note">No accounts are enrolled. The local agent daemon enrolls one per harness sign-in.</p>
-    <ul v-else class="list">
-      <li v-for="{ account, window } in rows" :key="account.id" class="account" :class="account.state">
-        <div class="top">
-          <span class="dot" :class="account.state" aria-hidden="true" />
-          <span class="label">{{ accountName(account) }}</span>
-          <span v-if="accountPlan(account)" class="plan">{{ accountPlan(account) }}</span>
-          <span class="harness">{{ harnessLabel(account.harness) }}</span>
-          <span class="spacer" />
-          <span v-if="account.state !== 'available'" class="state-text">{{ stateLabel[account.state] }}</span>
-          <button v-if="mayManage && editingId !== account.id" type="button" class="btn sm add-window" :aria-label="`Add allowance window for ${accountName(account)}`" :disabled="flight !== null || busy === account.id" @click="openAllowance(account.id)">Add allowance window</button>
-          <button v-if="mayManage" type="button" role="switch" class="btn sm toggle" :aria-label="`Agents may use it · ${accountName(account)}`" :aria-checked="agentsAllowed(account)" :disabled="busy === account.id" @click="toggle(account)"><span>Agents may use it</span><span class="switch-state">{{ agentsAllowed(account) ? 'On' : 'Off' }}</span></button>
-        </div>
-        <template v-if="window?.window.provisional">
-          <p class="facts">
-            <span class="left">{{ allowanceWindowLabel(window.window) }} {{ UNIT_LABEL[window.window.unit] }} · allowance unknown</span>
-            <span class="provisional">Unmeasured</span>
-            <span class="reset">resets in {{ duration(window.resetsIn) }}</span>
-          </p>
-        </template>
-        <template v-else-if="window">
-          <div class="meter" role="meter" :aria-valuenow="Math.round(window.left * 100)" aria-valuemin="0" aria-valuemax="100" :aria-label="`${accountName(account)}: ${Math.round(window.left * 100)}% of ${allowanceWindowLabel(window.window)} ${UNIT_LABEL[window.window.unit]} left`">
-            <span class="fill" :class="window.pace" :style="{ width: `${Math.max(2, window.left * 100)}%` }" />
-            <span class="pace-mark" :style="{ left: `${Math.min(100, (1 - window.expected) * 100)}%` }" :data-tip="`Pace allows ${Math.round(window.expected * 100)}% used by now`" />
-          </div>
-          <p class="facts">
-            <span class="left"><b>{{ Math.round(window.left * 100) }}%</b> {{ UNIT_LABEL[window.window.unit] }} left · {{ allowanceWindowLabel(window.window) }}</span>
-            <span class="pace" :class="window.pace">{{ PACE_LABEL[window.pace] }}</span>
-            <span class="reset">resets in {{ duration(window.resetsIn) }}</span>
-          </p>
-        </template>
-        <p v-else class="facts muted">No active allowance window</p>
-        <ClaudeStatuslineToggle v-if="mayManage && account.harness === 'claude' && account.statusline_opt_in" :account="account" @changed="emit('allowance-created')" />
-        <AllowanceWindowForm
-          v-if="mayManage && editingId === account.id"
-          :account="account" :now="now" :busy="flight !== null" :server-message="serverMessage" :uncertain="uncertain"
-          :pending="pending[account.id]?.body ?? null"
-          @save="saveAllowance(account, $event)" @cancel="closeAllowance" @check="checkAllowance(account)" @revise="reviseAllowance(account.id)"
-        />
-      </li>
-    </ul>
-    <p v-if="allowanceStatus" class="note" role="status">{{ allowanceStatus }}</p>
+    <p v-else-if="!accounts.length" class="note empty">
+      No accounts yet. Connect a computer; accounts appear as you sign in to Codex, Claude, Grok or Cursor there.
+      <RouterLink v-if="mayManage" class="btn sm" to="/agents/register-agent"><AppIcon name="monitor" :size="14" />Connect computer</RouterLink>
+    </p>
+    <template v-else>
+      <p class="use-head" aria-hidden="true">Agents may use it</p>
+      <section v-for="group in groups" :key="group.harness" class="group" :aria-labelledby="`accounts-${group.harness}`">
+        <h3 :id="`accounts-${group.harness}`" class="group-head">
+          <HarnessMark :harness="group.harness" :size="16" />
+          <span>{{ group.name }}</span>
+          <span class="count">{{ group.accounts.length }} {{ group.accounts.length === 1 ? 'account' : 'accounts' }}</span>
+        </h3>
+        <ul class="list">
+          <li v-for="a in group.accounts" :key="a.id" class="account" :class="[stateOf(a), { open: open === a.id }]" :data-account="a.id">
+            <div class="head" @click="onHead($event, a.id)">
+              <span class="dot" :class="stateOf(a)" aria-hidden="true" />
+              <div class="ident">
+                <span class="name" :title="accountName(a)">{{ accountName(a) }}</span>
+                <button v-if="clashes.has(a.id) && mayManage" type="button" class="name-it" :aria-label="`Name it: another ${group.name} account is also called ${accountName(a)}`" :data-tip="`Another ${group.name} account is also called ${accountName(a)}`" @click="nameIt(a.id, $event)">Name it</button>
+                <span v-if="host(a)" class="chip host" :title="host(a)">{{ host(a) }}</span>
+                <span v-if="limitChip(a)" class="chip mine">{{ limitChip(a) }}</span>
+                <span class="meta">
+                  <template v-if="STATE_TEXT[stateOf(a)]"><span class="state">{{ STATE_TEXT[stateOf(a)] }}</span><span class="sep"> · </span></template>
+                  <template v-if="accountPlan(a)"><span class="plan">{{ accountPlan(a) }}</span><span class="sep"> · </span></template>
+                  <span class="reads">{{ readingSupport(a.harness) }}</span>
+                </span>
+              </div>
+              <button
+                type="button" role="switch" class="use" :aria-checked="agentsAllowed(a)" :aria-label="`Agents may use it · ${accountName(a)}`"
+                :disabled="!mayManage || busy === a.id" :data-tip="mayManage ? undefined : 'People who can manage accounts change this'" @click="toggleUse(a)"
+              ><span class="track" aria-hidden="true"><span class="thumb" /></span></button>
+              <button type="button" class="icon-btn flat more" :aria-expanded="open === a.id" :aria-controls="`account-detail-${a.id}`" :aria-label="`Details for ${accountName(a)}`" @click="toggleOpen(a.id)"><AppIcon name="chevron" :size="16" /></button>
+            </div>
+            <AccountDetail
+              v-if="open === a.id" :id="`account-detail-${a.id}`" :account="a" :row="rowOf.get(a.id)" :cap="capacity.byAccount.get(a.id)" :now="now"
+              :timezone="capacity.timezone" :may-manage="mayManage" :rename="renameAt === a.id ? renameActivation : 0" :rename-trigger="renameTrigger" @changed="changed"
+            />
+          </li>
+        </ul>
+      </section>
+    </template>
     <p v-if="error" class="note error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>
-  </section>
+  </div>
 </template>
 
 <style scoped>
-.accounts { border-top: 1px solid var(--line); padding-top: 8px; }
-.note { padding: 8px 18px 16px; font-size: 12.5px; color: var(--ink-2); }
+.accounts { position: relative; display: grid; gap: 14px; }
+/* The switches' one column label, on the first vendor's line. */
+.use-head { position: absolute; top: 0; right: 58px; margin: 0; font-size: 12px; line-height: 20px; color: var(--ink-3); }
+.note { font-size: 13px; color: var(--ink-2); }
+.note.empty { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .note.error { display: flex; align-items: center; gap: 6px; color: var(--danger); }
-.sk { display: grid; gap: 10px; padding: 6px 16px 18px; }
+.sk { display: grid; gap: 10px; padding: 6px 0 8px; }
 .sk .short { width: 60%; }
-.list { margin: 0; padding: 0 10px 10px; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
-.account { padding: 10px 8px 10px; border-radius: 10px; }
-.account + .account { box-shadow: inset 0 1px 0 var(--line); border-radius: 0; }
-.account.unavailable .label { color: var(--ink-2); }
-.top { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-height: 24px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }
-.toggle { min-height: 44px; gap: 8px; }
-.switch-state { min-width: 30px; font-weight: 650; }
-.toggle[aria-checked="true"] { background: var(--row-selected); }
-.dot.draining { background: var(--gold); }
-.dot.unavailable { background: var(--st-closed); }
-.label { font-size: 13px; font-weight: 600; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
-.harness, .plan { flex-shrink: 0; height: 18px; padding: 0 6px; border-radius: 5px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 10px/18px var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
-.plan { font-family: var(--font); letter-spacing: 0; }
-.spacer { flex: 1; }
-.state-text { font-size: 11.5px; color: var(--gold-ink); font-weight: 600; }
-.account.unavailable .state-text { color: var(--ink-3); }
-.toggle, .add-window { height: 24px; padding: 0 8px; font-size: 12px; }
-.add-window { border-color: transparent; background: transparent; color: var(--teal-ink); }
-/* Permission is always visible. The secondary manual editor stays on hover. */
-@media (hover: hover) and (min-width: 601px) { .account .add-window { opacity: 0; } .account:hover .add-window, .account:focus-within .add-window { opacity: 1; } }
-.meter { position: relative; height: 6px; margin: 9px 0 7px; border-radius: 999px; background: var(--skeleton); }
-.fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, var(--teal), var(--st-qa-fill)); }
-.fill.ahead { background: linear-gradient(90deg, var(--gold), var(--gold-2)); }
-.pace-mark { position: absolute; top: -3px; width: 2px; height: 12px; margin-left: -1px; border-radius: 1px; background: var(--ink-2); opacity: .55; }
-.facts { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--ink-2); }
-.facts b { font: 600 12.5px/1 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
-.facts.muted { margin-top: 4px; color: var(--ink-3); }
-.pace { font-weight: 600; color: var(--ok); }
-.pace.ahead { color: var(--gold-ink); }
-.pace.under { color: var(--ink-2); font-weight: 500; }
-.provisional { font-weight: 600; color: var(--ink-2); }
-.reset { margin-left: auto; color: var(--ink-3); }
+.group-head { display: flex; align-items: center; gap: 8px; margin: 0 0 2px; padding: 0 8px; font: 600 12.5px/1.4 var(--font); color: var(--ink-2); }
+.group-head .count { font-weight: 500; color: var(--ink-3); }
+.list { margin: 0; padding: 0; list-style: none; }
+.account + .account { box-shadow: inset 0 1px 0 var(--line); }
+.head { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 34px; align-items: center; column-gap: 12px; min-height: 48px; padding: 7px 4px 7px 10px; border-radius: 10px; cursor: pointer; }
+@media (hover: hover) { .head:hover { background: var(--row-hover); } }
+.account.open > .head { background: transparent; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.dot.paused, .dot.unavailable { background: var(--ink-3); }
+.dot.offline { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-3); }
+.dot.signin { background: var(--gold); }
+.ident { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.name { max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.account.paused .name, .account.unavailable .name { color: var(--ink-2); }
+.chip { height: 20px; padding: 0 7px; font-size: 11px; letter-spacing: 0; }
+.chip.mine { font-family: var(--font); font-size: 11.5px; }
+.chip.host { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-variant-ligatures: none; }
+.chip.mine { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.meta { font-size: 12.5px; color: var(--ink-3); }
+/* A long line breaks between its parts, never inside one. */
+.meta > span:not(.sep) { white-space: nowrap; }
+.plan { color: var(--ink-2); }
+.state { color: var(--ink-2); font-weight: 600; }
+.account.signin .state { color: var(--gold-ink); }
+.sep { font-weight: 400; color: var(--ink-3); }
+.name-it { height: 22px; padding: 0 8px; border: 0; border-radius: 999px; background: var(--gold-wash); color: var(--gold-ink); font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.name-it:focus-visible { box-shadow: var(--focus-ring); }
+.use { display: inline-grid; place-items: center; width: 50px; height: 32px; padding: 0; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
+@media (hover: hover) { .use:not(:disabled):hover { background: var(--row-selected); } }
+.use:focus-visible { box-shadow: var(--focus-ring); }
+.use:disabled { cursor: default; }
+.track { position: relative; flex: none; width: 34px; height: 20px; border-radius: 999px; background: var(--track); box-shadow: inset 0 0 0 1px var(--line-2); transition: background-color .15s ease; }
+.thumb { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface-raised); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s ease; }
+.use[aria-checked="true"] .track { background: linear-gradient(90deg, #0e6f6c, #1a8683); box-shadow: none; }
+.use[aria-checked="true"] .thumb { transform: translateX(14px); background: #fff; }
+.use:disabled .track { opacity: .55; }
+.more { justify-self: end; color: var(--ink-3); }
+.more :deep(svg) { transition: transform .15s ease; }
+.more[aria-expanded="true"] :deep(svg) { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .track, .thumb, .more :deep(svg) { transition: none; } }
+@media (max-width: 600px) {
+  .head { grid-template-columns: 10px minmax(0, 1fr) 50px 44px; column-gap: 8px; align-items: start; padding: 4px 0 6px 8px; }
+  .dot { margin-top: 18px; }
+  .ident { padding-top: 10px; }
+  .meta { flex-basis: 100%; }
+  .use { height: 44px; }
+  .more { width: 44px; height: 44px; }
+  .name { max-width: 100%; }
+  .use-head { position: static; justify-self: end; margin: 0 60px -12px 0; }
+}
 </style>

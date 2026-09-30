@@ -38,6 +38,8 @@
 // A grant change does not stop already owned runs. Metadata is audited and an
 // identical retry is a no-op. Credentials, home paths and identities stay local.
 // Display labels accept up to 128 Unicode characters, matching session metadata.
+// PUT {id}/label (person account.manage) renames only, so Settings' inline
+// rename never turns a legacy null grant into an explicit one.
 //
 // Agentd's local account enrollment accepts an optional metadata object with
 // exactly those four fields and publishes it once on daemon startup. Owner
@@ -70,8 +72,28 @@
 // Catalog and queued runs expose structured advisory waits; reservation and
 // claim recheck admission under the account lock. A person's per-run "now"
 // override skips schedule pacing, never holds, truth or ownership fences.
-// Active manual windows override pacing; fresh vendor denial still fences them. Percent reservations hold an
-// initial 1% per job; tokens/dollars never masquerade as vendor quota.
+// Active manual windows cap on top of readings (AEON-384): readings, pacing and
+// Keep for you still apply next to them, and fresh vendor denial fences them.
+// A removed manual window keeps its row and ledger but no longer caps. Percent
+// reservations hold an initial 1% per job; tokens/dollars never masquerade as
+// vendor quota.
+//
+// PUT/DELETE {id}/limit stores the one Advanced sentence per account in
+// account_limit_rules: at most N percent, runs, requests, tokens or cost micros
+// per local day, week or month of the account owner's schedule timezone. A rule
+// is evaluated at admission, next to the readings, and never replaces them.
+// Percent counts the rise of each current vendor window within the period (a
+// reset inside the period starts that count again; your own use counts too).
+// Runs count managed runs started, or holding the account, in the period.
+// Requests, tokens and cost count run telemetry in the period, so a run that
+// starts under the limit may finish above it. A reached limit waits with code
+// allowance until the period ends; Run now does not skip it. Replacing or
+// removing a rule keeps the old row as history. POST {id}/windows/{wid}/repeat
+// turns an old manual window into a rule (its length picks day, week or month)
+// and removes the window in the same transaction; DELETE {id}/windows/{wid}
+// removes one. GET /capacity projects the rule with its use this period, the
+// manual windows still in force, and list-price spend this month for accounts
+// billed by API key.
 // Settlement releases that hold without adding usage already in observations.
 //
 // GET /api/agent-accounts/capacity (person account.read) returns exact percentages,
@@ -127,6 +149,18 @@
 // route returns that same choice. While a run is queued, retries recheck its
 // account state, probe, profile and grants; revoked eligibility returns conflict
 // without rerouting or releasing the held reservation.
+//
+// Advanced limits use the capacity owner's local day, Monday-first week, or
+// month. Positive percent deltas survive vendor resets; the largest total per
+// vendor series binds. Refresh grants obey the same limit. Each managed route
+// snapshots per-run estimates with its account reservation under the account
+// lock. Admission counts recorded use plus remaining live holds; a terminal run
+// with missing usage retains its estimate in each overlapping period. Unmeasured
+// defaults are one request, 100k tokens and one dollar; measured estimates use
+// the largest total from the last twenty finished runs. Dollar limits require
+// positive priced run telemetry (422 unsupported_limit_unit otherwise).
+// Make this repeat retains the original manual cap until its expiry, preserves
+// its ledger, and refuses to overwrite an existing Advanced sentence.
 //
 // Settle and Release run inside the caller's db.InTenant transaction. Settle
 // turns monotonic telemetry sums into used units and is idempotent per

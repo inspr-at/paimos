@@ -88,10 +88,6 @@ async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
   if (state === 'available') await approveAccountCapacity(account.id)
   await agents.setAccount(account, state)
 }
-async function refreshAfterAllowance() {
-  await agents.refreshAccounts()
-  await agents.refreshAccounts()
-}
 </script>
 
 <template>
@@ -107,7 +103,7 @@ async function refreshAfterAllowance() {
       <AddAccountPanel v-if="open && machines.length" :machines="machines" />
       <AccountsCard
         :accounts="agents.accounts" :state="agents.accountsUpdatedAt !== null ? 'ready' : agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'"
-        :set="setAccount" @allowance-created="refreshAfterAllowance()"
+        :set="setAccount"
       />
     </SettingsCard>
   </div>

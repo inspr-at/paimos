@@ -263,6 +263,11 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	if hardUntil != nil {
 		return nil, &CapacityWait{Code: "allowance", Until: hardUntil, Timezone: s.Timezone}, nil
 	}
+	// The Advanced sentence caps on top, like a window set by hand. A percent
+	// rule lowers the returned windows' budgets in place, so fits agrees.
+	if wait, err := limitWait(ctx, tx, a, active, now, run, claiming, s); err != nil || wait != nil {
+		return nil, wait, err
+	}
 	// The schedule is account-wide, Keep for you per window: a run waits for the
 	// schedule when any window's paced share is short, and for the reserve when
 	// only the reserve stands in the way (until the person's last band before

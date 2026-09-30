@@ -6,6 +6,7 @@
 // windows, names states and words the plan. It never re-derives a budget.
 import { api, APIError, RequestFailure, StaleRequestError } from './api.ts'
 import { capacityWaitText, type CapacityWait } from './capacityWait.ts'
+import type { LimitUse } from './accountLimits.ts'
 
 export type Pool = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
 export type OffDays = 'rest' | 'expire' | 'normal'
@@ -61,6 +62,11 @@ export interface AccountCapacity {
   limiting_reset?: string
   /** Recovery cleared a denial and the next run still has to produce a reading. */
   awaiting_reading?: boolean
+  /** The Advanced sentence with its use this period (AEON-384). */
+  limit?: LimitUse
+  /** List-price spend this month, in dollars, for an account billed by API key. */
+  cost_limit_supported?: boolean
+  spend_month_usd?: string
 }
 export interface ScheduleOverride { scope: 'user' | 'pool' | 'account'; pool?: Pool; account_id?: string; schedule: CapacitySchedule | null; carry_overrides?: boolean }
 

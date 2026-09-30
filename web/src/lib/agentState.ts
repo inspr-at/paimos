@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Pure rules for the agents workspace: what state a session is in, which group it
-// belongs to, what an approval asks for and how risky it is, and how an account's
-// allowance window is pacing. Free of Vue so it can be unit tested.
+// belongs to, and what an approval asks for and how risky it is. Free of Vue so it
+// can be unit tested.
 import { brand } from './brand.ts'
-import { paceFraction, type AgentRun, type AllowanceWindow, type Approval, type HarnessSession, type ProjectMessage } from './agents.ts'
+import type { AgentRun, Approval, HarnessSession, ProjectMessage } from './agents.ts'
 
 import { DEFAULT_AGENT_STATE, assessAgentState, type StateReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
 
@@ -229,26 +229,6 @@ export const expiresSoon = (approval: Approval, now: number) => Date.parse(appro
 
 // ---------- Held action requests ----------
 export const heldRequests = (messages: ProjectMessage[]) => messages.filter(m => m.is_action_request && !m.human_resolution_outcome)
-
-// ---------- Allowance windows ----------
-export type Pace = 'ahead' | 'on' | 'under'
-export interface WindowSummary { window: AllowanceWindow; left: number; pace: Pace; expected: number; used: number; resetsIn: number }
-export function windowSummary(window: AllowanceWindow, now: number): WindowSummary | null {
-  const start = Date.parse(window.starts_at), end = Date.parse(window.ends_at)
-  if (!(now >= start && now < end) || window.allowance <= 0) return null
-  const used = Math.min(1, (window.used + window.reserved) / window.allowance)
-  const expected = paceFraction(window.pace_model, (now - start) / (end - start), window.burst_ratio)
-  const pace: Pace = used > expected + 0.02 ? 'ahead' : used < expected - 0.15 ? 'under' : 'on'
-  return { window, left: Math.max(0, 1 - used), pace, expected, used, resetsIn: end - now }
-}
-// The window that binds first: the active one with the least left.
-export function bindingWindow(windows: AllowanceWindow[] | undefined, now: number) {
-  const summaries = (windows ?? []).map(w => windowSummary(w, now)).filter((w): w is WindowSummary => !!w)
-  const measured = summaries.filter(w => !w.window.provisional)
-  return (measured.length ? measured : summaries).sort((a, b) => a.left - b.left)[0] ?? null
-}
-export const PACE_LABEL: Record<Pace, string> = { ahead: 'Ahead of pace', on: 'On pace', under: 'Room to spare' }
-export const UNIT_LABEL: Record<AllowanceWindow['unit'], string> = { requests: 'requests', tokens: 'tokens', cost_micros: 'spend', percent: 'percent' }
 
 // Why a typed control cannot be sent right now, or '' when it can. Controls exist
 // only for sessions Aeon owns that advertise them, one at a time.

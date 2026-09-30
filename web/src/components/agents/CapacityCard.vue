@@ -56,6 +56,11 @@ function gaugeLabel(row: AccountRow) {
 /** What the 5-hour window keeps for you now, when it keeps something. */
 const fiveKept = (w: CapacityWindow) => { const k = Math.min(w.remaining_percent, w.pacing.reserve_effective_percent ?? 0); return k >= 0.5 ? pct(k) : '' }
 const anyKept = computed(() => pools.value.some(p => p.rows.some(r => (planOf(r)?.reserve ?? 0) >= 0.5)))
+function fiveLine(row: AccountRow) {
+  if (!row.five) return ''
+  const n = Math.round(modeOf(row) === 'used' ? 100 - row.five.remaining_percent : row.five.remaining_percent)
+  return `5-hour window ${n}% ${modeOf(row)}${fiveKept(row.five) ? ` · keeps ${fiveKept(row.five)} for you` : ''} · resets ${when(row.five.reading.resets_at, now.value)}`
+}
 function toggleMode(row: AccountRow) { capacity.setGauge(toggleAccountMode(capacity.gauge, row.id)) }
 function setGlobal(mode: GaugeMode) { capacity.setGauge(setGlobalMode(capacity.gauge, mode)) }
 const globalMode = computed(() => capacity.gauge?.mode ?? 'left')
@@ -349,7 +354,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
               :gauge="row.primary ? gaugeOf(row, planOf(row)) : null" :left="row.primary?.remaining_percent" :value="figure(row)" :used="modeOf(row) === 'used'"
               :label="gaugeLabel(row)" :ahead="!!planOf(row)?.ahead" :dim="row.state !== 'live' && row.state !== 'unread'"
             />
-            <div v-if="row.five" class="win5" :data-tip="`5-hour window: ${pct(row.five.remaining_percent)} left${fiveKept(row.five) ? `, ${fiveKept(row.five)} kept for you` : ''}, resets ${whenFull(row.five.reading.resets_at)}`">5-hour window <b>{{ Math.round(modeOf(row) === 'used' ? 100 - row.five.remaining_percent : row.five.remaining_percent) }}% {{ modeOf(row) }}</b><template v-if="fiveKept(row.five)"> · keeps <b>{{ fiveKept(row.five) }}</b> for you</template> · resets {{ when(row.five.reading.resets_at, now) }}</div>
+            <div v-if="row.five" class="win5" :data-tip="fiveLine(row)">5-hour window <b>{{ Math.round(modeOf(row) === 'used' ? 100 - row.five.remaining_percent : row.five.remaining_percent) }}% {{ modeOf(row) }}</b><template v-if="fiveKept(row.five)"> · keeps <b>{{ fiveKept(row.five) }}</b> for you</template> · resets {{ when(row.five.reading.resets_at, now) }}</div>
           </div>
           <button
             v-if="row.primary" type="button" class="left" :aria-label="`${row.name}: ${Math.round(figure(row))}% ${modeOf(row)}. Show % ${modeOf(row) === 'left' ? 'used' : 'left'} for this account`"
@@ -431,7 +436,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .cap-title { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
 .cap-title h2 { font-size: 19px; }
 .cap-meta { color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.settings { display: flex; align-items: center; gap: 22px; min-width: 0; max-width: 100%; }
+.settings { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; min-width: 0; max-width: 100%; }
 .setting { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 13px; font-weight: 550; white-space: nowrap; }
 .setting .lbl { margin-right: 2px; }
 .setting.nights .lbl { cursor: pointer; }
@@ -562,7 +567,8 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .acct { grid-template-columns: minmax(0, 150px) minmax(120px, 1fr) 68px minmax(0, 110px) 150px; }
   .source { display: none; }
 }
-@container cap (max-width: 640px) {
+@container cap (max-width: 1000px) {
+  .settings .divider { display: none; }
   .settings { flex-wrap: wrap; row-gap: 6px; }
   .setting { min-width: 0; max-width: 100%; }
 }

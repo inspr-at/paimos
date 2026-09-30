@@ -632,7 +632,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
           </li>
         </ul>
         <p v-if="grantedKeys && !approvalPending" class="sub">{{ allowAgents ? 'Agents may use the selected accounts once setup finishes.' : 'Agents stay paused. Turn them on in Settings / Accounts.' }}</p>
-        <button v-if="approvalPending && permissions.canSetOngoingLimits" type="button" class="btn sm" :disabled="!!busy" @click="retryAccountApproval">Retry account approval</button>
+        <button v-if="approvalPending && permissions.canApproveAccounts" type="button" class="btn sm" :disabled="!!busy" @click="retryAccountApproval">Retry account approval</button>
       </div>
 
       <div v-if="pendingReview" class="actions">
@@ -684,7 +684,6 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .banner, .problem { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 .banner { padding: 10px 12px; border-radius: 12px; background: var(--surface-sunken); color: var(--ink-2); }
 .problem { color: var(--danger); }
-.limit label { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
 /* Public guide commands and optional instance details. */
 .address { min-width: 0; display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 6px 6px 12px; border-radius: 10px; background: var(--surface-sunken); }
 .agent-address { margin-top: 22px; }
@@ -751,10 +750,6 @@ legend { margin-bottom: 4px; color: var(--ink); font-weight: 600; font-size: 14p
 .enrollments li > :first-child { margin-top: 2px; }
 .enrollment-text { min-width: 0; }
 .enrollment-text .sub { margin-top: 2px; }
-.limit { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
-.limit h4 { margin-top: 0; }
-.limit-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.4fr); gap: 10px; margin-top: 8px; }
-.limit .problem { margin: 8px 0 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 @media (max-width: 720px) {
   .connect { padding: 18px 16px 32px; }
@@ -771,7 +766,6 @@ legend { margin-bottom: 4px; color: var(--ink); font-weight: 600; font-size: 14p
   .review-head .btn { margin-left: -11px; }
   .code-row .code { flex: 1 1 100%; }
   .code-row .go { flex: 1 1 100%; }
-  .limit-fields { grid-template-columns: 1fr; }
   .actions .go { flex: 1 1 auto; }
   .keep { flex-basis: 100%; margin-left: 0; }
 }

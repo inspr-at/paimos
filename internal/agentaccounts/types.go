@@ -73,6 +73,9 @@ type Window struct {
 	Used        int64     `json:"used"`
 	Reserved    int64     `json:"reserved"`
 	Provisional bool      `json:"provisional"`
+	// SetByYou marks a manual window, set by a person rather than read from
+	// the vendor. It caps on top of readings (AEON-384).
+	SetByYou bool `json:"set_by_you,omitempty"`
 }
 
 // Reservation is one held estimate against a window.
@@ -102,6 +105,7 @@ type HarnessHealth struct {
 }
 
 type httpError struct {
+	code   string
 	status int
 	msg    string
 }
@@ -151,6 +155,10 @@ func writeErr(w http.ResponseWriter, err error) {
 	}
 	var he *httpError
 	if errors.As(err, &he) {
+		if he.code != "" {
+			httpapi.WriteJSON(w, he.status, map[string]string{"error": he.msg, "code": he.code})
+			return
+		}
 		httpapi.WriteError(w, he.status, he.msg)
 		return
 	}

@@ -67,7 +67,7 @@ test('nothing waits: no Needs you, a compact live line, and accounts with one pl
   const studio = page.locator(`[data-account="${ACCOUNTS.studio}"]`)
   await expect(studio.locator('.source')).toHaveText('Read on studio · 3 h ago · offline')
   await expect(studio.locator('.today')).toHaveText('waits for studio')
-  await expect(page.locator(`[data-account="${ACCOUNTS.claude}"] .win5`)).toHaveText('5-hour 60% left · keeps 16% for you · resets 16:40')
+  await expect(page.locator(`[data-account="${ACCOUNTS.claude}"] .win5`)).toHaveText('5-hour window 60% left · keeps 16% for you · resets 16:40')
   await expect(pool(page, 'claude').locator('.plan')).toHaveText('Today: use up to ~10% of Claude (4% so far) — on track to finish at 0% by Fri 22:00, before it resets Sun 11:00. Its 5-hour window keeps ~16% for you until 16:40.')
   await expect(pool(page, 'grok').locator('.plan')).toContainText('(fresh week)')
   await expect(pool(page, 'cursor').locator('.plan')).toHaveText('Ahead of pace: 7% used today, the plan was ~6%. Agents ease off Cursor until tomorrow.')
@@ -472,7 +472,7 @@ test('stale readings, % used per account and globally, and Manage accounts', asy
   await expect(page.locator(`[data-account="${ACCOUNTS.claude}"] .win5`)).toContainText('40% used')
   await cap(page).getByRole('link', { name: /Manage/ }).click()
   await expect(page).toHaveURL('/settings/accounts')
-  await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('Spare')
+  await expect(page.locator('#agent-accounts')).toContainText('Spare')
 })
 
 test('without account.manage the pacing controls stay visible but inert', async ({ page }) => {

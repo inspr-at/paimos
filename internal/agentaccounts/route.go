@@ -4,6 +4,7 @@ package agentaccounts
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"sort"
@@ -17,6 +18,7 @@ import (
 )
 
 type runRow struct {
+	LimitEstimates        map[string]int64
 	CapacityOverride      string
 	Purpose               string
 	VerificationAccountID *string
@@ -39,11 +41,11 @@ func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 	err := tx.QueryRow(ctx, `
 		SELECT r.id::text, r.agent_principal_id::text, r.model_profile_id::text, r.account_id::text,
          r.status, r.daemon_id, r.daemon_generation, COALESCE(r.requested_account_id,r.retry_account_id)::text,
-         r.purpose, e.account_id::text, e.verification_expires_at, r.capacity_override
+         r.purpose, e.account_id::text, e.verification_expires_at, r.capacity_override, r.account_limit_estimates
   FROM agent_runs r LEFT JOIN agent_pairing_enrollments e
    ON e.tenant_id=r.tenant_id AND e.verification_run_id=r.id
   WHERE r.id = $1::uuid FOR UPDATE OF r`, id).
-		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation, &run.RequestedAccountID, &run.Purpose, &run.VerificationAccountID, &run.VerificationExpiresAt, &run.CapacityOverride)
+		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation, &run.RequestedAccountID, &run.Purpose, &run.VerificationAccountID, &run.VerificationExpiresAt, &run.CapacityOverride, &run.LimitEstimates)
 	if isNoRows(err) {
 		return runRow{}, fail(http.StatusNotFound, "run not found")
 	}
@@ -121,16 +123,23 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if err != nil {
 		return RouteResult{}, err
 	}
-	account, windows, err := selectAccount(ctx, tx, run, p.ID, harness, *run.ProfileID, daemonID, accountIDs, estimates, now)
+	account, windows, limitEstimates, err := selectAccount(ctx, tx, run, p.ID, harness, *run.ProfileID, daemonID, accountIDs, estimates, now)
 	if err != nil {
 		return RouteResult{}, err
 	}
 	if err = agentpairing.RunFence(ctx, tx, account.ID, run.ID, false); err != nil {
 		return RouteResult{}, err
 	}
+	if limitEstimates == nil {
+		limitEstimates = map[string]int64{}
+	}
+	rawEstimates, err := json.Marshal(limitEstimates)
+	if err != nil {
+		return RouteResult{}, err
+	}
 	tag, err := tx.Exec(ctx, `
-		UPDATE agent_runs SET account_id = $2::uuid
-		WHERE id = $1::uuid AND account_id IS NULL AND status = 'queued'`, run.ID, account.ID)
+		UPDATE agent_runs SET account_id = $2::uuid, account_limit_estimates = $3
+		WHERE id = $1::uuid AND account_id IS NULL AND status = 'queued'`, run.ID, account.ID, rawEstimates)
 	if err != nil {
 		return RouteResult{}, err
 	}
@@ -318,6 +327,7 @@ func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemon
 }
 
 type ranked struct {
+	limitEstimates map[string]int64
 	account Account
 	windows []Window
 	cap     float64
@@ -325,7 +335,7 @@ type ranked struct {
 	slots   int
 }
 
-func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harness, profileID, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, error) {
+func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harness, profileID, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, map[string]int64, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
@@ -337,7 +347,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		ORDER BY id
 		FOR UPDATE`, harness, daemonID, principalID, accountIDs, profileID)
 	if err != nil {
-		return Account{}, nil, err
+		return Account{}, nil, nil, err
 	}
 	defer rows.Close()
 	var accounts []Account
@@ -345,24 +355,24 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	for rows.Next() {
 		account, err := scanAccount(rows)
 		if err != nil {
-			return Account{}, nil, err
+			return Account{}, nil, nil, err
 		}
 		accounts = append(accounts, account)
 		ids = append(ids, account.ID)
 	}
 	if err := rows.Err(); err != nil {
-		return Account{}, nil, err
+		return Account{}, nil, nil, err
 	}
 	if len(accounts) == 0 {
-		return Account{}, nil, fail(http.StatusConflict, "no eligible account")
+		return Account{}, nil, nil, fail(http.StatusConflict, "no eligible account")
 	}
 	windows, err := lockAccountWindows(ctx, tx, ids)
 	if err != nil {
-		return Account{}, nil, err
+		return Account{}, nil, nil, err
 	}
 	usedSlots, err := occupancy(ctx, tx)
 	if err != nil {
-		return Account{}, nil, err
+		return Account{}, nil, nil, err
 	}
 	var picks []ranked
 	for _, account := range accounts {
@@ -378,9 +388,13 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 			}
 		} else {
 			var wait *CapacityWait
+			run.LimitEstimates, err = learnedLimitEstimates(ctx, tx, account.ID, estimates)
+			if err != nil {
+				return Account{}, nil, nil, err
+			}
 			active, wait, err = admission(ctx, tx, account, windows[account.ID], now, usedSlots[account.ID], run, false)
 			if err != nil {
-				return Account{}, nil, err
+				return Account{}, nil, nil, err
 			}
 			if wait != nil {
 				continue
@@ -410,10 +424,12 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		if !ok {
 			continue
 		}
-		picks = append(picks, routeRank(account, active, usedSlots[account.ID], estimates, now))
+		pick := routeRank(account, active, usedSlots[account.ID], estimates, now)
+		pick.limitEstimates = run.LimitEstimates
+		picks = append(picks, pick)
 	}
 	if len(picks) == 0 {
-		return Account{}, nil, fail(http.StatusConflict, "no eligible account")
+		return Account{}, nil, nil, fail(http.StatusConflict, "no eligible account")
 	}
 	orderPicks(picks)
 	// Materialize a provisional grant only for the selected account; losing
@@ -424,10 +440,10 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 			continue
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_read_at,capacity_allowed,capacity_source,capacity_bucket) SELECT tenant_id,id,$2,$3,'percent',1,0,'unrestricted',0,$5,$4,true,'estimate',$6 FROM agent_accounts WHERE id=$1 RETURNING id::text`, w.AccountID, w.StartsAt, w.EndsAt, w.capacityReadAt, w.capacityKind, w.capacityBucket).Scan(&w.ID); err != nil {
-			return Account{}, nil, err
+			return Account{}, nil, nil, err
 		}
 	}
-	return picks[0].account, picks[0].windows, nil
+	return picks[0].account, picks[0].windows, picks[0].limitEstimates, nil
 }
 
 func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (map[string][]Window, error) {
@@ -435,7 +451,7 @@ func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (ma
 		SELECT id::text, account_id::text, starts_at, ends_at, unit, allowance, used, reserved,
 		       pace_model, burst_ratio::float8, pairing_verification, capacity_read_at, capacity_allowed, COALESCE(capacity_kind,''), capacity_bucket, capacity_retired, capacity_refresh_run::text
 		FROM account_allowance_windows
-		WHERE account_id::text = ANY($1::text[])
+		WHERE account_id::text = ANY($1::text[]) AND (removed_at IS NULL OR EXISTS (SELECT 1 FROM account_limit_rules l WHERE l.from_window_id=account_allowance_windows.id AND l.removed_at IS NULL))
 		ORDER BY id
 		FOR UPDATE`, accountIDs)
 	if err != nil {

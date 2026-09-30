@@ -300,8 +300,9 @@ func testCapacityActiveWindowSelection(t *testing.T, now time.Time) {
 	if got := activeWindows([]Window{denied, manual}, now); len(got) != 0 {
 		t.Fatal("reset bypassed fresh vendor denial")
 	}
+	// A manual window caps on top of the reading (AEON-384): both bind.
 	got := activeWindows([]Window{fresh, manual}, now)
-	if len(got) != 1 || got[0].ID != "manual" {
+	if len(got) != 2 || got[0].ID != "manual" || got[1].ID != "derived" {
 		t.Fatal(got)
 	}
 }
@@ -329,6 +330,8 @@ func TestCapacityPacingAtNightAndDay(t *testing.T) {
 						readAt := now.Add(-time.Minute)
 						windows := []Window{{AccountID: account.ID, StartsAt: now.Add(-4 * time.Hour), EndsAt: now.Add(time.Hour), Unit: "percent", Allowance: 100, Used: 20, PaceModel: "unrestricted", capacityReadAt: &readAt, capacityAllowed: true, capacityKind: "5h"}}
 						schedule := capacity.DefaultSchedule()
+						// This fixture isolates the work-hours band from Keep for you.
+						schedule.Reserve = capacity.ReserveOff
 						schedule.Override = override
 						err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 							return applyCapacityPacing(t.Context(), tx, account, windows, now, schedule)

@@ -10,7 +10,9 @@ import { pairingEnrollment, pairingView } from './agent-pairing-fixtures'
 export const NOW = Date.parse('2026-09-29T12:02:00Z') // Tue 14:02 in Vienna
 export const TZ = 'Europe/Vienna'
 const uuid = (n: number) => `c0000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
-export const ACCOUNTS = { spare: uuid(1), main: uuid(2), studio: uuid(3), claude: uuid(4), grok: uuid(5), cursor: uuid(6) }
+export const ACCOUNTS = { spare: uuid(1), main: uuid(2), studio: uuid(3), claude: uuid(4), grok: uuid(5), cursor: uuid(6), pi: uuid(7) }
+/** A limit set by hand before the Advanced sentence (AEON-384): pairing's ongoing requests on Spare. */
+export const OLD_WINDOW = 'f0000000-0000-4000-8000-000000000001'
 const MBP = 'd0000000-0000-4000-8000-000000000001', STUDIO = 'd0000000-0000-4000-8000-000000000002'
 const iso = (s: string) => new Date(Date.parse(s)).toISOString()
 const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString()
@@ -31,10 +33,6 @@ export interface CapacityOptions {
   unmeasured?: boolean
   /** mbp2607's setup reports login_required (computer-wide, not per account). */
   computerLogin?: boolean
-  /** Long account labels and host names, for the accounts-card width sweep. */
-  longNames?: boolean
-  /** A Pi pool with one account and no reading yet. */
-  unread?: boolean
   /**
    * The one-time plan card: 'first' has no saved schedule yet, 'new' a release 11
    * schedule without Keep for you. By default Keep for you is confirmed (Auto).
@@ -44,6 +42,19 @@ export interface CapacityOptions {
   reserve?: 'off' | number
   /** Away until Monday 08:00, set on the person's schedule. */
   away?: boolean
+  /**
+   * Settings → Accounts (AEON-384): Main has the Advanced sentence (20% a day,
+   * 12% used), Spare an old limit set by hand, Grok 5 runs a week (3 so far).
+   */
+  limits?: boolean
+  /** A Pi account on an API key, with list-price spend this month. */
+  apiKey?: boolean
+  /** Studio is also called Main, so both Codex rows ask to be named. */
+  clash?: boolean
+  /** Long account labels and host names, for the accounts-card width sweep. */
+  longNames?: boolean
+  /** A Pi pool with one account and no reading yet. */
+  unread?: boolean
 }
 
 export function capacityWorld(options: CapacityOptions = {}) {
@@ -58,6 +69,8 @@ export function capacityWorld(options: CapacityOptions = {}) {
     { id: ACCOUNTS.grok, label: 'markus', harness: 'grok', host: 'mbp2607', plan: 'SuperGrok Heavy', ...(options.unavailable ? { probe: false, failure: 'unavailable' } : {}), windows: [{ kind: 'weekly', used: 0, usedToday: 0, budget: 13, reset: '2026-10-06T11:10:00Z', start: '2026-09-29T11:10:00Z', source: 'agentd', readMin: options.stale ? 400 : 12, finish: '2026-10-06T11:10:00Z' }] },
   ]
   if (options.unmeasured) accts.find(a => a.id === ACCOUNTS.studio)!.windows = []
+  if (options.clash) accts.find(a => a.id === ACCOUNTS.studio)!.label = 'Main'
+  if (options.apiKey) accts.push({ id: ACCOUNTS.pi, label: 'OpenRouter key', harness: 'pi', host: 'mbp2607', plan: '', windows: [] })
   if (!options.noCursor) accts.push({ id: ACCOUNTS.cursor, label: 'markus', harness: 'cursor', host: 'mbp2607', plan: 'Pro', state: options.signin ? 'unavailable' : 'available', probe: !options.signin, ...(options.signin ? { failure: 'auth_failed' } : {}), windows: [{ kind: 'monthly', used: 43, usedToday: 7, budget: 6, reset: '2026-10-14T07:00:00Z', start: '2026-09-14T07:00:00Z', source: 'estimate', readMin: options.signin ? 2 * 24 * 60 : 20 }] })
   if (options.unread) accts.push({ id: uuid(7), label: options.longNames ? 'Pi on the home server waiting for its first run' : 'Pi on hsb1', harness: 'pi', host: 'mbp2607', plan: '', windows: [] })
   if (options.longNames) {
@@ -161,8 +174,11 @@ export function capacityWorld(options: CapacityOptions = {}) {
       s = resolveChain([account, carried, draft].filter(Boolean) as Schedule[])
     }
     const resets = a.windows.map(w => Date.parse(w.reset)).filter(t => t > NOW)
+    const rule = rules.get(a.id)
     return {
       account_id: a.id, ongoing_use_approved: true, schedule: s,
+      ...(rule ? { limit: { ...rule, period_end: periodEnd(rule.period) } } : {}),
+      ...(a.harness === 'pi' && options.apiKey ? { spend_month_usd: '12.40', cost_limit_supported: true } : {}),
       ...(a.failure ? { probe_failure: a.failure } : {}),
       ...(resets.length ? { limiting_reset: new Date(Math.min(...resets)).toISOString() } : {}),
       windows: a.windows.map(w => ({
@@ -171,10 +187,31 @@ export function capacityWorld(options: CapacityOptions = {}) {
       })),
     }
   })
+  // The Advanced sentence per account, with what it counted this period.
+  type Rule = { id: string; account_id: string; amount: number; unit: string; period: string; created_at: string; used: number; from_window_id?: string }
+  const rules = new Map<string, Rule>()
+  const periodEnd = (period: string) => iso(period === 'day' ? '2026-09-29T22:00:00Z' : period === 'week' ? '2026-10-04T22:00:00Z' : '2026-10-31T23:00:00Z')
+  let ruleSeq = 0
+  const rule = (accountId: string, body: { amount: number; unit: string; period: string }, used = 0, from?: string): Rule => ({
+    id: `a0000000-0000-4000-8000-${String(++ruleSeq).padStart(12, '0')}`, account_id: accountId, ...body, created_at: minutesAgo(60), used, ...(from ? { from_window_id: from } : {}),
+  })
+  type Manual = { id: string; account_id: string; starts_at: string; ends_at: string; unit: string; allowance: number; used: number; reserved: number; pace_model: string; burst_ratio: number; provisional: boolean; set_by_you: true }
+  const manual = new Map<string, Manual[]>()
+  if (options.limits) {
+    rules.set(ACCOUNTS.main, rule(ACCOUNTS.main, { amount: 20, unit: 'percent', period: 'day' }, 12))
+    rules.set(ACCOUNTS.grok, rule(ACCOUNTS.grok, { amount: 5, unit: 'runs', period: 'week' }, 3))
+    manual.set(ACCOUNTS.spare, [{ id: OLD_WINDOW, account_id: ACCOUNTS.spare, starts_at: iso('2026-09-28T06:00:00Z'), ends_at: iso('2026-10-28T07:00:00Z'), unit: 'requests', allowance: 300, used: 40, reserved: 0, pace_model: 'unrestricted', burst_ratio: 0, provisional: false, set_by_you: true }])
+  }
   const agentAccounts = accts.map(a => ({
     id: a.id, account_key: `${a.harness}-${a.label}`, harness: a.harness, daemon_id: a.host, label: a.label, plan: a.plan, host_label: a.hostLabel ?? a.host, registered_by_principal_id: 'me',
-    state: a.state ?? 'available', max_parallel_runs: 2, last_probe_at: minutesAgo(3), last_probe_ok: a.probe ?? true, created_at: minutesAgo(60 * 24 * 30), windows: [],
+    state: a.state ?? 'available', max_parallel_runs: 2, last_probe_at: minutesAgo(3), last_probe_ok: a.probe ?? true, created_at: minutesAgo(60 * 24 * 30), windows: manual.get(a.id) ?? [] as Manual[],
   }))
+  // The last readings of an account: the current one, then earlier ones a little lower.
+  const readings = (a: Acct) => a.windows.flatMap(w => [0, 1, 2, 3].map(i => ({
+    window_kind: w.kind, bucket: '', window_minutes: w.kind === '5h' ? 300 : w.kind === 'monthly' ? 43200 : 10080, used_percent: Math.max(0, w.used - i),
+    resets_at: iso(w.reset), plan: w.plan ?? '', source: i === 0 ? w.source : 'agentd', read_at: minutesAgo(w.readMin + [0, 22, 295, 540][i]),
+  })))
+  const writes: { path: string; method: string; body: unknown }[] = []
   const computers = [
     pairingView({ state: 'redeemed', computer_id: MBP, computer_name: 'mbp2607', computer_state: 'connected', setup_state: options.computerLogin ? 'login_required' : 'connected', connectivity: 'online', last_seen_at: minutesAgo(0.2),
       enrollments: accts.filter(a => a.host === 'mbp2607').map(a => pairingEnrollment(a.id, `${a.harness}-${a.label}`, a.harness, a.label)) }),
@@ -215,8 +252,25 @@ export function capacityWorld(options: CapacityOptions = {}) {
       return { status: 204 }
     }
     if (path === '/api/agent-pairing/computers' && method === 'GET') return { json: { computers } }
+    // Settings → Accounts (AEON-384): rename, the Advanced sentence, old limits, readings.
+    const one = /^\/api\/agent-accounts\/([^/]+)\/(label|limit|readings|windows\/([^/]+)(\/repeat)?)$/.exec(path)
+    if (!one) return null
+    const [, id, what, windowId, repeat] = one
+    const acct = accts.find(a => a.id === id)
+    const entry = agentAccounts.find(a => a.id === id)
+    if (!acct || !entry) return { status: 404, json: { error: 'account not found' } }
+    if (what === 'readings' && method === 'GET') return { json: readings(acct) }
+    writes.push({ path, method, body })
+    if (what === 'label' && method === 'PUT') { acct.label = entry.label = (body as { label: string }).label; return { json: entry } }
+    if (what === 'limit' && method === 'PUT') { const r = rule(id, body as { amount: number; unit: string; period: string }); rules.set(id, r); const { used: _u, ...out } = r; return { json: out } }
+    if (what === 'limit' && method === 'DELETE') { rules.delete(id); return { status: 204 } }
+    const w = entry.windows.find(x => x.id === windowId)
+    if (!w) return { status: 404, json: { error: 'limit not found' } }
+    entry.windows = entry.windows.filter(x => x.id !== windowId)
+    if (method === 'DELETE' && !repeat) return { status: 204 }
+    if (method === 'POST' && repeat) { const r = rule(id, { amount: w.allowance, unit: w.unit, period: 'month' }, w.used, w.id); rules.set(id, r); const { used: _u, ...out } = r; return { json: out } }
     return null
   }
-  return { accounts: agentAccounts, computers, schedules, puts, previews, handle }
+  return { accounts: agentAccounts, computers, schedules, puts, previews, writes, handle }
 }
 export type CapacityWorld = ReturnType<typeof capacityWorld>

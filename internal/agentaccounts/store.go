@@ -106,7 +106,7 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		             AND r.state = 'settled' AND r.actual_units = 0
 		       ) AS provisional, w.capacity_read_at, w.capacity_allowed, COALESCE(w.capacity_kind,''), w.capacity_bucket, w.capacity_retired, w.capacity_refresh_run::text
 		FROM account_allowance_windows w
-		WHERE NOT w.pairing_verification AND NOT w.capacity_retired
+		WHERE NOT w.pairing_verification AND NOT w.capacity_retired AND w.removed_at IS NULL
 		ORDER BY w.account_id, w.starts_at, w.id`)
 	if err != nil {
 		return nil, err
@@ -120,6 +120,8 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		}
 		if w.capacityReadAt != nil {
 			w.Provisional = synthetic(w)
+		} else {
+			w.SetByYou = true
 		} // Vendor percentage is measured; token settlement is irrelevant.
 		byAccount[w.AccountID] = append(byAccount[w.AccountID], w)
 	}
@@ -415,7 +417,7 @@ func createWindow(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID 
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM account_allowance_windows
-			WHERE account_id = $1::uuid AND unit = $2 AND NOT pairing_verification
+			WHERE account_id = $1::uuid AND unit = $2 AND NOT pairing_verification AND removed_at IS NULL
 			  AND starts_at < $4 AND ends_at > $3
 		)`, accountID, in.Unit, in.StartsAt, in.EndsAt).Scan(&overlap); err != nil {
 		return Window{}, err
@@ -439,6 +441,7 @@ func createWindow(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID 
 		return Window{}, err
 	}
 	w.Provisional = true // No reservation has measured usage in a new window.
+	w.SetByYou = true
 	if err := writeEvent(ctx, tx, p, evWindow, nil, w); err != nil {
 		return Window{}, err
 	}
