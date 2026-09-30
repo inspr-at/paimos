@@ -125,7 +125,8 @@ go run ./internal/releasehistory/packnotes -repo . -snapshot SNAPSHOT.json -rese
 
 `VERSION` must match `version.json`. Both UUIDs bind the source to the selected
 PPM tenant and AEON project. This explicit reserve step may freeze an unpublished
-preview; historical imports must already be frozen. Use the configured API
+preview; historical snapshot imports must already be frozen. Historic ticket
+exports use the separate explicit workflow below. Use the configured API
 client with `releases.read`/`nodes.read` to obtain the export. Keep the raw export
 in its authorized local context: it may contain hidden text and tenant IDs and
 must not be committed as the public projection. The generated file contains
@@ -135,7 +136,7 @@ only with that same export file: a fresh export has a new `captured_at` and
 conflicts. Restore the file before re-reserving; do not export the preview again.
 Conflicting entries fail instead of rewriting a reserved version.
 
-For historical backfill, export existing stored snapshots as `VERSION.json` in
+For historical backfill where snapshots exist, export stored snapshots as `VERSION.json` in
 one directory and run the same command with `-snapshots DIRECTORY -tenant
 TENANT_UUID -project AEON_PROJECT_UUID`. A run with no exports imports only
 authoritative snapshots already in local tags and reports missing versions.
@@ -143,15 +144,16 @@ Alternatively, save an authorized PPM `GET /api/releases` response, record that
 workspace's `tenant_id` and `project_node_id` on the saved file, and pass
 `-history HISTORY.json -tenant TENANT_UUID -project AEON_PROJECT_UUID`. Prefer
 `-history` over `-snapshots` for backfill. A snapshot file from before group
-storage has no group, and packnotes cannot derive one offline; those embedded
+storage has no group, and this snapshot import cannot derive one offline; those embedded
 items then take a group from the viewing tenant's own tickets, which usually
 means Features. `-history` records the group the serving workspace already
 derived. The two identifiers must match the flags; a file for another workspace
 is rejected. This consumes only `database-snapshot` or immutable tag-snapshot
 notes, never `changes.linked_tickets`. It records each ticket's group, including
 a group the server derived from the live classification when the snapshot itself
-had none. Never substitute live ticket fields, release PR bodies or pills.tsv
-files for missing snapshots. Existing tags and artifacts stay unchanged; the new
+had none. The explicit historic-ticket workflow below is the only import of current
+ticket fields for missing snapshots; release PR bodies and pills.tsv are not sources.
+Existing tags and artifacts stay unchanged; the new
 binary carries the backfill. Migration `0997` captures future groups alongside
 the five note fields. Older snapshots have no group. Serving those classifies
 every commit ticket from the current classification, not only the tickets the
@@ -217,6 +219,51 @@ The writing-rule proposal is `docs/proposals/ticket-benefit-writing.json`, using
 AR1's draft Rule DTO. It must be imported as a draft at the fetched revision and
 published separately by an authorized human; it changes no effective harness
 files or company rules.
+
+### Historic product notes without journey membership (AEON-398)
+
+Historic AEON tickets often have no journey release assignment. For published
+releases without a capture, use the same Git tag history and union of release
+and commit ticket keys as the history builder. This is explicitly later
+`release-manifest-tickets` evidence, not original journey membership. No
+database write, migration, tag rewrite or deployment is involved.
+
+From a full checkout with release tags, use a configured PPM agent client (or
+wrapper) with `nodes.read`. It must select the approved PPM tenant; no credential
+is passed on the command line. Both source UUIDs are explicit:
+
+```sh
+go run ./internal/releasehistory/exporthistoric -repo . -client /path/to/ppm-client -tenant TENANT_UUID -project AEON_PROJECT_UUID -out tmp/historic-notes.json
+# Review the ignored local export, then freeze only its public projection:
+go run ./internal/releasehistory/packnotes -repo . -historic tmp/historic-notes.json -tenant TENANT_UUID -project AEON_PROJECT_UUID
+```
+
+The exporter verifies the authenticated tenant, resolves each node's kind and
+project ancestry, and reads the four bilingual note fields, type, tags and hide
+flag. The output must be ignored and inside this checkout; an existing file is
+never overwritten. Keep it local: hidden text is present for the projection
+check and must never be committed. API failures, missing tickets, wrong source
+bindings, duplicate keys and invalid hide flags fail the import rather than
+publishing a partial history. A later release can repeat these two commands with
+a new export filename; already captured versions remain unchanged.
+
+`packnotes -historic` reuses `ParseTicketMeta` and the live linked-note projection
+for Features/Fixes, including bug kinds, types and tags. Hidden notes are omitted;
+tickets with no note text stay under Other. Missing translations stay empty.
+The public bundle contains only ticket keys, existing note text, groups and
+capture provenance. Its digest covers the version, manifest membership source,
+capture time and selected ticket observations; `written_after_release` is true.
+Only published versions without captures are added; reservations and existing
+snapshots are skipped. Review and commit `internal/releasehistory/data/product-notes.json`
+with the code. Export counts distinguish releases and ticket occurrences across
+releases (classified, Other and hidden); one ticket can occur in several releases.
+
+Regression: `TestHistoricNotesNonPPMTenant` builds historic Git membership,
+imports the export and serves it without tenant ticket data. The Playwright
+`release-historic-tenant.spec.ts` consumes that HTTP output and exercises both
+groups, the release filters and Highlights/Details at desktop and phone widths.
+`GET /api/releases` and `GET /api/releases/{version}` support agent keys with
+`releases.read`; presentation writes remain person-only.
 
 ## Historical note backfill (AEON-290)
 

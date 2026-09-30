@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // packnotes is the offline reserve/backfill step. Inputs are explicit snapshot
-// exports, never PR bodies, TSVs or live ticket fields. It writes only the public
+// exports, or explicitly selected historic ticket exports. It writes only the public
 // projection and leaves existing version entries immutable.
 package main
 
@@ -27,21 +27,22 @@ func run() error {
 	repo := flag.String("repo", ".", "Aeon checkout")
 	snapshots := flag.String("snapshots", "", "directory of frozen VERSION.json snapshot exports")
 	historyFile := flag.String("history", "", "reviewed /api/releases export with tenant_id and project_node_id; frozen notes only")
+	historic := flag.String("historic", "", "reviewed historic ticket export; freeze public fields for published Git membership")
 	snapshot := flag.String("snapshot", "", "one snapshot export for the reserved version")
 	reserve := flag.String("reserve", "", "explicitly freeze the preview for version.json's reserved coordinate")
 	tenant := flag.String("tenant", "", "expected source tenant UUID (required for exports)")
 	project := flag.String("project", "", "expected source AEON project UUID (required for exports)")
 	flag.Parse()
 	inputs := 0
-	for _, value := range []string{*snapshot, *snapshots, *historyFile} {
+	for _, value := range []string{*snapshot, *snapshots, *historyFile, *historic} {
 		if value != "" {
 			inputs++
 		}
 	}
 	if flag.NArg() != 0 || ((*snapshot == "") != (*reserve == "")) || inputs > 1 {
-		return fmt.Errorf("use -snapshots DIR or -snapshot FILE -reserve VERSION; exports require -tenant UUID -project UUID")
+		return fmt.Errorf("select one of -snapshots DIR, -history FILE, -historic FILE or -snapshot FILE -reserve VERSION; exports require -tenant UUID -project UUID")
 	}
-	if (*snapshots != "" || *snapshot != "" || *historyFile != "") && (*tenant == "" || *project == "") {
+	if inputs > 0 && (*tenant == "" || *project == "") {
 		return fmt.Errorf("exports require -tenant UUID -project UUID")
 	}
 	path := filepath.Join(*repo, releasehistory.ProductNotesPath)
@@ -67,6 +68,17 @@ func run() error {
 	// public fields only; historical tags and the raw files remain untouched.
 	if err := bundle.AddHistory(history); err != nil {
 		return err
+	}
+	if *historic != "" {
+		raw, err := os.ReadFile(*historic)
+		if err != nil {
+			return err
+		}
+		report, err := bundle.AddHistoric(history, raw, *tenant, *project)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("historic notes: %d releases backfilled; %d ticket occurrences classified; %d under Other; %d hidden\n", report.Releases, report.Classified, report.Other, report.Hidden)
 	}
 	if *historyFile != "" {
 		raw, err := os.ReadFile(*historyFile)

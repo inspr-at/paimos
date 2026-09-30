@@ -1382,7 +1382,7 @@ paths:
     get:
       operationId: listReleases
       summary: The release history embedded in this build (inspr.release-history.v1)
-      description: Frozen snapshots for the caller tenant and visible AEON project win over embedded public product notes. Other tenants receive the same embedded product notes without reading live ticket fields. Releases without either retain the historical headline. Backfilled notes are explicitly marked written_after_release.
+      description: Requires releases.read; agent keys are supported. Frozen snapshots for the caller tenant and visible AEON project win over embedded public product notes. Other tenants receive the same embedded product notes without reading live ticket fields. Releases without either retain the historical headline. Backfilled notes are explicitly marked written_after_release.
       responses:
         '200':
           description: History, newest first
@@ -1390,12 +1390,13 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ReleaseHistory'}
         '401': {description: Authentication required}
+        '403': {description: Release read permission or agent key scope required}
         '500': {description: Stored release notes could not be read}
   /releases/{version}:
     get:
       operationId: getRelease
       summary: One release of the embedded history
-      description: Uses the same tenant snapshot and embedded public product note precedence as the list endpoint.
+      description: Requires releases.read; agent keys are supported. Uses the same tenant snapshot and embedded public product note precedence as the list endpoint.
       parameters:
         - {name: version, in: path, required: true, schema: {type: string}, description: 'The calendar version, with or without the leading v'}
       responses:
@@ -1406,6 +1407,7 @@ paths:
               schema: {$ref: '#/components/schemas/Release'}
         '400': {description: Not a calendar version (inspr-calver-3 or inspr-calendar-v2 coordinate)}
         '401': {description: Authentication required}
+        '403': {description: Release read permission or agent key scope required}
         '500': {description: Stored release notes could not be read}
         '404': {description: No such release in this build's history}
   /releases/{version}/presentation:
