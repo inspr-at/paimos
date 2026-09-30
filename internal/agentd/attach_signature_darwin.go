@@ -5,15 +5,18 @@ package agentd
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // Use Apple's fixed system utility with a minimal environment, bounded output
 // and an Apple certificate-chain requirement, not just a self-reported Team ID.
-func inspectAttachSignature(ctx context.Context, path string) (attachSignature, error) {
-	return inspectAttachSignatureWith(ctx, path, runAttachCodesign)
+func inspectAttachSignature(ctx context.Context, pid string) (attachSignature, error) {
+	return inspectAttachSignatureWith(ctx, pid, runAttachCodesign)
 }
 func runAttachCodesign(ctx context.Context, args ...string) (string, error) {
 	op, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -25,8 +28,15 @@ func runAttachCodesign(ctx context.Context, args ...string) (string, error) {
 	output := &attachCodesignOutput{}
 	cmd.Stdout, cmd.Stderr = output, output
 	err := cmd.Run()
+	if op.Err() != nil {
+		return "", errAttachSignatureUnavailable
+	}
 	if output.overflow {
 		return "", errAttachSignature
+	}
+	var exitError *exec.ExitError
+	if err != nil && !errors.As(err, &exitError) {
+		return "", errAttachSignatureUnavailable
 	}
 	return output.text.String(), err
 }
@@ -44,16 +54,23 @@ func (b *attachCodesignOutput) Write(p []byte) (int, error) {
 	_, _ = b.text.Write(p)
 	return len(p), nil
 }
-func inspectAttachSignatureWith(ctx context.Context, path string, run func(context.Context, ...string) (string, error)) (attachSignature, error) {
-	output, err := run(ctx, "-dv", "--verbose=4", path)
+func inspectAttachSignatureWith(ctx context.Context, pid string, run func(context.Context, ...string) (string, error)) (attachSignature, error) {
+	n, err := strconv.Atoi(pid)
+	if err != nil || n < 1 || strconv.Itoa(n) != pid {
+		return attachSignature{}, errAttachSignature
+	}
+	output, err := run(ctx, "-dv", "--verbose=4", pid)
 	if err != nil {
+		if errors.Is(err, errAttachSignatureUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return attachSignature{}, errAttachSignatureUnavailable
+		}
 		// Only the explicit unsigned diagnostic enables the local fallback.
-		if strings.TrimSpace(output) == path+": code object is not signed at all" {
+		if strings.TrimSpace(output) == pid+": code object is not signed at all" {
 			return attachSignature{}, nil
 		}
 		return attachSignature{}, errAttachSignature
 	}
-	team := ""
+	team, identifier := "", ""
 	for _, line := range strings.Split(output, "\n") {
 		if strings.HasPrefix(line, "TeamIdentifier=") {
 			if team != "" {
@@ -61,12 +78,33 @@ func inspectAttachSignatureWith(ctx context.Context, path string, run func(conte
 			}
 			team = strings.TrimPrefix(line, "TeamIdentifier=")
 		}
+		if strings.HasPrefix(line, "Identifier=") {
+			if identifier != "" {
+				return attachSignature{}, errAttachSignature
+			}
+			identifier = strings.TrimPrefix(line, "Identifier=")
+		}
 	}
 	if team == "" || team == "not set" || strings.Contains(output, "Signature=adhoc") {
 		return attachSignature{}, errAttachSignature
 	}
-	if _, err := run(ctx, "--verify", "--strict", "-R=anchor apple generic", path); err != nil {
+	// Display text selects a fixed built-in requirement; it is never authority.
+	// Both certificate OU and CLI identifier are enforced by verification itself.
+	matched := false
+	for _, harness := range []string{Claude, Codex} {
+		matched = matched || team == attachVendorTeam(harness) && identifier == attachVendorIdentifier(harness)
+	}
+	if !matched {
 		return attachSignature{}, errAttachSignature
 	}
-	return attachSignature{TeamID: team, Signed: true}, nil
+	requirement := fmt.Sprintf("-R=anchor apple generic and certificate leaf[subject.OU] = %q and identifier %q", team, identifier)
+	// Verbosity adds the full static check to dynamic PID verification, including
+	// the check that the code on disk matches what is actually running.
+	if _, err := run(ctx, "--verify", "--strict", "-v", requirement, pid); err != nil {
+		if errors.Is(err, errAttachSignatureUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return attachSignature{}, errAttachSignatureUnavailable
+		}
+		return attachSignature{}, errAttachSignature
+	}
+	return attachSignature{TeamID: team, Identifier: identifier, Signed: true}, nil
 }

@@ -131,7 +131,7 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 				var detail agentd.AttachLocalError
 				if json.Unmarshal(raw, &detail) == nil && validAttachDiagnostic(detail.Hint) {
 					switch detail.Code {
-					case "harness_identity_mismatch", "harness_executable_unsafe", "harness_image_changed":
+					case "harness_identity_mismatch", "harness_executable_unsafe", "harness_image_changed", "harness_identity_unavailable":
 						return &detail
 					}
 				} else if hint := strings.TrimSpace(string(raw)); !strings.HasPrefix(hint, "{") && validAttachDiagnostic(hint) {
