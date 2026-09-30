@@ -77,6 +77,17 @@ export function cloudStride(count: number): number {
 export function glimpsePointInside(x: number, y: number, radius: number, width: number, height: number): boolean {
   return Number.isFinite(x) && Number.isFinite(y) && x - radius >= 8 && y - radius >= 8 && x + radius <= width - 8 && y + radius <= height - 8
 }
+// force-graph ignores a pointer at or beyond the top-left edge and reads nothing
+// beyond the far edges, so a node centre outside this area can never be picked.
+export function onCanvas(x: number, y: number, width: number, height: number): boolean {
+  return Number.isFinite(x) && Number.isFinite(y) && x > 0 && y > 0 && x < width && y < height
+}
+// A hit-bitmap pixel belongs to a node when it is opaque and holds that node's index colour.
+export function holdsIndexColour(pixel: ArrayLike<number>, color: string): boolean {
+  if (!/^#[\da-f]{6}$/i.test(color)) return false
+  const value = Number.parseInt(color.slice(1), 16)
+  return pixel[0] === (value >> 16 & 255) && pixel[1] === (value >> 8 & 255) && pixel[2] === (value & 255) && pixel[3] === 255
+}
 export function graphLayout(data: GraphData): { nodes: LayoutNode[]; links: LayoutEdge[] } {
   const degrees = new Map<string, number>()
   for (const link of data.links) for (const id of [link.source, link.target]) degrees.set(id, (degrees.get(id) ?? 0) + 1)
@@ -138,15 +149,20 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   let glimpseLaidOut = false
   // The product never publishes simulation stop. A canvas-centre click therefore
   // races the layout, and it misses whenever the bubble is not the centre.
-  // Test builds publish read-only canvas positions and data-settled. Settled
-  // means the engine has stopped, the projection has matched for two frames,
-  // and the 2D hit bitmap has been flushed for that frame. A restart, including
-  // a drag, clears it. The markers take no clicks (AEON-447).
+  // Test builds publish read-only canvas positions, data-settled and data-hovered.
+  // Settled means two things only: the engine has stopped with the projection
+  // matching for two frames, and the 2D hit bitmap was painted for this camera,
+  // canvas size and layout. A restart, drag, resize or camera move clears it and
+  // asks for a fresh paint. Whether one node can be picked is a separate,
+  // per-marker answer (data-node-pickable), so a covered or offscreen node
+  // never holds the others back. The markers take no clicks and no pick is
+  // ever delivered from here: a click reaches the app through force-graph only (AEON-447).
   const testNodes = import.meta.env.MODE === 'test' && !glimpse
   let layoutRunning = false
   let nodeLayer: HTMLDivElement | undefined
   const nodeTargets = new Map<string, HTMLSpanElement>()
-  let settleSig = '', settleFrames = 0, settlePaintSig = ''
+  let settleSig = '', settleFrames = 0
+  let hitPainted = false, hitKey = '', hitSig = '', hitPickable = new Set<string>()
   // The 2D picker reads a shadow canvas that is not in the document. Test builds
   // keep its context so a settle can paint the current frame itself.
   let shadowCtx: CanvasRenderingContext2D | undefined
@@ -443,13 +459,16 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       }
       el.dataset.nodeX = screen.x.toFixed(2)
       el.dataset.nodeY = screen.y.toFixed(2)
+      el.dataset.nodePickable = String(hitPickable.has(id))
     }
     for (const [id, el] of nodeTargets) if (!seen.has(id)) { el.remove(); nodeTargets.delete(id) }
   }
   // force-graph paints the hit bitmap at most every 800ms, and a same-value
   // flush is a no-op once that timer is running. Paint this frame's index
   // colours straight into the shadow canvas. 3D picking reads the meshes.
-  function flushHitBitmap() {
+  // This answers one question only: did the whole bitmap get painted. It does
+  // not say that any given node can be picked (see pickableNodes).
+  function paintHitBitmap() {
     if (!g2 || disposed) return !g2
     if (!shadowCtx) return false
     const px = window.devicePixelRatio || 1
@@ -472,55 +491,74 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       shadowCtx.fill()
       painted++
     }
-    // Settled only when the centre pixel is that node's index colour. A flushed
-    // timer that painted an older camera still misses the click.
-    return painted === nodes.length && nodes.length > 0 && bitmapMatches()
+    return painted === nodes.length && nodes.length > 0
   }
-  function bitmapMatches() {
-    if (!g2 || !shadowCtx) return false
+  // The exact inputs of the bitmap. The rounded projection misses a one-pixel
+  // resize or a sub-pixel camera move, and a resize also empties the canvas.
+  function hitBitmapKey() {
+    if (!g2) return 'mesh'
+    const origin = g2.graph2ScreenCoords(0, 0)
+    return `${g2.width()}x${g2.height()}@${window.devicePixelRatio || 1}|${g2.zoom()}|${origin.x},${origin.y}`
+  }
+  // A marker is pickable when a click at its centre would resolve to that node:
+  // inside the canvas, and (2D) the painted bitmap holds that node's index
+  // colour there. A covered or offscreen node is not pickable, and no other
+  // node depends on it.
+  function pickableNodes(points: Map<string, { x: number; y: number }>) {
+    const pickable = new Set<string>()
+    if (!graph) return pickable
     const px = window.devicePixelRatio || 1
     for (const n of nodes) {
-      const color = (n as LayoutNode & { __indexColor?: string }).__indexColor
-      const screen = g2.graph2ScreenCoords(n.x ?? 0, n.y ?? 0)
-      if (!color || screen.x <= 0 || screen.y <= 0) return false
-      const value = Number.parseInt(color.slice(1), 16)
-      let pixel: Uint8ClampedArray
-      try { pixel = shadowCtx.getImageData(screen.x * px, screen.y * px, 1, 1).data }
-      catch { return false }
-      if (pixel[0] !== (value >> 16 & 255) || pixel[1] !== (value >> 8 & 255) || pixel[2] !== (value & 255) || pixel[3] !== 255) return false
+      const at = points.get(n.id)
+      if (!at) continue
+      // The markers publish two decimals; the click lands on exactly those.
+      const x = Number(at.x.toFixed(2)), y = Number(at.y.toFixed(2))
+      if (!onCanvas(x, y, graph.width(), graph.height())) continue
+      if (g2) {
+        const color = (n as LayoutNode & { __indexColor?: string }).__indexColor
+        if (!color || !shadowCtx) continue
+        let pixel: Uint8ClampedArray
+        try { pixel = shadowCtx.getImageData(x * px, y * px, 1, 1).data }
+        catch { continue }
+        if (!holdsIndexColour(pixel, color)) continue
+      }
+      pickable.add(n.id)
     }
-    return true
+    return pickable
   }
   function publishTestNodes() {
     if (!testNodes || disposed) return
     const measured = projectNodes()
-    writeTestMarkers(measured.points)
     const frozen = !layoutRunning && measured.placed && measured.points.size === nodes.length && measured.sig !== ''
     if (frozen && measured.sig === settleSig) settleFrames++
     else settleFrames = 0
     settleSig = measured.sig
-    const stable = frozen && settleFrames >= 1
-    if (!stable) { host.dataset.settled = 'false'; settlePaintSig = ''; return }
-    if (settlePaintSig === measured.sig && host.dataset.settled === 'true') return
-    if (!flushHitBitmap() || layoutRunning || disposed) { host.dataset.settled = 'false'; settlePaintSig = ''; return }
-    const after = projectNodes()
-    writeTestMarkers(after.points)
-    if (!after.placed || after.sig !== measured.sig || after.points.size !== nodes.length) {
+    // Anything that moved or emptied the bitmap since its paint needs a new one.
+    if (hitPainted && (hitKey !== hitBitmapKey() || hitSig !== measured.sig)) { hitPainted = false; hitPickable = new Set() }
+    if (!frozen || settleFrames < 1) {
+      hitPainted = false; hitPickable = new Set()
+      writeTestMarkers(measured.points)
       host.dataset.settled = 'false'
-      settlePaintSig = ''
-      settleFrames = 0
-      settleSig = after.sig
       return
     }
-    settlePaintSig = after.sig
+    if (!hitPainted) {
+      if (!paintHitBitmap()) { writeTestMarkers(measured.points); host.dataset.settled = 'false'; return }
+      hitPainted = true; hitKey = hitBitmapKey(); hitSig = measured.sig
+      hitPickable = pickableNodes(measured.points)
+    }
+    writeTestMarkers(measured.points)
     host.dataset.settled = 'true'
   }
-  function unsettle() {
+  // `restart` is true when the layout may move again (new data, reheat, drag).
+  // A resize or camera move leaves the layout alone and only asks for a fresh paint.
+  function unsettle(restart = true) {
     if (!testNodes) return
-    layoutRunning = true
+    if (restart) layoutRunning = true
     settleFrames = 0
     settleSig = ''
-    settlePaintSig = ''
+    hitPainted = false
+    hitPickable = new Set()
+    for (const el of nodeTargets.values()) el.dataset.nodePickable = 'false'
     host.dataset.settled = 'false'
   }
   function interact() { cameraTaken = true; resumeAt = performance.now() + 5000; clearTimeout(settleTimer); cancelAnimationFrame(fitFrame) }
@@ -603,51 +641,20 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     .linkColor(linkColor).linkVisibility(glimpseLinkVisible).linkDirectionalParticles(particles).linkDirectionalParticleWidth(1.4).linkDirectionalParticleSpeed(.002)
     .linkDirectionalArrowLength(l => !glimpse && l.directed ? 3 : 0).linkDirectionalArrowRelPos(1).linkCurvature(l => glimpse ? 0 : l.curvature ?? 0)
     .warmupTicks(90).cooldownTicks(paused ? 0 : 140).d3VelocityDecay(.38)
-    .onNodeClick((node, event) => { deliverPick(node, event.clientX, event.clientY) }).onNodeHover(node => { if (glimpse) return; pointerNode = node; options.hover(node) })
+    .onNodeClick((node, event) => {
+      if (glimpse || performance.now() - openedAt < 100) return
+      lastPick = { node, x: event.clientX, y: event.clientY, at: performance.now() }; options.select(node)
+    }).onNodeHover(node => { if (glimpse) return; pointerNode = node; if (testNodes) host.dataset.hovered = node?.id ?? ''; options.hover(node) })
     .onBackgroundClick(() => { if (!glimpse && performance.now() - openedAt >= 100) options.clear() })
     .onNodeDrag(() => { if (!glimpse) { unsettle(); interact() } }).onNodeDragEnd(() => { if (!glimpse) { unsettle(); interact() } })
     .onEngineTick(() => { if (testNodes && !layoutRunning) unsettle() })
     .onEngineStop(() => { layoutRunning = false; if (fitOnSettle && !cameraTaken && !emphasis.selected) fit(); fitOnSettle = false })
-  let clickDelivered = false, sawDown = false, pressX = 0, pressY = 0
-  // One delivery for the library click and the test sample. force-graph drops
-  // the click when a move arrives while the button is down (AEON-447).
-  function deliverPick(node: LayoutNode, x: number, y: number) {
-    if (clickDelivered) return
-    clickDelivered = true
-    if (glimpse || performance.now() - openedAt < 100) return
-    lastPick = { node, x, y, at: performance.now() }; options.select(node)
-  }
-  function nodeAt(clientX: number, clientY: number) {
-    if (!shadowCtx || !g2) return null
-    const surface = host.querySelector('canvas')
-    if (!(surface instanceof HTMLCanvasElement)) return null
-    const rect = surface.getBoundingClientRect()
-    const x = clientX - rect.left, y = clientY - rect.top
-    if (x <= 0 || y <= 0) return null
-    const px = window.devicePixelRatio || 1
-    let pixel: Uint8ClampedArray
-    try { pixel = shadowCtx.getImageData(x * px, y * px, 1, 1).data } catch { return null }
-    return nodes.find(n => {
-      const color = (n as LayoutNode & { __indexColor?: string }).__indexColor
-      if (!color) return false
-      const value = Number.parseInt(color.slice(1), 16)
-      return pixel[0] === (value >> 16 & 255) && pixel[1] === (value >> 8 & 255) && pixel[2] === (value & 255)
-    }) ?? null
-  }
-  const pointerDown = (event: PointerEvent) => { clickDelivered = false; sawDown = true; pressX = event.clientX; pressY = event.clientY; dragging = true; interact() }
+  // Every 2D camera move, including a resize, runs through this callback. Test
+  // builds only: the bitmap no longer matches the view until it is painted again.
+  if (testNodes) g2?.onZoom(() => { if (!disposed) unsettle(false) })
+  const pointerDown = () => { dragging = true; interact() }
   const pointerMove = () => { if (dragging) interact() }
-  const pointerUp = (event: PointerEvent) => {
-    const down = sawDown
-    sawDown = false
-    if (dragging) { dragging = false; interact() }
-    if (!testNodes || event.type !== 'pointerup' || event.button !== 0) return
-    const surface = host.querySelector('.force-graph-container')
-    if (!(event.target instanceof Node) || !surface?.contains(event.target)) return
-    if (down && Math.hypot(event.clientX - pressX, event.clientY - pressY) > 5) return
-    if (!flushHitBitmap()) return
-    const node = nodeAt(event.clientX, event.clientY)
-    if (node) deliverPick(node, event.clientX, event.clientY)
-  }
+  const pointerUp = () => { if (dragging) { dragging = false; interact() } }
   if (!glimpse) {
     host.addEventListener('pointerdown', pointerDown, { passive: true }); host.addEventListener('wheel', interact, { passive: true })
     window.addEventListener('pointermove', pointerMove, { passive: true }); window.addEventListener('pointerup', pointerUp); window.addEventListener('pointercancel', pointerUp)
@@ -929,6 +936,9 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     resize(width, height) {
       const changed = graph.width() !== width || graph.height() !== height
       graph.width(Math.max(1, width)).height(Math.max(1, height)); cancelAnimationFrame(fitFrame)
+      // The library empties its hit bitmap on a resize, and a one-pixel change can
+      // keep the rounded projection. Ask for a fresh paint rather than trust it.
+      unsettle(false)
       if (changed && options.layoutBias === 'elliptic' && glimpseLaidOut && !(import.meta.env.MODE === 'test' && (glimpsePin?.pending() || glimpsePin?.pinned()))) { fitOnSettle = true; unsettle(); graph.d3ReheatSimulation() }
       const node = g2 && emphasis.selected ? nodes.find(n => n.id === emphasis.selected) : undefined
       if (node) fitFrame = requestAnimationFrame(() => { g2?.centerAt(node.x ?? 0, node.y ?? 0); refreshPicking(0) })

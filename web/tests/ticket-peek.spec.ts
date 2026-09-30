@@ -40,24 +40,29 @@ async function clickShown(target: Locator) {
 }
 
 // data-ready means the renderer has started, not that the simulation has stopped.
-// Test builds set data-settled after the engine has stopped, the projection has
-// held for two frames, and the hit bitmap has been flushed. The marker only
-// reports canvas CSS pixels. The click lands on the canvas (AEON-447).
+// Test builds publish read-only state: data-settled (engine stopped, this frame's
+// hit bitmap painted), one marker per node with its canvas pixel and
+// data-node-pickable, and data-hovered, which is force-graph's own hover. The
+// click is a plain press and release once that hover names the target, so the
+// library's click dispatch is what selects the node (AEON-447).
 async function clickGraphNode(canvas: Locator, id: string, timeout: number) {
+  const page = canvas.page()
   const node = canvas.locator(`[data-node-id="${id}"]`)
-  await expect.poll(async () => {
-    const x = Number(await node.getAttribute('data-node-x'))
-    const y = Number(await node.getAttribute('data-node-y'))
-    return (await canvas.getAttribute('data-settled')) === 'true' && await node.count() === 1 && Number.isFinite(x) && Number.isFinite(y)
-  }, { timeout }).toBe(true)
-  const x = Number(await node.getAttribute('data-node-x'))
-  const y = Number(await node.getAttribute('data-node-y'))
   const surface = canvas.locator('canvas').first()
-  const box = await surface.boundingBox()
-  if (!box || !Number.isFinite(x) || !Number.isFinite(y) || (await canvas.getAttribute('data-settled')) !== 'true') throw new Error(`graph node ${id} has no canvas position`)
-  // One click. The hold finishes the move before the press, so a late move is
-  // not still in flight when the button comes up (AEON-447).
-  await canvas.page().mouse.click(box.x + x, box.y + y, { delay: 30 })
+  const read = async () => ({ box: await surface.boundingBox(), x: Number(await node.getAttribute('data-node-x')), y: Number(await node.getAttribute('data-node-y')) })
+  await expect(async () => {
+    await expect(canvas).toHaveAttribute('data-settled', 'true', { timeout: 2_000 })
+    await expect(node).toHaveAttribute('data-node-pickable', 'true', { timeout: 2_000 })
+    const { box, x, y } = await read()
+    if (!box || !Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`graph node ${id} has no canvas position`)
+    await page.mouse.move(box.x + x, box.y + y)
+    await expect(canvas).toHaveAttribute('data-hovered', id, { timeout: 2_000 })
+    // Still the same settled view under a stationary pointer.
+    await expect(canvas).toHaveAttribute('data-settled', 'true', { timeout: 500 })
+    expect(await read()).toEqual({ box, x, y })
+  }).toPass({ timeout })
+  await page.mouse.down()
+  await page.mouse.up()
 }
 
 async function openAgents(page: Page) {
