@@ -478,10 +478,12 @@ on registration and every heartbeat. The transport ceiling is 512,000 bytes,
 separate from the 500,000-byte workspace budget. General Codex reports remain
 32,768 bytes, its default combined project-instruction limit; other harnesses
 report 512,000. Fresh Aeon app-server launches supplied with rules set
-`project_doc_max_bytes` to the exact delivered byte size and supply the same
-bytes as ephemeral developer instructions, without changing account config or
-repository files. Manually launched Codex sessions keep their honest default
-report. See the [official configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+`project_doc_max_bytes` to the greater of the delivered byte size and 32,768,
+preserving the default allowance for the repository's `AGENTS.md` chain.
+The delivered rules go separately into ephemeral developer instructions,
+without changing account config or repository files. Manually launched Codex
+sessions keep their honest default report. See the
+[official configuration reference](https://developers.openai.com/codex/config-reference/).
 Omission resets support to the legacy 12,000-byte limit after a downgrade.
 These are request-only fields; PHAROS/JANUS session responses stay unchanged.
 

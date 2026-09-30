@@ -92,19 +92,28 @@ func TestFakeVendorProcess(t *testing.T) {
 			}
 		case "thread/start":
 			if strings.HasPrefix(vendor, "codex_rules_") {
-				var expected int
-				if _, err := fmt.Sscanf(vendor, "codex_rules_%d", &expected); err != nil {
+				var expectedSize, expectedMaximum int
+				if _, err := fmt.Sscanf(vendor, "codex_rules_%d_%d", &expectedSize, &expectedMaximum); err != nil {
 					os.Exit(2)
 				}
 				var request struct {
 					Params struct {
 						Config struct {
-							Maximum int    `json:"project_doc_max_bytes"`
+							Maximum *int   `json:"project_doc_max_bytes"`
 							Rules   string `json:"developer_instructions"`
 						} `json:"config"`
 					} `json:"params"`
 				}
-				if json.Unmarshal(read.Bytes(), &request) != nil || request.Params.Config.Maximum != expected || request.Params.Config.Rules != strings.Repeat("<", expected) {
+				if json.Unmarshal(read.Bytes(), &request) != nil || request.Params.Config.Rules != strings.Repeat("<", expectedSize) {
+					os.Exit(2)
+				}
+				// Model Codex's default when no override is supplied and check
+				// the effective allowance independently of the rules' byte size.
+				effectiveMaximum := rules.CodexProjectDocMaxBytes
+				if request.Params.Config.Maximum != nil {
+					effectiveMaximum = *request.Params.Config.Maximum
+				}
+				if effectiveMaximum != expectedMaximum {
 					os.Exit(2)
 				}
 			}
@@ -274,10 +283,21 @@ func TestCodexAppServerProtocolAndSteer(t *testing.T) {
 }
 
 func TestCodexLaunchReceivesExactRulesAndProjectDocAllowance(t *testing.T) {
-	for _, size := range []int{rules.CodexProjectDocMaxBytes + 1, rules.MaxBudgetBytes, rules.MaxBytes} {
-		t.Run(fmt.Sprint(size), func(t *testing.T) {
+	for _, tc := range []struct {
+		size, maximum int
+	}{
+		{0, rules.CodexProjectDocMaxBytes},
+		{1, rules.CodexProjectDocMaxBytes},
+		{3000, rules.CodexProjectDocMaxBytes},
+		{rules.CodexProjectDocMaxBytes - 1, rules.CodexProjectDocMaxBytes},
+		{rules.CodexProjectDocMaxBytes, rules.CodexProjectDocMaxBytes},
+		{rules.CodexProjectDocMaxBytes + 1, rules.CodexProjectDocMaxBytes + 1},
+		{rules.MaxBudgetBytes, rules.MaxBudgetBytes},
+		{rules.MaxBytes, rules.MaxBytes},
+	} {
+		t.Run(fmt.Sprint(tc.size), func(t *testing.T) {
 			r := adapterRequest(t)
-			r.Rules = strings.Repeat("<", size) // sixfold JSON expansion at 500 KB
+			r.Rules = strings.Repeat("<", tc.size) // sixfold JSON expansion at 500 KB
 			home, err := filepath.EvalSymlinks(t.TempDir())
 			if err != nil {
 				t.Fatal(err)
@@ -285,7 +305,7 @@ func TestCodexLaunchReceivesExactRulesAndProjectDocAllowance(t *testing.T) {
 			if err = os.Chmod(home, 0700); err != nil {
 				t.Fatal(err)
 			}
-			a := NewCodexAdapter(fakeVendorPath(t, fmt.Sprintf("codex_rules_%d", size)), map[string]string{"account": home})
+			a := NewCodexAdapter(fakeVendorPath(t, fmt.Sprintf("codex_rules_%d_%d", tc.size, tc.maximum)), map[string]string{"account": home})
 			a.SetExpectedEmails(map[string]string{"account": "agent@example.test"})
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()

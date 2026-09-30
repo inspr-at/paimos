@@ -260,9 +260,10 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	threadArgs := map[string]any{"cwd": r.Workspace, "approvalPolicy": "never", "model": r.Profile.Model}
 	config := map[string]any{}
 	if r.Rules != "" {
-		// Only this fresh thread receives the delivered byte allowance and
-		// ephemeral rules. Never edit account config or repository instructions.
-		config["project_doc_max_bytes"] = len(r.Rules)
+		// This limits the repository AGENTS.md chain, not developer instructions.
+		// Preserve Codex's default allowance when the delivered rules are smaller.
+		// Only this fresh thread receives overrides; never edit persistent config.
+		config["project_doc_max_bytes"] = max(len(r.Rules), rules.CodexProjectDocMaxBytes)
 		config["developer_instructions"] = r.Rules
 	}
 	if r.Tools != nil {
