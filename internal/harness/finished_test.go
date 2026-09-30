@@ -62,7 +62,9 @@ func TestFinishedNeedsAReportedHundredAndARecordedCleanExit(t *testing.T) {
 		t.Fatalf("ticket %s not listed", ticket)
 		return nil
 	}
-	finishedOf := func(p tenant.Principal, endpoint, session string) (finished bool, stopReasonShown bool) {
+	// finishedOf reads one session's answer from an endpoint: the session itself, or the
+	// live feed, where the ticket is the key a viewer without the session id can match.
+	finishedOf := func(p tenant.Principal, endpoint, ticket string) (finished bool, stopReasonShown bool) {
 		t.Helper()
 		w := f.call(p, "GET", endpoint, nil, "")
 		expect(t, w, 200)
@@ -70,19 +72,16 @@ func TestFinishedNeedsAReportedHundredAndARecordedCleanExit(t *testing.T) {
 		if items, ok := data["items"].([]any); ok {
 			data = nil
 			for _, raw := range items {
-				if item := raw.(map[string]any); item["session_id"] == session {
+				item := raw.(map[string]any)
+				if bound, _ := item["ticket"].(map[string]any); bound != nil && bound["id"] == ticket {
 					data = item
 				}
 			}
 			if data == nil {
-				t.Fatalf("session %s missing from %s", session, endpoint)
+				t.Fatalf("ticket %s has no session in %s", ticket, endpoint)
 			}
 		}
-		_, shown := data["stop_reason"]
-		if shown && data["stop_reason"] == nil {
-			shown = false
-		}
-		return data["finished"] == true, shown
+		return data["finished"] == true, data["stop_reason"] != nil
 	}
 
 	n := 0
@@ -100,18 +99,19 @@ func TestFinishedNeedsAReportedHundredAndARecordedCleanExit(t *testing.T) {
 		return session, ticket
 	}
 	sessionURL := func(session string) string { return "/api/projects/" + f.project + "/harness-sessions/" + session }
+	const liveURL = "/api/harness-sessions/live?include_inactive=true"
 
 	// Reported 100% and left cleanly: finished, for everyone, with the ticket agreeing.
 	session, ticket := run("clean", 100, "process_exited")
 	for _, p := range []tenant.Principal{f.person, guest} {
-		if got, _ := finishedOf(p, "/api/harness-sessions/live?include_inactive=true", session); !got {
+		if got, _ := finishedOf(p, liveURL, ticket); !got {
 			t.Fatalf("live feed did not report the clean 100%% exit as finished for %v", p.ID == guest.ID)
 		}
 	}
-	if got, _ := finishedOf(f.person, sessionURL(session), session); !got {
+	if got, _ := finishedOf(f.person, sessionURL(session), ticket); !got {
 		t.Fatal("session read did not report finished")
 	}
-	if _, shown := finishedOf(guest, "/api/harness-sessions/live?include_inactive=true", session); shown {
+	if _, shown := finishedOf(guest, liveURL, ticket); shown {
 		t.Fatal("the restricted viewer read the stop reason")
 	}
 	row := ticketRow(f.person, ticket)
@@ -137,10 +137,10 @@ func TestFinishedNeedsAReportedHundredAndARecordedCleanExit(t *testing.T) {
 		{"ownership lost", 100, "ownership_lost"},
 	} {
 		session, ticket := run(tc.name, tc.progress, tc.stop)
-		if got, _ := finishedOf(f.person, "/api/harness-sessions/live?include_inactive=true", session); got {
+		if got, _ := finishedOf(f.person, liveURL, ticket); got {
 			t.Fatalf("%s: live feed reads finished", tc.name)
 		}
-		if got, _ := finishedOf(f.person, sessionURL(session), session); got {
+		if got, _ := finishedOf(f.person, sessionURL(session), ticket); got {
 			t.Fatalf("%s: session reads finished", tc.name)
 		}
 		if row := ticketRow(f.person, ticket); row != nil && (row.Finished || row.FinishedBy != "") {
@@ -155,10 +155,10 @@ func TestFinishedNeedsAReportedHundredAndARecordedCleanExit(t *testing.T) {
 			_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped', stopped_at=clock_timestamp(), stop_reason=$2 WHERE id=$1`, session, reason)
 			return err
 		})
-		if got, _ := finishedOf(guest, "/api/harness-sessions/live?include_inactive=true", session); got {
+		if got, _ := finishedOf(guest, liveURL, ticket); got {
 			t.Fatalf("stop reason %v: a withheld reason reads finished", reason)
 		}
-		if got, _ := finishedOf(f.person, "/api/harness-sessions/live?include_inactive=true", session); got {
+		if got, _ := finishedOf(f.person, liveURL, ticket); got {
 			t.Fatalf("stop reason %v reads finished", reason)
 		}
 		if row := ticketRow(f.person, ticket); row != nil && row.Finished {
@@ -177,7 +177,7 @@ func TestFinishedNeedsAReportedHundredAndARecordedCleanExit(t *testing.T) {
 		if row := ticketRow(f.person, ticket); row == nil || row.Finished {
 			t.Fatalf("%s at 100%%: ticket row %+v must not read finished", phase, row)
 		}
-		if got, _ := finishedOf(f.person, sessionURL(session), session); got {
+		if got, _ := finishedOf(f.person, sessionURL(session), ticket); got {
 			t.Fatalf("%s session reads finished", phase)
 		}
 	}

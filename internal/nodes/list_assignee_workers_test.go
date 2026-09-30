@@ -799,7 +799,7 @@ func TestListLeadIgnoresReportedProgress(t *testing.T) {
 			sql  string
 			args []any
 		}{
-			{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'FULL-WO',id,'Order',$3 FROM node_kinds WHERE slug='work_order'`, []any{p.TenantID, order, root.ID}},
+			{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'FWO-1',id,'Order',$3 FROM node_kinds WHERE slug='work_order'`, []any{p.TenantID, order, root.ID}},
 			{`INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, []any{p.TenantID, order, person.ID}},
 			{`INSERT INTO agent_runs(tenant_id,id,work_order_id,agent_principal_id,status) VALUES($1,$2,$3,$4,'running')`, []any{p.TenantID, run, order, ada}},
 			{`UPDATE harness_sessions SET run_id=$2 WHERE id=$1`, []any{waiting, run}},
