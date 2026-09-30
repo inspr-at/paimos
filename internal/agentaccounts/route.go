@@ -174,6 +174,9 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 // ValidateReservedCapacity rechecks the router's capacity policy at launch.
 // The caller must authenticate ownership and hold the run/account locks first.
 func ValidateReservedCapacity(ctx context.Context, tx pgx.Tx, runID, accountID string) error {
+	if err := agentpairing.Lock(ctx, tx); err != nil {
+		return err
+	}
 	run, err := lockRun(ctx, tx, runID)
 	if err != nil {
 		return err
@@ -194,6 +197,13 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 		(a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID)) {
 		return fail(http.StatusConflict, "reserved account is not eligible")
 	}
+	eligible, err := narrowCandidates(ctx, tx, run, a.Harness, []Account{a})
+	if err != nil {
+		return err
+	}
+	if len(eligible) == 0 {
+		return fail(http.StatusConflict, "reserved account is outside the routing fence")
+	}
 	all, err := lockAccountWindows(ctx, tx, []string{accountID})
 	if err != nil {
 		return err
@@ -203,7 +213,11 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 		if err != nil {
 			return err
 		}
-		_, wait, err := admission(ctx, tx, a, all[accountID], now, used[accountID]-1, run, true)
+		quotaUsed, err := quotaOccupancy(ctx, tx)
+		if err != nil {
+			return err
+		}
+		_, wait, err := admission(ctx, tx, a, all[accountID], now, max(0, slotCount(a, used, quotaUsed)-1), run, true)
 		if err != nil {
 			return err
 		}
@@ -271,7 +285,8 @@ func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemon
 		       a.registered_by_principal_id::text, a.label, w.pairing_verification, w.ends_at, w.allowance
 		FROM account_reservations r
 		JOIN account_allowance_windows w ON w.tenant_id = r.tenant_id AND w.id = r.window_id
-		JOIN agent_accounts a ON a.tenant_id = w.tenant_id AND a.id = w.account_id
+		JOIN agent_runs owned ON owned.tenant_id=r.tenant_id AND owned.id=r.run_id
+		JOIN agent_accounts a ON a.tenant_id = owned.tenant_id AND a.id = owned.account_id
 		WHERE r.run_id = $1::uuid AND r.state = 'active'
 		ORDER BY w.unit, r.id`, run.ID)
 	if err != nil {
@@ -458,13 +473,20 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 }
 
 func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (map[string][]Window, error) {
-	rows, err := tx.Query(ctx, `
+	return readAccountWindows(ctx, tx, accountIDs, true)
+}
+
+func readAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string, lock bool) (map[string][]Window, error) {
+	query := `
 		SELECT id::text, account_id::text, starts_at, ends_at, unit, allowance, used, reserved,
 		       pace_model, burst_ratio::float8, pairing_verification, capacity_read_at, capacity_allowed, COALESCE(capacity_kind,''), capacity_bucket, capacity_retired, capacity_refresh_run::text, COALESCE(capacity_source,'')
 		FROM account_allowance_windows
 		WHERE account_id::text = ANY($1::text[])
-		ORDER BY id
-		FOR UPDATE`, accountIDs)
+		ORDER BY id`
+	if lock {
+		query += " FOR UPDATE"
+	}
+	rows, err := tx.Query(ctx, query, accountIDs)
 	if err != nil {
 		return nil, err
 	}

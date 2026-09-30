@@ -64,7 +64,7 @@ function resetTip(row: BandRow) {
           <span class="pool-name">{{ row.pool.name }}</span>
           <span v-if="planText(row)" class="plan-name" :title="planText(row)">{{ planText(row) }}</span>
         </div>
-        <CapacityGauge v-if="row.gauge || !row.pool.rows.some(r => r.learning)" class="bar" :gauge="row.gauge" :left="row.left ?? 0" :value="row.left ?? 0" :label="gaugeLabel(row)" :ahead="!!row.today?.ahead" :estimated="row.pool.rows.some(r => r.primary?.reading.source === 'estimate')" />
+        <CapacityGauge v-if="row.gauge || !row.pool.rows.some(r => r.learning || r.sharedQuotaName)" class="bar" :gauge="row.gauge" :left="row.left ?? 0" :value="row.left ?? 0" :label="gaugeLabel(row)" :ahead="!!row.today?.ahead" :estimated="row.pool.rows.some(r => r.primary?.reading.source === 'estimate')" />
         <span class="left num"><template v-if="row.left !== null"><b>{{ pct(row.left) }}</b> left</template></span>
         <span class="reset num" :data-tip="resetTip(row)">
           <template v-if="row.reset">resets <b>{{ row.reset.label }}</b><span v-if="row.reset.window" class="win"> · {{ row.reset.window }}</span></template>

@@ -4434,11 +4434,12 @@ paths:
   /agent-accounts/use:
     get:
       operationId: useAccount
-      summary: Resolve a harness label to door ids for the local agent
-      description: Person account.read, or the same agent authority as capacity next. Returns ids, labels and the quota fingerprint only. No path, home, socket or credential. The shell export is printed by aeon use from the local agentd.
+      summary: Resolve a harness label or account id to door ids for the local agent
+      description: Specify exactly one of label or account_id. Person account.read, or the same agent authority as capacity next. Returns ids, labels and the quota fingerprint only. No path, home, socket or credential. The shell export is printed by aeon use from the local agentd.
       parameters:
         - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
-        - {name: label, in: query, required: true, schema: {type: string, maxLength: 128}}
+        - {name: label, in: query, schema: {type: string, maxLength: 128}}
+        - {name: account_id, in: query, schema: {type: string, format: uuid}}
       responses:
         '200': {description: Doors of one quota, content: {application/json: {schema: {$ref: '#/components/schemas/AccountUse'}}}}
         '404': {$ref: '#/components/responses/Error'}

@@ -213,7 +213,8 @@ func (m *Module) use(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	harness, label := r.URL.Query().Get("harness"), r.URL.Query().Get("label")
-	if !validHarness(harness) || !pathFreeLabel(label) {
+	accountID := strings.ToLower(r.URL.Query().Get("account_id"))
+	if !validHarness(harness) || (label == "") == (accountID == "") || label != "" && !pathFreeLabel(label) || accountID != "" && !uuidRE.MatchString(accountID) {
 		writeErr(w, fail(http.StatusBadRequest, "invalid account label"))
 		return
 	}
@@ -250,7 +251,7 @@ func (m *Module) use(w http.ResponseWriter, r *http.Request) {
 		matched := []Account{}
 		want := strings.ToLower(label)
 		for _, a := range all {
-			if a.Harness == harness && strings.ToLower(a.Label) == want && (!ownOnly || a.RegisteredBy == p.ID) {
+			if a.Harness == harness && (accountID != "" && a.ID == accountID || accountID == "" && strings.ToLower(a.Label) == want) && (!ownOnly || a.RegisteredBy == p.ID) {
 				matched = append(matched, a)
 			}
 		}

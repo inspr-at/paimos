@@ -110,7 +110,7 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
     noPath(calls.find(call => call.path.endsWith('/target'))?.body)
 
     await page.goto('/settings/accounts')
-    const row = page.getByRole('listitem').filter({ hasText: 'aeon use codex Spare' })
+    const row = page.getByRole('listitem').filter({ hasText: `aeon use codex ${spare.id}` })
     await row.getByRole('button', { name: 'Keep separate…' }).click()
     const dialog = page.getByRole('dialog', { name: 'Keep separate' })
     await expect(dialog.getByText('Only for these projects', { exact: true })).toBeVisible()

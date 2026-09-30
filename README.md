@@ -227,6 +227,12 @@ stop only the matching model; account-wide denials still apply. Known denied
 windows are reported at 100%; missing bounds remain unknown. Accounts publish
 `reading_support` and a tenant-keyed HMAC of a verified vendor account ID, never an
 email, token or local path. Missing verified IDs leave the fingerprint empty.
+Doors with the same fingerprint share allowance windows, outstanding reservations
+and vendor denials within the tenant; group membership and schedules stay on each
+door. Reservations and launch validation recheck project fences and ticket pins.
+Settings displays `aeon use <harness> <account-id>` so labels containing spaces or
+shell metacharacters remain plain display text. The CLI still accepts labels;
+only the local owner-only agentd resolves the selected account's environment.
 Claude idle `get_usage` and Grok billing captures remain disabled until the coordinator verifies a
 quota-neutral exchange and adds an exact-version, exact-binary capability; this
 fixture implementation does not approve a production vendor capture.

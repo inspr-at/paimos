@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	goruntime "runtime"
 	"strings"
 	"time"
@@ -17,11 +18,13 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsetup"
 )
 
+var useAccountID = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
 func (rt *runtime) cmdUse() *Command {
 	var shell, socket, root string
 	shell = "sh"
 	return &Command{
-		Name: "use", Short: "Print the local environment for one account", Use: "use <harness> <label>", minArgs: 2, maxArgs: 2,
+		Name: "use", Short: "Print the local environment for one account", Use: "use <harness> <label-or-account-id>", minArgs: 2, maxArgs: 2,
 		addFlags: func(fs *flagSet) {
 			fs.string(&shell, "shell", 0, "sh, bash, zsh or fish")
 			fs.string(&socket, "socket", 0, "owner-only local agentd socket")
@@ -45,6 +48,9 @@ func (rt *runtime) cmdUse() *Command {
 				return usagef("choose --socket or --setup-root")
 			}
 			q := url.Values{"harness": {args[0]}, "label": {args[1]}}
+			if useAccountID.MatchString(args[1]) {
+				q = url.Values{"harness": {args[0]}, "account_id": {args[1]}}
+			}
 			var found agentaccounts.UseResult
 			if err := rt.do("GET", "/api/agent-accounts/use?"+q.Encode(), nil, &found); err != nil {
 				return err

@@ -343,9 +343,15 @@ export interface AccountRow {
   groupName: string
   hosts: string[]
   sameQuotaAs: string
+  sharedQuotaName?: string
 }
 export const HARNESS_NAME: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi' }
 export const POOL_ORDER = ['codex', 'claude', 'grok', 'cursor', 'pi']
+/** Stable IDs remain one shell word in fish, zsh and bash, regardless of the display label. */
+export function accountUseCommand(account: { id: string; harness: string }): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(account.id) || !POOL_ORDER.includes(account.harness)) return ''
+  return `aeon use ${account.harness} ${account.id}`
+}
 /** The vendor's own sign-in command, shown to copy. Aeon never takes the password. */
 export const LOGIN_COMMAND: Record<string, string> = { codex: 'codex login', claude: 'claude /login', cursor: 'cursor-agent login' }
 
@@ -456,10 +462,10 @@ function poolView(id: string, name: string, mark: string, list: AccountRow[], no
   return { id, name, mark, plan, rows: sorted, override: activeOverride(schedule, now), overrideUntil: schedule?.override_until ?? '', sprintEnd: limits[0] ?? '', parallelRuns: sorted.reduce((n, r) => n + (r.routing?.available_slots ?? 0), 0) }
 }
 export function buildPools(rows: AccountRow[], now: number): PoolView[] {
-  const merged = mergeQuotas(rows)
+  const quotas = new Map(mergeQuotas(rows).filter(r => r.fingerprint).map(r => [r.fingerprint, r]))
   const harness = new Map<string, AccountRow[]>()
   const groups = new Map<string, { mark: string; name: string; rows: AccountRow[] }>()
-  for (const row of merged) {
+  for (const row of rows) {
     if (row.groupId) {
       const id = `group:${row.groupId}`
       const cur = groups.get(id) ?? { mark: row.harness, name: `${row.groupName || 'Group'} · ${HARNESS_NAME[row.harness] ?? row.harness}`, rows: [] }
@@ -477,6 +483,22 @@ export function buildPools(rows: AccountRow[], now: number): PoolView[] {
     if (list?.length) pools.push(poolView(mark, HARNESS_NAME[mark] ?? mark, mark, list, now))
     const owned = [...groups.entries()].filter(([, g]) => g.mark === mark).sort((a, b) => a[1].name.localeCompare(b[1].name))
     for (const [id, g] of owned) pools.push(poolView(id, g.name, mark, g.rows, now))
+  }
+  const gauged = new Map<string, AccountRow>()
+  for (const pool of pools) {
+    pool.rows = mergeQuotas(pool.rows).map(row => {
+      const quota = quotas.get(row.fingerprint)
+      if (!quota) return row
+      // Membership and schedule belong to this door. Only observations and
+      // host chips merge; another pool keeps a named reference to the gauge.
+      const alias = gauged.has(row.fingerprint)
+      if (!alias) gauged.set(row.fingerprint, row)
+      return { ...row, primary: alias ? null : quota.primary, five: alias ? null : quota.five,
+        hosts: quota.hosts, plan: quota.plan, sameQuotaAs: alias ? gauged.get(row.fingerprint)!.id : '',
+        sharedQuotaName: alias ? gauged.get(row.fingerprint)!.name : undefined,
+        routing: row.routing ? { ...row.routing, available_slots: alias ? 0 : quota.routing?.available_slots ?? 0 } : undefined }
+    })
+    pool.parallelRuns = pool.rows.reduce((n, r) => n + (r.routing?.available_slots ?? 0), 0)
   }
   return pools
 }
@@ -539,6 +561,7 @@ export function todayCell(row: AccountRow, plan: AccountPlan | null): TodayCell 
   if (row.state === 'signin') return { kind: 'signin', command: LOGIN_COMMAND[row.harness] ?? '' }
   if (row.state === 'paused') return { kind: 'quiet', text: 'paused' }
   if (row.state === 'unavailable') return { kind: 'quiet', text: 'reading unavailable' }
+  if (row.sharedQuotaName) return { kind: 'quiet', text: '' }
   if (!plan) return { kind: 'quiet', text: row.learning ? consumptionLine(row.learning) : 'no reading yet' }
   if (plan.override === 'hold') return { kind: 'quiet', text: 'on hold' }
   if (plan.override === 'sprint' || plan.override === 'away') return { kind: 'sprint', text: `all ${pct(plan.left)}` }
@@ -551,6 +574,7 @@ export function todayCell(row: AccountRow, plan: AccountPlan | null): TodayCell 
 /** One quiet line: who measured it and how old it is. Never "Unknown". */
 export function sourceLine(row: AccountRow, now: number): string {
   const w = row.primary
+  if (row.sharedQuotaName) return `Shares quota with ${row.sharedQuotaName}`
   if (row.state === 'signin') return w ? `Sign-in expired · last read ${ago(w.reading.read_at, now)}` : 'Sign-in expired'
   if (!w) return row.learning && ['grok', 'cursor', 'pi'].includes(row.harness) ? (row.learning.limit_hits ? `${row.learning.limit_hits} limit hits · learning the window` : 'No limit seen yet') : 'No reading yet — starts with the first run'
   const r = w.reading
@@ -620,6 +644,7 @@ function reserveClause(live: { r: AccountRow; p: AccountPlan }[], at: (iso: stri
   return [t(' Keeps '), ...joinList(kept.map(x => [n(`~${pct(x.p.reserve)}`), t(` of ${x.r.name}`)])), t(' for you.')]
 }
 export function poolSentence(pool: PoolView, now: number, timezone?: string): Sentence {
+  if (pool.rows.length && pool.rows.every(r => r.sharedQuotaName)) return { segs: [t(`Shares quota with ${[...new Set(pool.rows.map(r => r.sharedQuotaName))].join(', ')}.`)] }
   const advised = pool.rows.length > 0 && pool.rows.every(r => r.routing)
   const ready = pool.rows.filter(r => (r.routing?.rank ?? 0) > 0)
   const paused = pool.rows.filter(r => r.routing?.rank === 0 && r.routing.wait)

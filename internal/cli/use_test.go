@@ -50,3 +50,24 @@ func assertCLINoPath(t *testing.T, raw string) {
 		}
 	}
 }
+
+func TestUseStableAccountIDRequest(t *testing.T) {
+	isolate(t)
+	id := "11111111-1111-4111-8111-111111111111"
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/api/agent-accounts/use" || r.URL.Query().Get("account_id") != id || r.URL.Query().Get("label") != "" {
+			t.Errorf("wrong request: %s", r.URL.RequestURI())
+		}
+		assertCLINoPath(t, r.URL.RequestURI())
+		_ = json.NewEncoder(w).Encode(map[string]any{"accounts": []map[string]any{{"account_id": id, "daemon_id": "daemon-a", "harness": "claude", "label": "Claude Max; $(false) 'quoted'"}}})
+	}))
+	defer server.Close()
+	t.Setenv("AEON_URL", server.URL)
+	t.Setenv("AEON_API_KEY", testKey)
+	code, out, errOut := runCLI([]string{"aeon", "use", "claude", id, "--socket", "/tmp/aeon-389-missing.sock"}, "")
+	if requests != 1 || code == 0 || out != "" || !strings.Contains(errOut, "no environment was printed") {
+		t.Fatalf("resolution: requests=%d code=%d out=%q err=%q", requests, code, out, errOut)
+	}
+}

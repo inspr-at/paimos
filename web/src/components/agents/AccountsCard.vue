@@ -6,6 +6,7 @@ import { createGroup, createWindow, deleteGroup, type AgentAccount, type Allowan
 import { can } from '../../lib/authz'
 import { accountName, accountPlan, allowanceWindowLabel } from '../../lib/accountCascade'
 import { PACE_LABEL, UNIT_LABEL, bindingWindow, duration, harnessLabel } from '../../lib/agentState'
+import { accountUseCommand } from '../../lib/capacity'
 import { confirmAction } from '../../lib/confirm'
 import type { Availability } from '../../stores/agents'
 import { useCapacity } from '../../stores/capacity'
@@ -147,10 +148,7 @@ const exclusive = ref(false)
 const separateBusy = ref(false)
 const separateError = ref('')
 const separateDialog = ref<HTMLDialogElement>()
-function useLine(account: AgentAccount) {
-  if (/[/\\]/.test(account.label)) return ''
-  return `aeon use ${account.harness} ${account.label}`
-}
+const useLine = accountUseCommand
 async function openSeparate(account: AgentAccount) {
   separate.value = account
   separateName.value = account.label
