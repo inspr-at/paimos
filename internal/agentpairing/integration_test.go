@@ -26,6 +26,7 @@ import (
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelregistry"
@@ -91,7 +92,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	pairing := agentpairing.New(d.App, origin, "pairtest")
-	api := &httpapi.Server{Pool: d.App, Modules: []httpapi.Module{am, pairing, agentaccounts.New(d.App), nodes.New(d.App, nil), modelregistry.New(d.App), harness.New(d.App), workorders.New(d.App), agentruns.New(d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
+	api := &httpapi.Server{Pool: d.App, Modules: []httpapi.Module{am, pairing, events.New(d.App), agentaccounts.New(d.App), nodes.New(d.App, nil), modelregistry.New(d.App), harness.New(d.App), workorders.New(d.App), agentruns.New(d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
 		return agentaccounts.Settle(ctx, tx, p, r.ID)
 	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
 	f := &fixture{pairing: pairing, t: t, db: d, h: api.Handler(), tenantID: id, profiles: map[string]string{}}
@@ -426,6 +427,65 @@ func TestPairingAddHarnessAndFreshRepair(t *testing.T) {
 	paired := f.redeem(fresh)
 	if *paired.PrincipalID == *v.PrincipalID || paired.RuntimePrefix == v.RuntimePrefix || paired.Enrollments[0].VerificationRunID != nil {
 		t.Fatal("re-pair inherited old authority or verification")
+	}
+}
+
+// AEON-470: re-pairing a computer must not pile up runtime identities. A fresh
+// pairing retires the identity of a revoked computer with the same name; a
+// computer that is still connected, or one with another name, is never touched.
+func TestPairingFreshRepairRetiresTheReplacedRuntimeIdentity(t *testing.T) {
+	f := newFixture(t)
+	status := func(principal string) string {
+		t.Helper()
+		var s string
+		if err := f.db.Admin.QueryRow(t.Context(), `SELECT status FROM principals WHERE id=$1::uuid`, principal).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	pair := func() agentpairing.View {
+		t.Helper()
+		p := f.propose("claude")
+		f.approve(p, "connect_only")
+		return f.redeem(p)
+	}
+	disconnect := func(v agentpairing.View) {
+		t.Helper()
+		f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "", 200)
+	}
+	old, other := pair(), pair()
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE principals SET name='Other workstation' WHERE id=$1::uuid`, *other.PrincipalID); err != nil {
+		t.Fatal(err)
+	}
+	disconnect(old)
+	disconnect(other)
+	if status(*old.PrincipalID) != "active" {
+		t.Fatal("revoking a computer alone changed its identity; only a fresh pairing retires it")
+	}
+
+	fresh := pair()
+	if got := status(*old.PrincipalID); got != "deactivated" {
+		t.Fatalf("the replaced identity is %q, want deactivated", got)
+	}
+	if status(*other.PrincipalID) != "active" || status(*fresh.PrincipalID) != "active" {
+		t.Fatal("a computer with another name, or the new pairing, was retired")
+	}
+	var keys, events int
+	var replacedBy, actor string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM agent_keys WHERE principal_id=$1::uuid AND revoked_at IS NULL`, *old.PrincipalID).Scan(&keys); err != nil || keys != 0 {
+		t.Fatalf("the retired identity keeps %d keys: %v", keys, err)
+	}
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*),coalesce(max(after->>'replaced_by'),''),coalesce(max(actor_principal_id::text),'') FROM events WHERE type='principal.deactivated' AND after->>'principal_id'=$1`, *old.PrincipalID).Scan(&events, &replacedBy, &actor); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 || replacedBy != *fresh.PrincipalID || actor != f.person {
+		t.Fatalf("retirement audit: %d events, replaced_by %q, actor %q", events, replacedBy, actor)
+	}
+
+	// A second pairing while the first is still connected keeps it.
+	next := pair()
+	if status(*fresh.PrincipalID) != "active" || status(*next.PrincipalID) != "active" {
+		t.Fatal("a connected computer's identity was retired by another pairing")
 	}
 }
 
@@ -1198,6 +1258,32 @@ func TestPairingHarnessStatusesStayScopedAndRecover(t *testing.T) {
 	f.approve(other, "connect_only")
 	f.redeem(other)
 	f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": other.id, "lifecycle_secret": other.lifecycle, "progress": agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "ready"}}}, false, "", 200)
+}
+
+func TestPairingProgressPublishesOneEventPerChange(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	f.redeem(p)
+	if f.events("agent_pairing.reported") != 0 {
+		t.Fatal("approval published a setup report")
+	}
+	report := func(state string, statuses map[string]string) {
+		t.Helper()
+		f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": agentpairing.SetupProgress{State: state, HarnessStatuses: statuses}}, false, "", 200)
+	}
+	report("connected", nil)
+	if f.events("agent_pairing.reported") != 1 {
+		t.Fatal("daemon connect did not publish agent_pairing.reported")
+	}
+	report("connected", nil)
+	if f.events("agent_pairing.reported") != 1 {
+		t.Fatal("unchanged heartbeat published another report")
+	}
+	report("connected", map[string]string{"claude": "ready"})
+	if f.events("agent_pairing.reported") != 2 {
+		t.Fatal("harness report did not publish")
+	}
 }
 
 func TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup(t *testing.T) {
