@@ -156,9 +156,7 @@ jobs:
   playwright-shard:
     name: playwright (${{ matrix.shard }}/8)
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule'
-    # Measure the serial configuration on standard M1 runners. The Free plan
-    # schedules at most five macOS jobs at once; retain eight one-worker jobs.
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false

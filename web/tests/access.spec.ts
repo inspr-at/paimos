@@ -134,7 +134,10 @@ test('deactivating says what happens, then shows the status; reactivating brings
 test('linking a classic identity to a person, with undo', async ({ page }) => {
   const world = await open(page)
   await page.getByRole('button', { name: /Imported from classic, no sign-in/ }).click()
-  await page.getByRole('button', { name: 'Link jw (classic) to a person' }).click()
+  const link = page.getByRole('button', { name: 'Link jw (classic) to a person' })
+  await link.scrollIntoViewIfNeeded()
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+  await link.click()
   const picker = page.getByRole('dialog', { name: 'Link jw (classic) to' })
   await picker.getByLabel(/Search link/i).fill('jonas')
   await picker.getByRole('option', { name: /Jonas Weber/ }).click()

@@ -14,9 +14,7 @@ just dev          # run the server (API on :8080); `cd web && npm run dev` for t
 ```
 
 UI CI runs eight duration-balanced jobs with one Playwright worker each, including
-the route audit, on standard M1 (`macos-15`) runners. GitHub Free schedules at
-most five macOS jobs concurrently, so measure the UI gate's elapsed time as well
-as individual job durations. To reproduce a job, run
+the route audit, on standard Linux runners. To reproduce a job, run
 `PW_COMPILED_UI=1 node scripts/playwright-ui-shards.mjs --shard=1/8`; `--plan` prints the balance
 and `--check` verifies that Playwright selects every test exactly once across all
 eight jobs. Ordinary spec files stay together; audit states each create their own

@@ -185,7 +185,11 @@ for (const colorScheme of ['light', 'dark'] as const) {
         for (const control of await list.getByRole('button').all()) expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(36)
         expect((await list.getByRole('button', { name: 'Link', exact: true }).boundingBox())!.height).toBeGreaterThanOrEqual(40)
       }
-      await list.getByRole('button', { name: 'Link', exact: true }).click()
+      const link = list.getByRole('button', { name: 'Link', exact: true })
+      await link.scrollIntoViewIfNeeded()
+      // Drain the opener's scroll before the popover starts closing on page scroll.
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+      await link.click()
       const dialog = picker(page, 'PHAROS-11')
       await dialog.getByRole('radio', { name: 'Blocks' }).click()
       await dialog.getByRole('combobox').fill('PHAROS-14')
