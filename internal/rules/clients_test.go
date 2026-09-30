@@ -46,11 +46,11 @@ func exactClientSnapshotsWithCount(size, n int) []Snapshot {
 }
 
 func TestCacheEnvelopeFitsEscapedStoreMaximum(t *testing.T) {
-	snaps := exactClientSnapshotsWithCount(MaxBytes, maxBudgetRules-1)
+	snaps := exactClientSnapshotsWithCount(MaxBudgetBytes, maxBudgetRules-1)
 	for i := 1; i < len(snaps); i++ {
 		for j := range snaps[i].Rules {
 			r := &snaps[i].Rules[j]
-			r.Why = strings.Repeat("<", 950)
+			r.Why = strings.Repeat("<", 700)
 			r.Source.Revision = strings.Repeat(">", 128)
 			r.Source.Identity = strings.Repeat("&", 96)
 		}
@@ -59,7 +59,7 @@ func TestCacheEnvelopeFitsEscapedStoreMaximum(t *testing.T) {
 	if err := storeBudget(context.Background(), snaps); err != nil {
 		t.Fatal("fixture exceeds store limits", err)
 	}
-	m, err := MergeWithin(testContext(), snaps, time.Now(), Budget{MaxBytes: MaxBytes})
+	m, err := MergeWithin(testContext(), snaps, time.Now(), Budget{MaxBytes: MaxBudgetBytes})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestCacheEnvelopeFitsEscapedStoreMaximum(t *testing.T) {
 	if _, err := DecodeCache(raw, "https://aeon.test", m.Context, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	legacy, err := MergeForClient(testContext(), snaps, time.Now(), Budget{MaxBytes: MaxBytes}, LegacyMaxBytes)
+	legacy, err := MergeForClient(testContext(), snaps, time.Now(), Budget{MaxBytes: MaxBudgetBytes}, LegacyMaxBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,11 +88,11 @@ func TestCacheEnvelopeFitsEscapedStoreMaximum(t *testing.T) {
 
 func TestClientCutAndCacheBoundaries(t *testing.T) {
 	now := time.Now()
-	for _, size := range []int{LegacyMaxBytes, LegacyMaxBytes + 1, MaxBytes, MaxBytes + 1} {
-		for _, limit := range []int{MinBudgetBytes, LegacyMaxBytes, 32000, MaxBytes} {
+	for _, size := range []int{LegacyMaxBytes, LegacyMaxBytes + 1, MaxBudgetBytes, MaxBudgetBytes + 1} {
+		for _, limit := range []int{MinBudgetBytes, LegacyMaxBytes, 32000, MaxBudgetBytes} {
 			t.Run(fmt.Sprintf("%d/client-%d", size, limit), func(t *testing.T) {
-				m, err := MergeForClient(testContext(), exactClientSnapshots(size), now, Budget{MaxBytes: MaxBytes}, limit)
-				if size > MaxBytes {
+				m, err := MergeForClient(testContext(), exactClientSnapshots(size), now, Budget{MaxBytes: MaxBudgetBytes}, limit)
+				if size > MaxBudgetBytes {
 					if !isCode(err, "rules_budget_exceeded") {
 						t.Fatalf("overflow accepted: %v", err)
 					}
@@ -114,7 +114,7 @@ func TestClientCutAndCacheBoundaries(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if size == MaxBytes && limit == MaxBytes && len(raw) <= 512*1024 {
+				if size == MaxBudgetBytes && limit == MaxBudgetBytes && len(raw) <= 512*1024 {
 					t.Fatal("fixture must exceed old cache envelope")
 				}
 				got, err := DecodeCache(raw, "https://aeon.test", m.Context, now)
@@ -139,7 +139,7 @@ func TestClientCutNeverDropsLockedRules(t *testing.T) {
 		snaps[1].Rules[i].Strength = "locked"
 	}
 	snaps[1].SHA256 = SnapshotDigest(snaps[1])
-	if _, err := MergeForClient(testContext(), snaps, time.Now(), Budget{MaxBytes: MaxBytes}, LegacyMaxBytes); !isCode(err, "client_floor_too_large") {
+	if _, err := MergeForClient(testContext(), snaps, time.Now(), Budget{MaxBytes: MaxBudgetBytes}, LegacyMaxBytes); !isCode(err, "client_floor_too_large") {
 		t.Fatalf("locked rules cut: %v", err)
 	}
 	// A locked lower-precedence rule is retained even when earlier normal rules fill the cut.
@@ -147,20 +147,76 @@ func TestClientCutNeverDropsLockedRules(t *testing.T) {
 	last := len(snaps[1].Rules) - 1
 	snaps[1].Rules[last].Strength = "locked"
 	snaps[1].SHA256 = SnapshotDigest(snaps[1])
-	m, err := MergeForClient(testContext(), snaps, time.Now(), Budget{MaxBytes: MaxBytes}, LegacyMaxBytes)
+	m, err := MergeForClient(testContext(), snaps, time.Now(), Budget{MaxBytes: MaxBudgetBytes}, LegacyMaxBytes)
 	if err != nil || !strings.Contains(m.Body, ruleLine(snaps[1].Rules[last])) {
 		t.Fatal("lost locked rule", err)
 	}
 }
 
+func TestClientCutPriorityIsDeterministicAcrossEveryLayer(t *testing.T) {
+	c := testContext()
+	c.TaskID = "10000000-0000-4000-8000-000000000005"
+	scopes := []Scope{
+		{Layer: "company"},
+		{Layer: "project", ProjectID: c.ProjectID},
+		{Layer: "person", OwnerID: c.PersonID},
+		{Layer: "agent", Role: c.Role},
+		{Layer: "agent", OwnerID: c.PersonID, AgentID: c.AgentID},
+		{Layer: "agent", ProjectID: c.ProjectID, OwnerID: c.PersonID, AgentID: c.AgentID, TaskID: c.TaskID},
+	}
+	snaps := []Snapshot{floorSnapshot()}
+	// Reverse identity order relative to layer priority. Four rules from each
+	// layer fill a 2,000-byte client, making the choice observable.
+	for i, scope := range scopes {
+		rs := []Rule{}
+		for j := 3; j >= 0; j-- {
+			rs = append(rs, testRule(fmt.Sprintf("layer-%d-%d", 5-i, j), strings.Repeat("界", 120)))
+		}
+		snaps = append(snaps, testSnapshot(fmt.Sprintf("layer-%d", i), scope, rs...))
+	}
+	now := time.Now()
+	first, err := MergeForClient(c, snaps, now, Budget{MaxBytes: MaxBudgetBytes}, MinBudgetBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ByteSize > MinBudgetBytes || len(first.Rules) != 5 {
+		t.Fatalf("cut size/rules: %d/%d", first.ByteSize, len(first.Rules))
+	}
+	for _, r := range first.Rules {
+		if r.Strength != "locked" && !strings.HasPrefix(r.Identity, "layer-5-") {
+			t.Fatalf("lower layer displaced company rule: %s", r.Identity)
+		}
+	}
+	for i := 0; i < len(snaps)/2; i++ {
+		snaps[i], snaps[len(snaps)-1-i] = snaps[len(snaps)-1-i], snaps[i]
+	}
+	second, err := MergeForClient(c, snaps, now, Budget{MaxBytes: MaxBudgetBytes}, MinBudgetBytes)
+	if err != nil || second.Body != first.Body || second.SHA256 != first.SHA256 {
+		t.Fatal("snapshot order changed delivery", err)
+	}
+	// Larger clients add the remaining priorities in the documented order.
+	for i := 1; i < len(scopes); i++ {
+		limit := first.ByteSize + i*4*len(ruleLine(snaps[0].Rules[0]))
+		got, err := MergeForClient(c, snaps, now, Budget{MaxBytes: MaxBudgetBytes}, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range got.Rules {
+			if r.Strength != "locked" && int(r.Identity[6]-'0') < 5-i {
+				t.Fatalf("priority %d displaced an earlier layer: %s", i, r.Identity)
+			}
+		}
+	}
+}
+
 func TestClientMaximumHeaders(t *testing.T) {
-	for _, value := range []string{"", "2000", "12000", "12001", "64000", "1999", "64001", "bogus", "64000,12000"} {
+	for _, value := range []string{"", "2000", "12000", "12001", "64000", "1999", "512000", "512001", "bogus", "64000,12000"} {
 		r := httptest.NewRequest("GET", "/", nil)
 		if value != "" {
 			r.Header.Set(ClientMaximumHeader, value)
 		}
 		n, err := RequestMaximum(r)
-		valid := value == "" || value == "2000" || value == "12000" || value == "12001" || value == "64000"
+		valid := value == "" || value == "2000" || value == "12000" || value == "12001" || value == "64000" || value == "512000"
 		if (err == nil) != valid || (value == "" && n != LegacyMaxBytes) {
 			t.Fatalf("header %q: %d %v", value, n, err)
 		}
@@ -168,7 +224,7 @@ func TestClientMaximumHeaders(t *testing.T) {
 }
 
 func TestFullSizeCompanyFloorCanBePinned(t *testing.T) {
-	snaps := exactClientSnapshots(MaxBytes)
+	snaps := exactClientSnapshots(MaxBudgetBytes)
 	for i := range snaps {
 		snaps[i].Scope = Scope{Layer: "company"}
 		for j := range snaps[i].Rules {
@@ -176,12 +232,12 @@ func TestFullSizeCompanyFloorCanBePinned(t *testing.T) {
 		}
 		snaps[i].SHA256 = SnapshotDigest(snaps[i])
 	}
-	m, err := MergeForClient(testContext(), snaps, time.Now(), Budget{MaxBytes: MaxBytes}, MaxBytes)
+	m, err := MergeForClient(testContext(), snaps, time.Now(), Budget{MaxBytes: MaxBudgetBytes}, MaxBudgetBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := VerifyFloor([]byte(m.Floor), digest([]byte(m.Floor))); err != nil {
-		t.Fatal("valid 64 KB online file cannot be pinned", err)
+		t.Fatal("valid 500 KB online file cannot be pinned", err)
 	}
 }
 
@@ -220,16 +276,23 @@ func TestClientGateFloorAndBlockerCap(t *testing.T) {
 		return b
 	}
 	insert("low-client", 8000)
-	if b := read(admin); b.CeilingBytes != LegacyMaxBytes || len(b.BlockingClients) != 1 || b.BlockingClients[0].Maximum != 8000 || b.BlockingClientsMore != 0 {
+	if b := read(admin); b.CeilingBytes != MaxBudgetBytes || len(b.BlockingClients) != 1 || b.BlockingClients[0].Maximum != 8000 || b.BlockingClientsMore != 0 {
 		t.Fatalf("low report pulled the ceiling: %+v", b)
 	}
+	if b := read(admin); b.BlockingClients[0].DeliveredMaxBytes != 8000 || !b.BlockingClients[0].Truncated {
+		t.Fatalf("low client delivery: %+v", b)
+	}
 	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: LegacyMaxBytes}, 200)
-	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBytes}, 409)
+	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBudgetBytes}, 200)
+	var rejected Error
+	if err := json.Unmarshal(w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBudgetBytes + 1}, 400), &rejected); err != nil || rejected.Code != "invalid_budget" {
+		t.Fatalf("stable ceiling error: %+v %v", rejected, err)
+	}
 	for i := 0; i <= maxBlockingClients; i++ {
 		insert(fmt.Sprintf("b-%03d", i), LegacyMaxBytes)
 	}
 	b := read(admin)
-	if b.CeilingBytes != LegacyMaxBytes || len(b.BlockingClients) != maxBlockingClients || b.BlockingClientsMore != 2 || b.BlockingClients[0].Host != "b-000" || b.BlockingClients[maxBlockingClients-1].Host != "b-049" {
+	if b.CeilingBytes != MaxBudgetBytes || len(b.BlockingClients) != maxBlockingClients || b.BlockingClientsMore != 2 || b.BlockingClients[0].Host != "b-000" || b.BlockingClients[maxBlockingClients-1].Host != "b-049" {
 		t.Fatalf("blocker cap: ceiling %d listed %d more %d first %q", b.CeilingBytes, len(b.BlockingClients), b.BlockingClientsMore, b.BlockingClients[0].Host)
 	}
 	for _, client := range b.BlockingClients {
@@ -328,10 +391,10 @@ func TestBudgetSevenDayClientGateAndDelivery(t *testing.T) {
 		}
 		return b
 	}
-	if read(admin).CeilingBytes != LegacyMaxBytes {
-		t.Fatal("empty inventory opened gate")
+	if read(admin).CeilingBytes != MaxBudgetBytes {
+		t.Fatal("empty inventory reduced the product ceiling")
 	}
-	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBytes}, 409)
+	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBudgetBytes}, 200)
 	addClient := func(host string, maximum any, age string) string {
 		t.Helper()
 		var id string
@@ -350,31 +413,31 @@ func TestBudgetSevenDayClientGateAndDelivery(t *testing.T) {
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), w.d.App, otherTenant, func(tx pgx.Tx) error {
 		ceiling, blockers, err := clientCeiling(t.Context(), tx)
-		if err == nil && (ceiling != LegacyMaxBytes || len(blockers) != 0) {
+		if err == nil && (ceiling != MaxBudgetBytes || len(blockers) != 0) {
 			return fmt.Errorf("client inventory crossed tenants")
 		}
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if b := read(admin); b.CeilingBytes != LegacyMaxBytes || len(b.BlockingClients) != 1 || b.BlockingClients[0].Host != "legacy" || b.BlockingClients[0].Version != "fixture-version" {
+	if b := read(admin); b.CeilingBytes != MaxBudgetBytes || len(b.BlockingClients) != 2 || b.BlockingClients[0].Host != "legacy" || b.BlockingClients[0].Version != "fixture-version" {
 		t.Fatalf("gate: %+v", b)
 	}
 	if len(read(member).BlockingClients) != 0 {
 		t.Fatal("tenant inventory leaked to rules reader")
 	}
-	// Stopping/archiving never bypasses the observation window.
+	// Stopping/archiving keeps the client in the observation window, without blocking saves.
 	if _, err := w.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp(),archived_at=clock_timestamp(),recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest=ref_digest,recovery_actor_id=agent_principal_id,recovery_reason='fixture' WHERE id=$1`, old); err != nil {
 		t.Fatal(err)
 	}
-	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBytes}, 409)
+	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBudgetBytes}, 200)
 	if _, err := w.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET created_at=clock_timestamp()-interval '8 days' WHERE id=$1`, old); err != nil {
 		t.Fatal(err)
 	}
-	if read(admin).CeilingBytes != MaxBytes {
-		t.Fatal("expired blocker still holds gate")
+	if read(admin).CeilingBytes != MaxBudgetBytes {
+		t.Fatal("expired client reduced the product ceiling")
 	}
-	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBytes}, 200)
+	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBudgetBytes}, 200)
 	large := w.set(admin, w.layer(admin, Scope{Layer: "project", ProjectID: w.project}), "Large", bulky("project", 60)...)
 	w.publish(admin, large, "260929120001.0.0")
 	path := fmt.Sprintf("/api/rules/merged?project_id=%s&person_id=%s&role=builder&harness=codex", w.project, admin.ID)

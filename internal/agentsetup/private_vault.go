@@ -19,6 +19,9 @@ func (s *Store) vaultID(name string) string { return Hash([]byte(s.path)) + "/" 
 // readVault runs under Store.mu. A failed ACL check never falls back to disk.
 // Migration is restart-safe: persist and verify the Keychain item first, then
 // overwrite and unlink only the exact private inode whose bytes were imported.
+// A pre-created Keychain item or a hardlink refuses migration and leaves the
+// legacy 0600 file in place. That refusal does not rotate the secret or create
+// an enclave key; rotating a legacy secret is a separate pairing choice.
 func (s *Store) readVault(name string, max int64) ([]byte, error) {
 	guard, err := s.lockNamed("keychain-migration.lock")
 	if err != nil {
@@ -84,8 +87,9 @@ func validVaultContent(name string, raw []byte) bool {
 }
 
 // This is a best-effort logical overwrite; APFS snapshots/backups may retain
-// older blocks. It does not follow symlinks and rejects observed inode swaps.
-// The advisory guard serializes helpers, not hostile same-UID namespace edits.
+// older blocks. It does not follow symlinks and rejects observed inode swaps,
+// including a hardlink (nlink != 1). The advisory guard serializes helpers,
+// not hostile same-UID namespace edits. Refusal leaves the legacy file in place.
 func (s *Store) erasePrivateFile(name string, f *os.File, size int) error {
 	var held, named unix.Stat_t
 	if unix.Fstat(int(f.Fd()), &held) != nil || !privateArtifact(&held, unix.S_IFREG) {

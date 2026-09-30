@@ -19,7 +19,7 @@ func TestRulesClientReportsAreOptionalLeaseBoundAndDowngradeSafe(t *testing.T) {
 	base := "/api/projects/" + f.project + "/harness-sessions"
 	lease := "client-capability-lease-00000000000001"
 	in := map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "client-test", "management_mode": "unmanaged", "role": "worker", "harness_session_ref": "client-capability-ref-000000000001", "worker_lease": lease, "max_session_file_bytes": 64000, "rules_client_version": "260929120000.0.0"}
-	in["max_session_file_bytes"] = 64001
+	in["max_session_file_bytes"] = rules.MaxBytes + 1
 	expect(t, f.call(f.agent, "POST", base, in, ""), 400)
 	in["max_session_file_bytes"] = 64000
 	w := f.call(f.agent, "POST", base, in, "")
@@ -60,7 +60,7 @@ func TestRulesClientReportsAreOptionalLeaseBoundAndDowngradeSafe(t *testing.T) {
 	if strings.Contains(w.Body.String(), "max_session_file_bytes") {
 		t.Fatal("heartbeat response changed")
 	}
-	for _, bad := range []any{1999, 64001, "64000", -1} {
+	for _, bad := range []any{1999, rules.MaxBytes + 1, "64000", -1} {
 		beat["max_session_file_bytes"] = bad
 		expect(t, f.call(f.agent, "POST", base+"/"+id+"/heartbeat", beat, lease), 400)
 		assertStored(nil)
@@ -73,18 +73,18 @@ func TestManagedRulesRespectRequestAndRegisteredCeilings(t *testing.T) {
 	order, run := stateRun(t, f, f.project, "running", "RCB-1")
 	lease := "managed-rules-capability-lease-000001"
 	base := "/api/projects/" + f.project + "/harness-sessions"
-	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "rules-test", "management_mode": "managed", "role": "worker", "harness_session_ref": "managed-rules-capability-ref-000001", "worker_lease": lease, "run_id": run, "work_order_id": order, "ticket_node_id": order, "work_shape": "ship", "max_session_file_bytes": 64000}, "")
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "rules-test", "management_mode": "managed", "role": "worker", "harness_session_ref": "managed-rules-capability-ref-000001", "worker_lease": lease, "run_id": run, "work_order_id": order, "ticket_node_id": order, "work_shape": "ship", "max_session_file_bytes": rules.MaxBytes}, "")
 	expect(t, w, 201)
 	id := decode(t, w)["id"].(string)
 	rules.New(f.db.App).Mount(f.mux)
-	expect(t, f.call(f.person, "PUT", "/api/rules/budget", map[string]any{"max_bytes": 64000}, ""), 200)
+	expect(t, f.call(f.person, "PUT", "/api/rules/budget", map[string]any{"max_bytes": rules.MaxBudgetBytes}, ""), 200)
 	w = f.call(f.person, "POST", "/api/rules/layers", map[string]any{"layer": "company"}, "")
 	expect(t, w, 200)
 	layer := decode(t, w)["id"]
 	floor := rules.Rule{Identity: "safe", Text: "Keep safety.", Why: "Safety.", Strength: "locked", Enabled: true, Source: rules.Source{Reference: "fixture"}}
 	lines := []rules.Rule{floor}
-	remaining := rules.MaxBytes - len(rules.RenderedBody(lines))
-	for i := 0; i < 160; i++ {
+	remaining := rules.MaxBudgetBytes - len(rules.RenderedBody(lines))
+	for i := 0; i < 1250; i++ {
 		r := rules.Rule{Identity: fmt.Sprintf("rule-%03d", i), Why: "Fixture.", Strength: "normal", Enabled: true, Source: rules.Source{Reference: "fixture"}}
 		remaining -= len("- [" + r.Identity + "] \n")
 		lines = append(lines, r)
@@ -119,7 +119,7 @@ func TestManagedRulesRespectRequestAndRegisteredCeilings(t *testing.T) {
 		}
 		return m
 	}
-	if m := request("64000"); m.ByteSize != 64000 || strings.Contains(m.Body, "Compatibility cut") {
+	if m := request("512000"); m.ByteSize != rules.MaxBudgetBytes || strings.Contains(m.Body, "Compatibility cut") {
 		t.Fatal("full managed boundary not delivered", m.ByteSize)
 	}
 	for _, limit := range []string{"", "12000"} {

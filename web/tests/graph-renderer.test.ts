@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { graphLayout, glimpseCore, cloudStride, glimpsePointInside, glimpseRadius, labelPosition, type GraphData } from '../src/lib/graphRenderer.ts'
+import { graphLayout, glimpseCore, cloudStride, glimpsePointInside, glimpseRadius, holdsIndexColour, labelPosition, onCanvas, type GraphData } from '../src/lib/graphRenderer.ts'
 
 test('glimpse orbs stay 4–8px across every node weight', () => {
   for (const weight of [-1, 0, 1, 10, 1000, NaN, Infinity]) {
@@ -63,5 +63,21 @@ test('elliptic anchors stay distinct for small, prime and composite graph sizes'
   for (const count of [1, 8, 37, 60, 74, 100, 1000]) {
     const stride = cloudStride(count)
     assert.equal(new Set(Array.from({ length: count }, (_, i) => i * stride % count)).size, count)
+  }
+})
+
+test('a hit-bitmap pixel belongs to a node only when it is opaque and holds its index colour', () => {
+  assert.equal(holdsIndexColour([0x12, 0x34, 0x56, 255], '#123456'), true)
+  assert.equal(holdsIndexColour([0x12, 0x34, 0x57, 255], '#123456'), false)
+  // Empty bitmap, antialiased edge, and a colour that is not an index colour.
+  assert.equal(holdsIndexColour([0, 0, 0, 0], '#123456'), false)
+  assert.equal(holdsIndexColour([0x12, 0x34, 0x56, 128], '#123456'), false)
+  assert.equal(holdsIndexColour([0x12, 0x34, 0x56, 255], 'rgb(18,52,86)'), false)
+})
+
+test('only a point inside the canvas can be picked', () => {
+  assert.equal(onCanvas(120, 80, 300, 200), true)
+  for (const [x, y] of [[0, 80], [120, 0], [-5, 80], [300, 80], [120, 200], [450, 80], [NaN, 80], [120, Infinity]]) {
+    assert.equal(onCanvas(x, y, 300, 200), false)
   }
 })

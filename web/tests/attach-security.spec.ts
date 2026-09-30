@@ -102,18 +102,22 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
 
   for (const capability of Object.keys(limitation)) {
     test(`mac confirmation unavailable ${capability} ${theme} ${width}`, async ({ page }) => {
-      await setup(page, theme, { computers: [computer(capability)] })
+      const upgraded = capability !== 'unsupported'
+      await setup(page, theme, { mode: upgraded ? 'local_auth' : 'aeon', saved: false, computers: [computer(capability)] })
       const card = await open(page, theme, width)
       const mac = card.getByRole('radio', { name: /Also confirm on the Mac/ })
       await expect(mac).toBeDisabled()
-      await expect(card.getByRole('radio', { name: /Approve in / })).toBeChecked()
-      await expect(card.locator('label').filter({ hasText: 'Approve in' })).toContainText('Default')
-      await expect(card.locator('label').filter({ hasText: 'Also confirm on the Mac' })).not.toContainText('Default')
-      await expect(card).toContainText(capability === 'unsupported'
-        ? `${limitation[capability]}. Approval stays in AEON.`
-        : capability === 'no_gui'
-        ? `${limitation[capability]}, so SSH and headless attaches keep approval in AEON.`
-        : `${limitation[capability]}, so approval stays in AEON.`)
+      if (upgraded) {
+        await expect(mac).toBeChecked()
+        await expect(card.locator('label').filter({ hasText: 'Also confirm on the Mac' })).toContainText('Default')
+        await expect(card.locator('label').filter({ hasText: 'Approve in' })).not.toContainText('Default')
+        await expect(card).toContainText(`${limitation[capability]}. Watches do not start until you save approval in AEON.`)
+      } else {
+        await expect(card.getByRole('radio', { name: /Approve in / })).toBeChecked()
+        await expect(card.locator('label').filter({ hasText: 'Approve in' })).toContainText('Default')
+        await expect(card.locator('label').filter({ hasText: 'Also confirm on the Mac' })).not.toContainText('Default')
+        await expect(card).toContainText(`${limitation[capability]}. Approval stays in AEON.`)
+      }
       await expect(card).not.toContainText('stay off')
       await expect(card).not.toContainText('After approval here')
       await expect(card.getByRole('button', { name: 'Save setting' })).toBeDisabled()

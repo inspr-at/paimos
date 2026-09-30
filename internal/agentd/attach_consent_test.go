@@ -130,6 +130,9 @@ func TestAttachStrictConsentActivation(t *testing.T) {
 					return "fixture-signature", nil
 				}, Exchange: func(_ context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 					sent = append(sent, in)
+					if in.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
+						t.Error("daemon did not advertise its consent proof version")
+					}
 					if in.LocalConfirmed {
 						t.Error("daemon sent a forgeable confirmation boolean")
 					}
@@ -201,8 +204,13 @@ func TestAttachStrictConsentActivation(t *testing.T) {
 				}
 				select {
 				case reason := <-auth.called:
-					if !strings.Contains(reason, "PID 40") || !strings.Contains(reason, "fixture Mac") {
-						t.Fatal("reason omitted session/host")
+					action := "watching the conversation"
+					if statusOnly {
+						action = "status only (no conversation text) for"
+					}
+					want := attachwatch.LocalConsentReason(attachwatch.Snapshot{Mode: map[bool]string{true: attachwatch.ModeLease}[statusOnly], Host: "fixture Mac", Harness: "codex", Process: attachwatch.Process{PID: 40}})
+					if reason != want || !strings.Contains(want, action) {
+						t.Fatalf("reason %q, want %q", reason, want)
 					}
 				case <-time.After(time.Second):
 					t.Fatal("no local confirmation")

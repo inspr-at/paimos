@@ -5,7 +5,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -23,13 +25,78 @@ func upgradedWatchFixture(t *testing.T) (*fixture, string, attachwatch.DeviceReq
 	f, bearer, in := watchFixtureWithKey(t, public)
 	return f, bearer, in, key
 }
-func signWatchConsent(t *testing.T, key *ecdsa.PrivateKey, digest, nonce string) string {
+func signWatchConsent(t *testing.T, key *ecdsa.PrivateKey, digest, nonce string, snap attachwatch.Snapshot) string {
 	t.Helper()
-	raw, err := ecdsa.SignASN1(rand.Reader, key, attachwatch.LocalConsentHash(digest, nonce))
+	raw, err := ecdsa.SignASN1(rand.Reader, key, attachwatch.LocalConsentHash(digest, nonce, attachwatch.LocalConsentReason(snap)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return base64.StdEncoding.EncodeToString(raw)
+}
+
+func TestConsentProofVersionUpgradeKeepsPairingKeyAndRejectsV1(t *testing.T) {
+	for _, mode := range []string{"", attachwatch.ModeLease} {
+		t.Run(fmt.Sprintf("mode=%s", mode), func(t *testing.T) {
+			f, bearer, in, signer := upgradedWatchFixture(t)
+			in.Snapshot.Platform = "darwin"
+			in.Snapshot.Mode = mode
+			if mode == attachwatch.ModeLease {
+				in.Snapshot.Transcript, in.Snapshot.FileID = "", ""
+			}
+			in.Digest = in.Snapshot.Digest()
+			public := base64.StdEncoding.EncodeToString(elliptic.Marshal(signer.Curve, signer.X, signer.Y))
+			registration := attachwatch.DeviceRequest{Operation: "register", AttachProtocol: attachwatch.Protocol, ComputerID: in.ComputerID, DeviceProof: in.DeviceProof}
+			for _, version := range []int{0, 1, 3} {
+				registration.PollKey = nonce()
+				registration.LocalConsentProofVersion = version
+				var refusal struct{ Code, Error string }
+				decodeResult(t, f.call("POST", "/api/agent-pairing/attach", registration, false, bearer, 409), &refusal)
+				if refusal.Code != "update_agentd" || !strings.Contains(refusal.Error, "upgrade paimos-agentd") {
+					t.Fatal("unsupported proof lacks actionable upgrade guidance")
+				}
+				old := in
+				old.PollKey = registration.PollKey
+				old.LocalConsentProofVersion = attachwatch.LocalConsentProofVersion
+				f.call("POST", "/api/agent-pairing/attach", old, false, bearer, 403)
+			}
+			var count int
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM harness_attach_requests)+(SELECT count(*) FROM harness_sessions)`).Scan(&count); err != nil || count != 0 {
+				t.Fatal("unsupported client created attach authority", err)
+			}
+			f.call("GET", "/api/me", nil, false, bearer, 200)
+			registration.PollKey = nonce()
+			registration.LocalConsentProofVersion = attachwatch.LocalConsentProofVersion
+			var registered attachwatch.View
+			decodeResult(t, f.call("POST", "/api/agent-pairing/attach", registration, false, bearer, 200), &registered)
+			if registered.State != "registered" || registered.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
+				t.Fatal("v2 registration did not advertise proof version")
+			}
+			var pinned string
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT local_auth_public_key FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&pinned); err != nil || pinned != public {
+				t.Fatal("proof upgrade changed the pairing key", err)
+			}
+			in.PollKey = registration.PollKey
+			v := requestWatch(t, f, bearer, in)
+			if v.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion || v.ConsentMode != attachwatch.ConsentLocalAuth {
+				t.Fatal("v2 request lost strict consent")
+			}
+			decodeResult(t, f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200), &v)
+			in.Operation, in.Sequence, in.ConsentDigest, in.LocalAuthNonce = "poll", 1, v.ConsentDigest, v.LocalAuthNonce
+			oldHash := sha256.Sum256([]byte("aeon.attach.local-consent.v1\x00" + in.ConsentDigest + "\x00" + in.LocalAuthNonce))
+			oldProof, err := ecdsa.SignASN1(rand.Reader, signer, oldHash[:])
+			if err != nil {
+				t.Fatal(err)
+			}
+			in.LocalAuthSignature = base64.StdEncoding.EncodeToString(oldProof)
+			f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
+			in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
+			var active attachwatch.View
+			decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 200), &active)
+			if active.State != "active" || active.SessionID == nil || active.LocalAuthNonce != "" {
+				t.Fatal("v2 proof with existing pairing key did not activate")
+			}
+		})
+	}
 }
 
 func TestEnclaveConsentRejectsWrongKeyNonceReplayAndExpiredApproval(t *testing.T) {
@@ -48,17 +115,21 @@ func TestEnclaveConsentRejectsWrongKeyNonceReplayAndExpiredApproval(t *testing.T
 	in.ConsentDigest = approved.ConsentDigest
 	in.LocalAuthNonce = approved.LocalAuthNonce
 	wrong, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	in.LocalAuthSignature = signWatchConsent(t, wrong, in.ConsentDigest, in.LocalAuthNonce)
+	in.LocalAuthSignature = signWatchConsent(t, wrong, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
 	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
 	var sessions int
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM harness_sessions WHERE agent_principal_id=(SELECT principal_id FROM agent_pairing_computers WHERE id=$1)`, in.ComputerID).Scan(&sessions); err != nil || sessions != 0 {
 		t.Fatal("forged signature created session")
 	}
 	in.LocalAuthNonce = strings.Repeat("f", 64)
-	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce)
+	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
 	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
 	in.LocalAuthNonce = approved.LocalAuthNonce
-	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce)
+	lied := in.Snapshot
+	lied.Host = "other host"
+	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, lied)
+	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
+	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
 	var active attachwatch.View
 	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 200), &active)
 	if active.State != "active" || active.LocalAuthNonce != "" || active.SessionID == nil {
@@ -79,9 +150,9 @@ func TestEnclaveConsentRejectsWrongKeyNonceReplayAndExpiredApproval(t *testing.T
 	in.Sequence = 1
 	in.ConsentDigest = approved.ConsentDigest
 	in.LocalAuthNonce = approved.LocalAuthNonce
-	in.LocalAuthSignature = signWatchConsent(t, signer, active.ConsentDigest, in.LocalAuthNonce)
+	in.LocalAuthSignature = signWatchConsent(t, signer, active.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
 	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
-	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce)
+	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_requests SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, in.RequestID); err != nil {
 		t.Fatal(err)
 	}

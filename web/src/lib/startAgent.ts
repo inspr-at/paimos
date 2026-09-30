@@ -15,6 +15,7 @@ import { capacityWaitText } from './capacityWait.ts'
 import { runNowOnce, listRuns, type AgentAccount, type AgentRun, type ModelProfile } from './agents.ts'
 
 export interface WorkOrder {
+  kind?: 'build' | 'review'
   node_id: string; status: 'draft' | 'ready' | 'running' | 'blocked' | 'done' | 'cancelled'
   revision: number; assignee_principal_id: string | null
   criteria: { id: string; description: string; checked_at: string | null }[]
@@ -49,7 +50,7 @@ export async function startAgent(selection: StartSelection): Promise<{ run: Agen
     }
     cursor = page.next_cursor ?? undefined
   } while (cursor)
-  const candidates = orders.filter(o => !['done', 'cancelled'].includes(o.status) && (!o.assignee_principal_id || o.assignee_principal_id === agentId))
+  const candidates = orders.filter(o => o.kind !== 'review' && !['done', 'cancelled'].includes(o.status) && (!o.assignee_principal_id || o.assignee_principal_id === agentId))
   if (candidates.length > 1) throw new Error('This ticket has several active work orders for this agent. Resolve them before starting another run.')
   let order = candidates[0]
   if (order) {
