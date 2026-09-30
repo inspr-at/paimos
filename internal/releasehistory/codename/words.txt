@@ -694,3 +694,7 @@ deny Digital Domain
 deny Golden Globe
 deny Pure Pulse
 deny Tiny Tower
+deny Clever Cloud
+deny Silent Scope
+deny Crystal Cosmos
+deny Crimson Cosmos

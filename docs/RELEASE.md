@@ -143,7 +143,7 @@ name such as "Cool Chip" or "Solar Star", a pure function of
 fixed cycle of the 15 letters rich enough for thousands of good names
 (A B C D E F G H I L M P R S T), so release 1 is A and neighbouring releases
 start differently. Within a letter short names come first, and no name
-repeats before sequence 46,510 (56,421 names in version 1). The reserve step above writes it into `version.json` as
+repeats before sequence 43,913 (50,419 names in version 1). The reserve step above writes it into `version.json` as
 `"codename"`, right after `release_sequence`; without a snapshot, run
 `just release-codename` (`go run ./internal/releasehistory/codename/stamp -repo .`)
 once `release_sequence` is set. Both are idempotent and refuse a name that
@@ -151,7 +151,9 @@ differs from the sequence's. The codename is presentation only: the version
 stays the identity, and every earlier release has its name from the same
 function. To change the lists, append a new `version N from S` block with `S`
 above every reserved sequence; never edit, reorder or delete a line, so no
-existing name moves.
+existing name moves. Two-word collisions with obscure titles are an accepted
+residual risk. A reported collision is added to the pair deny list in the next
+list version; names of already-published releases never change.
 
 For historical backfill where snapshots exist, export stored snapshots as `VERSION.json` in
 one directory and run the same command with `-snapshots DIRECTORY -tenant

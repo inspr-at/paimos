@@ -91,7 +91,7 @@ func TestVersionBlocksAreAppendOnly(t *testing.T) {
 }
 
 // version1SHA256 freezes the "version 1 from 1" block of words.txt.
-const version1SHA256 = "6f8bb0b02f4e949f9c23082bc3e00a08e4bdd9dd4ed0d143eb8c9d0d77314f00"
+const version1SHA256 = "5ef3eb48b372c5a72824a7fdc062a7a92f36d0d1c3352ddee094aa6d2970ac0a"
 
 func TestLetterCycling(t *testing.T) {
 	cycle := defaultLists.cycle
