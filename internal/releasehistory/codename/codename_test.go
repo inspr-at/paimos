@@ -91,7 +91,7 @@ func TestVersionBlocksAreAppendOnly(t *testing.T) {
 }
 
 // version1SHA256 freezes the "version 1 from 1" block of words.txt.
-const version1SHA256 = "7c9dcd1d54aa1421c78146590f1c9c6401e263afc3de606df51784591cc048f1"
+const version1SHA256 = "eb3875e7b34e962b1a696fedcd5a05cee5a78c25519aa44089a2650f8b055253"
 
 func TestLetterCycling(t *testing.T) {
 	cycle := defaultLists.cycle
@@ -255,6 +255,17 @@ var (
 	strongFragments = []string{"anal", "cock", "cunt", "dick", "fag", "fuck", "kkk", "nazi", "nigg", "piss", "porn", "shit", "slut", "twat", "wank", "whore"}
 	negativeWords   = []string{"abort", "bleak", "blight", "bomb", "broken", "bug", "collapse", "corona", "crash", "crater", "dark", "dead", "death", "decay", "demon", "die", "doom", "dread", "fail", "fatal", "final", "gloom", "grave", "grim", "hell", "kill", "last", "lost", "missile", "nuclear", "plague", "poison", "rot", "ruin", "sad", "sick", "sink", "toxic", "venom", "virus", "void", "war", "weapon", "wreck"}
 	properNouns     = []string{"Apollo", "Cassini", "Einstein", "Galileo", "Gemini", "Hubble", "Jupiter", "Kepler", "Mars", "Mercury", "Newton", "Orion", "Saturn", "Sirius", "Sputnik", "Tesla", "Titan", "Uranus", "Vega", "Venus", "Voyager"}
+	// offTheme words are brands or products, fantasy or medieval, or pastoral:
+	// the lists are pure science fiction.
+	offTheme = []string{
+		"Android", "Avatar", "Codex", "Copilot", "Cursor", "Droid", "Firefly", "Sprite", "Tailwind",
+		"Argent", "Ark", "Astrolabe", "Dwarf", "Exalted", "Firmament", "Forge", "Gallant", "Genesis", "Gnomon",
+		"Heavenly", "Hourglass", "Lantern", "Realm", "Regal", "Revered", "Royal", "Sovereign",
+		"Almanac", "Alpine", "Balmy", "Bloom", "Blooming", "Bountiful", "Breezy", "Budding", "Dappled", "Dewy",
+		"Evergreen", "Fertile", "Flaxen", "Flourishing", "Fountain", "Garden", "Harbor", "Harvest", "Haven", "Hazel",
+		"Homestead", "Idyllic", "Island", "Lavender", "Lilac", "Lush", "Meadow", "Orchard", "Perennial", "Rainbow",
+		"Russet", "Saffron", "Sundial", "Sunny", "Tawny", "Tropical",
+	}
 )
 
 func TestWordQuality(t *testing.T) {
@@ -275,6 +286,9 @@ func TestWordQuality(t *testing.T) {
 				if w.text == name {
 					t.Errorf("letter %c: %q is a proper noun", 'A'+li, w.text)
 				}
+			}
+			if slices.Contains(offTheme, w.text) {
+				t.Errorf("letter %c: %q is off theme (a brand, fantasy or pastoral)", 'A'+li, w.text)
 			}
 		}
 	}

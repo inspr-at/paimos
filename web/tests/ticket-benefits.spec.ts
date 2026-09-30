@@ -215,7 +215,7 @@ for (const width of [1600, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     // Cover both a hidden-only capture and an empty internal capture.
     for (const hidden of [2, 0]) {
-      await openNotedRelease(page, { ...benefitNotes(), hidden, items: [], gaps: [] })
+      const { current } = await openNotedRelease(page, { ...benefitNotes(), hidden, items: [], gaps: [] })
       const sheet = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
       const row = page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').first()
       const notes = page.getByRole('region', { name: 'Release notes' })
@@ -224,8 +224,9 @@ for (const width of [1600, 390]) {
       await expect(sheet).not.toContainText('No public release notes')
       await expect(notes).not.toContainText('is required')
       if (width === 390) await sheet.getByRole('button', { name: 'All releases' }).click()
-      // An empty capture names no benefits, so the row keeps version, date and counts.
-      await expect(row.locator('.headline')).toHaveCount(0)
+      // An empty capture names no benefits, so the codename is the row title (AEON-430), never the Git headline.
+      await expect(row.locator('.headline')).toHaveCount(1)
+      await expect(row.locator('.headline.codename-title')).toHaveText(current.codename!)
       await expect(row.getByText('Historical tag headline')).toHaveCount(0)
       if (process.env.SHOTS && hidden && width === 390) {
         for (const theme of ['light', 'dark']) {

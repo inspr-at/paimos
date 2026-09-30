@@ -285,12 +285,12 @@ test('search and filters look at headlines, changes and ticket keys', () => {
 })
 
 test('search finds a release by its codename in either language (AEON-430)', () => {
-  const r = rel('260930074921.0.0', '', { release_sequence: 111, codename: 'Fuzzy Facet' })
+  const r = rel('260930074921.0.0', '', { release_sequence: 111, codename: 'First Force' })
   const f = { q: '', features: false, fixes: false, tickets: false }
-  assert.ok(matches(r, { ...f, q: 'fuzzy fac' }))
-  assert.ok(matches(r, { ...f, q: 'FACET' }, 'de', 'details'))
+  assert.ok(matches(r, { ...f, q: 'first for' }))
+  assert.ok(matches(r, { ...f, q: 'FORCE' }, 'de', 'details'))
   assert.ok(!matches(r, { ...f, q: 'aqua' }))
-  assert.ok(!matches({ ...r, codename: undefined }, { ...f, q: 'facet' }))
+  assert.ok(!matches({ ...r, codename: undefined }, { ...f, q: 'force' }))
 })
 
 test('feature and fix filters follow the visible ticket lines, in the viewer locale', () => {

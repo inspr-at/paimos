@@ -353,7 +353,7 @@ func TestWithCodenames(t *testing.T) {
 		names = append(names, r.Codename)
 	}
 	// The function wins over any stored name; a reservation keeps its own slot.
-	if strings.Join(names, "|") != "Fuzzy Facet|Ideal Iris|Aqua Arc||" {
+	if strings.Join(names, "|") != "First Force|Ideal Iris|Aqua Arc||" {
 		t.Fatalf("codenames %q", names)
 	}
 	if h.Releases[0].Codename != "Stale Name" || h.Releases[2].Codename != "" {
