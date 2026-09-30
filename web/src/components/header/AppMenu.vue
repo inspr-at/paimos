@@ -15,6 +15,7 @@ import { absoluteTime, relativeTime } from '../../lib/work'
 import { useReleases } from '../../stores/releases'
 import { useSession } from '../../stores/session'
 import { useVersion } from '../../stores/version'
+import { doctrineInbox } from '../../lib/doctrineInbox'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
 import KeyCap from '../KeyCap.vue'
@@ -36,6 +37,9 @@ const keys = computed(() => can('keys.manage'))
 const connect = computed(() => session.identity?.principal.kind !== 'agent' && !!myWorkspaceRole())
 const canFeedback = computed(() => can('inbox.send'))
 const newCount = computed(() => releases.newCount)
+// Doctrine proposals waiting for a person (AEON-444): a dot on the gear, and a row.
+const doctrineWaiting = computed(() => doctrineInbox.pending)
+const triggerLabel = computed(() => doctrineWaiting.value ? `App and workspace, ${doctrineWaiting.value} doctrine ${doctrineWaiting.value === 1 ? 'proposal waits' : 'proposals wait'}` : 'App and workspace')
 
 // ---------- System status: read fresh on every open and every re-check ----------
 // Health, readiness and the running version come straight from the server (never
@@ -154,11 +158,17 @@ function edited() { sendKey = ''; sent.value = '' }
 <template>
   <HeaderMenu
     v-if="session.identity" id="app-menu" ref="menu" :role="pane === 'menu' ? 'menu' : 'dialog'" :label="pane === 'menu' ? 'App and workspace' : PANES[pane]"
-    trigger-label="App and workspace" tip="Settings and help" class="app-menu" @open="opened" @close="closed"
+    :trigger-label="triggerLabel" tip="Settings and help" class="app-menu" @open="opened" @close="closed"
   >
-    <template #trigger><AppIcon name="gear" /></template>
+    <template #trigger><AppIcon name="gear" /><i v-if="doctrineWaiting" class="trigger-dot" aria-hidden="true" /></template>
 
     <template v-if="pane === 'menu'">
+      <template v-if="doctrineWaiting">
+        <button class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/settings/agent-rules#doctrine-inbox')">
+          <AppIcon name="book" /><span class="hm-text">Doctrine proposals</span><span class="hm-end waiting-count">{{ doctrineWaiting }}</span>
+        </button>
+        <hr class="hm-sep" role="separator" />
+      </template>
       <template v-if="admin">
         <button class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/settings/workspace')"><AppIcon name="gear" /><span class="hm-text">Workspace settings</span></button>
         <hr class="hm-sep" role="separator" />
@@ -263,6 +273,10 @@ function edited() { sendKey = ''; sent.value = '' }
 
 <style scoped>
 .new-count { color: var(--gold-ink); font-weight: 600; }
+.waiting-count { color: var(--ink-2); font-weight: 650; font-variant-numeric: tabular-nums; }
+/* A neutral dot on the gear while doctrine proposals wait (AEON-444). */
+.app-menu :deep(.hm-trigger) { position: relative; }
+.trigger-dot { position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-2); box-shadow: 0 0 0 2px var(--surface-raised); pointer-events: none; }
 .hm-end :deep(.keycap) { margin: 0; }
 /* System status: a row with a second, quieter line. */
 .status-item { align-items: flex-start; padding-top: 9px; padding-bottom: 9px; }
