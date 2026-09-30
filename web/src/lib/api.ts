@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export interface Identity {
   principal: { id: string; name: string; email?: string; kind?: 'person' | 'agent'; roles?: string[] }
-  tenant: { id: string; name: string }
+  // brand: the workspace's own header brand (AEON-431), absent when unset.
+  tenant: { id: string; name: string; brand?: import('./tenantBrand').TenantBrand }
   // The signed-in person's external identity; absent for agent keys.
   identity?: { email?: string; display_name?: string } | null
 }
@@ -20,7 +21,8 @@ import type { TicketEstimate } from './estimates.ts'
 import type { TicketPlanning } from './planning.ts'
 import { rowStore } from './rowStore.ts'
 
-export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
+// codename: the running release's name (AEON-430); older servers leave it out.
+export interface Version { version: string; scheme: string; brand?: import('./brand').Brand; codename?: string }
 
 export class StaleRequestError extends Error {}
 export class RequestFailure extends Error {
