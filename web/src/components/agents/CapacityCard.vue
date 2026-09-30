@@ -115,10 +115,15 @@ function position() {
   // editor scrolls inside, with its footer in view.
   editorStyle.value = { top: `${g.bottom - box.top + 8}px`, left: `${Math.max(12, Math.min(g.right - box.left - w + 10, box.width - w - 12))}px`, maxHeight: `${Math.max(440, window.innerHeight - g.bottom - 64)}px` }
 }
+// On a phone the trigger sits in the inert page. Remember it and focus only
+// after the sheet has unmounted and that inert is gone (see the sheet watch).
+let sheetReturn: HTMLElement | null = null
 function closeEditor(focus = true) {
   const gear = editor.value?.gear
+  const onSheet = sheet.value && !!editor.value
   editor.value = null
   editorStyle.value = {}
+  if (onSheet) { sheetReturn = focus ? gear ?? null : null; return }
   if (focus) gear?.focus({ preventScroll: true })
 }
 async function saveEditor(next: CapacitySchedule) {
@@ -240,7 +245,14 @@ function setBackground(off: boolean) {
     }
   }
 }
-watch(() => !!editor.value && sheet.value, async open => { await nextTick(); setBackground(false); if (open) setBackground(true) })
+watch(() => !!editor.value && sheet.value, async open => {
+  await nextTick()
+  setBackground(false)
+  const back = sheetReturn
+  sheetReturn = null
+  if (open) setBackground(true)
+  else if (back?.isConnected) back.focus({ preventScroll: true })
+})
 onBeforeUnmount(() => setBackground(false))
 
 // ---------- Outside clicks ----------
