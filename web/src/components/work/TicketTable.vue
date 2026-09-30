@@ -889,8 +889,8 @@ td.c-title { position: relative; overflow: hidden; }
 @media (hover: hover) { .ticket-row:hover .parent-chip { opacity: 0; } }
 .ticket-row.cursor .parent-chip, td.c-title:focus-within .parent-chip { opacity: 0; }
 /* Hover actions float at the end of the title. Reserve their width (two 24px
-   buttons, the gap, and the 8px inset) so a worker cue or an epic count stays
-   a real hit target. Phones hide the actions, so they keep the full title. */
+   buttons, the 2px gap, and the 8px inset). With the cell's 12px padding that
+   leaves the cue 12px clear of Copy. Phones hide the actions. */
 @media (min-width: 721px) {
   .ticket-row:hover .title-cell,
   .ticket-row.cursor .title-cell,
@@ -921,9 +921,8 @@ td.c-title { position: relative; overflow: hidden; }
 .owner.with-workers { flex: 0 0 auto; }
 .owner.with-workers .person-name { display: none; }
 .c-assignee .cell:has(.owner) .ticket-workers { flex: 0 1 auto; }
-/* The title gives way first. The cue may ellipsize, and it must not stay rigid
-   and slide under the hover actions. */
-.title-workers { flex: 0 1 auto; min-width: 0; max-width: 132px; }
+/* The title ellipsizes. The cue keeps its full name and does not shrink. */
+.title-workers { flex: 0 0 auto; min-width: max-content; max-width: none; }
 .empty { color: var(--ink-3); }
 .c-updated time, .c-created time { color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .c-estimate .mono.estimate-draft { color: var(--ink-3); }

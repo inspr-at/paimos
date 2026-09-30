@@ -180,32 +180,42 @@ test('a narrow list keeps a compact worker cue in the title', async ({ page }) =
   await expect(page).toHaveURL(/\/agents\/s-nova$/)
 })
 
-test('the copy action does not cover the compact worker', async ({ page }) => {
+test('the compact worker name stays fully visible and clear of Copy', async ({ page }) => {
   const data = withWorkers()
   // Assignee hidden, so the cue stays in the title at every width, including 1600.
   data.preferences['list:p-pharos'] = { visible: ['status', 'priority', 'updated'] }
   await mockWork(page, data)
-  for (const width of [390, 800, 1600]) {
+  for (const width of [390, 721, 770, 800, 1600]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await page.goto('/p/PHAROS')
     const sample = row(page, 'PHAROS-14')
     const worker = sample.locator('.title-workers').getByRole('link', { name: /nova/ })
+    const name = sample.locator('.title-workers .worker-name')
     await expect(worker).toBeVisible()
+    await expect(name).toHaveText('nova')
+    expect(await name.evaluate(el => {
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      const text = range.getBoundingClientRect()
+      const box = el.getBoundingClientRect()
+      const clip = el.closest('td')?.getBoundingClientRect()
+      const covers = text.width > 8 && box.left <= text.left + 0.5 && box.right + 0.5 >= text.right
+      const inside = !clip || (text.left >= clip.left - 0.5 && text.right <= clip.right + 0.5)
+      return covers && inside
+    })).toBe(true)
     await sample.hover()
-    const workerBox = await worker.boundingBox()
+    const nameBox = await name.boundingBox()
     // Hidden on a phone (display: none), so it is not a role until the row is wide enough to hover.
     const copy = sample.locator('.row-actions button[aria-label="Copy PHAROS-14"]')
     const copyBox = await copy.boundingBox()
-    expect(workerBox).toBeTruthy()
+    expect(nameBox).toBeTruthy()
     if (width === 390) {
       expect(copyBox).toBeNull()
-    } else if (workerBox && copyBox) {
-      expect(copyBox).toBeTruthy()
-      const clear = copyBox.x + copyBox.width <= workerBox.x
-        || workerBox.x + workerBox.width <= copyBox.x
-        || copyBox.y + copyBox.height <= workerBox.y
-        || workerBox.y + workerBox.height <= copyBox.y
-      expect(clear).toBe(true)
+    } else if (nameBox && copyBox) {
+      const overlapsY = nameBox.y < copyBox.y + copyBox.height && copyBox.y < nameBox.y + nameBox.height
+      const gap = copyBox.x - (nameBox.x + nameBox.width)
+      expect(overlapsY).toBe(true)
+      expect(gap).toBeGreaterThanOrEqual(12)
     } else {
       expect(copyBox).toBeTruthy()
     }
