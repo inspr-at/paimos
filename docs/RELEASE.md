@@ -20,17 +20,278 @@ with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `C
 
 ## Workflow
 
-A push of a `v*` tag runs `.github/workflows/release.yml`.
+### Test runner routing (AEON-438)
 
-1. Check out the repository with tags, so release history can see earlier coordinates.
-2. Validate the tag and run `scripts/verify-release.mjs --release`. Fail if `version.json` disagrees with the tag.
-3. Refuse a coordinate whose GitHub release already exists, including drafts (the authenticated, paginated release list includes them). macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The Ubuntu job builds Linux `paimos-agentd` statically and all `aeon-cli` targets with CGO off, then checks the darwin binaries.
-4. Generate the release-history manifest embedded in the server image. That file is produced at release time. It is not committed.
-5. Run the image smoke gate. Publishing waits for it.
-6. Refuse a coordinate whose GHCR image tag already exists, including a tag left by a partial earlier run. Push the image to `ghcr.io/inspr-at/aeon:<version>`. There is no `latest` tag.
-7. Create the GitHub release once as a **draft** with the CLI, signed/notarized darwin `paimos-agentd`, Linux `paimos-agentd`, and `SHA256SUMS`. Existing releases are never uploaded to or overwritten. The notes name the image and its digest. A successful tag build ends here; it does not publish the draft or open a Homebrew PR.
-8. The release coordinator deploys that exact image digest through the normal deployment gates and verifies the live server's version and health. Only then publish the existing draft as described below. Failed or incomplete verification leaves it a draft.
-9. Publication triggers `.github/workflows/homebrew-tap.yml` (`release: published`). Its `homebrew-tap` job validates the exact event tag, rejects drafts and prereleases, and reads public release metadata before downloading `SHA256SUMS`. It renders `Formula/aeon-agentd.rb` from that release's darwin checksums and, when `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_KEY` are present in the `homebrew-tap` environment, opens a pull request on `inspr-at/homebrew-tap`. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either secret is absent the job logs `homebrew tap bump skipped: app secrets absent` and succeeds. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
+CI's hosted `runner-route` job calls `test-runner-route.yml` as a live router
+proof; its outputs have no consumer in CI until Mac shard integration. The
+manual smoke job consumes its JSON `runs_on` output behind independent event,
+ref and rerun-attempt guards.
+Only `push` and `workflow_dispatch` on `refs/heads/main` may select `[self-hosted,
+Linux, ARM64, mbp2606]`. The reviewed workflows route PRs to `ubuntu-latest`;
+a PR can modify those workflows or the guard, so runner-side admission is the
+enforcement boundary. The manual `Test runner smoke` workflow exercises the same
+router and small Go/Node checks. Normal PR and main CI retain the full Go suite
+on seven hosted shards; Mac shard integration remains pending below.
+
+**Active and required admission contract: mode B (Free plan), decided by Markus
+on 2026-09-30 and recorded on NIX-600.** Publishing
+`AEON_MBP2606_AVAILABILITY` requires all three controls below to be implemented
+and verified; workflow guards and matching labels cannot bind a JIT runner to
+the job the controller checked. GitHub can assign another queued job whose
+`runs-on` labels are a case-insensitive subset of the runner's labels, including
+a fork job racing the verified job.
+
+1. **Verified JIT minting:** no idle pre-registered runners. NIX-600 mints only
+   for an API-verified queued job whose event is `push` or `workflow_dispatch`,
+   head repository is `inspr-at/paimos`, workflow is
+   `inspr-at/paimos/.github/workflows/ci.yml@refs/heads/main` or
+   `inspr-at/paimos/.github/workflows/test-runner-smoke.yml@refs/heads/main`, and
+   head SHA is reachable from `main`. Missing or unverifiable metadata rejects
+   admission. Record the verified job ID, run ID/attempt and unique runner name.
+   Before **every mint**, sweep every queued paimos job whose `runs-on` labels
+   are a **case-insensitive subset of the labels of the runner about to be
+   minted**. Cancel the runs for matching jobs the controller has not verified,
+   or refuse to mint while any such job remains. This includes jobs requesting
+   only `self-hosted`, `[self-hosted, linux]` or `ARM64`, without `mbp2606`.
+   This covers any event or ref, including directly edited `runs-on`, PRs,
+   work-branch pushes, non-main dispatches, `merge_group`, `workflow_run` and
+   `schedule`; leave no spare registrations. App **5134402** requires
+   `actions:write` on paimos to cancel those runs.
+2. **Job-started hook:** bake an executable hook into the sealed VM image,
+   outside the checkout and actions-runner directory. Set
+   `ACTIONS_RUNNER_HOOK_JOB_STARTED` to its absolute path in the image's runner
+   startup configuration; never load the hook from the repository. Before any
+   workflow step, require `GITHUB_REPOSITORY` = `inspr-at/paimos`,
+   `GITHUB_EVENT_NAME` in exactly `{push, workflow_dispatch}`, and
+   `GITHUB_WORKFLOW_REF` equal to one of the two fully qualified workflow refs
+   above. Read and validate the payload from `GITHUB_EVENT_PATH`.
+   **PR-shaped events or payloads are always denied**, including same-repository
+   PRs; a matching `pull_request.head.repo.full_name` never admits them.
+   On missing, malformed or mismatched metadata, the hook must kill both
+   `Runner.Listener` and `Runner.Worker` and power the VM off (`poweroff -ff`)
+   **before it returns**; the controller then discards the VM. A non-zero exit
+   alone is insufficient. Keep the slot cache disk **LUKS2-locked at boot**;
+   the controller unlocks and mounts it only after API attribution of this
+   `runner_name` and hook admission. NIX-600's smoke acceptance must prove
+   that a rejected job containing an `if: always()` step and an action with a
+   `pre:` step produces **no workflow-step output and no cache write**.
+
+   GitHub's [job hook documentation](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/run-scripts)
+   says "the job will not run"; this contract explicitly **does not rely on
+   that claim**. In actions/runner at `ca43437862b6d6be24e6de73dff3971c99140c9a`,
+   the hook is an ordinary `always()` pre-job step
+   ([JobExtension.cs:302–310](https://github.com/actions/runner/blob/ca43437862b6d6be24e6de73dff3971c99140c9a/src/Runner.Worker/JobExtension.cs#L302-L310)).
+   A failed step only updates the job result
+   ([StepsRunner.cs:274–278](https://github.com/actions/runner/blob/ca43437862b6d6be24e6de73dff3971c99140c9a/src/Runner.Worker/StepsRunner.cs#L274-L278));
+   later step conditions are still evaluated
+   ([StepsRunner.cs:203–241](https://github.com/actions/runner/blob/ca43437862b6d6be24e6de73dff3971c99140c9a/src/Runner.Worker/StepsRunner.cs#L203-L241)),
+   and action `pre-if` defaults to `always()`
+   ([ActionManifestManager.cs:458](https://github.com/actions/runner/blob/ca43437862b6d6be24e6de73dff3971c99140c9a/src/Runner.Worker/ActionManifestManager.cs#L458)).
+3. **Controller post-job check:** query the actual completed job via the
+   [workflow-jobs API](https://docs.github.com/en/rest/actions/workflow-jobs#get-a-job-for-a-workflow-run).
+   Match its `runner_name` to the minted runner and confirm its job ID and run
+   ID/attempt are exactly those verified before minting, including assignments
+   from unexpected runs rather than checking only the expected run. A mismatch
+   alerts the operator and pauses mode B by clearing/refusing availability; missing or
+   unverifiable evidence also fails closed. This check runs outside the VM;
+   cleanup and verification must not depend on a job-controlled completion hook.
+
+**Deny recording:** write a deny line in the GitHub job log. The VM cannot reach
+the host to report a deny, so the controller treats **any VM power-off during a
+job** as a deny (including pause or cancellation), pauses mode B and taints the
+slot. Attribute the actual job/run/attempt and `runner_name` through the API.
+
+The controller, hook and `ci.yml` router use the same smaller allowlist:
+**`push`, `workflow_dispatch` at `refs/heads/main` only**. `schedule` and
+`merge_group` are excluded; no tags are routed. Expanding events or refs requires
+a reviewed change to all three controls and the workflow guard.
+
+**Preconditions for availability and every mint:** paimos main ruleset
+**24240960** (AEON-411 part 1) must exist, have `enforcement: active`, and match
+the reviewed ruleset baseline, including rules, parameters, ref conditions and
+bypass actors. Missing, disabled, weakened, changed or unverifiable protection
+refuses minting and clears/refuses `AEON_MBP2606_AVAILABILITY` (mode B off).
+The NIX-600 app `inspr-mbp2606-runner` (**5134402**) requires `actions:write`
+for queue cancellation and has `administration:write` on paimos and can edit
+rulesets, so the controller verifies the ID, active enforcement and unchanged
+rules through the API before **every** mint; the app's permissions are not proof
+that protection remains intact.
+
+**Mode-B runtime:** every job gets one fresh Linux ARM64 Lima VM cloned from a
+sealed base image containing rootful Docker, actions-runner and the baked hook,
+with **no host mounts**. The JIT runner executes inside that VM. The job has
+root inside its VM, so the VM is the isolation boundary; the controller deletes
+it after completion or rejection. Persistent caches use one **LUKS2-locked disk
+per slot**, unlocked and mounted by the controller only after API attribution
+and hook admission, read-write **only for verified main pushes**. Lima 2.2
+`format:true` repartitions on every boot: attach slot disks with `format:false`
+and require an explicit `--init` on first use. After **any deny, pause or
+mismatch**, restore the tainted slot disk from its last known-good APFS
+clone, captured after the previous verified main push. Promote a new known-good
+clone only after the external post-job check passes for a main push. Dispatches
+get a throwaway clone of known-good, with disposable scratch/overlays. A cache
+tarball over the controller's SSH is the fallback after admission; write-back
+is allowed only for verified main pushes.
+
+**Network precondition:** a host `pf` anchor for user `ci` blocks private ranges
+and host loopback, except the Lima SSH loopback ports **60019–60023**: **4 job
+slots + 1 proof VM (`on`'s isolation proof)**. NIX-600's TALKBOX mapping assigns
+60020–60023 to slots 0–3; 60019 serves the sealed base only during its build,
+or the throwaway proof VM at `on` and the 10-minute re-prove, never concurrently.
+This stateless, public-key-only exception, with per-instance keys and **no
+private key in any guest**, is an **accepted residual risk**. User `ci` has
+**no port-53 egress at all**. VM DNS resolves through Lima hostagent →
+`mDNSResponder` → the host's resolvers (router, tailnet split DNS and `.local`
+mDNS). **ACCEPTED residual risk:** LAN and tailnet **names resolve**, though
+those destinations remain unreachable; **DNS tunnelling to public servers is
+possible** through this host resolver path. Router **TCP 53/80/443 and UDP 53**
+are blocked from the VM. Direct resolver fallback and port 53 to arbitrary LAN
+hosts are not allowed in this contract.
+The controller verifies that the host anchor is installed and active before
+publishing availability and before every mint; a missing, inactive or
+unverifiable anchor keeps mode B off. An in-VM firewall does not satisfy this
+boundary, because the job has root.
+
+Org state verified on 2026-09-30: only the **Default** runner group, public
+repositories not allowed, **0 runners**; Blacksmith is removed.
+
+Mode A is only a possible future Team-plan upgrade: a group restricted to paimos
+and the two selected main workflow refs, recorded and verified before adoption,
+retaining the baked job-started hook as defence in depth.
+
+Fork-PR approval is `all_external_contributors` (set by the lead, 2026-09-30).
+That is defence in depth, not the runner admission boundary. A `merge_group` run
+executes PR code, so queueing a PR is a decision to run it on the Mac if routing
+is ever enabled for that event. **It is excluded from the mbp2606 allowlist in
+mode B today**: GitHub documents exact pinned workflow refs; matching
+`gh-readonly-queue/…` refs to the selected `main` workflows is unverified.
+Merge-queue CI continues on hosted runners. See GitHub's
+[runner-group workflow restrictions](https://docs.github.com/en/enterprise-cloud%40latest/actions/how-tos/manage-runners/self-hosted-runners/manage-access).
+
+Routing is disabled until NIX-600's controller publishes the repository variable
+`AEON_MBP2606_AVAILABILITY` on `inspr-at/paimos` with this value-free shape:
+
+```json
+{"schema":1,"repository":"inspr-at/paimos","os":"linux","arch":"arm64","online":true,"busy":false,"observed_at":"2026-09-30T10:00:00Z","idle_runners":4}
+```
+
+The schema remains **version 1**; mode and rerun-attempt metadata require no new
+availability fields. In mode B, `idle_runners` counts available VM execution
+slots, not idle registered runners. The controller observes live capacity,
+publishes only when online and idle, refreshes at least every 10 seconds, and
+clears the variable before draining/stopping the pool. Records expire after
+**30 seconds**. An absent, invalid, expired, future-dated, offline or busy record
+selects hosted immediately;
+there is no network wait and no runner administration credential in CI. GitHub's
+[runner-list API](https://docs.github.com/en/rest/actions/self-hosted-runners#list-self-hosted-runners-for-a-repository)
+requires repository Administration read access; that belongs to the host
+controller, not the workflow token. Neither token permissions nor environment
+secrets are added here. The Linux ARM64 pool must provide Docker service-container
+support, Ubuntu-compatible `apt`/`sudo`, Go 1.26 and the shells used by the tests.
+Routable `go` and future routed `e2e` jobs must not assume amd64:
+`pgvector/pgvector:pg18` is multi-arch, and setup-go/setup-node select ARM64 on
+this runner. The guard rejects routed jobs referencing `amd64`, `x86_64`,
+`x86-64`, `i[3-6]86` or the token `x64` in artifacts, including action inputs,
+services, matrices and inherited environment/default settings. `release.yml`
+and `pairing-platform.yml` are **never routed**; their multi-platform artifacts
+and evidence remain hosted.
+
+**Off/drain:** after clearing availability, NIX-600 keeps minting JIT runners for
+API-verified queued jobs that still carry the mbp2606 label, until that queue
+empties, and lets running jobs finish, with every mode-B control and precondition
+still enforced. A ruleset/network failure or post-job mismatch stops minting and
+cancels affected queued runs rather than draining through a failed boundary.
+**Hard stop:** cancel those queued and running runs before stopping capacity;
+do not leave them stranded waiting for a runner. A lease is an admission check,
+not an atomic reservation: concurrent
+admissions or host failure after selection remain a queue risk. Never publish
+a simple persistent `on` flag. Offline/busy smoke and full-suite timing must be
+recorded when the host becomes available.
+
+For routed workflows, use **Re-run all jobs** (`gh run rerun RUN_ID` without
+`--failed`) so the hosted router refreshes the lease. It emits `run_attempt`;
+consumers compare it with `github.run_attempt` and select hosted if a failed-job
+or individual-job rerun retains an older output. This rejects stale attempts,
+not a lease that expires after initial job scheduling; the controller's draining
+duties cover already queued jobs. See GitHub's
+[rerun behavior](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
+
+**TODO (AEON-408):** main now includes the seven-shard Go layout; this branch
+keeps those shards and the static/aggregate gates hosted. On Mac integration,
+use **4 Go shards on mbp2606, 7 on hosted**, driven by the router's runner class;
+require 4 idle slots for the mbp2606 batch. The current tool has
+`shardCount = 7` in `scripts/ci-go-shards/shard.go` and a seven-way
+`scripts/ci/go-shards.txt`: first add a count parameter or a separate four-way
+split, with coverage checks for both plans. Keep the **Timing budgets, alone**
+step hosted (`matrix.shard == 4`), where its budgets were calibrated; do not
+move it onto Mac shard 4. Set **`GOFLAGS=-count=1`** for every Mac shard so the
+tool's `go test` commands produce fresh evidence. Retain the shard commands and
+hosted aggregate/static gates, add `runner-route` to `needs`, and use the smoke
+job's guarded `runs-on` and actual runner-class evidence. Set `setup-go` cache
+to `${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}` and
+checkout's **`persist-credentials: false`** on every routed job. The current
+seven-way inventory includes `scripts/ci-runner-guard`; include it in the Mac
+split too. Insufficient capacity sends the entire batch to hosted; broader
+routed fan-outs must request their whole simultaneous capacity through
+`required-idle-runners`.
+
+Every evidence-producing Go test on mbp2606 uses **`go test -count=1`** to bypass
+cached test results. Routed action caches and the controller's persistent Go,
+npm and Playwright cache volumes are written **only by pushes to main**.
+Dispatch jobs may read trusted caches but write only disposable per-job scratch
+or overlays; NIX-600 must enforce that isolation. The routed workflows disable
+`setup-go` caching outside main pushes. A test cache hit is not fresh evidence.
+
+`go run ./scripts/ci-runner-guard` scans **all** workflow YAML, including `.yml`
+and `.yaml` in any letter case. Hosted labels are exactly `ubuntu-latest`,
+`ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15` and `macos-15-intel`; the controller
+must not assign these labels to self-hosted runners. Its fixture tests reject
+direct labels, hosted-looking impostors, unsafe expressions, matrix labels,
+unguarded router outputs, routed jobs with secrets/environments/write permissions,
+amd64 artifact references, and routed release/pairing/image/attestation/pin jobs.
+Unknown dynamic expressions fail closed.
+The hosted `release-check` runs both guard and router tests. Release workflows,
+image build/relink, attestation and pin gates always stay hosted; attestation
+verification must retain `--deny-self-hosted-runners` in its owning gate.
+
+The lead accepted mbp2606 green evidence for tree-keyed reuse of **tests/evals**
+only (AEON-438, 2026-09-30). Successful routed jobs record their actual
+`runner_class=hosted|mbp2606`, source commit and event in the job summary. Any
+future reuse record must preserve that class. Image provenance, attestations and
+pin gates may never reuse that evidence. This change adds no tree-skip mechanism.
+
+A push of an annotated `v*` tag runs `.github/workflows/release.yml`. Create it with `git tag -a "$tag" -m "Release $tag"`; lightweight tags fail before the image build (AEON-398).
+
+The `image` job starts independently of the macOS jobs (AEON-407):
+
+1. Check out all tags, validate the calendar coordinate and presentation bundle, and require the tag to match `version.json`.
+2. Refuse an existing GitHub release, including a draft, or an existing GHCR image tag, including one left by a partial run. API lookup failures stop the job.
+3. Generate the release-history manifest embedded in the server image. It is not committed; both image builds use the working directory as their context.
+4. Import the registry cache at `ghcr.io/inspr-at/aeon:buildcache`, build linux/amd64 and load it into Docker. Resolve the loaded tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable local ID. BuildKit's config digest alone is not runnable in every Docker image store.
+5. After smoke passes, export the same build inputs with BuildKit `provenance: mode=max`, push only `ghcr.io/inspr-at/aeon:<version>`, and update the separate registry cache in `mode=max`. There is no `latest` release alias. The first cache import may miss; the build still runs.
+6. Create a GitHub build-provenance attestation for the pushed digest and store it in GHCR. Verify its repository, release workflow, source tag and source commit with `gh attestation verify`. The job exposes `version` and `digest` outputs and records the verified digest in its summary. It cannot succeed if attestation or verification fails.
+
+In parallel, macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The `assets` job waits for both signed darwin targets and the verified image job, builds Linux `paimos-agentd` and all `aeon-cli` targets statically, verifies the darwin binaries and computes `SHA256SUMS` over all eight binaries. It rechecks release immutability, then creates one **draft** GitHub release with all nine assets and the image digest (AEON-356). Existing drafts and published releases are never uploaded to or overwritten. A partial image publication requires a new coordinate rather than a rerun that replaces it.
+
+Publication remains the coordinator's explicit step after deployment and live verification of the exact image digest, version and health. Failed or incomplete verification leaves the release a draft. The tag workflow never opens a tap pull request while the release is draft. Publication triggers `.github/workflows/homebrew-tap.yml` (`release: published`). Its `homebrew-tap` job validates the exact event tag, rejects drafts and prereleases, and reads public release metadata before downloading `SHA256SUMS`. It renders `Formula/aeon-agentd.rb` from that release's darwin checksums and, when `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_KEY` are present in the `homebrew-tap` environment, opens a pull request on `inspr-at/homebrew-tap`. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either secret is absent the job logs `homebrew tap bump skipped: app secrets absent` and succeeds. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
+
+To verify a published image independently, use its exact digest and source commit:
+
+```sh
+gh attestation verify "oci://ghcr.io/inspr-at/aeon@$DIGEST" \
+  --repo inspr-at/paimos \
+  --signer-workflow inspr-at/paimos/.github/workflows/release.yml \
+  --source-ref "refs/tags/v$VERSION" --source-digest "$COMMIT" \
+  --deny-self-hosted-runners
+```
+
+The attestation action uses the existing `packages`, `attestations` and OIDC write scopes only in the image job. Storage-record creation is disabled so no `artifact-metadata` write scope is needed. The image job retains its existing `contents: write` permission so its immutability lookup can see drafts (GitHub restricts draft listings to push access). Only `assets` creates the draft release; signing stays in its existing environment. Every action in these image/release workflows is pinned to a commit.
+
+### Dry runs and timing evidence
+
+`.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. It runs the workflow regression tests, generates offline release history, imports the same registry cache, loads the production build and runs the same smoke gate. Its token has only `contents: read`; it has no signing environment, registry login, cache export, image push, attestation or release creation. Run it on the work branch without creating a release tag. Hosted timing and real attestation verification still require a coordinator-authorized publishing run; a local fixture test does not establish either acceptance criterion.
+
+Baseline evidence: [release run 36647379702](https://github.com/inspr-at/paimos/actions/runs/36647379702), obtained with `gh run view --json jobs,createdAt,updatedAt`, took **641 s (10:41)** from run creation to pushed digest. The release job began after **237 s**; Linux/CLI builds took **99 s**, artifact download **1 s**, history **32 s**, image smoke (including its original build) **119 s**, and build/push **122 s**. Removing the signing dependency and client build/download time gives a conservative structural estimate of **304 s (5:04)** before the new attestation/verification overhead, with cache gains unmeasured. The ≤6 min target and successful test-image verification remain pending a hosted run; do not report this estimate as measured acceptance.
 
 ### Publish after live verification (AEON-356)
 
@@ -52,7 +313,7 @@ Drafts are excluded from public release discovery and GitHub's `latest` endpoint
 
 ## Image smoke gate
 
-`scripts/smoke-image.sh` builds the release image and exercises it before anything is published. It checks the pinned Chromium and tini packages, their licenses, and `NOTICE`. It then starts a disposable Postgres and the server with mounted secret files, and checks startup, the database role, UID 65532, health, and headers. The script's dev mode is only for authenticated upload and quote calls. Live OIDC is not part of the gate, because the database is disposable and has no identity provider.
+`scripts/smoke-image.sh` builds the release image and exercises it before anything is published. CI sets `AEON_SMOKE_IMAGE` to the cached build's immutable image ID, which skips rebuilding and preserves the caller-owned image during cleanup; standalone runs still build and clean up their own disposable image. It checks the pinned Chromium and tini packages, their licenses, and `NOTICE`. It then starts a disposable Postgres and the server with mounted secret files, and checks startup, the database role, UID 65532, health, and headers. The script's dev mode is only for authenticated upload and quote calls. Live OIDC is not part of the gate, because the database is disposable and has no identity provider.
 
 The gate needs Docker. It is a release check, not the day-to-day `just test` run.
 
@@ -117,7 +378,8 @@ classic database is contacted by the history builder.
 
 At reservation, the release coordinator reviews that export and freezes its
 public projection in `internal/releasehistory/data/product-notes.json` **before
-tagging** (AEON-372):
+the release PR** (AEON-405), so the release ships its own notes. Publication
+only verifies that capture; it does not fetch notes for the following release:
 
 ```sh
 go run ./internal/releasehistory/packnotes -repo . -snapshot SNAPSHOT.json -reserve VERSION -tenant TENANT_UUID -project AEON_PROJECT_UUID
@@ -219,6 +481,61 @@ The writing-rule proposal is `docs/proposals/ticket-benefit-writing.json`, using
 AR1's draft Rule DTO. It must be imported as a draft at the fetched revision and
 published separately by an authorized human; it changes no effective harness
 files or company rules.
+
+### Own-release notes without journey membership (AEON-405)
+
+At reservation, write an ignored JSON array of the release's reviewed ticket
+keys (for example `tmp/release-scope.json`). Use the exact scope being cut,
+including hidden members; `[]` explicitly declares an internal-only release.
+Do not infer this scope from earlier tags or require the release to be published.
+After updating `version.json`, capture through the configured PPM client and
+freeze the public projection in the same release PR:
+
+```sh
+go run ./internal/releasehistory/exporthistoric -repo . -client /path/to/ppm-client -tenant TENANT_UUID -project AEON_PROJECT_UUID -reserve VERSION -tickets tmp/release-scope.json -out tmp/own-release-notes.json
+go run ./internal/releasehistory/packnotes -repo . -historic tmp/own-release-notes.json -reserve VERSION -tenant TENANT_UUID -project AEON_PROJECT_UUID
+node scripts/check-own-release-notes.mjs
+```
+
+The explicit version, channel and sequence must match `version.json`. The
+exporter verifies the authenticated tenant and each member's project ancestry.
+Every public member must have both 2–4-word pills and both nonblank benefits;
+hidden members contribute no key or text. The raw ignored export stays local.
+Identical reruns use that same export; changed observations conflict with the
+frozen original. Commit the public bundle alongside the version reservation
+before opening the PR. CI's `release-check` rejects a missing own-version entry,
+a mismatched sequence/channel or invalid bilingual fields. AEON-405 pins the
+legacy cutoff at release sequence **113** (`LEGACY_RELEASE_SEQUENCE_CUTOFF` in
+the checker): captures through that sequence may omit channel/sequence and
+bilingual fields, but every field present is still validated. From sequence
+**114** onward, the complete matching channel/sequence and all four bilingual
+fields are required, even when `written_after_release` is set. The cutoff stays
+fixed; it does not follow `version.json` or future releases. Historic entries
+remain immutable; reserve and capture the next release rather than rewriting a
+legacy entry to satisfy the gate. After
+publication, verify the same capture digest and both languages on the target
+instance; do not recapture or rewrite it.
+
+### Reviewed corrections and fix markers (AEON-405)
+
+File bug-fix tickets with `paimos issue create ... --bug` (or `--tags bug`).
+The MCP `issue_create` argument schema exposes the same `bug` and `tags`
+fields; its existing R1 placeholder remains, so file through the CLI today.
+The helper preserves the ticket kind and writes the literal `bug` tag that the
+release classifier reads. Mark actual repairs when filing them; feature work
+keeps its feature classification. A mixed ticket's benefit can still describe
+its real new capability without overstating the repair.
+
+Published frozen entries stay insert-only. Reviewed corrections live separately
+in `internal/releasehistory/data/product-note-corrections.json`, with a version,
+ticket key, original snapshot SHA-256, reason, and new group and/or existing
+bilingual text. A correction must target a public item already in that capture;
+it cannot add hidden or absent members. Invalid bindings fail the history build.
+The served notes keep the original digest and expose the exact correction
+records under `notes.corrections`; Details → Evidence shows their keys and
+reasons. Tenant-local snapshots retain their existing precedence. The AEON-405
+layer applies the reviewed fix/feature and wording audit to each frozen public
+occurrence without rewriting the bundle, tags or published artifacts.
 
 ### Historic product notes without journey membership (AEON-398)
 

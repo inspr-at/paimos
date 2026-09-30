@@ -33,7 +33,14 @@ func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, eventType st
 	return err
 }
 
+// clockKey permits an in-process clock override; production uses transaction
+// time. It cannot be supplied through the HTTP contract.
+type clockKey struct{}
+
 func dbNow(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+	if now, ok := ctx.Value(clockKey{}).(time.Time); ok {
+		return now, nil
+	}
 	var now time.Time
 	err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now)
 	return now, err
@@ -326,7 +333,11 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if before.RegisteredBy != p.ID {
 		return Account{}, fail(http.StatusForbidden, "only the registering agent can probe")
 	}
-	if in.OpenRouterCredits != nil && (before.Provider != "openrouter" || !in.OpenRouterCredits.Valid() || in.OpenRouterCredits.ObservedAt.After(time.Now().Add(time.Minute))) {
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return Account{}, err
+	}
+	if in.OpenRouterCredits != nil && (before.Provider != "openrouter" || !in.OpenRouterCredits.Valid() || in.OpenRouterCredits.ObservedAt.After(now.Add(time.Minute))) {
 		return Account{}, fail(400, "invalid OpenRouter credits")
 	}
 	if before.DaemonID != daemonID {
@@ -334,9 +345,9 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE agent_accounts
-		SET last_probe_at = now(), last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END,
+		SET last_probe_at = $7, last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END,
 		    last_probe_failure = $5, openrouter_credits=$6
-		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure, in.OpenRouterCredits); err != nil {
+		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure, in.OpenRouterCredits, now); err != nil {
 		return Account{}, err
 	}
 	after, err := getAccount(ctx, tx, accountID)
