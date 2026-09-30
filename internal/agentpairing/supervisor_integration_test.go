@@ -5,6 +5,7 @@ package agentpairing_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -273,6 +274,46 @@ func TestVerificationRefusalReleasesOnlyOwnedUnclaimedRun(t *testing.T) {
 			}
 			if state != "failed" || hold != "released" || used != 0 || reserved != 0 || started {
 				t.Fatal("no-launch refusal changed usage or retained hold")
+			}
+		})
+	}
+}
+
+func TestAddHarnessApprovalSupersedesOnlyQueuedVerification(t *testing.T) {
+	for _, claimed := range []bool{false, true} {
+		t.Run(fmt.Sprint("claimed=", claimed), func(t *testing.T) {
+			f := newFixture(t)
+			p := f.propose("claude")
+			f.approve(p, "one_per_harness")
+			v := f.redeem(p)
+			e := v.Enrollments[0]
+			key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+			f.probe(v, e, key, 200)
+			ids := f.reserve(v, e, key, 200)
+			if claimed {
+				f.claim(v, e, key, ids, 200)
+			}
+			q := &proposal{id: uuid(t, f.db), device: nonce(), runtime: p.runtime, lifecycle: p.lifecycle, request: map[string]any{}}
+			for k, x := range p.request {
+				q.request[k] = x
+			}
+			q.request["request_id"], q.request["device_hash"] = q.id, hash(q.device)
+			q.request["existing_computer_id"], q.request["existing_lifecycle_secret"] = *v.ComputerID, p.lifecycle
+			q.request["accounts"] = []map[string]string{{"account_key": "claude-new", "harness": "claude", "label": "New account", "model_profile_id": f.profiles["claude"]}}
+			f.submit(q)
+			f.approve(q, "connect_only")
+			var state string
+			var held int64
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.status,w.reserved FROM agent_runs r JOIN account_allowance_windows w ON w.account_id=r.requested_account_id WHERE r.id=$1`, *e.VerificationRunID).Scan(&state, &held); err != nil {
+				t.Fatal(err)
+			}
+			if claimed {
+				if state != "starting" || held != 1 {
+					t.Fatal("later approval disturbed claimed work")
+				}
+				f.call("POST", "/api/runs/"+*e.VerificationRunID+"/claim", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "reservation_ids": []string{}, "verification_unavailable": "binding_incomplete"}, false, key, 403)
+			} else if state != "cancelled" || held != 0 {
+				t.Fatal("later approval kept queued verification or its hold")
 			}
 		})
 	}

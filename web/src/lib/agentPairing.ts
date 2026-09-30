@@ -978,9 +978,12 @@ export function describeHarnessHint(view: HarnessView, harness: string): string 
   const refusal = view.enrollments?.find(item => item.harness === harness && item.state === 'connected' && item.verification_error === 'verification_unavailable')
   if (refusal) return verificationRefusalText(refusal)
   if (!detail) return ''
+  const accounts = view.enrollments?.filter(item => item.harness === harness && item.state === 'connected') ?? []
+  const accountName = accounts.length === 1 && accounts[0]?.label ? accounts[0].label : harnessDisplayName(harness)
   if (detail.reason === 'binding_missing') return `${harnessDisplayName(harness)} was approved but isn't set up on this computer. Add it here or remove it from this computer in ${product()}.`
-  if (detail.reason === 'probe_pending') return 'Waiting for the account sign-in and availability check; blocked after 60 seconds.'
-  if (detail.reason === 'capacity_capture') return 'A short capacity check is in progress; expected within 10 seconds.'
+  if (detail.reason === 'probe_pending') return `${accountName}: waiting for the sign-in and availability check; blocked after 60 seconds.`
+  if (detail.reason === 'capacity_capture') return `${accountName}: a short capacity check is in progress; expected within 10 seconds.`
+  if (['probe_timeout', 'probe_failed', 'capacity_timeout'].includes(detail.reason ?? '')) return `${accountName}: ${reasonLabel(detail.state, detail.reason).toLowerCase()}.`
   const attention = attentionReport(detail)
   const enrolled = enrolledHarnessCount(view, harness)
   if (attention && enrolled >= 2 && attention.count < enrolled) {

@@ -15,7 +15,7 @@ import (
 // Status reads one atomically replaced snapshot and live, read-only daemon
 // telemetry. It never locks, reconciles, fences, saves or acknowledges cleanup.
 func (e *Engine) Status(ctx context.Context) (Progress, error) {
-	s, err := e.load()
+	s, err := e.loadSnapshot(true)
 	if errors.Is(err, os.ErrNotExist) {
 		return Progress{Schema: "aeon.agent-setup.v1", Stage: "provisioning", LocalProcesses: "unconfirmed", Action: "Setup in progress; the first complete snapshot is not available yet."}, nil
 	}

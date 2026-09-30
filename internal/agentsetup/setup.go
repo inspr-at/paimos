@@ -203,8 +203,16 @@ func uuid() (string, error) {
 	b[8] = (b[8] & 63) | 128
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
-func (e *Engine) load() (*snapshot, error) {
-	raw, err := e.Store.Read(snapshotName, 1<<20)
+func (e *Engine) load() (*snapshot, error) { return e.loadSnapshot(false) }
+
+func (e *Engine) loadSnapshot(readOnly bool) (*snapshot, error) {
+	var raw []byte
+	var err error
+	if readOnly {
+		raw, err = e.Store.readSnapshot()
+	} else {
+		raw, err = e.Store.Read(snapshotName, 1<<20)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -102,3 +102,36 @@ func TestLaunchdPrivateDiagnosticPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusReadsAtomicSnapshotsDuringPairWrites(t *testing.T) {
+	e, api, local, opts, _ := engineFixture(t)
+	approveFixture(t, e, api, opts)
+	reader, err := OpenStore(e.Store.Path(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	status := &Engine{Store: reader, Local: local}
+	saved, err := e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		for i := 0; i < 100; i++ {
+			if err := e.save(saved, false); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	for i := 0; i < 100; i++ {
+		if p, err := status.Status(t.Context()); err != nil || p.Stage != "connected" {
+			t.Fatalf("torn snapshot: %s %v", p.Stage, err)
+		}
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

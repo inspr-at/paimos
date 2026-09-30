@@ -230,12 +230,12 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 		t.Fatal("active local work was cleaned before drain completed")
 	}
 	local.active[first] = false
-	p, err = e.Status(t.Context())
+	p, err = e.Step(t.Context())
 	if err != nil || p.Stage != "draining" {
 		t.Fatalf("server active run was cleaned before settlement: stage=%s err=%v", p.Stage, err)
 	}
 	f.telemetry(initial, initial.Enrollments[0], string(key), 200)
-	p, err = e.Status(t.Context())
+	p, err = e.Step(t.Context())
 	if err != nil || p.Stage != "connected" {
 		t.Fatalf("selective cleanup reconciliation: stage=%s err=%v", p.Stage, err)
 	}
@@ -258,7 +258,7 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 		t.Fatal("whole-computer drain removed runtime before local work exited")
 	}
 	local.active[second] = false
-	p, err = e.Status(t.Context())
+	p, err = e.Step(t.Context())
 	if err != nil || p.Stage != "disconnected" || p.ServerRevocation != "confirmed" {
 		t.Fatalf("whole-computer cleanup: stage=%s revocation=%s err=%v", p.Stage, p.ServerRevocation, err)
 	}
