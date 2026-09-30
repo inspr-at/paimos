@@ -41,6 +41,8 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	MaxRunDuration    time.Duration
 	CapacityInterval  time.Duration
+	// PollDiagnostic receives bounded cause codes only, never raw errors or bindings.
+	PollDiagnostic func(string)
 }
 
 type replay struct {
@@ -145,6 +147,8 @@ type Supervisor struct {
 	closing             bool
 	blockedAccounts     map[string]bool
 	probedAccounts      map[string]bool
+	probePendingSince   map[string]time.Time // Protected by mu; reset only for a new probe lifecycle.
+	pollDiagnostic      func(string)
 	loginRequired       map[string]bool
 	harnessHoldReasons  map[string]string
 	dependencyReasons   map[string]string
@@ -314,7 +318,11 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	s := &Supervisor{startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
-		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx}
+		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic}
+	s.probePendingSince = make(map[string]time.Time, len(s.accounts))
+	for _, account := range s.accounts {
+		s.probePendingSince[account.ID] = s.startedAt
+	}
 	if err := s.loadCapacityCaptures(); err != nil {
 		return nil, err
 	}
@@ -394,14 +402,18 @@ func (s *Supervisor) Status() []Record {
 // harness session, so they cannot race a separate principal-wide inbox poll.
 // A missing or stale reservation fails closed and leaves the run queued.
 func (s *Supervisor) PollOnce(ctx context.Context) error {
+	diagnostic := ""
+	defer func() { s.reportPollDiagnostic(diagnostic) }()
 	// Recover no-launch claims before a fresh probe changes account generation.
 	recoveryErr := s.recoverUnlaunched(ctx)
 	s.settlePending(ctx)
 	if !s.dispatchAllowed("") {
+		diagnostic = "dispatch_not_allowed"
 		return nil
 	}
 	runs, err := s.api.Queued(ctx)
 	if err != nil {
+		diagnostic = "queue_unavailable"
 		return err
 	}
 	failures := []error{recoveryErr}
@@ -419,6 +431,7 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 		fenced, fenceErr := s.readFence(account.ID)
 		if fenced || fenceErr != nil {
+			diagnostic = "dispatch_not_allowed"
 			continue
 		}
 		if account.DependencyBlocked {
@@ -510,6 +523,7 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
+		delete(s.probePendingSince, account.ID)
 		// Only a confirmed sign-out asks the person to sign in again; a hold or a
 		// local dependency failure never does (AEON-342).
 		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed && hold == "" && dependencyErr == nil && probeErr == nil
@@ -541,6 +555,27 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func (s *Supervisor) reportPollDiagnostic(reason string) {
+	if s.pollDiagnostic == nil {
+		return
+	}
+	if reason != "" {
+		s.pollDiagnostic(reason)
+	}
+	// Multiple accounts produce at most one line per readiness cause per poll.
+	failed, timedOut := false, false
+	for _, detail := range s.Lifecycle("").AccountStatuses {
+		failed = failed || detail.Reason == "probe_failed"
+		timedOut = timedOut || detail.Reason == "probe_timeout"
+	}
+	if failed {
+		s.pollDiagnostic("probe_failed")
+	}
+	if timedOut {
+		s.pollDiagnostic("probe_timeout")
+	}
 }
 
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {

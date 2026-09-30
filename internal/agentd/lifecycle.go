@@ -199,11 +199,11 @@ func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatu
 			} else if s.probedAccounts[a.ID] && !s.blockedAccounts[a.ID] {
 				status, reason = "ready", ""
 				v.Ready = true
-			} else if s.blockedAccounts[a.ID] {
+			} else if s.blockedAccounts[a.ID] && s.probePendingSince[a.ID].IsZero() {
 				status, reason = "blocked", "probe_failed"
 			} else {
 				reason = "probe_pending"
-				if now.Sub(s.startedAt) >= time.Minute {
+				if since := s.probePendingSince[a.ID]; !since.IsZero() && now.Sub(since) >= time.Minute {
 					status, reason = "blocked", "probe_timeout"
 				}
 			}
@@ -371,6 +371,7 @@ func blockedReport(a EnrolledAccount) agentsetup.BlockedAccount {
 func (s *Supervisor) freezeOnError(account string) {
 	s.mu.Lock()
 	s.blockedAccounts[account] = true
+	delete(s.probePendingSince, account)
 	s.mu.Unlock()
 }
 
@@ -453,6 +454,14 @@ func (s *Supervisor) SetHarnessHoldWithReason(harness, code, reason string) {
 		s.harnessHoldReasons = map[string]string{}
 	}
 	if reason == "" {
+		if s.harnessHolds[harness] != "" {
+			now := time.Now()
+			for _, a := range s.accounts {
+				if a.Harness == harness {
+					s.beginAccountProbe(a.ID, now)
+				}
+			}
+		}
 		delete(s.harnessHolds, harness)
 		delete(s.harnessHoldReasons, harness)
 		return
@@ -466,6 +475,18 @@ func (s *Supervisor) SetHarnessHoldWithReason(harness, code, reason string) {
 			s.blockedAccounts[a.ID] = true
 		}
 	}
+}
+
+// beginAccountProbe gives an added or unblocked account its own bounded wait.
+// Callers hold s.mu. Dispatch fences and existing failure flags are preserved;
+// only a fresh probe can establish readiness again.
+func (s *Supervisor) beginAccountProbe(accountID string, now time.Time) {
+	if s.probePendingSince == nil {
+		s.probePendingSince = map[string]time.Time{}
+	}
+	s.probePendingSince[accountID] = now
+	delete(s.probedAccounts, accountID)
+	delete(s.loginRequired, accountID)
 }
 
 // settlePending retries the exact persisted sequence; it never restarts a run.
@@ -527,6 +548,7 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 		configured[a.Name()] = a
 	}
 	merged := append([]EnrolledAccount(nil), s.accounts...)
+	now := time.Now()
 	for _, a := range accounts {
 		if a.ID == "" || a.Key == "" || (configured[a.Harness] == nil && !a.DependencyBlocked) {
 			return ErrScope
@@ -546,6 +568,7 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 		}
 		if !found {
 			merged = append(merged, a)
+			s.beginAccountProbe(a.ID, now)
 		} else {
 			for i := range merged {
 				if merged[i].ID != a.ID {
@@ -556,6 +579,7 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 				merged[i].PinReason = a.PinReason
 				merged[i].PinFix = a.PinFix
 				if wasBlocked && !a.DependencyBlocked {
+					s.beginAccountProbe(a.ID, now)
 					delete(s.blockedAccounts, a.ID)
 					if s.harnessFailed != nil {
 						delete(s.harnessFailed, a.ID)
@@ -620,10 +644,10 @@ func (s *Supervisor) RestartClaude(ctx context.Context, adapter *ClaudeAdapter) 
 		return ErrScope
 	}
 	s.adapters[Claude] = adapter
+	now := time.Now()
 	for _, account := range accounts {
 		if account.Harness == Claude {
-			delete(s.probedAccounts, account.ID)
-			delete(s.loginRequired, account.ID)
+			s.beginAccountProbe(account.ID, now)
 		}
 	}
 	return nil
