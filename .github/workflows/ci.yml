@@ -19,6 +19,8 @@ permissions:
   contents: read
 
 jobs:
+  # Live router proof: retain this hosted job to exercise routing on real events.
+  # Its outputs have no consumer until the four-Mac/seven-hosted shard integration.
   runner-route:
     uses: ./.github/workflows/test-runner-route.yml
 

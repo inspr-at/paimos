@@ -22,9 +22,10 @@ with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `C
 
 ### Test runner routing (AEON-438)
 
-CI's hosted `runner-route` job calls `test-runner-route.yml`; routed test jobs
-consume its JSON `runs_on` output behind independent event, ref and rerun-attempt
-guards.
+CI's hosted `runner-route` job calls `test-runner-route.yml` as a live router
+proof; its outputs have no consumer in CI until Mac shard integration. The
+manual smoke job consumes its JSON `runs_on` output behind independent event,
+ref and rerun-attempt guards.
 Only `push` and `workflow_dispatch` on `refs/heads/main` may select `[self-hosted,
 Linux, ARM64, mbp2606]`. The reviewed workflows route PRs to `ubuntu-latest`;
 a PR can modify those workflows or the guard, so runner-side admission is the
@@ -36,8 +37,9 @@ on seven hosted shards; Mac shard integration remains pending below.
 on 2026-09-30 and recorded on NIX-600.** Publishing
 `AEON_MBP2606_AVAILABILITY` requires all three controls below to be implemented
 and verified; workflow guards and matching labels cannot bind a JIT runner to
-the job the controller checked. GitHub can assign another queued job carrying
-those labels, including a fork job racing the verified job.
+the job the controller checked. GitHub can assign another queued job whose
+`runs-on` labels are a case-insensitive subset of the runner's labels, including
+a fork job racing the verified job.
 
 1. **Verified JIT minting:** no idle pre-registered runners. NIX-600 mints only
    for an API-verified queued job whose event is `push` or `workflow_dispatch`,
@@ -46,8 +48,11 @@ those labels, including a fork job racing the verified job.
    `inspr-at/paimos/.github/workflows/test-runner-smoke.yml@refs/heads/main`, and
    head SHA is reachable from `main`. Missing or unverifiable metadata rejects
    admission. Record the verified job ID, run ID/attempt and unique runner name.
-   Before **every mint**, cancel the runs for every queued mbp2606-labelled job
-   the controller has not verified, or refuse to mint while any such job remains.
+   Before **every mint**, sweep every queued paimos job whose `runs-on` labels
+   are a **case-insensitive subset of the labels of the runner about to be
+   minted**. Cancel the runs for matching jobs the controller has not verified,
+   or refuse to mint while any such job remains. This includes jobs requesting
+   only `self-hosted`, `[self-hosted, linux]` or `ARM64`, without `mbp2606`.
    This covers any event or ref, including directly edited `runs-on`, PRs,
    work-branch pushes, non-main dispatches, `merge_group`, `workflow_run` and
    `schedule`; leave no spare registrations. App **5134402** requires
@@ -129,12 +134,19 @@ tarball over the controller's SSH is the fallback after admission; write-back
 is allowed only for verified main pushes.
 
 **Network precondition:** a host `pf` anchor for user `ci` blocks private ranges
-and host loopback, except the Lima SSH loopback ports **60019–60023**. This
-stateless, public-key-only exception, with per-instance keys and **no private
-key in any guest**, is an **accepted residual risk**. User `ci` has **no port-53
-egress at all**. VM DNS resolves through the Lima hostagent → `mDNSResponder`;
-router **TCP 53/80/443 and UDP 53** are blocked from the VM. Direct resolver
-fallback and port 53 to arbitrary LAN hosts are not allowed in this contract.
+and host loopback, except the Lima SSH loopback ports **60019–60023**: **4 job
+slots + 1 proof VM (`on`'s isolation proof)**. NIX-600's TALKBOX mapping assigns
+60020–60023 to slots 0–3; 60019 serves the sealed base only during its build,
+or the throwaway proof VM at `on` and the 10-minute re-prove, never concurrently.
+This stateless, public-key-only exception, with per-instance keys and **no
+private key in any guest**, is an **accepted residual risk**. User `ci` has
+**no port-53 egress at all**. VM DNS resolves through Lima hostagent →
+`mDNSResponder` → the host's resolvers (router, tailnet split DNS and `.local`
+mDNS). **ACCEPTED residual risk:** LAN and tailnet **names resolve**, though
+those destinations remain unreachable; **DNS tunnelling to public servers is
+possible** through this host resolver path. Router **TCP 53/80/443 and UDP 53**
+are blocked from the VM. Direct resolver fallback and port 53 to arbitrary LAN
+hosts are not allowed in this contract.
 The controller verifies that the host anchor is installed and active before
 publishing availability and before every mint; a missing, inactive or
 unverifiable anchor keeps mode B off. An in-VM firewall does not satisfy this
@@ -207,12 +219,21 @@ duties cover already queued jobs. See GitHub's
 **TODO (AEON-408):** main now includes the seven-shard Go layout; this branch
 keeps those shards and the static/aggregate gates hosted. On Mac integration,
 use **4 Go shards on mbp2606, 7 on hosted**, driven by the router's runner class;
-require 4 idle slots for the mbp2606 batch. Retain
-the shard commands and hosted aggregate/static gates, add `runner-route` to
-`needs`, and copy the Go job's guarded `runs-on` and actual runner-class evidence.
-The shard inventory must include `scripts/ci-runner-guard`. Insufficient capacity
-sends the entire batch to hosted; broader routed fan-outs must request their
-whole simultaneous capacity through `required-idle-runners`.
+require 4 idle slots for the mbp2606 batch. The current tool has
+`shardCount = 7` in `scripts/ci-go-shards/shard.go` and a seven-way
+`scripts/ci/go-shards.txt`: first add a count parameter or a separate four-way
+split, with coverage checks for both plans. Keep the **Timing budgets, alone**
+step hosted (`matrix.shard == 4`), where its budgets were calibrated; do not
+move it onto Mac shard 4. Set **`GOFLAGS=-count=1`** for every Mac shard so the
+tool's `go test` commands produce fresh evidence. Retain the shard commands and
+hosted aggregate/static gates, add `runner-route` to `needs`, and use the smoke
+job's guarded `runs-on` and actual runner-class evidence. Set `setup-go` cache
+to `${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}` and
+checkout's **`persist-credentials: false`** on every routed job. The current
+seven-way inventory includes `scripts/ci-runner-guard`; include it in the Mac
+split too. Insufficient capacity sends the entire batch to hosted; broader
+routed fan-outs must request their whole simultaneous capacity through
+`required-idle-runners`.
 
 Every evidence-producing Go test on mbp2606 uses **`go test -count=1`** to bypass
 cached test results. Routed action caches and the controller's persistent Go,
