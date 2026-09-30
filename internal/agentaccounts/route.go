@@ -148,7 +148,7 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		estimate := windowEstimate(window, estimates)
 		tag, err := tx.Exec(ctx, `
 			UPDATE account_allowance_windows
-			SET reserved = reserved + $2, capacity_refresh_run=CASE WHEN capacity_kind IN ('refresh','blind') OR capacity_read_at < $4::timestamptz-interval '10 minutes' THEN $3::uuid ELSE capacity_refresh_run END
+			SET reserved = reserved + $2, capacity_refresh_run=CASE WHEN capacity_kind IN ('refresh','blind') OR (capacity_source<>'estimate' AND capacity_read_at < $4::timestamptz-interval '10 minutes') THEN $3::uuid ELSE capacity_refresh_run END
 			WHERE id = $1::uuid AND used + reserved + $2 <= allowance`, window.ID, estimate, run.ID, now)
 		if err != nil {
 			return RouteResult{}, err
@@ -214,7 +214,7 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 		return fail(http.StatusConflict, "reserved capacity is not eligible")
 	}
 	var invalidCapacity bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$1 AND r.state='active' AND w.capacity_read_at IS NOT NULL AND (NOT w.capacity_allowed OR w.capacity_retired OR (w.capacity_read_at<$2::timestamptz-interval '10 minutes' AND w.capacity_refresh_run IS DISTINCT FROM r.run_id) OR w.ends_at<=$2 OR w.used+w.reserved>w.allowance))`, run.ID, now).Scan(&invalidCapacity); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$1 AND r.state='active' AND w.capacity_read_at IS NOT NULL AND (NOT w.capacity_allowed OR w.capacity_retired OR (w.capacity_source<>'estimate' AND w.capacity_read_at<$2::timestamptz-interval '10 minutes' AND w.capacity_refresh_run IS DISTINCT FROM r.run_id) OR w.ends_at<=$2 OR w.used+w.reserved>w.allowance))`, run.ID, now).Scan(&invalidCapacity); err != nil {
 		return err
 	}
 	if invalidCapacity {
@@ -318,11 +318,12 @@ func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemon
 }
 
 type ranked struct {
-	account Account
-	windows []Window
-	cap     float64
-	reset   *time.Time
-	slots   int
+	presence bool
+	account  Account
+	windows  []Window
+	cap      float64
+	reset    *time.Time
+	slots    int
 }
 
 func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harness, profileID, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, error) {
@@ -459,7 +460,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (map[string][]Window, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_id::text, starts_at, ends_at, unit, allowance, used, reserved,
-		       pace_model, burst_ratio::float8, pairing_verification, capacity_read_at, capacity_allowed, COALESCE(capacity_kind,''), capacity_bucket, capacity_retired, capacity_refresh_run::text
+		       pace_model, burst_ratio::float8, pairing_verification, capacity_read_at, capacity_allowed, COALESCE(capacity_kind,''), capacity_bucket, capacity_retired, capacity_refresh_run::text, COALESCE(capacity_source,'')
 		FROM account_allowance_windows
 		WHERE account_id::text = ANY($1::text[])
 		ORDER BY id
@@ -471,7 +472,7 @@ func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (ma
 	out := map[string][]Window{}
 	for rows.Next() {
 		var w Window
-		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.pairingVerification, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun); err != nil {
+		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.pairingVerification, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun, &w.capacitySource); err != nil {
 			return nil, err
 		}
 		out[w.AccountID] = append(out[w.AccountID], w)
@@ -498,7 +499,7 @@ func windowForRun(w Window, run runRow) bool {
 // percentages are available. It never invents token or dollar units.
 func windowEstimate(w Window, estimates map[string]int64) int64 {
 	if w.capacityReadAt != nil {
-		return 1
+		return max(1, w.capacityHold)
 	}
 	return estimates[w.Unit]
 }

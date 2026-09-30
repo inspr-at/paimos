@@ -51,7 +51,8 @@ const BLIND = new Set(['grok', 'cursor', 'pi'])
 const vendorRows = computed(() => props.pools.filter(p => !p.id.startsWith('group:')).map(p => {
   const measured = p.rows.some(r => r.primary)
   const note = measured ? '' : BLIND.has(p.mark || p.id) ? `${p.name} doesn't show its limit · one run at a time by day` : 'No reading yet'
-  return { id: p.id, mark: p.mark || p.id, name: p.name, measured, note }
+  const learned = p.rows.some(r => r.learning?.windows.some(w => w.auto_reserve_percent))
+  return { id: p.id, mark: p.mark || p.id, name: p.name, measured, note, auto: learned ? 'Auto · learned per account' : `Auto · ~${AUTO_RESERVE}%` }
 }))
 
 // ---------- Away ----------
@@ -190,7 +191,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
             <span class="vn">{{ v.name }}</span>
             <select v-if="v.measured" v-model="perPool[v.id]" class="sel" :aria-label="`${v.name}: keep for you`">
               <option value="">Same as above · {{ personLabel }}</option>
-              <option value="auto">Auto · ~{{ AUTO_RESERVE }}%</option>
+              <option value="auto">{{ v.auto }}</option>
               <option v-for="n in SHARES" :key="n" :value="String(n)">{{ n }}%</option>
               <option value="off">Nothing</option>
             </select>

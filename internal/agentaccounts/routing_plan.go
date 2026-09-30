@@ -46,6 +46,9 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 	p := ranked{account: a, windows: windows, cap: 100, slots: a.MaxParallel - slots}
 	var short, long *time.Time
 	for _, w := range windows {
+		if w.capacityPresence {
+			p.presence = true
+		}
 		if !synthetic(w) {
 			end := w.EndsAt
 			dest := &short
@@ -69,7 +72,7 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 			continue
 		}
 		p.slots = min(p.slots, int(math.Floor(available/float64(hold))))
-		if w.capacityReadAt != nil && (synthetic(w) || now.Sub(*w.capacityReadAt) > 10*time.Minute) {
+		if w.capacityReadAt != nil && (synthetic(w) || now.Sub(*w.capacityReadAt) > 10*time.Minute && w.capacitySource != "estimate") {
 			p.slots = min(p.slots, 1)
 		}
 	}
@@ -100,6 +103,9 @@ func fingerprintPrimary(picks []ranked) map[string]int {
 func orderPicks(picks []ranked) {
 	sort.Slice(picks, func(i, j int) bool {
 		a, b := picks[i], picks[j]
+		if a.presence != b.presence {
+			return !a.presence
+		}
 		if a.reset == nil && b.reset != nil {
 			return false
 		}
@@ -126,6 +132,9 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 		return nil, err
 	}
 	out := map[string]CapacityRouting{}
+	if profile != "" {
+		run.ProfileID = &profile
+	}
 	pools := map[string][]ranked{}
 	// Manual budgets have no learned unit conversion: advisory uses one unit;
 	// reservation always checks the daemon's real estimates again.

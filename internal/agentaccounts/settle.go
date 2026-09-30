@@ -39,6 +39,19 @@ func Settle(ctx context.Context, tx pgx.Tx, actor tenant.Principal, runID string
 	if err := actorMayUseRun(ctx, tx, actor, run.AgentID, run.ID); err != nil {
 		return err
 	}
+	if run.AccountID != nil {
+		a, err := lockAccount(ctx, tx, *run.AccountID)
+		if err != nil {
+			return err
+		}
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if err = learnRun(ctx, tx, a, run.ID, now); err != nil {
+			return err
+		}
+	}
 	sums, err := telemetrySums(ctx, tx, run.ID)
 	if err != nil {
 		return err

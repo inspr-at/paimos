@@ -10269,6 +10269,54 @@ components:
         command_template: {type: string}
         owner_required: {type: boolean}
         source: {type: string, enum: [aeon]}
+    CapacityEvidence:
+      type: object
+      additionalProperties: false
+      required: [kind, samples]
+      properties:
+        kind: {type: string, enum: [runs, tokens, limit_hits, drift]}
+        samples: {type: integer, minimum: 1}
+    CapacityLearning:
+      type: object
+      description: Tenant-local observations only. Suggestions never change a schedule without a person saving it. No paths or vendor text.
+      required: [windows, tokens, cost_micros, runs, limit_hits]
+      properties:
+        tokens: {type: integer, minimum: 0, description: "Observed managed and token-only session consumption in the current known cycle, or since observation began."}
+        cost_micros: {type: integer, minimum: 0}
+        runs: {type: integer, minimum: 0}
+        limit_hits: {type: integer, minimum: 0}
+        presence_until: {type: string, format: date-time}
+        away_suggested: {type: boolean}
+        sleeps_at_night: {type: boolean}
+        suggested_hours:
+          type: object
+          required: [start, end, days]
+          properties:
+            start: {type: number, minimum: 0, maximum: 23.5}
+            end: {type: number, minimum: 0.5, maximum: 24}
+            days: {type: integer, minimum: 5}
+        correction:
+          type: object
+          required: [points, at]
+          properties:
+            points: {type: number, description: Positive means the estimate was too optimistic.}
+            at: {type: string, format: date-time}
+        windows:
+          type: array
+          items:
+            type: object
+            required: [window_kind, bucket, run_count, work_days]
+            properties:
+              window_kind: {type: string, enum: [5h, weekly, monthly, other]}
+              bucket: {type: string}
+              run_count: {type: integer, minimum: 0}
+              run_percent: {type: number, minimum: 0, maximum: 100}
+              hold_percent: {type: number, minimum: 1, maximum: 25}
+              plus_minus: {type: number, minimum: 0}
+              percent_per_million_tokens: {type: number, minimum: 0}
+              percent_per_hour: {type: number, minimum: 0}
+              auto_reserve_percent: {type: number, minimum: 10, maximum: 60}
+              work_days: {type: integer, minimum: 0}
     CapacityReading:
       type: object
       additionalProperties: false
@@ -10285,6 +10333,8 @@ components:
         ordinary_usage_allowed: {type: boolean, description: Vendor authority; false forbids dispatch even when percent remains}
         run_id: {type: string, format: uuid}
         phase: {type: string, enum: [start, update, end]}
+        plus_minus: {type: number, minimum: 0, maximum: 100, description: Uncertainty in percentage points; display only at three points or more.}
+        evidence: {$ref: '#/components/schemas/CapacityEvidence'}
     CapacitySchedule:
       type: object
       additionalProperties: false
@@ -10367,6 +10417,8 @@ components:
         ahead: {type: boolean}
         reserve_percent: {type: number, description: 'Keep for you level R for this window: auto (30 until learned), the fixed share, or 0 when off.'}
         reserve_effective_percent: {type: number, description: 'R_eff now: what agents leave the person of this window. 0 under Sprint, Away and Run now once, and when no work hours remain before the reset.'}
+        drift_percent: {type: number, minimum: 0, description: Pessimistic usage since an aging reading; already subtracted from available_now_percent.}
+        would_expire_percent: {type: number, minimum: 0, description: Remaining capacity the learned throughput cannot consume in scheduled hours.}
         reserve_until: {type: string, format: date-time, description: 'End of the person''s last work band before the reset, after which the reserve is gone. Absent when reserve_effective_percent is 0.'}
     CapacityRouting:
       type: object
@@ -10403,6 +10455,7 @@ components:
       properties:
         account_id: {type: string, format: uuid}
         routing: {$ref: '#/components/schemas/CapacityRouting'}
+        learning: {$ref: '#/components/schemas/CapacityLearning'}
         ongoing_use_approved: {type: boolean, description: True for unpaired accounts or a separately approved connected pairing; readings never change this approval}
         probe_failure: {type: string, enum: [auth_failed, unavailable], description: 'Why the last probe failed; absent after a successful probe. Only auth_failed means the account needs a new sign-in.'}
         limiting_reset: {type: string, format: date-time, description: 'Earliest reset of the account''s current measured windows (including 5-hour windows); a Sprint in scope ends at the earliest of these.'}

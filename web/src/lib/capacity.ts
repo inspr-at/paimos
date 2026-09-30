@@ -28,7 +28,16 @@ export interface CapacitySchedule {
   shifts: { early: number; late: number; night: number; k: number[] }
   blocks: number[]
 }
+export interface CapacityLearning {
+  windows: { window_kind: string; bucket: string; run_count: number; run_percent?: number; hold_percent?: number; plus_minus?: number; auto_reserve_percent?: number; work_days: number }[]
+  tokens: number; cost_micros: number; runs: number; limit_hits: number
+  presence_until?: string; away_suggested?: boolean; sleeps_at_night?: boolean
+  suggested_hours?: { start: number; end: number; days: number }
+  correction?: { points: number; at: string }
+}
 export interface CapacityReading {
+  plus_minus?: number
+  evidence?: { kind: 'runs' | 'tokens' | 'limit_hits' | 'drift'; samples: number }
   window_kind: '5h' | 'weekly' | 'monthly' | 'other'
   bucket?: string
   window_minutes: number
@@ -40,6 +49,7 @@ export interface CapacityReading {
   ordinary_usage_allowed?: boolean
 }
 export interface CapacityPacing {
+  drift_percent?: number; would_expire_percent?: number
   usable_hours: number; percent_per_hour: number; suggested_today_percent: number
   available_now_percent?: number; budget_percent?: number; used_today_percent?: number; tonight_percent?: number
   period_start?: string; period_end?: string; finish?: string | null
@@ -53,6 +63,7 @@ export interface CapacityWindow {
 }
 export interface CapacityRouting { rank: number; available_slots: number; resets_at?: string; cap_percent?: number; wait?: CapacityWait; same_quota_as?: string }
 export interface AccountCapacity {
+  learning?: CapacityLearning
   routing?: CapacityRouting
   account_id: string; ongoing_use_approved?: boolean; schedule: CapacitySchedule; windows: CapacityWindow[]
   /** Why the last probe failed; only auth_failed is a confirmed sign-out. */
@@ -322,6 +333,7 @@ export interface AccountInput {
   groupName?: string
 }
 export interface AccountRow {
+  learning?: CapacityLearning
   id: string; name: string; host: string; harness: string; state: AccountState
   primary: CapacityWindow | null; five: CapacityWindow | null; schedule: CapacitySchedule | null; plan: string
   limitingReset: string
@@ -363,7 +375,7 @@ export function buildRows(accounts: AccountInput[], capacity: AccountCapacity[])
     const { primary, five } = pickWindows(cap?.windows ?? [])
     const state = accountState({ ...a, probeFailure: cap?.probe_failure ?? a.probeFailure }, !!primary)
     return {
-      id: a.id, name: a.label, host: a.host, harness: a.harness, state, primary, five, schedule: cap?.schedule ?? null, plan: primary?.reading.plan || a.plan || '', limitingReset: cap?.limiting_reset ?? '', routing: cap?.routing,
+      id: a.id, name: a.label, host: a.host, harness: a.harness, state, primary, five, schedule: cap?.schedule ?? null, plan: primary?.reading.plan || a.plan || '', limitingReset: cap?.limiting_reset ?? '', routing: cap?.routing, learning: cap?.learning,
       fingerprint: cap?.quota_fingerprint || a.fingerprint || '',
       groupId: cap?.group_id || a.groupId || '',
       groupName: cap?.group_name || a.groupName || '',
@@ -527,7 +539,7 @@ export function todayCell(row: AccountRow, plan: AccountPlan | null): TodayCell 
   if (row.state === 'signin') return { kind: 'signin', command: LOGIN_COMMAND[row.harness] ?? '' }
   if (row.state === 'paused') return { kind: 'quiet', text: 'paused' }
   if (row.state === 'unavailable') return { kind: 'quiet', text: 'reading unavailable' }
-  if (!plan) return { kind: 'quiet', text: 'no reading yet' }
+  if (!plan) return { kind: 'quiet', text: row.learning ? consumptionLine(row.learning) : 'no reading yet' }
   if (plan.override === 'hold') return { kind: 'quiet', text: 'on hold' }
   if (plan.override === 'sprint' || plan.override === 'away') return { kind: 'sprint', text: `all ${pct(plan.left)}` }
   if (plan.dayOff && !plan.expiring) return { kind: 'quiet', text: 'day off' }
@@ -540,14 +552,30 @@ export function todayCell(row: AccountRow, plan: AccountPlan | null): TodayCell 
 export function sourceLine(row: AccountRow, now: number): string {
   const w = row.primary
   if (row.state === 'signin') return w ? `Sign-in expired · last read ${ago(w.reading.read_at, now)}` : 'Sign-in expired'
-  if (!w) return 'No reading yet — starts with the first run'
+  if (!w) return row.learning && ['grok', 'cursor', 'pi'].includes(row.harness) ? (row.learning.limit_hits ? `${row.learning.limit_hits} limit hits · learning the window` : 'No limit seen yet') : 'No reading yet — starts with the first run'
   const r = w.reading
   const base = r.source === 'harness' ? `${HARNESS_NAME[row.harness] ?? row.harness} reported · ${ago(r.read_at, now)}`
-    : r.source === 'agentd' ? `Read on ${row.host} · ${ago(r.read_at, now)}` : 'Estimated'
+    : r.source === 'agentd' ? `Read on ${row.host} · ${ago(r.read_at, now)}` : estimateLabel(r)
   if (row.state === 'offline') return `${base} · offline`
   if (w.freshness === 'stale' || w.freshness === 'expired') return `${base} · stale`
-  return base
+  return `${base}${(w.pacing.drift_percent ?? 0) >= 3 ? ` · ~${pct(w.pacing.drift_percent!)} drift` : ''}`
 }
+
+/** Numeric evidence only; uncertainty below three points stays in the detail. */
+export function estimateLabel(r: CapacityReading): string {
+  const parts = ['Estimated']
+  if ((r.plus_minus ?? 0) >= 3) parts.push(`±${Math.round(r.plus_minus!)}%`)
+  if (r.evidence) {
+    const noun = r.evidence.kind === 'limit_hits' ? 'limit hit' : r.evidence.kind === 'drift' ? 'observation' : 'run'
+    parts.push(`${r.evidence.samples} ${noun}${r.evidence.samples === 1 ? '' : 's'}`)
+  }
+  return parts.join(' · ')
+}
+export function consumptionLine(l: CapacityLearning): string {
+  const tokens = new Intl.NumberFormat('en-GB', { notation: 'compact', maximumSignificantDigits: 3 }).format(l.tokens).replace('K', 'k')
+  return [l.runs ? `${l.runs} ${l.runs === 1 ? 'run' : 'runs'}` : '', l.cost_micros > 0 ? `$${(l.cost_micros / 1e6).toFixed(2)}` : l.tokens > 0 ? `${tokens} tokens` : ''].filter(Boolean).join(' · ') || 'Learning'
+}
+export const usingNow = (row: AccountRow, now: number) => !!row.learning?.presence_until && Date.parse(row.learning.presence_until) > now
 
 // ---------- The plan sentence per pool ----------
 /** A run of sentence text: `strong` is the lead, `num` a figure. */
@@ -602,6 +630,8 @@ export function poolSentence(pool: PoolView, now: number, timezone?: string): Se
   if (advised && ready.length) for (const row of paused) {
     if (row.state === 'live') sentence.segs.push(t(` ${row.name}: ${capacityWaitText(row.routing!.wait!, 'Agents', now)}.`))
   }
+  const yours = pool.rows.find(row => usingNow(row, now))
+  if (yours && ready.length && ready[0].id !== yours.id) sentence.segs.push(t(` You're on ${yours.name}, so agents take ${ready[0].name} first.`))
   if (pool.parallelRuns > 1) sentence.segs.push(t(` ${pool.parallelRuns} agents can run in parallel on ${pool.name} right now.`))
   return sentence
 }
@@ -618,6 +648,7 @@ function planSentence(pool: PoolView, now: number, timezone?: string): Sentence 
     if (first.state === 'offline') return { segs: [b(`Waits for ${first.host} to come back online.`)] }
     if (first.state === 'unavailable') return { segs: [b(`Reading unavailable on ${first.host}.`), t(' Agents skip it until the next check succeeds.')] }
     if (first.state === 'paused') return { segs: [b('Paused.'), t(' Agents leave it alone until you resume it in Settings.')] }
+    if (first.learning && ['grok', 'cursor', 'pi'].includes(first.harness)) return { segs: [b(`${pool.name} doesn't show its limit.`), t(' One run at a time by day.')] }
     return { segs: [b('No reading yet'), t(' — starts with the first run.')] }
   }
   if (pool.override === 'hold') {
