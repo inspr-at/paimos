@@ -67,6 +67,21 @@ beforeEach(() => { rowStore.clear(); for (const fn of Object.values(api)) fn.moc
 afterEach(() => { scope?.stop(); scope = undefined })
 
 describe('useTicket: a read that lands during an edit', () => {
+  it('AEON-385: retries a read crossing stream loss without needing a reconnect resync', async () => {
+    const answer = slow()
+    const { ticket, busy, target } = setup()
+    busy.value = true
+    await nextTick()
+    rowStore.gap()
+    api.getNode.mockResolvedValueOnce(node({ title: 'After loss', updated_at: at(5) }))
+    answer(node({ title: 'Before loss', updated_at: at(3) }))
+    await vi.waitFor(() => expect(ticket.liveHeld.value).toBe('changed'))
+    expect(api.getNode).toHaveBeenCalledTimes(2)
+    expect(target.title).toBe('Original')
+    busy.value = false
+    await settle()
+    expect(target.title).toBe('After loss')
+  })
   it('waits, and the save still sends the revision the editor started from', async () => {
     const answer = slow()
     const { ticket, busy, target } = setup()

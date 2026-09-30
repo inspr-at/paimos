@@ -10,7 +10,7 @@ import { LiveNodeStore, type NodeChange } from '../src/lib/liveNodes'
 import { PENDING_CAP } from '../src/lib/liveUpdates'
 import { RowStore } from '../src/lib/rowStore'
 import { filtersFromQuery, type ListFilters } from '../src/lib/ticketList'
-import { BATCH_MS, placeKey, RETRY_MS, useLiveList, type ListRead, type LiveList, type LiveListBlockers, type LiveListOptions } from '../src/lib/useLiveList'
+import { BATCH_MS, placeKey, RETRY_MS, useLiveList, type ListRead, type LiveList, type LiveListBlockers, type LiveListOptions, type LiveReadPurpose } from '../src/lib/useLiveList'
 
 const ME = 'me-1', MIRA = 'mira-2', PROJECT = 'p-1'
 let clock = 0
@@ -27,7 +27,7 @@ const CLOSED = ['done', 'cancelled', 'archived']
 // The server: the list API over an array, with within, kind, ids, hide_closed and a priority sort.
 function server(nodes: ListItem[]) {
   const calls: ListQuery[] = []
-  const fetchList = vi.fn(async (query: ListQuery): Promise<ListPage> => {
+  const fetchList = vi.fn(async (query: ListQuery, _purpose: LiveReadPurpose): Promise<ListPage> => {
     calls.push(query)
     let items = nodes.filter(node => node.project?.id === query.within)
       .filter(node => !query.ids || query.ids.includes(node.id))
@@ -255,6 +255,7 @@ describe('useLiveList: structural changes wait', () => {
     await h.settle()
     // Two requests: the filtered one leaves it out, the unfiltered one finds it closed.
     expect(h.srv.calls.map(q => q.hide_closed ?? false)).toEqual([true, false])
+    expect(h.srv.fetchList.mock.calls.map(([, purpose]) => purpose)).toEqual(['matches', 'presence'])
     expect(row.state).toBe('cancelled')
     expect(h.live.layout(row).state).toBe('backlog')
     expect(h.live.labels.value.get('n1')).toBe('Closed')
@@ -482,6 +483,17 @@ describe('useLiveList: applying by itself only when it is safe', () => {
     await closedRow(h)
     clock += 1500; h.live.checkNow()
     expect(h.live.pill.value).toBe('1 update · Show')
+    clock += 600; h.live.checkNow()
+    expect(h.live.pill.value).toBeNull()
+    expect(h.rows.value!.map(r => r.id)).toEqual(['n2'])
+  })
+  it('AEON-385: reading the same pending change again does not restart the idle wait', async () => {
+    const h = setup([item('n1'), item('n2')])
+    await closedRow(h)
+    clock += 1500
+    const node = h.srv.nodes.find(n => n.id === 'n1')!
+    h.send({ id: 'n1', fields: ['state'], revision: node.updated_at })
+    await h.settle()
     clock += 600; h.live.checkNow()
     expect(h.live.pill.value).toBeNull()
     expect(h.rows.value!.map(r => r.id)).toEqual(['n2'])

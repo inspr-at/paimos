@@ -41,6 +41,7 @@ import TicketWorkspace from '../components/work/TicketWorkspace.vue'
 import ViewBar from '../components/work/ViewBar.vue'
 import SaveViewPanel from '../components/work/SaveViewPanel.vue'
 import BulkBar from '../components/work/BulkBar.vue'
+import LiveUpdatesChip from '../components/work/LiveUpdatesChip.vue'
 import LabelMenu, { type LabelChoice } from '../components/work/LabelMenu.vue'
 import OptionMenu from '../components/work/OptionMenu.vue'
 import EpicPicker from '../components/work/EpicPicker.vue'
@@ -191,7 +192,20 @@ const graphActive = computed(() => viewMode.value === 'graph')
 const graphState = ref<TicketGraphState>({ data: { nodes: [], links: [], truncated: false }, visible: { nodes: [], links: [], truncated: false }, loading: true })
 const ticketGraphView = ref<{ focus: () => void }>()
 const outlineActive = computed(() => viewMode.value === 'outline')
-const outline = useOutline(projectId, filters, outlineActive, list)
+const outline = useOutline(projectId, filters, outlineActive, list, {
+  me: () => session.identity?.principal.id ?? null,
+  quiet: id => !!ticketKey.value && panelItem.value?.id === id,
+  holds: id => ticketKey.value && panelItem.value?.id === id
+    ? !!panel.value?.busy() || !!panel.value?.isDirty()
+    : selected.value.has(id) || statusMenu.value?.row.id === id,
+  blockers: () => ({
+    selected: selected.value.size + (phonePicking.value ? 1 : 0),
+    editing: creating.value || !!outline.createUnder.value || !!panel.value?.busy() || !!panel.value?.isDirty() || !!table.value?.createDirty(),
+    menuOpen: !!statusMenu.value || !!bulkMenu.value || !!savePanel.value || !!document.querySelector('.floating'),
+    dialogOpen: !!document.querySelector('dialog[open]'), dragging: !!document.querySelector('.dragging'),
+  }),
+  around: aroundLiveApply, applied: liveApplied,
+})
 // Changes by others, live (AEON-326): the list patches rows in place and holds
 // structural updates behind the "N updates · Show" pill until it is safe.
 const listActive = computed(() => section.value === 'tickets' && viewMode.value === 'list')
@@ -214,6 +228,20 @@ const liveList = useLiveList({
   }),
   around: aroundLiveApply, applied: liveApplied, reload: () => void list.load(),
 })
+
+const activeLive = computed(() => outlineActive.value ? outline.live : liveList)
+const liveActive = computed(() => listActive.value || outlineActive.value)
+const bulkBar = ref<InstanceType<typeof BulkBar>>()
+const bulkHeight = ref(0)
+let bulkResize: ResizeObserver | undefined
+watch(bulkBar, bar => {
+  bulkResize?.disconnect()
+  bulkHeight.value = 0
+  const element = bar?.$el.querySelector('.bulk-bar') as HTMLElement | undefined
+  if (!element) return
+  bulkResize = new ResizeObserver(() => { bulkHeight.value = element.offsetHeight })
+  bulkResize.observe(element)
+}, { flush: 'post' })
 
 const toolbarWrap = ref<HTMLElement>()
 const stickMark = ref<HTMLElement>()
@@ -503,10 +531,12 @@ async function resolvePanel() {
   }
 }
 watch([ticketKey, projectId], resolvePanel, { immediate: true })
-watch(panelItem, item => {
+// A lookup can find the store row before its list page lands. Object identity
+// then stays the same, so also observe when that row joins the visible view.
+watch([panelItem, () => sequence.value.some(row => row.id === panelItem.value?.id)], ([item, shown], [before]) => {
   if (!item) return
-  if (outlineActive.value) outline.reveal(item.id)
-  if (sequence.value.some(row => row.id === item.id)) {
+  if (item !== before && outlineActive.value) outline.reveal(item.id)
+  if (shown) {
     cursorId.value = item.id
     if (!fullView.value) void nextTick(() => table.value?.scrollToRow(item.id))
   }
@@ -586,7 +616,7 @@ function liveApplied() {
 }
 onBeforeUnmount(() => clearTimeout(liveCounts))
 function showUpdates() {
-  liveList.apply()
+  activeLive.value.apply()
   if (!fullView.value && !panel.value?.el?.contains(document.activeElement)) table.value?.focusGrid()
 }
 
@@ -1006,16 +1036,17 @@ async function selectAllMatching() {
   selectAll(true)
 }
 // Rows that left the list leave the selection.
-watch(() => list.rows.value, rows => {
+const selectionRows = computed(() => outlineActive.value ? outline.loadedRows.value : list.rows.value)
+watch(selectionRows, rows => {
   if (!selected.value.size) return
   const ids = new Set(rows.map(row => row.id))
   const kept = [...selected.value].filter(id => ids.has(id))
   if (kept.length !== selected.value.size) selected.value = new Set(kept)
 })
 watch(selectable, on => { if (!on) clearSelection() })
-const selectedRows = computed(() => list.rows.value.filter(row => selected.value.has(row.id)))
+const selectedRows = computed(() => selectionRows.value.filter(row => selected.value.has(row.id)))
 // Selected tickets someone deleted meanwhile: the bulk bar says so, and changes leave them out.
-const selectedDeleted = computed(() => liveList.deletedAmong(selected.value))
+const selectedDeleted = computed(() => activeLive.value.deletedAmong(selected.value))
 const liveSelection = () => { const gone = new Set(selectedDeleted.value); return [...selected.value].filter(id => !gone.has(id)) }
 // Where the list is, so the bulk bar centres over it (a docked panel takes the right).
 const listFrame = ref<{ left: number; width: number } | null>(null)
@@ -1069,7 +1100,7 @@ const bulkLabels = computed<LabelChoice[]>(() => {
 })
 // Review: the tickets that changed meanwhile become the selection, with their newer values.
 function reviewConflicts(ids: string[]) {
-  const shown = ids.filter(id => list.rows.value.some(row => row.id === id))
+  const shown = ids.filter(id => (outlineActive.value ? outline.rows.value : list.rows.value).some(row => row.id === id))
   if (!shown.length) return
   selected.value = new Set(shown)
   selectAnchor = shown[0]
@@ -1084,7 +1115,13 @@ async function runBulk(change: Omit<BulkChange, 'ids'>, done: (count: number) =>
   bulkMenu.value = null
   bulkBusy.value = true
   try {
-    const result = await list.applyBulk({ ids, ...change })
+    const bulkRows = selectionRows.value
+    const placements = new Map(bulkRows.map(row => [row.id, { parent: row.parent_id, epic: outline.epicOf(row.id) }]))
+    const result = await list.applyBulk({ ids, ...change }, bulkRows)
+    for (const answer of result.items) {
+      const from = placements.get(answer.id), row = rowStore.visibleRow(answer.id)
+      if (from && row && row.parent_id !== from.parent) outline.relocate(row, from.parent, from.epic)
+    }
     // Changed meanwhile: nothing was overwritten; Review shows those tickets.
     const conflicts = result.skipped.filter(item => item.code === 'conflict')
     const reported = result.skipped.filter(item => !benefitSkip(item) && item.code !== 'conflict')
@@ -1154,7 +1191,7 @@ async function undoBulk(eventId: number) {
   try {
     await list.undoBulk(eventId)
     toast('Undone: the tickets are as they were')
-    void list.load(); void projects.load(true); void refreshMemberships()
+    void list.load(); if (outlineActive.value) outline.reload(); void projects.load(true); void refreshMemberships()
   } catch (e) {
     toast(e instanceof APIError && e.status === 409 ? 'Some of them changed since, so nothing was undone.' : `Undo did not work: ${problem(e)}`, { tone: 'error' })
   }
@@ -1366,7 +1403,7 @@ function keydown(event: KeyboardEvent) {
       break
     case '/': if (!fullView.value) { event.preventDefault(); toolbar.value?.focusSearch() } break
     case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && row?.kind_slug === 'epic' ? row : null); break
-    case 'u': if (liveList.pill.value && listActive.value) { event.preventDefault(); showUpdates() } break
+    case 'u': if (activeLive.value.pill.value && liveActive.value) { event.preventDefault(); showUpdates() } break
     case 'e': if (ticketKey.value) { event.preventDefault(); void panel.value?.startEdit() } break
     case 's':
       if (ticketKey.value) { event.preventDefault(); panel.value?.openStatus() }
@@ -1435,6 +1472,7 @@ onBeforeUnmount(() => {
   clearInterval(clock)
   resize?.disconnect()
   stick?.disconnect()
+  bulkResize?.disconnect()
   list.invalidate()
   knowledge.stop()
   dockQuery.removeEventListener('change', onDockWidth)
@@ -1454,7 +1492,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 <template>
   <section class="project-page" :class="{ 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
-      <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size }">
+      <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size, 'has-live-updates': liveActive && activeLive.pill.value }" :style="{ '--live-obstacle-h': `${bulkHeight ? bulkHeight + 8 : 0}px` }">
       <header class="project-head" :class="{ 'glimpse-room': glimpseActive && !showViewBar }">
         <div class="head-flex" :class="{ 'with-glimpse': glimpseActive }">
         <div class="head-main">
@@ -1527,13 +1565,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
         :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />
       <template v-else>
-      <div v-if="listActive && liveList.pill.value" class="live-dock">
-        <button type="button" class="live-pill" :aria-label="liveList.pill.value" aria-keyshortcuts="u" :data-tip="liveList.pending.overflow ? 'Load the list again' : 'Show the updates · u'" @click="showUpdates">
-          <AppIcon :name="liveList.pending.overflow ? 'refresh' : 'arrow-up'" :size="13" />
-          <span>{{ liveList.pill.value.split(' · ')[0] }}</span><span class="dot" aria-hidden="true">·</span><b>{{ liveList.pill.value.split(' · ')[1] }}</b>
-        </button>
-      </div>
-      <p v-if="listActive" class="sr-only live-said" role="status" aria-live="polite">{{ liveList.message.value }}</p>
+      <LiveUpdatesChip v-if="liveActive && activeLive.pill.value" :text="activeLive.pill.value" :overflow="activeLive.pending.overflow" @show="showUpdates" />
+      <p v-if="liveActive" class="sr-only live-said" role="status" aria-live="polite">{{ activeLive.message.value }}</p>
       <TicketTable
         ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
         :query="filters.q" :sort="filters.sort" :density="density"
@@ -1550,12 +1583,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @open="openRow" @cursor="id => cursorId = id" @sort="sortBy" @status="(row, anchor) => openStatus(row, anchor, 'list')" @release="(row, anchor) => openRelease(anchor, [row.id])"
         @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
         @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
-        :live-labels="listActive ? liveList.labels.value : undefined" :live-flash="listActive ? liveList.flash.value : undefined"
-        :live-pill="listActive && liveList.pill.value ? { text: liveList.pill.value, overflow: liveList.pending.overflow } : null" @show-updates="showUpdates"
+        :live-labels="liveActive ? activeLive.labels.value : undefined" :live-flash="liveActive ? activeLive.flash.value : undefined"
+        :live-pill="liveActive && activeLive.pill.value ? { text: activeLive.pill.value, overflow: activeLive.pending.overflow } : null" @show-updates="showUpdates"
       />
       </template>
 
-      <BulkBar
+      <BulkBar ref="bulkBar"
         v-if="selectable && selected.size" :count="selected.size" :deleted="selectedDeleted.length" :loaded="sequence.length" :total="total" :busy="bulkBusy" :can-write="writable" :can-release="can('releases.write', project.id)" :frame="listFrame"
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
         @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, liveSelection())" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
@@ -1652,26 +1685,14 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .activity { font-size: 12px; color: var(--ink-3); }
 .activity time { color: var(--ink-2); }
 .stick-mark { height: 1px; margin-bottom: -1px; }
-/* Waiting live updates on a phone (the Title header carries them on wider
-   screens): a pill floats just under the toolbar and never pushes cards down (AEON-326). */
-.live-dock { display: none; }
-.live-pill {
-  display: inline-flex; align-items: center; gap: 6px; height: 32px; margin-top: 4px; padding: 0 13px 0 11px; border: 1px solid var(--glass-edge); border-radius: 999px;
-  background: var(--glass); box-shadow: var(--shadow-pop); color: var(--ink-2); font-size: 12.5px; white-space: nowrap; pointer-events: auto;
-  -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2);
-}
-.live-pill svg { color: var(--teal-ink); }
-.live-pill b { font-weight: 600; color: var(--teal-ink); }
-.live-pill .dot { color: var(--ink-3); }
-.live-pill:hover { color: var(--ink); background: var(--surface-raised-2); }
-.live-pill:focus-visible { box-shadow: var(--focus-ring), var(--shadow-pop); }
-@media (prefers-reduced-motion: no-preference) {
-  .live-pill { animation: live-pill-in .2s cubic-bezier(.2, .7, .2, 1); }
-  @keyframes live-pill-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
-}
 /* While tickets are selected the bulk bar floats at the bottom: the list can scroll clear of it. */
 .list-view.selecting { padding-bottom: 76px; }
-@media (max-width: 720px) { .list-view.selecting { padding-bottom: calc(168px + env(safe-area-inset-bottom)); } }
+@media (max-width: 720px) {
+  .list-view.selecting { padding-bottom: calc(168px + env(safe-area-inset-bottom)); }
+  /* The fixed chip never moves rows when it arrives; the last row can scroll
+     above both it and the measured selection sheet. Desktop stays in the header. */
+  .list-view.has-live-updates { padding-bottom: calc(var(--live-obstacle-h, 0px) + 68px + env(safe-area-inset-bottom)); }
+}
 .phone-pick { display: none; }
 @media (max-width: 720px) {
   .phone-pick { display: flex; align-items: center; justify-content: flex-start; min-height: 44px; margin-top: -2px; }
@@ -1679,8 +1700,6 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .phone-pick-status b { font-size: 15px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
   .phone-pick .dot { color: var(--ink-3); }
   .phone-pick .gone { color: var(--ink-2); }
-  .live-dock { position: sticky; top: calc(var(--toolbar-h, 0px) + 4px); z-index: 4; height: 0; display: flex; justify-content: center; pointer-events: none; }
-  .live-pill { font-size: 13px; }
   .phone-pick button { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 15px; font-weight: 600; }
   .phone-pick button.quiet { padding-left: 2px; color: var(--ink-2); font-weight: 600; }
   .phone-pick.on button { margin-left: -12px; color: var(--teal-ink); }

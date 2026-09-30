@@ -199,6 +199,9 @@ export function useTicket(item: Ref<ListItem | null>, context: {
       // over a deletion that arrived meanwhile.
       if (trusted()) rows.adoptNode(node, sent)
       if (request !== generation || item.value?.id !== target.id) return 'stale'
+      // Loss now invalidates reads before reconnect. The resumed stream may
+      // need no resync, so this request must replace its own doubtful answer.
+      if (!trusted()) return refresh()
       // Held off by a deletion the store learned after this read was sent
       // (without knowing when): a read sent now can tell.
       if (trusted() && rows.isDeleted(target.id) && rows.touchedSince(target.id, sent)) return refresh()
@@ -210,6 +213,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
       if (missing && trusted()) rows.gone(target.id, sent)
       if (request !== generation || item.value?.id !== target.id) return 'stale'
       if (missing) {
+        if (!trusted()) return refresh()
         // News arrived after the read was sent, so the store could not tell: read again.
         if (trusted() && !rows.isDeleted(target.id)) return refresh()
         sync(target, null)

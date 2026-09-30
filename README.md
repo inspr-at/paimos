@@ -616,6 +616,18 @@ user toggles it; that choice lasts for the current page session and writes no
 browser storage. Assets and fonts are served locally. The supplied mark is
 preserved at `web/src/assets/brand/aeon-mark.svg` for its later replacement.
 
+The ticket list and Outline share the causal row store and live stream. Field
+changes patch in place; moves, additions, removals and held edits wait behind
+**N updates · Show** (shortcut **U**), or apply after two idle seconds when no
+selection, editor, menu, dialog or drag is active. There is no countdown. The
+Outline retains expansion and tree placement while updates wait, refreshes
+filtered ancestors, and moves successful bulk results immediately. Stream loss
+invalidates outstanding reads before reconnect; older pages cannot overwrite
+locally changed child counts.
+On phones, List and Outline share a bottom-centred updates chip above the safe
+area, footer and selection sheet, with scroll clearance for the last row; the
+desktop action stays in the table header. Lazy pages retain the server's order.
+
 The auth adapter is isolated in `web/src/lib/api.ts`. Pending P0.3 contract
 confirmation, it expects `/api/me` to return
 `{ principal: { id, name, email? }, tenant: { id, name }, dev_mode?: boolean }`.

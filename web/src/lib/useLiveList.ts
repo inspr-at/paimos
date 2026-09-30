@@ -94,6 +94,8 @@ const browserEnv: LiveListEnv = {
 // (a save, an event or a panel read landed while it ran): they are looked at again.
 // sent: when a load was sent (the row store's clock).
 export interface ListRead { kind: 'load' | 'more'; behind: string[]; sent?: number }
+// Presence reads establish existence only; they never establish filter membership.
+export type LiveReadPurpose = 'matches' | 'presence'
 
 export interface LiveListOptions {
   projectId: Ref<string | null>
@@ -108,6 +110,12 @@ export interface LiveListOptions {
   // The last row of the last page as it was read: the next page starts after
   // it, so a row that sorts before it belongs to the loaded ones.
   edge?: () => ListItem | null
+  // A tree also places rows by their immediate parent, at every depth.
+  placement?: (row: Layout) => string
+  // Lazy trees discover additions in the levels they have loaded.
+  resyncQueries?: () => ListQuery[]
+  // Show can release a tree move only after its editor lets go of the row.
+  released?: () => void
   // The list is on show (not the Outline, the graph or another tab).
   active: Ref<boolean>
   me: () => string | null
@@ -123,7 +131,7 @@ export interface LiveListOptions {
   // Too many updates to apply: the list loads again.
   reload: () => void
   store?: LiveNodeStore
-  fetchList?: (query: ListQuery) => Promise<ListPage>
+  fetchList?: (query: ListQuery, purpose: LiveReadPurpose) => Promise<ListPage>
   env?: LiveListEnv
 }
 
@@ -144,7 +152,7 @@ export function useLiveList(options: LiveListOptions) {
   const afterEditor = new Set<string>()
   // When each waiting update was classified (the row store's clock): news
   // since then makes a removal stale.
-  const classified = new Map<string, number>()
+  const classified = new Map<string, { at: number; revision: string | null }>()
   const flash = ref(new Set<string>())
   const message = ref('')
   let queue = new Map<string, Queued>()
@@ -181,6 +189,9 @@ export function useLiveList(options: LiveListOptions) {
     // Reads that failed while the stream was away are tried again.
     resumed() {
       flushRetry.resume()
+      // A pending addition read before the loss cannot join until a read
+      // confirms it again, even when the stream resumes its full history.
+      for (const id of pending.ids()) if (pending.kind(id) === 'new' && !nodes.current(id)) receive(reread(id))
       if (queue.size) schedule()
       resyncRetry.resume()
     },
@@ -246,7 +257,7 @@ export function useLiveList(options: LiveListOptions) {
     queue = new Map()
     const run = generation
     const ids = [...batch.keys()]
-    const outcome: { id: string; kind: Classification; queued: Queued; row?: ListItem; newer: boolean }[] = []
+    const outcome: { id: string; kind: Classification; queued: Queued; row?: ListItem; newer: boolean; marked?: boolean }[] = []
     let failed = false
     for (let i = 0; i < ids.length; i += PAGE) {
       const chunk = ids.slice(i, i + PAGE)
@@ -257,7 +268,7 @@ export function useLiveList(options: LiveListOptions) {
       let matched: Map<string, ListItem>
       let present = new Map<string, ListItem>()
       try {
-        const page = await fetchList({ ...apiParams(project, filters.value, { limit: PAGE }), ids: chunk })
+        const page = await fetchList({ ...apiParams(project, filters.value, { limit: PAGE }), ids: chunk }, 'matches')
         if (run !== generation) { keep(page.items, sent); return false }
         // The store has what the query found at once, not after the next read.
         keep(page.items, sent)
@@ -265,7 +276,7 @@ export function useLiveList(options: LiveListOptions) {
         // Shown rows that no longer match: closed, or gone from the project?
         const missing = chunk.filter(id => !matched.has(id) && rowById(id) && batch.get(id)!.change.change !== 'deleted')
         if (missing.length) {
-          const found = await fetchList({ within: project, kind: WORK_KINDS, ids: missing, limit: PAGE })
+          const found = await fetchList({ within: project, kind: WORK_KINDS, ids: missing, limit: PAGE }, 'presence')
           if (run !== generation) { keep(found.items, sent); return false }
           present = new Map(found.items.map(item => [item.id, item]))
         }
@@ -302,7 +313,7 @@ export function useLiveList(options: LiveListOptions) {
       }
     }
     announce(outcome.filter(entry => !entry.queued.own))
-    if (outcome.some(entry => entry.kind !== 'ignore' && entry.kind !== 'patch' && !entry.queued.own)) markedAt = env.now()
+    if (outcome.some(entry => entry.marked && !entry.queued.own)) markedAt = env.now()
     // Counts follow the rows: waiting updates change them when they apply.
     if (outcome.some(entry => entry.kind === 'patch' && entry.newer)) options.applied?.()
     watchPending()
@@ -332,7 +343,8 @@ export function useLiveList(options: LiveListOptions) {
     let kind = classifyChange<Layout>({ change: told, shown: row ? base : null, node: current, matches: node => node === fresh })
     // Moved out to another project reads as no longer matching, not deleted.
     if (kind === 'deleted' && change.fields.includes('project_id') && change.projectId && change.projectId !== projectId.value) kind = 'no_longer_matches'
-    if (kind === 'patch' && fresh && base && placeKey(fresh, filters.value) !== placeKey(base, filters.value)) kind = 'moved'
+    const placement = options.placement ?? ((item: Layout) => placeKey(item, filters.value))
+    if (kind === 'patch' && fresh && base && placement(fresh) !== placement(base)) kind = 'moved'
     if (kind === 'new' && fresh && !fitsLoaded(fresh)) kind = 'ignore'
     const newer = !!row && !!current && compareRevision(current.updated_at, base?.updated_at) > 0
     // A row the person works with, or one an editor pins, keeps what they see
@@ -342,12 +354,14 @@ export function useLiveList(options: LiveListOptions) {
       if (!holding) nodes.show(id)
       else if (kind === 'patch' && nodes.waiting(id)) kind = 'changed'
     }
-    if (kind === 'patch' || kind === 'ignore') held.delete(id)
-    else classified.set(id, nodes.mark())
+    const marked = kind !== 'patch' && kind !== 'ignore'
+      && (pending.kind(id) !== kind || classified.get(id)?.revision !== nodes.revision(id))
+    if (kind === 'patch' || kind === 'ignore') { held.delete(id); classified.delete(id) }
+    else classified.set(id, { at: nodes.mark(), revision: nodes.revision(id) })
     // Past the cap the oldest updates go; the pill then offers a reload.
     pending.note(id, kind)
     if (row && newer && !own && !holding && (kind === 'patch' || kind === 'moved')) tint(id)
-    return { id, kind, queued, row, newer }
+    return { id, kind, queued, row, newer, marked }
   }
   // A new row joins the loaded ones when it sorts among them; one that sorts
   // after where the next page starts comes with that page.
@@ -411,7 +425,7 @@ export function useLiveList(options: LiveListOptions) {
         // A row leaves only as the store has it now: none the store has news
         // of since it was classified (a restore, a reopen, a newer revision).
         // Such a row is read again instead.
-        if (nodes.touchedSince(id, classified.get(id) ?? 0)) {
+        if (nodes.touchedSince(id, classified.get(id)?.at ?? 0)) {
           if (rowById(id)) receive(reread(id))
           continue
         }
@@ -466,13 +480,16 @@ export function useLiveList(options: LiveListOptions) {
   // An editor that saved on top leaves its own version: nothing to tint.
   function catchUp() {
     if (!afterEditor.size) return
+    let released = false
     for (const id of afterEditor) {
       if (nodes.pinned(id)) continue
       afterEditor.delete(id)
+      released = true
       nodes.show(id)
       const shown = nodes.shown(id)
       if (rowById(id) && shown && !nodes.isOwn(id, shown.updated_at)) tint(id)
     }
+    if (released) options.released?.()
     watchPending()
   }
   // The check runs only while updates wait.
@@ -504,7 +521,13 @@ export function useLiveList(options: LiveListOptions) {
     // store no longer counts them as current.)
     const sent = nodes.mark()
     let page: ListPage
-    try { page = await fetchList(apiParams(project, filters.value, { limit: Math.max(PAGE / 4, Math.min(PAGE, rows.value.length)) })) }
+    try {
+      const queries = options.resyncQueries?.()
+      if (queries) {
+        const pages = await Promise.all(queries.map(query => fetchList(query, 'matches')))
+        page = { items: pages.flatMap(page => page.items), next_cursor: null }
+      } else page = await fetchList(apiParams(project, filters.value, { limit: Math.max(PAGE / 4, Math.min(PAGE, rows.value.length)) }), 'matches')
+    }
     catch { return run === generation }
     if (run !== generation) { keep(page.items, sent); return false }
     // Another gap after this read was sent: the resync it asked for reads again.
