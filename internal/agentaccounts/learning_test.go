@@ -147,11 +147,16 @@ func TestLearningBlindLimitsAndFreshMeasuredWins(t *testing.T) {
 		if err := persistEstimate(t.Context(), tx, a, *v, now); err != nil {
 			return err
 		}
+		duplicate := *v
+		duplicate.UsedPercent = 1
+		if err := persistEstimate(t.Context(), tx, a, duplicate, now); err != nil {
+			return err
+		}
 		history, err := readCapacity(t.Context(), tx, a.ID, false)
 		if err != nil {
 			return err
 		}
-		if len(history) != 1 || history[0].Evidence == nil || history[0].Evidence.Samples != 2 || history[0].PlusMinus < 3 {
+		if len(history) != 1 || history[0].UsedPercent != 50 || history[0].Evidence == nil || history[0].Evidence.Samples != 2 || history[0].PlusMinus < 3 {
 			t.Fatal("lost estimate evidence")
 		}
 		return nil
@@ -249,7 +254,7 @@ func TestLearningBlindSettlementCalibratesAndReplayDoesNotMint(t *testing.T) {
 					return err
 				}
 			}
-			return learnRun(t.Context(), tx, a, id, now)
+			return learnRun(t.Context(), tx, a, id, now.Add(time.Duration(i-5)*time.Millisecond))
 		})
 	}
 	inLearning(t, person, func(tx pgx.Tx) error {
@@ -278,6 +283,23 @@ func TestLearningBlindSettlementCalibratesAndReplayDoesNotMint(t *testing.T) {
 	if after := scalar(t, person, `SELECT count(*) FROM account_capacity_readings WHERE account_id=$1`, a.ID); after != before {
 		t.Fatalf("replay minted an estimate: %d -> %d", before, after)
 	}
+	inLearning(t, person, func(tx pgx.Tx) error {
+		if err := ObserveSessionTokens(t.Context(), tx, runner.ID, a.ID, "blind-model", 200, now.Add(-time.Minute), now.Add(2*time.Second)); err != nil {
+			return err
+		}
+		l, err := loadLearning(t.Context(), tx, a.ID)
+		if err != nil {
+			return err
+		}
+		if l.Tokens != 800 || l.Runs != 3 {
+			t.Fatalf("external usage attribution %+v", l)
+		}
+		readings, err := readCapacity(t.Context(), tx, a.ID, true)
+		if err == nil && (len(readings) != 1 || math.Abs(readings[0].UsedPercent-100*800.0/1100) > .1) {
+			t.Fatalf("external calibrated estimate %+v", readings)
+		}
+		return err
+	})
 	// A calibrated blind window still admits at most one daytime run.
 	a.MaxParallel = 4
 	inLearning(t, person, func(tx pgx.Tx) error {

@@ -356,8 +356,8 @@ func persistEstimate(ctx context.Context, tx pgx.Tx, a Account, v capacity.Readi
 		return nil
 	}
 	evidence, _ := json.Marshal(v.Evidence)
-	_, err := tx.Exec(ctx, `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source,plan,plus_minus,evidence) SELECT tenant_id,id,$2,$3,$4,$5,$6,$7,'estimate',$8,$9,$10 FROM agent_accounts WHERE id=$1 ON CONFLICT DO NOTHING`, a.ID, v.WindowKind, v.Bucket, v.WindowMinutes, v.UsedPercent, v.ResetsAt, v.ReadAt, v.Plan, v.PlusMinus, evidence)
-	if err != nil {
+	inserted, err := tx.Exec(ctx, `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source,plan,plus_minus,evidence) SELECT tenant_id,id,$2,$3,$4,$5,$6,$7,'estimate',$8,$9,$10 FROM agent_accounts WHERE id=$1 ON CONFLICT DO NOTHING`, a.ID, v.WindowKind, v.Bucket, v.WindowMinutes, v.UsedPercent, v.ResetsAt, v.ReadAt, v.Plan, v.PlusMinus, evidence)
+	if err != nil || inserted.RowsAffected() == 0 {
 		return err
 	}
 	_, err = tx.Exec(ctx, `UPDATE account_allowance_windows SET capacity_retired=true WHERE account_id=$1 AND capacity_kind=$2 AND capacity_bucket=$3 AND ends_at<>$4 AND capacity_source='estimate'`, a.ID, v.WindowKind, v.Bucket, v.ResetsAt)

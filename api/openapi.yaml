@@ -10196,7 +10196,7 @@ components:
       description: Tenant-local observations only. Suggestions never change a schedule without a person saving it. No paths or vendor text.
       required: [windows, tokens, cost_micros, runs, limit_hits]
       properties:
-        tokens: {type: integer, minimum: 0, description: Observed managed consumption in the current known cycle, or since observation began.}
+        tokens: {type: integer, minimum: 0, description: "Observed managed and token-only session consumption in the current known cycle, or since observation began."}
         cost_micros: {type: integer, minimum: 0}
         runs: {type: integer, minimum: 0}
         limit_hits: {type: integer, minimum: 0}
