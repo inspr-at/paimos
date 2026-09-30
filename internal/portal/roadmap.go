@@ -57,6 +57,7 @@ var (
 // loadPublicRoadmap lists approved roadmap tickets for the pace-linked project.
 // Release history is not required. A shipped ticket already visible in the
 // public release history is omitted so it does not stay in both places.
+// A missing hide_from_release_notes is visible; only boolean true hides.
 func loadPublicRoadmap(ctx context.Context, tx pgx.Tx) ([]publicRoadmapItem, error) {
 	shipped, err := frozenPublicTicketIDs(ctx, tx)
 	if err != nil {
@@ -103,9 +104,10 @@ func loadPublicRoadmap(ctx context.Context, tx pgx.Tx) ([]publicRoadmapItem, err
 		        AND pr.kind = 'person'
 		        AND pr.id = (n.fields->>'roadmap_public_by')::uuid
 		  )
-		  AND NOT (
+		  AND NOT COALESCE(
 		      jsonb_typeof(n.fields->'hide_from_release_notes') = 'boolean'
-		      AND n.fields->>'hide_from_release_notes' = 'true'
+		      AND n.fields->>'hide_from_release_notes' = 'true',
+		      false
 		  )
 		  AND EXISTS (
 		      SELECT 1

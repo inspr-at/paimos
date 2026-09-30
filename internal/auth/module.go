@@ -102,11 +102,13 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		}
 		switch kind {
 		case credStale:
-			if r.URL.Path != "/api/auth/logout" {
+			// Public responses can be cached. A Set-Cookie there would store
+			// the session clear next to the page. Auth handlers clear their own.
+			if !publicRequest(r) {
 				m.clearSessionCookie(w)
 			}
 		case credSession:
-			if r.URL.Path != "/api/auth/logout" {
+			if !publicRequest(r) {
 				if c, cErr := r.Cookie(sessionCookieName); cErr == nil {
 					m.setSessionCookie(w, c.Value)
 				}

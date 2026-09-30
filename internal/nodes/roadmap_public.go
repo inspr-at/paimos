@@ -138,3 +138,28 @@ func stripRoadmapProvenance(fields map[string]any) {
 	delete(fields, "roadmap_public_by")
 	delete(fields, "roadmap_public_at")
 }
+
+// withoutInheritedRoadmapPublication drops a publication that rode along from
+// another kind. Only a later person action on a ticket sets the keys again.
+// Invalid JSON is left untouched so the caller can report it as a field block.
+func withoutInheritedRoadmapPublication(raw json.RawMessage) (json.RawMessage, bool, error) {
+	fields, err := decodeRouteFields(raw)
+	if err != nil {
+		return raw, false, nil
+	}
+	cleared := false
+	for _, key := range []string{"roadmap_public", "roadmap_public_source", "roadmap_public_by", "roadmap_public_at"} {
+		if _, ok := fields[key]; ok {
+			delete(fields, key)
+			cleared = true
+		}
+	}
+	if !cleared {
+		return raw, false, nil
+	}
+	stored, err := json.Marshal(fields)
+	if err != nil {
+		return nil, false, err
+	}
+	return stored, true, nil
+}
