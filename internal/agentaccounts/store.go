@@ -25,6 +25,7 @@ const (
 	evReserved   = "account.reserved"
 	evSettled    = "account.settled"
 	evReleased   = "account.released"
+	evArchived   = "account.archived"
 )
 
 func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, eventType string, before, after any) error {
@@ -38,13 +39,27 @@ func dbNow(ctx context.Context, tx pgx.Tx) (time.Time, error) {
 	return now, err
 }
 
+// retiredSQL matches an account that left the workspace's lists (AEON-402): a
+// person removed it, or its only computer binding is revoked for good. Its
+// runs, readings and events stay; it never routes again.
+const retiredSQL = `(agent_accounts.archived_at IS NOT NULL OR EXISTS (SELECT 1 FROM agent_pairing_enrollments e
+		WHERE e.tenant_id = agent_accounts.tenant_id AND e.account_id = agent_accounts.id AND e.state = 'revoked'))`
+
+// listAccounts lists the workspace's current accounts, without retired ones.
 func listAccounts(ctx context.Context, tx pgx.Tx) ([]Account, error) {
+	return queryAccounts(ctx, tx, false)
+}
+
+// queryAccounts with retired lists every account, for a daemon reconciling
+// its own registrations.
+func queryAccounts(ctx context.Context, tx pgx.Tx, retired bool) ([]Account, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
 		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,'')
 		FROM agent_accounts
-		ORDER BY created_at, id`)
+		WHERE $1 OR NOT `+retiredSQL+`
+		ORDER BY created_at, id`, retired)
 	if err != nil {
 		return nil, err
 	}
@@ -370,6 +385,10 @@ func updateState(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if !validState(state) {
 		return Account{}, fail(http.StatusBadRequest, "invalid state")
 	}
+	var archived bool
+	if err := tx.QueryRow(ctx, `SELECT archived_at IS NOT NULL FROM agent_accounts WHERE id = $1::uuid`, accountID).Scan(&archived); err == nil && archived {
+		return Account{}, &httpError{status: http.StatusConflict, msg: "this account was removed", code: "account_removed"}
+	}
 	if err := agentpairing.AccountFence(ctx, tx, accountID, false); err != nil {
 		return Account{}, err
 	}
@@ -459,4 +478,79 @@ func createWindow(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID 
 		return Window{}, err
 	}
 	return w, nil
+}
+
+// archiveAccount removes an account from the workspace's lists (AEON-402). A
+// paired binding is disconnected first; queued runs bound to it are cancelled
+// and release their holds. It refuses while a run works on the account, so its
+// accounting stays known. Nothing is deleted: runs, readings and events stay.
+func archiveAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string) (Account, error) {
+	if !uuidRE.MatchString(accountID) {
+		return Account{}, fail(http.StatusNotFound, "account not found")
+	}
+	before, err := lockAccount(ctx, tx, accountID)
+	if err != nil {
+		return Account{}, err
+	}
+	var archived bool
+	if err := tx.QueryRow(ctx, `SELECT archived_at IS NOT NULL FROM agent_accounts WHERE id = $1::uuid`, accountID).Scan(&archived); err != nil {
+		return Account{}, err
+	}
+	if archived {
+		return before, nil
+	}
+	if err := agentpairing.DisconnectAccount(ctx, tx, p, accountID); errors.Is(err, agentpairing.ErrActiveRuns) {
+		return Account{}, &httpError{status: http.StatusConflict, msg: "a run is still working on this account", code: "account_busy"}
+	} else if err != nil {
+		return Account{}, err
+	}
+	var active bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id = $1::uuid AND status IN ('starting','running','waiting'))`, accountID).Scan(&active); err != nil {
+		return Account{}, err
+	}
+	if active {
+		return Account{}, &httpError{status: http.StatusConflict, msg: "a run is still working on this account", code: "account_busy"}
+	}
+	// A vendor-handoff retry has no pin of its own; retry_account_id is its target.
+	rows, err := tx.Query(ctx, `SELECT id::text FROM agent_runs WHERE status = 'queued'
+		AND (account_id = $1::uuid OR COALESCE(requested_account_id, retry_account_id) = $1::uuid) ORDER BY id FOR UPDATE`, accountID)
+	if err != nil {
+		return Account{}, err
+	}
+	var queued []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return Account{}, err
+		}
+		queued = append(queued, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return Account{}, err
+	}
+	cancelled := []string{}
+	for _, id := range queued {
+		ok, err := agentpairing.CancelQueuedRun(ctx, tx, id)
+		if err != nil {
+			return Account{}, err
+		}
+		if ok {
+			cancelled = append(cancelled, id)
+		}
+	}
+	var at time.Time
+	if err := tx.QueryRow(ctx, `UPDATE agent_accounts SET state = 'unavailable', archived_at = clock_timestamp(), archived_by_principal_id = $2::uuid
+		WHERE id = $1::uuid RETURNING archived_at`, accountID, p.ID).Scan(&at); err != nil {
+		return Account{}, err
+	}
+	after, err := getAccount(ctx, tx, accountID)
+	if err != nil {
+		return Account{}, err
+	}
+	if err := writeEvent(ctx, tx, p, evArchived, before, map[string]any{"account": after, "archived_at": at, "cancelled_run_ids": cancelled}); err != nil {
+		return Account{}, err
+	}
+	return after, nil
 }

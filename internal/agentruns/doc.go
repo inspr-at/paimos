@@ -33,7 +33,9 @@
 // /api/runs/{id}/capacity-override while queued. It is run-scoped, idempotent
 // and audited; capacity routing still checks approval, hold, vendor truth,
 // probe freshness, models and concurrency. Queued responses include advisory
-// structured wait reasons without reserving capacity.
+// structured wait reasons without reserving capacity. AEON-402 adds person-only
+// POST /api/runs/{id}/cancel: a queued run ends as cancelled and releases its
+// holds in the same transaction; a started run is never changed.
 //
 // Agent keys require exact run.read, run.create, run.claim or run.telemetry
 // scopes. People may create/read runs; queue, claim and telemetry are agent-only.
