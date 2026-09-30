@@ -303,7 +303,7 @@ function rowClick(event: MouseEvent, id: string) {
             <span v-for="(continues, level) in guides" :key="level" class="tree-guide" :class="{ continues, elbow: level === depth - 1, last: level === depth - 1 && !continues }" :style="{ '--level': level }" />
             <span v-if="open" class="tree-stem" :style="{ '--level': depth }" />
           </span>
-          <span role="cell" class="c-state">
+          <span role="cell" class="c-state" :class="{ 'vendor-limit': view.session.vendor_limited }">
             <AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="view.session.archived_at ? 'Removed' : pendingLabel(view)" />
             <!-- No inbox (AEON-282) is the more specific cue; otherwise the listening cue (AEON-280). -->
             <span v-if="live(view) && view.session.management_mode === 'managed' && view.session.run_id && !view.session.advertised_capabilities.includes('inbox')" class="no-inbox" title="This session has no inbox delivery path. Launch a managed worker to receive follow-up messages.">No inbox</span>
@@ -484,6 +484,10 @@ function rowClick(event: MouseEvent, id: string) {
 .c-state:has(.no-inbox) { flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; }
 .no-inbox { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
 .c-state :deep(.state-word) { white-space: nowrap; }
+.c-state.vendor-limit { max-width: 148px; }
+.c-state.vendor-limit :deep(.agent-state-label) { min-width: 0; max-width: 100%; align-items: flex-start; }
+.c-state.vendor-limit :deep(.state-word) { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+
 .state-label { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.needs .state-label { color: var(--gold-ink); font-weight: 600; }
 .row > .c-agent { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; padding-block: 6px; }

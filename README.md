@@ -175,6 +175,22 @@ Unknown reason or state tokens from newer daemons remain visible as “Needs att
 
 Invoking the binary as `paimos` gives the paimos-compatible CLI. `PAIMOS_URL` (with `PAIMOS_API_KEY` or `PAIMOS_API_KEY_FILE`) is the process-only target.
 
+Claude accounts offer **Show Aeon in your Claude status line** in Settings → Accounts.
+Only that explicit opt-in lets the enrolled daemon install `aeon statusline` in
+its private Claude home; an existing user status line is preserved. The command
+prints one plan line and sends only the two supported quota windows to the local
+owner-only agentd socket. The registering agent reports at most once per minute,
+including across daemon restarts. Disabling removes only the matching owned entry.
+
+Structured vendor limit hits settle managed runs as `vendor_limit`; sessions show
+Throttled with the vendor's reset when known. Known denied windows are reported at
+100%; missing bounds remain unknown. Accounts publish `reading_support` and a
+tenant-keyed HMAC of a verified vendor account ID, never an email, token or local
+path. Missing verified IDs leave the fingerprint empty. Claude idle `get_usage`
+and Grok billing captures remain disabled until the coordinator verifies a
+quota-neutral exchange and adds an exact-version, exact-binary capability; this
+fixture implementation does not approve a production vendor capture.
+
 Managed `aeon-agentd` Codex runs report fresh app-server thread usage to
 `POST /api/projects/{projectId}/harness-sessions/{sessionId}/usage` with the
 registered session's worker lease (`harness.worker`). Input includes cached

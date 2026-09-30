@@ -690,7 +690,7 @@
   },
   "harness-session": {
     "version": "harness-session/1.5",
-    "sha256": "91379abf57e579c3d3750e21baa476417d050d6806be3405fe8aae4d41bd8002",
+    "sha256": "1c531882bc0519b06f971fc60f1de02a78ec41c9d95d0084aaa2fc3855aa3d2f",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1052,6 +1052,19 @@
             ],
             "type": "string"
           },
+          "limit_resets_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "limit_window": {
+            "enum": [
+              "5h",
+              "weekly",
+              "monthly",
+              "other"
+            ],
+            "type": "string"
+          },
           "management_mode": {
             "enum": [
               "managed",
@@ -1237,6 +1250,9 @@
               "string",
               "null"
             ]
+          },
+          "vendor_limited": {
+            "type": "boolean"
           },
           "watch": {
             "properties": {
@@ -1675,6 +1691,19 @@
             ],
             "type": "string"
           },
+          "limit_resets_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "limit_window": {
+            "enum": [
+              "5h",
+              "weekly",
+              "monthly",
+              "other"
+            ],
+            "type": "string"
+          },
           "management_mode": {
             "enum": [
               "managed",
@@ -1860,6 +1889,9 @@
               "string",
               "null"
             ]
+          },
+          "vendor_limited": {
+            "type": "boolean"
           },
           "watch": {
             "properties": {

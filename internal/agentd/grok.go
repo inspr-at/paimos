@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"runtime"
+	"sync"
 
 	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/grokprobe"
@@ -29,6 +30,7 @@ var grokAssets embed.FS
 type GrokBinding = grokprobe.Binding
 
 type GrokAdapter struct {
+	quotaIDs sync.Map
 	Bindings map[string]GrokBinding
 	Homes    map[string]string
 	billing  *grokBillingCapability

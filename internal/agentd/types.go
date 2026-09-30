@@ -131,6 +131,8 @@ type WorkCriterion struct {
 // Telemetry carries content-free, nonnegative deltas. TurnCountDelta is one
 // accepted user turn; token and cost deltas come from vendor usage reports.
 type Telemetry struct {
+	LimitWindow            string      `json:"limit_window,omitempty"`
+	LimitResetsAt          *time.Time  `json:"limit_resets_at,omitempty"`
 	Sequence               int64       `json:"sequence"`
 	Kind                   string      `json:"kind"`
 	Status                 string      `json:"status,omitempty"`
@@ -230,6 +232,8 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
+	VendorLimit *capacity.LimitHit
+
 	Activity               string // busy or idle, independent of the run process lifetime.
 	Capacity               []capacity.Reading
 	BudgetExhausted        string

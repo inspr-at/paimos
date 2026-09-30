@@ -99,6 +99,7 @@ type owned struct {
 	metadataPending []harnessMetadata
 	usage           *sessionUsageReporter
 	capacityPending map[string]capacity.Reading
+	vendorLimit     *capacity.LimitHit
 	inboxCapable    bool
 	pending         []HarnessControl
 	process         Process
@@ -120,6 +121,11 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	quotaKey            []byte // Tenant HMAC key, memory only; never passed to a child.
+	signalsPublished    map[string]AccountSignals
+	statuslineMu        sync.Mutex
+	statuslinePlans     map[string]statuslinePlan
+	statuslineEnabled   map[string]bool
 	capacityInterval    time.Duration
 	capacityLast        map[string]time.Time
 	capacitySaved       map[string]time.Time
@@ -992,6 +998,10 @@ func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 	s.observeBudget(entry, ev)
+	if ev.VendorLimit != nil {
+		s.observeVendorLimit(entry, ev.VendorLimit)
+		return
+	}
 	if ev.Activity == "busy" || ev.Activity == "idle" {
 		entry.mu.Lock()
 		entry.harness.Activity = ev.Activity
@@ -1109,8 +1119,9 @@ func (s *Supervisor) monitor(entry *owned) {
 	forced := entry.forceRequested
 	protocolFailed := entry.protocolFailed
 	budgetReason := entry.budgetStopReason()
+	limit := entry.vendorLimit
 	entry.mu.Unlock()
-	if err == nil && !protocolFailed {
+	if err == nil && !protocolFailed && limit == nil {
 		if evidence, ok := proc.(EvidenceProcess); ok {
 			answer := evidence.Evidence()
 			if answer == "" {
@@ -1126,6 +1137,9 @@ func (s *Supervisor) monitor(entry *owned) {
 	if err != nil {
 		status, code = "failed", "child_exit_failed"
 	}
+	if limit != nil {
+		status, code = "failed", "vendor_limit"
+	}
 	if stopped {
 		status, code = "cancelled", ""
 	}
@@ -1137,7 +1151,12 @@ func (s *Supervisor) monitor(entry *owned) {
 	entry.mu.Lock()
 	launchRev, launchDefault := entry.record.LaunchRev, entry.record.LaunchDefaultRev
 	entry.mu.Unlock()
-	reportErr := s.update(ctx, entry, Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: runCommits(ctx, s.workspace, launchRev, launchDefault)})
+	s.flushCapacity(ctx, entry)
+	final := Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: runCommits(ctx, s.workspace, launchRev, launchDefault)}
+	if code == "vendor_limit" {
+		final.LimitWindow, final.LimitResetsAt = limit.Window, limit.ResetsAt
+	}
+	reportErr := s.update(ctx, entry, final)
 	entry.mu.Lock()
 	doneRequested := entry.doneRequested
 	entry.mu.Unlock()
@@ -1160,6 +1179,9 @@ func (s *Supervisor) monitor(entry *owned) {
 		if forced {
 			reason = "force_stopped"
 		}
+	}
+	if code == "vendor_limit" {
+		reason = "vendor_limit"
 	}
 	if budgetReason != "" {
 		reason = budgetReason
