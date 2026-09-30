@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -141,7 +142,21 @@ func TestBrandSettingsArePersonOnlyAudited(t *testing.T) {
 	expect(t, f.call(f.admin, "PUT", "/api/settings/brand/logo/light", "image/png", logoPNG(t, 16, 16)), 400)
 	expect(t, f.call(f.admin, "PUT", "/api/settings/brand/logo/light", "image/svg+xml", logoPNG(t, 64, 64)), 400)
 	expect(t, f.call(f.admin, "PUT", "/api/settings/brand/logo/sepia", "image/png", logoPNG(t, 64, 64)), 404)
-	expect(t, f.call(f.admin, "PUT", "/api/settings/brand/logo/light", "image/svg+xml", append([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">`), bytes.Repeat([]byte(" "), 300<<10)...)), 413)
+	tooLarge := func(w *httptest.ResponseRecorder) {
+		t.Helper()
+		expect(t, w, 413)
+		var e struct{ Error, Code string }
+		if err := json.Unmarshal(w.Body.Bytes(), &e); err != nil || e.Code != "logo_too_large" || e.Error == "" {
+			t.Fatalf("413 body %s", w.Body.String())
+		}
+	}
+	tooLarge(f.call(f.admin, "PUT", "/api/settings/brand/logo/light", "image/svg+xml", append([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">`), bytes.Repeat([]byte(" "), 300<<10)...)))
+	// Under the limit as uploaded (171 KB), over it once rewritten (323 KB).
+	grown := []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` + strings.Repeat(`<circle/>`, 19000) + `</svg>`)
+	tooLarge(f.call(f.admin, "PUT", "/api/settings/brand/logo/light", "image/svg+xml", grown))
+	// The review's WebP: a 64×64 canvas around a 5000×64 frame.
+	falseCanvas, _ := hex.DecodeString(tenantbrand.WebPFalseCanvas)
+	expect(t, f.call(f.admin, "PUT", "/api/settings/brand/logo/light", "image/webp", falseCanvas), 400)
 
 	// The admin sets a name, a logo and a dark logo; each change is one event.
 	s = settingsOf(t, f.call(f.admin, "PUT", "/api/settings/brand", "application/json", name("  Acme   Studio ")))

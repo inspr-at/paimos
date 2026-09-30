@@ -92,12 +92,27 @@ type Settings struct {
 
 type failure struct {
 	status int
+	code   string
 	msg    string
 }
 
 func (f failure) Error() string { return f.msg }
 
-func fail(status int, msg string) error { return failure{status, msg} }
+func fail(status int, msg string) error { return failure{status: status, msg: msg} }
+
+// codeLogoTooLarge is the stable code of every 413 on a logo upload.
+const codeLogoTooLarge = "logo_too_large"
+
+func writeFailure(w http.ResponseWriter, f failure) {
+	if f.code == "" {
+		httpapi.WriteError(w, f.status, f.msg)
+		return
+	}
+	httpapi.WriteJSON(w, f.status, struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}{f.msg, f.code})
+}
 
 // settings wraps a person-only settings.manage route in a tenant transaction.
 func (m *Module) settings(write bool, fn func(*http.Request, pgx.Tx, tenant.Principal) (any, error)) http.HandlerFunc {
@@ -130,9 +145,9 @@ func (m *Module) settings(write bool, fn func(*http.Request, pgx.Tx, tenant.Prin
 		case err == nil:
 			httpapi.WriteJSON(w, http.StatusOK, out)
 		case errors.As(err, &f):
-			httpapi.WriteError(w, f.status, f.msg)
+			writeFailure(w, f)
 		case errors.As(err, &tooBig):
-			httpapi.WriteError(w, http.StatusRequestEntityTooLarge, "the logo exceeds 256 KB")
+			writeFailure(w, failure{http.StatusRequestEntityTooLarge, codeLogoTooLarge, "the logo exceeds 256 KB"})
 		case errors.Is(err, authz.ErrForbidden):
 			authz.WriteForbidden(w, err)
 		default:
@@ -191,7 +206,11 @@ func (m *Module) putLogo(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 		return nil, err
 	}
 	logo, err := ValidateLogo(r.Header.Get("Content-Type"), body)
-	if err != nil {
+	var tooLarge TooLargeError
+	switch {
+	case errors.As(err, &tooLarge):
+		return nil, failure{http.StatusRequestEntityTooLarge, codeLogoTooLarge, err.Error()}
+	case err != nil:
 		return nil, fail(http.StatusBadRequest, err.Error())
 	}
 	before, err := load(r.Context(), tx)

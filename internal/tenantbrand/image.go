@@ -16,12 +16,15 @@ import (
 // Logo limits. The header draws a logo at most 32 px high and 160 px wide, so
 // 32 px on the short side is the least that stays crisp, and a logo may be
 // square, wide (up to 8:1) or a little tall (down to 1:2).
+// A raster logo also has at most 4 megapixels (4096×1024, or 2048×2048), which
+// bounds what a decode may allocate.
 const (
-	MaxLogoBytes = 256 << 10
-	minLogoSide  = 32
-	maxLogoSide  = 4096
-	maxAspect    = 8.0
-	minAspect    = 0.5
+	MaxLogoBytes  = 256 << 10
+	minLogoSide   = 32
+	maxLogoSide   = 4096
+	maxLogoPixels = 4 << 20
+	maxAspect     = 8.0
+	minAspect     = 0.5
 )
 
 // Logo is a validated upload, ready to store.
@@ -35,6 +38,12 @@ type Logo struct {
 }
 
 var errLogoType = errors.New("expected a PNG, WebP or SVG image")
+
+// TooLargeError is a logo over MaxLogoBytes, as uploaded or once an SVG is
+// rewritten; the API answers it with 413.
+type TooLargeError struct{ msg string }
+
+func (e TooLargeError) Error() string { return e.msg }
 
 // sniff decides the type from the bytes; the declared type must agree.
 func sniff(b []byte) string {
@@ -57,7 +66,7 @@ func ValidateLogo(declared string, b []byte) (Logo, error) {
 		return Logo{}, errors.New("the logo is empty")
 	}
 	if len(b) > MaxLogoBytes {
-		return Logo{}, errors.New("the logo exceeds 256 KB")
+		return Logo{}, TooLargeError{"the logo exceeds 256 KB"}
 	}
 	declared = strings.ToLower(strings.TrimSpace(strings.Split(declared, ";")[0]))
 	kind := sniff(b)
@@ -70,26 +79,33 @@ func ValidateLogo(declared string, b []byte) (Logo, error) {
 	logo := Logo{ContentType: kind}
 	switch kind {
 	case "image/png", "image/webp":
-		decodeConfig, decode := png.DecodeConfig, png.Decode
+		bounds, decode := pngBounds, png.Decode
 		if kind == "image/webp" {
-			decodeConfig, decode = webp.DecodeConfig, webp.Decode
+			bounds, decode = webpBounds, webp.Decode
 		}
-		cfg, err := decodeConfig(bytes.NewReader(b))
+		w, h, err := bounds(b)
 		if err != nil {
-			return Logo{}, errors.New("the image cannot be read")
-		}
-		if err := checkSize(float64(cfg.Width), float64(cfg.Height), true); err != nil {
 			return Logo{}, err
 		}
-		// A full decode proves the file is intact before anyone's browser sees it.
-		if _, err := decode(bytes.NewReader(b)); err != nil {
-			return Logo{}, errors.New("the image cannot be read")
+		if err := checkSize(float64(w), float64(h), true); err != nil {
+			return Logo{}, err
 		}
-		logo.Content, logo.Width, logo.Height = b, cfg.Width, cfg.Height
+		// Only now, within the bounds, a full decode proves the file is intact
+		// and that the decoder saw the size the headers declare.
+		img, err := decode(bytes.NewReader(b))
+		if err != nil || img.Bounds().Dx() != w || img.Bounds().Dy() != h {
+			return Logo{}, errUnreadable
+		}
+		logo.Content, logo.Width, logo.Height = b, w, h
 	case "image/svg+xml":
 		clean, cleaned, err := SanitizeSVG(b)
 		if err != nil {
 			return Logo{}, err
+		}
+		// Rewriting can grow a file (<circle/> becomes <circle></circle>), so the
+		// stored bytes are held to the same limit.
+		if len(clean) > MaxLogoBytes {
+			return Logo{}, TooLargeError{"the cleaned SVG exceeds 256 KB"}
 		}
 		w, h, err := svgSize(clean)
 		if err != nil {
@@ -114,6 +130,9 @@ func checkSize(w, h float64, pixels bool) error {
 		}
 		if w > maxLogoSide || h > maxLogoSide {
 			return fmt.Errorf("the logo is %.0f×%.0f px; each side may be at most %d px", w, h, maxLogoSide)
+		}
+		if w*h > maxLogoPixels {
+			return fmt.Errorf("the logo is %.0f×%.0f px; it may have at most 4 megapixels, such as 4096×1024 or 2048×2048", w, h)
 		}
 	}
 	if r := w / h; r > maxAspect || r < minAspect {

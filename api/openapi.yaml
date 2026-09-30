@@ -3990,7 +3990,9 @@ paths:
       operationId: putBrandLogo
       description: >-
         Uploads a logo as the raw request body. The declared Content-Type must match the bytes: PNG, WebP or SVG, at most 256 KB.
-        Raster logos need at least 32 px and at most 4096 px on each side; every logo is between 1:2 and 8:1.
+        Raster logos need at least 32 px and at most 4096 px on each side and at most 4 megapixels; every logo is between 1:2 and 8:1.
+        A raster's size is read from every header before it is decoded: a WebP frame must match its VP8X canvas, and animated
+        PNG or WebP files and bytes after the image's end are refused.
         SVG is rewritten from an allowlist of drawing elements and attributes; scripts, styles, event handlers, foreignObject,
         images and every reference outside the file are removed, and cleaned reports it. Person only; requires settings.manage.
         A change appends tenant.brand_updated.
@@ -4002,9 +4004,9 @@ paths:
           image/svg+xml: {schema: {type: string, format: binary}}
       responses:
         '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
-        '400': {description: 'Wrong type, unreadable image, or outside the pixel bounds'}
+        '400': {description: 'Wrong type, unreadable or animated image, or outside the pixel bounds'}
         '403': {description: 'Not a person, or settings.manage missing'}
-        '413': {description: Larger than 256 KB}
+        '413': {description: 'Larger than 256 KB as uploaded, or an SVG once rewritten; code logo_too_large', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     delete:
       operationId: deleteBrandLogo
       description: Removes the logo; the header falls back to the product mark (or, for dark, to the light logo). Person only; requires settings.manage.
