@@ -162,6 +162,9 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			if _, err = tx.Exec(ctx, `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,local_auth_public_key) VALUES($1,$2,$2,$3,$4,$5,$6,$7)`, p.TenantID, computer, principal, key, daemon, rec.LifecycleHash, rec.Details.LocalAuthPublicKey); err != nil {
 				return err
 			}
+			if err = retireReplaced(ctx, tx, p, rec.Details, principal); err != nil {
+				return err
+			}
 		}
 		if rec.Details.ExistingComputerID != "" {
 			if err = supersedeVerifications(ctx, tx, computer, rec.ID); err != nil {
@@ -217,6 +220,47 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		return
 	}
 	reply(w, out)
+}
+
+// retireReplaced deactivates the runtime identities a fresh pairing replaces, so
+// re-pairing a laptop leaves one identity behind, not one more each time. A
+// computer counts as replaced only when the same person who approved it approves
+// its successor, the machine describes itself the same way (name, platform,
+// architecture), and no pinned local-auth key contradicts it; the old computer
+// must also be revoked and its identity still active. A name alone proves
+// nothing: two people may each call their laptop "Laptop". A computer that is
+// still connected is never touched.
+func retireReplaced(ctx context.Context, tx pgx.Tx, p tenant.Principal, d Details, replacedBy string) error {
+	rows, err := tx.Query(ctx, `SELECT pr.id::text FROM agent_pairing_computers c
+		JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+		JOIN principals pr ON pr.tenant_id=c.tenant_id AND pr.id=c.principal_id
+		WHERE c.tenant_id=$1 AND c.state='revoked' AND pr.kind='agent' AND pr.status='active' AND pr.name=$2 AND pr.id<>$3
+		  AND q.approved_by=$4 AND q.details->>'platform'=$5 AND q.details->>'arch'=$6
+		  AND (c.local_auth_public_key='' OR $7='' OR c.local_auth_public_key=$7)
+		ORDER BY c.created_at,c.id FOR UPDATE OF pr`, p.TenantID, d.ComputerName, replacedBy, p.ID, d.Platform, d.Arch, d.LocalAuthPublicKey)
+	if err != nil {
+		return err
+	}
+	var old []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		old = append(old, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range old {
+		if _, err = authz.RetireAgentTx(ctx, tx, p, id, map[string]any{"replaced_by": replacedBy}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func verificationJob(ctx context.Context, tx pgx.Tx, p tenant.Principal, computer, principal, account string, a Choice, expires time.Time) error {
 	var project *string
