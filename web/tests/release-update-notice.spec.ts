@@ -89,7 +89,7 @@ test('what’s new opens the one notice for a server version this build does not
   history.current = SERVER
   state.server = SERVER
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  const toast = page.locator('.toast').filter({ hasText: `updated to ${SERVER}` })
+  const toast = page.locator('.toast').filter({ hasText: 'was updated to' })
   await expect(toast).toBeVisible()
   await toast.getByRole('button', { name: 'What’s new' }).click()
   await expect(sheet(page)).toBeVisible()
@@ -136,7 +136,7 @@ test('what’s new with the history cached before the deploy never shows the mis
     new MutationObserver(read).observe(document.body, { childList: true, subtree: true, characterData: true })
   })
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  const toast = page.locator('.toast').filter({ hasText: `updated to ${SERVER}` })
+  const toast = page.locator('.toast').filter({ hasText: 'was updated to' })
   await expect(toast).toBeVisible()
   try {
     await toast.getByRole('button', { name: 'What’s new' }).click()
@@ -202,4 +202,54 @@ for (const state of ['outdated', 'missing'] as const) {
     }
   }
 }
+})
+
+// AEON-430: the toast leads with the marketing name. /api/version already told this
+// page the name, so a failed release-detail fetch must not turn it back into a number.
+test('the update toast uses the codename /api/version gave when the release detail fails, and reveals the version on hover and focus', async ({ page }) => {
+  const history = releaseHistory()
+  await mockWork(page, fixtures())
+  const state = await mockReleases(page, history, { running: history.current })
+  await page.goto('/')
+  await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+  history.current = SERVER
+  state.server = SERVER
+  state.codename = 'Hinged Hangar'
+  // The detail of the new release is not available (the history has none, and this one fails outright).
+  await page.route(`**/api/releases/${SERVER}`, route => route.abort())
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  const toast = page.locator('.toast').filter({ hasText: 'was updated to' })
+  await expect(toast).toBeVisible()
+  await expect(toast).toContainText('was updated to Hinged Hangar')
+  await expect(toast.locator('.rn-name')).toHaveText('Hinged Hangar')
+  // No calendar version at rest in the toast: the name shows, the stamp waits.
+  await expect(toast.locator('.rn-name')).toHaveCSS('opacity', '1')
+  await expect(toast.locator('.rn-stamp')).toHaveCSS('opacity', '0')
+  // Hover reveals it in the footer's chip style.
+  await toast.locator('.release-name').hover()
+  await expect(toast.locator('.rn-stamp')).toHaveCSS('opacity', '1')
+  await expect(toast.locator('.rn-stamp .calendar-version')).toContainText(/^\d\d·\d\d·\d\d \d\d:\d\d/)
+  await page.mouse.move(2, 2)
+  await expect(toast.locator('.rn-stamp')).toHaveCSS('opacity', '0')
+  // Keyboard focus reveals it too, and the name is described by it.
+  await toast.locator('.release-name').focus()
+  await expect(toast.locator('.rn-stamp')).toHaveCSS('opacity', '1')
+  await expect(toast.locator('.release-name')).toHaveAccessibleDescription(versionLabel(SERVER, false))
+  await toast.getByRole('button', { name: 'What’s new' }).click()
+  await expect(sheet(page)).toBeVisible()
+})
+
+test('an unnamed release reads as its calendar version in the toast, never as a raw number at rest', async ({ page }) => {
+  const history = releaseHistory()
+  await mockWork(page, fixtures())
+  const state = await mockReleases(page, history, { running: history.current })
+  await page.goto('/')
+  await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+  history.current = SERVER
+  state.server = SERVER
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  const toast = page.locator('.toast').filter({ hasText: 'was updated to' })
+  await expect(toast).toBeVisible()
+  await expect(toast.locator('.calendar-version')).toHaveAttribute('aria-label', versionLabel(SERVER))
+  expect(await toast.locator('> span').evaluate(el => el.textContent)).not.toContain(SERVER)
 })

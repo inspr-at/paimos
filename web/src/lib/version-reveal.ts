@@ -14,6 +14,25 @@ export function revealControl(host: HTMLElement): HTMLElement | null {
   return host.parentElement?.closest<HTMLElement>(CONTROL) ?? null
 }
 
+// Makes `id` (the element that holds a version's stamp) part of what the control
+// is described by, next to any description it already has, for as long as the
+// caller keeps it. A screen reader lands on the control (a button, menu item or
+// option), not on the name inside it, so the control carries the description.
+// Returns a dispose that takes only `id` back out.
+export function describeControl(control: HTMLElement, id: string): () => void {
+  const tokens = () => (control.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)
+  const apply = () => { if (!tokens().includes(id)) control.setAttribute('aria-describedby', [...tokens(), id].join(' ')) }
+  apply()
+  // The owner of the control may rewrite its own description; ours is put back.
+  const observer = new MutationObserver(apply)
+  observer.observe(control, { attributes: true, attributeFilter: ['aria-describedby'] })
+  return () => {
+    observer.disconnect()
+    const rest = tokens().filter(token => token !== id)
+    if (rest.length) control.setAttribute('aria-describedby', rest.join(' ')); else control.removeAttribute('aria-describedby')
+  }
+}
+
 const touchLike = (type: string) => type === 'touch' || type === 'pen'
 const focusVisible = (el: Element) => { try { return el.matches(':focus-visible') } catch { return true } }
 

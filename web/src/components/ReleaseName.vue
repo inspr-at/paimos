@@ -2,13 +2,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { codenameOf } from '../lib/codenames'
-import { revealControl, watchTrigger } from '../lib/version-reveal'
+import { describeControl, revealControl, watchTrigger } from '../lib/version-reveal'
 import CalendarVersion from './CalendarVersion.vue'
 
 // A release by its marketing name (AEON-430). Hover or keyboard focus on the
 // name, or on the control around it (the footer's history button, a release
 // row), reveals the Pretty calendar version ("26·09·30 11:53") over the name in
-// the footer's chip style; a screen reader gets it as the name's description.
+// the footer's chip style. A screen reader gets it as the description of what
+// takes focus: the control around the name (a button, a menu item, an option),
+// else the name itself.
 // A release with no known name reads as its calendar version, as before.
 const props = defineProps<{ version: string; name?: string }>()
 defineSlots<{ default?: () => unknown }>()
@@ -24,15 +26,17 @@ watch(root, host => {
   if (!host) return
   const control = revealControl(host)
   standalone.value = !control
-  stop = watchTrigger(control ?? host, on => { shown.value = on })
+  const undescribe = control ? describeControl(control, id) : undefined
+  const unwatch = watchTrigger(control ?? host, on => { shown.value = on })
+  stop = () => { unwatch(); undescribe?.() }
 }, { flush: 'post' })
 onBeforeUnmount(() => stop?.())
 </script>
 
 <template>
-  <span v-if="label" ref="root" class="release-name" :class="{ shown, standalone }" :data-version="version" :tabindex="standalone ? 0 : undefined" :aria-describedby="id">
+  <span v-if="label" ref="root" class="release-name" :class="{ shown, standalone }" :data-version="version" :tabindex="standalone ? 0 : undefined" :aria-describedby="standalone ? id : undefined">
     <span class="rn-name" lang="en"><slot>{{ label }}</slot></span>
-    <span :id="id" class="rn-stamp" role="tooltip"><CalendarVersion :value="version" rest /></span>
+    <span :id="id" class="rn-stamp" role="tooltip" aria-hidden="true"><CalendarVersion :value="version" rest /></span>
   </span>
   <CalendarVersion v-else :value="version" />
 </template>

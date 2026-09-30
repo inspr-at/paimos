@@ -90,8 +90,9 @@ export type History = ReturnType<typeof releaseHistory>
 
 // Serves the history and the running version; registered after the page's other
 // mocks so these routes win. `server` can later move to a newer version.
-export async function mockReleases(page: Page, history: History | Record<string, unknown>, options: { running?: string; brand?: Record<string, string> } = {}) {
-  const state = { server: options.running ?? (history as History).current, requests: 0 }
+// state.codename: the name /api/version gives the running release (AEON-430), changeable mid-test.
+export async function mockReleases(page: Page, history: History | Record<string, unknown>, options: { running?: string; brand?: Record<string, string>; codename?: string } = {}) {
+  const state = { server: options.running ?? (history as History).current, codename: options.codename, requests: 0 }
   await page.route('**/api/releases**', route => {
     const one = /\/api\/releases\/v?([^/?]+)$/.exec(new URL(route.request().url()).pathname)
     if (one) {
@@ -101,7 +102,7 @@ export async function mockReleases(page: Page, history: History | Record<string,
     state.requests++
     return route.fulfill({ json: history })
   })
-  await page.route('**/api/version', route => route.fulfill({ json: { version: state.server, scheme: 'inspr-calendar-v2', ...(options.brand ? { brand: options.brand } : {}) } }))
+  await page.route('**/api/version', route => route.fulfill({ json: { version: state.server, scheme: 'inspr-calendar-v2', ...(state.codename ? { codename: state.codename } : {}), ...(options.brand ? { brand: options.brand } : {}) } }))
   return state
 }
 
