@@ -33,6 +33,8 @@ export interface HarnessSession {
   eta_ready_at?: string | null; eta_live_at?: string | null; progress_pct?: number | null; eta_reported_at?: string | null; eta_stale?: boolean
   // AEON-280: the last inbox pull of this generation; absent until it pulls once.
   inbox_seen_at?: string | null; inbox_seen_via?: 'hook' | 'drain' | 'long_poll' | 'stream' | 'ack' | null
+  // AEON-369: true when a vendor session reference is stored. The reference itself is never returned.
+  has_vendor_session_ref?: boolean
   // The tenant-wide list adds node summaries (B7) and the agent principal's name (U13).
   project?: NodeSummary; ticket?: NodeSummary | null; agent?: { id: string; name: string } | null
 }

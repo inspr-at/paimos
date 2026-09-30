@@ -189,6 +189,9 @@ type Session struct {
 	// until it pulls once; clients derive Listening from the age.
 	InboxSeenAt  *time.Time `json:"inbox_seen_at,omitempty"`
 	InboxSeenVia string     `json:"inbox_seen_via,omitempty"`
+	// AEON-369: true when a vendor session reference is stored. The reference
+	// itself is never returned. Omitted when absent.
+	HasVendorSessionRef bool `json:"has_vendor_session_ref,omitempty"`
 }
 
 type ActivityNote struct {
@@ -320,11 +323,15 @@ func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
 	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID)
+	if err != nil {
+		return s, err
+	}
 	if progress != nil {
 		value := int(*progress)
 		s.ProgressPct = &value
 	}
-	return s, err
+	s.HasVendorSessionRef = len(s.vendorRefDigest) > 0
+	return s, nil
 }
 func project(ctx context.Context, tx pgx.Tx, id string) error {
 	if !workorders.UUID(id) {
@@ -377,11 +384,10 @@ func fillVendorRef(ctx context.Context, tx pgx.Tx, existing *Session, vendor []b
 			return registrationConflict(err)
 		}
 		existing.vendorRefDigest = vendor
-		return nil
-	}
-	if subtle.ConstantTimeCompare(existing.vendorRefDigest, vendor) != 1 {
+	} else if subtle.ConstantTimeCompare(existing.vendorRefDigest, vendor) != 1 {
 		return workorders.Fail(409, "active generation conflicts with registration")
 	}
+	existing.HasVendorSessionRef = true
 	return nil
 }
 

@@ -879,7 +879,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/1.4`:
+The reporter contract is `harness-session/1.5`:
 existing state values stay intact; optional `watch.process_state` carries a
 confirmed exit. The existing default-off permission and code-attempt-cap tests
 remain in `internal/agentpairing/watch_test.go`.

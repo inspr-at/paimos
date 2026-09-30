@@ -42,7 +42,7 @@ type Options struct {
 	App             AppConfig
 	GuardKey        []byte
 	BinaryAllowlist map[string]string
-	Analysis AnalysisPolicy
+	Analysis        AnalysisPolicy
 }
 
 // Module serves the doctrine layer.
@@ -53,7 +53,7 @@ type Module struct {
 	app             AppConfig
 	guardMaster     []byte
 	binaryAllowlist map[string]string
-	analysis AnalysisPolicy
+	analysis        AnalysisPolicy
 }
 
 var _ httpapi.Module = (*Module)(nil)

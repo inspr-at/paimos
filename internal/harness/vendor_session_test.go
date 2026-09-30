@@ -34,6 +34,9 @@ func TestVendorSessionBinding(t *testing.T) {
 	if strings.Contains(w.Body.String(), vendor) || strings.Contains(w.Body.String(), ref) || strings.Contains(w.Body.String(), lease) || strings.Contains(w.Body.String(), "vendor_ref") {
 		t.Fatal("registration response exposed a session reference")
 	}
+	if decode(t, w)["has_vendor_session_ref"] != true {
+		t.Fatal("vendor binding omitted has_vendor_session_ref")
+	}
 	sum := sha256.Sum256([]byte("aeon.harness.ref\x00" + vendor))
 	if !bytes.Equal(vendorDigest(t, f, id), sum[:]) {
 		t.Fatal("vendor digest does not match the harness ref domain")
@@ -105,6 +108,9 @@ func TestVendorSessionBinding(t *testing.T) {
 	if vendorDigest(t, f, wrapperID) != nil || bindSession(t, f, f.agent, shared) != wrapperID {
 		t.Fatal("private ref was not resolved")
 	}
+	if _, ok := decode(t, w)["has_vendor_session_ref"]; ok {
+		t.Fatal("session without a vendor digest reported one")
+	}
 	wrapper["vendor_session_ref"] = shared
 	w = f.call(f.person, "POST", base, wrapper, "")
 	expect(t, w, 201)
@@ -153,11 +159,14 @@ func TestVendorRefFillsOnReplay(t *testing.T) {
 	if vendorDigest(t, f, id) != nil {
 		t.Fatal("omitted vendor ref was stored")
 	}
+	if _, ok := decode(t, w)["has_vendor_session_ref"]; ok {
+		t.Fatal("omitted vendor ref reported a vendor session ref")
+	}
 	body["vendor_session_ref"] = vendor
 	w = f.call(f.person, "POST", base, body, "")
 	expect(t, w, 201)
 	sum := sha256.Sum256([]byte("aeon.harness.ref\x00" + vendor))
-	if decode(t, w)["id"] != id || !bytes.Equal(vendorDigest(t, f, id), sum[:]) || strings.Contains(w.Body.String(), vendor) {
+	if decode(t, w)["id"] != id || decode(t, w)["has_vendor_session_ref"] != true || !bytes.Equal(vendorDigest(t, f, id), sum[:]) || strings.Contains(w.Body.String(), vendor) || strings.Contains(w.Body.String(), "vendor_ref") {
 		t.Fatal("replay did not fill the vendor digest quietly")
 	}
 	delete(body, "vendor_session_ref")

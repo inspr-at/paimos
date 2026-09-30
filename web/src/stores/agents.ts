@@ -336,6 +336,8 @@ export const useAgents = defineStore('agents', () => {
       }
     }
   }
+  // `to` is the registered harness address when one exists, otherwise the principal id.
+  // recipient_session_id is always the open generation and is never dropped.
   async function send(session: HarnessSession, to: string, body: string, level: 'simple' | 'steer', replyTo?: string) {
     await sendMessage(session.project_id, { to, body, recipient_session_id: session.id, idempotency_key: crypto.randomUUID(), expects_reply: false, is_action_request: false, delivery_level: level, ...(replyTo ? { reply_to: replyTo } : {}) })
     await refreshThread(session.project_id, session.id)
