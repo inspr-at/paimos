@@ -29,6 +29,7 @@ type capacityLearning struct {
 	FirstSeen              time.Time
 	LastOwn, PresenceUntil *time.Time
 	Correction             *capacity.Correction
+	Sigma                  float64
 	Online                 []time.Time
 	Hits                   []capacity.LimitSample
 	Tokens, Cost           int64
@@ -171,12 +172,13 @@ func learnReading(ctx context.Context, tx pgx.Tx, a Account, v capacity.Reading,
 	}
 	// A contradiction widens uncertainty once, while the measured value wins.
 	var estimate, uncertainty float64
-	err = tx.QueryRow(ctx, `SELECT used_percent::float8,plus_minus::float8 FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND resets_at=$4 AND source='estimate' AND read_at<=$5 AND read_at>$5-interval '6 hours' ORDER BY read_at DESC LIMIT 1`, a.ID, v.WindowKind, v.Bucket, v.ResetsAt, v.ReadAt).Scan(&estimate, &uncertainty)
+	err = tx.QueryRow(ctx, `SELECT used_percent::float8,plus_minus::float8 FROM account_capacity_readings WHERE account_id=$1 AND ((window_kind=$2 AND bucket=$3) OR (bucket='learned' AND window_minutes=$6)) AND resets_at=$4 AND source='estimate' AND read_at<=$5 AND read_at>$5-interval '6 hours' ORDER BY read_at DESC LIMIT 1`, a.ID, v.WindowKind, v.Bucket, v.ResetsAt, v.ReadAt, v.WindowMinutes).Scan(&estimate, &uncertainty)
 	if err != nil && !isNoRows(err) {
 		return err
 	}
 	if err == nil && math.Abs(v.UsedPercent-estimate) > math.Max(3, uncertainty) {
 		w.Sigma = math.Max(w.Sigma, math.Abs(v.UsedPercent-estimate))
+		l.Sigma = math.Max(l.Sigma, w.Sigma)
 		l.Correction = &capacity.Correction{Points: v.UsedPercent - estimate, At: v.ReadAt}
 	}
 	if err := saveLearning(ctx, tx, a.ID, l); err != nil {
@@ -248,7 +250,7 @@ func learnRun(ctx context.Context, tx pgx.Tx, a Account, runID string, now time.
 	if a.Harness == "grok" || a.Harness == "cursor" || a.Harness == "pi" {
 		if estimate := capacity.BlindEstimate(l.Hits, float64(l.Tokens), float64(l.Cost), now); estimate != nil {
 			estimate.Plan = a.Plan
-			estimate.PlusMinus = math.Max(estimate.PlusMinus, l.window(*estimate).Sigma)
+			estimate.PlusMinus = math.Max(estimate.PlusMinus, l.Sigma)
 			return persistEstimate(ctx, tx, a, *estimate, now)
 		}
 	}
@@ -418,7 +420,7 @@ func ObserveSessionTokens(ctx context.Context, tx pgx.Tx, actorID, accountID, mo
 		}
 		if v := capacity.BlindEstimate(l.Hits, float64(l.Tokens), float64(l.Cost), at); v != nil {
 			v.Plan = a.Plan
-			v.PlusMinus = math.Max(v.PlusMinus, l.window(*v).Sigma)
+			v.PlusMinus = math.Max(v.PlusMinus, l.Sigma)
 			return persistEstimate(ctx, tx, a, *v, at)
 		}
 		return nil
@@ -453,17 +455,10 @@ func ObserveSessionTokens(ctx context.Context, tx pgx.Tx, actorID, accountID, mo
 					continue
 				}
 				// L2 uses exact model evidence, never a vendor-wide token conversion.
-				matching := w
-				matching.Runs = nil
-				for _, r := range w.Runs {
-					if r.Model == sample.Model {
-						matching.Runs = append(matching.Runs, r)
-					}
-				}
-				metric := matching.Summarize(at, capacity.DefaultSchedule(), "")
-				if metric.PerMillion > 0 {
-					total += float64(sample.Tokens) * metric.PerMillion / 1e6
-					n = metric.RunCount
+				rate, samples := w.TokenRate(sample.Model, at)
+				if rate > 0 {
+					total += float64(sample.Tokens) * rate / 1e6
+					n = samples
 				}
 			}
 		}
@@ -477,7 +472,7 @@ func ObserveSessionTokens(ctx context.Context, tx pgx.Tx, actorID, accountID, mo
 		v.OrdinaryUsageAllowed = nil
 		v.UsedPercent = math.Min(100, v.UsedPercent+total)
 		v.PlusMinus = math.Max(3, total*.25)
-		v.PlusMinus = math.Max(v.PlusMinus, l.window(v).Sigma)
+		v.PlusMinus = math.Max(v.PlusMinus, l.Sigma)
 		v.Evidence = &capacity.Evidence{Kind: "tokens", Samples: n}
 		if err = persistEstimate(ctx, tx, a, v, at); err != nil {
 			return err

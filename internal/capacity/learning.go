@@ -94,6 +94,21 @@ func weightAt(at, now time.Time) float64 {
 }
 func clamp(v, lo, hi float64) float64 { return math.Max(lo, math.Min(hi, v)) }
 
+// TokenRate is per exact model within this plan/window. Profiles can choose
+// different run sizes, but that must not split evidence for a token conversion.
+func (w LearnedWindow) TokenRate(model string, now time.Time) (float64, int) {
+	values := []weighted{}
+	for _, r := range w.Runs {
+		if r.Model == model && r.Tokens > 0 && !r.At.After(now) && now.Sub(r.At) <= LearningHorizon {
+			values = append(values, weighted{r.Percent * 1e6 / r.Tokens, weightAt(r.At, now)})
+		}
+	}
+	if len(values) < 3 {
+		return 0, len(values)
+	}
+	return quantile(values, .75), len(values)
+}
+
 // Summarize uses exact plan/window/profile cohorts. Empty profile is advice for
 // any profile and takes the largest learned hold, never a cheap mixed average.
 func (w LearnedWindow) Summarize(now time.Time, s Schedule, profile string) WindowLearning {

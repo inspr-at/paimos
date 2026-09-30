@@ -150,3 +150,19 @@ func TestBlindNamedWindowCalibratesFirstHit(t *testing.T) {
 		t.Fatalf("first named cycle %+v", r)
 	}
 }
+
+func TestTokenRateCombinesExactModelAcrossProfilesOnly(t *testing.T) {
+	now := instant("2026-09-29T12:00:00Z")
+	w := LearnedWindow{Runs: []RunSample{
+		{Profile: "quick", Model: "same", At: now, Percent: 4, Tokens: 500000},
+		{Profile: "deep", Model: "same", At: now, Percent: 8, Tokens: 1000000},
+		{Profile: "deep", Model: "same", At: now, Percent: 16, Tokens: 2000000},
+		{Profile: "deep", Model: "different", At: now, Percent: 90, Tokens: 100000},
+	}}
+	if rate, n := w.TokenRate("same", now); rate != 8 || n != 3 {
+		t.Fatalf("token cohort %v %v", rate, n)
+	}
+	if rate, _ := w.TokenRate("different", now); rate != 0 {
+		t.Fatal("learned an unobserved model")
+	}
+}

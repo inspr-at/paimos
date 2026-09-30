@@ -161,7 +161,9 @@ func TestLearningBlindLimitsAndFreshMeasuredWins(t *testing.T) {
 		}
 		return nil
 	})
-	measured := capacity.Reading{WindowKind: "other", Bucket: "learned", WindowMinutes: 10080, UsedPercent: 80, ReadAt: now.Add(time.Millisecond), ResetsAt: now.Add(6 * 24 * time.Hour), Source: "harness"}
+	// The first real vendor reading names its actual bucket, unlike the blind
+	// estimate. Matching reset and duration still establish a contradiction.
+	measured := capacity.Reading{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: 80, ReadAt: now.Add(time.Millisecond), ResetsAt: now.Add(6 * 24 * time.Hour), Source: "harness"}
 	callStatus(t, accountsMod(), &runner, key, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{measured}}), 204, nil)
 	inLearning(t, person, func(tx pgx.Tx) error {
 		v := measured
@@ -183,7 +185,7 @@ func TestLearningBlindLimitsAndFreshMeasuredWins(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if l.Correction == nil || l.Windows[0].Sigma < 29 {
+		if l.Correction == nil || l.Windows[0].Sigma < 29 || l.Sigma < 29 {
 			t.Fatal("contradiction did not widen uncertainty")
 		}
 		return nil
