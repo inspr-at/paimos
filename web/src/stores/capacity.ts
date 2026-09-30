@@ -44,6 +44,7 @@ export const useCapacity = defineStore('capacity', () => {
     const computer = computerOf.value.get(a.id)
     return {
       id: a.id, label: a.label, harness: a.harness, host: a.host_label || computer?.computer_name || a.daemon_id, state: a.state, last_probe_ok: a.last_probe_ok, plan: a.plan,
+      fingerprint: a.quota_fingerprint, groupId: a.group_id, groupName: a.group_name,
       // The computer's setup flag is computer-wide; sign-ins are judged per account (probe_failure).
       connectivity: computer?.connectivity,
     }
@@ -120,13 +121,19 @@ export const useCapacity = defineStore('capacity', () => {
   }
   /** Sprint, Hold (optionally until a time) or back to the plan; a pool's own reserve stays. */
   async function setPoolOverride(pool: string, value: Override, until?: string) {
-    const entry = poolEntry(pool)?.schedule ?? null
+    const group = pool.startsWith('group:') ? pool.slice('group:'.length) : ''
+    const entry = group
+      ? entries.value.find(e => e.scope === 'group' && e.group_id === group)?.schedule ?? null
+      : poolEntry(pool)?.schedule ?? null
     const carrier = !entry || sameShape(entry, schedule.value)
     const own = entry?.reserve ?? ''
     const shape = withReserve(stripReserve(carrier ? schedule.value : stripOverride(entry!)), own, entry?.reserve_percent)
+    const write = (body: CapacitySchedule | null) => group
+      ? putSchedule({ scope: 'group', group_id: group, schedule: body })
+      : putSchedule({ scope: 'pool', pool: pool as Pool, schedule: body })
     try {
-      if (!value && carrier && !own) await putSchedule({ scope: 'pool', pool: pool as Pool, schedule: null })
-      else await putSchedule({ scope: 'pool', pool: pool as Pool, schedule: { ...clone(shape), override: value, ...(value === 'hold' && until ? { override_until: until } : {}) } })
+      if (!value && carrier && !own) await write(null)
+      else await write({ ...clone(shape), override: value, ...(value === 'hold' && until ? { override_until: until } : {}) })
     } finally {
       await Promise.all([schedulesRead.refresh(), capacityRead.refresh()])
     }

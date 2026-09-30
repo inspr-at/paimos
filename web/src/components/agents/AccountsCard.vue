@@ -1,11 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { createWindow, type AgentAccount, type AllowanceWrite } from '../../lib/agents'
+import { getProjects } from '../../lib/api'
+import { createGroup, createWindow, deleteGroup, type AgentAccount, type AllowanceWrite } from '../../lib/agents'
 import { can } from '../../lib/authz'
 import { accountName, accountPlan, allowanceWindowLabel } from '../../lib/accountCascade'
 import { PACE_LABEL, UNIT_LABEL, bindingWindow, duration, harnessLabel } from '../../lib/agentState'
+import { confirmAction } from '../../lib/confirm'
 import type { Availability } from '../../stores/agents'
+import { useCapacity } from '../../stores/capacity'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import AllowanceWindowForm from './AllowanceWindowForm.vue'
@@ -18,6 +21,7 @@ import { ABSENT_ALLOWANCE, allowanceFailure, beginSave, findSavedAllowance, hold
 const props = defineProps<{ accounts: AgentAccount[]; state: Availability; now: number; admin: boolean; set: (account: AgentAccount, state: AgentAccount['state']) => Promise<void> }>()
 const emit = defineEmits<{ 'allowance-created': [] }>()
 const session = useSession()
+const capacity = useCapacity()
 const mayManage = computed(() => session.identity?.principal.kind === 'person' && can('account.manage'))
 const busy = ref('')
 const error = ref('')
@@ -130,8 +134,77 @@ async function checkAllowance(account: AgentAccount) {
   uncertain.value = true
   serverMessage.value = UNCERTAIN_ALLOWANCE
 }
-watch(mayManage, allowed => { if (!allowed) closeAllowance() })
+watch(mayManage, allowed => { if (!allowed) { closeAllowance(); closeSeparate() } })
 const stateLabel: Record<AgentAccount['state'], string> = { available: 'Available', draining: 'Draining', unavailable: 'Unavailable' }
+
+const separate = ref<AgentAccount | null>(null)
+const separateName = ref('')
+const projectChoices = ref<{ id: string; label: string }[]>([])
+const pickedProjects = ref<string[]>([])
+const exclusive = ref(false)
+const separateBusy = ref(false)
+const separateError = ref('')
+const separateDialog = ref<HTMLDialogElement>()
+function useLine(account: AgentAccount) {
+  if (/[/\\]/.test(account.label)) return ''
+  return `aeon use ${account.harness} ${account.label}`
+}
+async function openSeparate(account: AgentAccount) {
+  separate.value = account
+  separateName.value = account.label
+  exclusive.value = false
+  pickedProjects.value = []
+  separateError.value = ''
+  projectChoices.value = []
+  separateDialog.value?.showModal()
+  try {
+    const page = await getProjects()
+    if (separate.value?.id !== account.id) return
+    projectChoices.value = page.items.map(project => ({ id: project.id, label: project.key ? `${project.key} · ${project.title}` : project.title }))
+  } catch (e) {
+    if (separate.value?.id === account.id) separateError.value = e instanceof Error ? e.message : 'Projects could not be loaded.'
+  }
+}
+function toggleProject(id: string, on: boolean) {
+  pickedProjects.value = on ? [...pickedProjects.value, id] : pickedProjects.value.filter(item => item !== id)
+  if (!pickedProjects.value.length) exclusive.value = false
+}
+function closeSeparate() {
+  if (separateBusy.value) return
+  separateDialog.value?.close()
+  separate.value = null
+}
+async function saveSeparate() {
+  const account = separate.value
+  const name = separateName.value.trim()
+  if (!account || separateBusy.value) return
+  if (!name || name.length > 80) { separateError.value = 'Name the group in 80 characters or fewer.'; return }
+  separateBusy.value = true
+  separateError.value = ''
+  try {
+    await createGroup({ harness: account.harness, name, exclusive: exclusive.value && pickedProjects.value.length > 0, account_ids: [account.id], project_ids: pickedProjects.value })
+    separateDialog.value?.close()
+    separate.value = null
+    emit('allowance-created')
+    void capacity.load()
+  } catch (e) {
+    separateError.value = e instanceof Error ? e.message : 'The group was not saved.'
+  } finally { separateBusy.value = false }
+}
+async function backInPool(account: AgentAccount) {
+  if (!account.group_id || busy.value) return
+  const ok = await confirmAction({ title: 'Back in the pool?', body: 'Other work can use these accounts again.', confirmLabel: 'Back in the pool' })
+  if (!ok) return
+  busy.value = account.id
+  error.value = ''
+  try {
+    await deleteGroup(account.group_id)
+    emit('allowance-created')
+    void capacity.load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'The group was not removed.'
+  } finally { busy.value = '' }
+}
 </script>
 
 <template>
@@ -153,6 +226,9 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
           <span class="spacer" />
           <span v-if="account.state !== 'available'" class="state-text">{{ stateLabel[account.state] }}</span>
           <button v-if="mayManage && editingId !== account.id" type="button" class="btn sm add-window" :aria-label="`Add allowance window for ${accountName(account)}`" :disabled="flight !== null || busy === account.id" @click="openAllowance(account.id)">Add allowance window</button>
+          <span v-if="account.group_name" class="plan">{{ account.group_name }}</span>
+          <button v-if="mayManage && account.group_id" type="button" class="btn sm quiet-act" :disabled="busy === account.id" @click="backInPool(account)">Back in the pool</button>
+          <button v-else-if="mayManage" type="button" class="btn sm quiet-act" :disabled="flight !== null || busy === account.id" @click="openSeparate(account)">Keep separate…</button>
           <button v-if="mayManage" type="button" role="switch" class="btn sm toggle" :aria-label="`Agents may use it · ${accountName(account)}`" :aria-checked="agentsAllowed(account)" :disabled="busy === account.id" @click="toggle(account)"><span>Agents may use it</span><span class="switch-state">{{ agentsAllowed(account) ? 'On' : 'Off' }}</span></button>
         </div>
         <template v-if="window?.window.provisional">
@@ -174,6 +250,7 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
           </p>
         </template>
         <p v-else class="facts muted">No active allowance window</p>
+        <p v-if="useLine(account)" class="use-line">{{ useLine(account) }}</p>
         <ClaudeStatuslineToggle v-if="mayManage && account.harness === 'claude' && account.statusline_opt_in" :account="account" @changed="emit('allowance-created')" />
         <AllowanceWindowForm
           v-if="mayManage && editingId === account.id"
@@ -183,6 +260,26 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
         />
       </li>
     </ul>
+    <dialog ref="separateDialog" class="separate" aria-labelledby="separate-title" @close="separate = null">
+      <form @submit.prevent="saveSeparate">
+        <h3 id="separate-title">Keep separate</h3>
+        <label class="sep-label" for="separate-name">Name</label>
+        <input id="separate-name" v-model="separateName" class="sep-input" maxlength="80" autocomplete="off" required>
+        <p id="separate-projects" class="sep-label">Only for these projects</p>
+        <ul class="projects" aria-labelledby="separate-projects">
+          <li v-for="project in projectChoices" :key="project.id">
+            <label><input type="checkbox" :checked="pickedProjects.includes(project.id)" @change="toggleProject(project.id, ($event.target as HTMLInputElement).checked)"> {{ project.label }}</label>
+          </li>
+          <li v-if="!projectChoices.length" class="muted">No projects yet.</li>
+        </ul>
+        <label class="excl"><input v-model="exclusive" type="checkbox" :disabled="!pickedProjects.length"> Other work waits rather than using this group.</label>
+        <p v-if="separateError" class="note error" role="alert">{{ separateError }}</p>
+        <div class="sep-foot">
+          <button type="button" class="btn" :disabled="separateBusy" @click="closeSeparate">Cancel</button>
+          <button type="submit" class="btn primary" :disabled="separateBusy">{{ separateBusy ? 'Saving…' : 'Save' }}</button>
+        </div>
+      </form>
+    </dialog>
     <p v-if="allowanceStatus" class="note" role="status">{{ allowanceStatus }}</p>
     <p v-if="error" class="note error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>
   </section>
@@ -213,6 +310,19 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
 .account.unavailable .state-text { color: var(--ink-3); }
 .toggle, .add-window { height: 24px; padding: 0 8px; font-size: 12px; }
 .add-window { border-color: transparent; background: transparent; color: var(--teal-ink); }
+.quiet-act { height: 24px; padding: 0 8px; border-color: transparent; background: transparent; color: var(--ink-2); font-size: 12px; }
+.use-line { margin: 6px 0 0; color: var(--ink-3); font: 12px/1.4 var(--mono); overflow-wrap: anywhere; }
+dialog.separate { width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 32px); margin: auto; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-raised); color: var(--ink); }
+dialog.separate::backdrop { background: var(--scrim); }
+dialog.separate form { display: grid; gap: 10px; padding: 16px 18px 14px; }
+dialog.separate h3 { margin: 0; font-size: 16px; font-weight: 650; }
+.sep-label { margin: 0; color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.sep-input { width: 100%; min-height: 36px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
+.projects { max-height: 220px; margin: 0; padding: 0; overflow: auto; list-style: none; display: grid; gap: 6px; }
+.projects label, .excl { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.4; }
+.projects .muted { color: var(--ink-3); font-size: 13px; }
+.sep-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.sep-foot .btn { min-height: 36px; }
 /* Permission is always visible. The secondary manual editor stays on hover. */
 @media (hover: hover) and (min-width: 601px) { .account .add-window { opacity: 0; } .account:hover .add-window, .account:focus-within .add-window { opacity: 1; } }
 .meter { position: relative; height: 6px; margin: 9px 0 7px; border-radius: 999px; background: var(--skeleton); }

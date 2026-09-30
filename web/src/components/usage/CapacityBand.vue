@@ -60,7 +60,7 @@ function resetTip(row: BandRow) {
     <ul v-else class="rows">
       <li v-for="row in rows" :key="row.pool.id" class="row" :data-pool="row.pool.id">
         <div class="name">
-          <span class="vendor"><HarnessMark :harness="row.pool.id" :size="15" /></span>
+          <span class="vendor"><HarnessMark :harness="row.pool.mark || row.pool.id" :size="15" /></span>
           <span class="pool-name">{{ row.pool.name }}</span>
           <span v-if="planText(row)" class="plan-name" :title="planText(row)">{{ planText(row) }}</span>
         </div>

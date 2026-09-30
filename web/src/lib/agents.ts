@@ -71,6 +71,8 @@ export interface AgentAccount {
   // the legacy tenant catalog; the start dialog does not expand them itself.
   plan?: string
   host_label?: string
+  group_id?: string
+  group_name?: string
   allowed_model_profile_ids?: string[] | null
   windows?: AllowanceWindow[]
 }
@@ -149,6 +151,15 @@ export const requestManagedControl = (session: HarnessSession, kind: SessionCont
   request<SessionControl>(`${sessionPath(session.project_id, session.id)}/managed-controls`, 'POST', { request_id: crypto.randomUUID(), kind, expected_ownership: { ...session.process_ownership } })
 export const getControl = (projectId: string, sessionId: string, controlId: string) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${enc(controlId)}`)
 export const listAccounts = () => request<AgentAccount[]>('/agent-accounts')
+export interface AccountGroup { id: string; harness: string; name: string; exclusive: boolean; account_ids: string[]; project_ids: string[] }
+export const listGroups = () => request<AccountGroup[]>('/agent-accounts/groups')
+export const createGroup = (body: { harness: string; name: string; exclusive: boolean; account_ids: string[]; project_ids: string[] }) => request<AccountGroup>('/agent-accounts/groups', 'POST', body)
+export const deleteGroup = (id: string) => request<void>(`/agent-accounts/groups/${enc(id)}`, 'DELETE')
+export interface TicketPin { ticket_id: string; harness: string; account_id?: string; group_id?: string }
+export const listPins = (ticketId: string) => request<TicketPin[]>(`/agent-accounts/pins?ticket_id=${enc(ticketId)}`)
+export const putPin = (body: { ticket_id: string; harness: string; account_id?: string; group_id?: string }) => request<void>('/agent-accounts/pins', 'PUT', body)
+export const deletePin = (ticketId: string, harness: string) => request<void>(`/agent-accounts/pins?ticket_id=${enc(ticketId)}&harness=${enc(harness)}`, 'DELETE')
+export const setRunTarget = (runId: string, body: { account_id?: string; group_id?: string }) => request<void>(`/agent-accounts/runs/${enc(runId)}/target`, 'POST', body)
 export const setAccountState = (id: string, state: AgentAccount['state']) => request<AgentAccount>(`/agent-accounts/${enc(id)}`, 'PATCH', { state })
 export const getRun = (id: string) => request<AgentRun>(`/runs/${enc(id)}`)
 export const listApprovals = () => request<Approval[]>('/approvals?limit=200')

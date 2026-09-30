@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { APIError, RequestFailure, StaleRequestError } from '../src/lib/api.ts'
 import {
-  accountPlan, confirmsSave, uncertainFailure, accountState, buildPools, buildRows, clampRate, dayProfile, daysLabel, defaultSchedule, fullPaceHours, gauge, gaugeModeFor,
+  accountPlan, confirmsSave, uncertainFailure, accountState, buildPools, buildRows, clampRate, dayProfile, daysLabel, defaultSchedule, fullPaceHours, gauge, gaugeModeFor, sameAccountCopy,
   nightLabel, pickWindows, plainText, poolSentence, presetWeek, rateAt, sameShape, scheduleProblem, setGlobalMode, sourceLine, todayCell,
   toggleAccountMode, when, reserveLabel, reserveLevel, withReserve, workStart, zonedInstant, activeOverride, stripOverride,
   type AccountCapacity, type AccountInput, type CapacitySchedule, type CapacityWindow,
@@ -127,6 +127,35 @@ test('two Codex accounts: soonest reset first, one plan sentence, gauges from se
   assert.equal(sourceLine(studio, now), 'Read on studio · 3 h ago · offline')
   assert.deepEqual(todayCell(studio, accountPlan(studio, now)), { kind: 'quiet', text: 'waits for studio' })
   assert.equal(gauge(studio, accountPlan(studio, now)).tick, null)
+})
+
+test('one quota is one gauge, and a group is its own pool', () => {
+  const fp = 'ab'.repeat(32)
+  const group = '11111111-1111-4111-8111-111111111111'
+  const built = pools(
+    [
+      acct('a', 'Spare', 'codex', { host: 'mbp2607', fingerprint: fp }),
+      acct('b', 'Spare', 'codex', { host: 'studio', fingerprint: fp }),
+      acct('c', 'Client door', 'codex', { host: 'studio', groupId: group, groupName: 'Client' }),
+    ],
+    [
+      { ...cap('a', [win({ used: 10, budget: 10, reset: '2026-10-02T07:14:00Z' })]), quota_fingerprint: fp, hosts: ['mbp2607'], routing: { rank: 1, available_slots: 1 } },
+      { ...cap('b', [win({ used: 10, budget: 10, reset: '2026-10-02T07:14:00Z' })]), quota_fingerprint: fp, hosts: ['studio'], same_quota_as: 'a', routing: { rank: 2, available_slots: 0, same_quota_as: 'a' } },
+      { ...cap('c', [win({ used: 20, budget: 10, reset: '2026-10-03T07:14:00Z' })]), group_id: group, group_name: 'Client', routing: { rank: 1, available_slots: 1 } },
+    ],
+  )
+  assert.equal(built[0].id, 'codex')
+  assert.equal(built[0].name, 'Codex')
+  assert.equal(built[0].mark, 'codex')
+  assert.equal(built[0].rows.length, 1)
+  assert.deepEqual(built[0].rows[0].hosts, ['mbp2607', 'studio'])
+  assert.equal(built[0].parallelRuns, 1)
+  assert.equal(sameAccountCopy(built[0].rows[0].hosts), 'Same account on mbp2607 and studio')
+  assert.equal(sameAccountCopy(['mbp2607', 'studio', 'desk']), 'Same account on mbp2607, studio and desk')
+  assert.equal(built[1].id, `group:${group}`)
+  assert.equal(built[1].name, 'Client · Codex')
+  assert.equal(built[1].mark, 'codex')
+  assert.equal(built[1].rows[0].id, 'c')
 })
 
 test('one account: by day and tonight, finish before reset, fresh week', () => {

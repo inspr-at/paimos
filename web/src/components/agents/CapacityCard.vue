@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { can } from '../../lib/authz'
 import {
-  accountPlan, daysLabel, daysSummary, gauge as gaugeOf, gaugeModeFor, nightLabel, pct, poolSentence, reserveLabel, reserveLevel, setGlobalMode, sourceLine, timeLabel, todayCell, toggleAccountMode, when, whenFull, workStart,
+  accountPlan, daysLabel, daysSummary, gauge as gaugeOf, gaugeModeFor, nightLabel, pct, poolSentence, reserveLabel, reserveLevel, sameAccountCopy, setGlobalMode, sourceLine, timeLabel, todayCell, toggleAccountMode, when, whenFull, workStart,
   type AccountRow, type CapacitySchedule, type CapacityWindow, type GaugeMode, type Override, type PoolView,
 } from '../../lib/capacity'
 import { toast } from '../../lib/toast'
@@ -322,7 +322,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
     <div v-for="pool in pools" :key="pool.id" class="pool" :data-pool="pool.id">
       <div class="pool-info">
         <div class="pool-head">
-          <span class="vendor"><HarnessMark :harness="pool.id" :size="16" /></span>
+          <span class="vendor"><HarnessMark :harness="pool.mark || pool.id" :size="16" /></span>
           <span class="pool-name">{{ pool.name }}</span>
           <span v-if="pool.plan" class="pool-plan" :title="pool.plan">{{ pool.plan }}</span>
           <span v-if="ownOverride(pool)" class="override" :class="{ hold: pool.override === 'hold' }">
@@ -341,7 +341,8 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
           <div class="acct-name">
             <span class="dot" :class="row.state" :data-tip="DOT_TIP[row.state](row)"><span class="sr-only">{{ DOT_TIP[row.state](row) }}</span></span>
             <span class="nm" :title="row.name">{{ row.name }}</span>
-            <span v-if="row.host" class="chip host">{{ row.host }}</span>
+            <span v-for="host in (row.hosts.length ? row.hosts : row.host ? [row.host] : [])" :key="host" class="chip host">{{ host }}</span>
+            <p v-if="sameAccountCopy(row.hosts)" class="same-quota">{{ sameAccountCopy(row.hosts) }}</p>
           </div>
           <div class="gauge-cell">
             <CapacityGauge
@@ -494,9 +495,10 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .plan.ahead :deep(.n) { color: var(--gold-ink); }
 
 .accts { display: grid; gap: 2px; align-self: start; margin: -6px 0 0; padding: 0; list-style: none; }
-.acct { display: grid; grid-template-columns: 170px minmax(160px, 1fr) 74px 124px 150px 204px; align-items: center; gap: 16px; min-height: 44px; padding: 6px 10px; border-radius: var(--radius-row); }
+.acct { display: grid; grid-template-columns: minmax(220px, 1.15fr) minmax(140px, 1.5fr) 74px 118px 140px minmax(120px, 180px); align-items: center; gap: 16px; min-height: 44px; padding: 6px 10px; border-radius: var(--radius-row); }
 @media (hover: hover) { .acct:hover { background: var(--row-hover); } }
-.acct-name { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.acct-name { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 9px; min-width: 0; }
+.same-quota { flex-basis: 100%; margin: 0; font-size: 12px; line-height: 1.35; color: var(--ink-3); text-wrap: pretty; }
 .acct-name .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13.5px; font-weight: 600; }
 .host { flex: none; }
 .dot { position: relative; flex: none; width: 8px; height: 8px; border-radius: 50%; }
@@ -546,11 +548,11 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
 /* Mid width: the plan sits above its accounts. */
 @media (max-width: 1320px) {
   .pool { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-  .acct { grid-template-columns: 180px minmax(140px, 1fr) 72px 120px 124px 180px; }
+  .acct { grid-template-columns: minmax(220px, 1.1fr) minmax(120px, 1.4fr) 72px 112px 120px minmax(100px, 160px); }
   .plan { padding-left: 40px; }
 }
 @media (max-width: 1100px) {
-  .acct { grid-template-columns: 150px minmax(120px, 1fr) 68px 110px 120px; }
+  .acct { grid-template-columns: minmax(200px, 1fr) minmax(100px, 1.2fr) 68px 100px minmax(90px, 120px); }
   .source { display: none; }
 }
 /* Phone: stacked rows, the settings as one sunken group. */
