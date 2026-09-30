@@ -151,7 +151,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.Shape, "work-shape", 0, "ship or scout")
 			fs.string(&o.Management, "management", 0, "managed or unmanaged")
 			fs.string(&o.Role, "role", 0, "worker or coordinator")
-			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source")
+			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source and inbox index")
 			fs.string(&o.CodexIndex, "codex-index", 0, "Codex session_index.jsonl (default ~/.codex/session_index.jsonl)")
 			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
 			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage and its title")
@@ -322,10 +322,12 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 	if heartbeatSettling(&session) {
 		explainClosedHeartbeat(rt, &session)
 		rt.settleGeneration(o, &session)
+		releaseSessionIndex(&session)
 		return nil
 	}
 	if session.disk.Terminal {
 		explainClosedHeartbeat(rt, &session)
+		releaseSessionIndex(&session)
 		return nil
 	}
 	if created {
@@ -353,6 +355,7 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 	if !dep.alive(o.OwnerPID) {
 		return rt.rejectDeadOwner(o, &session)
 	}
+	recordSessionIndex(rt, o, &session)
 	return rt.heartbeatLoop(ctx, o, dep, &session)
 }
 
@@ -380,6 +383,7 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 			if serr := saveHeartbeatSession(session); serr != nil {
 				return serr
 			}
+			releaseSessionIndex(session)
 			return nil
 		case err != nil && ctx.Err() != nil:
 			return rt.finishHeartbeat(o, session)
@@ -473,6 +477,7 @@ func (rt *runtime) finishHeartbeat(o heartbeatOptions, session *heartbeatSession
 	}
 	if session.disk.Terminal {
 		_ = saveHeartbeatSession(session)
+		releaseSessionIndex(session)
 		return nil
 	}
 	return rt.finishStop(o, session)
@@ -689,7 +694,9 @@ func persistStopSuccess(session *heartbeatSession) error {
 	if session.hold.dir != nil {
 		_ = session.hold.remove("stop.intent")
 	}
-	return saveHeartbeatSession(session)
+	err := saveHeartbeatSession(session)
+	releaseSessionIndex(session)
+	return err
 }
 
 // abandonHeartbeat closes a generation whose state could not be saved, and

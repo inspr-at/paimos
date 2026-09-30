@@ -85,7 +85,14 @@ func (rt *runtime) cmdHookInstall(uninstall bool) *Command {
 			command += " --instance " + shellHookQuote(rt.instance)
 		}
 		command += " hook " + harness + " "
-		return rt.mergeInboxHooks(path, command, harness, uninstall, dryRun)
+		if err := rt.mergeInboxHooks(path, command, harness, uninstall, dryRun); err != nil {
+			return err
+		}
+		if uninstall {
+			return nil
+		}
+		_, err = fmt.Fprintln(rt.stdout, hookBindingStatus(harness))
+		return err
 	}}
 }
 
