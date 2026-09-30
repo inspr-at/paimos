@@ -28,6 +28,10 @@ const (
 // reads or writes an entry. Production leaves it nil.
 var sessionIndexHeld func(dirfd int, root string)
 
+// sessionIndexEnumerating is a test seam. It runs once per enumeration,
+// while the duplicated directory descriptor is still open. Production leaves it nil.
+var sessionIndexEnumerating func(dir *os.File)
+
 func sessionIndexRoot() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
@@ -496,15 +500,21 @@ func dropOtherSessionIndexEntries(dirfd int, keep, stateDir string) {
 }
 
 func indexEntryNames(dirfd int) []string {
-	dup, err := unix.Dup(dirfd)
+	dir, err := dupSessionIndexDir(dirfd)
 	if err != nil {
 		return nil
 	}
-	dir := os.NewFile(uintptr(dup), "session-index")
 	defer dir.Close()
 	var names []string
+	hooked := false
 	for {
 		batch, err := dir.ReadDir(128)
+		if !hooked {
+			hooked = true
+			if sessionIndexEnumerating != nil {
+				sessionIndexEnumerating(dir)
+			}
+		}
 		for _, entry := range batch {
 			names = append(names, entry.Name())
 		}
@@ -512,6 +522,26 @@ func indexEntryNames(dirfd int) []string {
 			return names
 		}
 	}
+}
+
+// dupSessionIndexDir duplicates dirfd for name enumeration.
+// The copy shares the kernel directory offset. unix.Dup clears FD_CLOEXEC
+// and os.NewFile does not restore it, so a concurrent exec could inherit the
+// copy and advance that offset. dupCloexec keeps the duplicate close-on-exec.
+func dupSessionIndexDir(dirfd int) (*os.File, error) {
+	raw, err := dupCloexec(dirfd)
+	if err != nil {
+		return nil, err
+	}
+	if raw < 0 {
+		return nil, errRefusedFile
+	}
+	f := os.NewFile(uintptr(raw), "session-index")
+	if f == nil {
+		unix.Close(raw)
+		return nil, errRefusedFile
+	}
+	return f, nil
 }
 
 func unlinkIndexIfMatch(dirfd int, name, stateDir string) {

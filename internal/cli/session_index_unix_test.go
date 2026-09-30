@@ -1155,6 +1155,120 @@ func TestBusyStateLockPreservesIndexBinding(t *testing.T) {
 	}
 }
 
+func TestSessionIndexEnumerationFdNotInherited(t *testing.T) {
+	if os.Getenv("AEON_INDEX_FD_CHILD") == "1" {
+		fd, dev, ino, err := indexChildIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if how := inheritedIndexFd(fd, dev, ino); how != "" {
+			t.Fatalf("enumeration descriptor inherited via %s", how)
+		}
+		fmt.Fprintln(os.Stdout, "index-fd-closed")
+		return
+	}
+
+	useIndexHome(t)
+	root := mustIndexRoot(t)
+	if err := mkdirPrivate(root); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, indexSourceID)
+	if err := os.WriteFile(marker, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dirfd, err := openValidatedIndexDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(dirfd)
+	var st unix.Stat_t
+	if err := unix.Fstat(dirfd, &st); err != nil {
+		t.Fatal(err)
+	}
+
+	probed := false
+	sessionIndexEnumerating = func(dir *os.File) {
+		probed = true
+		fd := int(dir.Fd())
+		flags, ferr := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
+		if ferr != nil {
+			t.Fatalf("F_GETFD: %v", ferr)
+		}
+		if flags&unix.FD_CLOEXEC == 0 {
+			t.Fatal("enumeration descriptor is missing FD_CLOEXEC")
+		}
+		cmd := exec.Command(os.Args[0], "-test.run=^TestSessionIndexEnumerationFdNotInherited$")
+		cmd.Env = append(os.Environ(),
+			"AEON_INDEX_FD_CHILD=1",
+			"AEON_INDEX_FD="+strconv.Itoa(fd),
+			"AEON_INDEX_DEV="+strconv.FormatUint(uint64(st.Dev), 10),
+			"AEON_INDEX_INO="+strconv.FormatUint(st.Ino, 10),
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil || !bytes.Contains(out, []byte("index-fd-closed")) {
+			t.Fatalf("child: %v %s", err, out)
+		}
+	}
+	t.Cleanup(func() { sessionIndexEnumerating = nil })
+
+	names := indexEntryNames(dirfd)
+	if !probed {
+		t.Fatal("enumeration did not duplicate the directory")
+	}
+	found := false
+	for _, name := range names {
+		if name == indexSourceID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("enumeration missed %s in %v", indexSourceID, names)
+	}
+}
+
+func indexChildIdentity() (int, uint64, uint64, error) {
+	fd, err := strconv.Atoi(os.Getenv("AEON_INDEX_FD"))
+	if err != nil || fd < 0 {
+		return 0, 0, 0, errors.New("enumeration child fd")
+	}
+	dev, err := strconv.ParseUint(os.Getenv("AEON_INDEX_DEV"), 10, 64)
+	if err != nil {
+		return 0, 0, 0, errors.New("enumeration child dev")
+	}
+	ino, err := strconv.ParseUint(os.Getenv("AEON_INDEX_INO"), 10, 64)
+	if err != nil {
+		return 0, 0, 0, errors.New("enumeration child ino")
+	}
+	return fd, dev, ino, nil
+}
+
+// inheritedIndexFd reports how a child still sees the parent's directory
+// descriptor. fcntl identifies the fd number; /dev/fd is the path check.
+func inheritedIndexFd(fd int, dev, ino uint64) string {
+	if _, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0); err == nil && sameIndexFile(fd, dev, ino) {
+		return "fcntl"
+	}
+	f, err := os.Open("/dev/fd/" + strconv.Itoa(fd))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	if sameIndexFile(int(f.Fd()), dev, ino) {
+		return "/dev/fd"
+	}
+	return ""
+}
+
+func sameIndexFile(fd int, dev, ino uint64) bool {
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil {
+		return false
+	}
+	return uint64(st.Dev) == dev && st.Ino == ino
+}
+
 func holdStateLockChild() {
 	hold, err := openHeartbeatHold(os.Getenv("AEON_INDEX_STATE_DIR"))
 	if err != nil {
