@@ -33,7 +33,7 @@ func TestAttachLeaseUsesServerDecisionUnderClockSkew(t *testing.T) {
 				}
 				root := filepath.Dir(path)
 				peer := attachObservation{Process: attachwatch.Process{PID: 30, UID: os.Getuid(), Started: "helper", Executable: exe, CWD: root}, Parent: 20, Session: 20, TTY: true}
-				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid()}, Parent: 1, Session: 20, TTY: true}
+				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid(), Started: "leader"}, Parent: 1, Session: 20, TTY: true}
 				target := attachObservation{Process: attachwatch.Process{PID: 40, UID: os.Getuid(), Started: "target", Executable: exe, CWD: root}, Parent: 1}
 				lease := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
 				polls := 0
@@ -52,6 +52,7 @@ func TestAttachLeaseUsesServerDecisionUnderClockSkew(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer m.Close(t.Context())
+				m.signature = attachCodexSignatureFixture
 				m.observe = func(pid int) (attachObservation, error) {
 					for _, v := range []attachObservation{peer, leader, target} {
 						if v.PID == pid {
@@ -60,6 +61,7 @@ func TestAttachLeaseUsesServerDecisionUnderClockSkew(t *testing.T) {
 					}
 					return attachObservation{}, errors.New("unknown PID")
 				}
+				m.ancestry = m.observe
 				v, err := m.handle(t.Context(), peer, AttachLocalRequest{Operation: "preview", PID: target.PID, Harness: "codex", ProjectID: "22222222-2222-4222-8222-222222222222", TicketID: "33333333-3333-4333-8333-333333333333", Transcript: path})
 				if err != nil {
 					t.Fatal(err)
@@ -97,7 +99,7 @@ func (f *fakeLocalAuth) Confirm(ctx context.Context, reason string) error {
 }
 func TestAttachStrictConsentActivation(t *testing.T) {
 	for _, statusOnly := range []bool{false, true} {
-		for _, outcome := range []string{"confirm", "deny", "unavailable", "revoke", "changed identity", "changed mode", "premature activation", "policy changed while pending"} {
+		for _, outcome := range []string{"confirm", "deny", "unavailable", "revoke", "changed identity", "changed mode", "premature activation", "policy changed while pending", "missing nonce", "changed nonce", "empty signature"} {
 			t.Run(fmt.Sprintf("status-only=%t/%s", statusOnly, outcome), func(t *testing.T) {
 				path := attachFixtureFile(t, "history\n")
 				exe, err := os.Executable()
@@ -110,13 +112,30 @@ func TestAttachStrictConsentActivation(t *testing.T) {
 				}
 				root := filepath.Dir(path)
 				peer := attachObservation{Process: attachwatch.Process{PID: 30, UID: os.Getuid(), Started: "helper", Executable: exe, CWD: root}, Parent: 20, Session: 20, TTY: true}
-				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid()}, Parent: 1, Session: 20, TTY: true}
+				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid(), Started: "leader"}, Parent: 1, Session: 20, TTY: true}
 				target := attachObservation{Process: attachwatch.Process{PID: 40, UID: os.Getuid(), Started: "target", Executable: exe, CWD: root}, Parent: 1}
 				auth := &fakeLocalAuth{called: make(chan string, 1), answer: make(chan error, 1)}
 				var sent []attachwatch.DeviceRequest
 				mode := attachwatch.ConsentLocalAuth
-				m, err := NewAttachManager(AttachConfig{Origin: "https://paired.test", ComputerID: "11111111-1111-4111-8111-111111111111", Host: "fixture Mac", Workspace: root, Executables: map[string]string{"codex": exe}, LocalAuth: auth, Exchange: func(_ context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
+				m, err := NewAttachManager(AttachConfig{Origin: "https://paired.test", ComputerID: "11111111-1111-4111-8111-111111111111", Host: "fixture Mac", Workspace: root, Executables: map[string]string{"codex": exe}, LocalSigner: func(ctx context.Context, digest, nonce, reason string) (string, error) {
+					if !attachwatch.LocalAuthNonceValid(digest) || !attachwatch.LocalAuthNonceValid(nonce) {
+						t.Error("unbound local signing")
+					}
+					if err := auth.Confirm(ctx, reason); err != nil {
+						return "", err
+					}
+					if outcome == "empty signature" {
+						return "", nil
+					}
+					return "fixture-signature", nil
+				}, Exchange: func(_ context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 					sent = append(sent, in)
+					if in.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
+						t.Error("daemon did not advertise its consent proof version")
+					}
+					if in.LocalConfirmed {
+						t.Error("daemon sent a forgeable confirmation boolean")
+					}
 					state := "pending"
 					responseMode := mode
 					if outcome == "policy changed while pending" && in.Operation == "request" {
@@ -127,16 +146,27 @@ func TestAttachStrictConsentActivation(t *testing.T) {
 					}
 					if in.Operation == "poll" {
 						state = "approved"
-						if in.LocalConfirmed || outcome == "premature activation" {
+						if in.LocalAuthSignature != "" || outcome == "premature activation" {
 							state = "active"
 						}
 					}
-					return attachwatch.View{RequestID: in.RequestID, Digest: in.Digest, Snapshot: in.Snapshot, State: state, ConsentMode: responseMode, ConsentDigest: attachwatch.ConsentDigest(in.RequestID, in.Digest, responseMode)}, nil
+					challenge := ""
+					if state == "approved" {
+						challenge = strings.Repeat("a", 64)
+						if outcome == "missing nonce" {
+							challenge = ""
+						}
+						if outcome == "changed nonce" && len(sent) > 2 {
+							challenge = strings.Repeat("b", 64)
+						}
+					}
+					return attachwatch.View{LocalAuthNonce: challenge, RequestID: in.RequestID, Digest: in.Digest, Snapshot: in.Snapshot, State: state, ConsentMode: responseMode, ConsentDigest: attachwatch.ConsentDigest(in.RequestID, in.Digest, responseMode)}, nil
 				}})
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer m.Close(t.Context())
+				m.signature = attachCodexSignatureFixture
 				m.observe = func(pid int) (attachObservation, error) {
 					for _, v := range []attachObservation{peer, leader, target} {
 						if v.PID == pid {
@@ -145,6 +175,7 @@ func TestAttachStrictConsentActivation(t *testing.T) {
 					}
 					return attachObservation{}, errors.New("unknown PID")
 				}
+				m.ancestry = m.observe
 				request := AttachLocalRequest{Operation: "preview", PID: target.PID, Harness: "codex", ProjectID: "22222222-2222-4222-8222-222222222222", TicketID: "33333333-3333-4333-8333-333333333333", Transcript: path, StatusOnly: statusOnly}
 				if statusOnly {
 					request.Transcript = ""
@@ -162,7 +193,7 @@ func TestAttachStrictConsentActivation(t *testing.T) {
 					return m.handle(t.Context(), peer, AttachLocalRequest{Operation: "poll", ID: v.ID, Digest: v.Digest})
 				}
 				first, err := poll()
-				if outcome == "premature activation" {
+				if outcome == "premature activation" || outcome == "missing nonce" {
 					if err == nil {
 						t.Fatal("server bypass activated strict watch")
 					}
@@ -173,15 +204,26 @@ func TestAttachStrictConsentActivation(t *testing.T) {
 				}
 				select {
 				case reason := <-auth.called:
-					if !strings.Contains(reason, "PID 40") || !strings.Contains(reason, "fixture Mac") {
-						t.Fatal("reason omitted session/host")
+					action := "watching the conversation"
+					if statusOnly {
+						action = "status only (no conversation text) for"
+					}
+					want := attachwatch.LocalConsentReason(attachwatch.Snapshot{Mode: map[bool]string{true: attachwatch.ModeLease}[statusOnly], Host: "fixture Mac", Harness: "codex", Process: attachwatch.Process{PID: 40}})
+					if reason != want || !strings.Contains(want, action) {
+						t.Fatalf("reason %q, want %q", reason, want)
 					}
 				case <-time.After(time.Second):
 					t.Fatal("no local confirmation")
 				}
 				for i := 0; i < 3; i++ {
 					pending, err := poll()
-					if err != nil || pending.State != "approved" || sent[len(sent)-1].LocalConfirmed {
+					if outcome == "changed nonce" {
+						if err == nil || len(m.sessions) != 0 {
+							t.Fatal("changed challenge kept confirmation authority")
+						}
+						return
+					}
+					if err != nil || pending.State != "approved" || sent[len(sent)-1].LocalAuthSignature != "" {
 						t.Fatal("activated without local confirmation")
 					}
 				}
@@ -224,7 +266,7 @@ func TestAttachStrictConsentActivation(t *testing.T) {
 					}
 					return
 				}
-				if err != nil || next.State != "active" || !sent[len(sent)-1].LocalConfirmed || sent[len(sent)-1].Text != "" {
+				if err != nil || next.State != "active" || sent[len(sent)-1].LocalAuthSignature == "" || sent[len(sent)-1].Text != "" {
 					t.Fatal("confirmed activation failed", err)
 				}
 				appendAttach(t, path, "live only\n")
@@ -242,7 +284,7 @@ func TestAttachStrictConsentActivation(t *testing.T) {
 }
 
 func TestLocalSocketCannotSupplyOSConfirmation(t *testing.T) {
-	for _, field := range []string{`"local_confirmed":true`, `"consent_mode":"aeon"`, `"consent_digest":"pretend"`} {
+	for _, field := range []string{`"local_auth_nonce":"pretend"`, `"local_auth_signature":"pretend"`, `"local_confirmed":true`, `"consent_mode":"aeon"`, `"consent_digest":"pretend"`} {
 		// Use the same strict request decoder as the local HTTP entry point.
 		r := httptest.NewRequest("POST", "/v1/attach", strings.NewReader(`{"operation":"poll",`+field+`}`))
 		var request AttachLocalRequest

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsecurity"
+	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/grokprobe"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/piprobe"
@@ -69,20 +71,23 @@ type RuntimeAccount struct {
 	Node      harnesslaunch.Node `json:"node,omitempty"`
 }
 type RuntimeConfig struct {
-	Schema        string           `json:"schema"`
-	Origin        string           `json:"origin"`
-	TenantID      string           `json:"tenant_id"`
-	PrincipalID   string           `json:"principal_id"`
-	DaemonID      string           `json:"daemon_id"`
-	ComputerID    string           `json:"computer_id"`
-	Workspace     string           `json:"workspace"`
-	Accounts      []RuntimeAccount `json:"accounts"`
-	NodePath      string           `json:"node_path,omitempty"`
-	ClaudeSDKPath string           `json:"claude_sdk_path,omitempty"`
-	ClaudeRepinID string           `json:"claude_repin_id,omitempty"`
+	LocalAuthKeyID   string                    `json:"local_auth_key_id,omitempty"`
+	AttachIdentities map[string]AttachIdentity `json:"attach_identities,omitempty"`
+	Schema           string                    `json:"schema"`
+	Origin           string                    `json:"origin"`
+	TenantID         string                    `json:"tenant_id"`
+	PrincipalID      string                    `json:"principal_id"`
+	DaemonID         string                    `json:"daemon_id"`
+	ComputerID       string                    `json:"computer_id"`
+	Workspace        string                    `json:"workspace"`
+	Accounts         []RuntimeAccount          `json:"accounts"`
+	NodePath         string                    `json:"node_path,omitempty"`
+	ClaudeSDKPath    string                    `json:"claude_sdk_path,omitempty"`
+	ClaudeRepinID    string                    `json:"claude_repin_id,omitempty"`
 }
 
 type snapshot struct {
+	LocalAuthKeyID     string                `json:"local_auth_key_id,omitempty"`
 	BoundComputer      string                `json:"bound_computer_id,omitempty"`
 	BoundDaemon        string                `json:"bound_daemon_id,omitempty"`
 	BoundPrincipal     string                `json:"bound_principal_id,omitempty"`
@@ -131,6 +136,8 @@ type Progress struct {
 	RetryAfterSeconds int                      `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
+	VerificationReasons                    map[string]string
+	AccountStatuses                        map[string]HarnessDetail
 	ProfilePermissions                     bool
 	HarnessFailed                          bool
 	HarnessDetails                         map[string]HarnessDetail
@@ -170,6 +177,7 @@ type LocalDaemon interface {
 	Status(context.Context, string) (LocalStatus, error)
 }
 type Engine struct {
+	Enclave            agentsecurity.Signer
 	Store              *Store
 	API                PairingAPI
 	Services           *ServiceManager
@@ -201,8 +209,16 @@ func uuid() (string, error) {
 	b[8] = (b[8] & 63) | 128
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
-func (e *Engine) load() (*snapshot, error) {
-	raw, err := e.Store.Read(snapshotName, 1<<20)
+func (e *Engine) load() (*snapshot, error) { return e.loadSnapshot(false) }
+
+func (e *Engine) loadSnapshot(readOnly bool) (*snapshot, error) {
+	var raw []byte
+	var err error
+	if readOnly {
+		raw, err = e.Store.readSnapshot()
+	} else {
+		raw, err = e.Store.Read(snapshotName, 1<<20)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +341,7 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		return Progress{}, ErrUnsafePath
 	}
 	for _, entry := range entries {
-		if entry.Name() != "setup.lock" {
+		if entry.Name() != "setup.lock" && !(e.Store.vault != nil && entry.Name() == "keychain-migration.lock") {
 			return Progress{}, ErrCollision
 		}
 	}
@@ -390,7 +406,21 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		return Progress{}, err
 	}
 	s := &snapshot{Schema: "aeon.agent-setup.private.v1", Origin: strings.TrimRight(o.Origin, "/"), Device: device, Runtime: runtimeSecret, Lifecycle: life, LifecycleRequestID: id, StartService: o.StartService, NodePath: o.NodePath, ClaudeSDKPath: o.ClaudeSDKPath, Phase: "requesting", Removed: map[string]bool{}}
-	s.Request = DeviceRequest{RequestID: id, TenantID: o.TenantID, TenantSlug: o.TenantSlug, DeviceHash: Hash([]byte(device)), RuntimeHash: Hash([]byte(runtimeSecret)), LifecycleHash: Hash([]byte(life)), Details: Details{ComputerName: o.ComputerName, Platform: o.Platform.OS, Arch: o.Platform.Arch, Workspace: o.Workspace, Capabilities: []string{"managed_runs"}}}
+	signer := e.Enclave
+	if signer == nil {
+		signer = agentsecurity.DefaultSigner()
+	}
+	publicKey, keyErr := signer.Create(ctx, Hash([]byte(e.Store.Path()))+"/"+id)
+	if keyErr != nil && !errors.Is(keyErr, agentsecurity.ErrUnavailable) {
+		return Progress{}, keyErr
+	}
+	if publicKey != "" && (o.Platform.OS != "darwin" || attachwatch.LocalAuthPublicKey(publicKey) == nil) {
+		return Progress{}, errors.New("invalid enclave public key")
+	}
+	if publicKey != "" {
+		s.LocalAuthKeyID = Hash([]byte(e.Store.Path())) + "/" + id
+	}
+	s.Request = DeviceRequest{RequestID: id, TenantID: o.TenantID, TenantSlug: o.TenantSlug, DeviceHash: Hash([]byte(device)), RuntimeHash: Hash([]byte(runtimeSecret)), LifecycleHash: Hash([]byte(life)), Details: Details{LocalAuthPublicKey: publicKey, ComputerName: o.ComputerName, Platform: o.Platform.OS, Arch: o.Platform.Arch, Workspace: o.Workspace, Capabilities: []string{"managed_runs"}}}
 	for _, c := range o.Candidates {
 		key, err := uuid()
 		if err != nil {
@@ -610,7 +640,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 	if err := e.save(s, false); err != nil {
 		return e.progress(s), err
 	}
-	config := RuntimeConfig{Schema: "aeon.agent-runtime.v1", Origin: s.Origin, TenantID: s.View.TenantID, PrincipalID: s.View.PrincipalID, DaemonID: s.View.DaemonID, ComputerID: s.View.ComputerID, Workspace: s.Request.Workspace, NodePath: s.NodePath, ClaudeSDKPath: s.ClaudeSDKPath, ClaudeRepinID: s.ClaudeRepinID, Accounts: []RuntimeAccount{}}
+	config := RuntimeConfig{LocalAuthKeyID: s.LocalAuthKeyID, Schema: "aeon.agent-runtime.v1", Origin: s.Origin, TenantID: s.View.TenantID, PrincipalID: s.View.PrincipalID, DaemonID: s.View.DaemonID, ComputerID: s.View.ComputerID, Workspace: s.Request.Workspace, NodePath: s.NodePath, ClaudeSDKPath: s.ClaudeSDKPath, ClaudeRepinID: s.ClaudeRepinID, Accounts: []RuntimeAccount{}}
 	seen := map[string]bool{}
 	for _, a := range s.View.Enrollments {
 		if a.State != "connected" || s.Removed[a.AccountID] {
@@ -652,6 +682,11 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 			return e.progress(s), ErrCollision
 		}
 	}
+	var previous RuntimeConfig
+	if saved, err := e.Store.Read(RuntimeName, 128<<10); err == nil && json.Unmarshal(saved, &previous) == nil {
+		config.preserveAttachIdentities(previous)
+	}
+	config.RecordAttachIdentities()
 	raw, _ := json.Marshal(config)
 	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
 		return e.progress(s), err
@@ -682,17 +717,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		p.Action = "Start the approved daemon to verify connectivity."
 		return p, nil
 	}
-	local, err := e.Local.Status(ctx, "")
-	if err == nil && local.DaemonID == s.View.DaemonID && len(local.BlockedAccounts) > 0 {
-		p.BlockedAccounts = append([]BlockedAccount(nil), local.BlockedAccounts...)
-	}
-	if err != nil || local.DaemonID != s.View.DaemonID || !local.Ready {
-		p.Stage = "provisioning"
-		p.Action = "Daemon connectivity is unconfirmed; resume setup after the approved service starts."
-		return p, nil
-	}
-	p.LocalProcesses = local.State
-	return p, nil
+	return e.connectionProgress(ctx, s), nil
 }
 
 func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
@@ -701,6 +726,10 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 		return RuntimeConfig{}, err
 	}
 	defer s.Close()
+	return readRuntimeConfig(s)
+}
+
+func readRuntimeConfig(s *Store) (RuntimeConfig, error) {
 	raw, err := s.Read(RuntimeName, 128<<10)
 	if err != nil {
 		return RuntimeConfig{}, err
@@ -708,6 +737,19 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 	var c RuntimeConfig
 	if json.Unmarshal(raw, &c) != nil || c.Schema != "aeon.agent-runtime.v1" || ValidateOrigin(c.Origin) != nil || !uuidPattern.MatchString(c.TenantID) || !uuidPattern.MatchString(c.PrincipalID) || !uuidPattern.MatchString(c.ComputerID) || c.DaemonID == "" || len(c.DaemonID) > 128 || strings.ContainsAny(c.DaemonID, "/\\\x00\r\n") {
 		return RuntimeConfig{}, errors.New("private runtime configuration invalid")
+	}
+	if s.vault != nil {
+		// Public disk state cannot redirect the signed daemon into disclosing a
+		// protected lifecycle proof or bearer. This runs before cold-start
+		// preflight, and migrates the pairing snapshot on first daemon start.
+		engine := Engine{Store: s}
+		paired, err := engine.load()
+		if err != nil {
+			return RuntimeConfig{}, err
+		}
+		if paired.ComputerCleaned || c.Origin != paired.Origin || c.TenantID != paired.View.TenantID || c.ComputerID != paired.View.ComputerID || c.PrincipalID != paired.View.PrincipalID || c.DaemonID != paired.View.DaemonID || c.Workspace != paired.Request.Workspace || c.LocalAuthKeyID != paired.LocalAuthKeyID {
+			return RuntimeConfig{}, errors.New("runtime configuration differs from protected pairing")
+		}
 	}
 	return c, nil
 }

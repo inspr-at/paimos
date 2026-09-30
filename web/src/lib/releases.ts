@@ -14,13 +14,17 @@ export interface ReleaseEvidence {
   ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; unavailable: string[]
 }
 export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string; group?: ChangeGroup }
-export interface ReleaseNotes { source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; public_items?: Omit<ReleaseNoteItem, 'id'>[]; gaps: string[]; hidden: number; written_after_release?: boolean }
+export interface ReleaseNoteCorrection { version: string; key: string; snapshot_sha256: string; reason: string; group?: string; pill_en?: string; pill_de?: string; benefit_en?: string; benefit_de?: string }
+export interface ReleaseNotes { corrections?: ReleaseNoteCorrection[]; source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; public_items?: Omit<ReleaseNoteItem, 'id'>[]; gaps: string[]; hidden: number; written_after_release?: boolean }
 // How a release introduces itself (AEON-305): the theme is the kicker, the
 // headline one sentence, the intro two or three. German may be empty.
 export interface ReleasePresentation { theme_en: string; theme_de: string; headline_en: string; headline_de: string; intro_en: string; intro_de: string; revision: number; updated_at: string }
 export interface Release {
   notes?: ReleaseNotes
   presentation?: ReleasePresentation
+  // The release's sci-fi codename from its sequence (AEON-430), English in
+  // both languages. Absent on a reservation whose sequence another release took.
+  codename?: string
   version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved'
   reserved_at: string | null; tagged_at: string | null; published_at: string | null; headline: string
   tickets: string[]; changes: ReleaseChange[]; changes_omitted: number; evidence: ReleaseEvidence
@@ -494,9 +498,9 @@ export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; t
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
 // The filters follow the blocks the detail and the row counts show. Search
 // looks at the text the chosen language and view show (AEON-323): both views
-// show the name, pills, ticket keys, commit subjects and SHAs (Highlights opens
-// a folded list on a hit); Highlights adds the benefits, Details the evidence
-// it shows open.
+// show the codename (AEON-430), the name, pills, ticket keys, commit subjects
+// and SHAs (Highlights opens a folded list on a hit); Highlights adds the
+// benefits, Details the evidence it shows open.
 export function matches(r: Release, f: ReleaseFilter, locale?: string | null, view: ReleaseView = 'highlights') {
   const presented = presentRelease(r, locale)
   if (f.features && !presented.features.length) return false
@@ -508,7 +512,7 @@ export function matches(r: Release, f: ReleaseFilter, locale?: string | null, vi
   const named = localizedPresentation(r, locale)
   const commits = [...lines.flatMap(line => line.commits), ...presented.other]
   const texts = [
-    r.version, ...ticketsOf(r), ...r.tickets,
+    r.version, r.codename ?? '', ...ticketsOf(r), ...r.tickets,
     ...(named ? [named.theme, named.headline, named.intro] : []),
     ...lines.map(line => line.pill || line.benefit),
     ...(view === 'highlights' ? lines.map(line => line.benefit) : evidenceSearch(r).texts),
@@ -532,7 +536,7 @@ export function evidenceSearch(r: Release): { texts: string[]; ids: string[] } {
   const ev = r.evidence
   const runs = [ev?.ci, ev?.release_run].flatMap(run => run ? [run.name, runWord(run)] : [])
   return {
-    texts: [r.headline, r.tag, r.notes?.source ?? '', ...runs, ev?.image?.reference ?? '', ...(ev?.unavailable ?? [])].filter(Boolean),
+    texts: [r.headline, r.tag, r.notes?.source ?? '', ...(r.notes?.corrections ?? []).flatMap(c => [c.key, c.reason]), ...runs, ev?.image?.reference ?? '', ...(ev?.unavailable ?? [])].filter(Boolean),
     ids: [r.notes?.snapshot_sha256 ?? '', ev?.source_commit ?? '', ev?.image?.digest ?? ''].filter(Boolean),
   }
 }

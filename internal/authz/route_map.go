@@ -8,8 +8,9 @@ import (
 	"strings"
 )
 
-// PublicRoute marks an explicitly public API route. Unknown routes have no
-// declaration and must be denied by the authorization boundary.
+// PublicRoute marks a matched route that is public. Unknown routes have no
+// declaration and must be denied by the authorization boundary. Session
+// refresh uses the same marker, so it cannot disagree with authorization.
 const PublicRoute = "public"
 
 // RoutePermissions declares the permission for each registered API pattern.
@@ -17,6 +18,8 @@ const PublicRoute = "public"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/nodes/{nodeId}/reviews":                                                   "work_orders.read",
+	"POST /api/nodes/{nodeId}/reviews":                                                  "work_orders.write",
 	"DELETE /api/agent-accounts/{accountId}/{resource}":                                 "account.manage",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/reparent":              "harness.write",
 	"GET /api/rules/doctrine/proposals":                                                 "rules.read",
@@ -25,6 +28,12 @@ var RoutePermissions = map[string]string{
 	"POST /api/rules/doctrine/proposals/{proposalId}/refresh":                           "rules.write",
 	"POST /api/rules/doctrine/proposals/{proposalId}/approve":                           "rules.publish",
 	"POST /api/rules/doctrine/proposals/{proposalId}/pins":                              "settings.manage",
+	"GET /api/rules/doctrine/inbox":                                                     "rules.read",
+	"GET /api/rules/doctrine/inbox/summary":                                             "rules.read",
+	"POST /api/rules/doctrine/inbox":                                                    "rules.write",
+	"POST /api/rules/doctrine/inbox/{proposalId}/pull-request":                          "rules.write",
+	"POST /api/rules/doctrine/inbox/{proposalId}/dismiss":                               "rules.write",
+	"POST /api/rules/doctrine/inbox/{proposalId}/notified":                              "rules.read",
 	"GET /api/me/security/session-watching":                                             "profile.read",
 	"PUT /api/me/security/session-watching":                                             "profile.write",
 	"POST /api/agent-pairing/attach":                                                    "harness.worker",
@@ -67,6 +76,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/agent-pairing/computers/{computerId}":                                     "account.read",
 	"POST /api/agent-pairing/computers/{computerId}/disconnect":                         "account.manage",
 	"POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/disconnect": "account.manage",
+	"POST /api/agent-pairing/computers/{computerId}/remove":                             "account.manage",
 	"GET /api/agent-pairing/self":                                                       "run.claim",
 	"POST /api/agent-pairing/self/disconnect":                                           "run.claim",
 
@@ -220,6 +230,13 @@ var RoutePermissions = map[string]string{
 	"GET /api/public/portal/{tenantSlug}/catalog.json":                                "public",
 	"GET /api/public/portal/{tenantSlug}/llms.txt":                                    "public",
 	"GET /api/public/portal/{tenantSlug}/releases":                                    "public",
+	"GET /api/public/portal/{tenantSlug}/roadmap":                                     "public",
+	"GET /api/public/portal/{tenantSlug}/roadmap.json":                                "public",
+	"GET /portal/{tenantSlug}":                                                        "public",
+	"GET /portal/{tenantSlug}/catalog.json":                                           "public",
+	"GET /portal/{tenantSlug}/llms.txt":                                               "public",
+	"GET /portal/{tenantSlug}/roadmap":                                                "public",
+	"GET /portal/{tenantSlug}/roadmap.json":                                           "public",
 	"GET /api/public/quotes/{publicTenant}/{token}":                                   "public",
 	"GET /api/public/quotes/{publicTenant}/{token}/pdf":                               "public",
 	"GET /api/quote-profiles":                                                         "quotes.read",
@@ -262,6 +279,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/work-orders":                                                                      "work_orders.read",
 	"GET /api/work-orders/{workOrderId}":                                                        "work_orders.read",
 	"PATCH /api/agent-accounts/{accountId}":                                                     "account.manage",
+	"POST /api/agent-accounts/{accountId}/archive":                                              "account.manage", // Person-only Remove (AEON-402).
 	"PATCH /api/attachments/{id}":                                                               "attachments.write",
 	"PATCH /api/crm/contacts/{contactId}":                                                       "crm.write",
 	"PATCH /api/crm/organisations/{organisationId}":                                             "crm.write",
@@ -414,6 +432,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/roles":                                                                           "roles.manage",
 	"POST /api/runs/{runId}/claim":                                                              "run.claim",
 	"POST /api/runs/{runId}/capacity-override":                                                  "run.create", // Person-only, queued managed run; handler checks work-order edit access.
+	"POST /api/runs/{runId}/cancel":                                                             "run.create", // Person-only, queued run; handler checks work-order edit access (AEON-402).
 	"POST /api/runs/{runId}/telemetry":                                                          "run.telemetry",
 	"POST /api/stage-handoffs":                                                                  "stage_handoffs.write",
 	"POST /api/stage-handoffs/{handoffId}/classic-batch-alias":                                  "stage_handoffs.decide",
@@ -459,6 +478,14 @@ var RoutePermissions = map[string]string{
 func PermissionForPattern(pattern string) (string, bool) {
 	permission, ok := RoutePermissions[pattern]
 	return permission, ok
+}
+
+// PatternIsPublic reports whether the router's matched pattern is a public
+// declaration. Session refresh and the authentication gate use this and not
+// the request URL: the router accepts other spellings of the same pattern.
+func PatternIsPublic(pattern string) bool {
+	declaration, ok := PermissionForPattern(pattern)
+	return ok && declaration == PublicRoute
 }
 
 // RequirePattern denies missing declarations. A public declaration leaves the

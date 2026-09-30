@@ -9,7 +9,8 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
 const [, , sdkPath, claudePath, workspace] = process.argv;
-const MAX_INPUT_FRAME_BYTES = 2 * 1024 * 1024;
+// Rules and prompts can expand sixfold when JSON-escaped by the Go sender.
+const MAX_INPUT_FRAME_BYTES = 8 * 1024 * 1024;
 const MAX_PROMPT_BYTES = 256 * 1024;
 const MAX_STEER_BYTES = 64 * 1024;
 const MAX_PENDING_STEERS = 256;
@@ -179,7 +180,7 @@ try {
   process.exit(1);
 }
 if ((start?.capabilities !== undefined && (!Array.isArray(start.capabilities) || start.capabilities.some(c => typeof c !== "string"))) ||
-    (start?.rules !== undefined && (typeof start.rules !== "string" || Buffer.byteLength(start.rules) > 64000)) ||
+    (start?.rules !== undefined && (typeof start.rules !== "string" || Buffer.byteLength(start.rules) > 512000)) ||
     (start?.max_turns !== undefined && (!Number.isSafeInteger(start.max_turns) || start.max_turns < 0)) ||
     (start?.max_tokens !== undefined && (!Number.isSafeInteger(start.max_tokens) || start.max_tokens < 0)) ||
     start?.op !== "start" || typeof start.prompt !== "string" || start.prompt.length === 0 ||
@@ -313,7 +314,7 @@ try {
   const physicalWorkspace = realpathSync(workspace);
   if (!isAbsolute(workspace) || physicalWorkspace !== workspace) throw new Error("workspace is not physical");
   const { query } = await import(pathToFileURL(sdkPath));
-  const verification = start.purpose === "pairing_verification";
+  const verification = start.purpose === "pairing_verification" || start.read_only_review === true;
   if (verification && start.tools != null) throw new Error("verification cannot have tools");
   const toolBinding = start.tools ?? undefined;
   if (toolBinding !== undefined &&
@@ -400,7 +401,7 @@ const handleControlLine = (line) => {
     let fatal = false;
     let failureReason = "control_failed";
     try {
-      if (start.purpose === "pairing_verification" && request.op !== "stop") {
+      if ((start.purpose === "pairing_verification" || start.read_only_review === true) && request.op !== "stop") {
         fail("app_server_protocol", correlationID, "verification_control_forbidden");
         return;
       }
@@ -579,8 +580,15 @@ try {
         break;
       }
       emit({ kind: "turn_completed" });
-      if (start.purpose === "pairing_verification") {
+      if (start.purpose === "pairing_verification" || start.read_only_review === true) {
         verificationSucceeded = message.subtype === "success" && message.is_error !== true;
+        if (start.read_only_review === true && verificationSucceeded) {
+          if (typeof message.result !== "string" || Buffer.byteLength(message.result) > 65536) {
+            verificationSucceeded = false;
+          } else {
+            emit({ kind: "review_result", answer: message.result });
+          }
+        }
         controlInput.close(); input.close(); queryHandle.close();
         break;
       }

@@ -689,8 +689,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/1.5",
-    "sha256": "1c531882bc0519b06f971fc60f1de02a78ec41c9d95d0084aaa2fc3855aa3d2f",
+    "version": "harness-session/1.6",
+    "sha256": "c39230fe9d2eebb0c77412978a367e6da76a851605291cadc441a40e0f27adab",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1253,6 +1253,29 @@
           },
           "vendor_limited": {
             "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "properties": {
+                "code": {
+                  "enum": [
+                    "missing_progress",
+                    "missing_eta",
+                    "ticket_without_estimate"
+                  ],
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "hint"
+              ],
+              "type": "object"
+            },
+            "type": "array"
           },
           "watch": {
             "properties": {
@@ -1892,6 +1915,29 @@
           },
           "vendor_limited": {
             "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "properties": {
+                "code": {
+                  "enum": [
+                    "missing_progress",
+                    "missing_eta",
+                    "ticket_without_estimate"
+                  ],
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "hint"
+              ],
+              "type": "object"
+            },
+            "type": "array"
           },
           "watch": {
             "properties": {

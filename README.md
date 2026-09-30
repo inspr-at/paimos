@@ -32,6 +32,22 @@ then request a new deployment. Journey contract `journey/1.2` adds the optional
 `next_action.renewal_action`; clients must use it when present. Existing action
 keys and reporter major versions remain unchanged.
 
+Native intake drafts accept an optional Aithema `extensions` map and the
+original review snapshot as `document_bytes` alongside the required native
+projection fields. Aeon extracts extensions from the single confirmed,
+unbound item and stores both fields as immutable text, preserving evidence and
+JSON spelling; idempotent retries must keep the bytes unchanged. Aithema owns
+registry/schema validation and its canonical 16 KiB instance / 64 KiB map
+limits. Aeon's intake request cap remains 1 MiB, including JSON escaping and
+projection overhead. Drafts, accepted briefs, requirements and their generated
+tickets show each namespace/version in a neutral Extension data disclosure.
+`GET /api/projects/{projectId}/intake?node_id=UUID` returns only the accepted
+drafts for that node or the requirement that generated its ticket, with empty
+sources/turns and the same `intake.read` permission. This additive native API
+does not implement Aithema's snapshot-only plugin protocol or change Aithema's
+separate `pending_op.payload` limit (AIT-89); the adapter integration remains
+tracked by AEON-360.
+
 Wide project headers can show an ambient ticket graph (Display → Graph in
 project header). It uses a tilted 3D cloud with an optional elliptic force bias,
 fits the densest 85% of nodes by height, and fades out inside the empty space
@@ -122,7 +138,13 @@ and shared-inbox obligations stay outside the session thread.
 ### Agent work estimates
 
 Estimates are expected **agent hours until ready for review**, separate from a live ETA.
-Set them with `aeon issue create ... --estimate 2h`, `aeon issue update AEON-317 --estimate 90m`, or `aeon issue estimate AEON-317 --hours 1.5 --source agent`. Decimal hours and minutes are accepted; values must be greater than zero and at most 200 hours. The optional source asserts the authenticated principal kind; the server stamps the principal and time. Creating a ticket or task as an agent without an estimate returns a warning.
+Set them with `aeon issue create ... --estimate-hours 2`, `aeon issue update AEON-317 --estimate-hours 1.5`, or `aeon issue estimate AEON-317 --hours 1.5 --source agent`. `--estimate 90m` remains an alias. Decimal hours and minutes are accepted; values must be greater than zero and at most 200 hours. The optional source asserts the authenticated principal kind; the server stamps the principal and time. Creating a ticket or task without an estimate prints a non-blocking warning. API callers can PATCH `/api/nodes/{id}` with `{"estimate_hours":2}` to change just the hours, or null to clear them; other fields survive. Do not combine this property with a replacement `fields` document.
+
+`aeon harness run-heartbeat --status-file .agent-status.json` reads `pct`, `remaining_min` and `note` on every beat. Bound workers send the percent and a ready ETA anchored to the file's modification time plus the remaining minutes, including zero. An unchanged file's ETA can become overdue; after 30 minutes without an update, the CLI warns `stale_progress`. Minutes must be finite numbers from 0 to 524160 (364 days); ETAs outside the server's allowed window are omitted. Workers with `--worktree` default to that worktree's `.agent-status.json`; coordinators read a file only with an explicit `--status-file` and retain their separate live-ETA reporting. Missing, malformed or refused status files never stop the loop. If the server rejects status-file estimates, the CLI retries the heartbeat without those fields. Status reads retain the credential, symlink and hard-link fence.
+
+Heartbeat responses carry non-blocking `warnings`: a working worker gets `missing_progress` after three accepted beats without a fresh percent, a working session with a bound `ticket_node_id` gets `missing_eta` for its role's absent ETA, and a visible bound ticket/task without valid hours gets `ticket_without_estimate`. Unbound workers and coordinators have no missing-ETA warning or UI hint. Warning-query failures are logged and return an empty array without rolling back the heartbeat. Both heartbeat commands print each code to stderr at most once per ten minutes, with receipts retained across reporter restarts. Run-heartbeat uses its private state directory; one-shot heartbeats use private 0700 directories under `~/.aeon`, including when the lease comes from stdin.
+
+Harness status and heartbeat declare `Aeon-Contract: harness-session/1.6`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing fields and required payloads are unchanged.
 
 Agent drafts show `est.` until a person or a working agent bound to the ticket confirms or changes them. Resubmitting the hours through the estimate command confirms them; provenance is recorded again. The ticket's Estimate control also edits or clears the value. Epics show the sum of direct, visible, open ticket/task children, with estimated-child coverage in the tooltip; nested tasks are not counted twice. The Estimate sort keeps empty values last in either direction. Imported points remain visible as points, not converted to hours.
 
@@ -134,6 +156,29 @@ aeon issue estimate --missing --project AEON --from-file plan.json --apply
 ```
 
 Both modes validate every plan entry and project membership before any write. Apply uses the agent identity, skips work already estimated and checks each node's revision. A concurrent change stops the plan; earlier successful writes remain applied and a rerun skips them. There are no server-side model calls.
+
+## Independent commit reviews
+
+The ticket panel's **Cross-family review** section requests a review of a repository and two full commit hashes. A completed managed builder run also requests one automatically when its daemon reports a produced commit range and its key already permits `work_orders.write` and `run.create`. The reviewer receives the ticket snapshot, acceptance criteria and exact bounded diff through the existing managed-run queue. This slice never merges.
+
+Review work orders have immutable author, reviewer, repository and range bindings. The registry's `review-gate` profiles provide model/version pins; eligible strong or frontier profiles require `xhigh`, exclude the author family, and follow Codex → Grok → Claude. Only qualified adapters with tools, hooks, plugins and inherited settings disabled can launch a review. Today that means the Claude bridge or a qualified native Grok enrollment on arm64 macOS; unsupported adapters, unavailable accounts, exhausted capacity and missing approvals remain visible fallback reasons. Legacy daemons cannot receive or claim review runs. The daemon uses scratch space outside the repository and supplies a bounded text diff without credential paths or known credential forms. Binary or oversized changes require another review path; they cannot pass this gate.
+
+Review context is built in a private, temporary bare Git repository. Only the
+sealed base and head objects are fetched from the workspace through a transport
+view with helper-owned metadata; workspace configuration, hooks, attributes,
+grafts and replacement refs are excluded. Ancestry follows raw commit parent
+headers, and the diff compares the two sealed trees (`base..head`) with renames,
+external diff commands and text conversion disabled. Submodules show gitlink
+hashes only; sensitive paths are refused before reading the patch. Missing or
+invalid objects, incomplete ancestry, ambiguous duplicate packed HEAD records,
+a walk beyond 4096 commits or a context build beyond 30 seconds fail closed.
+Git output is capped at 192 KiB while the subprocess output is copied; an
+oversized patch fails before it can grow the daemon's buffer past that cap.
+Scratch repositories are removed on success and error.
+
+Each finding uses `FINDING: <critical|high|medium|low> <relative-file>:<line> <message>`. The final line must be exactly `VERDICT: ok` or `VERDICT: changes`. Only a completed run with vendor-reported model evidence and a valid, independent `ok` opens the gate. Missing output, malformed verdicts, cancellation and unavailable routes leave it closed. Findings, elapsed time and vendor-reported cost appear on the ticket; unreported cost is omitted. Repeated request IDs safely replay the same binding; a changed range requires a new request.
+
+Optional GitHub status reporting is host-owned. Configure all of `AEON_REVIEW_APP_ID`, `AEON_REVIEW_INSTALLATION_ID`, `AEON_REVIEW_APP_KEY_FILE` (absolute physical path to a private RSA file, mode 0600), `AEON_REVIEW_APP_TENANT_ID` and `AEON_REVIEW_APP_REPOSITORY` (`owner/repo`). The installation token is narrowed to that single repository, with `statuses:write` and `pull_requests:read` only. Specify the PR number when requesting a review. Reporting checks its exact base and head before posting `aeon/review`, retries failures and revokes temporary tokens. A moved PR cannot receive an approval for its new head from an old review. The repository owner must separately make `aeon/review` a required branch-protection status and restrict its source to this App; Aeon does not change protection rules. Without configuration, local reviews continue normally. See [GitHub commit statuses](https://docs.github.com/en/rest/commits/statuses) for repository-side enforcement.
 
 ## Lead handover and short review/fix jobs
 
@@ -466,30 +511,48 @@ role, named agent, task. The highest matching identity wins; identical-rank
 ambiguity fails closed. No natural-language conflict guesses are made. Expiry is
 checked on every request. The complete rendered body must fit the workspace
 budget (12,000 UTF-8 bytes by default); publication over that budget returns 422.
-Admins can set up to 64,000 bytes in the rules budget editor once all clients
-active in the tenant over the last seven days report support. Missing reports,
-reports under 12,000, stopped/archived older generations and an empty inventory
-retain the 12,000-byte ceiling. The editor lists up to 50 blocking hosts,
-harnesses and reported versions, and counts any further clients.
-CLI and agentd send optional `max_session_file_bytes` and `rules_client_version`
-on registration and every heartbeat. The number is that harness's default read
-limit: Codex stops at `project_doc_max_bytes` (32,768 bytes of combined
-`AGENTS.md`); the other harnesses report 64,000. Omission resets support to the
-legacy limit, so rolling a client back closes the gate. These are request-only fields;
-PHAROS/JANUS reporter response contracts and pins are unchanged.
+Admins can set 2,000–500,000 bytes in the rules budget editor, with optional
+layer caps from 500 bytes to the total. Older clients never block a save;
+out-of-range totals return the stable `400 invalid_budget` error. Lowering a
+budget below published rules still fails with 422. The editor estimates tokens
+at full budget (bytes ÷ 4), adds nonblocking guidance above 64 KB and 128 KB,
+and offers a collapsible English/German Tip for keeping the kernel small.
 
-Rules requests report `X-Aeon-Max-Session-File-Bytes` (2,000–64,000; omission
+CLI and agentd send optional `max_session_file_bytes` and `rules_client_version`
+on registration and every heartbeat. The transport ceiling is 512,000 bytes,
+separate from the 500,000-byte workspace budget. General Codex reports remain
+32,768 bytes, its default combined project-instruction limit; other harnesses
+report 512,000. Fresh Aeon app-server launches supplied with rules set
+`project_doc_max_bytes` to the greater of the delivered byte size and 32,768,
+preserving the default allowance for the repository's `AGENTS.md` chain.
+The delivered rules go separately into ephemeral developer instructions,
+without changing account config or repository files. Manually launched Codex
+sessions keep their honest default report. See the
+[official configuration reference](https://developers.openai.com/codex/config-reference/).
+Omission resets support to the legacy 12,000-byte limit after a downgrade.
+These are request-only fields; PHAROS/JANUS session responses stay unchanged.
+
+Rules requests report `X-Aeon-Max-Session-File-Bytes` (2,000–512,000; omission
 means 12,000). Managed delivery also respects its registered capability.
-When a valid publication is larger than that limit, delivery retains all locked
-rules, then adds whole rules in precedence/identity order as space allows, with
-an explicit compatibility note in the file. Legacy cuts also fit the old 512-KiB
-cache envelope, with 16 KiB reserved for its wrapper. The body digest, receipt
-and served manifest describe the actual cut. If locked rules plus the note cannot fit,
-delivery fails closed with an upgrade message; it never drops a locked rule.
-Upgraded CLI, managed delivery, Claude bridge and caches accept 64,000-byte
-files. The bounded cache envelope allows 32 MiB for repeated text, metadata and
-worst-case JSON escaping. Roll out the server before upgraded reporting clients;
-raise the workspace budget only after the editor's gate clears.
+Delivery fits within the lesser of the workspace budget and client limit,
+retaining all locked rules before adding whole normal rules in this fixed
+priority: company, project, person, agent role, named agent, task; identity
+ascending within each priority. A compatibility note names any cut. Legacy
+cuts also fit the old 512-KiB cache envelope, reserving 16 KiB for the wrapper.
+The body digest, receipt and served manifest describe the actual cut. If
+locked rules plus the note cannot fit, delivery fails closed with an upgrade
+message; it never drops a locked rule. Whole rules may leave unused bytes.
+The admin editor shows each recent client's delivery allowance
+`min(budget, reported limit)` and marks smaller allowances as truncated. The
+historical `blocking_clients` field now carries this inventory, grouped by
+host/harness/version/limit over seven days, bounded to 50 plus a remainder
+count, including stopped/archived generations. Readers without workspace
+`settings.manage` never receive tenant-wide host/version details. The product
+ceiling is always 500,000, including an empty inventory.
+Upgraded CLI, managed delivery, Claude bridge and caches accept 512,000-byte
+files. The cache envelope remains bounded at 32 MiB; publication store caps
+remain 2,000 rules and 2 MiB. Roll out migration 1042 and the server before
+upgraded reporting clients.
 An applicable published locked company floor is required.
 
 `paimos session start --rules-preview` is an opt-in JSON preview. Use `--project`
@@ -699,6 +762,40 @@ sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 `/tmp/aeon-p05-shots/`. Screenshots and browser test output are not committed.
 
 Licence: AGPL-3.0-only.
+
+### Pairing readiness and diagnostics
+
+`aeon-agentd status` reads the last atomic setup snapshot and live daemon status
+without taking `setup.lock`, reconciling enrollment, or performing cleanup.
+Use `pair`/`setup` to resume setup and `disconnect` to resume cleanup. Approved
+but unbound harnesses name the required `add-harness` command. Account checks
+report a 60-second bound from daemon start for each initial account, or from
+that account being added or unblocked by repin; refreshing unchanged accounts
+does not extend the wait. Capacity capture reports a 10-second bound.
+Unsupported or incomplete verification fails with `verification_unavailable`
+and a bounded cause, independently of account probing. Connect-only approval
+creates no verification, and a later approval cancels older queued verification
+on that same computer without interrupting claimed work.
+
+New pairing-owned macOS launchd services write diagnostics to
+`~/Library/Logs/aeon-agentd/{stdout,stderr}.log` in a private `0700` directory.
+Existing receipt-bound service definitions remain owned and unchanged; logging
+is added when a new service is installed. Managed Nix/Home Manager services
+retain their configuration ownership.
+
+The paired daemon writes bounded `agentd polling diagnostic` lines to stderr
+when the set of causes changes, then at most one reminder per cause every
+15 minutes while the set persists. A healthy poll clears the set, so a recurring
+cause is logged immediately. Multiple accounts sharing a cause produce one line:
+`reason=probe_failed` records an account readiness failure (a failed probe/report
+or a retained ownership/reporting block);
+`reason=probe_timeout` confirms an account exhausted its own pending probe wait;
+`reason=queue_unavailable` confirms `Queued()` returned an error before probing;
+`reason=dispatch_not_allowed` confirms a dispatch fence, fence-read failure or
+daemon shutdown prevented polling or an account probe. Correlate these lines
+with read-only `aeon-agentd status --json` for the affected account. Queue errors
+can therefore explain a subsequent probe timeout; the timeout alone does not
+identify the underlying cause. Raw errors and private bindings are not logged.
 
 ### Paired daemon socket paths
 
@@ -989,6 +1086,82 @@ text)** at the local prompt, or pass `--status-only` (no transcript needed), to
 report status without reading or sharing conversation text. Missing or unsafe
 transcripts never silently select status-only.
 
+On macOS, normal Terminal and Ghostty tabs and SSH terminals work with a
+root-owned `login` or `sshd-session` leader; tmux also remains supported.
+Ancestry and session-leader checks use kernel PID, parent, UID, start time,
+session and TTY metadata without reading ancestor paths. The helper must have
+a TTY and belong to the target's user. Neither process may be an ancestor of
+the other, and ancestor UIDs must be that user or root. The complete process
+graph is rechecked for PID reuse and reparenting on confirmation and polls.
+The target still requires its full physical folder and image validation.
+On Linux, ancestry uses the same metadata-only read: `/proc/<pid>/stat` and
+the uid of the `/proc/<pid>` directory. Root-owned `sshd`, `su` and `sudo`
+ancestors are acceptable. The selected target still requires its executable
+and working directory.
+Those checks are defence in depth. A program running as the same user can open
+another terminal and request the review. On a Mac that can use Touch ID, attach
+approval asks for it by default until the person saves a choice. People without
+Touch ID, Linux, and a Mac with no graphical login keep approval in Aeon.
+Saving Mac confirmation turns watches off where Touch ID cannot run. SSH to a
+Mac that can show Touch ID prompts on that Mac's screen.
+Run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-ancestry-mutations.py`
+on macOS to verify that the negative ancestry regressions catch removed guards.
+
+Claude and Codex are identified from the kernel-observed running image,
+so an exec wrapper or a vendor auto-update does not require re-pairing. On macOS,
+the daemon verifies the running PID against Apple's certificate chain, the
+Developer ID Application markers, and the built-in vendor Team ID and CLI
+signing identifier on preview, confirmation and every poll. A vendor file
+renamed over a foreign running binary cannot confer that identity. A Claude
+process is refused (`harness_identity_unsupported`) when any NUL-terminated
+string after the executable path — an argument, an environment entry, or an
+apple-vector string — is a non-blank `BUN_*` assignment other than
+`BUN_INSTALL`. The signed executable can run other JavaScript from those
+variables and still keep the vendor signature. Unset them and attach again.
+`NODE_*` assignments stay allowed. When the kernel omits the environment, or
+the string area cannot be parsed, Claude is refused or reported unavailable,
+because a missing or unreadable environment is not evidence that every `BUN_*`
+variable is unset. Codex is identified from its signature alone, and the daemon
+leaves its procargs unread. This environment check is a best-effort deterrent.
+`KERN_PROCARGS2` copies the process's own rewritable string area; only the
+argument count comes from the kernel. Code running in the process can rewrite
+that area before attach, including a NUL that ends the string list early.
+Reading the environment as it was at exec needs Endpoint Security, which
+requires root and an entitlement, and is out of scope. The person's approval
+remains the real gate. Cursor
+attach is refused on macOS until a signed cursor-agent CLI exists;
+Cursor.app's signature is not a harness identity.
+Legacy Claude and Codex wrapper pairings work after upgrading and
+restarting agentd. Unsigned Claude and Codex images are refused on macOS,
+including when run through Rosetta. Linux uses a local installation
+root plus owner recorded at pairing or by `repin --harness claude`,
+`add-harness --harness codex` or `add-harness --harness cursor`; restart agentd
+after recording a fallback identity. Unknown layouts retain only the approved
+exact-file pin. Pairing retains recorded roots after removal of an old version,
+bound to the same pairing and account. A recorded owner and root must match even
+when the running image still has the old exact path.
+The daemon does not interpret or execute wrappers to discover an install root.
+Every image and ancestor must satisfy the existing ownership and permission
+rules, and confirmation and polls recheck the image. Local HTTP 409 diagnostics
+include `harness_identity_mismatch`, `harness_executable_unsafe`,
+`harness_image_changed`, `harness_identity_unavailable` or
+`harness_identity_unsupported` with a fixed repair, retry or unsupported-harness
+hint; the attach client displays them. Signature checks run outside the manager
+lock. Startup drops only fallback identities that cannot be re-derived from
+the approved installation; signed images and other harnesses remain available.
+Refresh validates new fallback identities against their approved installations.
+
+Identity regressions cover release-13 wrapper pairing upgrades, native exec
+chains, vendor updates, Linux root fallback and its repair, unsigned Rosetta
+image refusals, signature failures, writable installations, real
+running-process rename-over attacks,
+verification timeouts and concurrent detach, and local 409 diagnostics.
+On macOS, run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-identity-mutations.py`
+to remove each guard temporarily and require a failing regression; the script
+rejects build failures as evidence and restores each source file. Real codesign
+checks also probe running installed vendor binaries; a harness with no running
+process is reported as skipped, while fixture signature checks still run.
+
 Review the kernel-observed process, physical folder and chosen mode, type `WATCH`
 or `ATTACH` as shown, then enter its nine-digit code under **Agents → Attach
 session** on the paired instance. The approval screen shows the selected mode.
@@ -1002,14 +1175,22 @@ Conversation watching shares only new turns after activation with people
 explicitly granted `harness.watch` in the project. Status-only (`snapshot.mode=lease`)
 opens no transcript, rejects conversation text and has no conversation viewer.
 The project permission remains off for all built-in roles and is never implied
-by `harness.read` or `nodes.read`. Both attach modes require protocol 2. An older
-daemon connecting to a newer server still registers and keeps serving work; its
-attach requests receive HTTP 409 `update_agentd` and cannot create a watch or
-lease. The released older terminal helper shows `local lifecycle request rejected`
+by `harness.read` or `nodes.read`. Both attach modes require protocol 2 and
+`local_consent_proof_version=2`, negotiated at startup registration. A
+protocol-less older daemon still registers and keeps serving work; its attach
+requests receive HTTP 409 `update_agentd` and cannot create a watch or lease.
+An AEON-460 protocol-2 daemon with an omitted or v1 proof version is refused at
+registration with HTTP 409 `update_agentd` and “upgrade paimos-agentd” guidance,
+before approval or Touch ID; ordinary work continues with attachment disabled.
+The released older terminal helper shows `local lifecycle request rejected`
 (the daemon's local refusal is `paired instance refused attach`), rather than
-the server's update message. Update agentd, restart it and give fresh approval.
+the server's update message. Upgrade `paimos-agentd`, restart it and give fresh
+approval. Existing pairing capabilities and Enclave keys remain valid; the proof
+format upgrade does not require re-pairing. The updated daemon requires the
+server's v2 acknowledgement and refuses missing or unknown proof versions.
 A newer daemon connecting to an older server receives HTTP 400 on attach
-registration because that server rejects the unknown `attach_protocol` field.
+registration because that server rejects an unknown `attach_protocol` or
+`local_consent_proof_version` field.
 The daemon logs the server's refusal, disables attach and keeps serving work
 and local control. An attach attempt through that daemon shows
 `local lifecycle request rejected`. After updating the server, restart agentd
@@ -1030,7 +1211,9 @@ can attach. It also runs the real serve loop through registration refusals,
 checks that work polling and local control continue with attach disabled, and
 restarts against an updated server to recover attach. Server regressions verify
 that protocol-less registrations keep daemon identity usable while every attach
-operation requires an update, even if later requests claim protocol 2.
+operation requires an update, even if later requests claim protocol 2. Consent
+proof regressions reject v1 and unknown versions before approval, reject a v1
+signature, and accept v2 using the unchanged browser-pinned pairing key.
 `TestAttachModesProtectionMatrix` checks consent, mode tampering and terminal
 states in both modes, sending text on refused watch polls. Early text at pending,
 discovery, local-confirmation and activation stages detaches without a session.
@@ -1038,7 +1221,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/1.5`:
+The reporter contract is `harness-session/1.6`:
 existing state values stay intact; optional `watch.process_state` carries a
 confirmed exit. The existing default-off permission and code-attempt-cap tests
 remain in `internal/agentpairing/watch_test.go`.

@@ -39,6 +39,8 @@ type Server struct {
 	// Brand is the product's names from AEON_BRAND_FILE (brand.Load at startup);
 	// nil serves the embedded brand.json.
 	Brand *brand.Brand
+	// Codename names a release version (AEON-430); nil, or "", serves no name.
+	Codename func(version string) string
 
 	// serving is set when the process is in http.Server.Serve.
 	// draining is set on SIGTERM before Shutdown. Readiness is serving and
@@ -117,11 +119,16 @@ func (s *Server) build() {
 	// every method with 410 and the new location, without auth and without data.
 	root.Handle("/from-classic/api/", commonMiddleware(http.HandlerFunc(handleClassicAPIGone)))
 	// Exact files only. A /portal/ subtree would take the Vue catalog page off the SPA.
+	// The catalog and roadmap HTML patterns are the public declarations for those pages.
+	spa := commonMiddleware(spaHandler(s.Web, s.brand()))
 	if publicMounted {
 		root.Handle("GET /portal/{tenantSlug}/llms.txt", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/catalog.json", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/roadmap.json", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/roadmap", spa)
+		root.Handle("GET /portal/{tenantSlug}", spa)
 	}
-	root.Handle("/", commonMiddleware(spaHandler(s.Web, s.brand())))
+	root.Handle("/", spa)
 	s.handler = root
 }
 

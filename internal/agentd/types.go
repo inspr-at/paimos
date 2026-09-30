@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
@@ -41,6 +42,7 @@ var (
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
+	ReadOnlyReview            bool   `json:"read_only_review,omitempty"`
 	RetryOfRunID              string `json:"retry_of_run_id"`
 	CapacityHandoff           bool   `json:"capacity_handoff,omitempty"`
 	Purpose                   string `json:"purpose,omitempty"`
@@ -67,6 +69,7 @@ func (r Run) requestedAccount() string {
 }
 
 type Profile struct {
+	Family  string `json:"family"`
 	ID      string `json:"id"`
 	Harness string `json:"harness"`
 	Model   string `json:"model"`
@@ -118,11 +121,13 @@ type HarnessDelivery struct {
 }
 
 type WorkOrder struct {
-	NodeID             string          `json:"node_id"`
-	Status             string          `json:"status"`
-	Revision           int64           `json:"revision"`
-	Criteria           []WorkCriterion `json:"criteria"`
-	MaxDurationSeconds *int64          `json:"max_duration_seconds"`
+	Kind               string              `json:"kind"`
+	Review             *reviewgate.Binding `json:"review,omitempty"`
+	NodeID             string              `json:"node_id"`
+	Status             string              `json:"status"`
+	Revision           int64               `json:"revision"`
+	Criteria           []WorkCriterion     `json:"criteria"`
+	MaxDurationSeconds *int64              `json:"max_duration_seconds"`
 }
 
 type WorkCriterion struct {
@@ -134,21 +139,22 @@ type WorkCriterion struct {
 // Telemetry carries content-free, nonnegative deltas. TurnCountDelta is one
 // accepted user turn; token and cost deltas come from vendor usage reports.
 type Telemetry struct {
-	LimitWindow            string      `json:"limit_window,omitempty"`
-	LimitResetsAt          *time.Time  `json:"limit_resets_at,omitempty"`
-	Sequence               int64       `json:"sequence"`
-	Kind                   string      `json:"kind"`
-	Status                 string      `json:"status,omitempty"`
-	InputTokensDelta       int64       `json:"input_tokens_delta,omitempty"`
-	OutputTokensDelta      int64       `json:"output_tokens_delta,omitempty"`
-	CachedInputTokensDelta int64       `json:"cached_input_tokens_delta,omitempty"`
-	ReasoningTokensDelta   int64       `json:"reasoning_tokens_delta,omitempty"`
-	CostMicrosDelta        int64       `json:"cost_micros_delta,omitempty"`
-	TurnCountDelta         int64       `json:"turn_count_delta,omitempty"`
-	EffectiveModel         string      `json:"effective_model,omitempty"`
-	ModelEvidence          string      `json:"model_evidence,omitempty"`
-	ErrorCode              string      `json:"error_code,omitempty"`
-	GitCommits             []GitCommit `json:"git_commits,omitempty"`
+	ReviewRange            *reviewgate.CommitRange `json:"review_range,omitempty"`
+	LimitWindow            string                  `json:"limit_window,omitempty"`
+	LimitResetsAt          *time.Time              `json:"limit_resets_at,omitempty"`
+	Sequence               int64                   `json:"sequence"`
+	Kind                   string                  `json:"kind"`
+	Status                 string                  `json:"status,omitempty"`
+	InputTokensDelta       int64                   `json:"input_tokens_delta,omitempty"`
+	OutputTokensDelta      int64                   `json:"output_tokens_delta,omitempty"`
+	CachedInputTokensDelta int64                   `json:"cached_input_tokens_delta,omitempty"`
+	ReasoningTokensDelta   int64                   `json:"reasoning_tokens_delta,omitempty"`
+	CostMicrosDelta        int64                   `json:"cost_micros_delta,omitempty"`
+	TurnCountDelta         int64                   `json:"turn_count_delta,omitempty"`
+	EffectiveModel         string                  `json:"effective_model,omitempty"`
+	ModelEvidence          string                  `json:"model_evidence,omitempty"`
+	ErrorCode              string                  `json:"error_code,omitempty"`
+	GitCommits             []GitCommit             `json:"git_commits,omitempty"`
 }
 
 // GitCommit is one commit introduced after the run's launch revision.

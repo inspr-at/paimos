@@ -272,7 +272,9 @@ func (p *wireProcess) sendContext(ctx context.Context, v any) error {
 	if err != nil {
 		return err
 	}
-	if len(data) > 2<<20 {
+	// A 512 KB rules file plus a bounded prompt can expand sixfold in JSON.
+	// Keep transport bounded while allowing the decoded launch limits.
+	if len(data) > 8<<20 {
 		return errors.New("adapter request exceeds bound")
 	}
 	p.writeMu.Lock()

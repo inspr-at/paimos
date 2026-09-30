@@ -103,7 +103,7 @@ test.describe('release history before the version has loaded', () => {
       const release = await holdReleaseApis(page)
       await page.goto('/', { waitUntil: 'domcontentloaded' })
       await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-      const pill = page.locator('footer.app-footer .version-pill')
+      const pill = page.locator('footer.app-footer .footer-name')
       await expect(pill).toHaveAccessibleName('Release history')
       await pill.click()
       await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
@@ -122,7 +122,9 @@ test.describe('release history before the version has loaded', () => {
       await expect(page).toHaveURL(new RegExp(`[?&]releases=${version.replace(/\./g, '\\.')}(?:&|#|$)`))
       await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveCount(1)
       await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveAttribute('id', `release-${version.replace(/\./g, '-')}`)
-      await expect(history.getByRole('heading', { level: 2, name: version })).toBeVisible()
+      // The running release's heading is its marketing name (AEON-430).
+      const name = state.history.releases.find(r => r.version === version)!.codename!
+      await expect(history.getByRole('heading', { level: 2, name })).toBeVisible()
       if (width < 600) await expect(history.locator('.shell')).toHaveClass(/show-detail/)
     })
 
@@ -147,7 +149,7 @@ test.describe('release history before the version has loaded', () => {
     const release = await holdReleaseApis(page, route => route.fulfill({ status: 503, json: { error: 'The release history could not be loaded.' } }))
     await page.goto('/', { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-    const pill = page.locator('footer.app-footer .version-pill')
+    const pill = page.locator('footer.app-footer .footer-name')
     await expect(pill).toHaveAccessibleName('Release history')
     await pill.click()
     await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
@@ -170,7 +172,7 @@ test.describe('release history before the version has loaded', () => {
     }))
     await page.goto('/', { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-    const pill = page.locator('footer.app-footer .version-pill')
+    const pill = page.locator('footer.app-footer .footer-name')
     await expect(pill).toHaveAccessibleName('Release history')
     await pill.click()
     await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
@@ -191,7 +193,7 @@ test.describe('gear menu', () => {
     const items = await names(page, 'App and workspace')
     expect(items.slice(0, 7)).toEqual(['Workspace settings', 'Connect your machine', 'Agent keys', 'Inbox hooks', expect.stringMatching(/^Release history/), 'Keyboard shortcuts', 'Help & feedback'])
     await expect(menu.getByRole('group', { name: 'Agents' }).getByRole('menuitem')).toHaveCount(3)
-    expect(items[7]).toMatch(/^System status, Operational, version \d{12}\.\d+\.\d+, deployed 50 min ago$/)
+    expect(items[7]).toMatch(/^System status, Operational, (?:[A-Z][a-z]+ [A-Z][a-z]+, )?version \d{12}\.\d+\.\d+, deployed 50 min ago$/)
     await expect(menu.getByRole('menuitem', { name: 'Workspace settings' })).toBeFocused()
     await menu.getByRole('menuitem', { name: 'Workspace settings' }).click()
     await expect(page).toHaveURL('/settings/workspace')
@@ -346,7 +348,8 @@ test.describe('avatar menu', () => {
     const menu = await openAccount(page)
     await expect(menu.getByRole('menuitem', { name: 'Personal settings' })).toBeFocused()
     await expect(menu.getByRole('menuitemradio', { name: 'System' })).toHaveAttribute('aria-checked', 'true')
-    await expect(menu.getByRole('menuitem', { name: /^\d{12}\.0\.0 · .* — Copy version$/ })).toBeVisible()
+    // The running release is named (AEON-430); its version is one hover away.
+    await expect(menu.getByRole('menuitem', { name: /^\S.*, version \d{12}\.0\.0 — Copy version$/ })).toBeVisible()
     await expect(menu.getByRole('menuitem', { name: 'Release history' })).toBeVisible()
     await expect(menu.getByRole('menuitem', { name: 'Sign out' })).toBeVisible()
     // Workspace things are not here.

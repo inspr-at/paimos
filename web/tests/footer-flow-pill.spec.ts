@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-308: the project flow pill lives in the footer centre and stays put while
-// the page scrolls. It is absent off a project route. The version pill stays put.
+// the page scrolls. It is absent off a project route. The release name (AEON-431, the footer's far left) stays put and stays readable.
 import { mkdirSync } from 'node:fs'
 import { expect, test, type Locator } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
@@ -25,7 +25,6 @@ test('the flow pill stays centred in the footer on project routes only', async (
   await mockWork(page, fixtures())
   await mockJourney(page, journeyWorld('plan'))
   const chip = () => page.locator('footer.app-footer .journey-chip')
-  const version = () => page.locator('footer.app-footer .version-pill')
   const name = () => page.locator('footer.app-footer .footer-name')
 
   await page.setViewportSize({ width: 1600, height: 900 })
@@ -51,16 +50,16 @@ test('the flow pill stays centred in the footer on project routes only', async (
       await page.goto('/p/PHAROS')
       await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
       await expect(chip()).toBeVisible()
-      await expect(version()).toBeVisible()
+      await expect(name()).toBeVisible()
+      // Whatever the pill needs, the release name stays: only the product name steps aside.
+      await expect(name().locator('.release-name')).toBeVisible()
       const chipBox = await box(chip())
-      const versionBox = await box(version())
       const nameBox = await box(name())
       const mainBox = await box(page.locator('#main'))
-      expect(overlaps(chipBox, versionBox), `${width} ${scheme}: pill covers the version`).toBe(false)
-      expect(overlaps(chipBox, nameBox), `${width} ${scheme}: pill covers the wordmark`).toBe(false)
+      expect(overlaps(chipBox, nameBox), `${width} ${scheme}: pill covers the release name`).toBe(false)
       expect(chipBox.y, `${width} ${scheme}: pill overlaps the page`).toBeGreaterThanOrEqual(mainBox.y + mainBox.height - 1)
-      expect(versionBox.x, `${width} ${scheme}: version stays on the right`).toBeGreaterThan(chipBox.x + chipBox.width - 1)
-      expect(nameBox.x, `${width} ${scheme}: wordmark stays on the left`).toBeLessThan(chipBox.x + 1)
+      expect(nameBox.x, `${width} ${scheme}: the name stays on the left`).toBeLessThan(chipBox.x + 1)
+      expect(nameBox.x, `${width} ${scheme}: the name is at the far left`).toBeLessThan(24)
       if (width <= 430) expect(chipBox.height, `${width} ${scheme}: 44px target`).toBeGreaterThanOrEqual(44)
       if (width >= 1000) expect(Math.abs(chipBox.x + chipBox.width / 2 - width / 2), `${width} ${scheme}: page centre`).toBeLessThan(16)
       await page.screenshot({ path: `${OUT}/project-${width}-${scheme}.png` })
@@ -72,7 +71,7 @@ test('the flow pill stays centred in the footer on project routes only', async (
       await expect(page.locator('.app-shell')).not.toHaveClass(/footer-hidden/)
       const scrolled = await box(chip())
       expect(scrolled.y).toBeGreaterThan(height * 0.7)
-      expect(overlaps(scrolled, await box(version()))).toBe(false)
+      expect(overlaps(scrolled, await box(name()))).toBe(false)
       await page.screenshot({ path: `${OUT}/project-${width}-${scheme}-scrolled.png` })
     }
     await page.setViewportSize({ width: scheme === 'light' ? 390 : 1600, height: 812 })
@@ -90,5 +89,5 @@ test('a project with no next step leaves the footer without a flow pill', async 
   await expect(page.locator('tr.ticket-row').first()).toBeVisible()
   await page.waitForTimeout(300)
   await expect(page.locator('.journey-chip')).toHaveCount(0)
-  await expect(page.locator('footer.app-footer .version-pill')).toBeVisible()
+  await expect(page.locator('footer.app-footer .footer-name')).toBeVisible()
 })

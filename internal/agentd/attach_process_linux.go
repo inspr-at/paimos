@@ -45,7 +45,11 @@ func linuxAttachStat(raw []byte) (start string, parent, session int, tty bool, e
 	_, err = strconv.ParseUint(fields[19], 10, 64)
 	return fields[19], parent, session, fields[4] != "0", err
 }
-func observeAttachProcess(pid int) (attachObservation, error) {
+
+// Metadata only: /proc/<pid>/stat and the directory uid. exe and cwd are not
+// readable for another user's process, including root-owned sshd, su and sudo.
+// The /proc uid is the effective uid. Non-dumpable processes show as 0.
+func observeAttachProcessIdentity(pid int) (attachObservation, error) {
 	fail := errors.New("kernel process identity unavailable")
 	root := fmt.Sprintf("/proc/%d", pid)
 	raw, err := os.ReadFile(root + "/stat")
@@ -63,6 +67,31 @@ func observeAttachProcess(pid int) (attachObservation, error) {
 	if unix.Stat(root, &st) != nil {
 		return attachObservation{}, fail
 	}
+	after, err := os.ReadFile(root + "/stat")
+	if os.IsNotExist(err) && errors.Is(unix.Kill(pid, 0), unix.ESRCH) {
+		return attachObservation{}, errAttachExited
+	}
+	if err != nil {
+		return attachObservation{}, fail
+	}
+	again, lastParent, lastSession, lastTTY, statErr := linuxAttachStat(after)
+	if statErr != nil {
+		return attachObservation{}, statErr
+	}
+	var againStat unix.Stat_t
+	if again != start || parent != lastParent || session != lastSession || tty != lastTTY || unix.Stat(root, &againStat) != nil || againStat.Uid != st.Uid {
+		return attachObservation{}, fail
+	}
+	return attachObservation{Process: attachwatch.Process{PID: pid, UID: int(st.Uid), Started: start}, Parent: parent, Session: session, TTY: tty}, nil
+}
+
+func observeAttachProcess(pid int) (attachObservation, error) {
+	fail := errors.New("kernel process identity unavailable")
+	first, err := observeAttachProcessIdentity(pid)
+	if err != nil {
+		return attachObservation{}, err
+	}
+	root := fmt.Sprintf("/proc/%d", pid)
 	exe, err := os.Readlink(root + "/exe")
 	if err != nil {
 		return attachObservation{}, fail
@@ -71,13 +100,13 @@ func observeAttachProcess(pid int) (attachObservation, error) {
 	if err != nil || strings.HasSuffix(exe, " (deleted)") || strings.HasSuffix(cwd, " (deleted)") {
 		return attachObservation{}, fail
 	}
-	after, err := os.ReadFile(root + "/stat")
+	last, err := observeAttachProcessIdentity(pid)
 	if err != nil {
+		return attachObservation{}, err
+	}
+	if last != first {
 		return attachObservation{}, fail
 	}
-	again, lastParent, lastSession, lastTTY, err := linuxAttachStat(after)
-	if err != nil || again != start || parent != lastParent || session != lastSession || tty != lastTTY {
-		return attachObservation{}, fail
-	}
-	return attachObservation{Process: attachwatch.Process{PID: pid, UID: int(st.Uid), Started: start, Executable: exe, CWD: cwd}, Parent: parent, Session: session, TTY: tty}, nil
+	first.Executable, first.CWD = exe, cwd
+	return first, nil
 }

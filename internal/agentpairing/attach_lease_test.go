@@ -2,6 +2,7 @@
 package agentpairing_test
 
 import (
+	"crypto/ecdsa"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -283,29 +284,47 @@ func TestAttachModesProtectionMatrix(t *testing.T) {
 	for _, mode := range []string{"", attachwatch.ModeLease} {
 		for _, protection := range []string{"missing active consent", "changed active consent", "changed activation consent", "premature local confirmation", "strict missing digest", "strict changed digest", "discovery text", "changed cwd", "changed mode", "consumed request", "stopped session"} {
 			t.Run("mode="+mode+"/"+protection, func(t *testing.T) {
-				f, key, in := attachModeFixture(t, mode)
+				var f *fixture
+				var key string
+				var in attachwatch.DeviceRequest
+				var signer *ecdsa.PrivateKey
 				if strings.HasPrefix(protection, "strict ") {
+					f, key, in, signer = upgradedWatchFixture(t)
 					setWatchMode(f, attachwatch.ConsentLocalAuth)
 					in.Snapshot.Platform = "darwin"
+					in.Snapshot.Mode = mode
+					if mode == attachwatch.ModeLease {
+						in.Snapshot.Transcript, in.Snapshot.FileID = "", ""
+					}
 					in.Digest = in.Snapshot.Digest()
+				} else {
+					f, key, in = attachModeFixture(t, mode)
 				}
 				v := requestWatch(t, f, key, in)
-				f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200)
+				decodeResult(t, f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200), &v)
 				in.Operation, in.Sequence = "poll", 1
+				if protection == "premature local confirmation" {
+					in.LocalConfirmed = true
+					f.call("POST", "/api/agent-pairing/attach", in, false, key, 403)
+					var sessions int
+					if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM harness_sessions`).Scan(&sessions); err != nil || sessions != 0 {
+						t.Fatal("boolean confirmation granted authority", err)
+					}
+					return
+				}
 				if protection == "discovery text" {
 					in.Text = "must never publish"
 					f.call("POST", "/api/agent-pairing/attach", in, false, key, 400)
-				} else if protection == "changed activation consent" || protection == "premature local confirmation" || strings.HasPrefix(protection, "strict ") {
+				} else if protection == "changed activation consent" || strings.HasPrefix(protection, "strict ") {
 					if mode == "" {
 						in.Text = "must never publish"
 					}
 					if protection == "changed activation consent" || protection == "strict changed digest" {
 						in.ConsentDigest = strings.Repeat("0", 64)
-					} else {
-						in.LocalConfirmed = true
 					}
 					if strings.HasPrefix(protection, "strict ") {
-						in.LocalConfirmed = true
+						in.LocalAuthNonce = v.LocalAuthNonce
+						in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, v.LocalAuthNonce, in.Snapshot)
 					}
 					f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
 				} else {
@@ -370,6 +389,7 @@ func TestAttachModesProtectionMatrix(t *testing.T) {
 					t.Fatal("unsafe request retained authority", err)
 				}
 				in.Text, in.ConsentDigest, in.LocalConfirmed = "", v.ConsentDigest, false
+				in.LocalAuthNonce, in.LocalAuthSignature = "", ""
 				f.call("POST", "/api/agent-pairing/attach", in, false, key, 410)
 			})
 		}
@@ -411,6 +431,7 @@ func TestLegacyAttachRegistrationKeepsDaemonIdentityButGrantsNoAttach(t *testing
 				// A fresh protocol-2 registration is understood by this server and
 				// still needs the complete approval flow before it activates.
 				registration.AttachProtocol, registration.PollKey = attachwatch.Protocol, nonce()
+				registration.LocalConsentProofVersion = attachwatch.LocalConsentProofVersion
 				f.call("POST", "/api/agent-pairing/attach", registration, false, key, 200)
 				in.PollKey, in.Operation = registration.PollKey, "request"
 				activateWatch(t, f, key, &in)
@@ -423,21 +444,34 @@ func TestAttachEarlyTextAlwaysDetaches(t *testing.T) {
 	for _, mode := range []string{"", attachwatch.ModeLease} {
 		for _, stage := range []string{"pending", "discovery", "local confirmation", "activation", "strict activation"} {
 			t.Run("mode="+mode+"/"+stage, func(t *testing.T) {
-				f, key, in := attachModeFixture(t, mode)
+				var f *fixture
+				var key string
+				var in attachwatch.DeviceRequest
+				var signer *ecdsa.PrivateKey
 				if stage == "local confirmation" || stage == "strict activation" {
+					f, key, in, signer = upgradedWatchFixture(t)
 					setWatchMode(f, attachwatch.ConsentLocalAuth)
 					in.Snapshot.Platform = "darwin"
+					in.Snapshot.Mode = mode
+					if mode == attachwatch.ModeLease {
+						in.Snapshot.Transcript, in.Snapshot.FileID = "", ""
+					}
 					in.Digest = in.Snapshot.Digest()
+				} else {
+					f, key, in = attachModeFixture(t, mode)
 				}
 				v := requestWatch(t, f, key, in)
 				if stage != "pending" {
-					f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200)
+					decodeResult(t, f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200), &v)
 					if stage != "discovery" {
 						in.ConsentDigest = v.ConsentDigest
 					}
 				}
 				in.Operation, in.Sequence, in.Text = "poll", 1, "AEON352_EARLY_TEXT_MUST_NOT_PUBLISH"
-				in.LocalConfirmed = stage == "strict activation"
+				if stage == "strict activation" {
+					in.LocalAuthNonce = v.LocalAuthNonce
+					in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, v.LocalAuthNonce, in.Snapshot)
+				}
 				f.call("POST", "/api/agent-pairing/attach", in, false, key, 400)
 				var state string
 				var sessions int
@@ -445,6 +479,7 @@ func TestAttachEarlyTextAlwaysDetaches(t *testing.T) {
 					t.Fatal("early text retained authority or activated a session", err)
 				}
 				in.Text, in.ConsentDigest = "", v.ConsentDigest
+				in.LocalAuthNonce, in.LocalAuthSignature = "", ""
 				f.call("POST", "/api/agent-pairing/attach", in, false, key, 410)
 			})
 		}

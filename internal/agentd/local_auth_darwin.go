@@ -23,7 +23,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/inspr-at/paimos/internal/attachwatch"
+	"github.com/inspr-at/paimos/internal/agentsecurity"
 )
 
 func localAuthInstalledNameAllowed(name string) bool {
@@ -52,19 +52,7 @@ func localAuthSignedByExpectedTeam() bool {
 }
 
 func CurrentLocalAuthCapability() string {
-	if !localAuthSignedByExpectedTeam() {
-		return attachwatch.LocalAuthUnsigned
-	}
-	switch C.aeon_local_auth_capability() {
-	case 0:
-		return attachwatch.LocalAuthAvailable
-	case 2:
-		return attachwatch.LocalAuthNoGUI
-	case 3:
-		return attachwatch.LocalAuthPolicy
-	default:
-		return attachwatch.LocalAuthUnsigned
-	}
+	return agentsecurity.LocalAuthCapability()
 }
 
 func (systemLocalAuthenticator) Confirm(ctx context.Context, reason string) error {

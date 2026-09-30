@@ -356,10 +356,10 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   await setup(page)
   await openAgents(page)
   // A click anywhere on the row that is not a link or button opens the session.
-  // Rows follow urgency: the problem camy sits right above nova.
-  await row(page, session(8)).locator('.c-state').click()
-  await expect(page).toHaveURL(`/agents/${session(8)}`)
-  await expect(panel(page).getByRole('heading', { name: /camy/ })).toBeVisible()
+  // Rows follow urgency, then start time: kite, which needs you and started first, sits right above nova.
+  await row(page, kite).locator('.c-state').click()
+  await expect(page).toHaveURL(`/agents/${kite}`)
+  await expect(panel(page).getByRole('heading', { name: /kite/ })).toBeVisible()
   await panel(page).focus()
   await page.keyboard.press('j')
   await expect(page).toHaveURL(`/agents/${nova}`)

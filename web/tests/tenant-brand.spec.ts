@@ -110,9 +110,9 @@ test('without a brand the header keeps the product mark; the footer names the pr
   await expect(lockup(page).locator('.mark-backing')).toBeVisible()
   await expect(lockup(page)).toHaveAttribute('aria-label', 'PAIMOS AEON home')
   await expect(lockup(page).locator('.tenant-logo')).toHaveCount(0)
-  // An older server has no codename: the name stands alone.
-  await expect(footerName(page)).toHaveText('PAIMOS AEON')
-  await expect(footerName(page).locator('.footer-codename')).toHaveCount(0)
+  await expect(footerName(page).locator('.footer-wordmark')).toHaveText('PAIMOS AEON')
+  // An older server names no release: it reads as its calendar version (AEON-430), never as an invented name.
+  await expect(footerName(page).locator('.rn-name')).toHaveCount(0)
   await footerName(page).click()
   await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
   await expect(page).toHaveURL(new RegExp(`releases=${history.current.replace(/\./g, '\\.')}`))
@@ -122,10 +122,21 @@ test('without a brand the header keeps the product mark; the footer names the pr
 test('the footer shows the release codename at its left edge', async ({ page }) => {
   const history = await setup(page, brandWorld({ codename: 'Amber Aurora' }))
   await page.goto('/')
-  await expect(footerName(page)).toHaveText('PAIMOS AEON·Amber Aurora')
-  await expect(footerName(page)).toHaveAccessibleName('PAIMOS AEON Amber Aurora, release history')
+  await expect(footerName(page).locator('.footer-wordmark')).toHaveText('PAIMOS AEON')
+  await expect(footerName(page).locator('.rn-name')).toHaveText('Amber Aurora')
+  await expect(footerName(page)).toHaveAccessibleName(new RegExp(`^Release history, Amber Aurora, version ${history.current.replace(/\./g, '\\.')}`))
+  // One element: no second version pill on the right, and no release number in its text.
+  await expect(page.locator('footer.app-footer .version-pill')).toHaveCount(0)
+  expect(await footerName(page).innerText()).not.toMatch(/Release \d|\b\d+\.\d+\b/)
   const box = await footerName(page).boundingBox()
   expect(box!.x).toBeLessThan(40)
+  // Hover or focus swaps the name for its calendar version, without moving anything.
+  const stamp = footerName(page).locator('.rn-stamp')
+  await expect(stamp).toHaveCSS('opacity', '0')
+  await footerName(page).hover()
+  await expect(stamp).toHaveCSS('opacity', '1')
+  const hovered = await footerName(page).boundingBox()
+  expect(Math.abs(hovered!.width - box!.width)).toBeLessThanOrEqual(1)
   await footerName(page).click()
   await expect(page).toHaveURL(new RegExp(`releases=${history.current.replace(/\./g, '\\.')}`))
 })

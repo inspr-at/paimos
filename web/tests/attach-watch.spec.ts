@@ -131,6 +131,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await expect(dialog.locator(':scope > dl').getByText(snapshot.transcript, { exact: true })).toBeVisible()
     await expect(dialog.locator(':scope > dl').getByText(snapshot.file_id, { exact: true })).toBeVisible()
     await expect(dialog.getByRole('button', { name: consent_mode === 'local_auth' ? 'Allow and confirm on Mac' : 'Allow live watch' })).toBeVisible()
+    await expect(dialog).not.toContainText('Linux and a headless Mac keep this approval')
     await expect(dialog).toContainText('PDF worker image')
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
     expect((await new AxeBuilder({ page }).include('dialog').analyze()).violations).toEqual([])
@@ -166,8 +167,24 @@ test('strict approval cannot proceed on a Linux daemon', async ({ page }) => {
   await page.getByLabel('Attach code', { exact: true }).fill('123456789')
   await page.getByRole('button', { name: 'Review session' }).click()
   await expect(page.getByRole('dialog')).toContainText('Local confirmation is unavailable on this computer')
+  await expect(page.getByRole('dialog')).not.toContainText('Linux and a headless Mac keep this approval')
   await expect(page.getByRole('button', { name: 'Allow and confirm on Mac' })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Decline', exact: true })).toBeEnabled()
+})
+
+test('an Aeon approval on Linux says that computer keeps this approval', async ({ page }) => {
+  await setup(page)
+  await page.route('**/api/agent-pairing/attach/lookup', route => route.fulfill({ json: {
+    request_id: 'linux-fixture', request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64), consent_mode: 'aeon', state: 'pending', expires_at: new Date(Date.now() + 600_000).toISOString(),
+    snapshot: { platform: 'linux', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Linux workstation', harness: 'codex', transcript: '/home/owner/session.jsonl', file_id: '1:234', process: { pid: 4812, uid: 1000, started: 'fixture', executable: '/usr/bin/codex', cwd: '/home/owner/work' } },
+  } }))
+  await page.route('**/api/nodes/p-pharos', route => route.fulfill({ json: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' } }))
+  await page.route('**/api/nodes/n-2', route => route.fulfill({ json: { id: 'n-2', key: 'PHAROS-12', title: 'PDF worker image' } }))
+  await page.goto('/agents')
+  await page.getByRole('button', { name: 'Attach session', exact: true }).click()
+  await page.getByLabel('Attach code', { exact: true }).fill('123456789')
+  await page.getByRole('button', { name: 'Review session' }).click()
+  await expect(page.getByRole('dialog')).toContainText('This computer keeps approval in AEON.')
 })
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) for (const consent_mode of ['aeon', 'local_auth'] as const) {
@@ -206,6 +223,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await expect(dialog).toContainText('Session status only; no conversation text is read or shared.')
     await expect(dialog.getByText('Status only (no conversation text)', { exact: true })).toBeVisible()
     await expect(dialog.getByText('Watch the conversation', { exact: true })).toHaveCount(0)
+    await expect(dialog).not.toContainText('Linux and a headless Mac keep this approval')
     await expect(dialog).toContainText('Requested by a process on Markus’s MacBook.')
     await expect(dialog.getByText('Transcript', { exact: true })).toHaveCount(0)
     await expect(dialog.getByText('New turns will be visible', { exact: false })).toHaveCount(0)

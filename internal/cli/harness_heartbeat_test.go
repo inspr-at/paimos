@@ -83,6 +83,8 @@ func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *http
 func heartbeatRuntime(t *testing.T, srv *httptest.Server) (*runtime, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	isolate(t)
+	// Session-index maintenance must not touch the operator's real home.
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("AEON_URL", srv.URL)
 	t.Setenv("AEON_API_KEY", testKey)
 	var stdout, stderr bytes.Buffer
@@ -481,7 +483,7 @@ func TestRunHeartbeatCLIOwnerExit(t *testing.T) {
 	if len(reg) != 1 {
 		t.Fatal("missing registration")
 	}
-	if reg[0].body["max_session_file_bytes"] != float64(64000) || reg[0].body["rules_client_version"] == nil {
+	if reg[0].body["max_session_file_bytes"] != float64(rules.MaxBytes) || reg[0].body["rules_client_version"] == nil {
 		t.Fatal("CLI registration lacks capability")
 	}
 	if _, ok := reg[0].body["model"]; ok {
@@ -555,7 +557,7 @@ func TestRunHeartbeatLabelChangeSentOnce(t *testing.T) {
 	}
 	beats := hbWhere(calls, http.MethodPost, "/heartbeat")
 	for _, beat := range beats {
-		if beat.body["max_session_file_bytes"] != float64(64000) || beat.body["rules_client_version"] == nil {
+		if beat.body["max_session_file_bytes"] != float64(rules.MaxBytes) || beat.body["rules_client_version"] == nil {
 			t.Fatal("CLI heartbeat lacks capability")
 		}
 	}

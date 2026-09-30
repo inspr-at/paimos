@@ -2,6 +2,8 @@
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 
 const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 
@@ -84,6 +86,23 @@ const agentsWorld: AgentWorld = {
 }
 const sessionRow = (page: Page, n: number) => page.locator(`[data-row="s:5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}"]`)
 
+for (const role of ['worker', 'coordinator'] as const) {
+  test(`an unbound ${role} has no missing-ETA hint in its row or panel`, async ({ page }) => {
+    await mockWork(page, fixtures(), { admin: true })
+    const data = agentData({ ...agentsWorld })
+    const session = data.sessions[0]!
+    Object.assign(session, { role, ticket_node_id: null, ticket: null, work_order_id: null, run_id: null, eta_ready_at: null, eta_live_at: null, progress_pct: 0, phase: 'working', stopped_at: null })
+    await mockAgents(page, data)
+    await page.goto('/agents')
+    await expect(sessionRow(page, 1)).toBeVisible()
+    await expect(sessionRow(page, 1).locator('.eta-cell')).toHaveCount(0)
+    await page.goto(`/agents/${session.id}`)
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    await expect(panel).toBeVisible()
+    await expect(panel.locator('.now-eta')).toHaveCount(0)
+  })
+}
+
 for (const width of [1600, 1100, 390]) {
   test(`the sessions table carries the bound ticket's estimate without overflowing its columns at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
@@ -100,8 +119,10 @@ for (const width of [1600, 1100, 390]) {
     await expect(sessionRow(page, 3).locator('.eta-cell')).toHaveClass(/stale/)
     await expect(sessionRow(page, 4).locator('.eta-cell')).toHaveClass(/overdue/)
     await expect(sessionRow(page, 4).locator('.eta-cell .when')).toHaveText(/^overdue [45] min$/)
-    // A stopped session no longer speaks for its ticket; one without a report shows nothing.
-    await expect(page.locator('.row .eta-cell')).toHaveCount(3)
+    // Stopped sessions stay empty; working sessions without a time show a quiet hint.
+    await expect(page.locator('.row .eta-cell .when')).toHaveCount(3)
+    await expect(sessionRow(page, 1).locator('.eta-cell')).toHaveText('no ETA')
+    await expect(sessionRow(page, 7).locator('.eta-cell')).toHaveCount(0)
     for (const n of [2, 3, 4]) {
       const fits = await sessionRow(page, n).evaluate(row => [...row.querySelectorAll<HTMLElement>(':scope > [role="cell"]')].every(cell => cell.scrollWidth <= cell.clientWidth + 1)
         && [...row.querySelectorAll<HTMLElement>('.when > .shown')].every(el => el.scrollWidth <= el.clientWidth))
@@ -123,3 +144,30 @@ test('the session panel names the estimate next to the running time', async ({ p
   await expect(eta.locator('.when')).toHaveText(/^~2\d min$/)
   await expect(eta.locator('.pct')).toHaveText('40%')
 })
+
+for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+  test(`missing ETA and estimate hints remain quiet at ${width}px in ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    const data = fixtures()
+    data.preferences.theme = { choice: theme }
+    data.preferences['list:p-pharos'] = { visible: ['key', 'title', 'status', 'estimate', 'updated', 'progress', 'eta'] }
+    data.nodes.find(node => node.key === 'PHAROS-14')!.eta = { has_working_session: true }
+    data.nodes.find(node => node.key === 'PHAROS-13')!.eta = { has_working_session: true, progress_pct: 0 }
+    await mockWork(page, data, { admin: true })
+    await page.goto('/p/PHAROS')
+    await expect(row(page, 'PHAROS-14').locator('.eta-cell')).toHaveText('no ETA')
+    await expect(row(page, 'PHAROS-13').locator('.eta-cell')).toHaveText(/0%\s*no ETA/)
+    await expect(row(page, 'PHAROS-13').locator('.eta-cell')).toHaveAttribute('data-tip', /0% done\nNo ETA reported/)
+    await expect(row(page, 'PHAROS-13').locator('.eta-cell .sr-only')).toContainText('No ETA reported')
+    if (width === 1600) await expect(row(page, 'PHAROS-14').locator('.c-estimate .empty')).toHaveAttribute('data-tip', 'No estimate yet')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+    const shots = process.env.AEON_443_SHOTS
+    if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `tickets-${width}-${theme}.png`), fullPage: true }) }
+    await mockAgents(page, agentData({ ...agentsWorld }))
+    await page.goto('/agents')
+    await expect(sessionRow(page, 1).locator('.eta-cell')).toHaveText('no ETA')
+    await expect(sessionRow(page, 7).locator('.eta-cell')).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+    if (shots) { await sessionRow(page, 1).scrollIntoViewIfNeeded(); await page.screenshot({ path: join(shots, `agents-${width}-${theme}.png`) }) }
+  })
+}

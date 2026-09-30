@@ -28,10 +28,14 @@ type readyBody struct {
 	Status string `json:"status"`
 }
 
+// versionBody carries Codename, the running release's marketing name
+// (AEON-430), which the footer shows instead of the version; absent when the
+// build has none.
 type versionBody struct {
-	Version string      `json:"version"`
-	Scheme  string      `json:"scheme"`
-	Brand   brand.Brand `json:"brand"`
+	Version  string      `json:"version"`
+	Scheme   string      `json:"scheme"`
+	Brand    brand.Brand `json:"brand"`
+	Codename string      `json:"codename,omitempty"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -87,7 +91,11 @@ func (s *Server) pingReady(ctx context.Context) error {
 // handleVersion answers the build's calendar version and the product's names
 // (brand.json, or the deployment's AEON_BRAND_FILE when the server was given one).
 func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {
-	WriteJSON(w, http.StatusOK, versionBody{Version: version.Version, Scheme: version.Scheme, Brand: s.brand()})
+	body := versionBody{Version: version.Version, Scheme: version.Scheme, Brand: s.brand()}
+	if s.Codename != nil {
+		body.Codename = s.Codename(version.Version)
+	}
+	WriteJSON(w, http.StatusOK, body)
 }
 
 // brand is the deployment's brand, else the embedded brand.json.

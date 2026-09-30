@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"time"
 )
 
 // heartbeatHold is the exclusive owner of one private state directory.
@@ -19,6 +20,7 @@ type heartbeatHold struct {
 }
 
 type heartbeatDisk struct {
+	WarningAt             map[string]time.Time    `json:"warning_at,omitempty"`
 	CapacityStarted       bool                    `json:"capacity_started,omitempty"`
 	AppliedModelSequence  int64                   `json:"applied_model_sequence,omitempty"`
 	AppliedRenameSequence int64                   `json:"applied_rename_sequence,omitempty"`
@@ -46,6 +48,7 @@ type heartbeatDisk struct {
 	OwnerStart            string                  `json:"owner_start,omitempty"`
 	BoundWorktree         string                  `json:"bound_worktree,omitempty"`
 	BoundBranch           string                  `json:"bound_branch,omitempty"`
+	BoundTicket           string                  `json:"bound_ticket,omitempty"`
 	StartedUnix           int64                   `json:"started_unix,omitempty"`
 	CommitCursor          string                  `json:"commit_cursor,omitempty"`
 	Terminal              bool                    `json:"terminal,omitempty"`

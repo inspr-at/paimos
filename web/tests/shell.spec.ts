@@ -12,7 +12,7 @@ const projects = [
 ]
 const projectNodes = projects.map(p => ({ id: p.id, key: p.key, title: p.title, body: '', state: p.state, kind_slug: 'project', fields: { classic: { key: p.id === 'p1' ? 'BAKE' : 'CLINIC', description: 'A small studio project.' } } }))
 
-async function mockAPI(page: Page, options: { signedIn?: boolean; auth?: { signedIn: boolean }; devMode?: boolean; version?: string; sessionFailure?: boolean; logoutFailure?: boolean; loginFailure?: boolean } = {}) {
+async function mockAPI(page: Page, options: { signedIn?: boolean; auth?: { signedIn: boolean }; devMode?: boolean; version?: string; codename?: string; sessionFailure?: boolean; logoutFailure?: boolean; loginFailure?: boolean } = {}) {
   let signedIn = options.signedIn ?? true
   const calls: { path: string; method: string; body: string | null }[] = []
   await page.route('**/api/**', async route => {
@@ -24,7 +24,7 @@ async function mockAPI(page: Page, options: { signedIn?: boolean; auth?: { signe
     if (path === '/api/nodes') return route.fulfill({ json: { items: projectNodes, next_cursor: null } })
     if (path === '/api/nodes/tree') return route.fulfill({ json: { items: [], next_cursor: null } })
     if (path === '/api/events/stream') return route.fulfill({ contentType: 'text/event-stream', body: ': heartbeat\n\n' })
-    if (path === '/api/version') return route.fulfill({ json: { version: options.version ?? canonical, scheme: 'inspr-calendar-v2' } })
+    if (path === '/api/version') return route.fulfill({ json: { version: options.version ?? canonical, scheme: 'inspr-calendar-v2', ...(options.codename ? { codename: options.codename } : {}) } })
     if (path === '/api/me') {
       if (options.sessionFailure) return route.fulfill({ status: 503, json: { error: 'Unavailable' } })
       const live = options.auth?.signedIn ?? signedIn
@@ -73,7 +73,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         await expect(page.locator('h1')).toBeVisible()
         // Sign-in's card carries the copyable version; signed in, the footer bar's pill opens the release history.
         if (screen.startsWith('signin')) await expect(page.locator('footer [data-version-view="pretty"]')).toBeVisible()
-        else await expect(page.locator('footer.app-footer .version-pill .calendar-version[role="img"]')).toHaveAttribute('aria-label', versionName)
+        else await expect(page.locator('footer.app-footer .footer-name .calendar-version[role="img"]')).toHaveAttribute('aria-label', versionName)
         await page.evaluate(() => document.fonts.ready)
         await noOverflow(page)
         // Sign-in is a bare page: no header, the card carries brand, version and theme.
@@ -279,6 +279,54 @@ test('version uses six-segment Pretty, keyboard reveal, exact clipboard and one 
   await expect(version).toHaveAttribute('data-copy-state', 'copied')
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(canonical)
   expect(calls.filter(call => call.path === '/api/version')).toHaveLength(1)
+})
+
+// AEON-430: the sign-in card names the release too; the version waits for hover or focus.
+test('sign-in card shows the release name; hover and focus reveal the version, and the name still copies it', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const calls = await mockAPI(page, { signedIn: false, codename: 'Hinged Hangar' })
+  await page.goto('/signin')
+  const copy = page.locator('.card-foot').getByRole('button', { name: `Hinged Hangar, version ${canonical} — Copy version` })
+  await expect(copy).toBeVisible()
+  await expect(copy.locator('.rn-name')).toHaveText('Hinged Hangar')
+  // No calendar version at rest: the name shows, the stamp waits, and the page never draws the number.
+  await expect(copy.locator('.rn-name')).toHaveCSS('opacity', '1')
+  await expect(copy.locator('.rn-stamp')).toHaveCSS('opacity', '0')
+  await expect(page.locator('.card-foot .version-coordinate')).toHaveCount(0)
+  await copy.hover()
+  await expect(copy.locator('.rn-stamp')).toHaveCSS('opacity', '1')
+  await expect(copy.locator('.rn-stamp .calendar-version')).toContainText('26·09·23 12:00')
+  await page.mouse.move(2, 2)
+  await expect(copy.locator('.rn-stamp')).toHaveCSS('opacity', '0')
+  await copy.focus()
+  await page.keyboard.press('Shift+Tab')
+  await page.keyboard.press('Tab')
+  await expect(copy).toBeFocused()
+  await expect(copy.locator('.rn-stamp')).toHaveCSS('opacity', '1')
+  await expect(copy).toHaveAccessibleDescription(versionName)
+  await page.keyboard.press('Enter')
+  await expect(copy).toHaveAttribute('data-copy-state', 'copied')
+  await expect(copy.locator('[role="status"]')).toHaveText('Copied')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(canonical)
+  expect(calls.filter(call => call.path === '/api/version')).toHaveLength(1)
+  // The confirmation passes; focus is still on the name, so the version stays; moving on brings the name back.
+  await expect(copy).not.toHaveAttribute('data-copy-state', /.+/)
+  await expect(copy.locator('.rn-stamp')).toHaveCSS('opacity', '1')
+  await page.keyboard.press('Tab')
+  await expect(copy.locator('.rn-name')).toHaveCSS('opacity', '1')
+})
+
+test('sign-in card: when the clipboard is unavailable the version is offered selected', async ({ page, context }) => {
+  await context.grantPermissions([])
+  await page.addInitScript(() => { Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('denied')) } }); document.execCommand = () => false })
+  await mockAPI(page, { signedIn: false, codename: 'Hinged Hangar' })
+  await page.goto('/signin')
+  const copy = page.locator('.card-foot').getByRole('button', { name: /— Copy version$/ })
+  await copy.click()
+  await expect(copy).toHaveAttribute('data-copy-state', 'failed')
+  await expect(copy.locator('.copy-note')).toHaveText(canonical)
+  await expect(copy.locator('[role="status"]')).toContainText('Copy unavailable')
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(canonical)
 })
 
 test('dev version remains plain text', async ({ page }) => {

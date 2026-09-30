@@ -3,7 +3,7 @@
 // ever drawn; dark mode without a dark logo uses the light one on a plate.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { codenameOf, fitLogo, headerBrand, logoProblem, logoType, publicBrand, safeLogo, shortName } from '../src/lib/tenantBrand.ts'
+import { fitLogo, headerBrand, logoProblem, logoType, publicBrand, safeLogo, shortName } from '../src/lib/tenantBrand.ts'
 
 const LIGHT = { url: '/api/brand/logo/light?v=0123456789abcdef', width: 240, height: 60 }
 const DARK = { url: '/api/brand/logo/dark?v=fedcba9876543210', width: 240, height: 60 }
@@ -52,11 +52,4 @@ test('picked files are typed by their extension when the browser leaves them unt
   assert.equal(logoType({ name: 'logo.gif', type: 'image/gif' }), '')
   assert.equal(logoProblem({ name: 'a.png', type: 'image/png', size: 300 * 1024 }), 'The file is 300 KB; the limit is 256 KB.')
   assert.equal(logoProblem({ name: 'a.png', type: 'image/png', size: 1000 }), '')
-})
-
-test('the codename is optional and plain', () => {
-  assert.equal(codenameOf({ version: '1', codename: ' Amber   Aurora ' }), 'Amber Aurora')
-  assert.equal(codenameOf({ version: '1' }), '')
-  assert.equal(codenameOf({ codename: 42 }), '')
-  assert.equal(codenameOf(null), '')
 })

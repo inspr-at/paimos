@@ -19,8 +19,12 @@ import (
 
 func watchFixture(t *testing.T) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
+	return watchFixtureWithKey(t, "")
+}
+func watchFixtureWithKey(t *testing.T, publicKey string) (*fixture, string, attachwatch.DeviceRequest) {
+	t.Helper()
 	f := newFixture(t)
-	p := f.propose("codex")
+	p := f.proposePlatformKey("darwin", "arm64", publicKey, "codex")
 	f.approve(p, "connect_only")
 	v := f.redeem(p)
 	project, ticket := uuid(t, f.db), uuid(t, f.db)
@@ -39,7 +43,7 @@ func watchFixture(t *testing.T) (*fixture, string, attachwatch.DeviceRequest) {
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	in.PollKey = nonce()
 	in.Digest = in.Snapshot.Digest()
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
 	return f, key, in
 }
 func requestWatch(t *testing.T, f *fixture, key string, in attachwatch.DeviceRequest) attachwatch.View {
@@ -342,7 +346,7 @@ func TestAttachDaemonRestartInvalidatesEveryApproval(t *testing.T) {
 			}
 			newKey := nonce()
 			// A registration with a wrong lifecycle proof must not evict the daemon.
-			registration := attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: nonce(), PollKey: newKey}
+			registration := attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: "register", ComputerID: in.ComputerID, DeviceProof: nonce(), PollKey: newKey}
 			f.call("POST", "/api/agent-pairing/attach", registration, false, key, 403)
 			registration.DeviceProof = in.DeviceProof
 			f.call("POST", "/api/agent-pairing/attach", registration, false, key, 200)

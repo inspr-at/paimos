@@ -283,7 +283,7 @@ test('add harness is labeled from the request, and an agent cannot approve', asy
   await page.getByRole('button', { name: 'Look up code' }).click()
   await expect(page.getByRole('heading', { name: 'Add a harness' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Add harness', exact: true })).toBeDisabled()
-  await expect(page.getByText('Only a signed-in person who can manage accounts can connect this computer.')).toBeVisible()
+  await expect(page.getByText('Only a signed-in person who can manage accounts can connect or deny this computer.')).toBeVisible()
 })
 
 test('the last install choice is remembered in this browser', async ({ page }) => {

@@ -13,8 +13,12 @@ const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON rele
 const options = (page: Page) => page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
 const pill = (page: Page) => page.getByRole('button', { name: /^Release history, version / })
 
+// A release with a marketing name shows the name and reveals its stamp (AEON-430,
+// release-codenames.spec.ts); these are the versions nobody has named, which keep
+// the CalVer3 reveal of the seconds.
 async function setup(page: Page) {
   const history = releaseHistory()
+  for (const release of history.releases) delete release.codename
   await mockWork(page, fixtures())
   await mockReleases(page, history)
   return history

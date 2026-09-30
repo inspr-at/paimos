@@ -17,6 +17,8 @@ import { can } from '../lib/authz'
 import { command, consume, run } from '../lib/commands'
 import { fatal } from '../lib/fatal'
 import { usePoller } from '../lib/usePolledData'
+import { pollDoctrineInbox, resetDoctrineInbox } from '../lib/doctrineInbox'
+import { toast } from '../lib/toast'
 import { placeOf, releaseChordOpen, sequence, visiblePlaces, type PlaceId } from '../lib/places'
 import { SETTINGS_SECTIONS, sectionOf } from '../lib/settings'
 import AppIcon from './AppIcon.vue'
@@ -146,6 +148,21 @@ function chordPointer(event: PointerEvent) {
 function chordFocus(event: FocusEvent) { if (typing(event.target)) disarmChord() }
 // The Agents badge: permission requests and held action requests, checked each minute.
 const needsPoll = usePoller(() => agents.loadNeeds(true), 60_000, { enabled: () => !!session.identity && !agentsPage.value, invalidate: agents.invalidatePolls })
+// The doctrine inbox (AEON-444): people who can send a proposal to git see a dot
+// while proposals wait, and one toast per new proposal.
+const doctrineReviewer = () => session.identity?.principal.kind === 'person' && can('rules.write')
+async function doctrinePoll() {
+  const principal = session.identity?.principal.id
+  if (!principal || !doctrineReviewer()) return
+  const text = await pollDoctrineInbox(principal)
+  if (text) toast(text, { key: 'doctrine-inbox', timeout: 9000, action: { label: 'Review', run: () => void router.push('/settings/agent-rules#doctrine-inbox') } })
+}
+const doctrinePoller = usePoller(doctrinePoll, 30_000, { enabled: () => !!session.identity && doctrineReviewer() })
+// Permissions arrive after the identity: the first read follows them.
+watch(() => [session.identity?.principal.id, doctrineReviewer()] as const, ([id, reviewer], before) => {
+  if (id !== before?.[0] || !reviewer) resetDoctrineInbox()
+  if (id && reviewer) void doctrinePoll().catch(() => { /* the next tick retries */ })
+}, { immediate: true })
 watch(() => session.identity?.principal.id, id => {
   if (!id) { business.reset(); customers.reset(); quotes.reset(); profile.reset(); return }
   void profile.load(true)
@@ -195,8 +212,9 @@ onMounted(() => {
   window.addEventListener('keydown', shortcut, true); window.addEventListener('keydown', placeKeys, true)
   window.addEventListener('pointerdown', chordPointer, true); window.addEventListener('focusin', chordFocus, true)
   needsPoll.start()
+  doctrinePoller.start()
 })
-onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', shortcut, true); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop() })
+onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', shortcut, true); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop(); doctrinePoller.stop() })
 </script>
 
 <template>

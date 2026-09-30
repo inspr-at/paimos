@@ -21,7 +21,6 @@ import type { TicketEstimate } from './estimates.ts'
 import type { TicketPlanning } from './planning.ts'
 import { rowStore } from './rowStore.ts'
 
-// codename: the running release's name (AEON-430); older servers leave it out.
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand; codename?: string }
 
 export class StaleRequestError extends Error {}

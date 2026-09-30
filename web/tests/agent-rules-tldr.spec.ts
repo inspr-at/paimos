@@ -164,11 +164,11 @@ test('the budget is a workspace setting for people who manage it', async ({ page
   const section = page.getByRole('region', { name: 'Budget' })
   await expect(section).toContainText('12,000 bytes per session file')
   await section.getByRole('button', { name: 'Change' }).click()
-  await expect(section.getByText('2,000 to 12,000')).toBeVisible()
-  for (const value of ['1000', '12001']) {
+  await expect(section.getByText('2,000 to 500,000; default 12,000')).toBeVisible()
+  for (const value of ['1000', '500001']) {
     await section.getByLabel(/^Total/).fill(value)
     await section.getByRole('button', { name: 'Save budget' }).click()
-    await expect(section.getByRole('alert')).toContainText('between 2,000 and 12,000 bytes')
+    await expect(section.getByRole('alert')).toContainText('between 2,000 and 500,000 bytes')
   }
   await section.getByLabel(/^Total/).fill('10000')
   await section.getByLabel(/^Company/).fill('7000')

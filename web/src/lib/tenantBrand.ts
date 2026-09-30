@@ -90,10 +90,3 @@ export function logoProblem(file: { name: string; type: string; size: number }) 
   if (file.size === 0) return 'The file is empty.'
   return ''
 }
-
-// "PAIMOS AEON · Amber Aurora": the codename from /api/version, when the server has one.
-export function codenameOf(version: unknown) {
-  if (!version || typeof version !== 'object') return ''
-  const c = (version as Record<string, unknown>).codename
-  return typeof c === 'string' ? c.replace(/\s+/g, ' ').trim().slice(0, 48) : ''
-}

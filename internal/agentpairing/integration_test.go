@@ -169,6 +169,9 @@ func (f *fixture) propose(harnesses ...string) *proposal {
 	return f.proposePlatform("darwin", "arm64", harnesses...)
 }
 func (f *fixture) proposePlatform(platform, arch string, harnesses ...string) *proposal {
+	return f.proposePlatformKey(platform, arch, "", harnesses...)
+}
+func (f *fixture) proposePlatformKey(platform, arch, publicKey string, harnesses ...string) *proposal {
 	f.t.Helper()
 	p := &proposal{id: uuid(f.t, f.db), device: nonce(), runtime: nonce(), lifecycle: nonce()}
 	accounts := []map[string]string{}
@@ -176,6 +179,9 @@ func (f *fixture) proposePlatform(platform, arch string, harnesses ...string) *p
 		accounts = append(accounts, map[string]string{"account_key": h + "-local", "harness": h, "label": h + " personal test", "model_profile_id": f.profiles[h]})
 	}
 	p.request = map[string]any{"request_id": p.id, "tenant_id": f.tenantID, "device_hash": hash(p.device), "runtime_hash": hash(p.runtime), "lifecycle_hash": hash(p.lifecycle), "computer_name": "Test workstation", "platform": platform, "arch": arch, "workspace_path": "/tmp/pairing-fixture", "capabilities": []string{"managed_runs"}, "accounts": accounts}
+	if publicKey != "" {
+		p.request["local_auth_public_key"] = publicKey
+	}
 	f.submit(p)
 	return p
 }
@@ -797,21 +803,10 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 
 func (f *fixture) twoQualifiedEnrollments() (*proposal, agentpairing.View) {
 	f.t.Helper()
-	p := f.propose("claude")
+	// Both verifications belong to one approval. A later Add harness approval
+	// intentionally supersedes older queued verification (AEON-401).
+	p := f.propose("claude", "grok")
 	f.approve(p, "one_per_harness")
-	v := f.redeem(p)
-	q := &proposal{id: uuid(f.t, f.db), device: nonce(), runtime: p.runtime, lifecycle: p.lifecycle, request: map[string]any{}}
-	for k, x := range p.request {
-		q.request[k] = x
-	}
-	q.request["request_id"] = q.id
-	q.request["device_hash"] = hash(q.device)
-	q.request["existing_computer_id"] = *v.ComputerID
-	q.request["existing_lifecycle_secret"] = p.lifecycle
-	q.request["accounts"] = []map[string]string{{"account_key": "claude-second", "harness": "claude", "label": "Second selected account", "model_profile_id": f.profiles["claude"]}}
-	f.submit(q)
-	f.approve(q, "one_per_harness")
-	f.redeem(q)
 	return p, f.redeem(p)
 }
 

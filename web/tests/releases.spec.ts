@@ -86,7 +86,7 @@ test('the version pill opens the history over the page, and Esc brings the page 
   await expect(options(page).first().getByRole('img', { name: '3 other changes', exact: true })).toHaveAttribute('data-tip', '3 other changes')
   await expect(options(page).first().getByRole('img', { name: '1 feature', exact: true })).toHaveCount(0)
   await expect(options(page).nth(1).getByRole('img', { name: '4 other changes', exact: true })).toBeVisible()
-  await expect(sheet(page).getByRole('heading', { level: 2, name: history.current })).toBeVisible()
+  await expect(sheet(page).getByRole('heading', { level: 2, name: history.releases.find(r => r.version === history.current)!.codename })).toBeVisible()
   await expect(sheet(page)).toContainText('PAIMOS 7 · Release history')
   await expect(sheet(page).getByText(/^Live on this server since /)).toBeVisible()
   await page.keyboard.press('Escape')
@@ -106,6 +106,8 @@ test('deep links open one release, and the address follows the selection', async
   await expect(sheet(page).locator('.detail .headline')).toHaveCount(0)
   await expect(sheet(page).getByText('Historical tag headline')).toHaveCount(0)
   await expect(sheet(page).locator('.detail .tickets')).toContainText('PAI-1057')
+  // AEON-430: its row title is the codename, never the tag message.
+  await expect(options(page).nth(3).locator('.rn-name')).toHaveText(target.codename!)
   await expect(options(page).nth(3).locator('.headline')).toHaveCount(0)
   await page.keyboard.press('k')
   await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
@@ -146,7 +148,7 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await page.keyboard.press('j')
   await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('Enter')
-  await expect(sheet(page).getByRole('heading', { level: 2, name: history.releases[1].version })).toBeFocused()
+  await expect(sheet(page).getByRole('heading', { level: 2, name: history.releases[1].codename })).toBeFocused()
   await page.keyboard.press('e')
   await expect(sheet(page).getByRole('button', { name: /^Evidence/ })).toHaveAttribute('aria-expanded', 'true')
   await page.keyboard.press('?')
@@ -184,11 +186,12 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(compare.locator('.facts')).toContainText('2 releases')
   await expect(compare.locator('.facts')).toContainText('3 tickets')
   await expect(compare.locator('.changes')).toContainText('Other changes')
-  // AEON-305: no tag message outside Evidence; without a theme or benefit a release shows its version and date.
+  // AEON-305: no tag message outside Evidence; without a theme or benefit a
+  // release shows its version and, since AEON-430, its codename.
   const included = compare.getByRole('region', { name: 'Releases in this range' }).getByRole('listitem')
   await expect(included).toHaveCount(2)
   await expect(included).not.toContainText(['Wide lists and columns', 'Retry a busy BEGIN in release acceptance'])
-  await expect(included.locator('.inc-date')).toHaveCount(2)
+  await expect(included.locator('.rn-name')).toHaveText([history.releases[1].codename!, history.releases[3].codename!])
   await compare.getByRole('button', { name: 'Swap' }).click()
   await expect(compare.locator('.facts')).toContainText('2 releases')
   await page.keyboard.press('Escape')
@@ -392,8 +395,10 @@ test('a newer version on the server: a toast offers what is new and a reload', a
   await expect(pill(page)).toHaveAccessibleName(new RegExp(`version ${escaped(history.releases[1].version)}`))
   state.server = history.current
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  // AEON-305: without a theme or benefit the toast names only the version, never the tag message.
-  const toast = page.locator('.toast').filter({ hasText: `PAIMOS AEON was updated to ${history.current}` })
+  // AEON-305: without a theme or benefit the toast names only the release, never the tag message.
+  // AEON-430: by its marketing name, not its version.
+  const newest = history.releases.find(r => r.version === history.current)!
+  const toast = page.locator('.toast').filter({ hasText: `PAIMOS AEON was updated to ${newest.codename}` })
   await expect(toast).not.toContainText('Time entry editing')
   await expect(toast).toBeVisible()
   await expect(toast.getByRole('button', { name: 'Reload' })).toBeVisible()
@@ -403,7 +408,7 @@ test('a newer version on the server: a toast offers what is new and a reload', a
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   const update = sheet(page).getByRole('status').filter({ hasText: 'this page still runs' })
   await expect(update).toBeVisible()
-  await expect(update.locator('.calendar-version').first()).toHaveAttribute('aria-label', versionLabel(history.releases[1].version))
+  await expect(update.locator('.calendar-version').first()).toHaveAttribute('aria-label', versionLabel(history.releases[1].version, false))
   await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
 })
 
@@ -521,7 +526,7 @@ test('release history renders CalVer2 history and CalVer3 versions as six-segmen
   await page.goto('/')
   await pill(page).click()
   await expect(sheet(page)).toBeVisible()
-  const rows = sheet(page).locator('.row-version')
+  const rows = sheet(page).locator('.row .calendar-version')
   await expect(rows.first()).toBeVisible()
   const count = await rows.count()
   expect(count).toBe(history.releases.length)
@@ -533,8 +538,6 @@ test('release history renders CalVer2 history and CalVer3 versions as six-segmen
     expect(drawn).not.toContain('.0.0')
     expect((await row.locator('[data-collapsed="true"]').first().boundingBox())?.width ?? 0).toBe(0)
   }
-  const footer = page.locator('footer.app-footer .pill-version')
-  const width = (await footer.boundingBox())!.width
-  // The loading skeleton (AppFooter .pill-skeleton) matches this rest width.
-  expect(Math.abs(width - 94)).toBeLessThanOrEqual(3)
+  // AEON-430: the footer leads with the marketing name; its version is the hover chip.
+  await expect(page.locator('footer.app-footer .footer-name .rn-name')).toBeVisible()
 })

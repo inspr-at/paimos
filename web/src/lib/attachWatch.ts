@@ -3,7 +3,7 @@ import { api } from './api.ts'
 
 export type WatchConsentMode = 'aeon' | 'local_auth'
 export type LocalAuthCapability = 'available' | 'unsupported' | 'unsigned' | 'no_gui' | 'policy' | 'unreported'
-export interface LocalAuthComputer { computer_id: string; name: string; capability: LocalAuthCapability }
+export interface LocalAuthComputer { computer_id: string; name: string; capability: LocalAuthCapability; pairing_upgraded?: boolean }
 export const metadataOnlyAttach = (snapshot: { mode?: string }) => snapshot.mode === 'lease'
 export interface AttachStatus { mode?: 'lease'; process_state?: 'confirmed_exited'; request_id: string; owner_id: string; state: 'active' | 'detached' | 'unreachable'; lease_until: string | null }
 export interface AttachReview {

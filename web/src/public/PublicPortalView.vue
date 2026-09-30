@@ -48,6 +48,7 @@ interface PortalDocument {
   comparison?: PortalComparison[]
   pace?: PortalPace
   release_history?: boolean
+  roadmap?: boolean
 }
 
 const statusLabel: Record<string, string> = {
@@ -293,8 +294,9 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
         <p class="eyebrow">Product portal</p>
         <h1>{{ doc.product.title }}</h1>
         <p v-if="doc.product.summary" class="lead">{{ doc.product.summary }}</p>
-        <nav v-if="doc.release_history" class="jumps" aria-label="Portal">
-          <router-link class="jump" :to="`/portal/${tenantSlug}/releases`">Releases</router-link>
+        <nav v-if="doc.release_history || doc.roadmap" class="jumps" aria-label="Portal">
+          <router-link v-if="doc.roadmap" class="jump" :to="`/portal/${tenantSlug}/roadmap`">What's coming</router-link>
+          <router-link v-if="doc.release_history" class="jump" :to="`/portal/${tenantSlug}/releases`">Releases</router-link>
         </nav>
 
         <section v-if="paceFigures.length" class="block" aria-labelledby="pace-heading">

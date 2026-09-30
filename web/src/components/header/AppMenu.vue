@@ -6,6 +6,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../../lib/api'
+import { codenameOf, releaseAria, rememberCodename } from '../../lib/codenames'
 import { can, myWorkspaceRole } from '../../lib/authz'
 import { run } from '../../lib/commands'
 import { feedbackRecipient, sendFeedback, type FeedbackRecipient } from '../../lib/feedback'
@@ -15,8 +16,9 @@ import { absoluteTime, relativeTime } from '../../lib/work'
 import { useReleases } from '../../stores/releases'
 import { useSession } from '../../stores/session'
 import { useVersion } from '../../stores/version'
+import { doctrineInbox } from '../../lib/doctrineInbox'
 import AppIcon from '../AppIcon.vue'
-import CalendarVersion from '../CalendarVersion.vue'
+import ReleaseName from '../ReleaseName.vue'
 import KeyCap from '../KeyCap.vue'
 import HeaderMenu from './HeaderMenu.vue'
 
@@ -36,6 +38,9 @@ const keys = computed(() => can('keys.manage'))
 const connect = computed(() => session.identity?.principal.kind !== 'agent' && !!myWorkspaceRole())
 const canFeedback = computed(() => can('inbox.send'))
 const newCount = computed(() => releases.newCount)
+// Doctrine proposals waiting for a person (AEON-444): a dot on the gear, and a row.
+const doctrineWaiting = computed(() => doctrineInbox.pending)
+const triggerLabel = computed(() => doctrineWaiting.value ? `App and workspace, ${doctrineWaiting.value} doctrine ${doctrineWaiting.value === 1 ? 'proposal waits' : 'proposals wait'}` : 'App and workspace')
 
 // ---------- System status: read fresh on every open and every re-check ----------
 // Health, readiness and the running version come straight from the server (never
@@ -50,7 +55,7 @@ async function check() {
   now.value = Date.now()
   const health = api('/health').then(r => r.ok ? r.json() as Promise<SystemProbe['health']> : { status: 'error', db: 'down' }).catch(() => null)
   const ready = api('/ready').then(r => r.ok).catch(() => null)
-  const running = api('/version').then(r => r.ok ? r.json() as Promise<{ version?: unknown }> : null).then(body => typeof body?.version === 'string' ? body.version : '').catch(() => '')
+  const running = api('/version').then(r => r.ok ? r.json() as Promise<{ version?: unknown; codename?: unknown }> : null).then(body => { if (typeof body?.version === 'string' && typeof body.codename === 'string') rememberCodename(body.version, body.codename); return typeof body?.version === 'string' ? body.version : '' }).catch(() => '')
   void releases.load(true)
   const answer = { health: await health, ready: await ready }
   const at = await running
@@ -67,7 +72,7 @@ let ticker: ReturnType<typeof setInterval> | undefined
 const deployed = computed(() => liveSince.value ? `deployed ${relativeTime(liveSince.value, { long: true, now: now.value })}` : '')
 // The row itself says it short; its name and tip say it in full.
 const deployedShort = computed(() => liveSince.value ? `deployed ${relativeTime(liveSince.value, { now: now.value })}` : '')
-const statusName = computed(() => ['System status', status.value.label, status.value.detail, running.value && `version ${running.value}`, deployed.value].filter(Boolean).join(', '))
+const statusName = computed(() => ['System status', status.value.label, status.value.detail, running.value && releaseAria(codenameOf(running.value), running.value), deployed.value].filter(Boolean).join(', '))
 
 function opened() {
   pane.value = 'menu'
@@ -154,11 +159,17 @@ function edited() { sendKey = ''; sent.value = '' }
 <template>
   <HeaderMenu
     v-if="session.identity" id="app-menu" ref="menu" :role="pane === 'menu' ? 'menu' : 'dialog'" :label="pane === 'menu' ? 'App and workspace' : PANES[pane]"
-    trigger-label="App and workspace" tip="Settings and help" class="app-menu" @open="opened" @close="closed"
+    :trigger-label="triggerLabel" tip="Settings and help" class="app-menu" @open="opened" @close="closed"
   >
-    <template #trigger><AppIcon name="gear" /></template>
+    <template #trigger><AppIcon name="gear" /><i v-if="doctrineWaiting" class="trigger-dot" aria-hidden="true" /></template>
 
     <template v-if="pane === 'menu'">
+      <template v-if="doctrineWaiting">
+        <button class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/settings/agent-rules#doctrine-inbox')">
+          <AppIcon name="book" /><span class="hm-text">Doctrine proposals</span><span class="hm-end waiting-count">{{ doctrineWaiting }}</span>
+        </button>
+        <hr class="hm-sep" role="separator" />
+      </template>
       <template v-if="admin">
         <button class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/settings/workspace')"><AppIcon name="gear" /><span class="hm-text">Workspace settings</span></button>
         <hr class="hm-sep" role="separator" />
@@ -191,7 +202,7 @@ function edited() { sendKey = ''; sent.value = '' }
           <span class="status-top"><span class="hm-text">System status</span><span class="status-state" :class="status.state"><i class="dot" aria-hidden="true" />{{ status.label }}</span></span>
           <span v-if="status.detail" class="status-sub">{{ status.detail }}</span>
           <span v-else-if="running || deployed" class="status-sub">
-            <CalendarVersion v-if="running" :value="running" class="status-version" />
+            <ReleaseName v-if="running" :version="running" class="status-version" />
             <span v-if="running && deployed" aria-hidden="true">·</span>
             <time v-if="deployed" class="deployed" :datetime="liveSince" :title="`Deployed ${absoluteTime(liveSince)}`">{{ deployedShort }}</time>
           </span>
@@ -230,7 +241,7 @@ function edited() { sendKey = ''; sent.value = '' }
       <section v-if="latest" class="news" aria-labelledby="news-title">
         <div class="news-head">
           <h3 id="news-title" class="eyebrow">What’s new</h3>
-          <CalendarVersion :value="latest.version" class="news-version" />
+          <ReleaseName :version="latest.version" :name="latest.codename" class="news-version" />
         </div>
         <ul v-if="benefits.length" class="benefits">
           <li v-for="note in benefits" :key="note.pill + note.benefit"><strong v-if="note.pill">{{ note.pill }}</strong><span v-if="note.benefit">{{ note.benefit }}</span></li>
@@ -263,6 +274,10 @@ function edited() { sendKey = ''; sent.value = '' }
 
 <style scoped>
 .new-count { color: var(--gold-ink); font-weight: 600; }
+.waiting-count { color: var(--ink-2); font-weight: 650; font-variant-numeric: tabular-nums; }
+/* A neutral dot on the gear while doctrine proposals wait (AEON-444). */
+.app-menu :deep(.hm-trigger) { position: relative; }
+.trigger-dot { position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-2); box-shadow: 0 0 0 2px var(--surface-raised); pointer-events: none; }
 .hm-end :deep(.keycap) { margin: 0; }
 /* System status: a row with a second, quieter line. */
 .status-item { align-items: flex-start; padding-top: 9px; padding-bottom: 9px; }
@@ -279,6 +294,7 @@ function edited() { sendKey = ''; sent.value = '' }
 .status-state.down .dot { background: var(--danger); }
 .status-sub { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; }
 .status-version { flex-shrink: 0; font-size: 11.5px; color: var(--ink-2); }
+.status-version :deep(.rn-name), .news-version :deep(.rn-name) { font-weight: 600; }
 .deployed { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* Help & feedback: a pane in the same surface, one step back to the menu. */
 .help-pane { display: grid; gap: 4px; }

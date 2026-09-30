@@ -47,6 +47,10 @@ const SPECS: Spec[] = [
   ] },
 ]
 
+// The server names each release from its sequence (AEON-430); these are the
+// frozen names of sequences 1-6 (internal/releasehistory/codename/testdata/golden.txt).
+export const CODENAMES = ['Avid Axle', 'Blue Bot', 'Cyan Cell', 'Dual Dawn', 'Even Era', 'Full Fin']
+
 export function releaseHistory(now = Date.now(), repository = 'inspr-at/aeon') {
   let sequence = SPECS.filter(s => !s.reserved).length
   const releases = SPECS.map(spec => {
@@ -62,9 +66,10 @@ export function releaseHistory(now = Date.now(), repository = 'inspr-at/aeon') {
         evidence: { source_commit: '', source_url: '', image: null, ci: null, release_run: null, release_url: '', unavailable: ['This version was reserved but never published.'] } }
     }
     const published = spec.evidence === 'no-release' ? null : new Date(at + 150_000).toISOString()
+    const seq = sequence--
     const run = (name: string, id: number, conclusion = 'success') => ({ name, url: `https://github.com/${repository}/actions/runs/${id}`, status: 'completed', conclusion })
     return {
-      version, tag: `v${version}`, release_channel: 'stable', release_sequence: sequence--, state: 'published', reserved_at: iso, tagged_at: iso, published_at: published,
+      version, tag: `v${version}`, release_channel: 'stable', release_sequence: seq, codename: CODENAMES[seq - 1], state: 'published', reserved_at: iso, tagged_at: iso, published_at: published,
       headline: spec.headline, tickets: spec.tickets, changes, changes_omitted: 0,
       evidence: {
         source_commit: commit, source_url: `https://github.com/${repository}/commit/${commit}`,
@@ -85,8 +90,9 @@ export type History = ReturnType<typeof releaseHistory>
 
 // Serves the history and the running version; registered after the page's other
 // mocks so these routes win. `server` can later move to a newer version.
-export async function mockReleases(page: Page, history: History | Record<string, unknown>, options: { running?: string; brand?: Record<string, string> } = {}) {
-  const state = { server: options.running ?? (history as History).current, requests: 0 }
+// state.codename: the name /api/version gives the running release (AEON-430), changeable mid-test.
+export async function mockReleases(page: Page, history: History | Record<string, unknown>, options: { running?: string; brand?: Record<string, string>; codename?: string } = {}) {
+  const state = { server: options.running ?? (history as History).current, codename: options.codename, requests: 0 }
   await page.route('**/api/releases**', route => {
     const one = /\/api\/releases\/v?([^/?]+)$/.exec(new URL(route.request().url()).pathname)
     if (one) {
@@ -96,7 +102,7 @@ export async function mockReleases(page: Page, history: History | Record<string,
     state.requests++
     return route.fulfill({ json: history })
   })
-  await page.route('**/api/version', route => route.fulfill({ json: { version: state.server, scheme: 'inspr-calendar-v2', ...(options.brand ? { brand: options.brand } : {}) } }))
+  await page.route('**/api/version', route => route.fulfill({ json: { version: state.server, scheme: 'inspr-calendar-v2', ...(state.codename ? { codename: state.codename } : {}), ...(options.brand ? { brand: options.brand } : {}) } }))
   return state
 }
 
