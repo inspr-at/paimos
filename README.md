@@ -147,6 +147,17 @@ The ticket panel's **Cross-family review** section requests a review of a reposi
 
 Review work orders have immutable author, reviewer, repository and range bindings. The registry's `review-gate` profiles provide model/version pins; eligible strong or frontier profiles require `xhigh`, exclude the author family, and follow Codex → Grok → Claude. Only qualified adapters with tools, hooks, plugins and inherited settings disabled can launch a review. Today that means the Claude bridge or a qualified native Grok enrollment on arm64 macOS; unsupported adapters, unavailable accounts, exhausted capacity and missing approvals remain visible fallback reasons. Legacy daemons cannot receive or claim review runs. The daemon uses scratch space outside the repository and supplies a bounded text diff without credential paths or known credential forms. Binary or oversized changes require another review path; they cannot pass this gate.
 
+Review context is built in a private, temporary bare Git repository. Only the
+sealed base and head objects are fetched from the workspace through a transport
+view with helper-owned metadata; workspace configuration, hooks, attributes,
+grafts and replacement refs are excluded. Ancestry follows raw commit parent
+headers, and the diff compares the two sealed trees (`base..head`) with renames,
+external diff commands and text conversion disabled. Submodules show gitlink
+hashes only; sensitive paths are refused before reading the patch. Missing or
+invalid objects, incomplete ancestry, a walk beyond 4096 commits or a context
+build beyond 30 seconds fail closed. Scratch repositories are removed on success
+and error.
+
 Each finding uses `FINDING: <critical|high|medium|low> <relative-file>:<line> <message>`. The final line must be exactly `VERDICT: ok` or `VERDICT: changes`. Only a completed run with vendor-reported model evidence and a valid, independent `ok` opens the gate. Missing output, malformed verdicts, cancellation and unavailable routes leave it closed. Findings, elapsed time and vendor-reported cost appear on the ticket; unreported cost is omitted. Repeated request IDs safely replay the same binding; a changed range requires a new request.
 
 Optional GitHub status reporting is host-owned. Configure all of `AEON_REVIEW_APP_ID`, `AEON_REVIEW_INSTALLATION_ID`, `AEON_REVIEW_APP_KEY_FILE` (absolute physical path to a private RSA file, mode 0600), `AEON_REVIEW_APP_TENANT_ID` and `AEON_REVIEW_APP_REPOSITORY` (`owner/repo`). The installation token is narrowed to that single repository, with `statuses:write` and `pull_requests:read` only. Specify the PR number when requesting a review. Reporting checks its exact base and head before posting `aeon/review`, retries failures and revokes temporary tokens. A moved PR cannot receive an approval for its new head from an old review. The repository owner must separately make `aeon/review` a required branch-protection status and restrict its source to this App; Aeon does not change protection rules. Without configuration, local reviews continue normally. See [GitHub commit statuses](https://docs.github.com/en/rest/commits/statuses) for repository-side enforcement.
