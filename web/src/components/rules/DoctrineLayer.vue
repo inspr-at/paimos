@@ -4,12 +4,14 @@ import { computed, onMounted, ref } from 'vue'
 import BizIcon from '../business/BizIcon.vue'
 import DoctrineFileCard from './DoctrineFileCard.vue'
 import DoctrineSourceDialog from './DoctrineSourceDialog.vue'
+import DoctrineProposalDialog from './DoctrineProposalDialog.vue'
+import DoctrineProposals from './DoctrineProposals.vue'
 import { can } from '../../lib/authz'
 import { toast } from '../../lib/toast'
 import { useSession } from '../../stores/session'
 import {
   DoctrineError, doctrineMessage, getDoctrine, indexDoctrineSource, pinLine, repoName, stateLine,
-  type DoctrineLayer, type DoctrineSource,
+  type DoctrineLayer, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineProposal,
 } from '../../lib/doctrine'
 
 // The INSPR doctrine, read-only, as git holds it at the pinned release. Agents
@@ -21,6 +23,10 @@ const layer = ref<DoctrineLayer | null>(null)
 const loadError = ref('')
 const editing = ref<{ source?: DoctrineSource } | null>(null)
 const reading = ref('')
+const proposing = ref<{ source: DoctrineSource; file: DoctrineFile; rule: DoctrineRule }>()
+const latestProposal = ref<DoctrineProposal>()
+const canPropose = computed(() => !!layer.value?.proposals_enabled && can('rules.write'))
+function proposed(proposal: DoctrineProposal) { latestProposal.value = proposal; proposing.value = undefined; toast('Pull request created') }
 
 const canManage = computed(() => session.identity?.principal.kind !== 'agent' && can('settings.manage'))
 const sources = computed(() => layer.value?.sources ?? [])
@@ -66,7 +72,7 @@ onMounted(load)
       <span class="mark" aria-hidden="true"><BizIcon name="book" :size="15" /></span>
       <div class="titles">
         <h3 id="doctrine-title">Doctrine</h3>
-        <p>Read-only, as git holds it. Agents get it through their harness files.</p>
+        <p>Pinned in git. Agents get it through their harness files.</p>
       </div>
       <button v-if="canManage && sources.length" type="button" class="btn sm ghost" @click="editing = {}"><BizIcon name="plus" :size="14" />Link repository</button>
     </header>
@@ -99,10 +105,12 @@ onMounted(load)
         <button v-if="canManage" type="button" class="link" :disabled="!!reading" @click="reread(source)">{{ reading === source.id ? 'Reading…' : 'Try again' }}</button>
       </p>
       <div v-if="source.files.length" class="files">
-        <DoctrineFileCard v-for="file in source.files" :key="file.path" :file="file" />
+        <DoctrineFileCard v-for="file in source.files" :key="file.path" :file="file" :can-propose="canPropose && ['inspr-at/inspr-modules', 'inspr-at/inspr-doctrine-private'].includes(source.repository)" @propose="rule => proposing = { source, file, rule }" />
       </div>
     </div>
 
+    <DoctrineProposals v-if="layer?.proposals_enabled" :latest="latestProposal" />
+    <DoctrineProposalDialog v-if="proposing" v-bind="proposing" @close="proposing = undefined" @saved="proposed" />
     <DoctrineSourceDialog v-if="editing" :source="editing.source" @close="editing = null" @saved="saved" />
   </section>
 </template>

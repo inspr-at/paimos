@@ -16,14 +16,15 @@ import (
 // fakeGitHub serves the three REST reads the indexer uses from fixture
 // commits. A repository listed in private answers 404 without the token.
 type fakeGitHub struct {
-	mu      sync.Mutex
-	commits map[string]map[string]string // repo@sha -> path -> content
-	refs    map[string]string            // repo@ref -> sha
-	private map[string]bool
-	token   string
-	auth    []string // Authorization headers seen, in order
-	calls   int
-	down    bool
+	mu       sync.Mutex
+	commits  map[string]map[string]string // repo@sha -> path -> content
+	refs     map[string]string            // repo@ref -> sha
+	private  map[string]bool
+	token    string
+	auth     []string // Authorization headers seen, in order
+	calls    int
+	down     bool
+	failBlob string // repository path whose blob read fails closed
 }
 
 func newFakeGitHub(t *testing.T) (*fakeGitHub, *http.Client) {
@@ -101,8 +102,12 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if !strings.HasPrefix(key, repo+"@") {
 				continue
 			}
-			for _, content := range files {
+			for path, content := range files {
 				if BlobSHA([]byte(content)) == parts[4] {
+					if f.failBlob != "" && path == f.failBlob {
+						w.WriteHeader(http.StatusBadGateway)
+						return
+					}
 					enc := base64.StdEncoding.EncodeToString([]byte(content))
 					var wrapped strings.Builder
 					for len(enc) > 60 {

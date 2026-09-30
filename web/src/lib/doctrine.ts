@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The INSPR doctrine as a git-backed, read-only rule layer (AEON-318). Git is
 // the source of truth: Aeon shows each configured repository at its pinned
-// commit and never edits it. Every rule's text is the exact bytes of its lines
-// at that commit and links there; TL;DRs are read from git, never written here.
+// commit. Edits become PRs; the pinned view stays unchanged. Every rule's text
+// is the exact bytes of its lines at that commit and links there; TL;DRs live
+// in git alongside the rule.
 import { api, RequestFailure } from './api.ts'
 import { sessionGone } from './authz.ts'
 
@@ -58,7 +59,7 @@ export interface DoctrineSource {
   files: DoctrineFile[]
   skipped: DoctrineSkip[]
 }
-export interface DoctrineLayer { sources: DoctrineSource[] }
+export interface DoctrineLayer { sources: DoctrineSource[]; proposals_enabled?: boolean }
 export interface DoctrineSourceInput {
   repository?: string
   visibility: 'public' | 'private'
@@ -90,7 +91,7 @@ async function send(path: string, method = 'GET', body?: unknown): Promise<Doctr
     throw new DoctrineError(response.status, failure.code ?? '', failure.error || `Request failed (${response.status})`)
   }
   const layer = await response.json() as DoctrineLayer
-  return { sources: layer.sources ?? [] }
+  return { ...layer, sources: layer.sources ?? [] }
 }
 
 export const getDoctrine = () => send('/rules/doctrine')
@@ -179,4 +180,38 @@ const SHA = /^[0-9a-f]{40}$/
 export function pinInput(value: string): Pick<DoctrineSourceInput, 'ref' | 'commit'> {
   const pin = value.trim()
   return SHA.test(pin) ? { commit: pin } : { ref: pin }
+}
+
+export interface DoctrineProposal {
+  id: string; source_id: string; repository: string; path: string; rule_key: string
+  state: 'proposed' | 'in_review' | 'merged' | 'released' | 'pinned' | 'closed'
+  head_sha: string; pr_number: number; pr_url: string; proposed_by: string; approved_by?: string
+  merge_commit?: string; release?: string; release_commit?: string; release_url?: string
+  release_requested?: boolean; gate_ready: boolean; gate_reason?: string; pinned_machines: number; created_at: string
+  branch?: string; orphaned?: boolean
+}
+export interface DoctrineProposalInput {
+  request_id: string; source_id: string; path: string; rule_key: string; rule_sha256: string
+  source: string; tldr: { en: string; de?: string }; explanation: string
+}
+async function proposalRequest<T>(path: string, method = 'POST', body?: unknown): Promise<T> {
+  const response = await api(`/rules/doctrine/proposals${path}`, {
+    method, headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  if (response.status === 401) sessionGone()
+  if (!response.ok) {
+    const failure = await response.json().catch(() => ({})) as { code?: string; error?: string }
+    throw new DoctrineError(response.status, failure.code ?? '', failure.error || `Request failed (${response.status})`)
+  }
+  return response.json() as Promise<T>
+}
+export const proposeDoctrineChange = (input: DoctrineProposalInput) => proposalRequest<DoctrineProposal>('', 'POST', input)
+export const getDoctrineProposals = async () => (await proposalRequest<{ proposals: DoctrineProposal[] }>('', 'GET')).proposals ?? []
+export const refreshDoctrineProposal = (id: string) => proposalRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/refresh`)
+export const approveDoctrineProposal = (id: string, head: string) => proposalRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/approve`, 'POST', { head_sha: head })
+export function proposalState(p: Pick<DoctrineProposal, 'state' | 'pinned_machines'> & { orphaned?: boolean }): string {
+  if (p.orphaned) return 'Branch left on GitHub'
+  if (p.state === 'pinned') return `Pinned on ${p.pinned_machines} reported ${p.pinned_machines === 1 ? 'machine' : 'machines'}`
+  return { proposed: 'Proposed', in_review: 'In review', merged: 'Merged', released: 'Released', closed: 'Closed' }[p.state]
 }

@@ -567,7 +567,7 @@ paths:
   /rules/doctrine:
     get:
       operationId: getDoctrineLayer
-      description: "rules.read (person or agent key). The INSPR doctrine as a git-backed, read-only rule layer (AEON-318): every repository this workspace indexes, at its pinned commit. Git is the source of truth. Each rule's identity is its repository, file and heading anchor; source is the exact bytes of its lines at the pinned commit, and url opens those lines. TL;DRs come from a .tldr.yaml sidecar in git and are only displayed. Aeon holds no doctrine text beyond a cache keyed by the pinned commit. There is no route that edits doctrine. Credential-backed sources require an operator-provisioned tenant/repository grant even when reading cached files; unavailable grants show the source as failed with a generic credential error and no cached files."
+      description: "rules.read (person or agent key). The INSPR doctrine as a git-backed, read-only rule layer (AEON-318): every repository this workspace indexes, at its pinned commit. Git is the source of truth. Each rule's identity is its repository, file and heading anchor; source is the exact bytes of its lines at the pinned commit, and url opens those lines. TL;DRs come from a .tldr.yaml sidecar in git and are only displayed. Aeon holds no doctrine text beyond a cache keyed by the pinned commit. Edits are proposed as PRs; the pinned source remains unchanged. Credential-backed sources require an operator-provisioned tenant/repository grant even when reading cached files; unavailable grants show the source as failed with a generic credential error and no cached files."
       responses:
         "200":
           description: The doctrine layer
@@ -576,6 +576,98 @@ paths:
               schema: {"$ref": "#/components/schemas/DoctrineLayer"}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine/proposals:
+    get:
+      operationId: listDoctrineProposals
+      description: "rules.read. Workspace proposal references only; proposed text lives in git. At most 100 recent proposals."
+      responses:
+        "200":
+          description: Proposal history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [proposals]
+                properties:
+                  proposals: {type: array, items: {"$ref": "#/components/schemas/DoctrineProposal"}}
+    post:
+      operationId: proposeDoctrineChange
+      description: "Workspace rules.write. Requires a server-configured GitHub App, operator-acknowledged DCO contribution policy and its designated tenant. The App key reference requires an operator-owned tenant/exact-repository allowlist grant, checked before key use for each proposal, refresh or approval. Tokens are narrowed to the owning repository; all GitHub requests use https://api.github.com with redirects disabled. Commit authorship and sign-off use the verified App bot identity. The source determines the owning repository; only inspr-at/inspr-modules and inspr-at/inspr-doctrine-private are writable. Before ANY GitHub write, the changed rule, its TLDR entry and explanation are Unicode-normalized and checked for identity patterns and quotations from the indexed private doctrine. Public proposal letters must be Latin, including German umlauts and ß, and digits must be ASCII (422 non_latin). Quotation exemptions use only blobs identical to the repository's current main tree, never the configured pin, a proposal branch or an unmerged SHA. The private guard is an HMAC keyed by the server secret AEON_DOCTRINE_GUARD_KEY_FILE; a missing or stale guard returns 422 private_index_unavailable until reindex or the startup rebuild. Public proposals require an available, authorized private index; unchanged file content is not scanned. GitHub I/O holds no database locks: short authorized transactions reserve a per-proposal lease and compare the saved version before applying results. Source, main-file blob and rule digest must match. Reuse request_id with identical input to recover a timeout; another input returns 409. No draft prose is retained in Aeon. A ref that lands after authority is revoked is stored as branch with orphaned true and a doctrine.branch_observed event."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/DoctrineProposalInput"}
+      responses:
+        "200":
+          description: Created or recovered proposal
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+        "400": {description: Invalid edit}
+        "403": {description: Permission or tenant denied}
+        "409": {description: Stale source or request id conflict}
+        "422": {description: "Credential, non-Latin public text (non_latin), private quotation (private_doctrine), or a missing private guard (private_index_unavailable) refused the proposal"}
+        "503": {description: App not configured or outcome uncertain; retry the same request id}
+  /rules/doctrine/proposals/{proposalId}/refresh:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: refreshDoctrineProposal
+      description: "Workspace rules.write. Observe PR/check/review/release state from GitHub; never merge or dispatch. An unchanged refresh emits no event. A release is accepted only with owning-repo provenance for this proposal and merge, and a tag resolving to that merge or its descendant."
+      responses:
+        "200":
+          description: Current proposal
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+  /rules/doctrine/proposals/{proposalId}/approve:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: approveDoctrineProposal
+      description: "Person-only workspace rules.publish, no agent/key approval. Body head_sha must match the recorded and live PR head. Requires protected main, clean mergeability, and the configured independent gate account's latest APPROVED review on that exact head with explicit ok, checks_green, and distinct author/reviewer families. GitHub enforces required checks at merge; the App must not bypass protections. Record the approval before attempting the SHA-guarded merge. Dispatch doctrine-release to the owning repo after merge (idempotency key proposal id); the repo reserves CalVer3 under its own flow. Refresh observes the published release; dispatch alone is never released. Repeating approval recovers uncertain merge/dispatch outcomes. A merge observed outside Aeon is recorded as an observation, never attributed to the observing person as approver; without an existing Aeon approval, release must be requested in the owning repository."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [head_sha]
+              properties:
+                head_sha: {type: string, pattern: "^[0-9a-f]{40}$"}
+      responses:
+        "200":
+          description: Proposal after approval attempt
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+        "403": {description: A person with workspace publication authority must approve}
+        "409": {description: Head changed or checks/review gate not green}
+  /rules/doctrine/proposals/{proposalId}/pins:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reportDoctrineProposalPin
+      description: "Person-only settings.manage. Record an operator-verified machine pin, never change one. machine_key is a SHA-256 of a stable machine identity (no hostname); commit must equal this proposal's verified release_commit. Upserts the machine's observation for this repository, so newer pins stop counting toward older releases. UI explicitly labels counts as reported."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [machine_key, commit]
+              properties:
+                machine_key: {type: string, pattern: "^[0-9a-f]{64}$"}
+                commit: {type: string, pattern: "^[0-9a-f]{40}$"}
+      responses:
+        "200":
+          description: Updated reported pin count
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
   /rules/doctrine/sources:
     post:
       operationId: addDoctrineSource
@@ -6764,6 +6856,51 @@ components:
           maxItems: 16
           description: "Comparison limits. Tokens only; no paths or instruction text."
           items: {type: string, pattern: "^[a-z][a-z0-9_]{0,63}$"}
+    DoctrineProposalInput:
+      type: object
+      additionalProperties: false
+      required: [request_id, source_id, path, rule_key, rule_sha256, source, tldr, explanation]
+      properties:
+        request_id: {type: string, format: uuid}
+        source_id: {type: string, format: uuid}
+        path: {type: string, maxLength: 300}
+        rule_key: {type: string, maxLength: 200}
+        rule_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        source: {type: string, maxLength: 8000, description: "Replacement rule source, including its explicit marker if present. Must still parse as exactly one rule in the same set."}
+        tldr:
+          type: object
+          additionalProperties: false
+          required: [en]
+          properties:
+            en: {type: string, maxLength: 300}
+            de: {type: string, maxLength: 300}
+        explanation: {type: string, maxLength: 2000, description: Why this change; stored only in the PR body}
+    DoctrineProposal:
+      type: object
+      required: [id, source_id, repository, path, rule_key, state, head_sha, pr_number, pr_url, proposed_by, created_at, gate_ready, pinned_machines]
+      properties:
+        id: {type: string, format: uuid}
+        source_id: {type: string, format: uuid}
+        repository: {type: string}
+        path: {type: string}
+        rule_key: {type: string}
+        state: {type: string, enum: [proposed, in_review, merged, released, pinned, closed]}
+        head_sha: {type: string}
+        pr_number: {type: integer}
+        pr_url: {type: string}
+        proposed_by: {type: string, format: uuid}
+        approved_by: {type: string, format: uuid}
+        merge_commit: {type: string}
+        release: {type: string}
+        release_commit: {type: string}
+        release_url: {type: string}
+        release_requested: {type: boolean}
+        gate_ready: {type: boolean}
+        gate_reason: {type: string}
+        pinned_machines: {type: integer, minimum: 0, description: "Operator-reported, not live machine inventory"}
+        branch: {type: string, description: "Proposal branch name when the GitHub ref exists"}
+        orphaned: {type: boolean, description: "True when that branch exists without a pull request because authority was revoked during the ref write. An admin should delete the branch."}
+        created_at: {type: string, format: date-time}
     DoctrineTLDR:
       type: object
       additionalProperties: false
@@ -6858,6 +6995,7 @@ components:
       required: [sources]
       properties:
         sources: {type: array, maxItems: 8, items: {"$ref": "#/components/schemas/DoctrineSource"}}
+        proposals_enabled: {type: boolean, description: Whether this workspace has a server-provisioned proposal App}
     RuleChannels:
       type: object
       additionalProperties: false

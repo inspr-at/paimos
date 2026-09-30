@@ -31,13 +31,24 @@ type Config struct {
 	LinkKey []byte
 	// FilesDir is the attachment store root (AEON_FILES_DIR, default data/files).
 	FilesDir string
-	// DoctrineCredentialsDir holds host-provisioned read-only tokens for private
-	// doctrine repositories, one token file and <ref>.allowlist.json per reference
+	// DoctrineCredentialsDir holds host-provisioned doctrine read tokens and App
+	// keys, one credential file and <ref>.allowlist.json per reference
 	// (AEON_DOCTRINE_CREDENTIALS_DIR, AEON-318). Aeon stores only the names.
 	DoctrineCredentialsDir string
 	// PairingNixGuide is deployment-admin-owned public guidance. There is no
 	// tenant or pairing-peer write path; absent configuration hides the block.
 	PairingNixGuide *PairingNixGuide
+	// DoctrineGuardKey is the server secret for per-tenant HMAC of the private
+	// doctrine quotation guard (AEON_DOCTRINE_GUARD_KEY_FILE). In dev without a
+	// file it is random and lives only in memory; in prod without a file it is
+	// nil and public proposals stay refused. It is never logged.
+	DoctrineGuardKey        []byte
+	DoctrineAppID           string
+	DoctrineInstallationID  string
+	DoctrineAppKeyRef       string
+	DoctrineAppTenantID     string
+	DoctrineGateLogin       string
+	DoctrineDCOAcknowledged bool
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -55,7 +66,13 @@ func FromEnv() (Config, error) {
 		BootstrapTenantName: getenv("AEON_BOOTSTRAP_TENANT_NAME", "INSPR"),
 		FilesDir:            getenv("AEON_FILES_DIR", "data/files"),
 		// Only the directory path is read here; a token is read at fetch time.
-		DoctrineCredentialsDir: os.Getenv("AEON_DOCTRINE_CREDENTIALS_DIR"),
+		DoctrineCredentialsDir:  os.Getenv("AEON_DOCTRINE_CREDENTIALS_DIR"),
+		DoctrineAppID:           os.Getenv("AEON_DOCTRINE_APP_ID"),
+		DoctrineInstallationID:  os.Getenv("AEON_DOCTRINE_INSTALLATION_ID"),
+		DoctrineAppKeyRef:       os.Getenv("AEON_DOCTRINE_APP_KEY_REF"),
+		DoctrineAppTenantID:     os.Getenv("AEON_DOCTRINE_APP_TENANT_ID"),
+		DoctrineGateLogin:       os.Getenv("AEON_DOCTRINE_GATE_LOGIN"),
+		DoctrineDCOAcknowledged: os.Getenv("AEON_DOCTRINE_DCO_ACKNOWLEDGED") == "true",
 	}
 	switch cfg.Env {
 	case "dev", "prod":
@@ -64,6 +81,18 @@ func FromEnv() (Config, error) {
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("AEON_DATABASE_URL is required")
+	}
+	if f := os.Getenv("AEON_DOCTRINE_GUARD_KEY_FILE"); f != "" {
+		key, err := doctrineGuardKey(f)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.DoctrineGuardKey = key
+	} else if cfg.Env == "dev" {
+		cfg.DoctrineGuardKey = make([]byte, 32)
+		if _, err := rand.Read(cfg.DoctrineGuardKey); err != nil {
+			return Config{}, fmt.Errorf("dev doctrine guard key: %w", err)
+		}
 	}
 	if f := os.Getenv("AEON_MESSAGING_KEY_FILE"); f != "" {
 		key, err := messagingKey(f)
@@ -119,6 +148,24 @@ func LinkKeyFromEnv() ([]byte, error) {
 	}
 	sum := sha256.Sum256([]byte("aeon/link-vault/v1\x00" + secret))
 	return sum[:], nil
+}
+
+// doctrineGuardKey reads a host-generated secret file of at least 32
+// characters. The bytes are the HMAC master; callers derive a per-tenant key.
+// The file contents are never logged.
+func doctrineGuardKey(file string) ([]byte, error) {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("AEON_DOCTRINE_GUARD_KEY_FILE: %w", err)
+	}
+	if len(b) > 4096 {
+		return nil, fmt.Errorf("AEON_DOCTRINE_GUARD_KEY_FILE is too long")
+	}
+	secret := strings.TrimSpace(string(b))
+	if len(secret) < 32 {
+		return nil, fmt.Errorf("AEON_DOCTRINE_GUARD_KEY_FILE must hold at least 32 characters")
+	}
+	return []byte(secret), nil
 }
 
 // messagingKey reads a host-generated secret file (at least 32 characters)

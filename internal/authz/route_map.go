@@ -18,6 +18,11 @@ const PublicRoute = "public"
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/reparent":              "harness.write",
+	"GET /api/rules/doctrine/proposals":                                                 "rules.read",
+	"POST /api/rules/doctrine/proposals":                                                "rules.write",
+	"POST /api/rules/doctrine/proposals/{proposalId}/refresh":                           "rules.write",
+	"POST /api/rules/doctrine/proposals/{proposalId}/approve":                           "rules.publish",
+	"POST /api/rules/doctrine/proposals/{proposalId}/pins":                              "settings.manage",
 	"GET /api/me/security/session-watching":                                             "profile.read",
 	"PUT /api/me/security/session-watching":                                             "profile.write",
 	"POST /api/agent-pairing/attach":                                                    "harness.worker",
