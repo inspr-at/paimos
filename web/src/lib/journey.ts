@@ -79,8 +79,9 @@ export interface TicketSuggestion { title: string; estimated_hours: string | num
 export type IntakeExtensions = Record<string, { version: string; data: unknown }>
 export interface IntakeDraft {
   id: string; kind: 'brief' | 'requirement'; requirement_kind?: Requirement['kind']; target_node_id?: string; title: string; body: string
-  base_event_id: number; citations: Citation[]; ticket_suggestions: TicketSuggestion[]; status: 'proposed' | 'accepted' | 'rejected'
+  base_event_id: number; citations: Citation[]; ticket_suggestions: TicketSuggestion[]; status: 'proposed' | 'accepted' | 'rejected' | 'superseded'
   proposed_at: string; accepted_at: string | null
+  requester_principal_id?: string; supersedes_draft_id?: string
   extensions?: IntakeExtensions; document_bytes?: string
 }
 export interface Intake { sources: IntakeSource[]; turns: IntakeTurn[]; drafts: IntakeDraft[] }

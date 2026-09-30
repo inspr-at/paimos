@@ -396,6 +396,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/stop":                          "harness.worker",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield":                         "harness.worker",
 	"POST /api/projects/{projectId}/intake/drafts":                                              "intake.write",
+	"POST /api/projects/{projectId}/intake/drafts/{draftId}/replace":                            "intake.write",
 	"POST /api/projects/{projectId}/intake/drafts/{draftId}/accept":                             "intake.decide",
 	"POST /api/projects/{projectId}/intake/sources":                                             "intake.write",
 	"POST /api/projects/{projectId}/intake/transcript-turns":                                    "intake.write",

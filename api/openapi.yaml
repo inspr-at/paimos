@@ -5274,46 +5274,69 @@ paths:
       operationId: addIntakeSource
       summary: Record an intake source
       description: Aithema records a source reference, content digest and provenance; file bytes remain behind Aeon's tenant-scoped file storage boundary. Never accepts credentials in locators.
-      security: *auth
+      x-aithema-authorization: {capability: intake.write, checks: [tid, pid, sid, gen, auth_epoch, exp, ephemeral_live_grant]}
+      security: [{session: []}, {agentKey: []}, {aithemaDelegated: []}]
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSourceWrite'}}}}
       responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
         '201': {description: Source, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSource'}}}}
-        '409': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
   /projects/{projectId}/intake:
     get:
       operationId: getProjectIntake
       summary: Read intake history
-      description: Aithema's current source, transcript and draft history; accepted and superseded proposals remain visible with citations.
-      security: *auth
+      description: Aithema's source, transcript and draft history. Delegated calls require exact intake.read, session tid/pid/sid and current auth_epoch; reads do not check gen. Accepted and superseded proposals remain visible.
+      security: [{session: []}, {agentKey: []}, {aithemaDelegated: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: node_id, in: query, schema: {type: string, format: uuid}, description: Return accepted drafts for this node or the requirement that generated this ticket; sources and turns are empty. Requires the same intake.read permission.}
       responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
         '200': {description: Intake snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSnapshot'}}}}
-        '404': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
+        '409': {$ref: '#/components/responses/IntakeError'}
   /projects/{projectId}/intake/transcript-turns:
     post:
       operationId: appendIntakeTurn
       summary: Append a conversation turn
       description: Appends an immutable conversation turn to a source. Idempotency key binds a retry to the same content.
-      security: *auth
+      x-aithema-authorization: {capability: intake.write, checks: [tid, pid, sid, gen, auth_epoch, exp, ephemeral_live_grant]}
+      security: [{session: []}, {agentKey: []}, {aithemaDelegated: []}]
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeTurnWrite'}}}}
       responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
         '201': {description: Turn, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeTurn'}}}}
-        '409': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
   /projects/{projectId}/intake/drafts:
     post:
       operationId: proposeIntakeDraft
       summary: Propose a cited draft
       description: Aithema proposes an immutable cited brief or requirement draft against a target node revision. Proposals never patch people-edited nodes.
-      security: [{agentKey: []}]
+      x-aithema-authorization: {capability: intake.write, checks: [tid, pid, sid, gen, auth_epoch, exp, ephemeral_live_grant]}
+      security: [{agentKey: []}, {aithemaDelegated: []}]
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraftWrite'}}}}
       responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
         '201': {description: Draft, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraft'}}}}
-        '409': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
   /projects/{projectId}/intake/drafts/{draftId}/accept:
     post:
       operationId: acceptIntakeDraft
@@ -5325,9 +5348,33 @@ paths:
         - {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeAccept'}}}}
       responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
         '200': {description: Accepted draft, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraft'}}}}
-        '403': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/IntakeError'}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+  /projects/{projectId}/intake/drafts/{draftId}/replace:
+    post:
+      operationId: replaceIntakeDraft
+      summary: Atomically replace a proposed draft
+      description: Agent-only replacement with intake.write and a live grant. Inserts a new immutable draft linked by supersedes_draft_id and an immutable receipt under the same project lock as acceptance. Accepted old drafts return already_accepted; superseded old drafts return draft_superseded. The same key and exact request bytes return the original 201 result, even after later acceptance or replacement; changed bytes or an operation on a different old draft return idempotency_conflict. No bare withdrawal is offered. Delegated requester_principal_id is derived from act.sub; a supplied value must match.
+      security: [{agentKey: []}, {aithemaDelegated: []}]
+      x-aithema-authorization: {capability: intake.write, checks: [tid, pid, sid, gen, auth_epoch, exp, ephemeral_live_grant]}
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraftWrite'}}}}
+      responses:
+        '201': {description: Original replacement receipt, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraft'}}}}
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
+        '404': {$ref: '#/components/responses/IntakeError'}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
   /stage-handoffs:
     post:
       operationId: requestStageHandoff
@@ -6838,6 +6885,12 @@ components:
     HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.6']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
   securitySchemes:
+    aithemaDelegated:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Aithema delegated host token verified by internal/aithema/tokens. Requires a current host session and exact per-route capabilities. Acceptance is session-only.
+
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
@@ -8810,6 +8863,7 @@ components:
         kind: {type: string, enum: [brief, requirement]}
         requirement_kind: {type: string, enum: [functional, nonfunctional]}
         target_node_id: {type: string, format: uuid}
+        requester_principal_id: {type: string, format: uuid, description: Person represented by the delegated token. Omit to derive from act.sub; cannot be set by an ordinary agent key.}
         title: {type: string, minLength: 1}
         body: {type: string}
         extensions: {$ref: '#/components/schemas/IntakeExtensions'}
@@ -8845,7 +8899,13 @@ components:
     IntakeDraft:
       allOf:
         - {$ref: '#/components/schemas/IntakeDraftWrite'}
-        - {type: object, required: [id, status, proposed_at], properties: {id: {type: string, format: uuid}, status: {type: string, enum: [proposed, accepted, rejected]}, proposed_at: {type: string, format: date-time}, accepted_at: {type: [string, 'null'], format: date-time}}}
+        - {type: object, required: [id, status, proposed_at], properties: {supersedes_draft_id: {type: string, format: uuid}, id: {type: string, format: uuid}, status: {type: string, enum: [proposed, accepted, rejected, superseded]}, proposed_at: {type: string, format: date-time}, accepted_at: {type: [string, 'null'], format: date-time}}}
+    IntakeError:
+      type: object
+      required: [error, code]
+      properties:
+        error: {type: string}
+        code: {type: string, description: 'Stable refusal code: idempotency_conflict, citation_invalid (422), draft_superseded, already_accepted, target_changed, already_accepted_on_target, no_recorded_content, person_authored, fenced_generation, revoked (409); forbidden for plain authorization (403). Transport failures use invalid_request, unauthenticated, not_found, unavailable or internal.'}
     IntakeAccept:
       type: object
       additionalProperties: false
@@ -12970,6 +13030,10 @@ components:
           schema:
             $ref: '#/components/schemas/ViewPatch'
   responses:
+    IntakeError:
+      description: Intake refusal with a stable machine-readable code; Cache-Control no-store.
+      content: {application/json: {schema: {$ref: '#/components/schemas/IntakeError'}}}
+
     KnowledgeEntry:
       description: Knowledge entry
       content:
