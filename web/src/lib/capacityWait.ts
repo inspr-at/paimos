@@ -36,6 +36,7 @@ export function capacityWaitText(wait: CapacityWait, subject = 'Agents', now = D
     case 'capacity': return 'Waiting for the current run to finish'
     case 'allowance': return at ? `Capacity available after ${at}` : 'Waiting for capacity'
     case 'models': return 'No model is granted for this account'
-    case 'state': return 'Agents are paused for this account'
+    // Why and how to resume, not just that it is paused (AEON-402).
+    case 'state': return 'Paused in Settings / Accounts; turn “Agents may use it” back on to resume'
   }
 }

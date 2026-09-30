@@ -67,6 +67,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/agent-pairing/computers/{computerId}":                                     "account.read",
 	"POST /api/agent-pairing/computers/{computerId}/disconnect":                         "account.manage",
 	"POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/disconnect": "account.manage",
+	"POST /api/agent-pairing/computers/{computerId}/remove":                             "account.manage",
 	"GET /api/agent-pairing/self":                                                       "run.claim",
 	"POST /api/agent-pairing/self/disconnect":                                           "run.claim",
 
@@ -262,6 +263,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/work-orders":                                                                      "work_orders.read",
 	"GET /api/work-orders/{workOrderId}":                                                        "work_orders.read",
 	"PATCH /api/agent-accounts/{accountId}":                                                     "account.manage",
+	"POST /api/agent-accounts/{accountId}/archive":                                              "account.manage", // Person-only Remove (AEON-402).
 	"PATCH /api/attachments/{id}":                                                               "attachments.write",
 	"PATCH /api/crm/contacts/{contactId}":                                                       "crm.write",
 	"PATCH /api/crm/organisations/{organisationId}":                                             "crm.write",
@@ -414,6 +416,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/roles":                                                                           "roles.manage",
 	"POST /api/runs/{runId}/claim":                                                              "run.claim",
 	"POST /api/runs/{runId}/capacity-override":                                                  "run.create", // Person-only, queued managed run; handler checks work-order edit access.
+	"POST /api/runs/{runId}/cancel":                                                             "run.create", // Person-only, queued run; handler checks work-order edit access (AEON-402).
 	"POST /api/runs/{runId}/telemetry":                                                          "run.telemetry",
 	"POST /api/stage-handoffs":                                                                  "stage_handoffs.write",
 	"POST /api/stage-handoffs/{handoffId}/classic-batch-alias":                                  "stage_handoffs.decide",

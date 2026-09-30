@@ -29,7 +29,10 @@ func attachProcInfo(pid, flavor int, buf []byte) (int, error) {
 	}
 	return int(n), nil
 }
-func observeAttachProcess(pid int) (attachObservation, error) {
+
+// sysctl and getsid are readable across UIDs, unlike libproc's cwd/path APIs.
+// Keep this observation separate so a root-owned terminal leader is usable.
+func observeAttachProcessIdentity(pid int) (attachObservation, error) {
 	fail := errors.New("kernel process identity unavailable")
 	first, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 	if err := checkAttachDarwinProcess(pid, first, err, func() error { return unix.Kill(pid, 0) }); err != nil {
@@ -38,6 +41,23 @@ func observeAttachProcess(pid int) (attachObservation, error) {
 	session, err := unix.Getsid(pid)
 	if err != nil || session < 1 {
 		return attachObservation{}, fail
+	}
+	last, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err := checkAttachDarwinProcess(pid, last, err, func() error { return unix.Kill(pid, 0) }); err != nil {
+		return attachObservation{}, err
+	}
+	lastSession, sessionErr := unix.Getsid(pid)
+	if sessionErr != nil || session != lastSession || last.Proc.P_starttime != first.Proc.P_starttime || last.Eproc.Ucred.Uid != first.Eproc.Ucred.Uid || last.Eproc.Ppid != first.Eproc.Ppid || last.Eproc.Tdev != first.Eproc.Tdev {
+		return attachObservation{}, fail
+	}
+	return attachObservation{Process: attachwatch.Process{PID: pid, UID: int(first.Eproc.Ucred.Uid), Started: fmt.Sprintf("%d:%d", first.Proc.P_starttime.Sec, first.Proc.P_starttime.Usec)}, Parent: int(first.Eproc.Ppid), Session: session, TTY: first.Eproc.Tdev != -1}, nil
+}
+
+func observeAttachProcess(pid int) (attachObservation, error) {
+	fail := errors.New("kernel process identity unavailable")
+	first, err := observeAttachProcessIdentity(pid)
+	if err != nil {
+		return attachObservation{}, err
 	}
 	exe := make([]byte, 4096)
 	n, err := attachProcInfo(pid, 11, exe)
@@ -66,12 +86,12 @@ func observeAttachProcess(pid int) (attachObservation, error) {
 	if err != nil || physical != cwd {
 		return attachObservation{}, fail
 	}
-	last, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
-	lastSession, sessionErr := unix.Getsid(pid)
-	if err != nil || sessionErr != nil || session != lastSession || last.Proc.P_starttime != first.Proc.P_starttime || last.Eproc.Ucred.Uid != first.Eproc.Ucred.Uid || last.Eproc.Ppid != first.Eproc.Ppid || last.Eproc.Tdev != first.Eproc.Tdev {
+	last, err := observeAttachProcessIdentity(pid)
+	if err != nil || last != first {
 		return attachObservation{}, fail
 	}
-	return attachObservation{Process: attachwatch.Process{PID: pid, UID: int(first.Eproc.Ucred.Uid), Started: fmt.Sprintf("%d:%d", first.Proc.P_starttime.Sec, first.Proc.P_starttime.Usec), Executable: executable, CWD: cwd}, Parent: int(first.Eproc.Ppid), Session: session, TTY: first.Eproc.Tdev != -1}, nil
+	first.Executable, first.CWD = executable, cwd
+	return first, nil
 }
 
 func checkAttachDarwinProcess(pid int, first *unix.KinfoProc, err error, exists func() error) error {

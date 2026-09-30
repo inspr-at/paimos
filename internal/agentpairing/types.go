@@ -120,6 +120,7 @@ type View struct {
 	SetupState                string                              `json:"setup_state"`
 	SetupError                string                              `json:"setup_error"`
 	LastSeenAt                *time.Time                          `json:"last_seen_at"`
+	ArchivedAt                *time.Time                          `json:"archived_at,omitempty"`
 	Connectivity              string                              `json:"connectivity"`
 	RequestID                 string                              `json:"request_id"`
 	TenantID                  string                              `json:"tenant_id"`
