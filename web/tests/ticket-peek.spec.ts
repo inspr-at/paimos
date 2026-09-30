@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-202: a ticket click opens the app side panel and stays on the current view.
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
@@ -22,6 +22,15 @@ const world: AgentWorld = {
 const session = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
 const peek = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
 const pathOf = (page: Page) => new URL(page.url()).pathname
+
+// Open in project does not change the address until /api/me and the lazy project
+// page finish. toHaveURL gives that five seconds and then still sees the peek (AEON-447).
+function openInProject(page: Page, button: Locator, path: string) {
+  return Promise.all([
+    page.waitForURL(`**${path}`, { timeout: 15_000 }),
+    button.click(),
+  ])
+}
 
 async function openAgents(page: Page) {
   await mockWork(page, fixtures())
@@ -46,8 +55,7 @@ test('a ticket pill on /agents opens the peek and stays on /agents', async ({ pa
   expect(list.x + list.width).toBeLessThanOrEqual(box.x + 2)
   expect(box.x + box.width).toBeLessThanOrEqual(1600)
 
-  await peek(page).getByRole('button', { name: 'Open in project' }).click()
-  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
+  await openInProject(page, peek(page).getByRole('button', { name: 'Open in project' }), '/p/PHAROS/PHAROS-11')
   await expect(page.getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
 })
 
@@ -109,8 +117,7 @@ test('a ticket from another project in the tickets graph opens the peek', async 
   expect(pathOf(page)).toBe('/p/PHAROS/tickets')
   expect(new URL(page.url()).searchParams.get('view')).toBe('graph')
   expect(new URL(page.url()).searchParams.get('peek')).toBe('AEON-1')
-  await peek(page).getByRole('button', { name: 'Open in project' }).click()
-  await expect(page).toHaveURL('/p/AEON/AEON-1')
+  await openInProject(page, peek(page).getByRole('button', { name: 'Open in project' }), '/p/AEON/AEON-1')
 })
 
 test('a knowledge-graph ticket node opens the peek instead of leaving the graph', async ({ page }) => {
@@ -151,8 +158,7 @@ test('release history still opens its own ticket panel', async ({ page }) => {
   await expect(panel.getByRole('button', { name: 'Open in project' })).toBeVisible()
   expect(new URL(page.url()).searchParams.get('peek')).toBeNull()
   await expect(page).toHaveURL(`/releases/${history.releases[1].version}`)
-  await panel.getByRole('button', { name: 'Open in project' }).click()
-  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
+  await openInProject(page, panel.getByRole('button', { name: 'Open in project' }), '/p/PHAROS/PHAROS-11')
 })
 
 test('ticket peek screenshots', async ({ page }) => {
