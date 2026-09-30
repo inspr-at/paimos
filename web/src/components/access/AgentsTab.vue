@@ -4,7 +4,8 @@ import { brand } from '../../lib/brand'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSession } from '../../stores/session'
-import { keyHint, revokeAgentKey, type Agent } from '../../lib/access'
+import { CONNECTED_COMPUTER_REASON, agentDeactivatePoints, keyHint, revokeAgentKey, splitAgents, type Agent } from '../../lib/access'
+import type { RowAction } from '../../lib/rowActions'
 import { can, myPermissions } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
 import { keyState, listAgentKeys, type AgentKey } from '../../lib/settings'
@@ -13,6 +14,7 @@ import { relativeTime } from '../../lib/work'
 import { useAccess } from '../../stores/access'
 import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
+import RowMenu from '../business/RowMenu.vue'
 import KeysTable from './KeysTable.vue'
 import NewKeySheet from './NewKeySheet.vue'
 import NewAgentSheet from './NewAgentSheet.vue'
@@ -23,7 +25,8 @@ import { problem, undoing } from './accessText'
 
 // Agents: each with its role (what its keys can do at most) and its keys.
 // Service principals run inside Aeon itself; they are shown as internal and are
-// never offered keys.
+// never offered keys. A person can deactivate an agent (its keys are revoked with
+// it); deactivated agents rest in a folded group with a way back.
 const access = useAccess()
 const session = useSession()
 const route = useRoute()
@@ -45,8 +48,13 @@ const manage = computed(() => can('members.manage'))
 const keys = ref<AgentKey[] | null>(null)
 const keysError = ref('')
 const open = ref(new Set<string>())
-const working = computed(() => access.agents.filter(a => !a.service))
-const service = computed(() => access.agents.filter(a => a.service))
+const groups = computed(() => splitAgents(access.agents))
+const working = computed(() => groups.value.working)
+const deactivated = computed(() => groups.value.deactivated)
+const deactivatedOpen = ref(false)
+// Retiring an identity is person-only; the server refuses an agent key outright.
+const retire = computed(() => session.identity?.principal.kind === 'person' && manage.value)
+const service = computed(() => groups.value.service)
 const keysOf = (agent: Agent) => (keys.value ?? []).filter(k => k.principal_id === agent.principal_id).sort((a, b) => Number(keyState(a) !== 'active') - Number(keyState(b) !== 'active') || Date.parse(b.created_at) - Date.parse(a.created_at))
 async function loadKeys() {
   if (!manageKeys.value) return
@@ -83,6 +91,32 @@ async function chooseRole(roleId: string | null) {
   } catch (e) { roleError.value = problem(e, `${target.agent.name} keeps its role`) }
   finally { busy.value = false }
 }
+
+// ---------- Deactivate / reactivate ----------
+const menu = ref<{ agent: Agent; anchor: HTMLElement } | null>(null)
+const actions = computed<RowAction[]>(() => {
+  const agent = menu.value?.agent
+  return agent ? [{ id: 'deactivate', label: 'Deactivate…', icon: 'stop', group: 1, danger: true, reason: agent.connected_computer ? CONNECTED_COMPUTER_REASON : undefined }] : []
+})
+function openMenu(agent: Agent, anchor: HTMLElement) { menu.value = menu.value?.agent.principal_id === agent.principal_id ? null : { agent, anchor } }
+async function act(id: string) {
+  const agent = menu.value?.agent
+  menu.value = null
+  if (agent && id === 'deactivate') await deactivate(agent)
+}
+async function deactivate(agent: Agent) {
+  const ok = await confirmAction({ title: `Deactivate ${agent.name}?`, points: agentDeactivatePoints(agent.key_count), confirmLabel: agent.key_count ? 'Revoke keys and deactivate' : 'Deactivate', danger: true })
+  if (!ok) return
+  try {
+    await access.deactivate(agent.principal_id)
+    void loadKeys()
+    toast(`${agent.name} is deactivated`, { action: { label: 'Reactivate', run: () => void reactivate(agent) } })
+  } catch (e) { toast(problem(e, `${agent.name} stays active`), { tone: 'error' }) }
+}
+async function reactivate(agent: Agent) {
+  try { await access.reactivate(agent.principal_id); toast(`${agent.name} is active again; add a new key to connect it`) }
+  catch (e) { toast(problem(e, `${agent.name} stays deactivated`), { tone: 'error' }) }
+}
 onMounted(loadKeys)
 </script>
 
@@ -98,7 +132,7 @@ onMounted(loadKeys)
       </div>
       <button v-if="manageKeys" type="button" class="btn primary" @click="creatingAgent = true"><AppIcon name="plus" :size="14" />New agent</button>
     </div>
-    <ul v-if="working.length" class="agents" aria-label="Agents">
+    <ul v-if="working.length" class="agents" :class="{ menus: retire }" aria-label="Agents">
       <li v-for="agent in working" :key="agent.principal_id" class="agent">
         <div class="row">
           <Avatar :id="agent.principal_id" :name="agent.name" kind="agent" :size="30" />
@@ -111,6 +145,7 @@ onMounted(loadKeys)
             <AppIcon name="key" :size="13" />{{ agent.key_count === 1 ? '1 active key' : `${agent.key_count} active keys` }}<AppIcon name="chevron" :size="12" class="chev" :class="{ open: open.has(agent.principal_id) }" />
           </button>
           <span v-else class="keys-count">{{ agent.key_count === 1 ? '1 active key' : `${agent.key_count} active keys` }}</span>
+          <button v-if="retire" type="button" class="icon-btn sm flat a-more" :aria-label="`Actions for ${agent.name}`" aria-haspopup="menu" :aria-expanded="menu?.agent.principal_id === agent.principal_id" @click="openMenu(agent, $event.currentTarget as HTMLElement)"><AppIcon name="more" :size="15" /></button>
         </div>
         <div v-if="open.has(agent.principal_id)" :id="`keys-${agent.principal_id}`" class="keys">
           <p v-if="keysError" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ keysError }}<button type="button" class="btn sm" @click="loadKeys">Try again</button></p>
@@ -138,6 +173,25 @@ onMounted(loadKeys)
       </ul>
     </section>
 
+    <section v-if="deactivated.length" class="deactivated" aria-labelledby="deactivated-h">
+      <h3 id="deactivated-h" class="fold-h">
+        <button type="button" class="fold" :aria-expanded="deactivatedOpen" aria-controls="deactivated-rows" @click="deactivatedOpen = !deactivatedOpen">
+          <AppIcon name="chevron" :size="12" class="chev" :class="{ open: deactivatedOpen }" />Deactivated<span class="count mono">{{ deactivated.length }}</span>
+        </button>
+      </h3>
+      <ul v-if="deactivatedOpen" id="deactivated-rows" class="agents" aria-label="Deactivated agents">
+        <li v-for="agent in deactivated" :key="agent.principal_id" class="agent off">
+          <div class="row">
+            <Avatar :id="agent.principal_id" :name="agent.name" kind="agent" :size="30" />
+            <span class="a-text"><span class="a-name mono" :title="agent.name">{{ agent.name }}</span><span class="a-seen">{{ agent.last_seen_at ? `Seen ${relativeTime(agent.last_seen_at, { long: true })}` : 'Not seen yet' }}</span></span>
+            <span class="a-role role-text">{{ agent.workspace_role?.name ?? (agent.project_roles?.length ? 'Project roles' : '') }}</span>
+            <button v-if="retire" type="button" class="btn sm" :aria-label="`Reactivate ${agent.name}`" @click="reactivate(agent)"><AppIcon name="refresh" :size="13" />Reactivate</button>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <RowMenu v-if="menu" :anchor="menu.anchor" :items="actions" :label="`Actions for ${menu.agent.name}`" @select="act" @close="menu = null" />
     <RolePicker
       v-if="picker" :anchor="picker.anchor" :subject="picker.agent.name" :roles="access.roles" :current="picker.agent.workspace_role?.id ?? null" :registry="access.registry"
       :mine="myPermissions()" scope="workspace" allow-none none-label="No role" :busy="busy" :can-apply="can('members.manage')" :error="roleError" @choose="chooseRole" @close="picker = null"
@@ -159,6 +213,20 @@ onMounted(loadKeys)
 .agents { display: grid; margin: 0; padding: 0; list-style: none; }
 .agent { border-bottom: 1px solid var(--line); }
 .row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto 150px; align-items: center; gap: 12px; min-height: 58px; }
+.menus .row { grid-template-columns: 30px minmax(0, 1fr) auto 150px 32px; }
+.a-more { color: var(--ink-3); }
+.off .row { grid-template-columns: 30px minmax(0, 1fr) auto auto; }
+.off .a-name, .off .role-text { color: var(--ink-2); font-weight: 500; }
+.off :deep(.avatar) { filter: grayscale(1); }
+.deactivated { display: grid; gap: 2px; margin-top: 4px; }
+.fold-h { margin: 0; font: inherit; }
+.fold { display: inline-flex; align-items: center; gap: 8px; height: 34px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 13px; font-weight: 600; }
+.fold .count { margin-left: 2px; font-size: 11px; font-weight: 500; color: var(--ink-3); }
+@media (hover: hover) { .fold:hover { background: var(--row-hover); color: var(--ink); } }
+.fold:focus-visible { box-shadow: var(--focus-ring); }
+.fold .chev { transform: rotate(-90deg); }
+.fold .chev.open { transform: none; }
+@media (prefers-reduced-motion: no-preference) { .fold .chev { transition: transform .15s ease; } }
 .a-text { display: grid; gap: 1px; min-width: 0; }
 .a-name { font-size: 13.5px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .a-description { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -183,11 +251,14 @@ onMounted(loadKeys)
 .count { letter-spacing: 0; }
 @media (max-width: 600px) {
   .agent-toolbar .btn { min-height: 44px; }
-  .row { grid-template-columns: 30px minmax(0, 1fr) auto; grid-template-areas: "av text keys" ". role role"; row-gap: 4px; padding: 8px 0; }
+  .row, .menus .row { grid-template-columns: 30px minmax(0, 1fr) auto; grid-template-areas: "av text keys" ". role more"; row-gap: 4px; padding: 8px 0; }
   .row > :first-child { grid-area: av; }
   .a-text { grid-area: text; }
   .a-role, .row > .status { grid-area: role; justify-self: start; }
   .keys-btn, .keys-count { grid-area: keys; }
+  .a-more { grid-area: more; justify-self: end; width: 44px; height: 44px; }
+  .off .row { grid-template-areas: "av text text" ". role act"; }
+  .off .row > .btn { grid-area: act; justify-self: end; height: 44px; }
   .role-btn, .keys-btn { height: 44px; }
   .keys { padding-left: 0; }
   .keys .btn { height: 44px; }

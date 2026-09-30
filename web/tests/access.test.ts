@@ -2,8 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  AccessError, auditSentence, beyond, categoryOf, defaultProjectRole, defaultWorkspaceRole, diff, effectLine, groupPermissions, inviteRoles,
-  isLastOwner, permissionLabel, projectRolesOf, projectSummary, validEmail, workspaceRolesOf, type Permission, type Role,
+  AccessError, agentDeactivatePoints, auditSentence, beyond, categoryOf, defaultProjectRole, defaultWorkspaceRole, diff, effectLine, groupPermissions, inviteRoles,
+  isLastOwner, permissionLabel, projectRolesOf, projectSummary, splitAgents, validEmail, workspaceRolesOf, type Agent, type Permission, type Role,
 } from '../src/lib/access.ts'
 
 const P = (key: string, group: string, risk: Permission['risk'], project = true): Permission => ({ key, group, description: key, risk, grantable_at: project ? ['workspace', 'project'] : ['workspace'] })
@@ -67,4 +67,20 @@ test('errors carry the server’s reason and field', () => {
   assert.equal(error.message, 'The last owner stays.')
   assert.equal(error.field, 'role_id')
   assert.equal(error.code, 'last_owner')
+})
+
+const agent = (name: string, extra: Partial<Agent> = {}): Agent => ({ principal_id: name, name, has_avatar: false, workspace_role: null, key_count: 0, last_seen_at: null, service: false, ...extra })
+
+test('agents split into working, deactivated and internal; a server without status knows only working ones', () => {
+  const groups = splitAgents([agent('a'), agent('b', { status: 'deactivated' }), agent('c', { status: 'active' }), agent('System', { service: true }), agent('d', { status: 'deactivated', connected_computer: false })])
+  assert.deepEqual(groups.working.map(a => a.name), ['a', 'c'])
+  assert.deepEqual(groups.deactivated.map(a => a.name), ['b', 'd'])
+  assert.deepEqual(groups.service.map(a => a.name), ['System'])
+})
+
+test('deactivating an agent says how many keys go with it', () => {
+  assert.match(agentDeactivatePoints(0)[0]!, /no active key/)
+  assert.match(agentDeactivatePoints(1)[0]!, /Its active key is revoked now/)
+  assert.match(agentDeactivatePoints(3)[0]!, /Its 3 active keys are revoked now/)
+  assert.ok(agentDeactivatePoints(2).some(line => /revoked keys stay revoked/.test(line)))
 })
