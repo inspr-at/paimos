@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch, watchEffect } from 'vue'
 import { APIError, undoEvent, type ListItem } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
+import { rowStore } from '../../lib/rowStore'
 import { toast } from '../../lib/toast'
 import { useActivity } from '../../lib/useActivity'
-import { useTicket, type RelatedNode } from '../../lib/useTicket'
+import { useTicket, type RelatedNode, type TicketChange } from '../../lib/useTicket'
 import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta, statusOptions } from '../../lib/work'
 import { useAttachments } from '../../lib/useAttachments'
 import AppIcon from '../AppIcon.vue'
@@ -59,12 +60,22 @@ const emit = defineEmits<{
   removed: [item: ListItem]; created: [item: ListItem]; moved: [item: ListItem, fromParent: string | null]; assigned: []; retry: []; openInProject: []
 }>()
 
-const item = toRef(props, 'item')
+// The row store's display object for this ticket (the list's row when the
+// list shows it): one object per node, so every read and write lands on what
+// the panel shows (AEON-326).
+const item = computed(() => {
+  const given = props.item
+  if (!given) return null
+  return rowStore.row(given.id) ?? rowStore.adopt(given, 0, { full: false }) ?? given
+})
+// Set below from the editors: while one is open, changes by others wait.
+const liveBusy = ref(false)
 const ticket = useTicket(item, {
   names: props.names,
   onRemoved: removed => emit('removed', removed),
   onCreated: created => emit('created', created),
   onMoved: (moved, fromParent) => emit('moved', moved, fromParent),
+  live: { busy: liveBusy, me: () => props.me?.id ?? null },
 })
 const activity = useActivity(computed(() => props.item?.id ?? null))
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
@@ -99,7 +110,9 @@ onMounted(() => {
   if (root.value) { sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(root.value) }
 })
 let releaseChoiceAlive = true
-onBeforeUnmount(() => { releaseChoiceAlive = false; wideQuery.removeEventListener('change', onWide); sizer?.disconnect() })
+onBeforeUnmount(() => {
+  releaseChoiceAlive = false; wideQuery.removeEventListener('change', onWide); sizer?.disconnect()
+})
 const contextColumn = computed(() => props.mode === 'full' ? wideScreen.value : width.value >= 860)
 
 // ---------- Edit mode: title, text and properties together, one Save ----------
@@ -110,8 +123,9 @@ const benefitInvalidKey = ref('')
 const titleField = ref<HTMLTextAreaElement>()
 const draft = reactive({ ...benefitDraft({}), title: '', body: '', acceptance: '', notes: '', state: '', priority: '', assignee: '' })
 let base = { ...draft }
-function snapshot() {
-  const it = props.item!
+// The draft's values from one server copy: the editor's base (the copy its
+// save is checked against), never whatever object shows at the moment.
+function snapshot(it: ListItem = ticket.base() ?? item.value!) {
   return {
     ...benefitDraft(it.fields), title: it.title, body: it.body ?? '', acceptance: typeof it.fields.acceptance_criteria === 'string' ? it.fields.acceptance_criteria : '',
     notes: typeof it.fields.notes === 'string' ? it.fields.notes : '', state: it.state, priority: it.priority && it.priority !== 'none' ? it.priority : '', assignee: it.assignee?.id ?? '',
@@ -119,7 +133,7 @@ function snapshot() {
 }
 const editDirty = computed(() => editing.value && (Object.keys(base) as (keyof typeof base)[]).some(key => draft[key] !== base[key]))
 const editStatusOptions = computed(() => {
-  const options = statusOptions([props.item?.state ?? ''])
+  const options = statusOptions([item.value?.state ?? ''])
   return options.some(o => o.value === draft.state) || !draft.state ? options : [{ value: draft.state, meta: statusMeta(draft.state) }, ...options]
 })
 const benefitNames: Record<string, string> = {
@@ -135,7 +149,7 @@ function focusBenefit(key: string) {
   scope.querySelector<HTMLElement>(`#${CSS.escape(id)}`)?.focus()
 }
 function refreshBenefitNotice() {
-  const target = props.item
+  const target = item.value
   if (!benefitNotice.value || !target) return
   if (!needsBenefitPrompt({ kind_slug: target.kind_slug, state: base.state, fields: draft }, draft.state)) {
     benefitNotice.value = ''
@@ -147,8 +161,11 @@ function refreshBenefitNotice() {
   benefitInvalidKey.value = gap?.key ?? ''
 }
 async function startEdit(focus: 'title' | 'body' | 'benefit' = 'title') {
-  if (!editable.value || !props.item || editing.value) return
-  base = snapshot(); Object.assign(draft, base)
+  if (!editable.value || !item.value || editing.value) return
+  // Editing starts now: the row is pinned and the draft builds on the copy
+  // the editor keeps as its base.
+  const copy = ticket.hold()
+  base = snapshot(copy ?? item.value); Object.assign(draft, base)
   benefitNotice.value = ''
   benefitInvalidKey.value = ''
   editing.value = true
@@ -165,26 +182,30 @@ function changeBenefit(key: string, value: string | boolean) {
 }
 function growTitle() { const el = titleField.value; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px` } }
 async function saveEdit() {
-  const target = props.item
+  const target = item.value
   if (!target || saving.value) return
   if (!draft.title.trim()) { toast('A title is needed.', { tone: 'error' }); titleField.value?.focus(); return }
   if (!editDirty.value) { editing.value = false; return }
-  const patch: Record<string, unknown> = {}
+  // Only what the viewer changed goes out; useTicket puts changed fields on
+  // the editor's base copy and sends that copy's revision.
+  const patch: TicketChange = {}
   if (draft.title.trim() !== base.title) patch.title = draft.title.trim()
   if (draft.body !== base.body) patch.body = draft.body
   if (draft.state !== base.state) patch.state = draft.state
-  const fields = { ...target.fields }
-  let fieldsChanged = false
-  const setField = (name: string, value: string, before: string) => { if (value === before) return; fieldsChanged = true; if (value.trim()) fields[name] = value; else delete fields[name] }
+  const changed: Record<string, unknown> = {}
+  const setField = (name: string, value: string, before: string) => { if (value === before) return; changed[name] = value.trim() ? value : undefined }
   setField('acceptance_criteria', draft.acceptance, base.acceptance)
   setField('notes', draft.notes, base.notes)
   setField('priority', draft.priority, base.priority)
   setField('assignee', draft.assignee, base.assignee)
   if (target.kind_slug === 'ticket') {
     for (const key of benefitTextKeys) setField(key, draft[key], base[key])
-    if (draft.hide_from_release_notes !== base.hide_from_release_notes) { fieldsChanged = true; fields.hide_from_release_notes = draft.hide_from_release_notes }
+    if (draft.hide_from_release_notes !== base.hide_from_release_notes) changed.hide_from_release_notes = draft.hide_from_release_notes
   }
-  if (fieldsChanged) patch.fields = fields
+  if (Object.keys(changed).length) patch.fields = changed
+  // The fields as the save will leave them, for the benefit check.
+  const fields: Record<string, unknown> = { ...(ticket.base()?.fields ?? target.fields) }
+  for (const [key, value] of Object.entries(changed)) { if (value === undefined) delete fields[key]; else fields[key] = value }
   // The benefit editor is already on this form. Point at the first incomplete field.
   if (needsBenefitPrompt({ kind_slug: target.kind_slug, state: base.state, fields }, draft.state)) {
     const gap = firstBenefitGap(fields)
@@ -196,25 +217,27 @@ async function saveEdit() {
   }
   benefitNotice.value = ''
   benefitInvalidKey.value = ''
+  // The answer names the assignee by id: the store names them from here.
+  const person = draft.assignee !== base.assignee ? assigneeOptions.value.find(o => o.value === draft.assignee && o.value) : undefined
+  if (person) { props.names.set(person.value, person.label); rowStore.learnName(person.value, person.label) }
   saving.value = true
   const result = await ticket.patch(patch)
   saving.value = false
   if (result === 'ok') {
-    if (draft.assignee !== base.assignee) {
-      const option = assigneeOptions.value.find(o => o.value === draft.assignee)
-      target.assignee = draft.assignee && option ? { id: draft.assignee, name: option.label } : null
-      if (target.assignee) props.names.set(target.assignee.id, target.assignee.name)
-    }
     editing.value = false
     toast(`Saved ${target.key}`)
     void nextTick(() => root.value?.focus({ preventScroll: true }))
   } else if (result === 'conflict') {
-    // The newer version is loaded; the draft stays, compared against it from now on.
-    base = snapshot()
+    // The editor rebased onto the newer version; the draft stays, compared
+    // against it from now on. What the viewer did not touch takes the newer
+    // value, so saving again does not undo someone else's change.
+    const fresh = snapshot()
+    for (const key of Object.keys(base) as (keyof typeof base)[]) if (draft[key] === base[key]) (draft as Record<string, unknown>)[key] = fresh[key]
+    base = fresh
   }
 }
 async function cancelEdit() {
-  if (editDirty.value && !(await confirmAction({ title: 'Discard your changes?', body: `Your edits to ${props.item?.key ?? 'this ticket'} have not been saved.`, confirmLabel: 'Discard', danger: true }))) return
+  if (editDirty.value && !(await confirmAction({ title: 'Discard your changes?', body: `Your edits to ${item.value?.key ?? 'this ticket'} have not been saved.`, confirmLabel: 'Discard', danger: true }))) return
   editing.value = false
   void nextTick(() => root.value?.focus({ preventScroll: true }))
 }
@@ -282,13 +305,23 @@ const notesSection = ref<InstanceType<typeof MarkdownSection>>()
 const sections = computed(() => [descSection.value, acSection.value, notesSection.value].filter(section => !!section))
 const composer = ref<InstanceType<typeof CommentComposer>>()
 const timeline = ref<InstanceType<typeof ActivityTimeline>>()
+watchEffect(() => { liveBusy.value = editing.value || saving.value || !!title.value?.editing || sections.value.some(section => section.editing) })
+// Parts someone else just changed get a brief tint (AEON-326).
+const PROPERTY_FIELDS = ['state', 'parent_id', 'fields.priority', 'fields.assignee', 'fields.estimate', 'fields.eta', 'fields.release']
+const liveTint = computed(() => {
+  const fields = ticket.liveFields.value
+  return {
+    title: fields.includes('title'), props: fields.some(field => PROPERTY_FIELDS.includes(field)), body: fields.includes('body'),
+    acceptance: fields.includes('fields.acceptance_criteria'), notes: fields.includes('fields.notes'),
+  }
+})
 const menu = ref<{ kind: 'priority' | 'assignee' | 'epic' | 'release'; anchor: HTMLElement } | null>(null)
 const showAcceptance = ref(false)
 const showNotes = ref(false)
 
-const acceptance = computed(() => typeof props.item?.fields.acceptance_criteria === 'string' ? props.item.fields.acceptance_criteria : '')
-const notes = computed(() => typeof props.item?.fields.notes === 'string' ? props.item.fields.notes : '')
-const hasChildren = computed(() => !!props.item && (props.item.kind_slug === 'epic' || props.item.children_count > 0 || ticket.children.value.length > 0))
+const acceptance = computed(() => typeof item.value?.fields.acceptance_criteria === 'string' ? item.value.fields.acceptance_criteria : '')
+const notes = computed(() => typeof item.value?.fields.notes === 'string' ? item.value.fields.notes : '')
+const hasChildren = computed(() => !!item.value && (item.value.kind_slug === 'epic' || item.value.children_count > 0 || ticket.children.value.length > 0))
 const priorityOptions: MenuOption[] = [{ value: 'high', label: 'High' }, { value: 'medium', label: 'Medium' }, { value: 'low', label: 'Low' }, { value: '', label: 'No priority' }]
 const assigneeOptions = computed<MenuOption[]>(() => {
   const people = new Map(props.people.map(person => [person.id, person.name]))
@@ -318,7 +351,7 @@ function openMenu(kind: 'priority' | 'assignee' | 'epic' | 'release', anchor: HT
   if (kind === 'release' ? canRelease.value : kind === 'epic' ? movable.value : editable.value) menu.value = { kind, anchor }
 }
 async function chooseRelease(target: ReleaseTarget) {
-  const it = props.item
+  const it = item.value
   const projectId = props.project.id
   if (!it || !canRelease.value) return
   const ticket = { id: it.id, key: it.key, title: it.title, state: it.state, kind: it.kind_slug }
@@ -372,7 +405,7 @@ const linkAnchor = ref<HTMLElement | null>(null)
 // On a phone the picker opens under Link with the screen's height to itself:
 // Link scrolls to the top first, so the keyboard does not cover the results.
 async function openLink(anchor: HTMLElement | null) {
-  if (!anchor || !linkable.value || !props.item) return
+  if (!anchor || !linkable.value || !item.value) return
   menu.value = null
   if (matchMedia('(max-width: 600px)').matches) {
     anchor.scrollIntoView({ block: 'start', behavior: 'instant' })
@@ -383,7 +416,7 @@ async function openLink(anchor: HTMLElement | null) {
 function closeLink(restore: boolean) { const anchor = linkAnchor.value; linkAnchor.value = null; if (restore) anchor?.focus() }
 // Removing a link asks first, then offers Undo, like the other destructive actions.
 async function unlinkEntry(entry: RelatedNode): Promise<boolean> {
-  const target = props.item
+  const target = item.value
   if (!target || !unlinkable.value) return false
   const other = entry.node?.key ?? 'an unavailable ticket'
   const ok = await confirmAction({
@@ -394,7 +427,7 @@ async function unlinkEntry(entry: RelatedNode): Promise<boolean> {
   return ok ? ticket.unlink(entry) : false
 }
 async function remove() {
-  const target = props.item
+  const target = item.value
   if (!target || !deletable.value) return
   const ok = await confirmAction({
     title: `Delete ${target.key}?`,
@@ -415,6 +448,8 @@ function isDirty() {
 function focus() { root.value?.focus({ preventScroll: true }) }
 defineExpose({
   el: root, focus, isDirty,
+  // An editor or a save is open: a live list waits with its structural updates.
+  busy: () => liveBusy.value,
   editTitle: () => title.value?.start(),
   startEdit, editing,
   openStatus: () => { const anchor = anchorFor('s'); if (anchor && editable.value) emit('status', anchor) },
@@ -442,6 +477,7 @@ defineExpose({
       @start-agent="item && startDialog?.open(item)"
     />
     <StartAgentDialog ref="startDialog" />
+    <p class="sr-only" role="status" aria-live="polite">{{ ticket.liveMessage.value }}</p>
 
     <div ref="scroller" class="ws-scroll">
       <div v-if="ticket.gone.value" class="ws-state" role="alert">
@@ -464,6 +500,9 @@ defineExpose({
 
       <!-- Edit mode: the whole ticket as one form, one Save -->
       <form v-else-if="editing" class="edit-form" :aria-label="`Edit ${item.key}`" @submit.prevent="saveEdit" @keydown="editKeys">
+        <p v-if="ticket.liveHeld.value" class="edit-live" role="status">
+          <AppIcon :name="ticket.liveHeld.value === 'deleted' ? 'archive' : 'refresh'" :size="13" />{{ ticket.liveHeld.value === 'deleted' ? 'Deleted elsewhere meanwhile.' : 'Changed elsewhere meanwhile: saving shows that version first and keeps your draft.' }}
+        </p>
         <label class="sr-only" for="edit-title">Title</label>
         <textarea id="edit-title" ref="titleField" v-model="draft.title" class="edit-title" :class="{ large: mode === 'full' }" rows="1" maxlength="500" placeholder="Title" @input="growTitle" @keydown.enter.exact.prevent />
         <div class="edit-props">
@@ -502,9 +541,9 @@ defineExpose({
       <div v-else class="ws-grid">
         <div class="ws-main">
           <p v-if="!editable" class="read-only" role="note"><AppIcon name="alert" :size="13" />You can read this {{ kindLabel(item.kind_slug).toLowerCase() }} but not change it.</p>
-          <InlineTitle ref="title" :value="item.title" :editable="editable" :large="mode === 'full'" :save="ticket.setTitle" />
+          <InlineTitle ref="title" :class="{ 'live-tint': liveTint.title }" :value="item.title" :editable="editable" :large="mode === 'full'" :save="ticket.setTitle" />
           <TicketProperties
-            class="ws-props" :class="{ 'only-narrow': mode === 'full' }" :item="item" :editable="editable" layout="row" :now="now"
+            class="ws-props" :class="{ 'only-narrow': mode === 'full', 'live-tint': liveTint.props }" :item="item" :editable="editable" layout="row" :now="now"
             :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate"
             @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
             @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
@@ -522,9 +561,9 @@ defineExpose({
           <div class="divider" />
 
           <div class="sections">
-            <MarkdownSection ref="descSection" title="Description" :value="item.body" :editable="editable" :save="ticket.setBody" :attachment-id="attachable ? attachmentId : undefined" empty-text="Add a description" @open-attachment="openAttachment" />
-            <MarkdownSection v-if="acceptance.trim() || showAcceptance" ref="acSection" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="value => ticket.setField('acceptance_criteria', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
-            <MarkdownSection v-if="notes.trim() || showNotes" ref="notesSection" title="Notes" :value="notes" :editable="editable" :save="value => ticket.setField('notes', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
+            <MarkdownSection ref="descSection" :class="{ 'live-tint': liveTint.body }" title="Description" :value="item.body" :editable="editable" :save="ticket.setBody" :attachment-id="attachable ? attachmentId : undefined" empty-text="Add a description" @open-attachment="openAttachment" />
+            <MarkdownSection v-if="acceptance.trim() || showAcceptance" ref="acSection" :class="{ 'live-tint': liveTint.acceptance }" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="value => ticket.setField('acceptance_criteria', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
+            <MarkdownSection v-if="notes.trim() || showNotes" ref="notesSection" :class="{ 'live-tint': liveTint.notes }" title="Notes" :value="notes" :editable="editable" :save="value => ticket.setField('notes', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
             <div v-if="editable && (!(acceptance.trim() || showAcceptance) || !(notes.trim() || showNotes))" class="add-sections">
               <button v-if="!(acceptance.trim() || showAcceptance)" type="button" class="add-section" @click="addSection('acceptance')"><AppIcon name="plus" :size="12" />Acceptance criteria</button>
               <button v-if="!(notes.trim() || showNotes)" type="button" class="add-section" @click="addSection('notes')"><AppIcon name="plus" :size="12" />Notes</button>
@@ -573,7 +612,7 @@ defineExpose({
         <aside v-if="mode === 'full'" class="ws-side" aria-label="Properties">
           <div class="side-card">
             <TicketProperties
-              :item="item" :editable="editable" layout="column" :now="now"
+              :class="{ 'live-tint': liveTint.props }" :item="item" :editable="editable" layout="column" :now="now"
               :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate"
               @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
               @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
@@ -673,6 +712,12 @@ defineExpose({
 .edit-section { display: grid; gap: 8px; }
 .edit-section .eyebrow { margin: 0; }
 .edit-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
+.edit-live { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; background: var(--code-bg); font-size: 12.5px; color: var(--ink-2); }
+.edit-live svg { flex-shrink: 0; color: var(--teal-ink); }
+/* Someone else's change: a brief full tint, never an edge accent (AEON-326). */
+.live-tint { border-radius: 10px; animation: live-tint 2s ease-out; }
+@keyframes live-tint { from { background-color: var(--row-selected); box-shadow: 0 0 0 6px var(--row-selected); } to { background-color: transparent; box-shadow: 0 0 0 6px transparent; } }
+@media (prefers-reduced-motion: reduce) { .live-tint { animation: none; background-color: var(--row-hover); box-shadow: 0 0 0 6px var(--row-hover); } }
 @media (max-width: 720px), (hover: none) { .edit-hint { display: none; } }
 /* Full page editing is a focused writing layout: editor and preview side by side. */
 .ticket-ws.full.editing { max-width: 1480px; }

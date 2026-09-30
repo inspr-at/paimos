@@ -64,6 +64,12 @@ const props = defineProps<{
   canAssignRelease?: boolean
   // Native journey membership for the visible tickets. Imported fields.release is not this.
   nativeReleases?: Map<string, NativeReleaseView>
+  // Live updates (AEON-326): rows waiting for Show carry a label ("Closed",
+  // "Deleted", ...) and stay dimmed; rows someone else just changed tint briefly.
+  liveLabels?: Map<string, string>
+  liveFlash?: Set<string>
+  // "3 updates · Show": in the Title header, so it never covers a row.
+  livePill?: { text: string; overflow: boolean } | null
 }>()
 // Unfiltered loads hold the expected height (so nothing below jumps); 1..28 rows.
 const skeletonRows = computed(() => Math.max(1, Math.min(28, props.expectedRows ?? 14)))
@@ -93,6 +99,7 @@ const emit = defineEmits<{
   select: [row: ListItem, mode: 'toggle' | 'range']
   selectAll: [on: boolean]
   release: [row: ListItem, anchor: HTMLElement]
+  showUpdates: []
 }>()
 
 const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated', progress: 'c-progress', eta: 'c-eta', model: 'c-model', tokens: 'c-tokens', list_cost: 'c-list-cost', paid: 'c-paid' }
@@ -487,6 +494,13 @@ defineExpose({
               </span>
             </button>
             <span v-else class="th-label">{{ column.label }}</span>
+            <button
+              v-if="column.id === 'title' && livePill" type="button" class="live-pill" :aria-label="livePill.text" aria-keyshortcuts="u"
+              :data-tip="livePill.overflow ? 'Load the list again' : 'Show the updates · u'" @click.stop="emit('showUpdates')"
+            >
+              <AppIcon :name="livePill.overflow ? 'refresh' : 'arrow-up'" :size="12" />
+              <span class="live-count">{{ livePill.text.split(' · ')[0] }}</span><span class="live-dot" aria-hidden="true">·</span><b>{{ livePill.text.split(' · ')[1] }}</b>
+            </button>
             <span
               v-if="!phone" class="col-resize" role="separator" aria-orientation="vertical" tabindex="0"
               :aria-label="`Resize ${column.label} column`" :aria-valuenow="shownWidth(column.id)" :aria-valuemin="bounds(column.id).min" :aria-valuemax="bounds(column.id).max"
@@ -621,6 +635,7 @@ defineExpose({
               cursor: cursorId === entry.row.id, open: openId === entry.row.id, epic: entry.row.kind_slug === 'epic',
               'tree-row': !!entry.tree, dimmed: entry.tree?.dimmed, top: entry.tree && entry.tree.depth === 0 && entry.row.kind_slug === 'epic',
               'drop-target': dropTarget === entry.row.id, dragging: dragId === entry.row.id,
+              stale: !!liveLabels?.has(entry.row.id), 'live-flash': !!liveFlash?.has(entry.row.id),
             }"
             :style="entry.tree ? { '--depth': entry.tree.depth } : undefined"
             :aria-selected="cursorId === entry.row.id" :aria-level="entry.tree ? entry.tree.depth + 1 : undefined"
@@ -662,6 +677,7 @@ defineExpose({
                 </span>
                 <AppIcon :name="entry.row.kind_slug === 'epic' ? 'epic' : entry.row.kind_slug === 'task' ? 'task' : 'ticket'" :size="14" class="kind-glyph" :class="entry.row.kind_slug" :data-tip="kindLabel(entry.row.kind_slug)" />
                 <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
+                <span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span>
                 <span v-if="childCount(entry)" class="child-count mono" :data-tip="plural(childCount(entry), 'child item')">{{ childCount(entry) }}</span>
                 <span v-if="!entry.tree && epicChip(entry.row)" class="parent-chip" :class="{ epic: epicChip(entry.row)!.kind_slug === 'epic' }" :data-tip="`${kindLabel(epicChip(entry.row)!.kind_slug)} ${epicChip(entry.row)!.key}\n${epicChip(entry.row)!.title}`">
                   <AppIcon v-if="epicChip(entry.row)!.kind_slug === 'epic'" name="epic" :size="10" />
@@ -866,6 +882,30 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 .ticket-row.tree-row.epic .title-link { font-weight: 650; }
 .ticket-row.top td { border-top: 1px solid var(--line); }
 tbody .ticket-row.top:first-child td { border-top: 0; }
+/* Waiting live updates: a quiet teal pill in the Title header (AEON-326). */
+.live-pill {
+  display: inline-flex; align-items: center; gap: 5px; max-width: calc(100% - 64px); height: 22px; margin-left: 12px; padding: 0 10px 0 8px; border: 0; border-radius: 999px;
+  vertical-align: middle; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink);
+  font: 500 12px/1 var(--font); letter-spacing: 0; text-transform: none; white-space: nowrap; overflow: hidden;
+}
+.live-pill b { font-weight: 650; }
+.live-pill .live-count { overflow: hidden; text-overflow: ellipsis; }
+.live-pill .live-dot { opacity: .6; }
+.live-pill:hover { background: var(--row-selected); }
+.live-pill:focus-visible { box-shadow: var(--focus-ring); }
+@media (prefers-reduced-motion: no-preference) {
+  .live-pill { animation: live-pill-in .2s ease-out; }
+  @keyframes live-pill-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+}
+/* A row waiting for Show: dimmed, with its label at full strength (AEON-326). */
+.ticket-row.stale td:not(.c-title):not(.c-key) > .cell, .ticket-row.stale .c-key .key, .ticket-row.stale .c-title .cell > :not(.live-label) { opacity: .45; }
+.live-label { flex-shrink: 0; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 11.5px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+/* Someone else changed the row: a brief full tint that fades. */
+@media (prefers-reduced-motion: no-preference) {
+  .ticket-row.live-flash td { animation: row-live 2s ease-out; }
+  @keyframes row-live { from { background-color: var(--row-selected); } to { background-color: transparent; } }
+}
+@media (prefers-reduced-motion: reduce) { .ticket-row.live-flash td { background-color: var(--row-hover); } }
 .ticket-row.dimmed .key, .ticket-row.dimmed .title-link, .ticket-row.dimmed .kind-glyph, .ticket-row.dimmed .c-status .cell, .ticket-row.dimmed .c-prio .cell, .ticket-row.dimmed .c-assignee .cell, .ticket-row.dimmed .ticket-workers, .ticket-row.dimmed time { opacity: .5; }
 .epic-progress { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto; padding-left: 12px; }
 .epic-progress .bar { width: 64px; height: 5px; }

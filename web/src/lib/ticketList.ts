@@ -435,10 +435,11 @@ export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => numb
 }
 
 // Stable status ordering by workflow. An unknown spelling stays after that
-// workflow in both directions, matching the list API.
-export function orderByStatus(rows: ListItem[], desc = false): ListItem[] {
+// workflow in both directions, matching the list API. layout gives the values
+// a row is placed by (a live list holds them while an update waits).
+export function orderByStatus(rows: ListItem[], desc = false, layout: (row: ListItem) => ListItem = row => row): ListItem[] {
   return rows
-    .map((row, index) => ({ row, index, meta: statusMeta(row.state) }))
+    .map((row, index) => ({ row, index, meta: statusMeta(layout(row).state) }))
     .sort((a, b) => {
       if ((a.meta.key === 'other') !== (b.meta.key === 'other')) return a.meta.key === 'other' ? 1 : -1
       return (desc ? b.meta.order - a.meta.order : a.meta.order - b.meta.order) || a.index - b.index
@@ -479,14 +480,18 @@ export interface RowGroup {
 }
 // Counts are the list API's facet for the grouped dimension (state, assignee,
 // priority, kind or tag), so a group shows its whole size while pages load.
-export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string } = {}): RowGroup[] {
+// layout gives the values a row is grouped by (a live list holds them while an
+// update waits); the group still lists the row itself.
+export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string; layout?: (row: ListItem) => ListItem } = {}): RowGroup[] {
   if (group === 'none') return [{ key: 'all', label: '', rows, total: rows.length }]
+  const layout = options.layout ?? (row => row)
   if (group === 'status') {
     const groups = new Map<string, RowGroup>()
     for (const row of rows) {
-      const meta = statusMeta(row.state)
-      const key = meta.key === 'other' ? normaliseState(row.state) : meta.key
-      if (!groups.has(key)) groups.set(key, { key, label: meta.label, state: row.state, rows: [], total: 0 })
+      const state = layout(row).state
+      const meta = statusMeta(state)
+      const key = meta.key === 'other' ? normaliseState(state) : meta.key
+      if (!groups.has(key)) groups.set(key, { key, label: meta.label, state, rows: [], total: 0 })
       groups.get(key)!.rows.push(row)
     }
     for (const entry of groups.values()) {
@@ -503,10 +508,11 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
     const groups = new Map<string, RowGroup>()
     const none: RowGroup = { key: 'none', label: 'No epic', rows: [], total: 0 }
     for (const row of rows) {
-      const epic = epicOf(row, byId)
+      const placed = layout(row)
+      const epic = epicOf(placed, byId)
       if (!epic) { none.rows.push(row); continue }
       if (!groups.has(epic.id)) groups.set(epic.id, { key: epic.id, label: epic.title, epic, rows: [], total: 0 })
-      if (row.kind_slug !== 'epic') groups.get(epic.id)!.rows.push(row)
+      if (placed.kind_slug !== 'epic') groups.get(epic.id)!.rows.push(row)
     }
     const out = [...groups.values(), ...(none.rows.length ? [none] : [])]
     for (const entry of out) entry.total = entry.rows.length
@@ -518,18 +524,19 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
     groups.get(key)!.rows.push(row)
   }
   for (const row of rows) {
+    const placed = layout(row)
     if (group === 'assignee') {
-      const person = row.assignee
+      const person = placed.assignee
       if (person) put(person.id, () => ({ key: person.id, label: person.name, person }), row)
       else put('none', () => ({ key: 'none', label: 'Unassigned' }), row)
     } else if (group === 'priority') {
-      const value = row.priority && row.priority !== 'none' ? row.priority : 'none'
+      const value = placed.priority && placed.priority !== 'none' ? placed.priority : 'none'
       put(value, () => ({ key: value, label: priorityLabel(value), priority: value }), row)
     } else if (group === 'type') {
-      put(row.kind_slug, () => ({ key: row.kind_slug, label: kindLabel(row.kind_slug), kind: row.kind_slug }), row)
+      put(placed.kind_slug, () => ({ key: placed.kind_slug, label: kindLabel(placed.kind_slug), kind: placed.kind_slug }), row)
     } else {
       // A ticket with several labels shows under each of them.
-      const tags = rowTags(row)
+      const tags = rowTags(placed)
       if (!tags.length) put('none', () => ({ key: 'none', label: 'No labels' }), row)
       for (const tag of new Map(tags.map(t => [t.name.toLowerCase(), t])).values()) put(tag.name.toLowerCase(), () => ({ key: tag.name.toLowerCase(), label: tag.name, tag }), row)
     }

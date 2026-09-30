@@ -88,7 +88,10 @@ test('R1 mutations send JSON, tolerate 204, and surface API failures', async () 
   }
   assert.equal((await updateNode('node/id', { body: '# Changed' })).body, '# Changed')
   globalThis.fetch = async () => new Response(null, { status: 204 })
-  assert.equal(await deleteNode('node-1'), undefined)
+  assert.deepEqual(await deleteNode('node-1'), { revision: null })
+  // A delete names the revision of its event (AEON-326).
+  globalThis.fetch = async () => new Response(null, { status: 204, headers: { 'aeon-revision': '2026-09-29T10:00:04.000001Z' } })
+  assert.deepEqual(await deleteNode('node-2'), { revision: '2026-09-29T10:00:04.000001Z' })
   respond({ error: 'Owner only' }, 403)
   await assert.rejects(deleteNode('node-1'), error => error instanceof APIError && error.status === 403 && error.message === 'Owner only')
   globalThis.fetch = async () => new Response('gateway unavailable', { status: 502 })

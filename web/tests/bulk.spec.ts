@@ -13,6 +13,8 @@ const rows = (page: Page) => grid(page).locator('tr.ticket-row:not(.ghost)')
 const row = (page: Page, key: string) => grid(page).locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const bulkBar = (page: Page) => page.getByRole('toolbar', { name: /selected ticket/ })
 const bulkCalls = (calls: Call[]) => calls.filter(call => call.path === '/api/nodes/bulk')
+// Every row sends the version the list shows (AEON-326): a newer one is a conflict, not an overwrite.
+const revisions = (...ids: string[]) => Object.fromEntries(ids.map(id => [id, expect.any(String)]))
 
 test('checkbox and Shift-click select a range; one status change for all of them, undone at once', async ({ page }) => {
   const errors = watchErrors(page)
@@ -30,7 +32,10 @@ test('checkbox and Shift-click select a range; one status change for all of them
   await bulkBar(page).getByRole('button', { name: 'Status' }).click()
   await page.getByRole('menu', { name: 'Status of 3 tickets' }).getByRole('menuitemradio', { name: 'Cancelled' }).click()
   await expect(page.getByText('3 tickets are now Cancelled')).toBeVisible()
-  expect(bulkCalls(calls)[0].body).toEqual({ ids: ['n-1', 'n-2', 'n-3'], state: 'cancelled' })
+  expect(bulkCalls(calls)[0].body).toEqual({
+    ids: ['n-1', 'n-2', 'n-3'], state: 'cancelled',
+    if_unmodified_since: { 'n-1': '2026-09-23T11:00:00.000Z', 'n-2': '2026-09-23T09:00:00.000Z', 'n-3': '2026-09-23T06:00:00.000Z' },
+  })
   // Cancelled work leaves the list (closed tickets are hidden), and the selection with it.
   await expect(rows(page)).toHaveCount(2)
   await expect(bulkBar(page)).toHaveCount(0)
@@ -83,7 +88,7 @@ test('assignee, priority, labels and epic change in one request each; skipped ti
   await bulkBar(page).getByRole('button', { name: 'Assignee' }).click()
   await page.getByRole('menu', { name: 'Assignee of 2 tickets' }).getByRole('menuitemradio', { name: /Markus Barta/ }).click()
   await expect(page.getByText('Assigned 2 tickets to Markus Barta')).toBeVisible()
-  expect(bulkCalls(calls).at(-1)!.body).toEqual({ ids: ['n-2', 'n-4'], assignee: me.id })
+  expect(bulkCalls(calls).at(-1)!.body).toEqual({ ids: ['n-2', 'n-4'], assignee: me.id, if_unmodified_since: revisions('n-2', 'n-4') })
   await expect(row(page, 'PHAROS-14').locator('.c-assignee')).toContainText('Markus Barta')
   await bulkBar(page).getByRole('button', { name: 'Priority' }).click()
   await page.getByRole('menu', { name: 'Priority of 2 tickets' }).getByRole('menuitemradio', { name: 'No priority' }).click()
@@ -100,7 +105,7 @@ test('assignee, priority, labels and epic change in one request each; skipped ti
   await page.keyboard.press('Enter')
   await labels.getByRole('button', { name: 'Apply' }).click()
   await expect(page.getByText('Changed the labels of 2 tickets')).toBeVisible()
-  expect(bulkCalls(calls).at(-1)!.body).toEqual({ ids: ['n-2', 'n-4'], tags_add: [{ name: 'release-blocker' }], tags_remove: ['BUG'] })
+  expect(bulkCalls(calls).at(-1)!.body).toEqual({ ids: ['n-2', 'n-4'], tags_add: [{ name: 'release-blocker' }], tags_remove: ['BUG'], if_unmodified_since: revisions('n-2', 'n-4') })
   // Epic: the picker's No epic takes them out; a task cannot go under an epic and is skipped.
   await pick('PHAROS-13')
   await bulkBar(page).getByRole('button', { name: 'Move' }).click()

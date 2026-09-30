@@ -2050,6 +2050,7 @@ paths:
         - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
+        - {name: ids, in: query, description: 'Repeatable or comma-separated node IDs, at most 200: only these nodes, with every other filter still applied. A live list refetches the rows that changed through its own query; a row that no longer matches is absent.', schema: {type: array, maxItems: 200, items: {type: string, format: uuid}}}
         - {$ref: '#/components/parameters/Sort'}
         - {$ref: '#/components/parameters/Direction'}
         - {$ref: '#/components/parameters/Limit'}
@@ -2126,6 +2127,8 @@ paths:
         answers 409 and changes nothing when any of them changed since. A node that
         cannot take the change (not found, another project, a kind rule, a cycle) is
         listed under skipped with a reason; nodes already so are listed as unchanged.
+        if_unmodified_since names, per node, the updated_at the caller last saw; a
+        node changed since is skipped with code conflict and left as it is.
         Any change to a portal_product, portal_feature or portal_wish, and any
         reparent into or out of a portal parent, requires a person with
         settings.manage. Agents are refused, and the batch changes nothing.
@@ -2158,6 +2161,11 @@ paths:
                           color: {type: string, maxLength: 32}
                 tags_remove: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 100}}
                 parent_id: {type: string, format: uuid}
+                if_unmodified_since:
+                  type: object
+                  description: Node ID to the updated_at the caller last saw (RFC 3339, compared exactly like PATCH's If-Unmodified-Since). Nodes not named are not checked.
+                  maxProperties: 500
+                  additionalProperties: {type: string, format: date-time}
       responses:
         '200':
           description: Changed, unchanged and skipped nodes
@@ -2181,7 +2189,7 @@ paths:
                         reason: {type: string}
                         code:
                           type: string
-                          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. Omitted for other skips.
+                          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
         '400':
           $ref: '#/components/responses/Error'
         '403':
@@ -2292,11 +2300,13 @@ paths:
                   - {$ref: '#/components/schemas/NodeError'}
     delete:
       operationId: deleteNode
-      description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
+      description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused. The deletion moves updated_at forward like every other write; Aeon-Revision names that revision (AEON-326).
       security: *auth
       responses:
         '204':
           description: Deleted
+          headers:
+            Aeon-Revision: {$ref: '#/components/headers/NodeRevision'}
         '403':
           $ref: '#/components/responses/Error'
         '404':
@@ -2620,10 +2630,11 @@ paths:
   /events/stream:
     get:
       operationId: streamEvents
-      description: SSE id is the event ID; event is its type; data is Event JSON. Quote events are excluded and use the authorized quote collaboration stream. LISTEN/NOTIFY wakes durable replay; periodic comments keep the connection alive.
+      description: 'SSE id is the event ID; event is its type; data is Event JSON. Quote events are excluded and use the authorized quote collaboration stream. LISTEN/NOTIFY wakes durable replay; periodic comments keep the connection alive. Live mode (AEON-326): with the after query parameter every connection first sends an event named stream.ready whose id and data {"after": N, "resumed": bool} name the event ID the stream continues after. after=latest starts at the newest event without replaying the log; a numeric after replays from there. Last-Event-ID (a browser reconnect) wins over after. A resume point more than 1000 events behind, or ahead of the newest event, restarts at the newest event. resumed is true only when the stream continues exactly after the ID the client sent; false (after=latest, or a restart) tells the client to refetch what it shows. Node events carry node_changes.'
       security: *auth
       parameters:
         - {name: Last-Event-ID, in: header, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: after, in: query, description: 'Live mode: latest, or an exclusive event ID', schema: {type: string, pattern: '^(latest|[0-9]+)$'}}
       responses:
         '200':
           description: Tenant event stream
@@ -6399,6 +6410,7 @@ components:
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
     HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.5']}}
+    NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
@@ -11843,6 +11855,36 @@ components:
         undo_of:
           type: [integer, 'null']
           format: int64
+        node_changes:
+          type: array
+          description: Set on node.* events when read (history and stream), never stored. The nodes the event changed, for live views; values are read through the node routes.
+          items:
+            $ref: '#/components/schemas/NodeChange'
+    NodeChange:
+      type: object
+      description: AEON-326. One node change, derived from an event the reader may read. Clients refetch the node through GET /nodes/{nodeId} (or their list) to see values.
+      required: [id, project_id, change, fields, revision]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: [string, 'null']
+          format: uuid
+          description: The node's project now; null outside every project
+        change:
+          type: string
+          enum: [created, updated, deleted]
+          description: A restored node reads as created
+        fields:
+          type: array
+          description: 'Changed attributes: key, kind_id, title, body, state, parent_id, position, deleted_at, project_id (a project move) and fields.<name> for custom fields. Empty for created.'
+          items:
+            type: string
+        revision:
+          type: [string, 'null']
+          format: date-time
+          description: The node's updated_at after the change, the value If-Unmodified-Since takes
     EventPage:
       type: object
       required: [items, next_after]

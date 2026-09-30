@@ -2,7 +2,7 @@
 // A small in-memory list API for the Projects and project list pages. It applies
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
-import type { Page } from '@playwright/test'
+import type { Page, Route } from '@playwright/test'
 import { deriveAgentState, normalizeAgentState, STATE_PRIORITY } from '../src/lib/agentSignals.ts'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
 import { leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
@@ -12,6 +12,8 @@ import { compareModelSort, planningSortValue, type PlanningColumn } from '../src
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
 const mira = { id: '22222222-2222-4222-8222-222222222222', name: 'Mira Holm' }
 const now = Date.parse('2026-09-23T12:00:00Z')
+// Like the server, every node write moves updated_at forward, whatever the clock says.
+const forward = (previous: string, at: number) => new Date(Math.max(at, Date.parse(previous) + 1)).toISOString()
 const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
 
 export interface MockNode {
@@ -51,6 +53,9 @@ export interface MockOptions {
   liveStatus?: number
   // The live answer names more sessions than it lists (AEON-233).
   liveTruncated?: boolean
+  // An answer the test holds back (a slow network, AEON-326): computed when
+  // the request arrives (writes apply then), sent once until settles.
+  hold?: (request: { path: string; method: string; query: URLSearchParams }) => { until: Promise<unknown>; computed?: () => void } | undefined
 }
 
 const STATE_ORDER = ['open', 'new', 'backlog', 'blocked', 'in_progress', 'active', 'qa', 'accepted', 'delivered', 'done', 'cancelled', 'archived']
@@ -266,8 +271,10 @@ function completionRefusal(node: MockNode, nextState: string, fields: Record<str
 export async function mockWork(page: Page, data: Fixtures, options: MockOptions = {}) {
   const calls: Call[] = []
   const started = Date.now()
-  await page.route('**/api/**', async route => {
-    const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), query = url.searchParams
+  await page.route('**/api/**', async arrived => {
+    const request = arrived.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), query = url.searchParams
+    const held = options.hold?.({ path, method, query })
+    const route = held ? heldRoute(arrived, held) : arrived
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = request.postData() }
     calls.push({ path, method, query, body, headers: request.headers() })
@@ -362,11 +369,14 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     // ---------- Bulk changes (U22) ----------
     if (path === '/api/nodes/bulk' && method === 'POST') {
       if (options.readOnly) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
-      const input = body as { ids: string[]; state?: string; priority?: string | null; assignee?: string | null; tags_add?: (string | { name: string; color?: string })[]; tags_remove?: string[]; parent_id?: string }
+      const input = body as { ids: string[]; state?: string; priority?: string | null; assignee?: string | null; tags_add?: (string | { name: string; color?: string })[]; tags_remove?: string[]; parent_id?: string; if_unmodified_since?: Record<string, string> }
       const before: MockNode[] = [], after: MockNode[] = [], skipped: { id: string; key?: string; reason: string; code?: string }[] = [], unchanged: string[] = []
       for (const id of input.ids) {
         const node = data.nodes.find(n => n.id === id)
         if (!node) { skipped.push({ id, reason: 'not found' }); continue }
+        // Per-node preconditions (AEON-326): changed since the list showed it.
+        const seen = input.if_unmodified_since?.[id]
+        if (seen && Date.parse(seen) !== Date.parse(node.updated_at)) { skipped.push({ id, key: node.key, reason: 'changed since you loaded it', code: 'conflict' }); continue }
         if (input.parent_id && node.kind_slug === 'task' && data.nodes.find(n => n.id === input.parent_id)?.kind_slug === 'epic') { skipped.push({ id, key: node.key, reason: 'a task cannot sit under an epic' }); continue }
         const old = JSON.parse(JSON.stringify(node)) as MockNode
         const fields = { ...node.fields }
@@ -386,7 +396,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         if (refusal) { skipped.push({ id, key: node.key, reason: refusal.error, code: refusal.code }); continue }
         const next = { ...node, fields, state: nextState, parent_id: input.parent_id ?? node.parent_id }
         if (JSON.stringify(next) === JSON.stringify(node)) { unchanged.push(id); continue }
-        Object.assign(node, next, { updated_at: new Date(now + 120_000 + calls.length).toISOString() })
+        Object.assign(node, next, { updated_at: forward(node.updated_at, now + 120_000 + calls.length) })
         before.push(old); after.push(JSON.parse(JSON.stringify(node)))
       }
       const eventId = after.length ? 5000 + data.batches.length : null
@@ -399,7 +409,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       const batch = data.batches.find(b => b.id === Number(batchUndo[1]))!
       const stale = batch.after.some(a => data.nodes.find(n => n.id === a.id)?.updated_at !== a.updated_at)
       if (batch.undone || stale) return route.fulfill({ status: 409, json: { code: 'conflict', message: 'resource changed or event is not reversible' } })
-      for (const old of batch.before) Object.assign(data.nodes.find(n => n.id === old.id)!, old, { updated_at: new Date(now + 180_000 + calls.length).toISOString() })
+      for (const old of batch.before) { const node = data.nodes.find(n => n.id === old.id)!; Object.assign(node, old, { updated_at: forward(node.updated_at, now + 180_000 + calls.length) }) }
       batch.undone = true
       return route.fulfill({ status: 201, json: { id: batch.id + 1, type: 'node.bulk_changed', undo_of: batch.id } })
     }
@@ -480,7 +490,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         return route.fulfill({ status: 412, json: { error: 'node has changed', node: { ...current, kind_id: `k-${kind}`, position: '0', deleted_at: null } } })
       }
       node.parent_id = (body as { parent_id: string }).parent_id
-      node.updated_at = new Date(now + 90_000).toISOString()
+      node.updated_at = forward(node.updated_at, now + 90_000)
       const { kind_slug: kind, project: _p, ...rest } = node
       return route.fulfill({ json: { ...rest, kind_id: `k-${kind}`, position: '0', deleted_at: null } })
     }
@@ -524,7 +534,10 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         const raw = dateField === 'created' ? n.created_at : dateField === 'updated' ? n.updated_at : dateField === 'start' ? n.fields.start_date : dateField === 'end' ? n.fields.end_date : n.fields.accepted_at
         return typeof raw === 'string' && !Number.isNaN(Date.parse(raw)) ? Date.parse(raw) : null
       }
+      // ids (AEON-326): only those nodes, every other filter still applied.
+      const onlyIds = listParam(query, 'ids')
       let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
+        .filter(n => !onlyIds.length || onlyIds.includes(n.id))
         .filter(n => passes(states, v => v === n.state))
         .filter(n => passes(priorities, v => v === (typeof n.fields.priority === 'string' ? n.fields.priority : 'none')))
         .filter(n => passes(assignees, v => v === (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')))
@@ -612,17 +625,18 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       if (method === 'DELETE') {
         if (data.nodes.some(n => n.parent_id === id)) return route.fulfill({ status: 409, json: { error: 'node has children' } })
         data.nodes.splice(data.nodes.indexOf(node), 1)
-        return route.fulfill({ status: 204 })
+        // The revision of the deletion, as its event names it (live-server.ts, AEON-326).
+        return route.fulfill({ status: 204, headers: { 'aeon-revision': new Date(Date.parse(node.updated_at) + 1000).toISOString() } })
       }
       if (method === 'PATCH' && options.readOnly) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       if (method === 'PATCH' && options.conflictAlways === id) {
-        node.updated_at = new Date(now + 45_000 + calls.length).toISOString(); node.title = 'Renamed by Mira'
+        node.updated_at = forward(node.updated_at, now + 45_000 + calls.length); node.title = 'Renamed by Mira'
         return route.fulfill({ status: 412, json: { error: 'node has changed' } })
       }
       if (method === 'PATCH') {
         if (options.failPatch) return route.fulfill({ status: 422, json: { error: 'State is not allowed here' } })
         // Someone else saved this node after the list was read.
-        if (options.conflictOn === id && !node.title.endsWith('(edited elsewhere)')) { node.updated_at = new Date(now + 30_000).toISOString(); node.title = `${node.title} (edited elsewhere)` }
+        if (options.conflictOn === id && !node.title.endsWith('(edited elsewhere)')) { node.updated_at = forward(node.updated_at, now + 30_000); node.title = `${node.title} (edited elsewhere)` }
         const expected = request.headers()['if-unmodified-since']
         if (expected && expected !== node.updated_at) return route.fulfill({ status: 412, json: { error: 'node has changed' } })
         const patch = body as { state?: string; fields?: Record<string, unknown> }
@@ -630,7 +644,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         const nextFields = patch.fields && typeof patch.fields === 'object' && !Array.isArray(patch.fields) ? patch.fields : node.fields
         const refusal = completionRefusal(node, nextState, nextFields)
         if (refusal) return route.fulfill({ status: 422, json: refusal })
-        Object.assign(node, body as object, { updated_at: new Date(now + 60_000 + calls.length).toISOString() })
+        Object.assign(node, body as object, { updated_at: forward(node.updated_at, now + 60_000 + calls.length) })
       }
       const { kind_slug: kind, project: _project, ...rest } = node
       return route.fulfill({ json: { ...rest, kind_id: `k-${kind}`, position: '0', deleted_at: null } })
@@ -666,6 +680,17 @@ function loopPath(relations: { source_node_id: string; target_node_id: string; t
     frontier = next
   }
   return null
+}
+
+// A route whose answer waits: computed now, fulfilled once the hold settles.
+function heldRoute(route: Route, held: { until: Promise<unknown>; computed?: () => void }): Route {
+  return {
+    request: () => route.request(),
+    fulfill: async (answer: Parameters<Route['fulfill']>[0]) => { held.computed?.(); await held.until; return route.fulfill(answer) },
+    fallback: (options?: Parameters<Route['fallback']>[0]) => route.fallback(options),
+    continue: (options?: Parameters<Route['continue']>[0]) => route.continue(options),
+    abort: (code?: string) => route.abort(code),
+  } as unknown as Route
 }
 
 export function watchErrors(page: Page) {

@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch, type Ref } from 'vue'
 import { getNode, listNodes, type ListItem } from './api'
 import { childMap, epicStats, flattenOutline, missingAncestors, type EpicStats, type OutlineEntry } from './outline'
 import { compareRows, effectiveSort, hasFilters, type ListFilters } from './ticketList'
+import { rowStore } from './rowStore'
 import { asListItem, kinds } from './useTicket'
 import { serializeSort, statusMeta } from './work'
 
@@ -67,6 +68,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       for (let round = 0; round < 8; round++) {
         const missing = missingAncestors(matchNodes.value, root)
         if (!missing.length || request !== ancestorRun) break
+        const sent = rowStore.mark()
         const fetched = await Promise.all(missing.map(id => getNode(id).catch(() => null)))
         for (const node of fetched) {
           if (!node) continue
@@ -75,7 +77,10 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
           const item = asListItem(node, kind, null, null)
           const assignee = typeof node.fields.assignee === 'string' ? node.fields.assignee : null
           if (assignee) item.assignee = { id: assignee, name: list.names.get(assignee) ?? 'Someone' }
-          ancestors.set(node.id, item)
+          // The row store's display object (the panel edits and moves that
+          // one); one the store knows deleted is not placed.
+          const row = rowStore.adopt(item, sent, { full: false })
+          if (row) ancestors.set(node.id, row)
         }
         // Parents that cannot be read would loop forever; place their children at the top.
         for (const id of missing) if (!ancestors.has(id)) ancestors.set(id, { id, key: '', title: '', parent_id: root, kind_slug: 'missing' } as unknown as ListItem)
@@ -92,10 +97,24 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     const request = generation
     block.loading = true; block.error = ''
     try {
-      const page = await listNodes({ ...params, sort: sortParam.value, limit: LEVEL, cursor: more ? block.cursor ?? undefined : undefined } as never)
-      if (request !== generation) return
-      for (const item of page.items) lazyNodes.set(item.id, item)
-      const ids = page.items.map(item => item.id)
+      // Keep the same level and cursor when a gap makes an in-flight page
+      // untrustworthy. It may contain a deletion the stream never delivered.
+      const query = { ...params, sort: sortParam.value, limit: LEVEL, cursor: more ? block.cursor ?? undefined : undefined }
+      let sent, page
+      do {
+        sent = rowStore.mark()
+        page = await listNodes(query as never)
+        if (request !== generation) return
+      } while (rowStore.gapSince(sent))
+      // Rows are the row store's display objects (AEON-326): the panel and the
+      // list show the same object, and a copy older than a deletion stays out.
+      const ids: string[] = []
+      for (const item of page.items) {
+        const row = rowStore.adopt(item, sent, { show: true })
+        if (!row) continue
+        lazyNodes.set(item.id, row)
+        ids.push(item.id)
+      }
       block.ids = more ? [...block.ids, ...ids.filter(id => !block.ids.includes(id))] : ids
       block.cursor = page.next_cursor
     } catch (e) {
@@ -238,21 +257,23 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   }
   function refreshStatsFor(id: string) { const epic = epicOf(id); if (epic) ensureStats(epic, true) }
   // Lazy mode keeps its own rows; created, moved and deleted work is placed at once.
+  // Rows are the row store's display objects, and a parent's children count
+  // follows through the store once per child (the panel may have counted it).
   function insert(item: ListItem) {
     if (matchMode.value) { refreshStatsFor(item.id); return }
-    lazyNodes.set(item.id, item)
-    const parent = item.parent_id ?? ''
-    const block = parent === projectId.value ? (item.kind_slug === 'epic' ? epicBlock.value : looseBlock.value) : blocks.get(parent)
+    const row = rowStore.row(item.id) ?? rowStore.adopt(item, undefined, { full: false })
+    if (!row) return
+    lazyNodes.set(item.id, row)
+    const parent = row.parent_id ?? ''
+    const block = parent === projectId.value ? (row.kind_slug === 'epic' ? epicBlock.value : looseBlock.value) : blocks.get(parent)
     if (block && !block.ids.includes(item.id)) block.ids = [item.id, ...block.ids]
-    const parentNode = lazyNodes.get(parent)
-    if (parentNode) parentNode.children_count = (parentNode.children_count ?? 0) + 1
+    if (lazyNodes.has(parent)) rowStore.child(parent, item.id, true)
     refreshStatsFor(item.id)
   }
   function detach(item: ListItem, fromParent: string | null) {
     const parent = fromParent ?? ''
     for (const block of [epicBlock.value, looseBlock.value, blocks.get(parent)]) if (block) block.ids = block.ids.filter(id => id !== item.id)
-    const parentNode = lazyNodes.get(parent)
-    if (parentNode && parentNode.children_count > 0) parentNode.children_count--
+    if (lazyNodes.has(parent)) rowStore.child(parent, item.id, false)
   }
   function relocate(item: ListItem, fromParent: string | null, fromEpic: string | null) {
     if (fromEpic) ensureStats(fromEpic, true)
