@@ -461,8 +461,27 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "run.claim", true
 		}
 	case "agent-accounts":
-		if r.Method == "GET" && len(parts) == 3 && parts[2] == "readings" {
-			return "account.probe", true
+		if len(parts) == 3 {
+			switch parts[2] {
+			case "readings":
+				if r.Method == http.MethodGet || r.Method == http.MethodPost {
+					return "account.probe", true
+				}
+			case "signals":
+				if r.Method == http.MethodPut {
+					return "account.probe", true
+				}
+			case "quota-key":
+				if r.Method == http.MethodPost {
+					return "account.probe", true
+				}
+			case "statusline":
+				// People opt in. A paired agent may only read the decision.
+				if r.Method == http.MethodGet {
+					return "account.probe", true
+				}
+				return "", false
+			}
 		}
 		if read {
 			return "account.read", true
@@ -470,7 +489,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if r.Method == "POST" && len(parts) == 2 && parts[1] == "route" {
 			return "account.route", true
 		}
-		if r.Method == "POST" && len(parts) == 3 && (parts[2] == "probe" || parts[2] == "readings") {
+		if r.Method == "POST" && len(parts) == 3 && parts[2] == "probe" {
 			return "account.probe", true
 		}
 		return "account.manage", true

@@ -185,6 +185,9 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 			if !allowed("harness.read", projectID) {
 				agent.StopReason = nil
 				agent.RunStatus = nil
+				agent.VendorLimited = false
+				agent.LimitWindow = ""
+				agent.LimitResetsAt = nil
 				agent.AttentionReasons = nil
 				agent.ActivityNote = nil
 				agent.ActivityNoteID = nil

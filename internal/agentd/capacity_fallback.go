@@ -64,6 +64,9 @@ func (a *ClaudeAdapter) CapacitySupport(key string) string {
 	if _, err := localHome(a.Homes, key); err != nil {
 		return "not available: account binding missing"
 	}
+	if a.CanCaptureCapacity(key) {
+		return "get_usage"
+	}
 	return "not available idle: reading starts with a run"
 }
 func (*CursorAdapter) CapacitySupport(string) string                              { return "not available headless" }
@@ -76,8 +79,10 @@ func (*CursorAdapter) CaptureCapacity(context.Context, string) []capacity.Readin
 // are intentionally no production capabilities yet; no configuration flag can
 // turn an unverified schema into a quota reading.
 type grokBillingCapability struct {
-	binaryPath string
-	decode     func(json.RawMessage, time.Time, string) []capacity.Reading
+	binaryPath   string
+	binarySHA256 string
+	version      string
+	decode       func(json.RawMessage, time.Time, string) []capacity.Reading
 }
 
 func (a *GrokAdapter) CapacitySupport(key string) string {
@@ -91,7 +96,7 @@ func (a *GrokAdapter) CapacitySupport(key string) string {
 }
 func (a *GrokAdapter) billingSupported(key string) bool {
 	b, ok := a.Bindings[key]
-	return ok && b.PrincipalSHA256 != "" && a.billing != nil && a.billing.decode != nil && a.billing.binaryPath == b.BinaryPath
+	return ok && b.PrincipalSHA256 != "" && a.billing != nil && a.billing.decode != nil && a.billing.binaryPath == b.BinaryPath && a.billing.version != "" && exactCapacityBinary(b.BinaryPath, a.billing.binarySHA256)
 }
 func (a *GrokAdapter) CanCaptureCapacity(key string) bool {
 	if !a.billingSupported(key) {
