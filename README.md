@@ -71,6 +71,12 @@ expire. The Accounts disclosure shows evidence and hours/Away/sleep suggestions;
 only an explicit save changes a schedule. Learning state is bounded and
 contains no local paths or credentials.
 
+The learning regression fixtures cover twelve-run p75 holds, five-day Auto
+reserves, blind-limit calibration and replay, exact-model token conversion,
+fresh-measurement precedence, tenant isolation, and weekend throughput. Browser
+coverage exercises the shared Agents/Usage evidence and explicit hours action
+at 1600/390 pixels in light and dark themes.
+
 `aeon capacity next codex --env` prints a shell-quoted config-home export only
 when the selected account belongs to the authenticated local agentd. Use
 `--shell fish` for fish, `--socket` for an explicit daemon socket, or
