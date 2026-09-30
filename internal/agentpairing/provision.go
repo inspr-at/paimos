@@ -165,6 +165,11 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			if err = tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,host_label,allowed_model_profile_ids) VALUES($1,$2,$3,$4,$5,$6,1,$7,ARRAY[$8::uuid]) RETURNING id::text`, p.TenantID, a.AccountKey, a.Harness, daemon, principal, a.Label, rec.Details.ComputerName, a.ProfileID).Scan(&account); err != nil {
 				return err
 			}
+			if a.Harness == "pi" {
+				if _, err = tx.Exec(ctx, `UPDATE agent_accounts a SET provider=split_part(p.model,'/',1), model=substring(p.model from position('/' in p.model)+1), model_data_note=(p.model LIKE 'openrouter/stealth/%' OR p.model LIKE '%:free') FROM model_profiles p WHERE a.id=$1 AND p.id=$2 AND p.tenant_id=a.tenant_id AND position('/' in p.model)>1`, account, a.ProfileID); err != nil {
+					return err
+				}
+			}
 			if _, err = tx.Exec(ctx, `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at) VALUES($1,$2,$3,$4,$5,$6)`, p.TenantID, account, computer, rec.ID, a.ProfileID, rec.VerificationExpiresAt); err != nil {
 				return err
 			}

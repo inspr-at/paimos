@@ -34,6 +34,7 @@ const pools = computed(() => capacity.pools)
 const card = ref<HTMLElement>()
 
 // ---------- Rows ----------
+const piModelOf = (id: string) => { const a = agents.accounts.find(a => a.id === id); return a?.harness === 'pi' ? a.model ?? '' : '' }
 const planOf = (row: AccountRow) => accountPlan(row, now.value)
 const sentence = (pool: PoolView) => poolSentence(pool, now.value)
 const modeOf = (row: AccountRow): GaugeMode => gaugeModeFor(capacity.gauge, row.id)
@@ -344,9 +345,10 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
       </div>
       <ul class="accts">
         <li v-for="row in pool.rows" :key="row.id" class="acct" :class="{ dim: row.state !== 'live' && row.state !== 'unread', ahead: planOf(row)?.ahead }" :data-account="row.id">
-          <div class="acct-name">
+          <div class="acct-name" :class="{ 'has-pi-model': piModelOf(row.id) }">
             <span class="dot" :class="row.state" :data-tip="DOT_TIP[row.state](row)"><span class="sr-only">{{ DOT_TIP[row.state](row) }}</span></span>
             <span class="nm" :title="row.name">{{ row.name }}</span>
+            <span v-if="piModelOf(row.id)" class="pi-model-caption" :title="piModelOf(row.id)">{{ piModelOf(row.id) }}</span>
             <span v-if="row.host" class="chip host" :title="row.host">{{ row.host }}</span>
           </div>
           <div class="gauge-cell">
@@ -431,6 +433,12 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 </template>
 
 <style scoped>
+.pi-model-caption { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font: 11px var(--mono); }
+.acct-name.has-pi-model { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 4px 9px; }
+.has-pi-model .dot { grid-area: 1 / 1; }
+.has-pi-model .nm { grid-area: 1 / 2; }
+.has-pi-model .host { grid-area: 1 / 3; }
+.has-pi-model .pi-model-caption { grid-area: 2 / 2 / 3 / -1; }
 .cap { padding: 0; z-index: 3; min-width: 0; container: cap / inline-size; }
 .cap-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; min-width: 0; padding: 14px 18px 14px 20px; border-bottom: 1px solid var(--line); }
 .cap-title { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }

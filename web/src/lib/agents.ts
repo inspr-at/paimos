@@ -68,6 +68,9 @@ export interface AgentAccount {
   ongoing_use_approved?: boolean
   reading_support?: 'every_5_min' | 'first_run' | 'statusline' | 'none'; quota_fingerprint?: string; statusline_enabled?: boolean
   statusline_opt_in?: 'own' | 'workspace'
+  provider?: string; model?: string; model_status?: 'known' | 'unknown' | 'unchecked'; model_data_note?: boolean
+  openrouter_credits?: { observed_at: string; usage: number | null; limit: number | null; remaining: number | null }
+
   id: string; account_key: string; harness: string; daemon_id: string; label: string
   registered_by_principal_id: string; state: 'available' | 'draining' | 'unavailable'
   max_parallel_runs?: number; last_probe_at?: string | null; last_probe_ok?: boolean | null; created_at: string
@@ -152,6 +155,7 @@ export const requestControl = (projectId: string, sessionId: string, kind: Sessi
 export const requestManagedControl = (session: HarnessSession, kind: SessionControl['kind']) =>
   request<SessionControl>(`${sessionPath(session.project_id, session.id)}/managed-controls`, 'POST', { request_id: crypto.randomUUID(), kind, expected_ownership: { ...session.process_ownership } })
 export const getControl = (projectId: string, sessionId: string, controlId: string) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${enc(controlId)}`)
+export const setPiAccountModel = (id: string, model: string) => request<AgentAccount>(`/agent-accounts/${enc(id)}/model`, 'PUT', { model })
 export const listAccounts = () => request<AgentAccount[]>('/agent-accounts')
 export const setAccountState = (id: string, state: AgentAccount['state']) => request<AgentAccount>(`/agent-accounts/${enc(id)}`, 'PATCH', { state })
 export const getRun = (id: string) => request<AgentRun>(`/runs/${enc(id)}`)

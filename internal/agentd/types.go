@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
@@ -295,8 +296,9 @@ type AccountProber interface {
 // signed out or signed in as someone else; errors, timeouts and unreadable
 // output are ProbeUnavailable. Vendor output never leaves the daemon.
 type ProbeStatus struct {
-	OK      bool
-	Failure string
+	OpenRouterCredits *openrouter.Credits
+	OK                bool
+	Failure           string
 }
 
 const (

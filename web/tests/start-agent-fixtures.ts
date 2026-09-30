@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test'
+import { defaultSchedule } from './capacity-fixtures'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import type { AgentAccount, AgentRun, HarnessSession, ModelProfile } from '../src/lib/agents'
@@ -13,10 +14,12 @@ const accountId = 'ac000000-0000-4000-8000-000000000001'
 const spareAccountId = 'ac000000-0000-4000-8000-000000000002'
 const laptopAccountId = 'ac000000-0000-4000-8000-000000000003'
 
-export async function mockStartAgent(page: Page, options: { wait?: CapacityWait; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'retry' | 'pi' | 'provisional' } = {}) {
+export async function mockStartAgent(page: Page, options: { wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional' } = {}) {
   const work = fixtures()
+  if (options.theme) work.preferences.theme = { choice: options.theme }
   await mockWork(page, work, { admin: true })
   const profile: ModelProfile = { id: profileId, slug: 'Build · deliberate', harness: 'codex', family: 'openai', model: 'workspace-build', effort: 'high', tier: 'standard', enabled: true }
+  if (options.catalog === 'pi-openrouter') Object.assign(profile, { harness: 'pi', family: 'unknown', model: 'openrouter/stealth/space-bunny-alpha', effort: 'off' })
   const ungranted: ModelProfile = { ...profile, id: 'c2000000-0000-4000-8000-000000000099', slug: 'Ungranted model', model: 'ungranted-model', enabled: true }
   const now = Date.now()
   const span = { starts_at: new Date(now - 60_000).toISOString(), ends_at: new Date(now - 60_000 + 5 * 3_600_000).toISOString() }
@@ -36,7 +39,7 @@ export async function mockStartAgent(page: Page, options: { wait?: CapacityWait;
     state: options.unavailable ? 'draining' : 'available', last_probe_at: new Date(now - (options.offline ? 180_000 : 1000)).toISOString(), last_probe_ok: !options.offline,
     available, unavailable_reasons: reasons, remaining_fraction: available ? 0.8 : null,
     windows: [{ id: 'd3000000-0000-4000-8000-000000000001', account_id: accountId, ...span, unit: 'requests', allowance: 100, used: 20, reserved: 0, pace_model: 'unrestricted', burst_ratio: 0, provisional: false, remaining: 80, pace_remaining: 80 }],
-    models: options.catalog === 'pi' ? piModels : (efforts.length ? [{ model: 'workspace-build', family: 'openai', efforts }] : []),
+    models: options.catalog === 'pi-openrouter' ? [{ model: profile.model, family: profile.family, efforts: [{ effort: 'off', model_profile_id: profileId, version: '1' }] }] : options.catalog === 'pi' ? piModels : (efforts.length ? [{ model: 'workspace-build', family: 'openai', efforts }] : []),
     default_model_profile_id: efforts.length ? profileId : null,
   }
   const spare = {
@@ -48,7 +51,7 @@ export async function mockStartAgent(page: Page, options: { wait?: CapacityWait;
   }
   const hosts = options.catalog === 'empty-grants' || options.offline || options.unavailable
     ? [{ daemon_id: 'workstation', label: 'Work Mac', harnesses: [{ harness: 'codex', accounts: [primary], default_account_id: available ? accountId : null }] }]
-    : [{ daemon_id: 'workstation', label: 'Work Mac', harnesses: [{ harness: options.catalog === 'pi' ? 'pi' : 'codex', accounts: [primary, spare], default_account_id: accountId }] }]
+    : [{ daemon_id: 'workstation', label: 'Work Mac', harnesses: [{ harness: options.catalog?.startsWith('pi') ? 'pi' : 'codex', accounts: [primary, spare], default_account_id: accountId }] }]
   if (options.catalog === 'two-hosts') {
     hosts.push({
       daemon_id: 'laptop', label: 'Laptop', harnesses: [{
@@ -67,6 +70,7 @@ export async function mockStartAgent(page: Page, options: { wait?: CapacityWait;
     last_probe_at: primary.last_probe_at, last_probe_ok: primary.last_probe_ok, created_at: new Date(now).toISOString(),
     windows: [{ id: primary.windows[0].id, account_id: accountId, ...span, unit: 'requests', allowance: 100, used: 20, reserved: 0, pace_model: 'unrestricted', burst_ratio: 0, provisional: false }],
   }
+  if (options.catalog === 'pi-openrouter') Object.assign(account, { harness: 'pi', provider: 'openrouter', model: 'stealth/space-bunny-alpha', model_status: 'known' })
   const state = { orders: [] as WorkOrder[], runs: [] as AgentRun[], sessions: [] as HarnessSession[], failQueue: !!options.failQueue, revoked: false, catalogMisses: options.catalog === 'retry' ? 1 : 0 }
   const calls: { method: string; path: string; body: Record<string, unknown> | null }[] = []
   await page.route('**/api/**', async route => {
@@ -100,6 +104,9 @@ export async function mockStartAgent(page: Page, options: { wait?: CapacityWait;
       return json({ ...bodyCatalog, role: url.searchParams.get('role') || 'build' })
     }
     if (path === '/api/agent-accounts') return json([account])
+    if (path === '/api/agent-accounts/capacity') return json([{ account_id: account.id, schedule: defaultSchedule(), windows: [] }])
+    if (path === '/api/agent-accounts/capacity/schedule') return json([])
+    if (path === '/api/agent-pairing/computers') return json({ computers: [] })
     if (path === '/api/harness-sessions') return json({ items: state.sessions, next_cursor: null })
     if (path === '/api/approvals') return json([])
     if (path.endsWith('/message-targets')) return json([])

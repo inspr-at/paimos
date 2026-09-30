@@ -54,6 +54,7 @@ let searchTimer: ReturnType<typeof setTimeout> | undefined
 const poll = usePoller(() => { now.value = Date.now(); if (run.value) return refresh() }, 3000, { enabled: () => visible.value && !!run.value })
 const role = computed(() => workRoleFor(ticket.value))
 const view = computed(() => presentCascade({ catalog: catalog.value, role: role.value, authorFamily: authorFamily.value }, choice.value, touch.value))
+const piModelBound = computed(() => choice.value.harness === 'pi' && view.value.models.length === 1)
 const cascadeLocked = computed(() => loading.value || catalogGap.value === 'failed' || catalogGap.value === 'forbidden' || catalogGap.value === 'family')
 const state = computed(() => run.value ? launchState(run.value) : null)
 const sessionConnected = computed(() => !!managed.value && managed.value.phase !== 'stopped')
@@ -270,13 +271,15 @@ defineExpose({ open })
             </select>
             <p v-if="notes.account" :id="`${uid}-account-note`" class="note">{{ notes.account }}</p>
           </div>
-          <div class="pair">
+          <div class="pair" :class="{ 'pi-bound': piModelBound }">
           <div class="select-field">
             <label :for="`${uid}-model`">Model</label>
-            <select :id="`${uid}-model`" class="field" :value="choice.modelKey" :disabled="cascadeLocked || !choice.accountId" :aria-describedby="notes.model ? `${uid}-model-note` : undefined" @change="pick('model', ($event.target as HTMLSelectElement).value)">
+            <input v-if="piModelBound" :id="`${uid}-model`" class="field pinned-model" :value="view.models[0]?.label" :title="view.models[0]?.label" readonly :aria-describedby="`${uid}-pi-model-note`" />
+            <select v-else :id="`${uid}-model`" class="field" :value="choice.modelKey" :disabled="cascadeLocked || !choice.accountId" :aria-describedby="notes.model ? `${uid}-model-note` : undefined" @change="pick('model', ($event.target as HTMLSelectElement).value)">
               <option value="">Choose a model</option>
               <option v-for="model in view.models" :key="model.value" :value="model.value">{{ model.label }}</option>
             </select>
+            <p v-if="piModelBound" :id="`${uid}-pi-model-note`" class="note">Model is set in Settings, under Accounts.</p>
             <p v-if="notes.model" :id="`${uid}-model-note`" class="note">{{ notes.model }}</p>
           </div>
           <div class="select-field">
@@ -387,10 +390,12 @@ footer .btn { min-height: 44px; }
 .requested span { color: var(--ink-3); flex-shrink: 0; }
 .requested strong { font-weight: 600; text-align: right; overflow-wrap: anywhere; }
 .requested .note { margin-top: 8px; }
+.pair.pi-bound { grid-template-columns: minmax(0, 1fr) 130px; }
+.field.pinned-model { font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; }
 @media (max-width: 600px) {
   .launch-dialog { max-height: calc(100dvh - 16px); width: calc(100vw - 16px); border-radius: 18px; }
   .launch-card { padding: 20px 16px; }
-  .pair { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .pair, .pair.pi-bound { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .launch-head { margin-bottom: 14px; }
   .launch-fields { gap: 14px; }
   .dispatch-status { margin-top: 16px; }

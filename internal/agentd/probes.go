@@ -16,7 +16,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -281,7 +283,18 @@ func (a *PiAdapter) probe(ctx context.Context, key string, fresh bool) (bool, er
 		if !fresh && ok && time.Now().Before(cached.expires) && cached.path == a.Path && cached.home == home && cached.provider == expected && cached.node == node {
 			return cached.available, cached.err
 		}
-		provider, err := piprobe.Provider(ctx, a.Path, home, expected, node.Path)
+		var credits *openrouter.Credits
+		provider := expected
+		var err error
+		if expected == "openrouter" {
+			// No prompt or completion. The key stays inside the local profile reader.
+			err = launcherReady(ctx, a.Path, node.Path, piprobe.Environment(home, node.Path))
+			if err == nil {
+				credits, err = agentsetup.OpenRouterCredits(ctx, home, a.OpenRouter)
+			}
+		} else {
+			provider, err = piprobe.Provider(ctx, a.Path, home, expected, node.Path)
+		}
 		available := err == nil && provider == expected
 		if errors.Is(err, piprobe.ErrProviderUnavailable) {
 			err = nil
@@ -290,7 +303,7 @@ func (a *PiAdapter) probe(ctx context.Context, key string, fresh bool) (bool, er
 		if a.probes == nil {
 			a.probes = map[string]piProbeResult{}
 		}
-		a.probes[key] = piProbeResult{path: a.Path, home: home, provider: expected, node: node, expires: time.Now().Add(time.Minute), available: available, err: err}
+		a.probes[key] = piProbeResult{credits: credits, path: a.Path, home: home, provider: expected, node: node, expires: time.Now().Add(time.Minute), available: available, err: err}
 		a.probeMu.Unlock()
 		return available, err
 	}

@@ -11,6 +11,7 @@ import type { AgentAccount, AllowanceWindow } from '../../lib/agents'
 import { pct, when, type AccountCapacity, type AccountRow, type CapacityReading } from '../../lib/capacity'
 import { confirmAction } from '../../lib/confirm'
 import AppIcon from '../AppIcon.vue'
+import PiAccountModel from '../settings/PiAccountModel.vue'
 import ClaudeStatuslineToggle from '../settings/ClaudeStatuslineToggle.vue'
 
 // The inline detail of one account in Settings → Accounts (AEON-384): its
@@ -148,6 +149,7 @@ async function drop(w: AllowanceWindow) {
 
 <template>
   <div class="detail">
+    <PiAccountModel v-if="account.harness === 'pi'" :account="account" :editable="mayManage" @saved="emit('changed')" />
     <ClaudeStatuslineToggle v-if="mayManage && account.harness === 'claude' && account.statusline_opt_in" :account="account" @changed="emit('changed')" />
     <dl class="account-facts">
       <div class="fact">

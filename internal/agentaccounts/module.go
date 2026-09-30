@@ -13,13 +13,15 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Module serves /api/agent-accounts.
 type Module struct {
-	pool    *pgxpool.Pool
-	preview *previewGuard
+	pool       *pgxpool.Pool
+	preview    *previewGuard
+	openRouter openrouter.Catalog
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -49,6 +51,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agent-accounts/{accountId}/readings", m.capacityHistory)
 	mux.HandleFunc("PUT /api/agent-accounts/{accountId}/metadata", m.metadata)
 	mux.HandleFunc("PUT /api/agent-accounts/{accountId}/label", m.rename)
+	mux.HandleFunc("PUT /api/agent-accounts/{accountId}/model", m.piModel)
 	mux.HandleFunc("POST /api/agent-accounts", m.register)
 	mux.HandleFunc("POST /api/agent-accounts/route", m.route)
 	mux.HandleFunc("POST /api/agent-accounts/{accountId}/windows", m.createWindow)

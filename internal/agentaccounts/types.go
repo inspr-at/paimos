@@ -15,11 +15,17 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Account is an opaque local enrollment. AccountKey is not a vendor credential.
 type Account struct {
+	Provider          string              `json:"provider,omitempty"`
+	Model             string              `json:"model,omitempty"`
+	ModelStatus       string              `json:"model_status,omitempty"`
+	ModelDataNote     bool                `json:"model_data_note,omitempty"`
+	OpenRouterCredits *openrouter.Credits `json:"openrouter_credits,omitempty"`
 	OngoingUseApproved bool   `json:"ongoing_use_approved"`
 	ReadingSupport     string `json:"reading_support"`
 	QuotaFingerprint   string `json:"quota_fingerprint"`

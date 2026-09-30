@@ -22,6 +22,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentdwire"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/version"
 )
@@ -128,6 +129,9 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	f.StringVar(&tenantSlug, "tenant", "", "tenant slug (defaults to instance guide)")
 	f.StringVar(&workspace, "workspace", "", "approved physical working folder")
 	f.StringVar(&computer, "computer-name", "", "computer display name")
+	var provider, openRouterFile string
+	f.StringVar(&provider, "provider", "", "pi provider ID; openrouter prompts for the key locally")
+	f.StringVar(&openRouterFile, "openrouter-env-file", "", "owner-selected private file containing OPENROUTER_API_KEY")
 	f.Var(&harnesses, "harness", "selected harness; repeat for another harness")
 	f.StringVar(&contextLabel, "account-context", "", "Expected account identity (pi: configured provider ID)")
 	f.StringVar(&account, "account-id", "", "remove only this enrolled account")
@@ -157,6 +161,18 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		}
 	} else if yes {
 		return errors.New("--yes is only supported for repin")
+	}
+	if provider != "" && (len(harnesses) != 1 || harnesses[0] != "pi" || !piprobe.ValidProvider(provider) || command != "setup" && command != "add-harness") {
+		return errors.New("--provider requires setup or add-harness with --harness pi")
+	}
+	if provider != "" && contextLabel != "" && contextLabel != provider {
+		return errors.New("provider and account context differ")
+	}
+	if openRouterFile != "" && provider != "openrouter" {
+		return errors.New("--openrouter-env-file requires --provider openrouter")
+	}
+	if provider != "" {
+		contextLabel = provider
 	}
 	prompt := setupPrompt{in: bufio.NewReader(in), out: out, json: jsonOutput}
 	home, err := os.UserHomeDir()
@@ -276,7 +292,22 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 			}
 		}
 		for _, h := range harnesses {
-			c, e := d.Detect(ctx, h, contextLabel)
+			var c agentsetup.Candidate
+			var e error
+			if h == "pi" && provider == "openrouter" {
+				var key string
+				if openRouterFile != "" {
+					key, e = agentsetup.OpenRouterKeyFile(openRouterFile)
+				} else {
+					key, e = readOpenRouterKey(in, out)
+				}
+				if e == nil {
+					c, e = d.PrepareOpenRouter(ctx, root, key, openrouter.Client{})
+				}
+				key = ""
+			} else {
+				c, e = d.Detect(ctx, h, contextLabel)
+			}
 			if e != nil {
 				stage := "login_required"
 				if errors.Is(e, piprobe.ErrStart) || errors.Is(e, piprobe.ErrPrivateProfile) {
