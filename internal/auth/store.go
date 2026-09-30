@@ -22,6 +22,7 @@ import (
 	"github.com/inspr-at/paimos/internal/operatoractor"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
+	"github.com/inspr-at/paimos/internal/tenantbrand"
 )
 
 var (
@@ -878,6 +879,7 @@ type meView struct {
 	TenantID  string
 	Slug      string
 	Name      string
+	Brand     *tenantbrand.Public
 	Identity  *identityView
 }
 
@@ -895,6 +897,11 @@ func (m *Module) loadMe(ctx context.Context, p tenant.Principal) (meView, error)
 		if err := tx.QueryRow(ctx, `SELECT id::text,slug,name FROM tenants WHERE id=$1::uuid`, p.TenantID).Scan(&view.TenantID, &view.Slug, &view.Name); err != nil {
 			return err
 		}
+		brand, err := tenantbrand.Load(ctx, tx)
+		if err != nil {
+			return err
+		}
+		view.Brand = brand
 		fresh, err := displayPrincipal(ctx, tx, p.TenantID, p.ID)
 		if err != nil {
 			return err

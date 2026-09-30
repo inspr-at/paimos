@@ -55,6 +55,7 @@ import (
 	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/search"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
+	"github.com/inspr-at/paimos/internal/tenantbrand"
 	"github.com/inspr-at/paimos/internal/ticketwork"
 	"github.com/inspr-at/paimos/internal/usagedashboard"
 	"github.com/inspr-at/paimos/internal/views"
@@ -75,7 +76,7 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	modules := []httpapi.Module{
-		authModule, authz.New(nil), nodes.New(nil, nil), fromclassic.New(nil), relations.New(nil),
+		authModule, authz.New(nil), nodes.New(nil, nil), fromclassic.New(nil), tenantbrand.New(nil), relations.New(nil),
 		events.New(nil), search.New(nil, nil), views.New(nil), activity.New(nil),
 		attachments.New(nil, attachments.Store{}), &greetings.Module{}, knowledge.New(nil),
 		projectgroups.New(nil), &releasehistory.Module{}, profile.New(nil, attachments.Store{}),

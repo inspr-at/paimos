@@ -61,6 +61,10 @@ func TestOIDCTenantSelection(t *testing.T) {
 	if me.Tenant.Slug != "augmentoring" || len(me.Principal.Roles) != 1 || me.Principal.Roles[0] != "customer" {
 		t.Fatalf("wrong tenant membership: %+v", me)
 	}
+	// AEON-431: a workspace without a brand answers exactly as before (me/1.0 readers).
+	if me.Tenant.Brand != nil || bytes.Contains(body, []byte(`"brand"`)) {
+		t.Fatalf("unset brand present: %s", body)
+	}
 	for _, path := range []string{"/api/nodes", "/api/events", "/api/search?q=customer", "/api/relations", "/api/imports"} {
 		if status, _, _ := do(t, c, http.MethodGet, app.URL+path, "", nil); status != http.StatusForbidden {
 			t.Fatalf("customer reached %s: %d", path, status)
