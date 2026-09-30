@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
@@ -19,7 +19,7 @@ import {
   pairingReadGeneration, peekPairingCode, planPoll, platformCaption, presentPublicGuide,
   rememberPairingCode, setHarnessAccount, submitApproval, takePairingCode,
   chooseInstallMethod, installMethods, readPairingInstallMethod, writePairingInstallMethod,
-  unsupportedVerification, verificationWarning,
+  connectDisabledReason, unsupportedVerification, verifiableAccountKeys, verificationWarning,
   type PairingGuide, type PairingView, type ReviewChoice,
 } from '../lib/agentPairing'
 
@@ -35,6 +35,9 @@ const guideError = ref('')
 const code = ref('')
 const current = ref<PairingView | null>(null)
 const verify = ref(true)
+const verificationChoice = ref(false)
+const connectButton = ref<HTMLButtonElement | null>(null)
+const connectOnlyButton = ref<HTMLButtonElement | null>(null)
 const allowAgents = ref(true)
 const approvalPending = ref(false)
 const selected = ref<string[]>([])
@@ -88,6 +91,12 @@ const targetProblem = computed(() => current.value ? addHarnessTargetProblem({
   requestedComputerId: requestedComputer.value,
   targetName: addTarget.value?.computer_name ?? null,
 }) : null)
+const connectReason = computed(() => connectDisabledReason({
+  busy: busy.value,
+  canApprove: permissions.value.canApprove,
+  selectedAccountKeys: selected.value,
+  targetProblem: targetProblem.value,
+}))
 const selectedHarnesses = computed(() => {
   const view = current.value
   if (!view) return [] as string[]
@@ -118,10 +127,12 @@ const verifyNote = computed(() => {
     return names ? `${names} can’t be verified.` : 'Verification is unavailable.'
   }
   if (!verify.value || !verifiableLabels.value.length) return ''
-  const will = `${listNames(verifiableLabels.value)} will be verified.`
-  return blockedLabels.value.length ? `${will} Leave out ${listNames(blockedLabels.value)}.` : will
+  return blockedLabels.value.length
+    ? `${listNames(verifiableLabels.value)} can be verified. ${listNames(blockedLabels.value)} can’t be verified.`
+    : `${listNames(verifiableLabels.value)} will be verified.`
 })
 watch(verifyLocked, locked => { if (locked) verify.value = false })
+watch([verify, selected, current], () => { verificationChoice.value = false })
 let pollTimer = 0
 let pollStarted = 0
 
@@ -247,7 +258,13 @@ function choice(): ReviewChoice {
 }
 
 async function connect() {
-  if (!current.value || busy.value) return
+  if (!current.value || connectReason.value) return
+  if (verificationBlocked.value.length) {
+    verificationChoice.value = true
+    await nextTick()
+    connectOnlyButton.value?.focus()
+    return
+  }
   message.value = ''
   nextStep.value = ''
   busy.value = 'approve'
@@ -270,6 +287,21 @@ async function connect() {
     if (error instanceof PairingError && error.code === 'session_reset') return
     if (started === pairingReadGeneration()) assignError(error, 'The computer was not connected.')
   } finally { if (started === pairingReadGeneration()) busy.value = '' }
+}
+
+async function connectWithoutVerification() {
+  if (connectReason.value) return
+  verify.value = false
+  verificationChoice.value = false
+  await connect()
+}
+
+async function leaveUnverifiableOut() {
+  if (!current.value || connectReason.value) return
+  selected.value = verifiableAccountKeys(current.value, selected.value)
+  verificationChoice.value = false
+  await nextTick()
+  connectButton.value?.focus()
 }
 
 async function approveAccounts(pairing = current.value, keys = grantedKeys.value ?? []) {
@@ -328,11 +360,11 @@ function reviewAsNewComputer() {
 }
 
 function verifiableHarnesses(view: PairingView, keys: readonly string[]) {
-  const blocked = new Set(unsupportedVerification(view, keys).map(item => item.harness))
+  const verifiable = verifiableAccountKeys(view, keys)
   const names: string[] = []
-  for (const key of keys) {
+  for (const key of verifiable) {
     const harness = view.requested_accounts.find(item => item.account_key === key)?.harness
-    if (harness && !blocked.has(harness) && !names.includes(harness)) names.push(harness)
+    if (harness && !names.includes(harness)) names.push(harness)
   }
   return names
 }
@@ -643,13 +675,17 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         <button v-if="approvalPending && permissions.canApproveAccounts" type="button" class="btn sm" :disabled="!!busy" @click="retryAccountApproval">Retry account approval</button>
       </div>
 
-      <div v-if="pendingReview" class="actions">
-        <button class="btn primary go" type="button" :disabled="!!busy || !permissions.canApprove || !selected.length || !!targetProblem || verificationBlocked.length > 0" @click="connect">{{ busy === 'approve' ? (addRequest ? 'Adding…' : 'Connecting…') : addRequest ? 'Add harness' : 'Connect your machine' }}</button>
+      <div v-if="pendingReview" class="actions" :role="verificationChoice ? 'group' : undefined" :aria-label="verificationChoice ? 'Verification choice' : undefined">
+        <p v-if="connectReason" id="connect-reason" class="connect-reason" role="status">{{ connectReason }}</p>
+        <template v-if="verificationChoice">
+          <p id="verification-choice-note" class="connect-reason" role="status">{{ listNames(blockedLabels) }} can’t be verified — connect without verification, or leave them out.</p>
+          <button ref="connectOnlyButton" class="btn primary go" type="button" :disabled="!!connectReason" :aria-describedby="connectReason ? 'connect-reason' : 'verification-choice-note'" @click="connectWithoutVerification">Connect without verification</button>
+          <button class="btn" type="button" :disabled="!!connectReason" @click="leaveUnverifiableOut">Leave them out</button>
+        </template>
+        <button v-else ref="connectButton" class="btn primary go" type="button" :disabled="!!connectReason" :aria-describedby="connectReason ? 'connect-reason' : undefined" @click="connect">{{ busy === 'approve' ? (addRequest ? 'Adding…' : 'Connecting…') : addRequest ? 'Add harness' : 'Connect your machine' }}</button>
         <button class="btn" type="button" :disabled="!!busy || !permissions.canDeny" @click="deny">Deny</button>
         <p class="keep"><AppIcon name="shield" :size="14" />Vendor sign-ins and project files stay on the computer.</p>
       </div>
-      <p v-if="pendingReview && !selected.length" class="note">Choose at least one harness.</p>
-      <p v-if="session.identity && permissionsReady && !permissions.canApprove" class="note">Only a signed-in person who can manage accounts can connect this computer.</p>
     </section>
 
     <p v-if="message" class="problem" role="alert">{{ message }}</p>
@@ -747,6 +783,7 @@ legend { margin-bottom: 4px; color: var(--ink); font-weight: 600; font-size: 14p
 .radio input { margin-top: 2px; }
 .radio .sub { display: block; margin-top: 2px; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.connect-reason { flex-basis: 100%; margin: 0; color: var(--ink-2); font-size: 13px; }
 .go { min-height: 44px; padding: 0 18px; }
 .keep { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 0 auto; color: var(--ink-3); font-size: 12.5px; }
 .review-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
