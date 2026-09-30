@@ -91,8 +91,9 @@ test('known fixture responses and decorative labelled versions are filtered prec
 })
 
 test('layout shift audit arms after navigation and resets startup movement', async ({ page }) => {
+  await page.route('**/audit-fixture', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><body>Stable audit fixture</body></html>' }))
   await page.addInitScript(installLayoutShiftAudit)
-  await page.goto('/')
+  await page.goto('/audit-fixture')
   await page.evaluate(() => { (window as unknown as { auditShift: number }).auditShift = 0.5 })
   await page.evaluate(armLayoutShiftAudit)
   expect(await page.evaluate(() => (window as unknown as { auditShift: number; auditShiftArmed: boolean }).auditShift)).toBe(0)

@@ -156,7 +156,9 @@ jobs:
   playwright-shard:
     name: playwright (${{ matrix.shard }}/8)
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    # Use a standard public-repository ARM runner for single-worker Linux
+    # coverage within the Free plan job budget.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -172,7 +174,7 @@ jobs:
       - working-directory: web
         run: npm ci
       - working-directory: web
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps --only-shell chromium
       - name: UI shard
         env:
           PW_NIGHTLY: ${{ github.event_name == 'schedule' && '1' || '0' }}

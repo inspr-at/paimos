@@ -19,5 +19,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts", "playwright.config.ts", "e2e/**/*.ts"]
+  "include": ["vite.config.ts", "vite.ui.config.ts", "playwright.config.ts", "playwright.ui.config.ts", "playwright.ui.timings.ts", "e2e/**/*.ts"]
 }

@@ -48,10 +48,10 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // Both servers preserve browser-imported TypeScript and test-only galleries.
-    // CI serves the compiled app to avoid dev module requests in every context.
+    // The test build includes browser imports in the app's own module graph.
+    // Local dev runs preserve the same source URLs and test-only galleries.
     command: compiled
-      ? `npx vite build --mode test && node playwright.ui.server.mjs ${port}`
+      ? `npx vite build -c vite.ui.config.ts --mode test && node playwright.ui.server.mjs ${port}`
       : `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort --mode test`,
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: process.env.PLAYWRIGHT_REUSE === '1',
