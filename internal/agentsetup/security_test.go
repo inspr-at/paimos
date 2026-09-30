@@ -190,7 +190,7 @@ func TestSetupCannotClaimConnectedBeforeAccountProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, err := e.Step(t.Context())
-	if err != nil || p.Stage != "provisioning" {
+	if err != nil || p.Stage != "blocked" || !strings.Contains(p.Action, "supplied no account readiness reason") {
 		t.Fatal("approval/socket mistaken for account connectivity")
 	}
 }

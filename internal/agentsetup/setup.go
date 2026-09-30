@@ -692,17 +692,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		p.Action = "Start the approved daemon to verify connectivity."
 		return p, nil
 	}
-	local, err := e.Local.Status(ctx, "")
-	if err == nil && local.DaemonID == s.View.DaemonID && len(local.BlockedAccounts) > 0 {
-		p.BlockedAccounts = append([]BlockedAccount(nil), local.BlockedAccounts...)
-	}
-	if err != nil || local.DaemonID != s.View.DaemonID || !local.Ready {
-		p.Stage = "provisioning"
-		p.Action = "Daemon connectivity is unconfirmed; resume setup after the approved service starts."
-		return p, nil
-	}
-	p.LocalProcesses = local.State
-	return p, nil
+	return e.connectionProgress(ctx, s), nil
 }
 
 func ReadRuntimeConfig(root string) (RuntimeConfig, error) {

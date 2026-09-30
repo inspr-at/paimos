@@ -83,6 +83,40 @@ func TestReadinessNamesEveryPendingOrBlockedEnrollment(t *testing.T) {
 	}
 }
 
+func TestInitialPairReportsReadinessWithoutUnconfirmedFallback(t *testing.T) {
+	for _, tc := range []struct{ reason, state, stage, want string }{
+		{"binding_missing", "", "blocked", "Codex was approved but isn't set up"},
+		{"probe_pending", "checking", "provisioning", "60 seconds"},
+		{"capacity_capture", "checking", "provisioning", "within 10 seconds"},
+		{"probe_failed", "blocked", "blocked", "availability check failed"},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			e, api, local, opts, _ := engineFixture(t)
+			if _, err := e.Begin(t.Context(), opts); err != nil {
+				t.Fatal(err)
+			}
+			details := map[string]HarnessDetail{}
+			if tc.state != "" {
+				details[testAccount] = HarnessDetail{State: tc.state, Reason: tc.reason}
+			}
+			local.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", AccountStatuses: details}
+			api.approved = true
+			s, err := e.load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.NextPoll = e.now()
+			if err := e.save(s, false); err != nil {
+				t.Fatal(err)
+			}
+			p, err := e.Step(t.Context())
+			if err != nil || p.Stage != tc.stage || !strings.Contains(p.Action, tc.want) || strings.Contains(p.Action, "unconfirmed") {
+				t.Fatal("initial pair lost readiness cause", p.Stage, p.Action, err)
+			}
+		})
+	}
+}
+
 func TestLaunchdPrivateDiagnosticPaths(t *testing.T) {
 	e, api, _, opts, _ := engineFixture(t)
 	opts.StartService = true

@@ -416,6 +416,7 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 				p.Stage = "blocked"
 				p.Action = "The daemon responded but supplied no account readiness reason. Update the helper, then resume setup."
 			}
+			return p
 		}
 	}
 	if p.Stage != "provisioning" {
