@@ -187,7 +187,7 @@ func Build(ctx context.Context, opts Options) (History, error) {
 			}
 		}
 	}
-	return h, nil
+	return WithCodenames(h), nil
 }
 
 // coordinateTime reads the reservation instant a calendar coordinate encodes (UTC).

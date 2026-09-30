@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/releasehistory"
+	"github.com/inspr-at/paimos/internal/releasehistory/codename"
 )
 
 func main() {
@@ -169,6 +170,14 @@ func run() error {
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return err
+	}
+	if *reserve != "" {
+		// The reservation also carries its codename (AEON-430), presentation only.
+		name, _, err := codename.StampFile(filepath.Join(*repo, "version.json"))
+		if err != nil {
+			return err
+		}
+		fmt.Printf("codename: %s\n", name)
 	}
 	missing, unclassified := 0, 0
 	for _, rel := range history.Releases {

@@ -7,7 +7,42 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 )
+
+// StampFile stamps the version.json at path in place (see StampVersionFile)
+// and returns the codename and whether the file changed. The write replaces
+// the file atomically.
+func StampFile(path string) (string, bool, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", false, err
+	}
+	out, name, err := StampVersionFile(raw)
+	if err != nil || bytes.Equal(out, raw) {
+		return name, false, err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".version-*.json")
+	if err != nil {
+		return "", false, err
+	}
+	defer os.Remove(tmp.Name()) // only this invocation's temporary file
+	if _, err := tmp.Write(out); err != nil {
+		tmp.Close()
+		return "", false, err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", false, err
+	}
+	if info, err := os.Stat(path); err == nil {
+		_ = os.Chmod(tmp.Name(), info.Mode().Perm())
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return "", false, err
+	}
+	return name, true, nil
+}
 
 // StampVersionFile writes the reservation's codename into version.json: the
 // "codename" member right after "release_sequence", every other member kept

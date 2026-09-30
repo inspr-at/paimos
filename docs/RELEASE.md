@@ -136,6 +136,21 @@ only with that same export file: a fresh export has a new `captured_at` and
 conflicts. Restore the file before re-reserving; do not export the preview again.
 Conflicting entries fail instead of rewriting a reserved version.
 
+Every release also has a codename (AEON-430): an alliterative science-fiction
+name such as "Amber Aurora" or "Galactic Gyroscope", a pure function of
+`release_sequence` from the frozen, append-only lists in
+`internal/releasehistory/codename/words.txt`. The letter is
+`(release_sequence - 1) mod 26`, so release 1 is A and neighbouring releases
+start differently. The reserve step above writes it into `version.json` as
+`"codename"`, right after `release_sequence`; without a snapshot, run
+`just release-codename` (`go run ./internal/releasehistory/codename/stamp -repo .`)
+once `release_sequence` is set. Both are idempotent and refuse a name that
+differs from the sequence's. The codename is presentation only: the version
+stays the identity, and every earlier release has its name from the same
+function. To change the lists, append a new `version N from S` block with `S`
+above every reserved sequence; never edit, reorder or delete a line, so no
+existing name moves.
+
 For historical backfill where snapshots exist, export stored snapshots as `VERSION.json` in
 one directory and run the same command with `-snapshots DIRECTORY -tenant
 TENANT_UUID -project AEON_PROJECT_UUID`. A run with no exports imports only

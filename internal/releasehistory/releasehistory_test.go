@@ -151,6 +151,15 @@ func TestBuildFromGit(t *testing.T) {
 	if never.Tag != "" || never.ReservedAt == nil || never.ReservedAt.Format(time.RFC3339) != "2026-09-23T14:00:00Z" || len(never.Evidence.Unavailable) != 1 {
 		t.Fatalf("untagged reservation %+v", never)
 	}
+	// Codenames come from the sequence (AEON-430). The published release 1 owns
+	// its name; the reservation it replaced and the untagged one have none.
+	names := []string{}
+	for _, r := range h.Releases {
+		names = append(names, r.Codename)
+	}
+	if strings.Join(names, "|") != "Brisk Binary||Amber Aurora|" {
+		t.Fatalf("codenames %q", names)
+	}
 }
 
 func TestBuildLightweightReleaseTags(t *testing.T) {
@@ -282,7 +291,7 @@ func TestBuildWithGitHubEvidence(t *testing.T) {
 }
 
 func TestHTTP(t *testing.T) {
-	h := History{Schema: Schema, Product: "PAIMOS AEON", Releases: []Release{{Version: "260923143005.0.0", Tag: "v260923143005.0.0", State: StatePublished, Tickets: []string{}, Changes: []Change{}}}}
+	h := History{Schema: Schema, Product: "PAIMOS AEON", Releases: []Release{{Version: "260923143005.0.0", Tag: "v260923143005.0.0", ReleaseSequence: 2, State: StatePublished, Tickets: []string{}, Changes: []Change{}}}}
 	mux := http.NewServeMux()
 	NewWith(h, "260923143005.0.0").Mount(mux)
 	get := func(path string, signedIn bool) *httptest.ResponseRecorder {
@@ -310,8 +319,44 @@ func TestHTTP(t *testing.T) {
 	if w := get("/api/releases/260923143005.0.0", false); w.Code != 401 {
 		t.Fatalf("anonymous one %d", w.Code)
 	}
+	// Every served release carries its codename, also from a manifest without one.
+	var named struct {
+		Releases []map[string]any `json:"releases"`
+	}
+	if json.Unmarshal(get("/api/releases", true).Body.Bytes(), &named) != nil || named.Releases[0]["codename"] != "Brisk Binary" {
+		t.Fatalf("list codename %+v", named.Releases)
+	}
+	var one map[string]any
+	if json.Unmarshal(get("/api/releases/260923143005.0.0", true).Body.Bytes(), &one) != nil || one["codename"] != "Brisk Binary" || one["release_sequence"] != float64(2) {
+		t.Fatalf("one codename %+v", one)
+	}
+	if h.Releases[0].Codename != "" {
+		t.Fatal("serving must not change the module's history in place")
+	}
 	// The committed empty manifest loads.
 	if e, err := Embedded(); err != nil || e.Schema != Schema || e.Releases == nil {
 		t.Fatalf("embedded %v %+v", err, e)
+	}
+}
+
+func TestWithCodenames(t *testing.T) {
+	h := History{Releases: []Release{
+		{Version: "260930074921.0.0", ReleaseSequence: 111, State: StatePublished, Codename: "Stale Name"},
+		{Version: "260925231350.0.0", ReleaseSequence: 54, State: StateReserved},
+		{Version: "260923134631.0.0", ReleaseSequence: 1, State: StatePublished},
+		{Version: "260923134337.0.0", ReleaseSequence: 1, State: StateReserved},
+		{Version: "260923140000.0.0", State: StateReserved},
+	}}
+	got := WithCodenames(h)
+	names := []string{}
+	for _, r := range got.Releases {
+		names = append(names, r.Codename)
+	}
+	// The function wins over any stored name; a reservation keeps its own slot.
+	if strings.Join(names, "|") != "Gentle Gravity|Bold Booster|Amber Aurora||" {
+		t.Fatalf("codenames %q", names)
+	}
+	if h.Releases[0].Codename != "Stale Name" || h.Releases[2].Codename != "" {
+		t.Fatal("WithCodenames must copy the releases")
 	}
 }

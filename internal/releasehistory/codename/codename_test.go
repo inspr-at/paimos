@@ -369,3 +369,30 @@ func TestStampVersionFile(t *testing.T) {
 		t.Fatalf("stamp after the last member: %q, %v", last, err)
 	}
 }
+
+// The reservation's version.json, once stamped, names the same codename as
+// its sequence; a hand edit cannot drift from the function.
+func TestRepositoryVersionFile(t *testing.T) {
+	raw, err := os.ReadFile("../../../version.json")
+	if err != nil {
+		t.Skip("no version.json in this checkout")
+	}
+	if _, _, err := StampVersionFile(raw); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStampFile(t *testing.T) {
+	path := t.TempDir() + "/version.json"
+	if err := os.WriteFile(path, []byte("{\"release_sequence\": 2}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	name, changed, err := StampFile(path)
+	raw, _ := os.ReadFile(path)
+	if err != nil || !changed || name != "Brisk Binary" || string(raw) != "{\n  \"release_sequence\": 2,\n  \"codename\": \"Brisk Binary\"\n}\n" {
+		t.Fatalf("stamp: %q %v %v %q", name, changed, err, raw)
+	}
+	if _, changed, err := StampFile(path); changed || err != nil {
+		t.Fatalf("restamp changed %v, %v", changed, err)
+	}
+}

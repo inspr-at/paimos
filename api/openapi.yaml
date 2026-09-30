@@ -8118,6 +8118,7 @@ components:
         tag: {type: string}
         release_channel: {type: string}
         release_sequence: {type: integer}
+        codename: {type: string, description: "AEON-430. Alliterative sci-fi name derived from release_sequence by the frozen, append-only codename lists (for example Amber Aurora); presentation only, the version stays the identity. Absent without a sequence, and on a reservation whose sequence a published release took."}
         state: {type: string, enum: [published, reserved]}
         reserved_at: {type: [string, 'null'], format: date-time}
         tagged_at: {type: [string, 'null'], format: date-time}
