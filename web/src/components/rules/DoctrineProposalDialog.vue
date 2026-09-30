@@ -3,13 +3,15 @@
 import { ref } from 'vue'
 import RulesDialog from './RulesDialog.vue'
 import BizIcon from '../business/BizIcon.vue'
-import { doctrineMessage, proposeDoctrineChange, DoctrineError, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineProposal } from '../../lib/doctrine'
-const props = defineProps<{ source: DoctrineSource; file: DoctrineFile; rule: DoctrineRule }>()
+import { doctrineMessage, proposeDoctrineChange, submitDoctrineInbox, DoctrineError, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineProposal, type DoctrineInboxItem } from '../../lib/doctrine'
+// draft: "edit then propose" for a doctrine inbox proposal (AEON-444). The
+// person's text replaces the agent's before it becomes a pull request.
+const props = defineProps<{ source: DoctrineSource; file: DoctrineFile; rule: DoctrineRule; draft?: DoctrineInboxItem }>()
 const emit = defineEmits<{ close: []; saved: [proposal: DoctrineProposal] }>()
-const sourceText = ref(props.rule.source)
-const en = ref(props.rule.tldr?.en ?? '')
-const de = ref(props.rule.tldr?.de ?? '')
-const explanation = ref('')
+const sourceText = ref(props.draft?.proposed ?? props.rule.source)
+const en = ref(props.draft?.tldr?.en ?? props.rule.tldr?.en ?? '')
+const de = ref(props.draft?.tldr?.de ?? props.rule.tldr?.de ?? '')
+const explanation = ref(props.draft?.why ?? '')
 const busy = ref(false)
 const error = ref('')
 const frozen = ref(false)
@@ -20,17 +22,19 @@ async function submit() {
   error.value = ''
   frozen.value = true
   try {
-    emit('saved', await proposeDoctrineChange({ request_id: requestId, source_id: props.source.id, path: props.file.path, rule_key: props.rule.key, rule_sha256: props.rule.sha256, source: sourceText.value, tldr: { en: en.value, de: de.value }, explanation: explanation.value }))
+    emit('saved', props.draft
+      ? await submitDoctrineInbox(props.draft.id, { source: sourceText.value, tldr: { en: en.value, de: de.value }, why: explanation.value, rule_sha256: props.rule.sha256 })
+      : await proposeDoctrineChange({ request_id: requestId, source_id: props.source.id, path: props.file.path, rule_key: props.rule.key, rule_sha256: props.rule.sha256, source: sourceText.value, tldr: { en: en.value, de: de.value }, explanation: explanation.value }))
   } catch (cause) {
     error.value = doctrineMessage(cause)
     // A lost response can have created the PR. Keep its exact input and UUID
     // for recovery; validation/leak failures happen before any publication.
-    if (cause instanceof DoctrineError && ['invalid_request', 'credential_text', 'public_identity', 'stale_rule', 'stale_source', 'invalid_sidecar', 'unsupported_repository', 'app_unavailable', 'forbidden'].includes(cause.code)) frozen.value = false
+    if (cause instanceof DoctrineError && ['invalid_request', 'credential_text', 'public_identity', 'stale_rule', 'stale_source', 'invalid_sidecar', 'unsupported_repository', 'app_unavailable', 'forbidden', 'not_pending', 'request_conflict'].includes(cause.code)) frozen.value = false
   } finally { busy.value = false }
 }
 </script>
 <template>
-  <RulesDialog title="Propose change" :lede="`A pull request in ${source.repository}; a person approves after checks and review.`" size="wide" :busy="busy" @close="emit('close')">
+  <RulesDialog :title="draft ? 'Edit, then propose' : 'Propose change'" :lede="`A pull request in ${source.repository}; a person approves after checks and review.`" size="wide" :busy="busy" @close="emit('close')">
     <form id="doctrine-proposal-form" class="form" @submit.prevent="submit">
       <label>Rule<textarea v-model="sourceText" class="field mono" rows="5" required :readonly="frozen" data-autofocus /></label>
       <label>TL;DR · English<input v-model="en" class="field" maxlength="300" required :readonly="frozen"></label>

@@ -477,6 +477,9 @@ func (m *Module) inboxItems(ctx context.Context, actor tenant.Principal, full bo
 				case s.CredentialRef != "" && m.credentials.authorize(s.CredentialRef, actor.TenantID, s.Repository) != nil:
 					// A revoked grant hides the private text, as in the layer.
 					loaded.denied = true
+				case !full:
+					// The summary polls: headlines need no rendered doctrine.
+					loaded.source = s
 				default:
 					files, err := cachedFiles(ctx, tx, s)
 					if err != nil {
