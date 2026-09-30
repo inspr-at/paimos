@@ -2,16 +2,20 @@
 import { reactive } from 'vue'
 
 export interface ToastAction { label: string; run: () => void }
-export interface Toast { id: number; message: string; tone: 'info' | 'error'; actions: ToastAction[]; sticky: boolean; key?: string }
+// A release named inside a toast's sentence: `message` is the whole sentence in
+// plain text, `release` says where the release stands in it so the toast can draw
+// the name with its version on hover or focus (AEON-430).
+export interface ToastRelease { version: string; name?: string; before: string; after?: string }
+export interface Toast { id: number; message: string; tone: 'info' | 'error'; actions: ToastAction[]; sticky: boolean; key?: string; release?: ToastRelease }
 export const toasts = reactive<Toast[]>([])
 let next = 1
 
 // Short, dismissible confirmations. Errors stay a little longer than info. A sticky
 // toast stays until it is acted on or dismissed; a keyed one replaces its earlier self.
-export function toast(message: string, options: { tone?: Toast['tone']; action?: ToastAction; actions?: ToastAction[]; timeout?: number; sticky?: boolean; key?: string } = {}) {
+export function toast(message: string, options: { tone?: Toast['tone']; action?: ToastAction; actions?: ToastAction[]; timeout?: number; sticky?: boolean; key?: string; release?: ToastRelease } = {}) {
   if (options.key) { const earlier = toasts.find(item => item.key === options.key); if (earlier) dismiss(earlier.id) }
   const item: Toast = {
-    id: next++, message, tone: options.tone ?? 'info', sticky: options.sticky ?? false, key: options.key,
+    id: next++, message, tone: options.tone ?? 'info', sticky: options.sticky ?? false, key: options.key, release: options.release,
     actions: [...(options.action ? [options.action] : []), ...(options.actions ?? [])],
   }
   toasts.push(item)

@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import AppIcon from '../components/AppIcon.vue'
+import ReleaseName from '../components/ReleaseName.vue'
 import { setPageTitle } from '../lib/brand'
 import { resilientFetch } from '../lib/api'
 
@@ -16,6 +17,7 @@ interface PublicNote {
 interface PublicRelease {
   released_at: string
   version?: string
+  codename?: string
   notes: PublicNote[]
 }
 interface ReleasesDocument {
@@ -142,11 +144,21 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
         <p v-if="!visibleReleases.length" class="quiet">No published releases yet.</p>
         <ol v-else class="releases">
           <li v-for="(release, index) in visibleReleases" :key="`${release.released_at}-${index}`" class="release">
-            <h2>
-              <time v-if="validTime(release.released_at)" :datetime="release.released_at">{{ releasedOn(release.released_at) }}</time>
-              <template v-else>{{ releasedOn(release.released_at) }}</template>
-            </h2>
-            <p v-if="release.version" class="version" :title="release.version">{{ release.version }}</p>
+            <!-- The marketing name leads; its calendar version shows on hover (AEON-430). -->
+            <template v-if="release.codename && release.version">
+              <h2><ReleaseName :version="release.version" :name="release.codename" /></h2>
+              <p class="version">
+                <time v-if="validTime(release.released_at)" :datetime="release.released_at">{{ releasedOn(release.released_at) }}</time>
+                <template v-else>{{ releasedOn(release.released_at) }}</template>
+              </p>
+            </template>
+            <template v-else>
+              <h2>
+                <time v-if="validTime(release.released_at)" :datetime="release.released_at">{{ releasedOn(release.released_at) }}</time>
+                <template v-else>{{ releasedOn(release.released_at) }}</template>
+              </h2>
+              <p v-if="release.version" class="version" :title="release.version">{{ release.version }}</p>
+            </template>
             <article v-for="(note, noteIndex) in release.notes" :key="noteIndex" class="note">
               <p v-if="line(note, 'pill').value" class="pill" :lang="line(note, 'pill').de ? 'de' : undefined">{{ line(note, 'pill').value }}</p>
               <p v-if="line(note, 'benefit').value" class="benefit" :lang="line(note, 'benefit').de ? 'de' : undefined">{{ line(note, 'benefit').value }}</p>
@@ -229,6 +241,7 @@ h1 {
   letter-spacing: -0.02em;
 }
 .release h2 time { font: inherit; color: inherit; }
+.release h2 :deep(.rn-stamp) { font-size: 13px; }
 .version {
   margin: 4px 0 0;
   overflow: hidden;

@@ -3,6 +3,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { dismiss, toasts } from '../lib/toast'
 import AppIcon from './AppIcon.vue'
+import ReleaseName from './ReleaseName.vue'
 function act(id: number, run: () => void) { dismiss(id); run() }
 // While a modal dialog is open the page under it is inert and hidden behind the
 // top layer: toasts show inside the topmost modal instead, and follow it as
@@ -29,7 +30,8 @@ onBeforeUnmount(() => dialogs?.disconnect())
     <TransitionGroup name="toast">
       <div v-for="item in toasts" :key="item.id" class="toast" :class="[item.tone, { sticky: item.sticky }]">
         <AppIcon v-if="item.tone === 'error'" name="alert" :size="14" />
-        <span>{{ item.message }}</span>
+        <span v-if="item.release">{{ item.release.before }}<ReleaseName :version="item.release.version" :name="item.release.name" />{{ item.release.after }}</span>
+        <span v-else>{{ item.message }}</span>
         <button v-for="a in item.actions" :key="a.label" class="toast-action" type="button" @click="act(item.id, a.run)">{{ a.label }}</button>
         <button class="toast-close" type="button" aria-label="Dismiss" @click="dismiss(item.id)"><AppIcon name="close" :size="12" /></button>
       </div>
@@ -48,6 +50,8 @@ onBeforeUnmount(() => dialogs?.disconnect())
 }
 .toast.error svg { color: #f3b0a8; }
 .toast span { min-width: 0; }
+/* A release's stamp on the toast's dark glass: the toast's own ink and a hairline, in both themes. */
+.toast :deep(.rn-stamp) { background: transparent; border-color: rgba(255, 255, 255, .28); box-shadow: none; color: var(--tip-ink); }
 .toast-action { height: 28px; padding: 0 12px; border: 0; border-radius: 999px; background: rgba(164, 229, 223, .18); color: #bff0eb; font-size: 12.5px; font-weight: 700; }
 .toast-action:hover { background: rgba(164, 229, 223, .3); }
 .toast-close { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; color: inherit; opacity: .7; }

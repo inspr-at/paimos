@@ -324,7 +324,7 @@ func TestAttachModesProtectionMatrix(t *testing.T) {
 					}
 					if strings.HasPrefix(protection, "strict ") {
 						in.LocalAuthNonce = v.LocalAuthNonce
-						in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, v.LocalAuthNonce)
+						in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, v.LocalAuthNonce, in.Snapshot)
 					}
 					f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
 				} else {
@@ -431,6 +431,7 @@ func TestLegacyAttachRegistrationKeepsDaemonIdentityButGrantsNoAttach(t *testing
 				// A fresh protocol-2 registration is understood by this server and
 				// still needs the complete approval flow before it activates.
 				registration.AttachProtocol, registration.PollKey = attachwatch.Protocol, nonce()
+				registration.LocalConsentProofVersion = attachwatch.LocalConsentProofVersion
 				f.call("POST", "/api/agent-pairing/attach", registration, false, key, 200)
 				in.PollKey, in.Operation = registration.PollKey, "request"
 				activateWatch(t, f, key, &in)
@@ -469,7 +470,7 @@ func TestAttachEarlyTextAlwaysDetaches(t *testing.T) {
 				in.Operation, in.Sequence, in.Text = "poll", 1, "AEON352_EARLY_TEXT_MUST_NOT_PUBLISH"
 				if stage == "strict activation" {
 					in.LocalAuthNonce = v.LocalAuthNonce
-					in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, v.LocalAuthNonce)
+					in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, v.LocalAuthNonce, in.Snapshot)
 				}
 				f.call("POST", "/api/agent-pairing/attach", in, false, key, 400)
 				var state string

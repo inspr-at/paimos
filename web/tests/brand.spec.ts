@@ -47,7 +47,7 @@ test('a different brand names the title, header, footer, menu, release history a
 
   state.server = history.current
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  await expect(page.locator('.toast')).toHaveText(new RegExp(`^NOVA DAWN was updated to ${history.current.replace(/\./g, '\\.')}`))
+  await expect(page.locator('.toast')).toHaveText(new RegExp(`^NOVA DAWN was updated to ${history.releases[0].codename}`))
   expect(await chromeText(page)).not.toMatch(DEFAULT)
 })
 

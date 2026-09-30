@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 import { api } from '../lib/api'
+import { rememberCodename, rememberCodenames } from '../lib/codenames'
 import { usePreference } from '../lib/preferences'
 import { getReleases, isCalendarVersion, newSince, type ReleaseHistory } from '../lib/releases'
 import { useVersion } from './version'
@@ -21,7 +22,7 @@ export const useReleases = defineStore('releases', () => {
     if (history.value && !force) return Promise.resolve()
     loading.value = true
     request = (async () => {
-      try { history.value = await getReleases(); error.value = '' }
+      try { history.value = await getReleases(); rememberCodenames(history.value.releases); error.value = '' }
       catch (e) { error.value = e instanceof Error ? e.message : 'The release history could not be loaded.' }
       finally { loading.value = false; request = undefined }
     })()
@@ -72,6 +73,7 @@ export const useReleases = defineStore('releases', () => {
       const response = await api('/version', { cache: 'no-store' })
       if (!response.ok) return
       const body = await response.json()
+      rememberCodename(body?.version, body?.codename)
       if (isCalendar(body?.version) && body.version > running && body.version !== available.value) available.value = body.version
     } catch { /* offline: try again later */ }
   }

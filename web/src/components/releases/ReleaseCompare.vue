@@ -4,7 +4,7 @@ import { computed } from 'vue'
 import { compare, presentCompare, releaseCopy, releasedAt, releaseName, span, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { absoluteTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
-import CalendarVersion from '../CalendarVersion.vue'
+import ReleaseName from '../ReleaseName.vue'
 import LangBadge from './LangBadge.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
 import TicketChips from './TicketChips.vue'
@@ -22,6 +22,7 @@ const lines = computed(() => result.value ? presentCompare(result.value.changes,
 // Each release's name, with the language it is shown in for the fallback badge.
 const names = computed(() => new Map((result.value?.releases ?? []).map(r => [r.version, releaseName(r, props.lang)])))
 const rangeTitle = (r: Release) => names.value.get(r.version) ?? { text: '', lang: props.lang }
+const nameOf = (version: string) => props.releases.find(r => r.version === version)?.codename
 const copyText = computed(() => releaseCopy(props.lang))
 const chipTickets = computed(() => {
   if (!result.value || !lines.value) return []
@@ -41,9 +42,9 @@ const between = computed(() => {
   <section class="compare" aria-labelledby="compare-title">
     <p class="eyebrow">Compare releases</p>
     <h2 id="compare-title" class="pair">
-      <span class="end"><span class="tag">From</span><CalendarVersion :value="result?.older ?? from" /></span>
+      <span class="end"><span class="tag">From</span><ReleaseName :version="result?.older ?? from" :name="nameOf(result?.older ?? from)" /></span>
       <AppIcon name="arrow" :size="16" class="to-arrow" />
-      <span class="end" :class="{ waiting: !result }"><span class="tag">To</span><CalendarVersion v-if="result" :value="result.newer" /><span v-else class="pick" :lang="lang">{{ copyText.comparePick }}</span></span>
+      <span class="end" :class="{ waiting: !result }"><span class="tag">To</span><ReleaseName v-if="result" :version="result.newer" :name="nameOf(result.newer)" /><span v-else class="pick" :lang="lang">{{ copyText.comparePick }}</span></span>
     </h2>
     <div class="actions">
       <button v-if="result" type="button" class="btn sm" @click="emit('swap')"><AppIcon name="refresh" :size="12" />Swap</button>
@@ -60,7 +61,7 @@ const between = computed(() => {
       <section class="included" aria-labelledby="compare-included">
         <h3 id="compare-included" class="included-h">Releases in this range</h3>
         <ul>
-          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span v-if="rangeTitle(r).text" class="inc-headline" :lang="rangeTitle(r).lang">{{ rangeTitle(r).text }}<LangBadge v-if="rangeTitle(r).lang !== lang" :lang="rangeTitle(r).lang" /></span><span v-else-if="releasedAt(r)" class="inc-date">{{ absoluteTime(releasedAt(r)!) }}</span></li>
+          <li v-for="r in result.releases" :key="r.version"><ReleaseName :version="r.version" :name="r.codename" class="inc-version" /><span v-if="rangeTitle(r).text" class="inc-headline" :lang="rangeTitle(r).lang">{{ rangeTitle(r).text }}<LangBadge v-if="rangeTitle(r).lang !== lang" :lang="rangeTitle(r).lang" /></span><span v-else-if="releasedAt(r)" class="inc-date">{{ absoluteTime(releasedAt(r)!) }}</span></li>
         </ul>
       </section>
       <ReleaseChanges v-if="count && lines" :presented="lines" :repository="repository" :query="query" :view="view" :lang="lang" class="changes" />
@@ -76,6 +77,7 @@ const between = computed(() => {
 .compare { display: grid; align-content: start; gap: 12px; max-width: 820px; }
 .eyebrow { margin: 0; }
 .pair { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; font: 500 20px/1.3 var(--mono); color: var(--ink); }
+.pair :deep(.rn-name) { font: 650 20px/1.3 var(--font); }
 .end { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 14px 6px 8px; border-radius: 12px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 1px var(--line); }
 .end.waiting { border-style: dashed; border-color: var(--line-2); box-shadow: none; background: transparent; }
 .tag { display: inline-grid; place-items: center; height: 22px; padding: 0 7px; border-radius: 7px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
@@ -90,9 +92,9 @@ const between = computed(() => {
 .included ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .included li { display: grid; grid-template-columns: 170px minmax(0, 1fr); align-items: baseline; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; color: var(--ink); }
 .included li:last-child { border-bottom: 0; }
-.inc-version { font-size: 12px; }
+.inc-version { font-size: 13px; font-weight: 600; }
 .inc-headline { overflow-wrap: anywhere; }
 .inc-date { color: var(--ink-3); }
 .none, .hint { font-size: 13.5px; color: var(--ink-2); line-height: 1.7; }
-@media (max-width: 760px) { .pair { font-size: 15px; } .included li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+@media (max-width: 760px) { .pair { font-size: 15px; } .pair :deep(.rn-name) { font-size: 16px; } .included li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 </style>
