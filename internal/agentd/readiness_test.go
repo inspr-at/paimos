@@ -189,6 +189,45 @@ func TestHarnessHoldReleaseRestartsProbeClockOnlyOnce(t *testing.T) {
 	}
 }
 
+type pendingProbeAdapter struct {
+	fakeAdapter
+	entered chan struct{}
+	resume  chan struct{}
+}
+
+func (a *pendingProbeAdapter) Probe(context.Context, string) bool {
+	close(a.entered)
+	<-a.resume
+	return false
+}
+
+func TestRepinCannotConsumeAnOlderInflightProbe(t *testing.T) {
+	s, api, _ := testSupervisor(t)
+	s.api = &readinessQueueAPI{fakeAPI: api}
+	adapter := &pendingProbeAdapter{entered: make(chan struct{}), resume: make(chan struct{})}
+	s.adapters[Codex] = adapter
+	done := make(chan error, 1)
+	go func() { done <- s.PollOnce(t.Context()) }()
+	<-adapter.entered
+	s.SetHarnessHoldWithReason(Codex, "repin_pending", "waiting for repin")
+	s.SetHarnessHold(Codex, "")
+	since := s.probePendingSince["account"]
+	close(adapter.resume)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !s.probePendingSince["account"].Equal(since) || s.loginRequired["account"] || s.probedAccounts["account"] || s.accountAvailable("account") {
+		t.Fatal("old probe changed the new pending clock or dispatch state")
+	}
+	if got := s.lifecycleAt("", since).AccountStatuses["account"]; got.State != "checking" || got.Reason != "probe_pending" {
+		t.Fatal("old probe ended the new pending wait", got)
+	}
+	s.adapters[Codex] = &fakeAdapter{}
+	if err := s.PollOnce(t.Context()); err != nil || !s.Lifecycle("").Ready {
+		t.Fatal("fresh probe did not restore readiness", err)
+	}
+}
+
 func TestInvalidVerificationCannotBlockProbeAndRefusalRetries(t *testing.T) {
 	for _, tc := range []string{"binding_incomplete", "adapter_unsupported", "local_binding_missing"} {
 		t.Run(tc, func(t *testing.T) {

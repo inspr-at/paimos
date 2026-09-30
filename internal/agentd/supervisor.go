@@ -420,6 +420,10 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 	s.mu.Lock()
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
 	adapters := map[string]Adapter{}
+	pendingProbes := make(map[string]time.Time, len(accounts))
+	for _, account := range accounts {
+		pendingProbes[account.ID] = s.probePendingSince[account.ID]
+	}
 	for k, v := range s.adapters {
 		adapters[k] = v
 	}
@@ -445,7 +449,12 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		probe := adapters[account.Harness].(AccountProber)
 		s.mu.Lock()
 		hold := s.harnessHolds[account.Harness]
+		pendingSince := pendingProbes[account.ID]
+		current := s.probePendingSince[account.ID].Equal(pendingSince)
 		s.mu.Unlock()
+		if !current {
+			continue
+		}
 		// A held harness (AEON-342) is not probed and reports unavailable.
 		status := probeUnavailable
 		var dependencyErr, probeErr error
@@ -493,6 +502,12 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			pi.probeMu.Unlock()
 		}
 		available := status.OK
+		s.mu.Lock()
+		current = s.probePendingSince[account.ID].Equal(pendingSince)
+		s.mu.Unlock()
+		if !current {
+			continue
+		}
 		var err error
 		if reporter, ok := s.api.(ProbeStatusReporter); ok {
 			err = reporter.ProbeStatus(ctx, account.ID, s.daemonID, s.generation, status)
@@ -500,6 +515,12 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			err = s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
 		}
 		s.mu.Lock()
+		// A concurrent repin/hold release starts a new probe lifecycle. The old
+		// adapter's in-flight result cannot consume that wait or establish local readiness.
+		if !s.probePendingSince[account.ID].Equal(pendingSince) {
+			s.mu.Unlock()
+			continue
+		}
 		if s.dependencyErrors == nil {
 			s.dependencyErrors = map[string]string{}
 		}
