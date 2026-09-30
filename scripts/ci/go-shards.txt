@@ -3,6 +3,7 @@
 # Packages over 140000ms are split by test. Harness, nodes, and agentpairing keep their five-shard proportions.
 # Inbox was measured locally and scaled to that run. Pairing tests added in release 14 were measured locally and scaled by the same ratio as the rest of that package.
 # A package added after that run is listed at 0ms until the next measurement.
+# A package absent from this file runs on the lightest shard. A split package's lowest shard skips tests assigned elsewhere, so a new Test, Example, or Fuzz still runs.
 # Columns: shard milliseconds import-path [TestName]
 1 45276 github.com/inspr-at/paimos/internal/activity
 1 1695 github.com/inspr-at/paimos/internal/agentpairing TestAllFiveGuidedHarnesses

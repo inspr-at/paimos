@@ -191,27 +191,41 @@ func cmdCheck(args []string) error {
 		return err
 	}
 	inFile := map[string]struct{}{}
-	split := map[string][]string{}
+	var splitPaths []string
+	seenSplit := map[string]struct{}{}
 	for _, it := range items {
 		inFile[it.Path] = struct{}{}
-		if it.Test != "" {
-			split[it.Path] = append(split[it.Path], it.Test)
+		if it.Test == "" {
+			continue
 		}
+		if _, ok := seenSplit[it.Path]; ok {
+			continue
+		}
+		seenSplit[it.Path] = struct{}{}
+		splitPaths = append(splitPaths, it.Path)
 	}
-	if err := samePathSet(listed, inFile); err != nil {
-		return err
+	sort.Strings(splitPaths)
+	listedSet := map[string]struct{}{}
+	for _, path := range listed {
+		listedSet[path] = struct{}{}
 	}
-	for path, names := range split {
-		want, err := listRunnableTests(root, path)
+	runnable := map[string][]string{}
+	for _, path := range splitPaths {
+		if _, ok := listedSet[path]; !ok {
+			continue
+		}
+		names, err := listRunnableTests(root, path)
 		if err != nil {
 			return err
 		}
-		if err := sameNameSet(path, want, names); err != nil {
-			return err
-		}
+		runnable[path] = names
+	}
+	if err := coverageHoles(items, listed, runnable); err != nil {
+		return err
 	}
 	fmt.Fprint(os.Stdout, shardStats(items))
-	fmt.Printf("packages=%d split_packages=%d\n", len(inFile), len(split))
+	fmt.Printf("packages=%d split_packages=%d\n", len(inFile), len(splitPaths))
+	fmt.Fprint(os.Stdout, formatDrift(assignmentDrift(listed, items, runnable)))
 	return nil
 }
 
@@ -234,19 +248,15 @@ func cmdPackages(args []string) error {
 	if err != nil {
 		return err
 	}
-	seen := map[string]struct{}{}
-	var paths []string
-	for _, it := range items {
-		if it.Shard != *shard {
-			continue
-		}
-		if _, ok := seen[it.Path]; ok {
-			continue
-		}
-		seen[it.Path] = struct{}{}
-		paths = append(paths, it.Path)
+	listed, err := goList(root)
+	if err != nil {
+		return err
 	}
-	sort.Strings(paths)
+	plan, err := planShard(items, listed, *shard)
+	if err != nil {
+		return err
+	}
+	paths := plan.packages()
 	if len(paths) == 0 {
 		return fmt.Errorf("shard %d has no packages", *shard)
 	}
@@ -300,61 +310,43 @@ func cmdTest(args []string) error {
 	if err != nil {
 		return err
 	}
-	var mine []Item
-	for _, it := range items {
-		if it.Shard == *shard {
-			mine = append(mine, it)
-		}
+	listed, err := goList(root)
+	if err != nil {
+		return err
 	}
-	if len(mine) == 0 {
+	plan, err := planShard(items, listed, *shard)
+	if err != nil {
+		return err
+	}
+	if plan.empty() {
 		return fmt.Errorf("shard %d has no packages", *shard)
 	}
-	code := runShard(root, *shard, mine)
+	code := runPlan(root, *shard, plan)
 	if code != 0 {
 		return exitCode(code)
 	}
 	return nil
 }
 
-func runShard(root string, shard int, items []Item) int {
-	order := make([]string, 0)
-	tests := map[string][]string{}
-	wholeSet := map[string]bool{}
-	for _, it := range items {
-		if _, ok := tests[it.Path]; !ok && !wholeSet[it.Path] {
-			order = append(order, it.Path)
-		}
-		if it.Test == "" {
-			wholeSet[it.Path] = true
+func runPlan(root string, shard int, plan shardPlan) int {
+	args, err := plan.commandArgs()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	for _, run := range plan.runs {
+		if run.skip {
+			fmt.Fprintf(os.Stderr, "shard %d: %s catch-all skips %d tests\n", shard, run.path, len(run.names))
 			continue
 		}
-		tests[it.Path] = append(tests[it.Path], it.Test)
+		fmt.Fprintf(os.Stderr, "shard %d: %s %d tests\n", shard, run.path, len(run.names))
 	}
-	var whole []string
-	type spec struct{ args []string }
-	var specs []spec
-	for _, path := range order {
-		names := tests[path]
-		if len(names) == 0 {
-			whole = append(whole, path)
-			continue
-		}
-		re, err := runRegex(names)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 2
-		}
-		specs = append(specs, spec{args: []string{"test", path, "-run", re}})
-		fmt.Fprintf(os.Stderr, "shard %d: %s %d tests\n", shard, path, len(names))
-	}
-	if len(whole) > 0 {
-		sort.Strings(whole)
-		specs = append(specs, spec{args: append([]string{"test"}, whole...)})
-		fmt.Fprintf(os.Stderr, "shard %d: %d whole packages\n", shard, len(whole))
+	if len(plan.whole) > 0 {
+		fmt.Fprintf(os.Stderr, "shard %d: %d whole packages\n", shard, len(plan.whole))
 	}
 	var cmds []*exec.Cmd
-	for _, sp := range specs {
-		cmd := exec.Command("go", sp.args...)
+	for _, sp := range args {
+		cmd := exec.Command("go", sp...)
 		cmd.Dir = root
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

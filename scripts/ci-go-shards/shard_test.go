@@ -4,6 +4,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -171,6 +172,16 @@ func TestRunRegexIsAnchored(t *testing.T) {
 	if _, err := runRegex([]string{"TestA/sub"}); err == nil {
 		t.Fatal("subtest name was accepted")
 	}
+	got, err = runRegex([]string{"FuzzNew", "Example_new", "TestNew"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `^(Example_new|FuzzNew|TestNew)$` {
+		t.Fatalf("%s", got)
+	}
+	if _, err := runRegex([]string{"BenchmarkHi"}); err == nil {
+		t.Fatal("benchmark was accepted")
+	}
 }
 
 func TestAlignPackageTimesCarriesNewPackages(t *testing.T) {
@@ -196,12 +207,16 @@ func Example_foo() {}
 func Examplebad() {}
 func (s *S) TestNope(t *testing.T) {}
 func BenchmarkHi(b *testing.B) {}
+func FuzzA(f *testing.F) {}
+func Fuzz(f *testing.F) {}
+func Fuzzbad(f *testing.F) {}
+func Test(t *testing.T) {}
 `)
 	got, err := testNamesIn("p_test.go", src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"TestA", "Example", "Example_foo"}
+	want := []string{"TestA", "Example", "Example_foo", "FuzzA", "Fuzz", "Test"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("got %v", got)
 	}
@@ -245,4 +260,239 @@ func TestParseFileRejectsBadShard(t *testing.T) {
 	if _, err := parseFile("9 1 p\n"); err == nil {
 		t.Fatal("expected shard rejection")
 	}
+}
+
+func TestLightestShardPrefersLowerNumber(t *testing.T) {
+	items := []Item{
+		{Shard: 2, MS: 5, Path: "b"},
+		{Shard: 1, MS: 5, Path: "a"},
+	}
+	if got := lightestShard(items); got != 1 {
+		t.Fatalf("got %d", got)
+	}
+}
+
+func TestAdditionsRunOnExactlyOneShard(t *testing.T) {
+	const pkg = "p"
+	items := []Item{
+		{Shard: 1, MS: 1000, Path: pkg, Test: "TestKeep"},
+		{Shard: 2, MS: 1, Path: pkg, Test: "TestOther"},
+	}
+	listed := []string{pkg, "q"}
+	runnable := map[string][]string{
+		pkg: {"TestKeep", "TestOther", "TestNew", "FuzzNew", "Example_new"},
+	}
+	if err := coverageHoles(items, listed, runnable); err != nil {
+		t.Fatal(err)
+	}
+	notes := formatDrift(assignmentDrift(listed, items, runnable))
+	for _, want := range []string{"rebalance recommended", "q", "TestNew", "FuzzNew", "Example_new", "::warning::rebalance recommended"} {
+		if !strings.Contains(notes, want) {
+			t.Fatalf("drift note missing %q:\n%s", want, notes)
+		}
+	}
+	matched := formatDrift(assignmentDrift([]string{pkg}, items, map[string][]string{pkg: {"TestKeep", "TestOther"}}))
+	if matched != "" {
+		t.Fatalf("balanced file was marked drifted: %s", matched)
+	}
+	owners := func(path, name string) []int {
+		t.Helper()
+		var got []int
+		for shard := 1; shard <= shardCount; shard++ {
+			plan, err := planShard(items, listed, shard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.runsTest(path, name) {
+				got = append(got, shard)
+			}
+		}
+		return got
+	}
+	for _, name := range []string{"TestKeep", "TestNew", "FuzzNew", "Example_new"} {
+		if got := owners(pkg, name); len(got) != 1 || got[0] != 1 {
+			t.Fatalf("%s runs on %v", name, got)
+		}
+	}
+	if got := owners(pkg, "TestOther"); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("TestOther runs on %v", got)
+	}
+	if got := owners("q", "TestQ"); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("new package runs on %v", got)
+	}
+	catchAll, err := planShard(items, listed, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := catchAll.commandArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(args) != 1 || strings.Join(args[0], " ") != "test p -skip ^(TestOther)$" {
+		t.Fatalf("catch-all args %q", args)
+	}
+	other, err := planShard(items, listed, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err = other.commandArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(args) != 2 || strings.Join(args[0], " ") != "test p -run ^(TestOther)$" || strings.Join(args[1], " ") != "test q" {
+		t.Fatalf("other shard args %q", args)
+	}
+}
+
+func TestCoverageHolesRejectsADroppedTest(t *testing.T) {
+	err := coverageHoles(nil, nil, map[string][]string{"p": {"TestNew"}})
+	if err == nil {
+		t.Fatal("dropped test was accepted")
+	}
+}
+
+func TestGoTestRunsAdditionsOnce(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/shards\n\ngo 1.26.0\n")
+	write("p/p_test.go", `package p
+
+import (
+	"fmt"
+	"os"
+	"testing"
+)
+
+func hit(name string) {
+	f, err := os.OpenFile(os.Getenv("HITS"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		panic(err)
+	}
+	if _, err := fmt.Fprintln(f, name); err != nil {
+		panic(err)
+	}
+	if err := f.Close(); err != nil {
+		panic(err)
+	}
+}
+
+func TestKeep(t *testing.T) {
+	hit("TestKeep")
+	t.Run("sub", func(t *testing.T) { hit("TestKeep/sub") })
+}
+
+func TestOther(t *testing.T) {
+	hit("TestOther")
+	t.Run("sub", func(t *testing.T) { hit("TestOther/sub") })
+}
+
+func TestNew(t *testing.T) {
+	hit("TestNew")
+	t.Run("sub", func(t *testing.T) { hit("TestNew/sub") })
+}
+
+func FuzzNew(f *testing.F) {
+	f.Add(1)
+	f.Fuzz(func(t *testing.T, n int) { hit("FuzzNew") })
+}
+
+func Example_new() {
+	hit("Example_new")
+	fmt.Println("ok")
+	// Output:
+	// ok
+}
+`)
+	write("q/q_test.go", `package q
+
+import (
+	"fmt"
+	"os"
+	"testing"
+)
+
+func hit(name string) {
+	f, err := os.OpenFile(os.Getenv("HITS"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		panic(err)
+	}
+	if _, err := fmt.Fprintln(f, name); err != nil {
+		panic(err)
+	}
+	if err := f.Close(); err != nil {
+		panic(err)
+	}
+}
+
+func TestQ(t *testing.T) { hit("TestQ") }
+`)
+	const pkgP = "example.com/shards/p"
+	const pkgQ = "example.com/shards/q"
+	items := []Item{
+		{Shard: 1, MS: 1000, Path: pkgP, Test: "TestKeep"},
+		{Shard: 2, MS: 1, Path: pkgP, Test: "TestOther"},
+	}
+	listed := []string{pkgP, pkgQ}
+	hits := filepath.Join(root, "hits")
+	env := withoutEnvPrefix(os.Environ(), "HITS=")
+	env = append(env, "HITS="+hits)
+	for shard := 1; shard <= shardCount; shard++ {
+		plan, err := planShard(items, listed, shard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmds, err := plan.commandArgs()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range cmds {
+			cmd := exec.Command("go", append(args, "-count=1", "-timeout=60s")...)
+			cmd.Dir = root
+			cmd.Env = env
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("shard %d go %s: %v\n%s", shard, strings.Join(args, " "), err, out)
+			}
+		}
+	}
+	body, err := os.ReadFile(hits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		if line != "" {
+			got[line]++
+		}
+	}
+	want := []string{"TestKeep", "TestKeep/sub", "TestOther", "TestOther/sub", "TestNew", "TestNew/sub", "FuzzNew", "Example_new", "TestQ"}
+	for _, name := range want {
+		if got[name] != 1 {
+			t.Fatalf("%s ran %d times; all hits:\n%s", name, got[name], body)
+		}
+		delete(got, name)
+	}
+	if len(got) != 0 {
+		t.Fatalf("unexpected hits %v", got)
+	}
+}
+
+func withoutEnvPrefix(env []string, prefix string) []string {
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }

@@ -288,6 +288,7 @@ func formatFile(items []Item, splitAbove int) string {
 	fmt.Fprintf(&b, "# Packages over %dms are split by test. Harness, nodes, and agentpairing keep their five-shard proportions.\n", splitAbove)
 	fmt.Fprintf(&b, "# Inbox was measured locally and scaled to that run. Pairing tests added in release 14 were measured locally and scaled by the same ratio as the rest of that package.\n")
 	fmt.Fprintf(&b, "# A package added after that run is listed at 0ms until the next measurement.\n")
+	fmt.Fprintf(&b, "# A package absent from this file runs on the lightest shard. A split package's lowest shard skips tests assigned elsewhere, so a new Test, Example, or Fuzz still runs.\n")
 	fmt.Fprintf(&b, "# Columns: shard milliseconds import-path [TestName]\n")
 	for _, it := range items {
 		if it.Test == "" {
@@ -459,19 +460,22 @@ func validTestName(name string) bool {
 	return true
 }
 
-// isRunnableTest reports whether go test would run name. Benchmarks and fuzz
-// targets are omitted because go test ./... does not run them.
+// isRunnableTest reports whether ordinary go test runs a function of this name.
+// The rule matches cmd/go's isTest for Test, Example, and Fuzz: the remainder
+// is empty or does not start with a lower-case letter. Fuzz targets run their
+// seed corpus without -fuzz. Benchmarks do not run unless -bench is set, and
+// CI never passes -bench. TestMain is the process hook, not a test.
 func isRunnableTest(name string) bool {
 	if name == "TestMain" {
 		return false
 	}
-	for _, prefix := range []string{"Test", "Example"} {
+	for _, prefix := range []string{"Test", "Example", "Fuzz"} {
 		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
 		rest := name[len(prefix):]
 		if rest == "" {
-			return prefix == "Example"
+			return true
 		}
 		r, _ := utf8.DecodeRuneInString(rest)
 		return !unicode.IsLower(r)
@@ -479,7 +483,7 @@ func isRunnableTest(name string) bool {
 	return false
 }
 
-// testNamesIn parses top-level Test and Example functions from one file.
+// testNamesIn parses top-level Test, Example, and Fuzz functions from one file.
 func testNamesIn(filename string, src []byte) ([]string, error) {
 	f, err := parser.ParseFile(token.NewFileSet(), filename, src, 0)
 	if err != nil {
@@ -496,4 +500,317 @@ func testNamesIn(filename string, src []byte) ([]string, error) {
 		}
 	}
 	return names, nil
+}
+
+// namedRun is one split package on a shard. skip selects -skip; otherwise -run.
+// names are exact top-level tests. The regex has no slash, so a subtest follows
+// its parent: -run keeps the parent's descendants and -skip drops them.
+type namedRun struct {
+	path  string
+	skip  bool
+	names []string
+}
+
+// shardPlan is everything one shard executes.
+type shardPlan struct {
+	whole []string
+	runs  []namedRun
+}
+
+func (p shardPlan) empty() bool {
+	return len(p.whole) == 0 && len(p.runs) == 0
+}
+
+func (p shardPlan) packages() []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(path string) {
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	for _, path := range p.whole {
+		add(path)
+	}
+	for _, run := range p.runs {
+		add(run.path)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (p shardPlan) commandArgs() ([][]string, error) {
+	var out [][]string
+	for _, run := range p.runs {
+		if run.skip && len(run.names) == 0 {
+			out = append(out, []string{"test", run.path})
+			continue
+		}
+		re, err := runRegex(run.names)
+		if err != nil {
+			return nil, err
+		}
+		flagName := "-run"
+		if run.skip {
+			flagName = "-skip"
+		}
+		out = append(out, []string{"test", run.path, flagName, re})
+	}
+	if len(p.whole) > 0 {
+		args := make([]string, 0, 1+len(p.whole))
+		args = append(args, "test")
+		args = append(args, p.whole...)
+		out = append(out, args)
+	}
+	return out, nil
+}
+
+func (p shardPlan) runsPackage(path string) bool {
+	for _, whole := range p.whole {
+		if whole == path {
+			return true
+		}
+	}
+	for _, run := range p.runs {
+		if run.path == path {
+			return true
+		}
+	}
+	return false
+}
+
+// runsTest reports whether this plan executes one top-level test.
+// A whole package runs every test. A catch-all runs every name it does not skip.
+func (p shardPlan) runsTest(path, name string) bool {
+	for _, whole := range p.whole {
+		if whole == path {
+			return true
+		}
+	}
+	for _, run := range p.runs {
+		if run.path != path {
+			continue
+		}
+		found := false
+		for _, n := range run.names {
+			if n == name {
+				found = true
+				break
+			}
+		}
+		if run.skip {
+			return !found
+		}
+		return found
+	}
+	return false
+}
+
+// lightestShard is the committed shard with the smallest total milliseconds.
+// Ties take the lower shard number. A package missing from the file runs there.
+func lightestShard(items []Item) int {
+	sum := map[int]int{}
+	for _, it := range items {
+		if it.Shard < 1 || it.Shard > shardCount {
+			continue
+		}
+		sum[it.Shard] += it.MS
+	}
+	best := 0
+	bestMS := 0
+	for shard, ms := range sum {
+		if best == 0 || ms < bestMS || (ms == bestMS && shard < best) {
+			best = shard
+			bestMS = ms
+		}
+	}
+	if best == 0 {
+		return 1
+	}
+	return best
+}
+
+// planShard builds one shard's commands from the committed file plus the
+// packages go list currently returns. The lowest shard of a split package is
+// the catch-all: it skips only the names assigned to other shards, so a new
+// Test, Example, or Fuzz runs there and nowhere else.
+func planShard(items []Item, listed []string, shard int) (shardPlan, error) {
+	if shard < 1 || shard > shardCount {
+		return shardPlan{}, fmt.Errorf("shard must be 1..%d", shardCount)
+	}
+	assigned := map[string]struct{}{}
+	for _, it := range items {
+		assigned[it.Path] = struct{}{}
+	}
+	wholeSet := map[string]struct{}{}
+	for _, it := range items {
+		if it.Shard == shard && it.Test == "" {
+			wholeSet[it.Path] = struct{}{}
+		}
+	}
+	if shard == lightestShard(items) {
+		for _, path := range listed {
+			if _, ok := assigned[path]; ok {
+				continue
+			}
+			wholeSet[path] = struct{}{}
+		}
+	}
+	whole := make([]string, 0, len(wholeSet))
+	for path := range wholeSet {
+		whole = append(whole, path)
+	}
+	sort.Strings(whole)
+
+	type group struct {
+		catch        int
+		mine, others []string
+	}
+	groups := map[string]*group{}
+	for _, it := range items {
+		if it.Test == "" {
+			continue
+		}
+		g, ok := groups[it.Path]
+		if !ok {
+			g = &group{catch: it.Shard}
+			groups[it.Path] = g
+		}
+		if it.Shard < g.catch {
+			g.catch = it.Shard
+		}
+		if it.Shard == shard {
+			g.mine = append(g.mine, it.Test)
+		} else {
+			g.others = append(g.others, it.Test)
+		}
+	}
+	paths := make([]string, 0, len(groups))
+	for path := range groups {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	var runs []namedRun
+	for _, path := range paths {
+		g := groups[path]
+		if g.catch == shard {
+			runs = append(runs, namedRun{path: path, skip: true, names: append([]string(nil), g.others...)})
+			continue
+		}
+		if len(g.mine) == 0 {
+			continue
+		}
+		runs = append(runs, namedRun{path: path, names: append([]string(nil), g.mine...)})
+	}
+	return shardPlan{whole: whole, runs: runs}, nil
+}
+
+// coverageHoles fails when a listed package or a runnable split-package test
+// would not run on exactly one shard. Drift of the committed file is separate
+// and stays advisory.
+func coverageHoles(items []Item, listed []string, runnable map[string][]string) error {
+	split := map[string]bool{}
+	for _, it := range items {
+		if it.Test != "" {
+			split[it.Path] = true
+		}
+	}
+	plans := make([]shardPlan, 0, shardCount)
+	for shard := 1; shard <= shardCount; shard++ {
+		plan, err := planShard(items, listed, shard)
+		if err != nil {
+			return err
+		}
+		plans = append(plans, plan)
+	}
+	var holes []string
+	for _, path := range listed {
+		if split[path] {
+			continue
+		}
+		n := 0
+		for _, plan := range plans {
+			if plan.runsPackage(path) {
+				n++
+			}
+		}
+		if n != 1 {
+			holes = append(holes, fmt.Sprintf("%s runs on %d shards", path, n))
+		}
+	}
+	paths := make([]string, 0, len(runnable))
+	for path := range runnable {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		names := append([]string(nil), runnable[path]...)
+		sort.Strings(names)
+		for _, name := range names {
+			n := 0
+			for _, plan := range plans {
+				if plan.runsTest(path, name) {
+					n++
+				}
+			}
+			if n != 1 {
+				holes = append(holes, fmt.Sprintf("%s %s runs on %d shards", path, name, n))
+			}
+		}
+	}
+	if len(holes) == 0 {
+		return nil
+	}
+	return fmt.Errorf("shard plan drops or duplicates work:\n%s", strings.Join(limit(holes, 12), "\n"))
+}
+
+// assignmentDrift compares the committed file with the packages and tests that
+// exist now. The caller prints it as a rebalance hint and still runs the work.
+func assignmentDrift(listed []string, items []Item, runnable map[string][]string) []string {
+	inFile := map[string]struct{}{}
+	split := map[string][]string{}
+	for _, it := range items {
+		inFile[it.Path] = struct{}{}
+		if it.Test != "" {
+			split[it.Path] = append(split[it.Path], it.Test)
+		}
+	}
+	inList := map[string]struct{}{}
+	for _, path := range listed {
+		inList[path] = struct{}{}
+	}
+	var notes []string
+	if err := samePathSet(listed, inFile); err != nil {
+		notes = append(notes, err.Error())
+	}
+	paths := make([]string, 0, len(split))
+	for path := range split {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if _, ok := inList[path]; !ok {
+			continue
+		}
+		if err := sameNameSet(path, runnable[path], split[path]); err != nil {
+			notes = append(notes, err.Error())
+		}
+	}
+	return notes
+}
+
+func formatDrift(notes []string) string {
+	if len(notes) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("rebalance recommended\n")
+	for _, note := range notes {
+		b.WriteString(note)
+		b.WriteByte('\n')
+	}
+	b.WriteString("::warning::rebalance recommended\n")
+	return b.String()
 }
