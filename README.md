@@ -709,7 +709,10 @@ Existing receipt-bound service definitions remain owned and unchanged; logging
 is added when a new service is installed. Managed Nix/Home Manager services
 retain their configuration ownership.
 
-The paired daemon writes bounded `agentd polling diagnostic` lines to stderr:
+The paired daemon writes bounded `agentd polling diagnostic` lines to stderr
+when the set of causes changes, then at most one reminder per cause every
+15 minutes while the set persists. A healthy poll clears the set, so a recurring
+cause is logged immediately. Multiple accounts sharing a cause produce one line:
 `reason=probe_failed` records an account readiness failure (a failed probe/report
 or a retained ownership/reporting block);
 `reason=probe_timeout` confirms an account exhausted its own pending probe wait;
