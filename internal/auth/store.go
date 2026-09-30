@@ -30,6 +30,7 @@ var (
 	errNotFound         = errors.New("not found")
 	errNotAgent         = errors.New("not an agent")
 	errServicePrincipal = errors.New("agent keys cannot be issued for service principals")
+	errAgentDeactivated = errors.New("agent is deactivated")
 )
 
 func scanPrincipal(row pgx.Row) (tenant.Principal, error) {
@@ -487,10 +488,10 @@ func (m *Module) createAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 		}
 		var err error
 		if principalID != "" {
-			var kind, agentName string
+			var kind, agentName, status string
 			var reserved bool
-			err = tx.QueryRow(ctx, `SELECT kind,name,roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[]
-				FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`, p.TenantID, principalID).Scan(&kind, &agentName, &reserved)
+			err = tx.QueryRow(ctx, `SELECT kind,name,status,roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[]
+				FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`, p.TenantID, principalID).Scan(&kind, &agentName, &status, &reserved)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return errNotFound
 			}
@@ -503,27 +504,35 @@ func (m *Module) createAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			if reserved {
 				return errServicePrincipal
 			}
+			// A deactivated agent's keys never authenticate; a new one would be dead on arrival.
+			if status != "active" {
+				return errAgentDeactivated
+			}
 			if name == "" {
 				name = agentName
 			}
 		} else {
 			rows, err := tx.Query(ctx, `
-			SELECT id::text,kind,roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[]
+			SELECT id::text,kind,status,roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[]
 			FROM principals WHERE name=$1 ORDER BY created_at,id FOR UPDATE`, name)
 			if err != nil {
 				return err
 			}
-			service := false
+			service, deactivated := false, false
 			for rows.Next() {
-				var id, kind string
+				var id, kind, status string
 				var reserved bool
-				if err := rows.Scan(&id, &kind, &reserved); err != nil {
+				if err := rows.Scan(&id, &kind, &status, &reserved); err != nil {
 					rows.Close()
 					return err
 				}
 				service = service || reserved
-				if kind == string(tenant.Agent) && principalID == "" {
-					principalID = id
+				if kind == string(tenant.Agent) {
+					// As before, the first identity of this name that is still active gets the key.
+					if status == "active" && principalID == "" {
+						principalID = id
+					}
+					deactivated = deactivated || status != "active"
 				}
 			}
 			err = rows.Err()
@@ -533,6 +542,9 @@ func (m *Module) createAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			}
 			if service {
 				return errServicePrincipal
+			}
+			if principalID == "" && deactivated {
+				return errAgentDeactivated
 			}
 			if principalID == "" {
 				err = tx.QueryRow(ctx, `
