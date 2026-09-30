@@ -23,8 +23,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Five shards. Four-way balance of run 36692613348 stays over 3.5 minutes.
-        shard: [1, 2, 3, 4, 5]
+        # Six shards. Five-way balance of run 36695656920 left jobs at 212s, 230s and 232s.
+        shard: [1, 2, 3, 4, 5, 6]
     runs-on: ubuntu-latest
     services:
       postgres:
