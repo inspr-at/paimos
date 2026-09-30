@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULT_AGENT_STATE, STATE_LABEL, attentionReasonText, assessAgentState, deriveAgentState, normalizeAgentState, problemReason, type StateEvidence } from '../src/lib/agentSignals.ts'
+import { DEFAULT_AGENT_STATE, LOST_CONTACT, STATE_LABEL, attentionReasonText, assessAgentState, deriveAgentState, normalizeAgentState, problemReason, type StateEvidence } from '../src/lib/agentSignals.ts'
 import { liveState, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { sessionStatus } from '../src/lib/agentState.ts'
 import type { HarnessSession } from '../src/lib/agents.ts'
@@ -161,4 +161,38 @@ test('safe reasons distinguish a peer reply from person action without claiming 
     { kind: 'approval', scope: 'run', actor: 'person', count: 1, blocking: true, location: 'approvals' },
   ] }), now)
   assert.match(mixed.reasons[0]!.detail, /person’s decision/)
+})
+
+test('a finished job reads Done, an early end Ended, and a failure or lost contact never Done (AEON-437)', () => {
+  const stopped = (fields: Partial<StateEvidence> = {}) => evidence({ phase: 'stopped', stopped_at: ago(60_000), heartbeat_at: ago(60_000), ...fields })
+  for (const stop_reason of [null, 'stopped', 'process_exited', 'completed']) {
+    const done = assessAgentState(stopped({ stop_reason, progress_pct: 100 }), now)
+    assert.deepEqual([done.state, done.label], ['done', 'Done'])
+    for (const progress_pct of [99, 40, 0, null, undefined]) {
+      const ended = assessAgentState(stopped({ stop_reason, progress_pct }), now)
+      assert.deepEqual([ended.state, ended.label], ['stopped', 'Ended'])
+    }
+  }
+  for (const stop_reason of ['process_failed', 'ownership_lost', 'error: exit status 1']) assert.equal(deriveAgentState(stopped({ stop_reason, progress_pct: 100 }), now), 'problem')
+  assert.equal(deriveAgentState(stopped({ stop_reason: 'stopped', progress_pct: 100, has_problem: true }), now), 'problem')
+  assert.equal(deriveAgentState(stopped({ stop_reason: 'stopped', progress_pct: 100, run_status: 'failed' }), now), 'problem')
+  // The server closing a silent session proves no clean exit, and a removal is not a finish.
+  const lost = assessAgentState(stopped({ stop_reason: LOST_CONTACT, progress_pct: 100 }), now)
+  assert.deepEqual([lost.state, lost.label], ['stopped', 'Lost contact'])
+  assert.equal(deriveAgentState(stopped({ stop_reason: 'archived', progress_pct: 100 }), now), 'stopped')
+})
+
+test('100% reported and then quiet reads Done, not a dead worker; under 100% the warning stays (AEON-437)', () => {
+  const quiet = (fields: Partial<StateEvidence> = {}) => evidence({ heartbeat_at: ago(11 * 60_000), ...fields })
+  assert.equal(deriveAgentState(quiet({ progress_pct: 99 }), now), 'unresponsive')
+  assert.equal(deriveAgentState(quiet({ progress_pct: 100 }), now), 'done')
+  assert.equal(deriveAgentState(quiet({ progress_pct: 100, activity: 'idle' }), now), 'done')
+  assert.equal(deriveAgentState(quiet({ progress_pct: 100, heartbeat_at: ago(4 * 60_000) }), now), 'done')
+  assert.equal(deriveAgentState(quiet({ progress_pct: 100, eta_stale: true }), now), 'done')
+  assert.match(assessAgentState(quiet({ progress_pct: 100 }), now).reasons[0]!.detail, /reported 100%/)
+  // A fresh heartbeat is still work in flight; a person's request and a vendor limit still show.
+  assert.equal(deriveAgentState(evidence({ progress_pct: 100 }), now), 'working')
+  assert.equal(deriveAgentState(quiet({ progress_pct: 100, heartbeat_at: ago(4 * 60_000), needs_attention: true }), now), 'waiting')
+  assert.equal(deriveAgentState(quiet({ progress_pct: 100, activity: 'throttled' }), now), 'throttled')
+  assert.equal(deriveAgentState(quiet({ progress_pct: 100, run_status: 'failed' }), now), 'problem')
 })

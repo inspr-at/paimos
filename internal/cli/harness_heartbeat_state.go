@@ -104,6 +104,9 @@ type heartbeatSession struct {
 	lease string
 	disk  heartbeatDisk
 	hold  heartbeatHold
+	// stopReason is how the wrapped job ended, for the stop request only. It is
+	// not persisted: a stop replayed from disk is a plain "stopped" (AEON-437).
+	stopReason string
 }
 
 func validStateName(name string) bool {

@@ -273,6 +273,45 @@ func TestLiveAgents(t *testing.T) {
 // Coordinator children share one agent principal. The live feed must keep that
 // principal name and still return each session's own display_label, and it must
 // withhold the label from anyone who lacks harness.read at the project.
+// AEON-437: the live feed carries the reported percent, so a screen can tell a
+// worker that finished from one that was lost. No report leaves the field out.
+func TestLiveCarriesReportedProgress(t *testing.T) {
+	f := fixture(t)
+	ctx := t.Context()
+	register := func(pct *int) string {
+		t.Helper()
+		body := map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "studio-mac", "management_mode": "unmanaged", "role": "worker", "harness_session_ref": "progress-generation-" + uid(), "worker_lease": "progress-worker-lease-" + uid(), "ticket_node_id": f.ticket, "work_shape": "ship"}
+		w := f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", body, "")
+		expect(t, w, 201)
+		id := decode(t, w)["id"].(string)
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE harness_sessions SET phase='working', activity='busy', heartbeat_at=clock_timestamp()-interval '20 seconds', progress_pct=$2 WHERE id=$1`, id, pct)
+			return err
+		})
+		return id
+	}
+	full := 100
+	finished, unreported := register(&full), register(nil)
+	w := f.call(f.person, "GET", "/api/harness-sessions/live", nil, "")
+	expect(t, w, 200)
+	var page struct {
+		Items []harness.LiveAgent `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]*int{}
+	for _, agent := range page.Items {
+		seen[agent.SessionID] = agent.ProgressPct
+	}
+	if got, ok := seen[finished]; !ok || got == nil || *got != 100 {
+		t.Fatalf("finished progress %v", got)
+	}
+	if got, ok := seen[unreported]; !ok || got != nil {
+		t.Fatalf("unreported progress %v", got)
+	}
+}
+
 func TestLiveDisplayLabelIsNotThePrincipalName(t *testing.T) {
 	f := fixture(t)
 	ctx := t.Context()

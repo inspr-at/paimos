@@ -18,6 +18,8 @@ export interface EtaInput {
   live?: EtaSide | null
   progress?: number | null
   stale?: boolean
+  // A session is still working the ticket. Without one, all work reported means done.
+  active?: boolean
 }
 
 export interface TicketEta {
@@ -44,6 +46,8 @@ export interface EtaView {
   pct: number | null
   overdue: boolean
   stale: boolean
+  // All work is reported and nobody is working it any more: a calm Done, no time (AEON-437).
+  done: boolean
   tip: string
 }
 
@@ -53,7 +57,7 @@ export function etaFromTicket(eta: TicketEta | null | undefined): EtaInput | nul
   const live = eta.eta_live_at ? { at: eta.eta_live_at, reported_at: eta.live_reported_at, by: eta.live_by, stale: eta.live_stale, kind: 'Live' as const } : null
   const progress = typeof eta.progress_pct === 'number' ? eta.progress_pct : null
   if (!ready && !live && progress == null) return null
-  return { ready, live, progress, stale: !!(eta.eta_stale || eta.ready_stale || eta.live_stale) }
+  return { ready, live, progress, stale: !!(eta.eta_stale || eta.ready_stale || eta.live_stale), active: !!eta.has_working_session }
 }
 
 export function etaFromSession(session: {
@@ -65,6 +69,7 @@ export function etaFromSession(session: {
   agent?: { name: string } | null
 }): EtaInput | null {
   return etaFromTicket({
+    has_working_session: true,
     eta_ready_at: session.eta_ready_at, eta_live_at: session.eta_live_at, progress_pct: session.progress_pct,
     ready_reported_at: session.eta_reported_at, live_reported_at: session.eta_reported_at,
     ready_by: session.agent?.name, live_by: session.agent?.name,
@@ -111,6 +116,15 @@ function sideTip(side: EtaSide, now: number, timeZone: string): string[] {
   return side.stale ? [`Estimate from ${from}${by} is ${span(age)} old`, head] : [head, `Estimated${by} at ${from}`]
 }
 
+// At 100% there is nothing left to estimate: a due time that passed is not late, and
+// a report that aged is not stale. Nobody working the ticket any more reads Done.
+function doneTip(sides: EtaSide[], now: number, timeZone: string): string {
+  const latest = sides.filter(side => valid(side.reported_at)).sort((a, b) => Date.parse(b.reported_at!) - Date.parse(a.reported_at!))[0]
+  if (!latest) return 'All work reported'
+  const who = latest.by?.trim()
+  return `All work reported${who ? ` by ${who}` : ''} at ${clock(latest.reported_at!, now, timeZone)}`
+}
+
 // formatEta returns null when nothing was reported. `timeZone` is explicit so tests
 // can pin a clock; the screen passes the viewer's zone.
 export function formatEta(input: EtaInput | null | undefined, mode: EtaMode, now: number, timeZone = 'UTC'): EtaView | null {
@@ -118,9 +132,10 @@ export function formatEta(input: EtaInput | null | undefined, mode: EtaMode, now
   const sides = [input.ready, input.live].filter((side): side is EtaSide => !!side && valid(side.at))
   const pct = typeof input.progress === 'number' ? Math.max(0, Math.min(100, Math.round(input.progress))) : null
   if (!sides.length && pct == null) return null
-  const main = sides[0] ?? null
-  const stale = !!input.stale || sides.some(side => side.stale)
-  const tip = [
+  const complete = pct === 100
+  const main = complete ? null : sides[0] ?? null
+  const stale = !complete && (!!input.stale || sides.some(side => side.stale))
+  const tip = complete ? [input.active ? '100% done' : doneTip(sides, now, timeZone)] : [
     ...sides.flatMap(side => sideTip(side, now, timeZone)),
     ...(pct != null ? [`${pct}% done`] : []),
   ]
@@ -133,6 +148,7 @@ export function formatEta(input: EtaInput | null | undefined, mode: EtaMode, now
     pct,
     overdue: !!main && Date.parse(main.at) < now,
     stale,
+    done: complete && !input.active,
     tip: tip.join('\n'),
   }
 }

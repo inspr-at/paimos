@@ -756,6 +756,42 @@ func TestListLeadUsesTheViewerHeartbeatThresholds(t *testing.T) {
 	}
 }
 
+// A worker that reported 100% and went quiet is finished, not lost (AEON-437):
+// past the red threshold it would rank unresponsive and lead, but it now ranks
+// after live work. Under 100% the same silence still leads.
+func TestListLeadRanksAFinishedQuietWorkerLast(t *testing.T) {
+	p := newPrincipal(t, "assignee-finished")
+	project := kindBySlug(t, p, "project")
+	ticketKind := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Finished"}`)
+	makeTicket := func(key string) nodeJSON {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"kind_id": ticketKind.ID, "key": key, "title": key, "state": "new", "parent_id": root.ID})
+		return mustNode(t, p, string(raw))
+	}
+	ada := insertNamedAgent(t, p.TenantID, "Ada")
+	stamp := func(node, label string, progress int, created, heartbeat time.Duration) {
+		t.Helper()
+		id := insertLiveSessionStamp(t, p.TenantID, root.ID, ada, node, "claude", "worker", label, "working", "busy", time.Now().UTC().Add(-created), time.Now().UTC().Add(-heartbeat))
+		if _, err := adminPool.Exec(t.Context(), `UPDATE harness_sessions SET progress_pct=$2 WHERE id=$1::uuid`, id, progress); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done, quiet := makeTicket("FIN-1"), makeTicket("FIN-2")
+	// Older and silent for 12 minutes at 100%, beside a fresh worker.
+	stamp(done.ID, "Done", 100, 40*time.Minute, 12*time.Minute)
+	stamp(done.ID, "Live", 30, time.Minute, time.Second)
+	// The same silence under 100% is a lost worker and keeps leading.
+	stamp(quiet.ID, "Lost", 99, 40*time.Minute, 12*time.Minute)
+	stamp(quiet.ID, "Fresh", 30, time.Minute, time.Second)
+	want := map[string]string{done.Key: "Live", quiet.Key: "Lost"}
+	for _, item := range listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=updated_at").Items {
+		if item.LeadWorker == nil || item.LeadWorker.Name != want[item.Key] {
+			t.Fatalf("%s lead %#v, want %s", item.Key, item.LeadWorker, want[item.Key])
+		}
+	}
+}
+
 // Equal start and heartbeat, session ids withheld: the lead name on the row
 // is the name the sort uses. Swapping hidden labels and principal names does
 // not change a guest's order or key.

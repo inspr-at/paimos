@@ -1283,7 +1283,11 @@ func (rt *runtime) stopHeartbeatMode(ctx context.Context, project string, sessio
 			return err
 		}
 	}
-	err := rt.harnessDoCtx(ctx, http.MethodPost, harnessPath(projectID, session.id)+"/stop", session.lease, map[string]string{"reason": "stopped"}, new(any))
+	reason := session.stopReason
+	if reason == "" {
+		reason = "stopped"
+	}
+	err := rt.harnessDoCtx(ctx, http.MethodPost, harnessPath(projectID, session.id)+"/stop", session.lease, map[string]string{"reason": reason}, new(any))
 	if err == nil || heartbeatStatus(err) == http.StatusGone {
 		return nil
 	}

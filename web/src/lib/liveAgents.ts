@@ -20,7 +20,7 @@ export interface LiveAgent {
   harness: Harness; management_mode: 'managed' | 'unmanaged'; role: 'worker' | 'coordinator'
   phase: 'starting' | 'working' | 'stopping' | 'yielded' | 'stopped'; activity: 'busy' | 'unknown' | 'idle' | 'throttled'
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]
-  eta_stale?: boolean
+  eta_stale?: boolean; progress_pct?: number | null
   // The bound ticket and the project it lives in now (it may have moved on).
   ticket: (NodeSummary & { project_id: string }) | null; since: string; heartbeat_at: string | null
   // The last persisted activity entry, withheld with the note when harness.read
@@ -121,7 +121,7 @@ export function groupLive(items: LiveAgent[], serverNow: number, preferences: Ag
 
 // Two readings that show the same thing, including event evidence, so a poll that
 // changes nothing re-renders nothing.
-const shown = (a: LiveAgent) => [a.project_id, a.session_id, a.principal_id, a.name, a.display_label, a.harness, a.role, a.phase, a.activity, a.state, a.ticket?.id, a.ticket?.key, a.ticket?.title, a.ticket?.project_id, a.since, a.heartbeat_at, a.activity_note, a.activity_note_id, a.run_status, a.stop_reason, a.stopped_at, a.needs_attention, a.has_problem, a.eta_stale, JSON.stringify(a.attention_reasons)].join('\u0000')
+const shown = (a: LiveAgent) => [a.project_id, a.session_id, a.principal_id, a.name, a.display_label, a.harness, a.role, a.phase, a.activity, a.state, a.ticket?.id, a.ticket?.key, a.ticket?.title, a.ticket?.project_id, a.since, a.heartbeat_at, a.activity_note, a.activity_note_id, a.run_status, a.stop_reason, a.stopped_at, a.needs_attention, a.has_problem, a.eta_stale, a.progress_pct, JSON.stringify(a.attention_reasons)].join('\u0000')
 export function sameLive(a: Map<string, LiveAgent[]>, b: Map<string, LiveAgent[]>) {
   if (a.size !== b.size) return false
   for (const [id, list] of a) {

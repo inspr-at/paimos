@@ -12,14 +12,14 @@ export const HARNESS_LABEL: Record<string, string> = { codex: 'Codex', claude: '
 export const harnessLabel = (harness: string) => HARNESS_LABEL[harness] ?? harness.charAt(0).toUpperCase() + harness.slice(1)
 
 export type SessionGroup = 'needs' | 'awaiting' | 'working' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stopped'
-export type LiveTone = 'busy' | 'idle' | 'attention' | 'quiet' | 'stopped' | 'throttled' | 'problem'
+export type LiveTone = 'busy' | 'idle' | 'attention' | 'quiet' | 'done' | 'stopped' | 'throttled' | 'problem'
 export interface SessionStatus { group: SessionGroup; tone: LiveTone; label: string; state: AgentState; reasons?: StateReason[] }
 export const GROUPS: { id: SessionGroup; label: string }[] = [
   { id: 'problem', label: 'Problem' }, { id: 'unresponsive', label: 'No heartbeat' }, { id: 'needs', label: 'Needs something' }, { id: 'awaiting', label: 'Awaiting heartbeat' }, { id: 'throttled', label: 'Throttled' },
-  { id: 'working', label: 'Working' }, { id: 'idle', label: 'Idle' }, { id: 'stopped', label: 'Stopped' },
+  { id: 'working', label: 'Working' }, { id: 'idle', label: 'Idle' }, { id: 'stopped', label: 'Ended' },
 ]
-const STATE_GROUP: Record<AgentState, SessionGroup> = { working: 'working', awaiting: 'awaiting', unresponsive: 'unresponsive', waiting: 'needs', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'idle', stopped: 'stopped' }
-const STATE_TONE: Record<AgentState, LiveTone> = { working: 'busy', awaiting: 'attention', unresponsive: 'attention', waiting: 'attention', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'quiet', stopped: 'stopped' }
+const STATE_GROUP: Record<AgentState, SessionGroup> = { working: 'working', awaiting: 'awaiting', unresponsive: 'unresponsive', waiting: 'needs', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'idle', done: 'stopped', stopped: 'stopped' }
+const STATE_TONE: Record<AgentState, LiveTone> = { working: 'busy', awaiting: 'attention', unresponsive: 'attention', waiting: 'attention', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'quiet', done: 'done', stopped: 'stopped' }
 export function heartbeatStale(session: HarnessSession, now: number, preferences = DEFAULT_AGENT_STATE) {
   return !session.heartbeat_at || now - Date.parse(session.heartbeat_at) >= preferences.yellowMinutes * 60_000
 }
@@ -29,7 +29,9 @@ export function sessionStatus(session: HarnessSession, now: number, needsYou = f
   const run_status = session.run_status !== undefined ? session.run_status : run?.outcome ?? run?.status
   const assessment = assessAgentState({ ...session, run_status }, now, preferences, needsYou)
   const { state, label, reasons } = assessment
-  return { state, label, ...(reasons.length ? { reasons } : {}), group: STATE_GROUP[assessment.state], tone: STATE_TONE[assessment.state] }
+  // A finished session that has not stopped yet stays with the live ones: it can still be reached.
+  const group = state === 'done' && !(session.phase === 'stopped' || session.stopped_at) ? 'idle' : STATE_GROUP[state]
+  return { state, label, ...(reasons.length ? { reasons } : {}), group, tone: STATE_TONE[state] }
 }
 
 // Mutation/snapshot responses may omit the separately projected state evidence.

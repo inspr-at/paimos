@@ -59,6 +59,9 @@ type LiveAgent struct {
 	Since           time.Time   `json:"since"`
 	HeartbeatAt     *time.Time  `json:"heartbeat_at"`
 	EtaStale        bool        `json:"eta_stale,omitempty"`
+	// ProgressPct is the last reported percent. A worker at 100% that then goes
+	// quiet, or stops cleanly, is finished, not lost (AEON-437).
+	ProgressPct *int `json:"progress_pct,omitempty"`
 }
 
 // LiveTicket is the bound ticket and the project it lives in now, so a link to
@@ -83,7 +86,7 @@ type LivePage struct {
 // range itself, and the LIMIT ends the walk. The predicates match the partial
 // index's so the planner can use it.
 const liveSelect = `SELECT s.id::text,s.project_id::text,s.agent_principal_id::text,coalesce(a.name,''),s.display_label,s.harness,s.model,s.reasoning_effort,s.account_label,s.harness_version,s.management,s.role,s.phase,s.activity,s.activity_note,latest.id,
-       t.id::text,t.key,t.title,t.project_id::text,s.created_at,s.heartbeat_at,s.stopped_at,s.stop_reason,s.eta_reported_at
+       t.id::text,t.key,t.title,t.project_id::text,s.created_at,s.heartbeat_at,s.stopped_at,s.stop_reason,s.eta_reported_at,s.progress_pct
   FROM harness_sessions s
   LEFT JOIN LATERAL (SELECT id FROM harness_activity_notes WHERE session_id=s.id ORDER BY id DESC LIMIT 1) latest ON true
   LEFT JOIN principals a ON a.tenant_id=s.tenant_id AND a.id=s.agent_principal_id
@@ -128,7 +131,7 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		var ticketID, ticketKey, ticketTitle, ticketProject *string
 		var heartbeat, reported *time.Time
 		if err = rows.Scan(&v.SessionID, &v.ProjectID, &v.PrincipalID, &v.Name, &v.DisplayLabel, &v.Harness, &v.Model, &v.ReasoningEffort, &v.AccountLabel, &v.HarnessVersion, &v.Management, &v.Role, &v.Phase, &v.Activity, &v.ActivityNote, &v.ActivityNoteID,
-			&ticketID, &ticketKey, &ticketTitle, &ticketProject, &v.Since, &heartbeat, &v.StoppedAt, &v.StopReason, &reported); err != nil {
+			&ticketID, &ticketKey, &ticketTitle, &ticketProject, &v.Since, &heartbeat, &v.StoppedAt, &v.StopReason, &reported, &v.ProgressPct); err != nil {
 			rows.Close()
 			return nil, err
 		}

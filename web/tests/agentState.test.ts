@@ -45,7 +45,7 @@ test('session families cross status groups without losing any worker or orphan',
   assert.equal(tree[0]!.count, 3)
   assert.equal(tree[0]!.liveCount, 2)
   assert.equal(tree[0]!.children[0]!.children[0]!.view.session.id, 'grandchild')
-  assert.equal(views[1]!.status.label, 'Stopped')
+  assert.equal(views[1]!.status.label, 'Ended')
 })
 
 test('worker families sort working and starting by start time, then idle, then stopped; heartbeats never decide', () => {
@@ -207,4 +207,17 @@ test('fresh session projection cannot be changed by a stale optional run or requ
   for (const status of ['failed', 'ownership_lost', 'waiting'] as const) {
     assert.equal(sessionStatus(current, now, true, undefined, { status } as AgentRun).state, 'working')
   }
+})
+
+test('a finished session sits with the ended ones; one that only went quiet at 100% stays reachable (AEON-437)', () => {
+  const done = sessionStatus(session({ phase: 'stopped', stopped_at: ago(2), stop_reason: 'process_exited', progress_pct: 100 }), now)
+  assert.deepEqual([done.state, done.label, done.group, done.tone], ['done', 'Done', 'stopped', 'done'])
+  const early = sessionStatus(session({ phase: 'stopped', stopped_at: ago(2), stop_reason: 'process_exited', progress_pct: 60 }), now)
+  assert.deepEqual([early.state, early.label, early.group, early.tone], ['stopped', 'Ended', 'stopped', 'stopped'])
+  const failed = sessionStatus(session({ phase: 'stopped', stopped_at: ago(2), stop_reason: 'process_failed', progress_pct: 100 }), now)
+  assert.deepEqual([failed.state, failed.group, failed.tone], ['problem', 'problem', 'problem'])
+  const quiet = sessionStatus(session({ heartbeat_at: ago(12), progress_pct: 100 }), now)
+  assert.deepEqual([quiet.state, quiet.group, quiet.tone], ['done', 'idle', 'done'])
+  const buckets = groupSessions([session({ id: 'a', phase: 'stopped', stopped_at: ago(2), stop_reason: 'stopped', progress_pct: 100 }), session({ id: 'b', phase: 'stopped', stopped_at: ago(3), stop_reason: 'stopped' })], now, () => false)
+  assert.deepEqual(buckets.stopped.map(entry => [entry.session.id, entry.status.state]), [['a', 'done'], ['b', 'stopped']])
 })

@@ -62,3 +62,21 @@ test('progress names the percent and, when the estimate is stale, when it was re
   assert.equal(progressReportedAt({ progress_pct: 10, live_stale: true, live_reported_at: '2026-09-28T11:00:00Z', eta_stale: true }), '2026-09-28T11:00:00Z')
   assert.equal(progressReportedAt({ progress_pct: 10 }), null)
 })
+
+test('at 100% nothing is overdue or stale: Done once nobody works the ticket, a quiet 100% while someone does (AEON-437)', () => {
+  const late = { at: '2026-09-28T13:00:00Z', kind: 'Ready' as const, by: 'Beau', reported_at: '2026-09-28T12:00:00Z', stale: true }
+  const finished = formatEta({ ready: late, progress: 100, stale: true }, 'relative', now, 'Europe/Vienna')
+  assert.equal(finished?.done, true)
+  assert.equal(finished?.text, null)
+  assert.equal(finished?.overdue, false)
+  assert.equal(finished?.stale, false)
+  assert.equal(finished?.tip, 'All work reported by Beau at 14:00')
+  assert.equal(formatEta({ progress: 100 }, 'relative', now)?.tip, 'All work reported')
+  const wrapping = formatEta({ ready: late, progress: 100, active: true }, 'relative', now, 'Europe/Vienna')
+  assert.deepEqual([wrapping?.done, wrapping?.progress, wrapping?.text, wrapping?.overdue, wrapping?.tip], [false, '100%', null, false, '100% done'])
+  const behind = formatEta({ ready: late, progress: 99 }, 'relative', now, 'Europe/Vienna')
+  assert.deepEqual([behind?.done, behind?.overdue, behind?.text], [false, true, 'overdue 15 min'])
+  assert.equal(etaFromTicket({ eta_ready_at: late.at, progress_pct: 100, has_working_session: true })?.active, true)
+  assert.equal(etaFromTicket({ eta_ready_at: late.at, progress_pct: 100 })?.active, false)
+  assert.equal(formatEta(etaFromSession({ eta_ready_at: late.at, progress_pct: 100 }), 'relative', now)?.done, false)
+})

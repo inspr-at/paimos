@@ -16,9 +16,9 @@ import (
 
 func TestHarnessRunStopsAndPreservesExit(t *testing.T) {
 	for _, tc := range []struct {
-		name, script string
-		code         int
-	}{{"success", "printf 'job output'; sleep 0.1", 0}, {"failed", "exit 7", 7}} {
+		name, script, reason string
+		code                 int
+	}{{"success", "printf 'job output'; sleep 0.1", "process_exited", 0}, {"failed", "exit 7", "process_failed", 7}} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls []hbCall
 			srv := heartbeatFixture(t, &calls, "", "")
@@ -38,6 +38,10 @@ func TestHarnessRunStopsAndPreservesExit(t *testing.T) {
 			}
 			if len(hbWhere(calls, http.MethodPost, "/harness-sessions")) != 1 || len(hbWhere(calls, http.MethodPost, "/stop")) != 1 {
 				t.Fatal("missing registration or stop")
+			}
+			// A clean exit and a failure are told apart on the session (AEON-437).
+			if got := hbWhere(calls, http.MethodPost, "/stop")[0].body["reason"]; got != tc.reason {
+				t.Fatalf("stop reason %v, want %s", got, tc.reason)
 			}
 			if tc.code == 0 && out.String() != "job output" {
 				t.Fatal("child stdout changed")
@@ -60,8 +64,8 @@ func TestHarnessRunLaunchFailureStops(t *testing.T) {
 	if err := rt.runHarnessCommand(context.Background(), o, []string{filepath.Join(t.TempDir(), "missing-command")}); err == nil {
 		t.Fatal("launch failure ignored")
 	}
-	if len(hbWhere(calls, http.MethodPost, "/stop")) != 1 {
-		t.Fatal("failed launch not stopped")
+	if stops := hbWhere(calls, http.MethodPost, "/stop"); len(stops) != 1 || stops[0].body["reason"] != "process_failed" {
+		t.Fatal("failed launch not stopped as failed")
 	}
 }
 
@@ -111,8 +115,8 @@ func TestHarnessRunSIGTERM(t *testing.T) {
 	if len(regs) != 1 || regs[0].body["role"] != "worker" || regs[0].body["display_label"] != "Review" {
 		t.Fatal("review registration missing")
 	}
-	if len(hbWhere(calls, http.MethodPost, "/stop")) != 1 {
-		t.Fatal("SIGTERM did not stop session")
+	if stops := hbWhere(calls, http.MethodPost, "/stop"); len(stops) != 1 || stops[0].body["reason"] != "stopped" {
+		t.Fatal("SIGTERM did not stop session plainly")
 	}
 }
 

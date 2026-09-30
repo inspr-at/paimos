@@ -10894,6 +10894,7 @@ components:
         since: {type: string, format: date-time, description: When the session started}
         heartbeat_at: {type: [string, 'null'], format: date-time}
         eta_stale: {type: boolean, description: True when the session estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
+        progress_pct: {type: integer, minimum: 0, maximum: 100, description: The last percent the session reported. Omitted until one is reported. A session at 100% that stops cleanly or goes quiet is finished (AEON-437).}
     ProjectMessage:
       allOf:
         - {$ref: './openapi-messaging.yaml#/components/schemas/Message'}

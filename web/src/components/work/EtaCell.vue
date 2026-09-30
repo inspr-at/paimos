@@ -15,24 +15,26 @@ const pref = usePreference<{ mode?: EtaMode }>('eta-display')
 const mode = computed<EtaMode>(() => pref.value.value?.mode === 'clock' || pref.value.value?.mode === 'both' ? pref.value.value.mode : 'relative')
 const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
 const view = computed(() => formatEta(props.eta, mode.value, props.now, zone))
-const tip = computed(() => [view.value?.tip, props.missing && !view.value?.text ? 'No ETA reported for this working session' : null].filter(Boolean).join('\n'))
+const hint = computed(() => props.missing && !view.value?.text && view.value?.pct !== 100)
+const tip = computed(() => [view.value?.tip, hint.value ? 'No ETA reported for this working session' : null].filter(Boolean).join('\n'))
 // The kind is named when asked for, or when the headline is the live time (a
 // column of ready times would otherwise read it as one).
 const kind = computed(() => view.value?.text && (props.labelled || view.value.kind === 'Live') ? view.value.kind : null)
 </script>
 
 <template>
-  <span v-if="view" class="eta-cell" :class="[align, { stale: view.stale, overdue: view.overdue && !view.stale }]" :data-tip="tip">
+  <span v-if="view" class="eta-cell" :class="[align, { stale: view.stale, overdue: view.overdue && !view.stale, done: view.done }]" :data-tip="tip">
     <span class="sr-only">{{ tip.replace(/\n/g, '. ') }}</span>
-    <span v-if="view.progress" class="pct" aria-hidden="true">{{ view.progress }}</span>
-    <span class="main" aria-hidden="true">
+    <span v-if="view.done" class="main" aria-hidden="true"><AppIcon name="check" :size="12" class="done-icon" />Done</span>
+    <span v-if="view.progress && !view.done" class="pct" aria-hidden="true">{{ view.progress }}</span>
+    <span v-if="!view.done" class="main" aria-hidden="true">
       <AppIcon v-if="view.stale" name="clock" :size="12" class="stale-icon" />
       <span v-if="kind" class="kind">{{ kind }}</span>
       <span v-if="view.text" class="when">
         <span class="shown">{{ view.text }}</span>
         <span v-if="view.hover" class="hover">{{ view.hover }}</span>
       </span>
-      <span v-else-if="missing" class="missing">no ETA</span>
+      <span v-else-if="hint" class="missing">no ETA</span>
     </span>
   </span>
   <span v-else-if="missing" class="eta-cell missing" :class="align" data-tip="No ETA reported for this working session">no ETA</span>
@@ -58,4 +60,6 @@ const kind = computed(() => view.value?.text && (props.labelled || view.value.ki
 .eta-cell.overdue .when { color: var(--warn); font-weight: 550; }
 .eta-cell.stale, .eta-cell.stale .kind, .eta-cell.stale .pct { color: var(--ink-3); }
 .stale-icon { flex: none; color: var(--ink-3); }
+.eta-cell.done { color: var(--ink-2); }
+.done-icon { flex: none; color: var(--ok); }
 </style>
