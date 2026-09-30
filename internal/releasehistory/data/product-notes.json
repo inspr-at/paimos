@@ -3192,6 +3192,198 @@
           "group": "features"
         }
       ]
+    },
+    "260930074921.0.0": {
+      "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",
+      "captured_at": "2026-09-30T09:09:33Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-399",
+          "pill_en": "Works with Homebrew",
+          "pill_de": "Läuft mit Homebrew",
+          "benefit_en": "Pairing a Mac works with Homebrew's own Node, and if a path is unsafe the message names exactly which one and why.",
+          "benefit_de": "Das Koppeln eines Macs funktioniert mit dem Node aus Homebrew, und bei einem unsicheren Pfad nennt die Meldung genau welchen und warum.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-400",
+          "pill_en": "Clear connect step",
+          "pill_de": "Klarer Verbinden-Schritt",
+          "benefit_en": "Connecting your machine never stalls on a greyed-out button: the screen says which harnesses are verified and connects the rest.",
+          "benefit_de": "Das Verbinden deines Rechners bleibt nie an einem ausgegrauten Knopf hängen: Der Bildschirm sagt, welche Harnesses geprüft werden, und verbindet die übrigen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-398",
+          "pill_en": "Complete release history",
+          "pill_de": "Vollständige Release-Historie",
+          "benefit_en": "Every earlier release now shows its features and fixes on all instances, not only the newest ones.",
+          "benefit_de": "Jedes frühere Release zeigt jetzt auf allen Instanzen seine Features und Fixes, nicht nur die neuesten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-396",
+          "pill_en": "Steadier tests",
+          "pill_de": "Stabilere Tests",
+          "benefit_en": "The copy button no longer covers the worker link on narrow screens, and releases stop tripping over flaky checks.",
+          "benefit_de": "Die Kopieren-Schaltfläche verdeckt auf schmalen Bildschirmen nicht mehr den Worker-Link, und Releases stolpern nicht mehr über wackelige Tests.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-379",
+          "pill_en": "Change ticket type",
+          "pill_de": "Tickettyp ändern",
+          "benefit_en": "A ticket that grows into an epic can be converted in place, instead of the change silently doing nothing.",
+          "benefit_de": "Ein Ticket, das zu einem Epic wächst, lässt sich direkt umwandeln, statt dass die Änderung stillschweigend nichts bewirkt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-389",
+          "pill_en": "Account groups",
+          "pill_de": "Kontengruppen pro Login",
+          "benefit_en": "Group accounts per project, count one login on two computers once, pin a ticket to an account, and switch your terminal to an account with one command.",
+          "benefit_de": "Konten pro Projekt gruppieren, ein Konto auf zwei Rechnern nur einmal zählen, ein Ticket an ein Konto binden und das Terminal mit einem Befehl auf ein Konto umstellen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-388",
+          "pill_en": "Aeon learns your limits",
+          "pill_de": "Aeon lernt deine Limits",
+          "benefit_en": "Aeon learns what a run costs, how much you use yourself and where blind vendors stop, and shows how sure it is.",
+          "benefit_de": "Aeon lernt, was ein Lauf kostet, wie viel du selbst nutzt und wo Anbieter ohne Anzeige stoppen, und zeigt, wie sicher es ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-384",
+          "pill_en": "Accounts without forms",
+          "pill_de": "Konten ohne Formulare",
+          "benefit_en": "Account settings show what Aeon measured and learned; an optional one-sentence limit replaces the old allowance form.",
+          "benefit_de": "Die Konteneinstellungen zeigen, was Aeon gemessen und gelernt hat; ein optionales Limit in einem Satz ersetzt das alte Kontingent-Formular.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-385",
+          "pill_en": "Live outline",
+          "pill_de": "Gliederung live aktualisiert",
+          "benefit_en": "The project outline updates live like the ticket list, and bulk moves show up right away.",
+          "benefit_de": "Die Projektgliederung aktualisiert sich live wie die Ticketliste, und Massenverschiebungen erscheinen sofort.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-383",
+          "pill_en": "Smarter account order",
+          "pill_de": "Klügere Kontenreihenfolge",
+          "benefit_en": "Agents use the account whose limit resets first, and when a vendor stops a run, the work moves to the next account by itself.",
+          "benefit_de": "Agenten nutzen zuerst das Konto, dessen Limit am frühesten zurückgesetzt wird; stoppt ein Anbieter einen Lauf, geht die Arbeit selbstständig ans nächste Konto.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-378",
+          "pill_en": "Aeon proposes rule fixes",
+          "pill_de": "Aeon schlägt Regelkorrekturen vor",
+          "benefit_en": "Aeon spots recurring problems in its agents' work and proposes rule changes as drafts with evidence; you decide what gets published.",
+          "benefit_de": "Aeon erkennt wiederkehrende Probleme in der Arbeit der Agenten und schlägt Regeländerungen mit Belegen als Entwurf vor; veröffentlicht wird nur, was du freigibst.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-375",
+          "pill_en": "Keep for you",
+          "pill_de": "Für dich reserviert",
+          "benefit_en": "Agents leave you your usual share of every limit while you work, and use what would expire anyway before a reset. One setting, Auto by default.",
+          "benefit_de": "Agenten lassen dir während deiner Arbeitszeit deinen üblichen Anteil jedes Limits und nutzen vor einem Reset, was sonst verfallen würde. Eine Einstellung, standardmäßig Auto.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-372",
+          "pill_en": "Release switches work",
+          "pill_de": "Versions-Umschalter funktionieren",
+          "benefit_en": "The language and Highlights/Details switches in the release history work wherever you open it.",
+          "benefit_de": "Die Umschalter für Sprache und Highlights/Details in der Versionshistorie funktionieren, egal wo sie geöffnet wird.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-369",
+          "pill_en": "Message any live session",
+          "pill_de": "Jede laufende Sitzung anschreiben",
+          "benefit_en": "You can send a message to any running agent session from its panel on the Agents page, with no extra setup.",
+          "benefit_de": "Jede laufende Agenten-Sitzung lässt sich direkt aus ihrem Bereich auf der Agenten-Seite anschreiben, ohne zusätzliche Einrichtung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-326",
+          "pill_en": "Lists stay current",
+          "pill_de": "Listen bleiben aktuell",
+          "benefit_en": "Lists and ticket views update live when someone else changes a ticket, without jumping rows or losing your selection.",
+          "benefit_de": "Listen und Ticketansichten aktualisieren sich live, wenn jemand anderes ein Ticket ändert, ohne springende Zeilen und ohne die Auswahl zu verlieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-374",
+          "pill_en": "pi runs OpenRouter models",
+          "pill_de": "pi mit OpenRouter-Modellen",
+          "benefit_en": "A pi agent can run any OpenRouter model: pick the model in Settings, and the key stays on your machine.",
+          "benefit_de": "Ein pi-Agent kann jedes OpenRouter-Modell nutzen: Das Modell wird in den Einstellungen gewählt, der Schlüssel bleibt auf dem eigenen Rechner.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-354",
+          "pill_en": "Honest vendor limits",
+          "pill_de": "Ehrliche Anbieterlimits",
+          "benefit_en": "When a vendor says stop, Aeon knows it at once, shows until when, and counts the same login on two computers only once.",
+          "benefit_de": "Meldet ein Anbieter ein Limit, weiß Aeon es sofort, zeigt bis wann, und zählt dasselbe Konto auf zwei Rechnern nur einmal.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-353",
+          "pill_en": "Agents start without setup",
+          "pill_de": "Agenten starten ohne Einrichtung",
+          "benefit_en": "Approve your accounts once when pairing and agents can start right away; when a run has to wait, Aeon says why and until when.",
+          "benefit_de": "Konten werden beim Koppeln einmal freigegeben, danach starten Agenten sofort; muss ein Lauf warten, nennt Aeon Grund und Zeitpunkt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-347",
+          "pill_en": "One account blocks alone",
+          "pill_de": "Nur das betroffene Konto",
+          "benefit_en": "One outdated agent setup on a computer no longer stops all its other agents.",
+          "benefit_de": "Eine veraltete Agenten-Einrichtung auf einem Rechner stoppt nicht mehr alle anderen Agenten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-352",
+          "pill_en": "Attach running agents",
+          "pill_de": "Laufende Agenten anbinden",
+          "benefit_en": "A session already running in a terminal can be attached to Aeon after its owner approves, so it shows up with a truthful status.",
+          "benefit_de": "Eine bereits laufende Terminal-Sitzung lässt sich nach Zustimmung des Besitzers an Aeon anbinden und erscheint dort mit ehrlichem Status.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-329",
+          "pill_en": "Plan with real numbers",
+          "pill_de": "Planen mit echten Zahlen",
+          "benefit_en": "Every ticket shows who should build it, how many tokens it took or will take, and what that costs at list price and in real charges.",
+          "benefit_de": "Jedes Ticket zeigt, wer es bauen sollte, wie viele Tokens es brauchte oder brauchen wird und was das zum Listenpreis und tatsächlich kostet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-319",
+          "pill_en": "Rules become pull requests",
+          "pill_de": "Regeln als Pull Requests",
+          "benefit_en": "A rule change you make in Aeon becomes a reviewed pull request to the doctrine repository, and approving it merges and releases it.",
+          "benefit_de": "Eine Regeländerung in Aeon wird zu einem geprüften Pull Request im Doktrin-Repository; die Freigabe führt ihn zusammen und veröffentlicht ihn.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-348",
+          "pill_en": "Clearer computer status",
+          "pill_de": "Klarerer Rechnerstatus",
+          "benefit_en": "When one agent tool on a computer needs attention, the others stay visibly ready.",
+          "benefit_de": "Braucht ein Agenten-Werkzeug auf einem Rechner Aufmerksamkeit, bleiben die anderen sichtbar bereit.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
