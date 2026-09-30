@@ -277,10 +277,12 @@ stored server-side in `person_watch_security`, scoped to that person and tenant.
 writes require the instance’s origin. The server, never a device request, selects
 one of two modes at approval:
 
-- **Approve in Aeon** (`aeon`, default): same-origin, digest-bound person approval
+- **Approve in Aeon** (`aeon`): same-origin, digest-bound person approval
   is the consent gate. The terminal WATCH prompt is a best-effort extra factor;
   a same-user process can emulate its PTY. The approval warns who requested it
-  and shows process, cwd and transcript before the Allow action.
+  and shows process, cwd and transcript before the Allow action. Saving this
+  mode opts out of Mac confirmation. A program running as that user can open
+  another terminal and request the review.
 - **Also confirm on the Mac** (`local_auth`): on an upgraded pairing, browser
   approval issues a random, one-use `local_auth_nonce`. The daemon signs
   `SHA-256("aeon.attach.local-consent.v1\0" + consent_digest + "\0" + nonce)`
@@ -291,12 +293,31 @@ one of two modes at approval:
   expired approval or replay is refused. No text is accepted before activation.
   Changing biometric enrollment invalidates the key; re-pair to restore Touch ID.
 
+Until the person saves a choice, a pending attach on an upgraded Mac whose
+connected daemon reports `available` uses `local_auth`. Linux, older pairings,
+SSH to a machine without a graphical login, an empty or legacy platform,
+and a Mac that reports `no_gui`,
+`unsigned`, `policy`, `unsupported` or `unreported` stay on Aeon approval so
+those attaches keep working. SSH to a Mac that reports `available` shows the
+Touch ID prompt on that Mac's screen, not in the SSH terminal. Settings shows
+`local_auth` with `consent_saved: false` when any connected computer reports
+`available` and has a browser-pinned key, including when another computer would
+still approve in Aeon. Saving `local_auth` applies it to every upgraded computer
+and fails closed where confirmation cannot run; pairings without a key retain
+Aeon approval until re-paired. Saving `aeon` keeps Aeon approval everywhere. The
+daemon's platform and capability report are advisory: a hostile daemon can
+claim another platform or `no_gui` to skip the unsaved default. A saved
+`local_auth` on an upgraded pairing requires the pinned key's signature;
+capability reports cannot substitute for that proof. Touch ID needs a person
+at the Mac. Ancestry and session checks are defence in depth, not a guarantee
+that same-user code cannot request its own attach.
+
 The `consent_digest` binds request ID, snapshot digest and mode with the
 `aeon.attach.consent.v1` domain. Settings changes affect pending requests;
 approved and active watches retain their pin. Existing pairings without a key
 use Aeon approval until re-paired, even if they report Touch ID availability.
 Settings says “upgrade this computer’s pairing to enable Touch ID”. Migration
-1046 ends in-flight watches approved under the old boolean protocol, requiring
+1047 ends in-flight watches approved under the old boolean protocol, requiring
 fresh consent. Daemon registration cannot install or replace a public key, and
 Add harness preserves both the public key and the original local key identity.
 
@@ -402,8 +423,15 @@ aeon-agentd attach --setup-root /absolute/setup-root --pid 1234 --harness codex 
 The local helper reads consent from its controlling terminal, never stdin or a
 flag. It must belong to an existing live terminal session, cannot itself be a
 session leader, and neither its ancestry nor its session leader's ancestry may
-include the target harness. These checks repeat at confirmation and on every
-poll, including immediately before upload. Type `WATCH`, then open the paired
+include the target harness. These checks are defence in depth: they repeat at
+confirmation and on every poll, including immediately before upload, and
+same-user code can still open an independent terminal and request the review.
+Ancestors are identified from kernel metadata only. On Linux that is
+`/proc/<pid>/stat` plus the directory uid, so a root-owned sshd, su or sudo
+ancestor stays acceptable; the target still needs its executable and cwd. On a
+Mac with an upgraded pairing whose daemon reports that Touch ID can run, the
+unsaved default also requires an enclave-signed confirmation before a session
+exists. Type `WATCH`, then open the paired
 instance's Agents page and choose
 **Attach session**. Review the code and snapshot, then approve. Keep the terminal
 open; Ctrl-C detaches without signalling the harness. Missing helper polls,

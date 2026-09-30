@@ -903,7 +903,14 @@ paths:
       summary: Read the signed-in person's session watching consent and reported computers
       responses:
         '200':
-          description: Per-person setting, defaulting to Aeon approval, plus advisory capability for connected computers this person approved
+          description: >-
+            Per-person setting plus advisory capability for connected computers this person approved.
+            With no saved choice, consent_mode is local_auth when any upgraded connected computer reports available,
+            and a pending approval on an upgraded Mac that reports available uses it. Linux, a Mac without a graphical
+            login, and computers that cannot confirm stay on aeon until a choice is saved. consent_saved is
+            false for that default. A saved local_auth applies to every upgraded computer and fails closed where
+            confirmation cannot run. Pairings without a pinned key keep aeon until re-paired. The capability
+            report is advisory and never authorizes a watch.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SessionWatchingSecurityView'}
@@ -919,7 +926,7 @@ paths:
             schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
       responses:
         '200':
-          description: Saved per-person setting and advisory computer capability
+          description: Saved per-person setting and advisory computer capability. consent_saved is true.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SessionWatchingSecurityView'}
@@ -6598,9 +6605,16 @@ components:
       type: object
       additionalProperties: false
       required: [consent_mode, local_auth_computers]
-      description: Saved consent plus the advisory capability last reported by each connected computer this person approved. The report never authorizes a watch.
+      description: >-
+        Consent plus the advisory capability last reported by each connected computer this person approved.
+        The report never authorizes a watch. consent_saved is false when consent_mode is the unsaved default:
+        local_auth if any upgraded connected computer reports available, otherwise aeon. Pending approvals use
+        local_auth only for an upgraded darwin computer that reports available. Other computers keep aeon until a
+        choice is saved. A saved local_auth applies to upgraded pairings and fails closed where confirmation
+        cannot run. Pairings without a pinned key keep aeon until re-paired.
       properties:
-        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon}
+        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon, description: "aeon is the fallback when nothing is saved and no connected Mac reports available."}
+        consent_saved: {type: boolean, description: "False when consent_mode is the unsaved default. True after this person saves a choice."}
         local_auth_computers:
           type: array
           items:
@@ -8077,6 +8091,22 @@ components:
         release_revision: {type: integer}
         hidden: {type: integer, minimum: 0}
         written_after_release: {type: boolean, description: "True when the captured snapshot was labelled backfilled. The release sheet says the notes were written after the release."}
+        corrections:
+          type: array
+          description: Reviewed public-note corrections applied over the frozen original. The original snapshot digest is preserved; each correction records its reason and exact version binding. Hidden or absent tickets cannot be added.
+          items:
+            type: object
+            required: [version, key, snapshot_sha256, reason]
+            properties:
+              version: {type: string}
+              key: {type: string}
+              snapshot_sha256: {type: string}
+              reason: {type: string}
+              group: {type: string, enum: [features, fixes, other]}
+              pill_en: {type: string}
+              pill_de: {type: string}
+              benefit_en: {type: string}
+              benefit_de: {type: string}
         gaps: {type: array, items: {type: string}}
         public_items:
           type: array

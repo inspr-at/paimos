@@ -60,7 +60,11 @@ func attachPeer(r *http.Request) (attachObservation, error) {
 }
 
 // An injected command launched beneath the selected agent cannot approve it.
-// This is defense in depth, not a boundary against unrestricted same-UID code.
+// This is defence in depth, not a boundary against unrestricted same-UID code.
+// Touch ID needs a person at the Mac and stops code that can only drive
+// terminals or the browser. It is still defence in depth, because a program
+// running as you that reads the daemon's pairing state can impersonate the
+// daemon and report confirmation. A Secure Enclave signature is AEON-460.
 func independentAttachPeer(peer, target attachObservation, observe func(int) (attachObservation, error)) bool {
 	current, err := observe(peer.PID)
 	if err != nil || !sameAttachProcessIdentity(current, peer) || current.UID != target.UID || !current.TTY || current.Session <= 1 || current.Session == current.PID {
@@ -100,6 +104,8 @@ func independentAttachPeer(peer, target attachObservation, observe func(int) (at
 
 // Ancestors need only kernel identity, never their executable or cwd. macOS
 // denies those path reads for root-owned login and sshd-session processes.
+// Linux denies /proc/<pid>/exe and /proc/<pid>/cwd across users, including
+// root-owned sshd, su and sudo.
 func attachProcessIdentity(p attachObservation) attachObservation {
 	p.Executable, p.CWD = "", ""
 	return p

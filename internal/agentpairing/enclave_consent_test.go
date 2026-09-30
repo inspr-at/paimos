@@ -89,15 +89,26 @@ func TestEnclaveConsentRejectsWrongKeyNonceReplayAndExpiredApproval(t *testing.T
 }
 
 func TestLegacyPairingUsesAeonApprovalDespiteCapabilityReport(t *testing.T) {
-	f, bearer, in := watchFixture(t)
-	setWatchMode(f, attachwatch.ConsentLocalAuth)
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", AttachProtocol: attachwatch.Protocol, ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: in.PollKey, LocalAuthCapability: attachwatch.LocalAuthAvailable}, false, bearer, 200)
-	v := activateWatch(t, f, bearer, &in)
-	if v.ConsentMode != attachwatch.ConsentAeon {
-		t.Fatal("legacy computer gained local confirmation authority")
+	for _, saved := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unsaved default", true: "saved local_auth"}[saved], func(t *testing.T) {
+			f, bearer, in := watchFixture(t)
+			if saved {
+				setWatchMode(f, attachwatch.ConsentLocalAuth)
+			}
+			registerCapability(t, f, bearer, &in, attachwatch.LocalAuthAvailable)
+			in.Snapshot.Platform = "darwin"
+			v := activateWatch(t, f, bearer, &in)
+			if v.ConsentMode != attachwatch.ConsentAeon {
+				t.Fatal("legacy computer gained local confirmation authority")
+			}
+			setting := readWatchSetting(t, f)
+			if setting.ConsentSaved != saved || setting.Computers[0].PairingUpgraded || !saved && setting.ConsentMode != attachwatch.ConsentAeon {
+				t.Fatalf("legacy pairing setting %+v", setting)
+			}
+			// Registration cannot add or replace a pairing key, even with lifecycle proof.
+			f.call("POST", "/api/agent-pairing/attach", map[string]any{"operation": "register", "computer_id": in.ComputerID, "device_proof": in.DeviceProof, "poll_key": in.PollKey, "local_auth_public_key": "pretend"}, false, bearer, 400)
+		})
 	}
-	// Registration cannot add or replace a pairing key, even with lifecycle proof.
-	f.call("POST", "/api/agent-pairing/attach", map[string]any{"operation": "register", "computer_id": in.ComputerID, "device_proof": in.DeviceProof, "poll_key": in.PollKey, "local_auth_public_key": "pretend"}, false, bearer, 400)
 }
 
 func TestPairingKeyRejectsMalformedKeysLinuxAndChangesAfterReview(t *testing.T) {
@@ -162,7 +173,7 @@ func TestEnclaveMigrationEndsLegacyStrictWatchesUnderForcedRLS(t *testing.T) {
 	if _, err := f.db.Admin.Exec(t.Context(), `ALTER TABLE agent_pairing_computers DROP COLUMN local_auth_public_key; ALTER TABLE harness_attach_requests DROP COLUMN local_auth_nonce`); err != nil {
 		t.Fatal(err)
 	}
-	migration, err := os.ReadFile("../db/migrations/1046_enclave_consent.sql")
+	migration, err := os.ReadFile("../db/migrations/1047_enclave_consent.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

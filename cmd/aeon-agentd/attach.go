@@ -160,6 +160,7 @@ func attachCommand(args []string, out io.Writer) error {
 		fmt.Fprintf(tty, "Watch the conversation.\nTranscript: %s (%s)\nOnly new turns after approval. Audience: people explicitly granted harness.watch in this project.\n", view.Snapshot.Transcript, view.Snapshot.FileID)
 	}
 	fmt.Fprintln(tty, "Only attach a single trust context. Same-user processes are not isolated.")
+	fmt.Fprintln(tty, "Touch ID is the default on an upgraded Mac pairing that can use it; Linux, a headless Mac and older pairings keep approval in Aeon.")
 	fmt.Fprintf(tty, "Type %s for the local check, then approve in your paired browser: ", confirmation)
 	answer, err := readAttachAnswer(ctx, reader)
 	if err != nil {
