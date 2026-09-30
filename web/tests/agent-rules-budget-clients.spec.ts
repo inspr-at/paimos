@@ -48,6 +48,9 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark']) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     if (process.env.AEON_432_SHOTS) {
       mkdirSync(process.env.AEON_432_SHOTS, { recursive: true })
+      await page.getByRole('button', { name: 'Dismiss', exact: true }).click()
+      if (width === 390) await page.setViewportSize({ width, height: 1600 })
+      await section.scrollIntoViewIfNeeded()
       await section.screenshot({ path: `${process.env.AEON_432_SHOTS}/budget-edit-${width}-${theme}.png` })
     }
     await section.getByLabel('Tip language').selectOption('de')

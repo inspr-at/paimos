@@ -36,7 +36,7 @@ const CodexProjectDocMaxBytes = 32 * 1024
 
 // SessionFileLimit is the session file a harness reads by default. Codex is
 // bound by project_doc_max_bytes. Claude Code, Cursor, Grok and Pi have no
-// documented cap below MaxBytes, so they report the product ceiling.
+// documented cap below MaxBytes, so they report the client ceiling.
 func SessionFileLimit(harness string) int {
 	if harness == "codex" {
 		return CodexProjectDocMaxBytes

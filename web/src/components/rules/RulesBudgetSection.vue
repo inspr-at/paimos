@@ -23,18 +23,18 @@ const deliveredBytes = (client: RuleBudgetBlocker) => Math.min(validEstimate.val
 const tipLanguage = ref<'en' | 'de'>('en')
 const tips = {
   en: [
-    'Keep always-on rules small: start around 4–16 KB. Long preambles dilute attention (context rot) and cost tokens in every session.',
+    'Keep always-on rules small: start around 4–16 KB; long preambles dilute attention (context rot) and cost tokens in every session.',
     'Load detail on demand: put playbooks, examples and domain packs into skills, docs or knowledge agents fetch when relevant.',
     'Put stable text first and changing content last so prompt caching can make repeated sessions cheaper.',
-    'Write specific, checkable instructions. Remove duplicates across layers: one rule, one place.',
-    'Measure before and after each change. Outcome analysis compares results per rules version.',
+    'Write specific, checkable instructions without duplicates across layers: one rule, one place.',
+    'Measure before and after each change with outcome analysis per rules version.',
   ],
   de: [
-    'Halte dauerhafte Regeln klein: beginne mit etwa 4–16 KB. Lange Einleitungen verwässern die Aufmerksamkeit (Context Rot) und kosten in jeder Sitzung Tokens.',
+    'Halte dauerhafte Regeln bei etwa 4–16 KB; lange Einleitungen verwässern die Aufmerksamkeit (Context Rot) und kosten in jeder Sitzung Tokens.',
     'Lade Details bei Bedarf: lege Anleitungen, Beispiele und Fachregeln in Skills, Dokumente oder Wissen, das Agenten bei Bedarf abrufen.',
     'Stelle stabilen Text an den Anfang und veränderliche Inhalte ans Ende, damit Prompt-Caching wiederholte Sitzungen günstiger machen kann.',
-    'Schreibe konkrete, überprüfbare Anweisungen. Entferne Dopplungen zwischen Ebenen: eine Regel, ein Ort.',
-    'Miss die Ergebnisse vor und nach jeder Änderung. Die Ergebnisanalyse vergleicht sie je Regelversion.',
+    'Schreibe konkrete, überprüfbare Anweisungen ohne Dopplungen zwischen Ebenen: eine Regel, ein Ort.',
+    'Miss vor und nach jeder Änderung die Ergebnisse mit der Ergebnisanalyse je Regelversion.',
   ],
 }
 
