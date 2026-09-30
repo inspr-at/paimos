@@ -31,6 +31,7 @@ type AttachManager struct {
 	mu        sync.Mutex
 	cfg       AttachConfig
 	observe   func(int) (attachObservation, error)
+	ancestry  func(int) (attachObservation, error)
 	signature func(context.Context, string) (attachSignature, error)
 	sessions  map[string]*localAttach
 }
@@ -77,7 +78,7 @@ func NewAttachManager(c AttachConfig) (*AttachManager, error) {
 	if c.LocalAuth == nil {
 		c.LocalAuth = systemLocalAuthenticator{}
 	}
-	return &AttachManager{cfg: c, observe: observeAttachProcess, signature: inspectAttachSignature, sessions: make(map[string]*localAttach)}, nil
+	return &AttachManager{cfg: c, observe: observeAttachProcess, ancestry: observeAttachProcessIdentity, signature: inspectAttachSignature, sessions: make(map[string]*localAttach)}, nil
 }
 func (m *AttachManager) localView(id string, s *localAttach) AttachLocalView {
 	return AttachLocalView{ConsentMode: s.view.ConsentMode, ID: id, Origin: m.cfg.Origin, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), State: s.view.State, Code: s.view.UserCode, SessionID: s.view.SessionID}
@@ -131,7 +132,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 			return AttachLocalView{}, reject
 		}
 		observed, err := m.observe(in.PID)
-		if err != nil || observed.UID != os.Getuid() || !independentAttachPeer(peer, observed, m.observe) || !attachwatch.Within(m.cfg.Workspace, observed.CWD) {
+		if err != nil || observed.UID != os.Getuid() || !independentAttachPeer(peer, observed, m.ancestry) || !attachwatch.Within(m.cfg.Workspace, observed.CWD) {
 			return AttachLocalView{}, reject
 		}
 		image, err := m.validateHarnessImage(ctx, observed, in.Harness)
@@ -188,7 +189,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		s.view.State = "confirmed_exited"
 		return m.localView(in.ID, s), nil
 	}
-	if err != nil || observed.Process != s.snapshot.Process || !m.unchangedHarnessImage(observed, s.image) || !independentAttachPeer(peer, observed, m.observe) || s.tail != nil && s.tail.check() != nil || in.Digest != s.snapshot.Digest() {
+	if err != nil || observed.Process != s.snapshot.Process || !m.unchangedHarnessImage(observed, s.image) || !independentAttachPeer(peer, observed, m.ancestry) || s.tail != nil && s.tail.check() != nil || in.Digest != s.snapshot.Digest() {
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("identity changed; watch detached")
 	}
@@ -259,7 +260,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		}
 	}
 	observed, err = m.observe(s.snapshot.Process.PID)
-	if err != nil || observed.Process != s.snapshot.Process || !m.unchangedHarnessImage(observed, s.image) || !independentAttachPeer(peer, observed, m.observe) || s.tail != nil && s.tail.check() != nil {
+	if err != nil || observed.Process != s.snapshot.Process || !m.unchangedHarnessImage(observed, s.image) || !independentAttachPeer(peer, observed, m.ancestry) || s.tail != nil && s.tail.check() != nil {
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("identity changed; watch detached")
 	}

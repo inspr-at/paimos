@@ -190,6 +190,7 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 		}
 		return attachObservation{}, errors.New("unknown fixture PID")
 	}
+	m.ancestry = m.observe
 	req := AttachLocalRequest{Operation: "preview", PID: target.PID, Harness: "codex", ProjectID: "22222222-2222-4222-8222-222222222222", TicketID: "33333333-3333-4333-8333-333333333333", Transcript: path}
 	v, err := m.handle(t.Context(), peer, req)
 	if err != nil {
@@ -288,9 +289,9 @@ func TestAttachBearerAloneCannotJoin(t *testing.T) {
 func TestAttachSessionAncestryRejectsPTYBypasses(t *testing.T) {
 	for _, attack := range []string{"independent terminal", "injected child", "setsid helper", "double fork dead leader", "target session", "descendant session leader", "lost tty", "ancestry cycle"} {
 		t.Run(attack, func(t *testing.T) {
-			peer := attachObservation{Process: attachwatch.Process{PID: 30, UID: 10}, Parent: 20, Session: 20, TTY: true}
-			target := attachObservation{Process: attachwatch.Process{PID: 40, UID: 10}, Parent: 1, Session: 40, TTY: true}
-			leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: 10}, Parent: 1, Session: 20, TTY: true}
+			peer := attachObservation{Process: attachwatch.Process{PID: 30, UID: 10, Started: "helper"}, Parent: 20, Session: 20, TTY: true}
+			target := attachObservation{Process: attachwatch.Process{PID: 40, UID: 10, Started: "target"}, Parent: 1, Session: 40, TTY: true}
+			leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: 10, Started: "leader"}, Parent: 1, Session: 20, TTY: true}
 			switch attack {
 			case "injected child":
 				peer.Parent = target.PID
@@ -337,7 +338,7 @@ func TestAttachRechecksAncestryAndSessionOnConfirmAndEveryPoll(t *testing.T) {
 				}
 				root := filepath.Dir(path)
 				peer := attachObservation{Process: attachwatch.Process{PID: 30, UID: os.Getuid(), Started: "helper", Executable: exe, CWD: root}, Parent: 20, Session: 20, TTY: true}
-				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid()}, Parent: 1, Session: 20, TTY: true}
+				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid(), Started: "leader"}, Parent: 1, Session: 20, TTY: true}
 				target := attachObservation{Process: attachwatch.Process{PID: 40, UID: os.Getuid(), Started: "target", Executable: exe, CWD: root}, Parent: 1}
 				dead := false
 				var sent []attachwatch.DeviceRequest
@@ -362,6 +363,7 @@ func TestAttachRechecksAncestryAndSessionOnConfirmAndEveryPoll(t *testing.T) {
 					}
 					return attachObservation{}, errors.New("dead fixture process")
 				}
+				m.ancestry = m.observe
 				v, err := m.handle(t.Context(), peer, AttachLocalRequest{Operation: "preview", PID: target.PID, Harness: "codex", ProjectID: "22222222-2222-4222-8222-222222222222", TicketID: "33333333-3333-4333-8333-333333333333", Transcript: path})
 				if err != nil {
 					t.Fatal(err)

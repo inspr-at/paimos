@@ -76,6 +76,7 @@ func TestAttachModesIdentityAndLease(t *testing.T) {
 					}
 					return attachObservation{}, errors.New("unknown PID")
 				}
+				m.ancestry = m.observe
 				req := AttachLocalRequest{Operation: "preview", PID: target.PID, Harness: "codex", ProjectID: "22222222-2222-4222-8222-222222222222", TicketID: "33333333-3333-4333-8333-333333333333", StatusOnly: statusOnly}
 				if !statusOnly {
 					req.Transcript = filepath.Join(root, "conversation.jsonl")

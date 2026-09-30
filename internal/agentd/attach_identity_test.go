@@ -66,6 +66,7 @@ func attachIdentityFixture(t *testing.T, harness string) (*AttachManager, attach
 		}
 		return attachObservation{}, errors.New("unknown fixture PID")
 	}
+	m.ancestry = m.observe
 	m.signature = func(_ context.Context, path string) (attachSignature, error) {
 		if path != target.Executable {
 			t.Fatal("signature was taken from the wrapper")
@@ -253,6 +254,15 @@ func TestAttachRealExecWrapperChain(t *testing.T) {
 	m.observe = func(pid int) (attachObservation, error) {
 		if pid == target.PID {
 			return observeAttachProcess(pid)
+		}
+		return original(pid)
+	}
+	// The real child proves the exec chain; the helper/leader remain fixtures.
+	m.ancestry = func(pid int) (attachObservation, error) {
+		if pid == target.PID {
+			p := *target
+			p.Parent = 1
+			return p, nil
 		}
 		return original(pid)
 	}

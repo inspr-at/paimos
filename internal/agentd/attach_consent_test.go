@@ -33,7 +33,7 @@ func TestAttachLeaseUsesServerDecisionUnderClockSkew(t *testing.T) {
 				}
 				root := filepath.Dir(path)
 				peer := attachObservation{Process: attachwatch.Process{PID: 30, UID: os.Getuid(), Started: "helper", Executable: exe, CWD: root}, Parent: 20, Session: 20, TTY: true}
-				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid()}, Parent: 1, Session: 20, TTY: true}
+				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid(), Started: "leader"}, Parent: 1, Session: 20, TTY: true}
 				target := attachObservation{Process: attachwatch.Process{PID: 40, UID: os.Getuid(), Started: "target", Executable: exe, CWD: root}, Parent: 1}
 				lease := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
 				polls := 0
@@ -61,6 +61,7 @@ func TestAttachLeaseUsesServerDecisionUnderClockSkew(t *testing.T) {
 					}
 					return attachObservation{}, errors.New("unknown PID")
 				}
+				m.ancestry = m.observe
 				v, err := m.handle(t.Context(), peer, AttachLocalRequest{Operation: "preview", PID: target.PID, Harness: "codex", ProjectID: "22222222-2222-4222-8222-222222222222", TicketID: "33333333-3333-4333-8333-333333333333", Transcript: path})
 				if err != nil {
 					t.Fatal(err)
@@ -111,7 +112,7 @@ func TestAttachStrictConsentActivation(t *testing.T) {
 				}
 				root := filepath.Dir(path)
 				peer := attachObservation{Process: attachwatch.Process{PID: 30, UID: os.Getuid(), Started: "helper", Executable: exe, CWD: root}, Parent: 20, Session: 20, TTY: true}
-				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid()}, Parent: 1, Session: 20, TTY: true}
+				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid(), Started: "leader"}, Parent: 1, Session: 20, TTY: true}
 				target := attachObservation{Process: attachwatch.Process{PID: 40, UID: os.Getuid(), Started: "target", Executable: exe, CWD: root}, Parent: 1}
 				auth := &fakeLocalAuth{called: make(chan string, 1), answer: make(chan error, 1)}
 				var sent []attachwatch.DeviceRequest
@@ -147,6 +148,7 @@ func TestAttachStrictConsentActivation(t *testing.T) {
 					}
 					return attachObservation{}, errors.New("unknown PID")
 				}
+				m.ancestry = m.observe
 				request := AttachLocalRequest{Operation: "preview", PID: target.PID, Harness: "codex", ProjectID: "22222222-2222-4222-8222-222222222222", TicketID: "33333333-3333-4333-8333-333333333333", Transcript: path, StatusOnly: statusOnly}
 				if statusOnly {
 					request.Transcript = ""
