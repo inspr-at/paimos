@@ -35,7 +35,8 @@ export interface TicketEta {
   ready_stale?: boolean
   live_stale?: boolean
   eta_stale?: boolean
-  finished?: boolean
+  // Always sent, false included; the only evidence that reads as Done (AEON-437).
+  finished: boolean
   finished_at?: string | null
   finished_by?: string | null
 }
@@ -55,14 +56,18 @@ export interface EtaView {
   tip: string
 }
 
-export function etaFromTicket(eta: TicketEta | null | undefined): EtaInput | null {
-  if (!eta) return null
+type EtaReading = Omit<TicketEta, 'finished'> & { finished?: boolean }
+function etaInput(eta: EtaReading): EtaInput | null {
   const ready = eta.eta_ready_at ? { at: eta.eta_ready_at, reported_at: eta.ready_reported_at, by: eta.ready_by, stale: eta.ready_stale, kind: 'Ready' as const } : null
   const live = eta.eta_live_at ? { at: eta.eta_live_at, reported_at: eta.live_reported_at, by: eta.live_by, stale: eta.live_stale, kind: 'Live' as const } : null
   const progress = typeof eta.progress_pct === 'number' ? eta.progress_pct : null
   const finished = eta.finished ? { at: eta.finished_at, by: eta.finished_by } : null
   if (!ready && !live && progress == null && !finished) return null
   return { ready, live, progress, stale: !!(eta.eta_stale || eta.ready_stale || eta.live_stale), finished }
+}
+
+export function etaFromTicket(eta: TicketEta | null | undefined): EtaInput | null {
+  return eta ? etaInput(eta) : null
 }
 
 export function etaFromSession(session: {
@@ -73,7 +78,7 @@ export function etaFromSession(session: {
   eta_stale?: boolean
   agent?: { name: string } | null
 }): EtaInput | null {
-  return etaFromTicket({
+  return etaInput({
     eta_ready_at: session.eta_ready_at, eta_live_at: session.eta_live_at, progress_pct: session.progress_pct,
     ready_reported_at: session.eta_reported_at, live_reported_at: session.eta_reported_at,
     ready_by: session.agent?.name, live_by: session.agent?.name,

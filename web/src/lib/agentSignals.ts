@@ -61,8 +61,9 @@ export function waitingLabel(evidence: Pick<StateEvidence, 'attention_reasons' |
 export interface StateEvidence {
   phase: string; activity: string; heartbeat_at?: string | null; created_at?: string; since?: string
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; progress_pct?: number | null
-  // The server's answer to "did it complete its job", present even where stop_reason is withheld.
-  finished?: boolean | null
+  // The server's answer to "did it complete its job": always sent, false included, also
+  // where stop_reason is withheld. The only input to Done; nothing here derives it.
+  finished: boolean
   needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]
   eta_stale?: boolean
   vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
@@ -77,15 +78,10 @@ export function problemReason(reason?: string | null) {
 }
 // AEON-437: Done is positive evidence: the worker reported all of its work AND its
 // launcher recorded a clean exit. The server derives `finished` from exactly that
-// (aeon_session_finished) and sends it to every viewer, also where the stop reason
-// is withheld, so it is the one answer. Evidence that never loaded it (a mutation
-// snapshot) falls back to the same two visible facts; a withheld reason, a missing
-// reason, a plain stop, a force stop, a spent budget, a failure and a silence the
-// server closed are never a finish. Anything else that stopped is Ended or failed.
-export const CLEAN_EXIT = 'process_exited'
-export function finishedStop(evidence: Pick<StateEvidence, 'finished' | 'progress_pct' | 'stop_reason'>) {
-  return evidence.finished ?? ((evidence.progress_pct ?? 0) >= 100 && evidence.stop_reason === CLEAN_EXIT)
-}
+// (aeon_session_finished) and puts it in every session, live and event payload, so
+// it is the one answer and this file has no second one: it never reads the percent
+// or the stop reason to decide Done. A plain stop, a force stop, a spent budget, a
+// failure and a silence the server closed are not a finish; they are Ended or failed.
 export interface StateReason { code: string; detail: string; next: string }
 export interface StateAssessment { state: AgentState; label: string; reasons: StateReason[] }
 export function heartbeatEvidence(evidence: StateEvidence, now: number) {
@@ -123,7 +119,7 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
     return result('throttled', [{ code: 'vendor-limit', detail: `${window}${until}.`, next: 'Check account capacity before starting another run.' }], `Throttled · ${window.toLowerCase()}${until}`)
   }
   if (evidence.phase === 'stopped' || evidence.stopped_at) {
-    if (finishedStop(evidence)) return result('done')
+    if (evidence.finished) return result('done')
     return result('stopped', [], evidence.stop_reason === LOST_CONTACT ? 'Lost contact' : STATE_LABEL.stopped)
   }
   const heartbeat = heartbeatEvidence(evidence, now)

@@ -20,7 +20,7 @@ export interface LiveAgent {
   harness: Harness; management_mode: 'managed' | 'unmanaged'; role: 'worker' | 'coordinator'
   phase: 'starting' | 'working' | 'stopping' | 'yielded' | 'stopped'; activity: 'busy' | 'unknown' | 'idle' | 'throttled'
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]
-  eta_stale?: boolean; progress_pct?: number | null; finished?: boolean
+  eta_stale?: boolean; progress_pct?: number | null; finished: boolean
   // The bound ticket and the project it lives in now (it may have moved on).
   ticket: (NodeSummary & { project_id: string }) | null; since: string; heartbeat_at: string | null
   // The last persisted activity entry, withheld with the note when harness.read
@@ -98,6 +98,7 @@ export function withServerLead(workers: readonly LiveAgent[], lead?: { name: str
     since: parts[0] === 'v' ? (parts[2] ?? '') : '',
     heartbeat_at: null,
     name: lead.name,
+    finished: false, // a stand-in for a worker still on the ticket; nothing has stopped
   }
   return [placeholder, ...workers]
 }
