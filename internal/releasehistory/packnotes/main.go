@@ -39,8 +39,8 @@ func run() error {
 			inputs++
 		}
 	}
-	if flag.NArg() != 0 || ((*snapshot == "") != (*reserve == "")) || inputs > 1 {
-		return fmt.Errorf("select one of -snapshots DIR, -history FILE, -historic FILE or -snapshot FILE -reserve VERSION; exports require -tenant UUID -project UUID")
+	if flag.NArg() != 0 || (*snapshot != "" && *reserve == "") || (*reserve != "" && *snapshot == "" && *historic == "") || inputs > 1 {
+		return fmt.Errorf("select one of -snapshots DIR, -history FILE, -historic FILE [-reserve VERSION] or -snapshot FILE -reserve VERSION; exports require -tenant UUID -project UUID")
 	}
 	if inputs > 0 && (*tenant == "" || *project == "") {
 		return fmt.Errorf("exports require -tenant UUID -project UUID")
@@ -74,11 +74,25 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		report, err := bundle.AddHistoric(history, raw, *tenant, *project)
-		if err != nil {
-			return err
+		if *reserve != "" {
+			var export releasehistory.HistoricTicketExport
+			if json.Unmarshal(raw, &export) != nil || export.Reservation == nil {
+				return fmt.Errorf("historic export must bind a reservation")
+			}
+			reservation, err := releasehistory.ReadNoteReservation(*repo, *reserve, export.Reservation.Tickets)
+			if err != nil {
+				return err
+			}
+			if err := bundle.AddReserved(raw, reservation, *tenant, *project); err != nil {
+				return err
+			}
+		} else {
+			report, err := bundle.AddHistoric(history, raw, *tenant, *project)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("historic notes: %d releases backfilled; %d ticket occurrences classified; %d under Other; %d hidden\n", report.Releases, report.Classified, report.Other, report.Hidden)
 		}
-		fmt.Printf("historic notes: %d releases backfilled; %d ticket occurrences classified; %d under Other; %d hidden\n", report.Releases, report.Classified, report.Other, report.Hidden)
 	}
 	if *historyFile != "" {
 		raw, err := os.ReadFile(*historyFile)
@@ -129,7 +143,7 @@ func run() error {
 			}
 		}
 	}
-	if *reserve != "" {
+	if *reserve != "" && *snapshot != "" {
 		raw, err := os.ReadFile(filepath.Join(*repo, "version.json"))
 		if err != nil {
 			return err

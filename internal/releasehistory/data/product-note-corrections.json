@@ -1,0 +1,624 @@
+{
+  "schema": "aeon.product-note-corrections.v1",
+  "corrections": [
+    {
+      "version": "260923173841.0.0",
+      "key": "AEON-40",
+      "snapshot_sha256": "1630e6c934c17f475963caf3321cc77e3bc6b7767924d6b7660f8063c9c243f6",
+      "reason": "Restores imported relations and release memberships omitted by the original importer.",
+      "group": "fixes"
+    },
+    {
+      "version": "260923180522.0.0",
+      "key": "AEON-40",
+      "snapshot_sha256": "ebf12db8a0caa582aad8cf57d31361ada135284c22f46c2771b82e6d15de61e0",
+      "reason": "Restores imported relations and release memberships omitted by the original importer.",
+      "group": "fixes"
+    },
+    {
+      "version": "260923185021.0.0",
+      "key": "AEON-40",
+      "snapshot_sha256": "0d01854127d8ff4a3bb4423becccb50252638606fca7bd0435f8601068e05b88",
+      "reason": "Restores imported relations and release memberships omitted by the original importer.",
+      "group": "fixes"
+    },
+    {
+      "version": "260923215400.0.0",
+      "key": "AEON-60",
+      "snapshot_sha256": "3568411b1e0fe210c2d61c1c601aff949bc45470b7e72481f357e15f9f9c67f1",
+      "reason": "Repairs imported statuses, missing assignees and inconsistent project counts.",
+      "group": "fixes"
+    },
+    {
+      "version": "260923225830.0.0",
+      "key": "AEON-62",
+      "snapshot_sha256": "18937fddf420ed23834f8cfab8667aaaa971c2129d8fa25eca2d3c02d005fe1e",
+      "reason": "Repairs duplicated person identity and incorrect imported author and assignee names.",
+      "group": "fixes"
+    },
+    {
+      "version": "260923235214.0.0",
+      "key": "AEON-64",
+      "snapshot_sha256": "ae636eb697e65b0624eeb103b38ab0360cb783556bce82f88dd620171cc17659",
+      "reason": "Prevents concurrent ticket moves from silently overwriting another change.",
+      "group": "fixes"
+    },
+    {
+      "version": "260924020145.0.0",
+      "key": "AEON-66",
+      "snapshot_sha256": "f44a4058fb684cc8ace4eba0dd901adca7e8c5cfacf2c1036b3fafce0b8cd3aa",
+      "reason": "Repairs sign-in failure handling and linked-person identity display.",
+      "group": "fixes"
+    },
+    {
+      "version": "260924023936.0.0",
+      "key": "AEON-69",
+      "snapshot_sha256": "b586b1ffcdff27cf1794ff4fcf72d82843892ab9d7acabefb7aaac07bfa84525",
+      "reason": "Repairs consistency, accessibility and performance defects across already-shipped screens.",
+      "group": "fixes"
+    },
+    {
+      "version": "260924105615.0.0",
+      "key": "AEON-78",
+      "snapshot_sha256": "c19b13a04096c7ca67cdf24adbcb890c1bb74f8aee307d594821ab52d07e012e",
+      "reason": "Repairs journey dead ends and incorrect stages on real projects.",
+      "group": "fixes"
+    },
+    {
+      "version": "260924190255.0.0",
+      "key": "AEON-97",
+      "snapshot_sha256": "567bbcd8b6b3365b85bf3bb3135979b5cd99a09118432c3fa612e69a6dc86148",
+      "reason": "Repairs public quote PDF links returning 404 under production permissions.",
+      "group": "fixes"
+    },
+    {
+      "version": "260925032936.0.0",
+      "key": "AEON-113",
+      "snapshot_sha256": "deaea52d16c84e182894f0da6524e24a60c5f2b0c4eee43931ab045a5e182902",
+      "reason": "Repairs imported quote rendering to match the established classic layout.",
+      "group": "fixes"
+    },
+    {
+      "version": "260925090550.0.0",
+      "key": "AEON-122",
+      "snapshot_sha256": "97956f10a689319bcd0425b0558a1a840e3ada4dec1a79bd4faee3d9abcbc1a6",
+      "reason": "Repairs imported drafts rejected when saving.",
+      "group": "fixes"
+    },
+    {
+      "version": "260925110255.0.0",
+      "key": "AEON-123",
+      "snapshot_sha256": "bfee6ca49879d277ec4a32a8b7370df7818dc105f28c5834f722b6edf2064c98",
+      "reason": "Repairs small touch targets, overlaps, layout jumps, accessibility failures and overflow.",
+      "group": "fixes"
+    },
+    {
+      "version": "260925141137.0.0",
+      "key": "AEON-134",
+      "snapshot_sha256": "fc62e0ca1d7bb95b95423f5a3c4e16d5f6cc12b758a78861051f2bcb3e84c201",
+      "reason": "Closes exposure of active customer-link tokens stored unencrypted.",
+      "group": "fixes"
+    },
+    {
+      "version": "260925150544.0.0",
+      "key": "AEON-138",
+      "snapshot_sha256": "3da7d5b16e2050b426ab8d3f96db97a2f46689f0aa0d0aed2fffc7ce70da8d2a",
+      "reason": "Repairs imported knowledge links missing the slug needed to open them.",
+      "group": "fixes"
+    },
+    {
+      "version": "260925153844.0.0",
+      "key": "AEON-143",
+      "snapshot_sha256": "46fa3c703a5132adacbe8664aef77b6bbe98b31cb582ee239e823d226633d4c9",
+      "reason": "Repairs importer field mismatches that stop imported entities opening.",
+      "group": "fixes"
+    },
+    {
+      "version": "260925213523.0.0",
+      "key": "AEON-149",
+      "snapshot_sha256": "b2ca42aef19596323eb8f85b34e92399fadb9107b24dfae8554ea7e8ce06f740",
+      "reason": "Closes authorization holes in agent access, system keys and high-risk approvals.",
+      "group": "fixes"
+    },
+    {
+      "version": "260925213523.0.0",
+      "key": "AEON-139",
+      "snapshot_sha256": "b2ca42aef19596323eb8f85b34e92399fadb9107b24dfae8554ea7e8ce06f740",
+      "reason": "Repairs empty journey stages, missing actions and dead ends on real projects.",
+      "group": "fixes"
+    },
+    {
+      "version": "260926083057.0.0",
+      "key": "AEON-159",
+      "snapshot_sha256": "69bae4302475af0321c9a7021a5d62bc2f72b4d21444a5b0bd16bcd0ed1e3e81",
+      "reason": "Repairs journey membership left in the old project after moving a ticket.",
+      "group": "fixes"
+    },
+    {
+      "version": "260926093605.0.0",
+      "key": "AEON-170",
+      "snapshot_sha256": "b027a6cd3db306649642200eed041ab37a0d92233fc64e944dfc22a387a84eae",
+      "reason": "Repairs list queries hanging after bulk writes with stale database statistics.",
+      "group": "fixes"
+    },
+    {
+      "version": "260926095249.0.0",
+      "key": "AEON-171",
+      "snapshot_sha256": "9adbb98ce839065d9103150721057a0a30fd9b01e787d0db6fced2148574ea5a",
+      "reason": "Repairs approvals showing an opaque identifier where the agent name belongs.",
+      "group": "fixes"
+    },
+    {
+      "version": "260926162107.0.0",
+      "key": "AEON-189",
+      "snapshot_sha256": "9659dbd382eef793f872dda5b964255e28169301fe77772ef124707456fc4f59",
+      "reason": "Repairs backlog rows overflowing journey Plan cards.",
+      "group": "fixes"
+    },
+    {
+      "version": "260926210025.0.0",
+      "key": "AEON-201",
+      "snapshot_sha256": "6c79b182324889fd74207ecffb8f267fbba2b516f35d5f5a8a63d926d378ca74",
+      "reason": "Repairs background poll failures replacing valid tables with error blocks.",
+      "group": "fixes"
+    },
+    {
+      "version": "260927045735.0.0",
+      "key": "AEON-95",
+      "snapshot_sha256": "037d0ca9330f0376bce50d84055b8c14e9de8812da880220fac7bd141f7ad162",
+      "reason": "Restores dragging of the title-column divider that previously did nothing.",
+      "group": "fixes"
+    },
+    {
+      "version": "260927071728.0.0",
+      "key": "AEON-210",
+      "snapshot_sha256": "e222d423cc22da665c91a27d1c57e7f0a6501123d7d559ed1dccaff980d732dc",
+      "reason": "Repairs expired approvals displayed as valid while the action is disabled.",
+      "group": "fixes"
+    },
+    {
+      "version": "260927120613.0.0",
+      "key": "AEON-231",
+      "snapshot_sha256": "5e387d245c0709ecdc20c5d302a646a7cafc54d07fdcd8714b0167226e594cec",
+      "reason": "Closes a cancellation race that can signal an unrelated reused process identifier.",
+      "group": "fixes"
+    },
+    {
+      "version": "260927134617.0.0",
+      "key": "AEON-209",
+      "snapshot_sha256": "5308e7da0b3a04e03b6210424cd1dadf3864f8b6da193292d8bffc597a2078a2",
+      "reason": "Reduces interruptions caused by restarting the only serving container during updates.",
+      "group": "fixes"
+    },
+    {
+      "version": "260927134617.0.0",
+      "key": "AEON-210",
+      "snapshot_sha256": "5308e7da0b3a04e03b6210424cd1dadf3864f8b6da193292d8bffc597a2078a2",
+      "reason": "Repairs expired approvals displayed as valid while the action is disabled.",
+      "group": "fixes"
+    },
+    {
+      "version": "260927160212.0.0",
+      "key": "AEON-232",
+      "snapshot_sha256": "a70c7f1c3123abea690b488fc057db336d23a9b9358cc314bc3833bb755b1f55",
+      "reason": "Restores desktop ticket controls incorrectly wrapping onto separate rows.",
+      "group": "fixes"
+    },
+    {
+      "version": "260927181849.0.0",
+      "key": "AEON-234",
+      "snapshot_sha256": "987c988e88ac58f40fe643879acbaf6fa670e026f83518047e38555a52f8484c",
+      "reason": "Repairs deployment recovery blocked by expired standing approval gates.",
+      "group": "fixes"
+    },
+    {
+      "version": "260928080324.0.0",
+      "key": "AEON-243",
+      "snapshot_sha256": "4d154c501e45d3ea216eae2e2e68f999e218945ad28ea0d185fd0a616d89f93c",
+      "reason": "Repairs active project agent counts inflated by stopped sessions.",
+      "group": "fixes"
+    },
+    {
+      "version": "260928080324.0.0",
+      "key": "AEON-240",
+      "snapshot_sha256": "4d154c501e45d3ea216eae2e2e68f999e218945ad28ea0d185fd0a616d89f93c",
+      "reason": "Repairs shared-inbox state incorrectly marking unrelated working sessions as blocked.",
+      "group": "fixes"
+    },
+    {
+      "version": "260928130526.0.0",
+      "key": "AEON-254",
+      "snapshot_sha256": "54f8b08e9d90189a17e7dbc731ddf8cfa3390aa793952e9673fa6b84ee4d5c45",
+      "reason": "Repairs messages reported delivered when delivery actually failed.",
+      "group": "fixes"
+    },
+    {
+      "version": "260928214842.0.0",
+      "key": "AEON-264",
+      "snapshot_sha256": "26f3e79188281f540cda5d432d699f2c74a4050bf3aafa29c96157c064cc54cf",
+      "reason": "Repairs long customer names clipped onto a hidden second line.",
+      "group": "fixes"
+    },
+    {
+      "version": "260928223247.0.0",
+      "key": "AEON-267",
+      "snapshot_sha256": "850c31731762a0aca7fbac8840ac402b9f4ceec8976688c6cd75f301b8863a48",
+      "reason": "Repairs session messages mixed into another session and relabeled with its current name.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929000754.0.0",
+      "key": "AEON-269",
+      "snapshot_sha256": "9cdf492a59072be465b6fef571040ed66391efac5f97c718a297a1808bab0cbf",
+      "reason": "Completes missing session reporting and stops orphan heartbeat rows after harness exit. Reviewed wording removes an overstated promise.",
+      "group": "fixes",
+      "pill_en": "Session reporting restored",
+      "pill_de": "Sitzungsmeldungen funktionieren",
+      "benefit_en": "Sessions started outside Aeon report their available name, model and work details, and are marked stopped when their owner exits.",
+      "benefit_de": "Außerhalb von Aeon gestartete Sitzungen melden ihre verfügbaren Angaben zu Name, Modell und Arbeit und werden nach dem Ende ihres Prozesses als beendet markiert."
+    },
+    {
+      "version": "260929052224.0.0",
+      "key": "AEON-271",
+      "snapshot_sha256": "3bad80a38cba2ceba9d80471407ad966eb724e84dd14b102e2a64b661a7ddb2c",
+      "reason": "Repairs force-stop availability depending on inconsistent clock windows.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929052224.0.0",
+      "key": "AEON-270",
+      "snapshot_sha256": "3bad80a38cba2ceba9d80471407ad966eb724e84dd14b102e2a64b661a7ddb2c",
+      "reason": "Repairs a flaky usage-archive test and duplicate writes after archive.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929062507.0.0",
+      "key": "AEON-273",
+      "snapshot_sha256": "f6de45627b70a6958b1a4dae22ac80102232178cf06b0d9ce47618bce45cd28c",
+      "reason": "Repairs iPhone chat overflow; tabs and read indicators accompany the layout repair.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929072754.0.0",
+      "key": "AEON-277",
+      "snapshot_sha256": "3d881217923ba28ab93f3292cdc267fe65ba1a10f7c20fcdbb38f0ff6ef011ab",
+      "reason": "Repairs oversized phone controls and ETA staleness calculated against the wrong clock.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929072754.0.0",
+      "key": "AEON-284",
+      "snapshot_sha256": "3d881217923ba28ab93f3292cdc267fe65ba1a10f7c20fcdbb38f0ff6ef011ab",
+      "reason": "Corrects the medium-priority icon to match the intended priority icon system.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929082208.0.0",
+      "key": "AEON-211",
+      "snapshot_sha256": "0d4a654794693698f5b6c69ae4659a731fbbf139c6fe8be7592bec18d8943d1d",
+      "reason": "Repairs deployment approvals that omit their target and permit ambiguous authorization.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929082208.0.0",
+      "key": "AEON-293",
+      "snapshot_sha256": "0d4a654794693698f5b6c69ae4659a731fbbf139c6fe8be7592bec18d8943d1d",
+      "reason": "Repairs deployment risk text failing required contrast in light mode.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929095359.0.0",
+      "key": "AEON-280",
+      "snapshot_sha256": "178658db6cdc6601c656a5f4b91859087a4d5b2423ddf55e0245430be0e67414",
+      "reason": "Repairs permanently queued receipts, ignored session messages and silent delivery failure.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929095359.0.0",
+      "key": "AEON-282",
+      "snapshot_sha256": "178658db6cdc6601c656a5f4b91859087a4d5b2423ddf55e0245430be0e67414",
+      "reason": "Repairs managed workers unable to receive follow-up messages while idle.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929113854.0.0",
+      "key": "AEON-291",
+      "snapshot_sha256": "a67863d8dd2de256bbaca9b10302f1ff1095d71920d92b11c6ff71996041c050",
+      "reason": "Repairs stale session registrations and unavailable actions left in session menus.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929113854.0.0",
+      "key": "AEON-304",
+      "snapshot_sha256": "a67863d8dd2de256bbaca9b10302f1ff1095d71920d92b11c6ff71996041c050",
+      "reason": "Repairs session-list layout breaking on phones.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929113854.0.0",
+      "key": "AEON-285",
+      "snapshot_sha256": "a67863d8dd2de256bbaca9b10302f1ff1095d71920d92b11c6ff71996041c050",
+      "reason": "Repairs released Mac daemon builds rejecting the promised Touch ID watch mode.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929162827.0.0",
+      "key": "AEON-332",
+      "snapshot_sha256": "9a0b3347a638557463ada264ca8ee4e9b57548ad493826d60aec4cda58328250",
+      "reason": "Restores the explicitly requested rhombus after the medium icon was implemented incorrectly.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929162827.0.0",
+      "key": "AEON-322",
+      "snapshot_sha256": "9a0b3347a638557463ada264ca8ee4e9b57548ad493826d60aec4cda58328250",
+      "reason": "Repairs live workers stranded under stopped lead generations after restart.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929162827.0.0",
+      "key": "AEON-325",
+      "snapshot_sha256": "9a0b3347a638557463ada264ca8ee4e9b57548ad493826d60aec4cda58328250",
+      "reason": "Repairs duplicate and misleading release-update banners.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929162827.0.0",
+      "key": "AEON-313",
+      "snapshot_sha256": "9a0b3347a638557463ada264ca8ee4e9b57548ad493826d60aec4cda58328250",
+      "reason": "Repairs agent replies absent from the session conversation where the person asked.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929162827.0.0",
+      "key": "AEON-315",
+      "snapshot_sha256": "9a0b3347a638557463ada264ca8ee4e9b57548ad493826d60aec4cda58328250",
+      "reason": "Repairs preview options offering forbidden agents and unhelpful permission errors.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929162827.0.0",
+      "key": "AEON-300",
+      "snapshot_sha256": "9a0b3347a638557463ada264ca8ee4e9b57548ad493826d60aec4cda58328250",
+      "reason": "Repairs missing usage reporting for sessions and non-Codex managed runs.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929162827.0.0",
+      "key": "AEON-306",
+      "snapshot_sha256": "9a0b3347a638557463ada264ca8ee4e9b57548ad493826d60aec4cda58328250",
+      "reason": "Repairs daemon shutdown waiting through an idle session's full window.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929162827.0.0",
+      "key": "AEON-307",
+      "snapshot_sha256": "9a0b3347a638557463ada264ca8ee4e9b57548ad493826d60aec4cda58328250",
+      "reason": "Repairs Hook delivery incorrectly labeled as Ack.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929193046.0.0",
+      "key": "AEON-346",
+      "snapshot_sha256": "56e6449f5a2a7c2e583b9de6f564d02428ffad69c12b5945e81ff38f2ef053bd",
+      "reason": "Repairs circular agent-and-key setup leaving fresh instances unable to create their first agent.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929193046.0.0",
+      "key": "AEON-345",
+      "snapshot_sha256": "56e6449f5a2a7c2e583b9de6f564d02428ffad69c12b5945e81ff38f2ef053bd",
+      "reason": "Repairs unread-position restoration racing server markers; indexes support the same existing chat behavior.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929193046.0.0",
+      "key": "AEON-350",
+      "snapshot_sha256": "56e6449f5a2a7c2e583b9de6f564d02428ffad69c12b5945e81ff38f2ef053bd",
+      "reason": "Repairs expired control settlement and delivery leases using inconsistent computer clocks.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929193046.0.0",
+      "key": "AEON-343",
+      "snapshot_sha256": "56e6449f5a2a7c2e583b9de6f564d02428ffad69c12b5945e81ff38f2ef053bd",
+      "reason": "Repairs the heartbeat helper exiting immediately on macOS despite a live owner process.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929193046.0.0",
+      "key": "AEON-340",
+      "snapshot_sha256": "56e6449f5a2a7c2e583b9de6f564d02428ffad69c12b5945e81ff38f2ef053bd",
+      "reason": "Corrects ambiguous dark-mode status colors and brittle navigation test timing.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929193046.0.0",
+      "key": "AEON-342",
+      "snapshot_sha256": "56e6449f5a2a7c2e583b9de6f564d02428ffad69c12b5945e81ff38f2ef053bd",
+      "reason": "Repairs Claude launches broken when updates replace permanently pinned dependency paths.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929193046.0.0",
+      "key": "AEON-341",
+      "snapshot_sha256": "56e6449f5a2a7c2e583b9de6f564d02428ffad69c12b5945e81ff38f2ef053bd",
+      "reason": "Repairs npm-launched harnesses missing a pinned Node interpreter under the service PATH.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929193046.0.0",
+      "key": "AEON-327",
+      "snapshot_sha256": "56e6449f5a2a7c2e583b9de6f564d02428ffad69c12b5945e81ff38f2ef053bd",
+      "reason": "Repairs coordinator keys denied registry and rules reads required for planning.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929193046.0.0",
+      "key": "AEON-336",
+      "snapshot_sha256": "56e6449f5a2a7c2e583b9de6f564d02428ffad69c12b5945e81ff38f2ef053bd",
+      "reason": "Repairs automatic tag changes missing their required audit events.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929193046.0.0",
+      "key": "AEON-330",
+      "snapshot_sha256": "56e6449f5a2a7c2e583b9de6f564d02428ffad69c12b5945e81ff38f2ef053bd",
+      "reason": "Repairs message sending rejected because ambient session attribution is corrupt or mismatched.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929193046.0.0",
+      "key": "AEON-338",
+      "snapshot_sha256": "56e6449f5a2a7c2e583b9de6f564d02428ffad69c12b5945e81ff38f2ef053bd",
+      "reason": "Corrects pairing instructions, instance-specific Nix snippets and misleading platform or error wording.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929203122.0.0",
+      "key": "AEON-367",
+      "snapshot_sha256": "c341250884caab6a06466110934334dd1b15cef428d25fc6f0b0b9e1f47fd4e6",
+      "reason": "Repairs a 32-scope cap blocking legitimate grants within the existing role ceiling.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929215406.0.0",
+      "key": "AEON-376",
+      "snapshot_sha256": "c70dc9e137c536067e7c222383c9478436c8564ad26958a60d84e69ba91a8d92",
+      "reason": "Repairs paired Mac daemon startup failing when the Unix socket path exceeds macOS limits.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929215406.0.0",
+      "key": "AEON-368",
+      "snapshot_sha256": "c70dc9e137c536067e7c222383c9478436c8564ad26958a60d84e69ba91a8d92",
+      "reason": "Repairs pairing misdiagnosing a deleted current directory as a broken harness installation.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929215406.0.0",
+      "key": "AEON-355",
+      "snapshot_sha256": "c70dc9e137c536067e7c222383c9478436c8564ad26958a60d84e69ba91a8d92",
+      "reason": "Repairs Accounts-card text overflowing its right edge at intermediate widths.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929232203.0.0",
+      "key": "AEON-358",
+      "snapshot_sha256": "ad26b061e4e2eed66a4eb216a4154eefa8c678f10305747d3cecfa367ce610e9",
+      "reason": "Repairs pairing instructions with unavailable formulas, wrong commands and an address loop.",
+      "group": "fixes"
+    },
+    {
+      "version": "260929232203.0.0",
+      "key": "AEON-357",
+      "snapshot_sha256": "ad26b061e4e2eed66a4eb216a4154eefa8c678f10305747d3cecfa367ce610e9",
+      "reason": "Repairs Release history opening the current version instead of the full history.",
+      "group": "fixes"
+    },
+    {
+      "version": "260930074921.0.0",
+      "key": "AEON-399",
+      "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",
+      "reason": "Repairs pairing rejecting standard Homebrew Node directory permissions.",
+      "group": "fixes"
+    },
+    {
+      "version": "260930074921.0.0",
+      "key": "AEON-400",
+      "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",
+      "reason": "Repairs Connect silently disabled when some selected harnesses cannot be verified.",
+      "group": "fixes"
+    },
+    {
+      "version": "260930074921.0.0",
+      "key": "AEON-398",
+      "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",
+      "reason": "Repairs missing historical release benefits and restored history entries on other tenants. Reviewed wording removes an overstated promise.",
+      "group": "fixes",
+      "pill_en": "Older notes restored",
+      "pill_de": "Ältere Versionshinweise wiederhergestellt",
+      "benefit_en": "Earlier releases now show benefit texts captured from their public tickets, including on instances without the AEON project.",
+      "benefit_de": "Ältere Versionen zeigen jetzt Nutzen-Texte aus ihren öffentlichen Tickets, auch auf Instanzen ohne das AEON-Projekt."
+    },
+    {
+      "version": "260930074921.0.0",
+      "key": "AEON-396",
+      "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",
+      "reason": "Repairs flaky checks, a worker-link overlap and a cancellation race.",
+      "group": "fixes"
+    },
+    {
+      "version": "260930074921.0.0",
+      "key": "AEON-379",
+      "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",
+      "reason": "Repairs silent successful type-update no-ops; supported person-only conversion accompanies the repair.",
+      "group": "fixes"
+    },
+    {
+      "version": "260930074921.0.0",
+      "key": "AEON-385",
+      "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",
+      "reason": "Repairs stale outline counts, cached rows and bulk moves that leave rows in place. Reviewed wording removes an overstated promise.",
+      "group": "fixes",
+      "pill_en": "Outline stays current",
+      "pill_de": "Gliederung bleibt aktuell",
+      "benefit_en": "Moved tickets appear in the right place and child counts stay correct. The outline follows live changes without a reload.",
+      "benefit_de": "Verschobene Tickets erscheinen am richtigen Ort, und die Anzahl der Untertickets bleibt korrekt. Die Gliederung folgt Live-Änderungen ohne Neuladen."
+    },
+    {
+      "version": "260930074921.0.0",
+      "key": "AEON-372",
+      "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",
+      "reason": "Repairs missing release benefits on other tenants that make both switches appear ineffective.",
+      "group": "fixes"
+    },
+    {
+      "version": "260930074921.0.0",
+      "key": "AEON-369",
+      "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",
+      "reason": "Repairs session chat incorrectly requiring an unrelated principal-wide message target. Reviewed wording removes an overstated promise.",
+      "group": "fixes",
+      "pill_en": "Session messaging works",
+      "pill_de": "Sitzungsnachrichten funktionieren",
+      "benefit_en": "A running session can receive messages from its Agents panel without a separate message address. Session-bound delivery uses that session directly.",
+      "benefit_de": "Eine laufende Sitzung kann Nachrichten aus ihrem Agenten-Panel ohne eigene Nachrichtenadresse empfangen. Sitzungsgebundene Nachrichten werden direkt an diese Sitzung zugestellt."
+    },
+    {
+      "version": "260930074921.0.0",
+      "key": "AEON-353",
+      "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",
+      "reason": "Repairs first runs stranded without capacity readings; simpler account approval accompanies the repair. Reviewed wording removes an overstated promise.",
+      "group": "fixes",
+      "pill_en": "First runs start",
+      "pill_de": "Erste Läufe starten",
+      "benefit_en": "After account approval, first runs can start even before a capacity reading exists. Waiting runs show the reason and next start time.",
+      "benefit_de": "Nach der Kontofreigabe können erste Läufe auch ohne vorhandenen Kapazitätswert starten. Wartende Läufe zeigen den Grund und den nächsten Startzeitpunkt."
+    },
+    {
+      "version": "260930074921.0.0",
+      "key": "AEON-347",
+      "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",
+      "reason": "Repairs one invalid harness enrollment stopping the entire paired daemon.",
+      "group": "fixes"
+    },
+    {
+      "version": "260930074921.0.0",
+      "key": "AEON-348",
+      "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",
+      "reason": "Repairs one blocked harness incorrectly marking the entire computer not ready.",
+      "group": "fixes"
+    },
+    {
+      "version": "260930094206.0.0",
+      "key": "AEON-398",
+      "snapshot_sha256": "ac6a53b384d63d55a8b7e77b21372fb375a8f883493f7d54c60967c3e7320934",
+      "reason": "Repairs missing historical release benefits and restored history entries on other tenants. Reviewed wording removes an overstated promise.",
+      "group": "fixes",
+      "pill_en": "Older notes restored",
+      "pill_de": "Ältere Versionshinweise wiederhergestellt",
+      "benefit_en": "Earlier releases now show benefit texts captured from their public tickets, including on instances without the AEON project.",
+      "benefit_de": "Ältere Versionen zeigen jetzt Nutzen-Texte aus ihren öffentlichen Tickets, auch auf Instanzen ohne das AEON-Projekt."
+    }
+  ]
+}
