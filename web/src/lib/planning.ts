@@ -15,6 +15,10 @@ export interface PlanningCost {
   list_spent: string | null; list_estimated: string | null; list_unpriced: boolean
   paid_spent: string | null; paid_estimated: string | null; paid_unknown: boolean
   plans: string[]
+  // Integer micro-dollars of the sort key (spent when present, otherwise the
+  // estimate). Display stays on the USD strings above.
+  list_cost_micros?: string | null
+  paid_micros?: string | null
 }
 export interface TicketPlanning {
   route: PlanningRoute | null
@@ -59,6 +63,11 @@ function num(value: string | null | undefined): number | null {
   if (value === null || value === undefined) return null
   const n = Number(value)
   return Number.isFinite(n) ? n : null
+}
+/** The API's micro-dollar sort key. A float cannot separate 10^10 dollars plus one micro. */
+function integerMicros(value: string | null | undefined): bigint | null {
+  if (value == null || !/^[0-9]+$/.test(value)) return null
+  return BigInt(value)
 }
 const ROLE_LABEL: Record<string, string> = { scout: 'Scout', mechanical: 'Mechanical', build: 'Build', 'build-hard': 'Build hard', 'review-gate': 'Review gate' }
 function text(fields: Record<string, unknown>, key: string): string {
@@ -184,12 +193,41 @@ export function planningPresent(rows: PlanningRow[]): Record<PlanningColumn, boo
   }
 }
 const ROLE_RANK: Record<string, number> = { scout: 0, mechanical: 1, build: 2, 'build-hard': 3, 'review-gate': 4 }
-/** The list API's order for a planning sort key: null sorts last in both directions. */
-export function planningSortValue(row: PlanningRow, field: PlanningColumn): number | string | null {
+interface ModelOrder { rank: number; area: string }
+function modelOrder(row: PlanningRow): ModelOrder | null {
+  const rank = ROLE_RANK[roleOf(row)]
+  return rank === undefined ? null : { rank, area: areaOf(row) }
+}
+/**
+ * Model order matches the list API: the role's rung, then the area.
+ * A missing role stays last. Rows that both lack a role still compare areas.
+ * A missing area stays last in either direction.
+ */
+export function compareModelSort(a: PlanningRow, b: PlanningRow, desc: boolean): number {
+  const x = modelOrder(a), y = modelOrder(b)
+  if ((x === null) !== (y === null)) return x === null ? 1 : -1
+  const dir = desc ? -1 : 1
+  if (x && y && x.rank !== y.rank) return (x.rank < y.rank ? -1 : 1) * dir
+  const xa = areaOf(a), ya = areaOf(b)
+  if ((xa === '') !== (ya === '')) return xa === '' ? 1 : -1
+  if (xa !== ya) return (xa < ya ? -1 : 1) * dir
+  return 0
+}
+/** The list API's order for a numeric planning sort key: null sorts last in both directions. Cost keys are integer micro-dollars. */
+export function planningSortValue(row: PlanningRow, field: PlanningColumn): number | string | bigint | null {
   switch (field) {
-    case 'model': { const rank = ROLE_RANK[roleOf(row)]; return rank === undefined ? null : `${rank}:${areaOf(row) || '~'}` }
+    case 'model': { const order = modelOrder(row); return order ? `${order.rank}:${order.area}` : null }
     case 'tokens': return row.planning?.tokens.spent ?? row.planning?.tokens.estimated ?? null
-    case 'list_cost': return num(row.planning?.cost?.list_spent) ?? num(row.planning?.cost?.list_estimated)
-    case 'paid': return num(row.planning?.cost?.paid_spent) ?? num(row.planning?.cost?.paid_estimated)
+    case 'list_cost': return integerMicros(row.planning?.cost?.list_cost_micros)
+    case 'paid': return integerMicros(row.planning?.cost?.paid_micros)
+  }
+}
+/** Screen-reader text for one planning cell; empty when the cell has nothing to explain. */
+export function planningTip(row: PlanningRow, column: PlanningColumn): string {
+  switch (column) {
+    case 'model': return modelCell(row).tip
+    case 'tokens': return tokensCell(row).tip
+    case 'list_cost': return listCostCell(row).tip
+    case 'paid': return paidCell(row).tip
   }
 }

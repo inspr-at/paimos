@@ -18,7 +18,7 @@ import TicketWorkers from './TicketWorkers.vue'
 import QuickCreateRow, { type QuickDraft } from './QuickCreateRow.vue'
 import EtaCell from './EtaCell.vue'
 import PlanningCell from './PlanningCell.vue'
-import { PLANNING_COLUMNS, planningPresent, type PlanningColumn } from '../../lib/planning'
+import { PLANNING_COLUMNS, planningPresent, planningTip, type PlanningColumn } from '../../lib/planning'
 import { etaFromTicket, progressAccessibleName, progressReportedAt } from '../../lib/eta'
 
 const NO_WORKERS: LiveAgent[] = []
@@ -97,6 +97,10 @@ const emit = defineEmits<{
 
 const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated', progress: 'c-progress', eta: 'c-eta', model: 'c-model', tokens: 'c-tokens', list_cost: 'c-list-cost', paid: 'c-paid' }
 const isPlanning = (id: ColumnId): id is PlanningColumn => (PLANNING_COLUMNS as ColumnId[]).includes(id)
+// Planning cells are not Tab stops. The focused row carries their descriptions.
+function planningDescribedBy(row: ListItem): string {
+  return columns.value.filter(column => isPlanning(column.id) && planningTip(row, column.id)).map(column => `plan-${row.id}-${column.id}`).join(' ')
+}
 // Columns follow the table's own width (the docked panel narrows it; wide screens
 // add columns) and the person's saved choice. Decided here rather than in CSS so
 // every colspan matches the visible columns.
@@ -620,6 +624,7 @@ defineExpose({
             }"
             :style="entry.tree ? { '--depth': entry.tree.depth } : undefined"
             :aria-selected="cursorId === entry.row.id" :aria-level="entry.tree ? entry.tree.depth + 1 : undefined"
+            :aria-describedby="planningDescribedBy(entry.row) || undefined"
             :aria-expanded="entry.tree?.hasChildren ? entry.tree.expanded : undefined"
             :draggable="draggable(entry) ? 'true' : undefined"
             @click="rowClick($event, entry.row)" @contextmenu="longPress($event, entry.row)"
@@ -742,7 +747,7 @@ defineExpose({
                 </div>
               </td>
               <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" /></div></td>
-              <td v-else-if="isPlanning(column.id)" :class="column.cls"><div class="cell"><PlanningCell :column="column.id" :row="entry.row" /></div></td>
+              <td v-else-if="isPlanning(column.id)" :class="column.cls"><div class="cell"><PlanningCell :column="column.id" :row="entry.row" :row-id="entry.row.id" /></div></td>
             </template>
           </tr>
         </template>
@@ -791,6 +796,13 @@ defineExpose({
 .table-card.compact { --row-h: 30px; }
 .tickets { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 13.5px; }
 .tickets:focus-visible { box-shadow: none; }
+/* Keyboard cursor: the app focus ring around the whole row. A shadow on the
+   tr itself is clipped by the card, so the ring is drawn just inside the row. */
+.tickets:focus .ticket-row.cursor { position: relative; z-index: 1; }
+.tickets:focus .ticket-row.cursor td:first-child::after {
+  content: ''; position: absolute; z-index: 4; left: 3px; top: 2px; bottom: 2px; width: calc(100% - 6px);
+  border-radius: 6px; pointer-events: none; box-shadow: var(--focus-ring);
+}
 /* Column widths live on the colgroup (saved per person); Title takes the rest. */
 thead th {
   position: sticky; top: var(--toolbar-h, 0px); z-index: 2; height: 34px; padding: 0 12px; text-align: left; font-weight: 500;

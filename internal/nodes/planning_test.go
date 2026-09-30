@@ -5,6 +5,7 @@ package nodes
 import (
 	"encoding/json"
 	"math"
+	"math/big"
 	"regexp"
 	"slices"
 	"strconv"
@@ -124,6 +125,86 @@ func TestPlanningSampleOf(t *testing.T) {
 	lines[0].sessionModel = ""
 	if got, _ := sampleOf(lines, map[string]float64{"a": 1800, "b": 1800}); got.model != "gpt-6-astra" {
 		t.Fatalf("usage model: %+v", got)
+	}
+}
+
+func TestSortMicrosDecimal(t *testing.T) {
+	n := func(v int64) *big.Int { return big.NewInt(v) }
+	huge, ok := new(big.Int).SetString("10000000000000000000", 10)
+	if !ok {
+		t.Fatal("huge micros")
+	}
+	got := sortMicros(n(10000000000000001), n(1))
+	if got == nil || *got != "10000000000000001" {
+		t.Fatalf("spent wins: %v", got)
+	}
+	got = sortMicros(nil, n(10000000000000002))
+	if got == nil || *got != "10000000000000002" {
+		t.Fatalf("estimate: %v", got)
+	}
+	got = sortMicros(huge, n(1))
+	if got == nil || *got != "10000000000000000000" {
+		t.Fatalf("past int64: %v", got)
+	}
+	if sortMicros(nil, nil) != nil || sortMicros(big.NewInt(-1), nil) != nil {
+		t.Fatal("absent or negative")
+	}
+	zero := sortMicros(n(0), n(9_000_000))
+	if zero == nil || *zero != "0" {
+		t.Fatalf("zero spent: %v", zero)
+	}
+}
+
+func TestUSDFromMicros(t *testing.T) {
+	n := func(v int64) *big.Int { return big.NewInt(v) }
+	huge, ok := new(big.Int).SetString("10000000000000000000", 10)
+	if !ok {
+		t.Fatal("huge micros")
+	}
+	cases := []struct {
+		in   *big.Int
+		want string
+	}{
+		{nil, ""},
+		{big.NewInt(-1), ""},
+		{n(0), "0.000000"},
+		{n(13500014), "13.500014"},
+		{n(13500013), "13.500013"},
+		{n(2500001), "2.500001"},
+		{n(100000000123457), "100000000.123457"},
+		{huge, "10000000000000.000000"},
+	}
+	for _, tc := range cases {
+		got := usdFromMicros(tc.in)
+		if tc.want == "" {
+			if got != nil {
+				t.Fatalf("%v printed %q", tc.in, *got)
+			}
+			continue
+		}
+		if got == nil || *got != tc.want {
+			t.Fatalf("%v = %v, want %s", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestMicrosFromText(t *testing.T) {
+	huge := "10000000000000000000"
+	got, err := microsFromText(&huge)
+	if err != nil || got == nil || got.String() != huge {
+		t.Fatalf("huge: %v %v", got, err)
+	}
+	if v, err := microsFromText(nil); err != nil || v != nil {
+		t.Fatalf("nil: %v %v", v, err)
+	}
+	blank := "  "
+	if v, err := microsFromText(&blank); err != nil || v != nil {
+		t.Fatalf("blank: %v %v", v, err)
+	}
+	for _, bad := range []string{"1.5", "-1", "1e19", "abc"} {
+		if _, err := microsFromText(&bad); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
 	}
 }
 
@@ -330,6 +411,10 @@ func TestListPlanningColumns(t *testing.T) {
 	}
 	if got := keys(w.admin, "model"); strings.Join(got[:5], ",") != "PLN-4,PLN-8,PLN-6,PLN-2,PLN-7" {
 		t.Fatalf("model sort: %v", got)
+	}
+	// Descending reverses the rung and the area, and still leaves a missing area last.
+	if got := keys(w.admin, "-model"); strings.Join(got[:5], ",") != "PLN-7,PLN-2,PLN-8,PLN-6,PLN-4" {
+		t.Fatalf("model sort descending: %v", got)
 	}
 	if got := keys(w.admin, "-tokens"); strings.Join(got[:4], ",") != "PLN-5,PLN-4,PLN-1,PLN-2" && strings.Join(got[:4], ",") != "PLN-5,PLN-4,PLN-2,PLN-1" {
 		t.Fatalf("tokens sort: %v", got)

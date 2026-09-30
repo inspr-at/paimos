@@ -6,13 +6,24 @@ import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork, type Fixtures } from './work-fixtures'
 import type { TicketPlanning } from '../src/lib/planning'
 
-const shots = process.env.PLANNING_SHOTS ?? '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-329b'
+const shots = process.env.PLANNING_SHOTS ?? '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-370-planning-followups'
 const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const keys = (page: Page) => page.locator('tr.ticket-row:not(.ghost) .key').allTextContents()
 const astra = { label: 'Codex astra · xhigh', profile: 'codex-astra-xhigh', harness: 'codex', model: 'gpt-6-astra', effort: 'xhigh', revision: '3f9a1c2b' }
 const opus = { label: 'Claude opus · high', profile: 'claude-opus-high', harness: 'claude', model: 'opus', effort: 'high', revision: '3f9a1c2b' }
 const tokens = (spent: number | null, estimated: number | null, calibration?: TicketPlanning['tokens']['calibration']) => ({ spent, input: spent ?? 0, output: 0, cached: Math.round((spent ?? 0) * 0.8), sessions: spent === null ? 0 : 2, unreported: 0, estimated, ...(calibration ? { calibration } : {}) })
-const cost = (list: [string | null, string | null], paid: [string | null, string | null], plans: string[] = []) => ({ list_spent: list[0], list_estimated: list[1], list_unpriced: false, paid_spent: paid[0], paid_estimated: paid[1], paid_unknown: false, plans })
+function usdMicros(value: string | null): string | null {
+  if (value === null) return null
+  const [whole, frac = ''] = value.split('.')
+  const digits = `${whole}${frac.padEnd(6, '0').slice(0, 6)}`.replace(/^0+(?=\d)/, '')
+  return digits === '' ? '0' : digits
+}
+const cost = (list: [string | null, string | null], paid: [string | null, string | null], plans: string[] = []) => ({
+  list_spent: list[0], list_estimated: list[1], list_unpriced: false,
+  paid_spent: paid[0], paid_estimated: paid[1], paid_unknown: false, plans,
+  list_cost_micros: usdMicros(list[0]) ?? usdMicros(list[1]),
+  paid_micros: usdMicros(paid[0]) ?? usdMicros(paid[1]),
+})
 const PLANNING = ['model', 'tokens', 'list_cost', 'paid']
 
 function world(): Fixtures {
@@ -131,7 +142,7 @@ test('cost stays with people who may see usage; tokens and model do not need it'
   expect(names).not.toContain('Paid')
 })
 
-for (const theme of ['light', 'dark'] as const) test(`keyboard focus exposes calibration, subscription and partial-data descriptions in ${theme}`, async ({ page }) => {
+for (const theme of ['light', 'dark'] as const) test(`the focused row exposes calibration, subscription and partial-data descriptions in ${theme}`, async ({ page }) => {
   const data = world()
   chooseAll(data)
   const built = data.nodes.find(n => n.key === 'PHAROS-11')!.planning!
@@ -144,20 +155,25 @@ for (const theme of ['light', 'dark'] as const) test(`keyboard focus exposes cal
   await mockWork(page, data)
   await page.setViewportSize({ width: 1600, height: 900 })
   await page.goto('/p/PHAROS?sort=key')
+  const grid = page.locator('table.tickets')
+  await grid.focus()
+  await page.keyboard.press('j')
+  await expect(grid).toBeFocused()
+  const ring = await page.locator('tr.ticket-row.cursor td:first-child').evaluate(el => getComputedStyle(el, '::after').boxShadow)
+  expect(ring).not.toBe('none')
   for (const [key, column, description] of [
     ['PHAROS-11', '.plan-model', /Model registry, revision/],
     ['PHAROS-11', '.c-tokens .plan-figure', /1 session has no usage report yet.*default 5M\/h/s],
     ['PHAROS-11', '.c-list-cost .plan-figure', /lower bound/],
     ['PHAROS-12', '.c-paid .plan-figure', /Max 20x.*no billing on record/s],
   ] as const) {
-    const trigger = row(page, key).locator(column)
-    await expect(trigger).toHaveAttribute('tabindex', '0')
+    const line = row(page, key)
+    const trigger = line.locator(column)
+    await expect(trigger).not.toHaveAttribute('tabindex', '0')
     await expect(trigger).toHaveAccessibleDescription(description)
-    // Traverse back onto the trigger with a real Tab, exercising TooltipHost.
-    await trigger.focus()
-    await page.keyboard.press('Shift+Tab')
-    await page.keyboard.press('Tab')
-    await expect(trigger).toBeFocused()
+    await expect(line).toHaveAttribute('aria-describedby', new RegExp(`plan-${data.nodes.find(n => n.key === key)!.id}-${column.includes('plan-model') ? 'model' : column.includes('tokens') ? 'tokens' : column.includes('list-cost') ? 'list_cost' : 'paid'}`))
+    await expect(line).toHaveAccessibleDescription(description)
+    await trigger.hover()
     await expect(page.locator('.tooltip')).toBeVisible()
     await expect(page.locator('.tooltip')).toHaveText(description)
     if (column === '.c-paid .plan-figure') {
@@ -166,8 +182,43 @@ for (const theme of ['light', 'dark'] as const) test(`keyboard focus exposes cal
     }
     await page.keyboard.press('Escape')
     await expect(page.locator('.tooltip')).toHaveCount(0)
-    await expect(trigger).toHaveAccessibleDescription(description)
+    await expect(line).toHaveAccessibleDescription(description)
   }
+})
+
+test('planning cells stay out of tab order', async ({ page }) => {
+  const data = world()
+  chooseAll(data)
+  const sample = data.nodes.find(n => n.key === 'PHAROS-11')!
+  for (let i = 0; i < 34; i++) {
+    data.nodes.push({ ...sample, id: `n-extra-${i}`, key: `PHAROS-${20 + i}`, title: `Extra planning row ${i + 1}`, fields: { ...sample.fields }, planning: sample.planning })
+  }
+  await mockWork(page, data)
+  await page.setViewportSize({ width: 2600, height: 900 })
+  await page.goto('/p/PHAROS?sort=key&closed=1')
+  const rows = page.locator('tr.ticket-row:not(.ghost)')
+  await expect(rows).toHaveCount(41)
+  await expect(page.locator('td.c-model, td.c-tokens, td.c-list-cost, td.c-paid')).toHaveCount(41 * 4)
+  await page.locator('table.tickets').focus()
+  await expect(page.locator('tr.ticket-row.cursor')).toHaveCount(1)
+  const stops: string[] = []
+  for (let i = 0; i < 250 && stops.length < 220; i++) {
+    await page.keyboard.press('Tab')
+    const where = await page.evaluate(() => {
+      const el = document.activeElement
+      if (!(el instanceof HTMLElement) || !el.closest('.tickets tbody')) return ''
+      return el.className
+    })
+    if (!where) {
+      if (stops.length) break
+      continue
+    }
+    stops.push(where)
+  }
+  expect(stops.some(name => /plan-model|plan-figure/.test(name)), stops.join('\n')).toBe(false)
+  // Status buttons, plus the cursor row's two actions: about 43, not 41×4 cells.
+  expect(stops.length).toBeGreaterThanOrEqual(41)
+  expect(stops.length).toBeLessThanOrEqual(43)
 })
 
 test('empty planning columns stay hidden, chosen or automatic', async ({ page }) => {
