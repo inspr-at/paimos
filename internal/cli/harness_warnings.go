@@ -31,9 +31,10 @@ func (rt *runtime) printEstimateWarnings(warnings []harness.EstimateWarning, at 
 	}
 }
 
-// One-shot invocations share a value-free private warning receipt under
-// ~/.aeon, independent of whether the worker lease came from a file or stdin.
-// Run-heartbeat keeps its receipts in its existing private state directory.
+// One-shot invocations share a value-free warning receipt under ~/.aeon.
+// That directory is often already 0755 for config, so the receipt itself
+// lives in a child this process creates at 0700. The lease may come from a
+// file or stdin. Run-heartbeat keeps its receipts in its private state directory.
 func (rt *runtime) printHeartbeatWarnings(out any, session, _ string) {
 	home, _ := os.UserHomeDir()
 	rt.printHeartbeatWarningsHome(out, session, home)
@@ -72,10 +73,14 @@ func openHeartbeatWarningHold(home, session string) (heartbeatHold, error) {
 	if !filepath.IsAbs(home) || !validUUID(session) {
 		return heartbeatHold{}, errHeartbeatState
 	}
-	dir, err := openPrivateHeartbeatDir(filepath.Join(home, ".aeon"))
+	root := filepath.Join(home, ".aeon")
+	if err := acceptHeartbeatConfigDir(root); err != nil {
+		return heartbeatHold{}, err
+	}
+	receipts, err := openPrivateHeartbeatDir(filepath.Join(root, "heartbeat-warnings"))
 	if err != nil {
 		return heartbeatHold{}, err
 	}
-	defer dir.Close()
-	return openHeartbeatHold(filepath.Join(dir.Name(), ".heartbeat-warnings-"+session))
+	defer receipts.Close()
+	return openHeartbeatHold(filepath.Join(receipts.Name(), session))
 }

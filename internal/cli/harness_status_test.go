@@ -74,6 +74,114 @@ func samePointer[T comparable](a, b *T) bool {
 	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
+func TestReadAgentStatusKeepsTheValidFieldWhenTheOtherIsInvalid(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "progress.json")
+	for _, tc := range []struct {
+		raw     string
+		pct     *int
+		minutes *float64
+	}{
+		{`{"pct":40,"remaining_min":"25"}`, ptr(40), nil},
+		{`{"pct":101,"remaining_min":25}`, nil, ptr(25.0)},
+	} {
+		if err := os.WriteFile(path, []byte(tc.raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+		got, ok := readAgentStatus(heartbeatOptions{StatusFile: path})
+		if ok || !samePointer(got.Progress, tc.pct) || !samePointer(got.Remaining, tc.minutes) {
+			t.Fatalf("%s: ok=%t %+v", tc.raw, ok, got)
+		}
+	}
+}
+
+func TestHeartbeatRestartWithoutTicketKeepsEstimates(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "progress.json")
+	if err := os.WriteFile(path, []byte(`{"pct":40,"remaining_min":25,"note":"Current step"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var calls []hbCall
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/nodes" && r.URL.Query().Get("q") == "AEON-465" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{map[string]any{
+				"id": transcriptEntryID, "key": "AEON-465", "kind_id": "ticket-kind", "title": "ETA",
+			}}})
+			return true
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, _ := heartbeatRuntime(t, srv)
+	o := heartbeatTestOptions(home)
+	o.StatusFile = path
+	o.Ticket = "AEON-465"
+	o.Shape = "ship"
+	deps := heartbeatDeps{alive: func(int) bool { return true }}
+	session, created, err := rt.openHeartbeatSession(t.Context(), o, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created || session.disk.BoundTicket != "AEON-465" {
+		session.hold.release()
+		t.Fatalf("registration did not persist the ticket: created=%t ticket=%q", created, session.disk.BoundTicket)
+	}
+	if err := rt.heartbeatBeat(t.Context(), o, deps, &session); err != nil {
+		session.hold.release()
+		t.Fatal(err)
+	}
+	if err := saveHeartbeatSession(&session); err != nil {
+		session.hold.release()
+		t.Fatal(err)
+	}
+	session.hold.release()
+
+	o.Ticket = ""
+	o.Shape = ""
+	resumed, created, err := rt.openHeartbeatSession(t.Context(), o, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resumed.hold.release()
+	if created || resumed.disk.BoundTicket != "AEON-465" {
+		t.Fatalf("restart lost the bound ticket: created=%t ticket=%q", created, resumed.disk.BoundTicket)
+	}
+	if err := rt.heartbeatBeat(t.Context(), o, deps, &resumed); err != nil {
+		t.Fatal(err)
+	}
+	beats := hbWhere(calls, http.MethodPost, "/heartbeat")
+	if len(beats) != 2 {
+		t.Fatalf("beats %d", len(beats))
+	}
+	registrations := 0
+	for _, call := range calls {
+		if call.method == http.MethodPost && strings.HasSuffix(call.path, "/harness-sessions") {
+			registrations++
+			if call.body["ticket_node_id"] != transcriptEntryID {
+				t.Fatalf("registration ticket %#v", call.body["ticket_node_id"])
+			}
+		}
+	}
+	if registrations != 1 {
+		t.Fatalf("restart registered again: %d", registrations)
+	}
+	for i, beat := range beats {
+		if beat.body["progress_pct"] != float64(40) {
+			t.Fatalf("beat %d dropped progress: %#v", i, beat.body["progress_pct"])
+		}
+		ready, err := time.Parse(time.RFC3339Nano, beat.body["eta_ready_at"].(string))
+		if err != nil || ready.IsZero() {
+			t.Fatalf("beat %d dropped ETA: %#v %v", i, beat.body["eta_ready_at"], err)
+		}
+	}
+}
+
 func TestHeartbeatStatusFileSentOnEachBeatAndMissingDoesNotFail(t *testing.T) {
 	home, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -158,11 +266,47 @@ func TestHeartbeatWarningsRateLimitedAcrossRestart(t *testing.T) {
 	if strings.Count(stderr.String(), "missing_eta") != 1 {
 		t.Fatal("one-shot receipts did not survive invocation", stderr.String())
 	}
-	for _, path := range []string{filepath.Join(home, ".aeon"), filepath.Join(home, ".aeon", ".heartbeat-warnings-"+transcriptSessionID)} {
+	receipts := filepath.Join(home, ".aeon", "heartbeat-warnings")
+	for _, path := range []string{filepath.Join(home, ".aeon"), receipts, filepath.Join(receipts, transcriptSessionID)} {
 		st, err := os.Stat(path)
 		if err != nil || st.Mode().Perm() != 0700 {
 			t.Fatalf("receipt directory is not private: %s, %v", path, err)
 		}
+	}
+}
+
+func TestHeartbeatWarningReceiptsOnceWhenAeonIs0755(t *testing.T) {
+	home := t.TempDir()
+	aeon := filepath.Join(home, ".aeon")
+	if err := os.Mkdir(aeon, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(aeon, 0755); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	warnings := []harness.EstimateWarning{{Code: "missing_eta", Hint: "Report ready ETA"}, {Code: "missing_progress", Hint: "Report percent"}}
+	response := map[string]any{"warnings": warnings}
+	rt.printHeartbeatWarningsHome(response, transcriptSessionID, home)
+	rt.printHeartbeatWarningsHome(response, transcriptSessionID, home)
+	if strings.Count(stderr.String(), "missing_eta") != 1 || strings.Count(stderr.String(), "missing_progress") != 1 {
+		t.Fatal("0755 home reprinted warning codes", stderr.String())
+	}
+	st, err := os.Stat(aeon)
+	if err != nil || st.Mode().Perm() != 0755 {
+		t.Fatalf("config directory was relabeled: %v %v", st.Mode().Perm(), err)
+	}
+	receipts := filepath.Join(aeon, "heartbeat-warnings")
+	for _, path := range []string{receipts, filepath.Join(receipts, transcriptSessionID)} {
+		info, err := os.Stat(path)
+		if err != nil || !info.IsDir() || info.Mode().Perm() != 0700 {
+			t.Fatalf("receipt child is not a private directory: %s %v", path, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(aeon, ".heartbeat-warnings-"+transcriptSessionID)); !os.IsNotExist(err) {
+		t.Fatal("receipt was written directly into the 0755 directory", err)
 	}
 }
 
@@ -385,15 +529,28 @@ func TestHeartbeatWarningReceiptsStayUnderPrivateHome(t *testing.T) {
 	if _, err := openHeartbeatWarningHold(home, "../../outside"); err == nil {
 		t.Fatal("accepted an invalid receipt session")
 	}
-	unsafeHome := t.TempDir()
-	unsafeDir := filepath.Join(unsafeHome, ".aeon")
-	if err := os.Mkdir(unsafeDir, 0755); err != nil {
+	for _, mode := range []os.FileMode{0775, 0777} {
+		unsafeHome := t.TempDir()
+		unsafeDir := filepath.Join(unsafeHome, ".aeon")
+		if err := os.Mkdir(unsafeDir, mode); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(unsafeDir, mode); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := openHeartbeatWarningHold(unsafeHome, transcriptSessionID); err == nil {
+			t.Fatalf("accepted receipt root mode %o", mode)
+		}
+	}
+	linkHome := t.TempDir()
+	target := t.TempDir()
+	if err := os.Mkdir(filepath.Join(target, "real-aeon"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(unsafeDir, 0755); err != nil {
+	if err := os.Symlink(filepath.Join(target, "real-aeon"), filepath.Join(linkHome, ".aeon")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := openHeartbeatWarningHold(unsafeHome, transcriptSessionID); err == nil {
-		t.Fatal("accepted a non-private receipt root")
+	if _, err := openHeartbeatWarningHold(linkHome, transcriptSessionID); err == nil {
+		t.Fatal("followed a symlinked receipt root")
 	}
 }

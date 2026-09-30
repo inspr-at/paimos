@@ -819,6 +819,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		body["parent_harness_session_id"] = strings.ToLower(o.Parent)
 	}
 	attachVendorSessionRef(body, o.Harness, ref, lease)
+	var boundTicket string
 	if o.Ticket != "" {
 		ticketID, err := rt.harnessTicket(projectID, o.Ticket, 0)
 		if err != nil {
@@ -832,13 +833,14 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		}
 		body["ticket_node_id"] = *ticketID
 		body["work_shape"] = o.Shape
+		boundTicket = strings.TrimSpace(o.Ticket)
 	}
 	var out struct {
 		ID string `json:"id"`
 	}
 	// Capture the owner before registration: a long predecessor timeout must
 	// not attach the new generation to a process that reused the owner's PID.
-	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID}
+	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID, BoundTicket: boundTicket}
 	if proved.Start != "" {
 		disk.OwnerPID = proved.PID
 		disk.OwnerStart = proved.Start
@@ -1062,7 +1064,15 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if !status.ModifiedAt.IsZero() && now.Sub(status.ModifiedAt) > heartbeatProgressStale {
 		rt.printEstimateWarnings([]harness.EstimateWarning{{Code: "stale_progress", Hint: "Status file has not been updated for over 30 minutes; refresh pct, remaining_min and note."}}, &session.disk.WarningAt, now)
 	}
-	if o.Role == "worker" && o.Ticket != "" {
+	// Registration persists the ticket. A restarted helper for that same
+	// generation often has an empty --ticket flag and would otherwise drop
+	// progress_pct and eta_ready_at, leaving the server on missing_progress
+	// and missing_eta. An explicit flag still wins.
+	ticket := strings.TrimSpace(o.Ticket)
+	if ticket == "" && session != nil {
+		ticket = strings.TrimSpace(session.disk.BoundTicket)
+	}
+	if o.Role == "worker" && ticket != "" {
 		if status.Progress != nil {
 			body["progress_pct"] = *status.Progress
 		}
