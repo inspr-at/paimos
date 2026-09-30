@@ -385,7 +385,8 @@ func fillVendorRef(ctx context.Context, tx pgx.Tx, existing *Session, vendor []b
 		return nil
 	}
 	if existing.vendorRefDigest == nil {
-		if _, err := tx.Exec(ctx, `UPDATE harness_sessions SET vendor_ref_digest=$2 WHERE id=$1 AND vendor_ref_digest IS NULL`, existing.ID, vendor); err != nil {
+		// The body names the row it was made from: keep its version current.
+		if err := tx.QueryRow(ctx, `UPDATE harness_sessions SET vendor_ref_digest=$2 WHERE id=$1 AND vendor_ref_digest IS NULL RETURNING row_version`, existing.ID, vendor).Scan(&existing.RowVersion); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return registrationConflict(err)
 		}
 		existing.vendorRefDigest = vendor
@@ -729,7 +730,7 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		owner = p.ID
 	}
 	if owner != "" {
-		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=(SELECT coalesce(linked_to,id) FROM principals WHERE id=$2 AND kind='person') WHERE id=$1 RETURNING owner_principal_id::text`, s.ID, owner).Scan(&s.ownerID); err != nil {
+		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=(SELECT coalesce(linked_to,id) FROM principals WHERE id=$2 AND kind='person') WHERE id=$1 RETURNING owner_principal_id::text,row_version`, s.ID, owner).Scan(&s.ownerID, &s.RowVersion); err != nil {
 			return nil, err
 		}
 	}
