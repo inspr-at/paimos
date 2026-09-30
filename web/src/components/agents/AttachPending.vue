@@ -5,6 +5,7 @@ import { attachOutcome, listPendingAttach, metadataOnlyAttach, type AttachOutcom
 import { can, onAccessChange } from '../../lib/authz'
 import { duration } from '../../lib/agentState'
 import { HARNESS_NAME } from '../../lib/capacity'
+import { useIdentityScope } from '../../lib/useIdentityScope'
 import { usePoller } from '../../lib/usePolledData'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
@@ -18,27 +19,25 @@ const emit = defineEmits<{ review: [request: AttachReview] }>()
 
 const session = useSession()
 const allowed = computed(() => session.identity?.principal.kind === 'person' && can('account.manage'))
-// Whose list this is. An answer belongs to the person and workspace that asked for
-// it, in the generation that asked: anything else is dropped, never shown.
-const owner = computed(() => allowed.value ? `${session.identity?.tenant.id}/${session.identity?.principal.id}` : '')
-const items = ref<AttachReview[]>([])
+// Whose list this is. Every read runs in the identity scope (one person, one
+// workspace, one generation): an answer for anyone else is dropped, never shown.
+const scope = useIdentityScope(() => allowed.value)
+const owner = scope.owner
+const reads = scope.lane()
+// The list carries its owner, so even a row that outlived a reset could not be shown to the next person.
+const held = ref<{ owner: string; list: AttachReview[] }>({ owner: '', list: [] })
+const items = computed(() => owner.value && held.value.owner === owner.value ? held.value.list : [])
 const dismissed = ref(new Set<string>())
-let inflight: AbortController | undefined
-let generation = 0
 function reset() {
-  generation++; inflight?.abort(); inflight = undefined
-  items.value = []; dismissed.value = new Set()
+  scope.reset()
+  held.value = { owner: '', list: [] }; dismissed.value = new Set()
 }
 async function refresh() {
   if (!owner.value) { reset(); return }
-  const asked = { generation, owner: owner.value }
-  inflight?.abort()
-  const controller = new AbortController()
-  inflight = controller
-  try {
-    const next = await listPendingAttach(controller.signal)
-    if (inflight === controller && asked.generation === generation && asked.owner === owner.value) items.value = next
-  } catch { /* a missed read keeps what is shown; the next tick asks again */ }
+  await reads.run(async ({ step, signal }) => {
+    const asked = owner.value
+    held.value = { owner: asked, list: await step(listPendingAttach(signal)) }
+  }, { failed: () => { /* a missed read keeps what is shown; the next tick asks again */ } })
 }
 const poller = usePoller(refresh, 5_000, { enabled: () => allowed.value })
 const stopAccess = onAccessChange(change => { if (change === 'reset') reset(); void refresh() })

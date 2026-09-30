@@ -17,12 +17,19 @@ export const stripAttachCode = (path: string) => path.replace(/#attach=[^]*$/, '
 // (a sign-in return, a feedback path, an error report) and leaves it here, in
 // memory only, until the page that opens the review takes it. A code nobody takes
 // before a sign-in redirect is dropped: it never outlives the session it was for.
+// It also stays with the person it arrived for: a code held while one person was
+// signed in is never offered to another. One that arrived before anybody was signed
+// in (a fresh tab) goes to whoever that tab signs in.
 // The page hears about it once the address is clean and the navigation is over, so
 // the session refresh that navigation starts cannot close the review it opens.
-let held: string | null = null
+let held: { code: string; owner: string } | null = null
 const listeners = new Set<() => void>()
-export function holdAttachCode(code: string): void { held = code }
+export function holdAttachCode(code: string, owner: string): void { held = { code, owner } }
 export function announceAttachCode(): void { if (held) for (const listener of [...listeners]) listener() }
-export function takeAttachCode(): string | null { const code = held; held = null; return code }
+export function takeAttachCode(owner: string): string | null {
+  const taken = held
+  held = null
+  return taken && owner && (!taken.owner || taken.owner === owner) ? taken.code : null
+}
 export function dropAttachCode(): void { held = null }
 export function onAttachCode(listener: () => void): () => void { listeners.add(listener); return () => listeners.delete(listener) }

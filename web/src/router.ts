@@ -8,6 +8,7 @@ import { sessionEnded } from './lib/api'
 import { can, ensurePermissions, permissionsRevoked } from './lib/authz'
 import { toast } from './lib/toast'
 import { announceAttachCode, attachCodeFromHash, dropAttachCode, hasAttachFragment, holdAttachCode } from './lib/attachLink'
+import { scopeOwner } from './lib/identityScope'
 import { expiredSignIn, takeSignInReturn } from './lib/signInReturn'
 import ProjectsView from './views/ProjectsView.vue'
 import SignInView from './views/SignInView.vue'
@@ -129,7 +130,7 @@ router.beforeEach(async (to, from) => {
   // copy it; the page that opens the review picks it up from memory (AEON-440).
   if (hasAttachFragment(to.hash)) {
     const code = attachCodeFromHash(to.hash)
-    if (code && to.path === '/agents') holdAttachCode(code)
+    if (code && to.path === '/agents') holdAttachCode(code, scopeOwner(useSession().identity))
     return { path: to.path, query: to.query, hash: '', replace: true }
   }
   // Canonical section URLs replace bookmarks without adding a history step.

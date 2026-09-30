@@ -259,6 +259,97 @@ test('the attach code never reaches a sign-in address, even when the session has
   expect(await page.evaluate(() => `${sessionStorage.getItem('aeon.signInReturn') ?? ''}${localStorage.length}`)).not.toMatch(/123456789/)
 })
 
+// Ola signs in to another workspace in this tab. The address gets a harmless fragment:
+// the guard that runs on every navigation refreshes the session, so she is the identity
+// from here on while anything asked for the previous person may still be on its way.
+async function signInAsOla(page: Page) {
+  await page.route('**/api/me', route => route.fulfill({ json: OLA }))
+  await page.evaluate(() => { location.hash = '#switch' })
+}
+const ADMIN_PERMISSIONS = (project?: string) => {
+  const value = mockEffectivePermissions('admin', project)
+  value.workspace.permissions = [...value.workspace.permissions, 'account.manage']
+  return value
+}
+
+// Every async path of the attach flow answers to the person who started it (AEON-440).
+test('a link code waiting for slow permissions never opens for the next person', async ({ page }) => {
+  await setup(page)
+  const slow = gate()
+  let switched = false, before = 0
+  await page.route('**/api/me/permissions*', async route => {
+    if (!switched) { before++; await slow.passed }
+    await route.fulfill({ json: ADMIN_PERMISSIONS(new URL(route.request().url()).searchParams.get('project_id') ?? undefined) }).catch(() => undefined)
+  })
+  await page.goto('/agents#attach=123456789')
+  await expect.poll(() => before).toBeGreaterThanOrEqual(1)
+  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
+  await expect.poll(() => new URL(page.url()).hash).toBe('')
+  await page.waitForTimeout(300)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  // Ola's permissions answer at once; the previous person's are still on their way.
+  switched = true
+  await signInAsOla(page)
+  await expect(page.getByRole('button', { name: 'Attach session' })).toBeVisible()
+  slow.open()
+  await page.waitForTimeout(400)
+  // The code was the previous person's: it opens nothing for Ola.
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByLabel('Attach code')).toHaveValue('')
+  // Her own link still works.
+  await page.evaluate(() => { location.hash = '#attach=987654321' })
+  await expect(page.getByLabel('Attach code')).toHaveValue('987 654 321')
+})
+
+test('names still loading for the previous person never enable approval for the next one', async ({ page }) => {
+  await setup(page)
+  const first = gate(), second = gate()
+  let switched = false
+  for (const id of ['p-pharos', 'n-2']) await page.route(`**/api/nodes/${id}`, async route => { await (switched ? second : first).passed; await route.fallback() })
+  await list(page, [request('r-wait', 'pending')])
+  await page.goto('/agents')
+  const dialog = page.getByRole('dialog')
+  await strip(page).getByRole('button', { name: 'Review' }).click()
+  await expect(dialog.getByText('Loading…')).toHaveCount(2)
+  switched = true
+  await signInAsOla(page)
+  await expect(dialog).toHaveCount(0)
+  // Ola's list carries the same kind of request; she opens it and her own names are still on their way.
+  await strip(page).getByRole('button', { name: 'Review' }).click()
+  await expect(dialog.getByText('Loading…')).toHaveCount(2)
+  first.open()
+  await page.waitForTimeout(400)
+  // The previous person's names land late: they fill nothing in for her, and approval stays off.
+  await expect(dialog.getByText('Loading…')).toHaveCount(2)
+  await expect(dialog.getByRole('button', { name: 'Allow live watch' })).toBeDisabled()
+  second.open()
+  await expect(dialog).toContainText('PDF worker image')
+  await expect(dialog.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
+})
+
+test('a decision still on its way when the person changes shows nothing to the next person', async ({ page }) => {
+  await setup(page)
+  const answer = gate()
+  let approvals = 0
+  await page.route('**/api/agent-pairing/attach/**', async route => {
+    if (route.request().method() === 'GET') return route.fallback()
+    approvals++
+    await answer.passed
+    await route.fulfill({ json: request('r-wait', 'approved') }).catch(() => undefined)
+  })
+  await list(page, [request('r-wait', 'pending')])
+  await page.goto('/agents')
+  await strip(page).getByRole('button', { name: 'Review' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Allow live watch' }).click()
+  await expect.poll(() => approvals).toBe(1)
+  await signInAsOla(page)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  answer.open()
+  await page.waitForTimeout(400)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByText('Approved. Keep the attach terminal open')).toHaveCount(0)
+})
+
 test('a link followed inside the open Agents page fills the code in again', async ({ page }) => {
   await setup(page)
   await page.goto('/agents')

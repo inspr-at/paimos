@@ -87,16 +87,32 @@ test('an attach fragment never survives into a return path, and a held code is t
   const stop = link.onAttachCode(() => heard.push('heard'))
   link.announceAttachCode()
   assert.deepEqual(heard, [], 'nothing held, nobody is told')
-  link.holdAttachCode('123456789')
+  link.holdAttachCode('123456789', 't1/ada')
   assert.deepEqual(heard, [], 'holding is silent until the navigation has settled')
   link.announceAttachCode()
   assert.deepEqual(heard, ['heard'])
-  assert.equal(link.takeAttachCode(), '123456789')
-  assert.equal(link.takeAttachCode(), null, 'one code opens one review')
-  link.holdAttachCode('987654321'); link.dropAttachCode()
-  assert.equal(link.takeAttachCode(), null, 'a code held for a session that ended is gone')
+  assert.equal(link.takeAttachCode('t1/ada'), '123456789')
+  assert.equal(link.takeAttachCode('t1/ada'), null, 'one code opens one review')
+  link.holdAttachCode('987654321', 't1/ada'); link.dropAttachCode()
+  assert.equal(link.takeAttachCode('t1/ada'), null, 'a code held for a session that ended is gone')
   stop()
-  link.holdAttachCode('111111111'); link.announceAttachCode()
+  link.holdAttachCode('111111111', 't1/ada'); link.announceAttachCode()
   assert.deepEqual(heard, ['heard'])
   link.dropAttachCode()
+})
+
+test('a held attach code stays with the person it arrived for', async () => {
+  const link = await import('../src/lib/attachLink.ts')
+  // Held while one person was signed in: another person, another workspace or nobody never gets it, and it is gone afterwards.
+  for (const other of ['t1/grace', 't2/ada', '']) {
+    link.holdAttachCode('123456789', 't1/ada')
+    assert.equal(link.takeAttachCode(other), null, `not for ${other || 'nobody'}`)
+    assert.equal(link.takeAttachCode('t1/ada'), null, 'and the refusal consumed it')
+  }
+  // Held before anybody was signed in (a fresh tab): it goes to whoever that tab signs in, once.
+  link.holdAttachCode('123456789', '')
+  assert.equal(link.takeAttachCode(''), null, 'nobody is signed in yet, so nothing is handed out')
+  link.holdAttachCode('123456789', '')
+  assert.equal(link.takeAttachCode('t2/grace'), '123456789')
+  assert.equal(link.takeAttachCode('t2/grace'), null)
 })

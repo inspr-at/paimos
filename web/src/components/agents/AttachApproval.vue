@@ -6,6 +6,7 @@ import { brand } from '../../lib/brand'
 import { formatAttachCode, onAttachCode, takeAttachCode } from '../../lib/attachLink'
 import { attachAction, metadataOnlyAttach, type AttachReview } from '../../lib/attachWatch'
 import { can, ensurePermissions, onAccessChange } from '../../lib/authz'
+import { useIdentityScope } from '../../lib/useIdentityScope'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 
@@ -13,6 +14,15 @@ const identity = useSession()
 // A decision changes what /agents lists as waiting; the page refreshes it.
 const emit = defineEmits<{ changed: [] }>()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('account.manage'))
+// Nothing here awaits outside an identity scope (AEON-440). `link` belongs to the
+// person who followed a link, before permissions are known; `review` to the dialog
+// and only while that person may manage accounts. Each drops what is still on its
+// way the moment the person, the workspace or the right changes.
+const link = useIdentityScope()
+const dialogScope = useIdentityScope(() => allowed.value)
+const lookups = dialogScope.lane()
+const decisions = dialogScope.lane()
+const labelReads = dialogScope.lane()
 const dialog = ref<HTMLDialogElement>()
 const codeInput = ref<HTMLInputElement>()
 const code = ref('')
@@ -28,40 +38,43 @@ const project = ref('')
 const ticket = ref('')
 // Approval waits until the person can read which project and ticket it covers.
 const labelsReady = ref(false)
-let operation: AbortController | undefined
-let labelsLoad: AbortController | undefined
 function close() {
-  operation?.abort(); operation = undefined; labelsLoad?.abort(); labelsLoad = undefined
+  dialogScope.reset()
   dialog.value?.close(); code.value = ''; review.value = null; error.value = ''; busy.value = false; project.value = ''; ticket.value = ''; labelsReady.value = false
 }
-async function open() { close(); dialog.value?.showModal(); await nextTick(); codeInput.value?.focus() }
+function open() { close(); dialog.value?.showModal(); nextTick(() => codeInput.value?.focus()) }
 // The link `aeon-agentd attach` prints only fills the code in; the person still
-// reviews and approves. The router took it off the address bar and holds it in memory.
-async function openWithCode(value: string) { await open(); code.value = formatAttachCode(value) }
-async function followLink() {
-  if (!identity.identity) return
-  const linked = takeAttachCode()
-  if (!linked) return
-  const settled = await ensurePermissions()
-  if (settled === 'known' && allowed.value) { await nextTick(); await openWithCode(linked) }
+// reviews and approves. The router took it off the address bar and holds it in memory
+// for the person it arrived for; waiting for permissions is part of the same scope, so
+// a person who replaced them meanwhile never gets it.
+function followLink() {
+  if (!identity.identity) return Promise.resolve()
+  const linked = takeAttachCode(link.owner.value)
+  if (!linked) return Promise.resolve()
+  return link.run(async ({ step }) => {
+    if (await step(ensurePermissions()) !== 'known' || !allowed.value) return
+    await step(nextTick())
+    open(); code.value = formatAttachCode(linked)
+  })
 }
 onMounted(followLink)
 const stopLink = onAttachCode(followLink)
 watch(() => !!identity.identity, followLink)
 // Names are a convenience; approval binds the immutable IDs in the snapshot. A name
-// that cannot be read is replaced by the ID itself. Loading never shares a controller
+// that cannot be read is replaced by the ID itself. Loading never shares a lane
 // with a decision, so deciding cannot cancel the names.
-async function loadLabels(result: AttachReview) {
-  labelsLoad?.abort()
-  const controller = new AbortController(); labelsLoad = controller
+function loadLabels(result: AttachReview) {
   labelsReady.value = false; project.value = ''; ticket.value = ''
-  const names = await Promise.allSettled([getNode(result.snapshot.project_id), getNode(result.snapshot.ticket_id)])
-  if (labelsLoad !== controller || controller.signal.aborted) return
-  project.value = names[0].status === 'fulfilled' ? names[0].value.title : result.snapshot.project_id
-  ticket.value = names[1].status === 'fulfilled' ? `${names[1].value.key} · ${names[1].value.title}` : result.snapshot.ticket_id
-  labelsReady.value = true
+  const named = (names: PromiseSettledResult<{ key: string; title: string }>[]) => {
+    project.value = names[0].status === 'fulfilled' ? names[0].value.title : result.snapshot.project_id
+    ticket.value = names[1].status === 'fulfilled' ? `${names[1].value.key} · ${names[1].value.title}` : result.snapshot.ticket_id
+    labelsReady.value = true
+  }
+  void labelReads.run(async ({ step }) => named(await step(Promise.allSettled([getNode(result.snapshot.project_id), getNode(result.snapshot.ticket_id)]))), {
+    failed: () => named([{ status: 'rejected', reason: undefined }, { status: 'rejected', reason: undefined }]),
+  })
 }
-function present(result: AttachReview) { review.value = result; code.value = ''; void loadLabels(result) }
+function present(result: AttachReview) { review.value = result; code.value = ''; loadLabels(result) }
 // Review a request the page already lists: same review, same digests, no code to type.
 function show(result: AttachReview) {
   if (!allowed.value) return
@@ -69,25 +82,28 @@ function show(result: AttachReview) {
   present(result)
 }
 defineExpose({ show })
-async function lookup() {
+function lookup() {
   const normalized = code.value.replace(/[\s-]/g, '')
-  if (!allowed.value || !/^\d{9}$/.test(normalized)) { error.value = 'Enter the nine-digit code from your terminal.'; return }
-  operation?.abort(); const controller = new AbortController(); operation = controller; busy.value = true; error.value = ''
-  try {
-    const result = await attachAction('/lookup', { user_code: normalized }, controller.signal)
-    if (operation !== controller || controller.signal.aborted) return
-    present(result)
-  } catch (e) { if (!controller.signal.aborted) error.value = e instanceof Error ? e.message : 'Attach unavailable.' }
-  finally { if (operation === controller) busy.value = false }
+  if (!allowed.value || !/^\d{9}$/.test(normalized)) { error.value = 'Enter the nine-digit code from your terminal.'; return Promise.resolve() }
+  return lookups.run(async ({ step, signal }) => {
+    busy.value = true; error.value = ''
+    present(await step(attachAction('/lookup', { user_code: normalized }, signal)))
+  }, {
+    failed: e => { error.value = e instanceof Error ? e.message : 'Attach unavailable.' },
+    settled: () => { busy.value = false },
+  })
 }
-async function decide(revoke = false) {
-  if (!allowed.value || !review.value || busy.value || (!revoke && !labelsReady.value)) return
-  operation?.abort(); const controller = new AbortController(); operation = controller; busy.value = true; error.value = ''
-  try {
-    const result = await attachAction(`/${encodeURIComponent(review.value.request_id)}/${revoke ? 'revoke' : 'approve'}`, revoke ? {} : { request_digest: review.value.request_digest, ...(review.value.consent_digest ? { consent_digest: review.value.consent_digest } : {}) }, controller.signal)
-    if (operation === controller && !controller.signal.aborted) { review.value = result; emit('changed') }
-  } catch (e) { if (!controller.signal.aborted) error.value = e instanceof Error ? e.message : 'Could not update this watch.' }
-  finally { if (operation === controller) busy.value = false }
+function decide(revoke = false) {
+  if (!allowed.value || !review.value || busy.value || (!revoke && !labelsReady.value)) return Promise.resolve()
+  const current = review.value
+  return decisions.run(async ({ step, signal }) => {
+    busy.value = true; error.value = ''
+    const result = await step(attachAction(`/${encodeURIComponent(current.request_id)}/${revoke ? 'revoke' : 'approve'}`, revoke ? {} : { request_digest: current.request_digest, ...(current.consent_digest ? { consent_digest: current.consent_digest } : {}) }, signal))
+    review.value = result; emit('changed')
+  }, {
+    failed: e => { error.value = e instanceof Error ? e.message : 'Could not update this watch.' },
+    settled: () => { busy.value = false },
+  })
 }
 // The same person refreshing their session keeps the review; a different person, workspace or right closes it.
 watch(() => `${identity.identity?.tenant.id}/${identity.identity?.principal.id}/${allowed.value}`, close)
