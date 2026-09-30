@@ -258,7 +258,11 @@ func restartPairedClaude(ctx context.Context, s pairedRuntimeSupervisor, old, ne
 // plus a per-account interpreter pin that was validated on its own. Identity,
 // launcher, home and every other fence still have to match.
 func claudeRepinPreservesOtherBindings(old, next agentsetup.RuntimeConfig) bool {
+	if !validAttachIdentityRefresh(old, next) {
+		return false
+	}
 	rolled := next
+	rolled.AttachIdentities = old.AttachIdentities
 	rolled.Accounts = append([]agentsetup.RuntimeAccount(nil), next.Accounts...)
 	rolled.NodePath, rolled.ClaudeSDKPath, rolled.ClaudeRepinID = old.NodePath, old.ClaudeSDKPath, old.ClaudeRepinID
 	if len(rolled.Accounts) != len(old.Accounts) {
@@ -445,6 +449,9 @@ func runtimeRefresh(current, next agentsetup.RuntimeConfig) (updated agentsetup.
 	if next.Origin != current.Origin || next.TenantID != current.TenantID || next.PrincipalID != current.PrincipalID || next.DaemonID != current.DaemonID || next.Workspace != current.Workspace || next.ComputerID != current.ComputerID {
 		return current, nil, nil, false, false, errors.New("pairing configuration identity changed")
 	}
+	if !validAttachIdentityRefresh(current, next) {
+		return current, nil, nil, false, false, errors.New("attach fallback differs from the approved installation")
+	}
 	if nonPinBindingChanged(current, next) {
 		return current, nil, nil, true, false, errors.New("approved account binding changed")
 	}
@@ -497,4 +504,27 @@ func pairedPreflight(ctx context.Context, root, origin string, api agentsetup.Pa
 		return false, err
 	}
 	return e.DispatchPermitted()
+}
+
+// A repair can add/renew only identities derived from the approved account
+// entrypoints. Existing roots survive absent old versions; removing a fallback
+// narrows trust. Unrelated map edits cannot ride an interpreter or Claude repin.
+func validAttachIdentityRefresh(current, next agentsetup.RuntimeConfig) bool {
+	for harness, identity := range next.AttachIdentities {
+		if old, ok := current.AttachIdentities[harness]; ok && old == identity {
+			continue
+		}
+		valid := false
+		for _, account := range next.Accounts {
+			if account.Harness != harness {
+				continue
+			}
+			derived := agentsetup.RecordAttachIdentity(harness, account.Path, next.Workspace)
+			valid = valid || derived != nil && *derived == identity
+		}
+		if !valid {
+			return false
+		}
+	}
+	return true
 }

@@ -568,12 +568,41 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 			candidate = i
 		}
 	}
-	if index < 0 || candidate < 0 || !pinBlocked(config, enrolled.AccountID) {
+	if index < 0 || candidate < 0 {
 		return e.progress(s), exists
 	}
 	current := config.Accounts[index]
 	if current.Path != c.Path || current.Home != c.Home || current.Identity != c.Identity {
 		return e.progress(s), errors.New("the signed-in account or executable differs from the enrolled one; remove this enrollment, then add the harness again")
+	}
+	if !pinBlocked(config, enrolled.AccountID) {
+		identity := RecordAttachIdentity(c.Harness, c.Path, config.Workspace)
+		if identity == nil || config.AttachIdentities[c.Harness] == *identity {
+			return e.progress(s), exists
+		}
+		id, err := uuid()
+		if err != nil {
+			return Progress{}, err
+		}
+		event, _ := json.Marshal(struct {
+			Kind      string         `json:"kind"`
+			ID        string         `json:"id"`
+			At        time.Time      `json:"at"`
+			AccountID string         `json:"account_id"`
+			Harness   string         `json:"harness"`
+			Identity  AttachIdentity `json:"attach_identity"`
+		}{"attach_identity_repaired", id, e.now(), enrolled.AccountID, c.Harness, *identity})
+		if err := e.Store.Write("attach-identity-repair-"+id+".json", event, true); err != nil {
+			return Progress{}, err
+		}
+		config.RecordAttachIdentities()
+		raw, _ = json.Marshal(config)
+		if err := e.Store.Write(RuntimeName, raw, false); err != nil {
+			return Progress{}, err
+		}
+		p := e.progress(s)
+		p.Action = "Local attach identity recorded; restart agentd to use it. No enrollment or interpreter pin changed."
+		return p, nil
 	}
 	current.Node, current.PiNode = c.Node, c.PiNode
 	config.Accounts[index] = current
@@ -601,6 +630,7 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 	if err := e.save(s, false); err != nil {
 		return Progress{}, err
 	}
+	config.RecordAttachIdentities()
 	raw, _ = json.Marshal(config)
 	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
 		return Progress{}, errors.New("pin renewal recorded but runtime update incomplete; rerun add-harness")

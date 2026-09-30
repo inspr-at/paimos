@@ -177,6 +177,7 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.Close(t.Context())
+	m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, nil }
 	m.observe = func(pid int) (attachObservation, error) {
 		if pid == target.PID {
 			return target, nil
@@ -352,6 +353,7 @@ func TestAttachRechecksAncestryAndSessionOnConfirmAndEveryPoll(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer m.Close(t.Context())
+				m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, nil }
 				m.observe = func(pid int) (attachObservation, error) {
 					for _, p := range []attachObservation{peer, target, leader} {
 						if pid == p.PID && !(dead && pid == leader.PID) {

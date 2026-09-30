@@ -52,6 +52,7 @@ func TestAttachLeaseUsesServerDecisionUnderClockSkew(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer m.Close(t.Context())
+				m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, nil }
 				m.observe = func(pid int) (attachObservation, error) {
 					for _, v := range []attachObservation{peer, leader, target} {
 						if v.PID == pid {
@@ -137,6 +138,7 @@ func TestAttachStrictConsentActivation(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer m.Close(t.Context())
+				m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, nil }
 				m.observe = func(pid int) (attachObservation, error) {
 					for _, v := range []attachObservation{peer, leader, target} {
 						if v.PID == pid {

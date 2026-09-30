@@ -989,6 +989,20 @@ text)** at the local prompt, or pass `--status-only` (no transcript needed), to
 report status without reading or sharing conversation text. Missing or unsafe
 transcripts never silently select status-only.
 
+Claude, Codex and Cursor are identified from the kernel-observed running image,
+so an exec wrapper or a vendor auto-update does not require re-pairing. On macOS,
+the daemon verifies the signature against Apple's certificate chain and the
+built-in vendor Team ID; legacy wrapper pairings work after upgrading and
+restarting agentd. Unsigned installations and Linux use a local installation
+root plus owner recorded at pairing or by `repin --harness claude`,
+`add-harness --harness codex` or `add-harness --harness cursor`; restart agentd
+after recording a fallback identity. Unknown layouts retain only the approved exact-file pin.
+The daemon does not interpret or execute wrappers to discover an install root.
+Every image and ancestor must satisfy the existing ownership and permission
+rules, and confirmation and polls recheck the image. Local HTTP 409 diagnostics
+include `harness_identity_mismatch`, `harness_executable_unsafe` or
+`harness_image_changed` with a repair hint; the attach client displays them.
+
 Review the kernel-observed process, physical folder and chosen mode, type `WATCH`
 or `ATTACH` as shown, then enter its nine-digit code under **Agents → Attach
 session** on the paired instance. The approval screen shows the selected mode.
