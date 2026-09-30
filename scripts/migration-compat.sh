@@ -6,8 +6,10 @@ set -euo pipefail
 for tool in docker python3 go; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
-tag="${1:?usage: bash scripts/migration-compat.sh vYYMMDDhhmmss.0.0}"
+tag="${1:?usage: bash scripts/migration-compat.sh vYYMMDDhhmmss.0.0 sha256:DIGEST}"
 [[ "$tag" =~ ^v[0-9]{12}\.0\.0$ ]] || { echo 'Expected an immutable release tag' >&2; exit 1; }
+digest="${2:?Expected the published release image digest}"
+[[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected an immutable image digest' >&2; exit 1; }
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 mkdir -p tmp
@@ -16,7 +18,7 @@ suffix="${tmp##*.}"
 db="aeon-compat-db-$suffix"
 app="aeon-compat-app-$suffix"
 network="aeon-compat-$suffix"
-image="ghcr.io/inspr-at/aeon:${tag#v}"
+image="ghcr.io/inspr-at/aeon@$digest"
 cleanup() {
   docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
@@ -26,8 +28,9 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Previous published release: $tag"
+echo "Previous registry image: $image"
 docker pull --platform linux/amd64 "$image"
-# Resolve the tag to the loaded immutable image ID; both boots use those bytes.
+# Pull the release-note digest, then resolve its local config ID for both boots.
 image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
 [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
 echo "Previous image: $image_id"
@@ -87,6 +90,6 @@ start_previous
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 echo "Migration compatibility passed: $tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  printf 'Previous release %s (%s) served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
-    "$tag" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
+    "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
 fi

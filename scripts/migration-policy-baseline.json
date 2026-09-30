@@ -1,0 +1,9 @@
+{
+  "releasedTag": "v260930115354.0.0",
+  "releasedThrough": 1043,
+  "legacySourceCommit": "67a93036146ba3ab7ddb174187306fe9b6f5e7e9",
+  "legacyFiles": {
+    "1047_enclave_consent.sql": "6a8c5f5fcba1413f91f9599e4c090737e4320b73301dcc0280cd21b1a95fcffb",
+    "1048_roadmap_publication.sql": "a347934bfcbba2ba40759d73621aedbf9120891a2f82221faa596d2b3fc35865"
+  }
+}
