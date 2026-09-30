@@ -94,6 +94,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/rules/doctrine/inbox", m.handle(m.proposeToInbox))
 	mux.HandleFunc("POST /api/rules/doctrine/inbox/{proposalId}/pull-request", m.handle(m.submitInbox))
 	mux.HandleFunc("POST /api/rules/doctrine/inbox/{proposalId}/dismiss", m.handle(m.dismissInbox))
+	mux.HandleFunc("POST /api/rules/doctrine/inbox/{proposalId}/notified", m.handle(m.claimInboxNotice))
 	mux.HandleFunc("POST /api/rules/doctrine/sources", m.handle(m.create))
 	mux.HandleFunc("PUT /api/rules/doctrine/sources/{sourceId}", m.handle(m.update))
 	mux.HandleFunc("DELETE /api/rules/doctrine/sources/{sourceId}", m.handle(m.remove))

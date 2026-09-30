@@ -182,10 +182,24 @@ func readAnalysis(t *testing.T, f doctrineFixture, p tenant.Principal) []finding
 	return out.Findings
 }
 
+// inboxProposals counts the doctrine inbox proposals of a workspace.
+func inboxProposals(t *testing.T, f doctrineFixture, tid string) int {
+	t.Helper()
+	var n int
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM doctrine_proposals WHERE tenant_id=$1 AND data->>'inbox'='true'`, tid).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// The outcome job never publishes (AEON-444): its proposal waits in the
+// doctrine inbox, proposed by System, and nothing reaches GitHub until a
+// person sends it to git.
 func TestAnalysisDraftJobAndBeforeAfter(t *testing.T) {
 	f, forge, m, owner := setupAnalysis(t)
 	now := time.Now().UTC().Add(time.Minute)
 	tickets := seedAnalysisOutcomes(t, f, owner, "BEFORE", "v1", "Missing regression test", "changes", strings.Repeat("c", 64), now.Add(-time.Hour))
+	writes, calls := forge.writes, forge.calls
 	concurrent := make(chan error, 2)
 	for range 2 {
 		go func() { concurrent <- m.analyzeOnce(t.Context(), now) }()
@@ -196,23 +210,26 @@ func TestAnalysisDraftJobAndBeforeAfter(t *testing.T) {
 		}
 	}
 	got := readAnalysis(t, f, owner)
-	if len(got) != 1 || got[0].Status != "draft" || got[0].Count != 3 || got[0].Before.Value != 1 || len(got[0].Evidence) != 3 {
+	if len(got) != 1 || got[0].Status != "draft" || got[0].Count != 3 || got[0].Before.Value != 1 || len(got[0].Evidence) != 3 || got[0].ProposalID != got[0].ID || got[0].PRURL != "" {
 		t.Fatalf("finding = %+v", got)
 	}
-	if len(forge.pulls) != 1 || forge.labels != 1 || forge.mergeCalls != 0 || forge.dispatches != 0 {
-		t.Fatal("not a single labeled draft")
+	if len(forge.pulls) != 0 || forge.writes != writes || forge.calls != calls || forge.labels != 0 || forge.mergeCalls != 0 || forge.dispatches != 0 {
+		t.Fatal("the outcome job reached GitHub; only a person publishes")
 	}
-	for _, p := range forge.pulls {
-		if !p.Draft {
-			t.Fatal("automatic PR was not draft")
+	const path = "/api/rules/doctrine/inbox"
+	var inbox inboxList
+	raw := f.call(owner, "GET", path, nil, 200)
+	if err := json.Unmarshal(raw, &inbox); err != nil {
+		t.Fatal(err)
+	}
+	if inbox.Pending != 1 || len(inbox.Items) != 1 || inbox.Items[0].ID != got[0].ProposalID || inbox.Items[0].State != "pending" || inbox.Items[0].Proposer != "System" || inbox.Items[0].PRNumber != 0 {
+		t.Fatalf("the job's proposal must wait in the inbox: %+v", inbox)
+	}
+	for _, private := range []string{"Missing regression test", owner.TenantID, tickets[0]} {
+		if strings.Contains(inbox.Items[0].Proposed+inbox.Items[0].Why, private) {
+			t.Fatal("private evidence reached the proposed text")
 		}
 	}
-	for _, body := range forge.bodies {
-		if strings.Contains(body, "Missing regression test") || strings.Contains(body, owner.TenantID) || strings.Contains(body, tickets[0]) {
-			t.Fatal("private evidence left the workspace")
-		}
-	}
-	calls := forge.calls
 	if err := m.analyzeOnce(t.Context(), now); err != nil {
 		t.Fatal(err)
 	}
@@ -226,6 +243,17 @@ func TestAnalysisDraftJobAndBeforeAfter(t *testing.T) {
 	foreign := f.principal(f.tenant("foreign-analysis"), "person", "owner", "admin", nil, "")
 	if len(readAnalysis(t, f, foreign)) != 0 {
 		t.Fatal("cross-tenant findings")
+	}
+	// A person sends it to git; the PR is theirs, not the job's.
+	var sent Proposal
+	_ = json.Unmarshal(f.call(owner, "POST", path+"/"+got[0].ProposalID+"/pull-request", map[string]any{}, 200), &sent)
+	if sent.PRNumber == 0 || sent.SubmittedBy != owner.ID || len(forge.pulls) != 1 || forge.labels != 0 {
+		t.Fatalf("a person's PR: %+v", sent)
+	}
+	for _, body := range forge.bodies {
+		if strings.Contains(body, "Missing regression test") || strings.Contains(body, owner.TenantID) || strings.Contains(body, tickets[0]) {
+			t.Fatal("private evidence left the workspace")
+		}
 	}
 	// A person merges externally. The job only observes that action and waits
 	// for actual use of the changed instruction bytes before measuring.
@@ -241,7 +269,7 @@ func TestAnalysisDraftJobAndBeforeAfter(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = readAnalysis(t, f, owner)
-	if got[0].Status != "awaiting_use" || got[0].After != nil {
+	if got[0].Status != "awaiting_use" || got[0].After != nil || got[0].PRURL != sent.PRURL {
 		t.Fatal("merged pin was treated as used instruction bytes")
 	}
 	next = next.Add(24 * time.Hour)
@@ -257,9 +285,16 @@ func TestAnalysisDraftJobAndBeforeAfter(t *testing.T) {
 		t.Fatal("job published a change")
 	}
 	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, owner.TenantID, func(tx pgx.Tx) error {
-		var wrong, comments int
-		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE (e.type LIKE 'doctrine.finding_%' OR e.type IN ('doctrine.proposed','doctrine.proposal_measured') OR e.metadata->>'job'='doctrine-outcome-analysis') AND NOT (p.name='System' AND p.roles @> ARRAY['system'])`).Scan(&wrong); err != nil {
+		var wrong, comments, published int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE (e.type LIKE 'doctrine.finding_%' OR e.type IN ('doctrine.inbox_proposed','doctrine.proposal_measured') OR e.metadata->>'job'='doctrine-outcome-analysis') AND NOT (p.name='System' AND p.roles @> ARRAY['system'])`).Scan(&wrong); err != nil {
 			return err
+		}
+		// Publication is the person's, never System's.
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='doctrine.proposed' AND actor_principal_id<>$1`, owner.ID).Scan(&published); err != nil {
+			return err
+		}
+		if published != 0 {
+			t.Fatalf("%d publication events by someone other than the person", published)
 		}
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='comment.created' AND metadata->>'job'='doctrine-outcome-analysis'`).Scan(&comments); err != nil {
 			return err
@@ -274,25 +309,31 @@ func TestAnalysisDraftJobAndBeforeAfter(t *testing.T) {
 	}
 }
 
-func TestAnalysisRecoversDroppedDraftResponse(t *testing.T) {
+// A proposal the job could not record keeps its reservation; the next day
+// records it once, under the same request id.
+func TestAnalysisRetriesAnUnrecordedProposal(t *testing.T) {
 	f, forge, m, owner := setupAnalysis(t)
 	now := time.Now().UTC().Add(time.Minute)
 	seedAnalysisOutcomes(t, f, owner, "RETRY", "v1", "Missing regression test", "changes", strings.Repeat("c", 64), now.Add(-time.Hour))
-	forge.dropPR = true
+	guard := m.guardMaster
+	m.guardMaster = nil
 	if err := m.analyzeOnce(t.Context(), now); err == nil {
-		t.Fatal("expected uncertain response")
+		t.Fatal("expected the unavailable guard to fail the attempt")
 	}
 	got := readAnalysis(t, f, owner)
-	if len(got) != 1 || got[0].Status != "pending" || len(forge.pulls) != 1 {
-		t.Fatal("uncertain write lost its reservation")
+	if len(got) != 1 || got[0].Status != "pending" || inboxProposals(t, f, owner.TenantID) != 0 {
+		t.Fatal("a failed attempt lost its reservation or left a proposal")
 	}
 	id := got[0].ID
-	if err := m.analyzeOnce(t.Context(), now.Add(24*time.Hour)); err != nil {
-		t.Fatal(err)
+	m.guardMaster = guard
+	for _, day := range []time.Duration{24 * time.Hour, 48 * time.Hour} {
+		if err := m.analyzeOnce(t.Context(), now.Add(day)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	got = readAnalysis(t, f, owner)
-	if len(got) != 1 || got[0].ID != id || got[0].Status != "draft" || len(forge.pulls) != 1 || forge.labels != 1 {
-		t.Fatal("retry duplicated or did not label the draft")
+	if len(got) != 1 || got[0].ID != id || got[0].Status != "draft" || got[0].ProposalID != id || inboxProposals(t, f, owner.TenantID) != 1 || forge.writes != 0 {
+		t.Fatal("the retry duplicated the proposal or published it")
 	}
 }
 
@@ -393,13 +434,13 @@ func TestAnalysisDailyAttemptCap(t *testing.T) {
 			pending++
 		}
 	}
-	if drafts != 1 || pending != 1 || len(forge.pulls) != 1 {
+	if drafts != 1 || pending != 1 || inboxProposals(t, f, owner.TenantID) != 1 || len(forge.pulls) != 0 {
 		t.Fatalf("daily cap: %d drafts, %d pending", drafts, pending)
 	}
 	if err := m.analyzeOnce(t.Context(), now.Add(24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if len(forge.pulls) != 2 {
+	if inboxProposals(t, f, owner.TenantID) != 2 || len(forge.pulls) != 0 {
 		t.Fatal("next day did not recover reserved second rule")
 	}
 }
@@ -422,7 +463,7 @@ func TestAnalysisWaitsForPrivateGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = readAnalysis(t, f, owner)
-	if got[0].Status != "draft" || len(forge.pulls) != 1 {
-		t.Fatal("rebuilt guard did not resume the reserved draft")
+	if got[0].Status != "draft" || inboxProposals(t, f, owner.TenantID) != 1 || len(forge.pulls) != 0 {
+		t.Fatal("rebuilt guard did not resume the reserved proposal")
 	}
 }

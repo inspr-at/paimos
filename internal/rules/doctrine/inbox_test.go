@@ -3,8 +3,10 @@
 package doctrine
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -12,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/systemactor"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -537,20 +540,32 @@ func TestDoctrineInboxDraftRetentionIsBounded(t *testing.T) {
 	}
 }
 
-// Every publication path refuses a locked rule without a person, before any
-// GitHub call; the outcome job goes through the same check.
-func TestPublicationRefusesLockedRulesWithoutAPerson(t *testing.T) {
+// Publication has one boundary: only a person reaches GitHub. An agent, a
+// person's key and the System principal the outcome job runs as are refused
+// by preparePublication and proposeChange before any GitHub call, for any
+// rule, locked or not.
+func TestPublicationIsPersonOnly(t *testing.T) {
 	f, forge, m := newProposalFixture(t)
 	tid := f.tenant("inbox-f")
 	m.app.TenantID = tid
 	allowCredential(t, m.credentials.Dir, "app-key", tid, publicRepository)
 	owner := f.principal(tid, "person", "owner", "admin", nil, "")
 	agent := f.principal(tid, "agent", "builder", "admin", []string{"rules.read", "rules.write"}, owner.ID)
+	keyed := f.principal(tid, "person", "scripted", "admin", []string{"rules.read", "rules.write"}, owner.ID)
 	src := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: publicRepository, Visibility: "public", Ref: "main"}), publicRepository)
-	kernel, locked := ruleWith(t, src, "NEVER")
+	seedPrivateGuard(t, f, m, owner)
+	var system tenant.Principal
+	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, tid, func(tx pgx.Tx) error {
+		var err error
+		system, err = systemactor.Ensure(t.Context(), tx, tid)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var source Source
 	var files []File
-	err := m.tx(t.Context(), owner, "rules.read", func(tx pgx.Tx) error {
+	err = m.tx(t.Context(), owner, "rules.read", func(tx pgx.Tx) error {
 		var err error
 		if source, err = getSource(t.Context(), tx, src.ID, false); err != nil {
 			return err
@@ -561,15 +576,265 @@ func TestPublicationRefusesLockedRulesWithoutAPerson(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := ProposalInput{RequestID: "44400000-0000-4000-8000-000000000051", SourceID: src.ID, Path: kernel.Path, RuleKey: locked.Key, RuleSHA: locked.SHA256, Source: strings.Replace(locked.Source, "run `env`", "run `env` or `printenv`", 1), Explanation: "Name the other command too."}
-	in.TLDR.EN = "Never print the environment."
-	calls := forge.calls
-	_, _, _, err = m.preparePublication(t.Context(), agent, source, files, nil, in)
-	var refused *failure
-	if !errors.As(err, &refused) || refused.Code != "locked_rule" || forge.calls != calls {
-		t.Fatalf("a locked rule must refuse an agent before GitHub: %v", err)
+	kernel, locked := ruleWith(t, src, "NEVER")
+	dev, tests := ruleWith(t, src, "Tests are part of done.")
+	lockedIn := ProposalInput{RequestID: "44400000-0000-4000-8000-000000000051", SourceID: src.ID, Path: kernel.Path, RuleKey: locked.Key, RuleSHA: locked.SHA256, Source: strings.Replace(locked.Source, "run `env`", "run `env` or `printenv`", 1), Explanation: "Name the other command too."}
+	lockedIn.TLDR.EN = "Never print the environment."
+	plainIn := ProposalInput{RequestID: "44400000-0000-4000-8000-000000000052", SourceID: src.ID, Path: dev.Path, RuleKey: tests.Key, RuleSHA: tests.SHA256, Source: strings.Replace(tests.Source, "Tests are part of done.", "Tests are always part of done.", 1), Explanation: "Always."}
+	plainIn.TLDR.EN = "Tests are part of done."
+	calls, writes := forge.calls, forge.writes
+	for _, actor := range []tenant.Principal{agent, keyed, system} {
+		for _, in := range []ProposalInput{lockedIn, plainIn} {
+			_, _, _, err := m.preparePublication(t.Context(), actor, source, files, nil, in)
+			var refused *failure
+			if !errors.As(err, &refused) || refused.Status != 403 || refused.Code != "forbidden" {
+				t.Fatalf("preparePublication must refuse %s (%s): %v", actor.Name, in.RuleKey, err)
+			}
+			_, err = m.proposeChange(t.Context(), actor, in)
+			if !errors.As(err, &refused) || refused.Status != 403 || refused.Code != "forbidden" {
+				t.Fatalf("proposeChange must refuse %s (%s): %v", actor.Name, in.RuleKey, err)
+			}
+		}
 	}
-	if got := f.call(agent, "POST", "/api/rules/doctrine/proposals", in, 403); !strings.Contains(string(got), "doctrine inbox") {
-		t.Fatalf("the PR endpoint is person-only: %s", got)
+	for _, actor := range []tenant.Principal{agent, keyed} {
+		if got := f.call(actor, "POST", "/api/rules/doctrine/proposals", plainIn, 403); !strings.Contains(string(got), "doctrine inbox") {
+			t.Fatalf("the PR endpoint is person-only: %s", got)
+		}
+	}
+	if forge.calls != calls || forge.writes != writes || len(forge.pulls) != 0 {
+		t.Fatal("a refused publication reached GitHub")
+	}
+	// The person passes the same boundary.
+	var p Proposal
+	_ = json.Unmarshal(f.call(owner, "POST", "/api/rules/doctrine/proposals", plainIn, 200), &p)
+	if p.PRNumber == 0 || p.ProposedBy != owner.ID {
+		t.Fatalf("a person publishes: %+v", p)
+	}
+}
+
+// landTests pins a commit whose Dev rule reads text, with its TL;DR.
+func landTests(t *testing.T, f doctrineFixture, owner tenant.Principal, sourceID, commit, ref, text, tldr string) {
+	t.Helper()
+	const dev = "docs/AGENTS-DOMAIN-DEV.md"
+	next := fixtureFiles()
+	next[dev] = "# Dev\n\n## Tests\n\n- " + text + "\n"
+	views := Render(publicRepository, commit, false, []File{{Path: dev, Content: []byte(next[dev])}})
+	next[SidecarPath(dev)] = "rules:\n  " + views[0].Rules[0].Key + ": {en: " + tldr + "}\n"
+	f.fake.commit(publicRepository, commit, next, ref)
+	f.layer(owner, "PUT", "/api/rules/doctrine/sources/"+sourceID, SourceInput{Visibility: "public", Ref: ref})
+}
+
+func proposalState(t *testing.T, f doctrineFixture, id string) string {
+	t.Helper()
+	var state string
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT COALESCE(data->>'state','proposed') FROM doctrine_proposals WHERE id=$1`, id).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+// An index skips a proposal under a lease. The pin it indexed still promotes
+// the proposal: when the lease ends, and in the hourly sweep after a lease
+// that expired without ending (a crashed process).
+func TestDoctrineInboxPromotionSurvivesALease(t *testing.T) {
+	f, _, m := newProposalFixture(t)
+	tid := f.tenant("inbox-g")
+	m.app.TenantID = tid
+	allowCredential(t, m.credentials.Dir, "app-key", tid, publicRepository)
+	owner := f.principal(tid, "person", "owner", "admin", nil, "")
+	agent := f.principal(tid, "agent", "builder", "admin", []string{"rules.read", "rules.write"}, owner.ID)
+	src := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: publicRepository, Visibility: "public", Ref: "main"}), publicRepository)
+	seedPrivateGuard(t, f, m, owner)
+	const path = "/api/rules/doctrine/inbox"
+	propose := func(id string, rule RuleView, from, to string) Proposal {
+		t.Helper()
+		in := InboxInput{RequestID: id, SourceID: src.ID, Path: rulePath(src, rule), RuleKey: rule.Key, Source: strings.Replace(rule.Source, from, to, 1), TLDR: &inboxTLDR{EN: "A short line."}, Why: "Because."}
+		var p Proposal
+		_ = json.Unmarshal(f.call(agent, "POST", path, in, 200), &p)
+		return p
+	}
+
+	// The pin lands while a lease is held: the index skips it, the end of the
+	// lease promotes it.
+	_, tests := ruleWith(t, src, "Tests are part of done.")
+	a := propose("44400000-0000-4000-8000-000000000061", tests, "Tests are part of done.", "Tests are always part of done.")
+	indexed := false
+	_, err := m.runProposal(t.Context(), owner, "rules.write", a.ID, func(ctx context.Context, p *Proposal) (string, error) {
+		landTests(t, f, owner, src.ID, promotedCommit, "v26.10.5", "Tests are always part of done.", "A short line.")
+		indexed = proposalState(t, f, a.ID) == "pending"
+		return "", nil
+	})
+	if err != nil || !indexed {
+		t.Fatalf("the index must skip the leased proposal: skipped=%v err=%v", indexed, err)
+	}
+	if state := proposalState(t, f, a.ID); state != "promoted" {
+		t.Fatalf("the end of the lease must promote a landed proposal: %s", state)
+	}
+	if n := draftCount(t, f, tid); n != 0 {
+		t.Fatalf("a promoted draft left behind: %d", n)
+	}
+
+	// A lease that never ended (a crashed process) blocks the index; once it
+	// expired, the hourly sweep promotes.
+	src = find(f.layer(owner, "GET", "/api/rules/doctrine", nil), publicRepository)
+	_, always := ruleWith(t, src, "Tests are always part of done.")
+	c := propose("44400000-0000-4000-8000-000000000062", always, "Tests are always part of done.", "Tests and estimates are always part of done.")
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE doctrine_proposals SET data=data||jsonb_build_object('operation_id','crashed','operation_until',to_jsonb(now()+interval '1 hour')) WHERE id=$1`, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	landTests(t, f, owner, src.ID, "6666666666666666666666666666666666666666", "v26.10.6", "Tests and estimates are always part of done.", "A short line.")
+	if state := proposalState(t, f, c.ID); state != "pending" {
+		t.Fatalf("the index must skip the leased proposal: %s", state)
+	}
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE doctrine_proposals SET data=data||jsonb_build_object('operation_until',to_jsonb(now()-interval '1 minute')) WHERE id=$1`, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	m.sweepInboxHourly(t.Context())
+	if state := proposalState(t, f, c.ID); state != "promoted" {
+		t.Fatalf("the hourly sweep must promote a proposal the index skipped: %s", state)
+	}
+}
+
+// One toast per person and proposal: the server hands the claim to exactly
+// one caller, however many tabs poll at once, and never for a proposal that
+// left the inbox.
+func TestDoctrineInboxNoticeIsClaimedOnce(t *testing.T) {
+	f, _, m := newProposalFixture(t)
+	tid := f.tenant("inbox-h")
+	m.app.TenantID = tid
+	allowCredential(t, m.credentials.Dir, "app-key", tid, publicRepository)
+	owner := f.principal(tid, "person", "owner", "admin", nil, "")
+	second := f.principal(tid, "person", "second", "admin", nil, "")
+	agent := f.principal(tid, "agent", "builder", "admin", []string{"rules.read", "rules.write"}, owner.ID)
+	keyed := f.principal(tid, "person", "scripted", "admin", []string{"rules.read", "rules.write"}, owner.ID)
+	src := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: publicRepository, Visibility: "public", Ref: "main"}), publicRepository)
+	seedPrivateGuard(t, f, m, owner)
+	const path = "/api/rules/doctrine/inbox"
+	_, small := ruleWith(t, src, "Small commits.")
+	_, tests := ruleWith(t, src, "Tests are part of done.")
+	var a, b Proposal
+	_ = json.Unmarshal(f.call(agent, "POST", path, InboxInput{RequestID: "44400000-0000-4000-8000-000000000071", SourceID: src.ID, Path: rulePath(src, small), RuleKey: small.Key, Source: strings.Replace(small.Source, "Small commits.", "Small, reviewed commits.", 1), TLDR: &inboxTLDR{EN: "A short line."}, Why: "Because."}, 200), &a)
+	_ = json.Unmarshal(f.call(agent, "POST", path, InboxInput{RequestID: "44400000-0000-4000-8000-000000000072", SourceID: src.ID, Path: rulePath(src, tests), RuleKey: tests.Key, Source: strings.Replace(tests.Source, "Tests are part of done.", "Tests are always part of done.", 1), TLDR: &inboxTLDR{EN: "A short line."}, Why: "Because."}, 200), &b)
+	notified := func(p tenant.Principal) map[string]bool {
+		t.Helper()
+		var summary struct {
+			Items []InboxHeadline `json:"items"`
+		}
+		_ = json.Unmarshal(f.call(p, "GET", path+"/summary", nil, 200), &summary)
+		out := map[string]bool{}
+		for _, item := range summary.Items {
+			out[item.ID] = item.Notified
+		}
+		return out
+	}
+	if got := notified(owner); len(got) != 2 || got[a.ID] || got[b.ID] {
+		t.Fatalf("nothing claimed yet: %v", got)
+	}
+	// Eight tabs claim at once: exactly one wins.
+	claim := func(p tenant.Principal, id string) (int, bool) {
+		req := httptest.NewRequest("POST", path+"/"+id+"/notified", nil)
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), p))
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, req)
+		var out struct {
+			Claimed bool `json:"claimed"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out.Claimed
+	}
+	results := make(chan bool, 8)
+	for range 8 {
+		go func() {
+			code, claimed := claim(owner, a.ID)
+			results <- code == 200 && claimed
+		}()
+	}
+	won := 0
+	for range 8 {
+		if <-results {
+			won++
+		}
+	}
+	if won != 1 {
+		t.Fatalf("%d tabs claimed the toast", won)
+	}
+	if code, claimed := claim(owner, a.ID); code != 200 || claimed {
+		t.Fatal("a repeated claim must not toast again")
+	}
+	if got := notified(owner); !got[a.ID] || got[b.ID] {
+		t.Fatalf("the summary names the claimed proposal: %v", got)
+	}
+	// Claims are per person; agents and keys are never notified.
+	if code, claimed := claim(second, a.ID); code != 200 || !claimed {
+		t.Fatal("another person has their own toast")
+	}
+	for _, p := range []tenant.Principal{agent, keyed} {
+		if code, _ := claim(p, b.ID); code != 403 {
+			t.Fatalf("%s must not claim a toast: %d", p.Name, code)
+		}
+	}
+	if code, _ := claim(owner, "not-a-uuid"); code != 400 {
+		t.Fatalf("an invalid id: %d", code)
+	}
+	// A proposal that left the inbox claims nothing, and its claims are swept.
+	f.call(owner, "POST", path+"/"+b.ID+"/dismiss", map[string]string{"reason": "No."}, 200)
+	f.call(owner, "POST", path+"/"+a.ID+"/dismiss", map[string]string{"reason": "No."}, 200)
+	if code, claimed := claim(second, b.ID); code != 200 || claimed {
+		t.Fatal("a dismissed proposal must not toast")
+	}
+	notified(owner)
+	var left int
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM doctrine_inbox_notified WHERE tenant_id=$1`, tid).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("claims of proposals that left the inbox must be swept: %d %v", left, err)
+	}
+}
+
+// Draft cleanup is transactional: when deleting the waiting text fails, the
+// decision that would retire it rolls back with it. Nothing is dismissed
+// with its text left behind, and no ticket hears of a decision that did not
+// happen.
+func TestDoctrineInboxDraftCleanupRollsBack(t *testing.T) {
+	f, _, m := newProposalFixture(t)
+	tid := f.tenant("inbox-i")
+	m.app.TenantID = tid
+	allowCredential(t, m.credentials.Dir, "app-key", tid, publicRepository)
+	owner := f.principal(tid, "person", "owner", "admin", nil, "")
+	agent := f.principal(tid, "agent", "builder", "admin", []string{"rules.read", "rules.write", "nodes.read"}, owner.ID)
+	src := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: publicRepository, Visibility: "public", Ref: "main"}), publicRepository)
+	seedPrivateGuard(t, f, m, owner)
+	ticket := inboxTicket(t, f, owner)
+	const path = "/api/rules/doctrine/inbox"
+	_, small := ruleWith(t, src, "Small commits.")
+	var a Proposal
+	_ = json.Unmarshal(f.call(agent, "POST", path, InboxInput{RequestID: "44400000-0000-4000-8000-000000000081", SourceID: src.ID, Path: rulePath(src, small), RuleKey: small.Key, Source: strings.Replace(small.Source, "Small commits.", "Small, reviewed commits.", 1), TLDR: &inboxTLDR{EN: "A short line."}, Why: "Because.", Ticket: "INB-2"}, 200), &a)
+	if _, err := f.d.Admin.Exec(t.Context(), `CREATE FUNCTION refuse_draft_delete() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RAISE EXCEPTION 'draft delete refused'; END$$;
+		CREATE TRIGGER refuse_draft_delete BEFORE DELETE ON doctrine_proposal_drafts FOR EACH ROW EXECUTE FUNCTION refuse_draft_delete()`); err != nil {
+		t.Fatal(err)
+	}
+	var events int
+	countEvents := func() int {
+		t.Helper()
+		var n int
+		if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND type LIKE 'doctrine.inbox_%'`, tid).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	events = countEvents()
+	f.call(owner, "POST", path+"/"+a.ID+"/dismiss", map[string]string{"reason": "Not now."}, 500)
+	// The hourly expiry takes the same path.
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE doctrine_proposals SET created_at=now()-interval '31 days' WHERE id=$1`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	m.sweepInboxHourly(t.Context())
+	if state := proposalState(t, f, a.ID); state != "pending" || draftCount(t, f, tid) != 1 || countEvents() != events || len(ticketComments(t, f, owner, ticket)) != 0 {
+		t.Fatalf("a failed cleanup must roll the decision back: state=%s drafts=%d", state, draftCount(t, f, tid))
+	}
+	if _, err := f.d.Admin.Exec(t.Context(), `DROP TRIGGER refuse_draft_delete ON doctrine_proposal_drafts`); err != nil {
+		t.Fatal(err)
+	}
+	m.sweepInboxHourly(t.Context())
+	if state := proposalState(t, f, a.ID); state != "dismissed" || draftCount(t, f, tid) != 0 {
+		t.Fatalf("the next sweep retires it: state=%s", state)
 	}
 }

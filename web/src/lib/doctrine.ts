@@ -233,7 +233,8 @@ export interface DoctrineInboxItem extends DoctrineProposal {
   tldr?: DoctrineTldr; why?: string; diff: DiffPart[]; outdated?: boolean
   proposer: string; proposer_kind: 'person' | 'agent' | ''; ticket_href?: string
 }
-export interface DoctrineInboxHeadline { id: string; label: string; created_at: string }
+/** notified: this person already claimed the proposal's toast. */
+export interface DoctrineInboxHeadline { id: string; label: string; created_at: string; notified?: boolean }
 export interface DoctrineInboxEdit { source?: string; tldr?: { en: string; de?: string }; why?: string; rule_sha256?: string }
 
 async function inboxRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -259,6 +260,11 @@ export async function getDoctrineInboxSummary(): Promise<{ pending: number; item
 /** Propose PR; with edits it is "edit then propose". */
 export const submitDoctrineInbox = (id: string, edit: DoctrineInboxEdit = {}) => inboxRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/pull-request`, 'POST', edit)
 export const dismissDoctrineInbox = (id: string, reason: string) => inboxRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/dismiss`, 'POST', { reason })
+/** Claims the toast for a waiting proposal: true only for this person's first claim. */
+export async function claimDoctrineInboxNotice(id: string): Promise<boolean> {
+  const out = await inboxRequest<{ claimed?: boolean }>(`/${encodeURIComponent(id)}/notified`, 'POST')
+  return out.claimed === true
+}
 
 /** "Estimate before work" — a headline short enough for a toast. */
 export function inboxLabel(label: string, max = 60): string {
@@ -283,7 +289,7 @@ export async function getDoctrineFindings(): Promise<DoctrineFinding[]> {
   if (!response.ok) throw new DoctrineError(response.status, '', 'Outcome proposals could not be loaded.')
   return ((await response.json()) as { findings: DoctrineFinding[] }).findings ?? []
 }
-export const findingState = (f: DoctrineFinding) => ({ pending: 'Queued', draft: 'Draft', awaiting_use: 'Awaiting outcomes', internal_note: 'Internal note', observed: 'Measured', closed: 'Closed' })[f.status]
+export const findingState = (f: DoctrineFinding) => ({ pending: 'Queued', draft: 'Proposed', awaiting_use: 'Awaiting outcomes', internal_note: 'Internal note', observed: 'Measured', closed: 'Closed' })[f.status]
 export function outcomeMetric(m: DoctrineMetric): string {
   if (m.name === 'fix_rounds' || m.name === 'review_rounds') return `${Number(m.value.toFixed(1))} rounds`
   if (m.name === 'time_to_done') return `${Number((m.value / 60).toFixed(1))} min`

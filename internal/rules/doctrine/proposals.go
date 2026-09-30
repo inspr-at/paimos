@@ -192,13 +192,16 @@ func (m *Module) listProposals(r *http.Request, actor tenant.Principal) (any, er
 	return out, err
 }
 
+// errPersonPublishes refuses publication by anyone but a person (AEON-444).
+var errPersonPublishes = fail(403, "forbidden", "A person sends a doctrine change to git. Agents propose through the doctrine inbox.")
+
 const missingGuardReason = "Propose PR is disabled: the server quotation guard key is not provisioned. Ask the server administrator to provision AEON_DOCTRINE_GUARD_KEY_FILE."
 
 func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	// Only a person opens a PR; an agent proposes through the doctrine inbox
 	// and waits for one (AEON-444).
 	if !humanActor(actor) {
-		return nil, fail(403, "forbidden", "A person sends a doctrine change to git. Agents propose through the doctrine inbox.")
+		return nil, errPersonPublishes
 	}
 	if err := m.proposalAccess(actor); err != nil {
 		return nil, err
@@ -210,17 +213,18 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	return m.proposeChange(r.Context(), actor, in)
 }
 
-// proposeChange is shared by the person workflow and the bounded system job.
-// Both traverse the identical edit, private guard, main and authority checks.
+// proposeChange opens a PR for a person's rule change. Only a person
+// publishes: an agent, a key and the outcome job propose through the doctrine
+// inbox and wait for one (AEON-444). preparePublication enforces the same.
 func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, in ProposalInput) (any, error) {
+	if !humanActor(actor) {
+		return nil, errPersonPublishes
+	}
 	if err := m.proposalAccess(actor); err != nil {
 		return nil, err
 	}
 	if len(m.guardMaster) < 32 {
 		return nil, fail(503, "guard_unavailable", missingGuardReason)
-	}
-	if in.automatic && !m.analysisAuthorized(parent, actor) {
-		return nil, authz.ErrForbidden
 	}
 	if err := in.validate(); err != nil {
 		return nil, err
@@ -270,19 +274,6 @@ func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, i
 		return nil, err
 	}
 	if existing != nil && existing.PRNumber > 0 {
-		if in.automatic {
-			// A PR may have landed before its label response or authority was
-			// lost. Reapplying one label is idempotent and completes that retry.
-			g, err := m.appClient(ctx, actor.TenantID, existing.Repository)
-			if err != nil {
-				return nil, err
-			}
-			defer g.revoke()
-			g.beforeWrite = func(ctx context.Context) error { return m.reauthorize(ctx, actor, "rules.write") }
-			if err := g.labelOutcomeProposal(ctx, *existing); err != nil {
-				return nil, err
-			}
-		}
 		return *existing, nil
 	}
 	changed, main, g, err := m.preparePublication(ctx, actor, source, files, guard, in)
@@ -302,16 +293,7 @@ func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, i
 		if duplicate {
 			return fail(409, "rule_proposal_open", "An outcome proposal already reserves this rule.")
 		}
-		if in.automatic {
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM doctrine_proposals WHERE source_id=$1 AND path=$2 AND rule_key=$3 AND id<>$4::uuid AND COALESCE(data->>'state','proposed') NOT IN ('closed','merged','released','pinned','dismissed','promoted'))`, in.SourceID, in.Path, in.RuleKey, in.RequestID).Scan(&duplicate); err != nil {
-				return err
-			}
-			if duplicate {
-				return fail(409, "rule_proposal_open", "A proposal for this rule is already open.")
-			}
-		}
-		data, _ := json.Marshal(map[string]any{"automatic": in.automatic, "draft": in.automatic})
-		result, err := tx.Exec(ctx, `INSERT INTO doctrine_proposals(tenant_id,id,source_id,repository,path,rule_key,input_digest,base_commit,proposed_by,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(tenant_id,id) DO NOTHING`, actor.TenantID, in.RequestID, in.SourceID, source.Repository, in.Path, in.RuleKey, inputDigest(in), main, actor.ID, data)
+		result, err := tx.Exec(ctx, `INSERT INTO doctrine_proposals(tenant_id,id,source_id,repository,path,rule_key,input_digest,base_commit,proposed_by,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'{}') ON CONFLICT(tenant_id,id) DO NOTHING`, actor.TenantID, in.RequestID, in.SourceID, source.Repository, in.Path, in.RuleKey, inputDigest(in), main, actor.ID)
 		if err != nil || result.RowsAffected() == 0 {
 			return err
 		}
@@ -336,16 +318,18 @@ func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, i
 }
 
 // preparePublication runs the identical edit, private guard, main and
-// authority checks for every path that publishes a rule change: the editor,
-// the outcome job and a promoted inbox proposal (AEON-444). Locked rules
-// change only through a person. The caller revokes the returned client.
+// authority checks for every path that publishes a rule change: the editor
+// and an inbox proposal a person sends to git (AEON-444). It is the shared
+// publication boundary: it refuses any principal but a person before any
+// GitHub call, so no agent, key or job reaches a branch or a PR. The caller
+// revokes the returned client.
 func (m *Module) preparePublication(ctx context.Context, actor tenant.Principal, source Source, files []File, guard *guardCorpus, in ProposalInput) (map[string]string, string, *GitHub, error) {
-	changed, old, next, err := editRuleViews(source, files, in)
+	if !humanActor(actor) {
+		return nil, "", nil, errPersonPublishes
+	}
+	changed, _, _, err := editRuleViews(source, files, in)
 	if err != nil {
 		return nil, "", nil, err
-	}
-	if !humanActor(actor) && (old.Strength == "locked" || next.Strength == "locked") {
-		return nil, "", nil, fail(403, "locked_rule", "Locked rules change only through a person. Ask one to edit it under Doctrine.")
 	}
 	quoteTexts := []string{in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation}
 	exemptMain, err := m.checkPrivateQuotes(ctx, actor, source, files, guard, quoteTexts...)
@@ -489,6 +473,11 @@ func (m *Module) runProposal(ctx context.Context, actor tenant.Principal, permis
 			_, err := tx.Exec(cleanup, `UPDATE doctrine_proposals SET data=(data-'operation_id'-'operation_until') || jsonb_build_object('version',COALESCE((data->>'version')::bigint,0)+1) WHERE id=$1 AND data->>'operation_id'=$2`, id, operationID)
 			return err
 		})
+		// An index during the lease skipped this inbox proposal; check the
+		// pin again now that the lease is gone (AEON-444).
+		if p.Inbox {
+			m.reconcileInbox(ctx, actor.TenantID, p.SourceID)
+		}
 	}()
 	before := p
 	event, err := fn(ctx, &p)

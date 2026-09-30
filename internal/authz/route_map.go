@@ -30,6 +30,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/rules/doctrine/inbox":                                                    "rules.write",
 	"POST /api/rules/doctrine/inbox/{proposalId}/pull-request":                          "rules.write",
 	"POST /api/rules/doctrine/inbox/{proposalId}/dismiss":                               "rules.write",
+	"POST /api/rules/doctrine/inbox/{proposalId}/notified":                              "rules.read",
 	"GET /api/me/security/session-watching":                                             "profile.read",
 	"PUT /api/me/security/session-watching":                                             "profile.write",
 	"POST /api/agent-pairing/attach":                                                    "harness.worker",

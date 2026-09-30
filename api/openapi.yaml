@@ -579,7 +579,7 @@ paths:
   /rules/doctrine/analysis:
     get:
       operationId: listDoctrineOutcomeAnalysis
-      description: "Person-only, workspace rules.read, outcome.read and knowledge.read. Up to 100 deterministic outcome findings, including internal notes refused by the public leak guard. Evidence stays inside the workspace. Daily analysis defaults to a 14-day window, 3 occurrences, 5 open drafts and 5 draft attempts per UTC day. No LLM calls or token consumption. Metrics are descriptive, not causal; after measurements require instruction provenance matching the changed file, in the same harness and ticket kind. Missing provenance leaves the comparison pending. Drafts never publish automatically."
+      description: "Person-only, workspace rules.read, outcome.read and knowledge.read. Up to 100 deterministic outcome findings, including internal notes refused by the public leak guard. Evidence stays inside the workspace. Daily analysis defaults to a 14-day window, 3 occurrences, 5 open drafts and 5 draft attempts per UTC day. No LLM calls or token consumption. Metrics are descriptive, not causal; after measurements require instruction provenance matching the changed file, in the same harness and ticket kind. Missing provenance leaves the comparison pending. The job never publishes (AEON-444): each proposal waits in the doctrine inbox, proposed by the System principal, until a person sends it to git or dismisses it; a dismissal closes the finding, a promotion or a merge starts the after measurement."
       responses:
         "200":
           description: Findings and proposal measurements
@@ -721,7 +721,7 @@ paths:
   /rules/doctrine/inbox/summary:
     get:
       operationId: getDoctrineInboxSummary
-      description: "rules.read. The waiting count and headlines (id, label, created_at) for the Settings dot and the proposal toast; no rule text. Same visibility as the inbox."
+      description: "rules.read. The waiting count and headlines (id, label, created_at, notified) for the Settings dot and the proposal toast; no rule text. Same visibility as the inbox. notified is true once the caller claimed the proposal's toast (claimDoctrineInboxNotice)."
       responses:
         "200":
           description: Waiting proposals
@@ -736,11 +736,30 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [id, label, created_at]
+                      required: [id, label, created_at, notified]
                       properties:
                         id: {type: string, format: uuid}
                         label: {type: string, description: "The proposed English TL;DR, else the rule heading"}
                         created_at: {type: string, format: date-time}
+                        notified: {type: boolean, description: "The caller already claimed this proposal's toast"}
+  /rules/doctrine/inbox/{proposalId}/notified:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: claimDoctrineInboxNotice
+      description: "Person-only (not a key) workspace rules.read. Claims the toast for a waiting proposal: claimed is true only for the first call per person and proposal, across tabs, devices and reloads, so a proposal toasts once. The claim is atomic and idempotent; every later call, and a call for a proposal that is no longer waiting (dismissed, expired, sent to git or promoted), returns claimed false. A claim racing a dismissal waits for it. Claims are deleted once the proposal leaves the inbox."
+      responses:
+        "200":
+          description: Whether this call claimed the toast
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [claimed]
+                properties:
+                  claimed: {type: boolean}
+        "403": {description: Agents and keys are not notified}
+        "400": {description: Not a proposal UUID}
   /rules/doctrine/inbox/{proposalId}/pull-request:
     parameters:
       - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -7485,7 +7504,7 @@ components:
         rules_version: {type: string}
         harness: {type: string}
         ticket_kind: {type: string}
-        status: {type: string, enum: [pending, draft, awaiting_use, internal_note, observed, closed]}
+        status: {type: string, enum: [pending, draft, awaiting_use, internal_note, observed, closed], description: "draft: the proposal waits in the doctrine inbox or as a person's PR"}
         reason: {type: string, description: Value-free reason for an internal note or pending retry}
         proposal_id: {type: string, format: uuid}
         pr_url: {type: string}

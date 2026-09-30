@@ -31,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/systemactor"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -103,13 +104,16 @@ type InboxItem struct {
 	Proposer     string     `json:"proposer"`
 	ProposerKind string     `json:"proposer_kind"`
 	TicketHref   string     `json:"ticket_href,omitempty"`
+	notified     bool
 }
 
 // InboxHeadline is what the dot and the toast need, without the text.
+// Notified is true once this person claimed the proposal's toast.
 type InboxHeadline struct {
 	ID        string    `json:"id"`
 	Label     string    `json:"label"`
 	CreatedAt time.Time `json:"created_at"`
+	Notified  bool      `json:"notified"`
 }
 
 type draft struct {
@@ -148,14 +152,16 @@ func tldrDigest(en, de string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// sweepInbox bounds draft retention. It deletes the text of every proposal
-// that left the inbox, and dismisses as expired, through the system actor,
+// sweepInbox bounds draft retention. It deletes the text and the
+// notification claims of every proposal that left the inbox, and dismisses as expired, through the system actor,
 // any proposal that waited longer than inboxDraftTTL.
 func sweepInbox(ctx context.Context, tx pgx.Tx, tenantID string, now time.Time) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM doctrine_proposal_drafts d USING doctrine_proposals p
-		WHERE p.tenant_id=d.tenant_id AND p.id=d.proposal_id
-		AND (COALESCE(p.data->>'state','proposed')<>'pending' OR COALESCE((p.data->>'pr_number')::int,0)>0)`); err != nil {
-		return err
+	for _, table := range []string{"doctrine_proposal_drafts", "doctrine_inbox_notified"} {
+		if _, err := tx.Exec(ctx, `DELETE FROM `+table+` d USING doctrine_proposals p
+			WHERE p.tenant_id=d.tenant_id AND p.id=d.proposal_id
+			AND (COALESCE(p.data->>'state','proposed')<>'pending' OR COALESCE((p.data->>'pr_number')::int,0)>0)`); err != nil {
+			return err
+		}
 	}
 	rows, err := tx.Query(ctx, `SELECT `+proposalColumns+` FROM doctrine_proposals
 		WHERE data->>'inbox'='true' AND data->>'state'='pending' AND created_at<$1
@@ -292,31 +298,36 @@ func setTitle(title string) string {
 	return title
 }
 
-// proposeToInbox records a waiting proposal. It runs the editor's checks
-// (one rule, same section and marker, sidecar, credential and public-identity
-// text, private quotation guard) but writes nothing to GitHub. Locked rules
-// change only through a person.
+// proposeToInbox records a waiting proposal from an agent loop or a person.
 func (m *Module) proposeToInbox(r *http.Request, actor tenant.Principal) (any, error) {
-	if err := m.proposalAccess(actor); err != nil {
-		return nil, err
-	}
-	if len(m.guardMaster) < 32 {
-		return nil, fail(503, "guard_unavailable", missingGuardReason)
-	}
 	var in InboxInput
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
+	return m.recordInboxProposal(r.Context(), actor, in)
+}
+
+// recordInboxProposal records a waiting proposal. It runs the editor's checks
+// (one rule, same section and marker, sidecar, credential and public-identity
+// text, private quotation guard) but writes nothing to GitHub. Locked rules
+// change only through a person. The outcome job proposes here too.
+func (m *Module) recordInboxProposal(parent context.Context, actor tenant.Principal, in InboxInput) (Proposal, error) {
+	if err := m.proposalAccess(actor); err != nil {
+		return Proposal{}, err
+	}
+	if len(m.guardMaster) < 32 {
+		return Proposal{}, fail(503, "guard_unavailable", missingGuardReason)
+	}
 	if !workorders.UUID(in.RequestID) || strings.ToLower(in.RequestID) != in.RequestID {
-		return nil, fail(400, "invalid_request", "Name a canonical request UUID.")
+		return Proposal{}, fail(400, "invalid_request", "Name a canonical request UUID.")
 	}
 	if in.Ticket != "" && !ticketKeyPattern.MatchString(in.Ticket) {
-		return nil, fail(400, "invalid_request", "ticket must be a key such as INSPR-491.")
+		return Proposal{}, fail(400, "invalid_request", "ticket must be a key such as INSPR-491.")
 	}
 	if in.RuleSHA != "" && !digestPattern.MatchString(in.RuleSHA) {
-		return nil, fail(400, "invalid_request", "rule_sha256 must be a SHA-256.")
+		return Proposal{}, fail(400, "invalid_request", "rule_sha256 must be a SHA-256.")
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), fetchTimeout)
+	ctx, cancel := context.WithTimeout(parent, fetchTimeout)
 	defer cancel()
 	var source Source
 	var files []File
@@ -352,21 +363,21 @@ func (m *Module) proposeToInbox(r *http.Request, actor tenant.Principal) (any, e
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return Proposal{}, err
 	}
 	if replay != nil {
 		// The same request id replays its proposal; anything else is a conflict.
 		if !replay.Inbox || replay.ProposedBy != actor.ID || replay.Path != in.Path || replay.RuleKey != in.RuleKey {
-			return nil, fail(409, "request_conflict", "That request UUID belongs to another proposal.")
+			return Proposal{}, fail(409, "request_conflict", "That request UUID belongs to another proposal.")
 		}
 		return *replay, nil
 	}
 	file, rule, index, ok := locateRule(Render(source.Repository, source.Commit, source.Visibility == "private", files), in.Path, in.RuleKey, "", -1)
 	if !ok || file.Problem != "" {
-		return nil, fail(409, "stale_rule", "That rule is not indexed at the pinned commit.")
+		return Proposal{}, fail(409, "stale_rule", "That rule is not indexed at the pinned commit.")
 	}
 	if in.RuleSHA != "" && in.RuleSHA != rule.SHA256 {
-		return nil, fail(409, "stale_rule", "The rule changed at the pin; reload it before proposing.")
+		return Proposal{}, fail(409, "stale_rule", "The rule changed at the pin; reload it before proposing.")
 	}
 	pin := ProposalInput{RequestID: in.RequestID, SourceID: source.ID, Path: in.Path, RuleKey: in.RuleKey, RuleSHA: rule.SHA256, Source: in.Source, Explanation: in.Why}
 	switch {
@@ -376,24 +387,24 @@ func (m *Module) proposeToInbox(r *http.Request, actor tenant.Principal) (any, e
 		pin.TLDR.EN, pin.TLDR.DE = rule.TLDR.EN, rule.TLDR.DE
 	}
 	if strings.TrimSpace(pin.TLDR.EN) == "" {
-		return nil, fail(400, "invalid_request", "This rule has no TL;DR yet; propose one with the change.")
+		return Proposal{}, fail(400, "invalid_request", "This rule has no TL;DR yet; propose one with the change.")
 	}
 	if err := pin.validate(); err != nil {
-		return nil, err
+		return Proposal{}, err
 	}
 	_, old, next, err := editRuleViews(source, files, pin)
 	if err != nil {
-		return nil, err
+		return Proposal{}, err
 	}
 	if !humanActor(actor) && (old.Strength == "locked" || next.Strength == "locked") {
-		return nil, fail(403, "locked_rule", "Locked rules change only through a person. Ask one to edit it under Doctrine.")
+		return Proposal{}, fail(403, "locked_rule", "Locked rules change only through a person. Ask one to edit it under Doctrine.")
 	}
 	// A TL;DR alone is a change; adding one to a rule without one is too.
 	if next.SHA256 == old.SHA256 && rule.TLDR != nil && tldrDigest(rule.TLDR.EN, rule.TLDR.DE) == tldrDigest(pin.TLDR.EN, pin.TLDR.DE) {
-		return nil, fail(400, "no_change", "The proposal matches the pinned rule.")
+		return Proposal{}, fail(400, "no_change", "The proposal matches the pinned rule.")
 	}
 	if _, err := m.checkPrivateQuotes(ctx, actor, source, files, guard, pin.Source, pin.TLDR.EN, pin.TLDR.DE, pin.Explanation); err != nil {
-		return nil, err
+		return Proposal{}, err
 	}
 	p := Proposal{
 		ID: in.RequestID, SourceID: source.ID, Repository: source.Repository, Path: in.Path, RuleKey: in.RuleKey,
@@ -458,7 +469,7 @@ func (m *Module) proposeToInbox(r *http.Request, actor tenant.Principal) (any, e
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return Proposal{}, err
 	}
 	if replay != nil {
 		return *replay, nil
@@ -500,9 +511,36 @@ func (m *Module) inboxSummary(r *http.Request, actor tenant.Principal) (any, err
 	}{Pending: pending, Items: []InboxHeadline{}}
 	for _, item := range items {
 		if item.State == "pending" {
-			out.Items = append(out.Items, InboxHeadline{ID: item.ID, Label: item.Label, CreatedAt: item.CreatedAt})
+			out.Items = append(out.Items, InboxHeadline{ID: item.ID, Label: item.Label, CreatedAt: item.CreatedAt, Notified: item.notified})
 		}
 	}
+	return out, err
+}
+
+// claimInboxNotice records that a person was told about a waiting proposal.
+// Only the first claim per person and proposal is true, across tabs, devices
+// and reloads: one toast per proposal. A proposal that left the inbox claims
+// nothing; the claim waits for a dismissal or a submission in flight.
+func (m *Module) claimInboxNotice(r *http.Request, actor tenant.Principal) (any, error) {
+	if !humanActor(actor) {
+		return nil, fail(403, "forbidden", "Only a person is notified of doctrine proposals.")
+	}
+	id := r.PathValue("proposalId")
+	if !workorders.UUID(id) || strings.ToLower(id) != id {
+		return nil, fail(400, "invalid_request", "invalid proposal UUID")
+	}
+	out := struct {
+		Claimed bool `json:"claimed"`
+	}{}
+	err := m.tx(r.Context(), actor, "rules.read", func(tx pgx.Tx) error {
+		result, err := tx.Exec(r.Context(), `INSERT INTO doctrine_inbox_notified(tenant_id,principal_id,proposal_id)
+			SELECT p.tenant_id,$2,p.id FROM doctrine_proposals p
+			WHERE p.id=$1 AND p.data->>'inbox'='true' AND p.data->>'state'='pending' AND COALESCE((p.data->>'pr_number')::int,0)=0
+			FOR SHARE OF p
+			ON CONFLICT DO NOTHING`, id, actor.ID)
+		out.Claimed = err == nil && result.RowsAffected() == 1
+		return err
+	})
 	return out, err
 }
 
@@ -518,17 +556,17 @@ func (m *Module) inboxItems(ctx context.Context, actor tenant.Principal, full bo
 		if err := sweepInboxOnce(ctx, tx, actor.TenantID); err != nil {
 			return err
 		}
-		query := `SELECT ` + prefixed("p", proposalColumns) + `,d.source,d.tldr_en,d.tldr_de,d.why,COALESCE(pr.name,''),COALESCE(pr.kind,'')
+		query := `SELECT ` + prefixed("p", proposalColumns) + `,d.source,d.tldr_en,d.tldr_de,d.why,COALESCE(pr.name,''),COALESCE(pr.kind,''),n.proposal_id IS NOT NULL
 			FROM doctrine_proposals p
 			LEFT JOIN doctrine_proposal_drafts d ON d.tenant_id=p.tenant_id AND d.proposal_id=p.id
 			LEFT JOIN principals pr ON pr.tenant_id=p.tenant_id AND pr.id=p.proposed_by
+			LEFT JOIN doctrine_inbox_notified n ON n.tenant_id=p.tenant_id AND n.proposal_id=p.id AND n.principal_id=$1
 			WHERE p.data->>'inbox'='true' AND `
-		args := []any{}
+		args := []any{actor.ID}
 		if humanActor(actor) {
 			query += `p.data->>'state'='pending' ORDER BY p.created_at DESC LIMIT 100`
 		} else {
 			query += `p.proposed_by=$1 ORDER BY p.created_at DESC LIMIT 50`
-			args = append(args, actor.ID)
 		}
 		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
@@ -538,7 +576,7 @@ func (m *Module) inboxItems(ctx context.Context, actor tenant.Principal, full bo
 		for rows.Next() {
 			var item InboxItem
 			var src, en, de, why *string
-			p, err := scanProposal(rows, &src, &en, &de, &why, &item.Proposer, &item.ProposerKind)
+			p, err := scanProposal(rows, &src, &en, &de, &why, &item.Proposer, &item.ProposerKind, &item.notified)
 			if err != nil {
 				rows.Close()
 				return err
@@ -948,6 +986,72 @@ func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Sou
 		}
 	}
 	return nil
+}
+
+// reconcilePromotions re-checks open inbox proposals against the pinned
+// index of their source, one source or (with "") every source. Indexing skips
+// a proposal under a lease; this runs when a lease ends and in the hourly
+// sweep, so a pin that landed meanwhile still promotes it.
+func reconcilePromotions(ctx context.Context, tx pgx.Tx, tenantID, sourceID string) error {
+	rows, err := tx.Query(ctx, `SELECT DISTINCT source_id::text FROM doctrine_proposals
+		WHERE data->>'inbox'='true' AND COALESCE(data->>'state','proposed') NOT IN ('dismissed','promoted')
+		AND ($1='' OR source_id::text=$1)`, sourceID)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(ids) == 0 {
+		return err
+	}
+	system, err := systemactor.Ensure(ctx, tx, tenantID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		s, err := getSource(ctx, tx, id, false)
+		if errors.Is(err, errNoSource) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		files, err := cachedFiles(ctx, tx, s)
+		if err != nil {
+			return err
+		}
+		if len(files) == 0 {
+			continue
+		}
+		if err := promoteLanded(ctx, tx, system, s, files); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reconcileInbox runs reconcilePromotions outside a request. A failure is
+// logged; the hourly sweep retries.
+func (m *Module) reconcileInbox(parent context.Context, tenantID, sourceID string) {
+	ctx, cancel := context.WithTimeout(db.AllProjects(context.WithoutCancel(parent), "doctrine inbox promotion"), 30*time.Second)
+	defer cancel()
+	err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','3s',true)`); err != nil {
+			return err
+		}
+		return reconcilePromotions(ctx, tx, tenantID, sourceID)
+	})
+	if err != nil {
+		slog.Error("doctrine inbox promotion check incomplete; the hourly sweep retries")
+	}
 }
 
 func shortCommit(sha string) string {

@@ -55,6 +55,7 @@ async function setup(page: Page, items: Record<string, unknown>[]): Promise<Inbo
   await mockSettings(page, settingsData())
   await mockRules(page)
   const inbox: Inbox = { items: [...items], calls: [], proposals: [] }
+  const notified = new Set<string>()
   await page.route('**/api/me/permissions**', route => {
     const url = new URL(route.request().url())
     const answer = mockEffectivePermissions('admin', url.searchParams.get('project_id') ?? undefined)
@@ -68,7 +69,14 @@ async function setup(page: Page, items: Record<string, unknown>[]): Promise<Inbo
     const path = new URL(request.url()).pathname
     const method = request.method()
     inbox.calls.push({ method, path, body: method === 'GET' ? undefined : request.postDataJSON() })
-    if (path.endsWith('/summary')) return route.fulfill({ json: { pending: inbox.items.length, items: inbox.items.map(i => ({ id: i.id, label: i.label, created_at: i.created_at })) } })
+    if (path.endsWith('/summary')) return route.fulfill({ json: { pending: inbox.items.length, items: inbox.items.map(i => ({ id: i.id, label: i.label, created_at: i.created_at, notified: notified.has(i.id) })) } })
+    if (path.endsWith('/notified')) {
+      // The server grants each person one claim per waiting proposal.
+      const id = path.split('/').at(-2)!
+      const claimed = inbox.items.some(i => i.id === id) && !notified.has(id)
+      notified.add(id)
+      return route.fulfill({ json: { claimed } })
+    }
     if (method === 'GET') return route.fulfill({ json: { pending: inbox.items.length, items: inbox.items } })
     const id = path.split('/').at(-2)
     const target = inbox.items.find(i => i.id === id)!
@@ -127,7 +135,7 @@ test('agent proposals wait in the doctrine inbox with a diff, a dot and one toas
   const axe = await new AxeBuilder({ page }).include('#doctrine-inbox').analyze()
   expect(axe.violations.map(v => v.id)).toEqual([])
 
-  // Seen once, never again: a reload shows no toast.
+  // Claimed once on the server, never again: a reload shows no toast.
   await page.reload()
   await expect(inboxRegion(page).getByRole('heading', { name: 'Proposed changes · 2' })).toBeVisible()
   await expect(page.getByText('2 doctrine changes proposed')).toHaveCount(0)
@@ -157,7 +165,6 @@ test('agent proposals wait in the doctrine inbox with a diff, a dot and one toas
 test('edit then propose replaces the agent text; an outdated proposal needs an edit', async ({ page }) => {
   const outdated = { ...REVIEWED, outdated: true, base: '- Small commits, one topic each.' }
   const mock = await setup(page, [ESTIMATE, outdated])
-  await page.addInitScript(() => localStorage.setItem('aeon.doctrine-inbox.seen.p1', '[]'))
   await page.goto('/settings/agent-rules')
   const inbox = inboxRegion(page)
   const stale = inbox.getByRole('article', { name: 'Keep commits small and reviewed' })

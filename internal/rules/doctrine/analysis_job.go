@@ -56,8 +56,9 @@ func (m *Module) RunOutcomeAnalysis(ctx context.Context) {
 }
 
 // sweepInboxHourly bounds doctrine inbox drafts even when nobody reads the
-// inbox (AEON-444).
+// inbox, and promotes proposals an index skipped under a lease (AEON-444).
 func (m *Module) sweepInboxHourly(parent context.Context) {
+	defer m.reconcileInbox(parent, m.app.TenantID, "")
 	ctx, cancel := context.WithTimeout(db.AllProjects(parent, "doctrine inbox sweep"), time.Minute)
 	defer cancel()
 	err := db.InTenant(ctx, m.pool, m.app.TenantID, func(tx pgx.Tx) error {
@@ -205,7 +206,7 @@ func analysisTarget(layer Layer, f finding) (SourceView, ProposalInput, bool) {
 				if findingClass(r.Text) != class || strings.Contains(r.Source, advice) {
 					continue
 				}
-				in := ProposalInput{automatic: true, SourceID: s.ID, Path: file.Path, RuleKey: r.Key, RuleSHA: r.SHA256, Source: strings.TrimRight(r.Source, "\r\n") + "\n  " + advice + "\n", Explanation: proposalExplanation(f)}
+				in := ProposalInput{SourceID: s.ID, Path: file.Path, RuleKey: r.Key, RuleSHA: r.SHA256, Source: strings.TrimRight(r.Source, "\r\n") + "\n  " + advice + "\n", Explanation: proposalExplanation(f)}
 				in.TLDR.EN = advice
 				if r.TLDR != nil {
 					in.TLDR.EN, in.TLDR.DE = r.TLDR.EN, r.TLDR.DE
@@ -237,7 +238,7 @@ func (m *Module) reserveFinding(ctx context.Context, actor tenant.Principal, f *
 			if open >= m.analysis.defaults().MaxOpenDrafts {
 				return nil
 			}
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM doctrine_findings WHERE source_id=$1 AND path=$2 AND rule_key=$3 AND status IN ('pending','draft')) OR EXISTS(SELECT 1 FROM doctrine_proposals WHERE source_id=$1 AND path=$2 AND rule_key=$3 AND COALESCE(data->>'state','proposed') NOT IN ('closed','merged','released','pinned'))`, f.SourceID, f.Path, f.RuleKey).Scan(&duplicate); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM doctrine_findings WHERE source_id=$1 AND path=$2 AND rule_key=$3 AND status IN ('pending','draft')) OR EXISTS(SELECT 1 FROM doctrine_proposals WHERE source_id=$1 AND path=$2 AND rule_key=$3 AND COALESCE(data->>'state','proposed') NOT IN ('closed','merged','released','pinned','dismissed','promoted'))`, f.SourceID, f.Path, f.RuleKey).Scan(&duplicate); err != nil {
 				return err
 			}
 			if duplicate {
@@ -296,9 +297,19 @@ func (m *Module) attemptFinding(ctx context.Context, actor tenant.Principal, f *
 	if editErr == nil {
 		f.AfterFileSHA = hashText(changed[in.Path])
 	}
-	result, err := m.proposeChange(ctx, actor, in)
+	// The job never publishes: its proposal waits in the doctrine inbox until
+	// a person sends it to git or dismisses it (AEON-444).
+	proposal, err := m.recordInboxProposal(ctx, actor, InboxInput{
+		RequestID: in.RequestID, SourceID: in.SourceID, Path: in.Path, RuleKey: in.RuleKey, RuleSHA: in.RuleSHA,
+		Source: in.Source, TLDR: &inboxTLDR{EN: in.TLDR.EN, DE: in.TLDR.DE}, Why: in.Explanation,
+	})
 	if err != nil {
 		var failure *failure
+		if errors.As(err, &failure) && (failure.Code == "inbox_full" || failure.Code == "rule_proposal_open") {
+			// The inbox is bounded; the reservation waits for a person to act.
+			f.Reason = "The doctrine inbox is full or already holds a proposal for this rule; retried on the next day."
+			return m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error { return saveFinding(ctx, tx, actor, *f, "doctrine.finding_pending") })
+		}
 		if errors.As(err, &failure) && (failure.Code == "private_doctrine" || failure.Code == "private_index_unavailable" || failure.Code == "public_identity" || failure.Code == "credential_text" || failure.Code == "non_latin" || failure.Code == "locked_rule") {
 			reason := "Kept internal to protect private instruction text."
 			if failure.Code == "private_index_unavailable" {
@@ -318,16 +329,15 @@ func (m *Module) attemptFinding(ctx context.Context, actor tenant.Principal, f *
 			}
 			return m.noteFinding(ctx, actor, f, reason)
 		}
-		// Unknown GitHub outcomes keep their slot; don't create an untracked draft
-		// or silently turn a transport failure into a safe-to-forget internal note.
-		f.Reason = "Draft outcome not confirmed; the same reservation will be retried."
+		// Other failures keep their slot; don't create an untracked proposal or
+		// silently turn a failure into a safe-to-forget internal note.
+		f.Reason = "Proposal not recorded; the same reservation will be retried."
 		saveErr := m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error { return saveFinding(ctx, tx, actor, *f, "doctrine.finding_pending") })
 		if saveErr != nil {
 			return saveErr
 		}
 		return err
 	}
-	proposal := result.(Proposal)
 	f.ProposalID, f.PRURL, f.Status, f.Reason = proposal.ID, proposal.PRURL, "draft", ""
 	return m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error { return saveFinding(ctx, tx, actor, *f, "doctrine.finding_proposed") })
 }
@@ -379,23 +389,44 @@ func afterMeasurement(samples []analysisSample, f findingData, now time.Time, wi
 }
 
 func (m *Module) observeFinding(ctx context.Context, actor tenant.Principal, f *findingData, samples []analysisSample, now time.Time) error {
-	proposal, err := m.runProposal(ctx, actor, "rules.write", f.ProposalID, func(ctx context.Context, p *Proposal) (string, error) {
-		g, err := m.appClient(ctx, actor.TenantID, p.Repository)
-		if err != nil {
-			return "", err
-		}
-		defer g.revoke()
-		// observe is read-only: no readiness, approvals, merges or dispatches.
-		return "doctrine.proposal_refreshed", m.observe(ctx, g, p)
+	var proposal Proposal
+	err := m.tx(ctx, actor, "rules.read", func(tx pgx.Tx) error {
+		var err error
+		proposal, err = scanProposal(tx.QueryRow(ctx, `SELECT `+proposalColumns+` FROM doctrine_proposals WHERE id=$1`, f.ProposalID))
+		return err
 	})
 	if err != nil {
 		return err
 	}
-	if proposal.State == "closed" {
+	// An inbox proposal waits for a person; only a PR a person opened has
+	// anything on GitHub to observe.
+	if !proposal.Inbox || proposal.PRNumber > 0 && proposal.State != "promoted" {
+		proposal, err = m.runProposal(ctx, actor, "rules.write", f.ProposalID, func(ctx context.Context, p *Proposal) (string, error) {
+			g, err := m.appClient(ctx, actor.TenantID, p.Repository)
+			if err != nil {
+				return "", err
+			}
+			defer g.revoke()
+			// observe is read-only: no readiness, approvals, merges or dispatches.
+			return "doctrine.proposal_refreshed", m.observe(ctx, g, p)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if proposal.PRURL != f.PRURL {
+		// A person sent the proposal to git.
+		f.PRURL = proposal.PRURL
+		if err := m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error { return saveFinding(ctx, tx, actor, *f, "doctrine.finding_proposed") }); err != nil {
+			return err
+		}
+	}
+	if proposal.State == "closed" || proposal.State == "dismissed" {
 		f.Status = "closed"
 		return m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error { return saveFinding(ctx, tx, actor, *f, "doctrine.finding_closed") })
 	}
-	if proposal.MergeCommit == "" {
+	// A promoted inbox proposal is in the pinned doctrine, by any route.
+	if proposal.MergeCommit == "" && proposal.State != "promoted" {
 		return nil
 	}
 	// A merged change no longer consumes an open-draft slot. Keep following
