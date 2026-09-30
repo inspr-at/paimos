@@ -638,6 +638,8 @@ func rememberStopIntent(session *heartbeatSession, strict bool, attempts, code i
 		b.WriteByte('\n')
 	}
 	fmt.Fprintf(&b, "%d\n%d\n", attempts, code)
+	// How the job ended survives with the intent, so a replayed stop still says so (AEON-437).
+	fmt.Fprintf(&b, "%s\n", persistedStopReason(session.stopReason))
 	_ = session.hold.writeFile("stop.intent", []byte(b.String()))
 }
 
@@ -909,12 +911,12 @@ func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSessi
 	if err != nil {
 		return err
 	}
-	id, strict, attempts, code := heartbeatStopIntent(raw)
+	id, strict, attempts, code, reason := heartbeatStopIntent(raw)
 	lease, err := readStateSecret(&session.hold, "lease.key")
 	if err != nil || !validUUID(id) {
 		return errHeartbeatState
 	}
-	stopping := heartbeatSession{id: id, lease: lease}
+	stopping := heartbeatSession{id: id, lease: lease, stopReason: reason}
 	// A previous flush may have saved a report and then failed to stop.
 	// Post that work on the usage budget, then stop on a fresh one.
 	// The generation id and transcript cursor stay so the next start cannot
@@ -927,6 +929,7 @@ func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSessi
 		rt.drainHeartbeatUsage(usageCtx, o, &existing)
 		cancel()
 		stopping.disk = existing.disk
+		existing.stopReason = reason
 		kept = &existing
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), heartbeatStopTimeout)
@@ -949,7 +952,7 @@ func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSessi
 		}
 		holder := kept
 		if holder == nil {
-			holder = &heartbeatSession{id: id, hold: session.hold}
+			holder = &heartbeatSession{id: id, hold: session.hold, stopReason: reason}
 		}
 		rememberStopIntent(holder, strict, attempts+1, heartbeatStatus(stopErr))
 		if kept != nil {
@@ -1251,14 +1254,15 @@ func explainClosedHeartbeat(rt *runtime, session *heartbeatSession) {
 	fmt.Fprintf(rt.stderr, "heartbeat: session %s is %s and will not resume\n", session.id, reason)
 }
 
-func heartbeatStopIntent(raw []byte) (id string, strict bool, attempts, code int) {
+func heartbeatStopIntent(raw []byte) (id string, strict bool, attempts, code int, reason string) {
 	line, rest, _ := strings.Cut(string(raw), "\n")
 	id = strings.ToLower(strings.TrimSpace(line))
 	next, rest, _ := strings.Cut(rest, "\n")
 	strict = strings.TrimSpace(next) == "strict"
 	attemptLine, rest, _ := strings.Cut(rest, "\n")
-	codeLine, _, _ := strings.Cut(rest, "\n")
-	return id, strict, heartbeatAttemptCount(attemptLine), heartbeatAttemptCount(codeLine)
+	codeLine, rest, _ := strings.Cut(rest, "\n")
+	reasonLine, _, _ := strings.Cut(rest, "\n")
+	return id, strict, heartbeatAttemptCount(attemptLine), heartbeatAttemptCount(codeLine), persistedStopReason(reasonLine)
 }
 
 func heartbeatAttemptCount(raw string) int {

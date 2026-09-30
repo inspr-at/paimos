@@ -105,8 +105,8 @@ type heartbeatSession struct {
 	lease string
 	disk  heartbeatDisk
 	hold  heartbeatHold
-	// stopReason is how the wrapped job ended, for the stop request only. It is
-	// not persisted: a stop replayed from disk is a plain "stopped" (AEON-437).
+	// stopReason is how the wrapped job ended. A stop that did not land keeps it in
+	// stop.intent, so the replay names the same ending (AEON-437). Empty is a plain stop.
 	stopReason string
 }
 

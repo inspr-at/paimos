@@ -188,6 +188,17 @@ const (
 	stopProcessFailed = "process_failed"
 )
 
+// persistedStopReason is what stop.intent may carry: only how a job ended. Any other
+// text, including a reason the server takes for other stops, reads back as a plain stop.
+func persistedStopReason(reason string) string {
+	switch reason = strings.TrimSpace(reason); reason {
+	case stopProcessExited, stopProcessFailed:
+		return reason
+	default:
+		return ""
+	}
+}
+
 func jobStopReason(interrupted bool, childErr error) string {
 	switch {
 	case interrupted:

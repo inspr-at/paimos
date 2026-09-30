@@ -142,3 +142,65 @@ func TestCoordinatorHeartbeatUsesNativeReference(t *testing.T) {
 		t.Fatal("coordinator reference/explicit succession not preserved")
 	}
 }
+
+// AEON-437: how the job ended is part of the stop. When the first /stop fails,
+// the recovery on the next start must replay that reason, not a plain "stopped":
+// a crash replayed as "stopped" at 100% would later read as a finished job.
+func TestHarnessRunStopRecoveryReplaysHowTheJobEnded(t *testing.T) {
+	for _, tc := range []struct{ name, script, reason string }{
+		{"failed", "exit 7", "process_failed"},
+		{"clean", "exit 0", "process_exited"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []hbCall
+			stops := 0
+			srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/stop") {
+					stops++
+					if stops == 1 {
+						w.WriteHeader(http.StatusInternalServerError)
+						_, _ = w.Write([]byte(`{"error":"unavailable"}`))
+						return true
+					}
+				}
+				return false
+			})
+			defer srv.Close()
+			rt, _, _ := heartbeatRuntime(t, srv)
+			o := heartbeatTestOptions(t.TempDir())
+			o.OwnerPID = os.Getpid()
+			_ = rt.runHarnessCommand(context.Background(), o, []string{"sh", "-c", tc.script})
+			if _, err := os.Lstat(filepath.Join(o.StateDir, "stop.intent")); err != nil {
+				t.Fatalf("failed stop left no stop intent: %v", err)
+			}
+			if err := rt.runHeartbeat(context.Background(), o, heartbeatDeps{alive: func(int) bool { return false }}); err != nil {
+				t.Fatalf("recovery: %v", err)
+			}
+			got := hbWhere(calls, http.MethodPost, "/stop")
+			if len(got) != 2 {
+				t.Fatalf("stops %d, want the failed one and its replay", len(got))
+			}
+			for i, stop := range got {
+				if stop.body["reason"] != tc.reason {
+					t.Fatalf("stop %d reason %v, want %s", i, stop.body["reason"], tc.reason)
+				}
+			}
+		})
+	}
+}
+
+// A stop intent written before the reason was persisted (or with a reason the
+// server does not accept) replays as the plain stop it always was.
+func TestHeartbeatStopIntentReasonIsAllowlisted(t *testing.T) {
+	for raw, want := range map[string]string{
+		"id\n\n1\n500\nprocess_failed\n": "process_failed",
+		"id\n\n1\n500\nprocess_exited\n": "process_exited",
+		"id\n\n1\n500\n":                 "",
+		"id\n\n1\n500\nforce_stopped\n":  "",
+		"id\n\n1\n500\nrm -rf /\n":       "",
+	} {
+		if _, _, _, _, got := heartbeatStopIntent([]byte(raw)); got != want {
+			t.Fatalf("%q read as %q, want %q", raw, got, want)
+		}
+	}
+}
