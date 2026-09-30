@@ -285,7 +285,8 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-ref "$GITHUB_REF" \
-            --source-digest "$GITHUB_SHA"
+            --source-digest "$GITHUB_SHA" \
+            --deny-self-hosted-runners
 
       - name: Record pushed digest
         env:

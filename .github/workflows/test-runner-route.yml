@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Test runner route
+
+on:
+  workflow_call:
+    inputs:
+      required-idle-runners:
+        type: number
+        default: 1
+    outputs:
+      runs_on:
+        value: ${{ jobs.route.outputs.runs_on }}
+      runner_class:
+        value: ${{ jobs.route.outputs.runner_class }}
+      run_attempt:
+        value: ${{ jobs.route.outputs.run_attempt }}
+
+permissions:
+  contents: read
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      runs_on: ${{ steps.route.outputs.runs_on }}
+      runner_class: ${{ steps.route.outputs.runner_class }}
+      run_attempt: ${{ steps.route.outputs.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select an available test runner or hosted fallback
+        id: route
+        env:
+          AEON_MBP2606_AVAILABILITY: ${{ vars.AEON_MBP2606_AVAILABILITY }}
+          AEON_REQUIRED_IDLE_RUNNERS: ${{ inputs.required-idle-runners }}
+        run: node scripts/ci-runner-route.mjs

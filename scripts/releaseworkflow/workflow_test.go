@@ -139,7 +139,7 @@ func TestSmokeBeforePushAndAttest(t *testing.T) {
 	if !strings.HasPrefix(attest.Uses, "actions/attest-build-provenance@") || attest.With["subject-name"] != "ghcr.io/inspr-at/aeon" || attest.With["subject-digest"] != "${{ steps.push.outputs.digest }}" || attest.With["push-to-registry"] != "true" || attest.With["create-storage-record"] != "false" {
 		t.Fatal("attestation must bind the pushed digest without new token scopes")
 	}
-	for _, binding := range []string{"oci://ghcr.io/inspr-at/aeon@${DIGEST}", "--repo \"$GITHUB_REPOSITORY\"", "--signer-workflow \"$GITHUB_REPOSITORY/.github/workflows/release.yml\"", "--source-ref \"$GITHUB_REF\"", "--source-digest \"$GITHUB_SHA\""} {
+	for _, binding := range []string{"oci://ghcr.io/inspr-at/aeon@${DIGEST}", "--repo \"$GITHUB_REPOSITORY\"", "--signer-workflow \"$GITHUB_REPOSITORY/.github/workflows/release.yml\"", "--source-ref \"$GITHUB_REF\"", "--source-digest \"$GITHUB_SHA\"", "--deny-self-hosted-runners"} {
 		if !strings.Contains(verify.Run, binding) {
 			t.Fatalf("verification missing binding %s", binding)
 		}

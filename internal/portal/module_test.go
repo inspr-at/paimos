@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -283,7 +284,17 @@ func sameResponse(t *testing.T, a, b *httptest.ResponseRecorder) {
 	if a.Code != b.Code || a.Body.String() != b.Body.String() {
 		t.Fatalf("status/body %d %s vs %d %s", a.Code, a.Body, b.Code, b.Body)
 	}
-	ah, bh := a.Header(), b.Header()
+	ah, bh := a.Header().Clone(), b.Header().Clone()
+	aRetry, bRetry := ah.Values("Retry-After"), bh.Values("Retry-After")
+	if a.Code == http.StatusTooManyRequests {
+		if !retryAfterAgrees(aRetry, bRetry) {
+			t.Fatalf("header Retry-After %v vs %v", aRetry, bRetry)
+		}
+	} else if strings.Join(aRetry, "\n") != strings.Join(bRetry, "\n") {
+		t.Fatalf("header Retry-After %v vs %v", aRetry, bRetry)
+	}
+	ah.Del("Retry-After")
+	bh.Del("Retry-After")
 	if len(ah) != len(bh) {
 		t.Fatalf("headers %#v vs %#v", ah, bh)
 	}
@@ -292,6 +303,96 @@ func sameResponse(t *testing.T, a, b *httptest.ResponseRecorder) {
 			t.Fatalf("header %s %v vs %v", key, values, bh[key])
 		}
 	}
+}
+
+// retryAfterAgrees compares Retry-After on two 429 responses. Each side must
+// be one integer from 1 through the limiter window before the values are
+// compared. Equal values in that range agree. The only unequal pair that
+// agrees is 59 and 60, either order: allow() ceils the remaining minute from
+// clock_timestamp(), so two denials that straddle the top of that minute can
+// report 60 and then 59. Callers comparing any other status keep absent
+// headers and do not use this helper.
+func retryAfterAgrees(a, b []string) bool {
+	av, aok := oneRetryAfter(a)
+	bv, bok := oneRetryAfter(b)
+	if !aok || !bok {
+		return false
+	}
+	if av == bv {
+		return true
+	}
+	return (av == 59 && bv == 60) || (av == 60 && bv == 59)
+}
+
+func oneRetryAfter(values []string) (int, bool) {
+	if len(values) != 1 {
+		return 0, false
+	}
+	seconds, err := strconv.Atoi(values[0])
+	if err != nil {
+		return 0, false
+	}
+	limit := int(publicLimitWindow / time.Second)
+	if seconds < 1 || seconds > limit {
+		return 0, false
+	}
+	return seconds, true
+}
+
+func TestSameResponseAllowsRetryAfterSecondBoundary(t *testing.T) {
+	sameResponse(t, rateLimited(t, "60"), rateLimited(t, "59"))
+	sameResponse(t, rateLimited(t, "59"), rateLimited(t, "60"))
+	sameResponse(t, rateLimited(t, "60"), rateLimited(t, "60"))
+}
+
+func TestSameResponseAllowsAbsentRetryAfterOffLimit(t *testing.T) {
+	a := httptest.NewRecorder()
+	b := httptest.NewRecorder()
+	a.WriteHeader(http.StatusNotFound)
+	b.WriteHeader(http.StatusNotFound)
+	sameResponse(t, a, b)
+}
+
+func TestRetryAfterAgreesOnlyAtFiftyNineSixty(t *testing.T) {
+	agree := [][2][]string{
+		{{"59"}, {"60"}},
+		{{"60"}, {"59"}},
+		{{"60"}, {"60"}},
+	}
+	for _, pair := range agree {
+		if !retryAfterAgrees(pair[0], pair[1]) {
+			t.Fatalf("Retry-After %v vs %v should agree", pair[0], pair[1])
+		}
+	}
+	reject := [][2][]string{
+		{{"1"}, {"2"}},
+		{{"58"}, {"59"}},
+		{{"0"}, {"0"}},
+		{{"61"}, {"61"}},
+		{nil, nil},
+		{{"60"}, {"58"}},
+		{{"60"}, nil},
+		{{"61"}, {"60"}},
+		{{"0"}, {"1"}},
+		{{"soon"}, {"60"}},
+	}
+	for _, pair := range reject {
+		if retryAfterAgrees(pair[0], pair[1]) {
+			t.Fatalf("Retry-After %v vs %v should not agree", pair[0], pair[1])
+		}
+	}
+}
+
+func rateLimited(t *testing.T, retryAfter string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Content-Type", "application/json")
+	rec.Header().Set("Retry-After", retryAfter)
+	rec.WriteHeader(http.StatusTooManyRequests)
+	if _, err := rec.WriteString(`{"error":"too many attempts"}`); err != nil {
+		t.Fatal(err)
+	}
+	return rec
 }
 
 func TestPublicWishIntake(t *testing.T) {
