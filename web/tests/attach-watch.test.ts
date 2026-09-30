@@ -25,3 +25,46 @@ test('explicit status-only attachment is distinct from default conversation cons
   assert.equal(metadataOnlyAttach({}), false)
   assert.equal(metadataOnlyAttach({ mode: 'unknown' }), false)
 })
+
+test('the terminal link fills in nine digits and nothing else', async () => {
+  const { attachCodeFromHash, formatAttachCode } = await import('../src/lib/attachWatch.ts')
+  assert.equal(attachCodeFromHash('#attach=123456789'), '123456789')
+  assert.equal(formatAttachCode('123456789'), '123 456 789')
+  for (const hash of ['', '#', '#attach=', '#attach=12345678', '#attach=1234567890', '#attach=12345678a', '#attach=123456789&x=1', '#attach=123456789/', '#x=123456789', '#attach=%31%32%33%34%35%36%37%38%39', '?attach=123456789', '#attach=123 456 789', '#attach=１２３４５６７８９', '#attach=<img src=x>']) {
+    assert.equal(attachCodeFromHash(hash), null, hash)
+  }
+})
+
+test('a waiting request reads as waiting, approved, expired or cancelled', async () => {
+  const { attachOutcome } = await import('../src/lib/attachWatch.ts')
+  const now = Date.parse('2026-09-30T12:00:00Z')
+  const soon = '2026-09-30T12:05:00Z', past = '2026-09-30T11:59:59Z'
+  assert.equal(attachOutcome({ state: 'pending', expires_at: soon }, now), 'waiting')
+  assert.equal(attachOutcome({ state: 'approved', expires_at: soon }, now), 'approved')
+  // The client clock may pass the expiry before the next poll says so.
+  assert.equal(attachOutcome({ state: 'pending', expires_at: past }, now), 'expired')
+  assert.equal(attachOutcome({ state: 'approved', expires_at: past }, now), 'expired')
+  assert.equal(attachOutcome({ state: 'unreachable', expires_at: soon }, now), 'expired')
+  assert.equal(attachOutcome({ state: 'detached', expires_at: soon }, now), 'cancelled')
+  // A watch that became a session is a session, never a pending request.
+  for (const state of ['active', 'confirmed_exited'] as const) assert.equal(attachOutcome({ state, expires_at: soon }, now), null)
+})
+
+test('listing pending attaches is a plain same-origin read', async () => {
+  const { listPendingAttach } = await import('../src/lib/attachWatch.ts')
+  const original = globalThis.fetch
+  try {
+    const calls: { url: string; method?: string; body?: unknown }[] = []
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url: String(url), method: init?.method, body: init?.body })
+      return new Response(JSON.stringify({ requests: [{ request_id: 'r1', state: 'pending' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    const found = await listPendingAttach()
+    assert.equal(found[0]?.request_id, 'r1')
+    assert.deepEqual(calls, [{ url: '/api/agent-pairing/attach/pending', method: undefined, body: undefined }])
+    globalThis.fetch = async () => new Response(JSON.stringify({}), { status: 200 })
+    assert.deepEqual(await listPendingAttach(), [])
+    globalThis.fetch = async () => new Response('{}', { status: 403 })
+    await assert.rejects(listPendingAttach())
+  } finally { globalThis.fetch = original }
+})

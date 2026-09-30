@@ -1,13 +1,18 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { getNode } from '../../lib/api'
-import { attachAction, metadataOnlyAttach, type AttachReview } from '../../lib/attachWatch'
-import { can, onAccessChange } from '../../lib/authz'
+import { attachAction, attachCodeFromHash, formatAttachCode, metadataOnlyAttach, type AttachReview } from '../../lib/attachWatch'
+import { can, ensurePermissions, onAccessChange } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 
 const identity = useSession()
+const route = useRoute()
+const router = useRouter()
+// A decision changes what /agents lists as waiting; the page refreshes it.
+const emit = defineEmits<{ changed: [] }>()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('account.manage'))
 const dialog = ref<HTMLDialogElement>()
 const codeInput = ref<HTMLInputElement>()
@@ -25,6 +30,40 @@ const ticket = ref('')
 let operation: AbortController | undefined
 function close() { operation?.abort(); operation = undefined; dialog.value?.close(); code.value = ''; review.value = null; error.value = ''; busy.value = false; project.value = ''; ticket.value = '' }
 async function open() { close(); dialog.value?.showModal(); await nextTick(); codeInput.value?.focus() }
+// The link `aeon-agentd attach` prints only fills the code in; the person still
+// reviews and approves. It is read once and removed from the address bar.
+async function openWithCode(value: string) { await open(); code.value = formatAttachCode(value) }
+// One pass per link. The address bar is cleaned first: that navigation refreshes
+// the session, which closes an open review, so the dialog opens after it.
+let followed = ''
+async function followLink() {
+  const linked = attachCodeFromHash(route.hash)
+  if (!linked) { followed = ''; return }
+  if (!identity.identity || linked === followed) return
+  followed = linked
+  const settled = await ensurePermissions()
+  const mayAttach = settled === 'known' && allowed.value
+  await router.replace({ path: route.path, query: route.query, hash: '' })
+  if (mayAttach) { await nextTick(); await openWithCode(linked) }
+}
+onMounted(followLink)
+watch([() => route.hash, () => !!identity.identity], followLink)
+// Names are a convenience; approval binds the immutable IDs in the snapshot.
+async function present(result: AttachReview, controller: AbortController) {
+  review.value = result; code.value = ''
+  const names = await Promise.allSettled([getNode(result.snapshot.project_id), getNode(result.snapshot.ticket_id)])
+  if (operation !== controller || controller.signal.aborted) return
+  project.value = names[0].status === 'fulfilled' ? names[0].value.title : 'Selected project'
+  ticket.value = names[1].status === 'fulfilled' ? `${names[1].value.key} · ${names[1].value.title}` : 'Selected ticket'
+}
+// Review a request the page already lists: same review, same digests, no code to type.
+async function show(result: AttachReview) {
+  if (!allowed.value) return
+  close(); dialog.value?.showModal()
+  const controller = new AbortController(); operation = controller
+  await present(result, controller)
+}
+defineExpose({ show })
 async function lookup() {
   const normalized = code.value.replace(/[\s-]/g, '')
   if (!allowed.value || !/^\d{9}$/.test(normalized)) { error.value = 'Enter the nine-digit code from your terminal.'; return }
@@ -32,12 +71,7 @@ async function lookup() {
   try {
     const result = await attachAction('/lookup', { user_code: normalized }, controller.signal)
     if (operation !== controller || controller.signal.aborted) return
-    review.value = result; code.value = ''
-    // Names are a convenience; approval binds the immutable IDs in the snapshot.
-    const names = await Promise.allSettled([getNode(result.snapshot.project_id), getNode(result.snapshot.ticket_id)])
-    if (operation !== controller || controller.signal.aborted) return
-    project.value = names[0].status === 'fulfilled' ? names[0].value.title : 'Selected project'
-    ticket.value = names[1].status === 'fulfilled' ? `${names[1].value.key} · ${names[1].value.title}` : 'Selected ticket'
+    await present(result, controller)
   } catch (e) { if (!controller.signal.aborted) error.value = e instanceof Error ? e.message : 'Attach unavailable.' }
   finally { if (operation === controller) busy.value = false }
 }
@@ -46,7 +80,7 @@ async function decide(revoke = false) {
   operation?.abort(); const controller = new AbortController(); operation = controller; busy.value = true; error.value = ''
   try {
     const result = await attachAction(`/${encodeURIComponent(review.value.request_id)}/${revoke ? 'revoke' : 'approve'}`, revoke ? {} : { request_digest: review.value.request_digest, ...(review.value.consent_digest ? { consent_digest: review.value.consent_digest } : {}) }, controller.signal)
-    if (operation === controller && !controller.signal.aborted) review.value = result
+    if (operation === controller && !controller.signal.aborted) { review.value = result; emit('changed') }
   } catch (e) { if (!controller.signal.aborted) error.value = e instanceof Error ? e.message : 'Could not update this watch.' }
   finally { if (operation === controller) busy.value = false }
 }
