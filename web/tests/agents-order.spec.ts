@@ -123,3 +123,46 @@ test('sorting still works when storage refuses the choice', async ({ page }) => 
   await page.getByRole('columnheader', { name: 'Running' }).getByRole('button').click()
   await expect.poll(() => rowOrder(page)).toEqual([sid(4), sid(2), sid(1), sid(3)])
 })
+
+test('the Heartbeat sort explains that fresh beats tie, for screen readers too', async ({ page }) => {
+  await setup(page)
+  await page.goto('/agents')
+  await expect.poll(() => rowOrder(page)).toHaveLength(4)
+  const help = 'Beats under 3 minutes old count as equal; start time and id then decide their order.'
+  const beat = page.getByRole('columnheader', { name: 'Heartbeat' }).getByRole('button')
+  await expect(beat).toHaveAccessibleDescription(help)
+  await expect(beat).toHaveAttribute('data-tip', new RegExp(help.slice(0, 30)))
+})
+
+test('at 390 px the compact sort control orders by Ticket, reverses, and restores the default', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await setup(page)
+  await page.goto('/agents')
+  const start = [sid(3), sid(1), sid(2), sid(4)]
+  await expect.poll(() => rowOrder(page)).toEqual(start)
+  await expect(page.locator('.thead')).toBeHidden()
+  const bar = page.getByRole('group', { name: 'Sort sessions' })
+  const pick = bar.getByRole('combobox', { name: 'Sort' })
+  await expect(pick).toHaveValue('state')
+  await expect(bar.getByRole('button', { name: /Order ascending/ })).toBeVisible()
+
+  await pick.selectOption('ticket')
+  const byTicket = [sid(2), sid(3), sid(1), sid(4)]
+  await expect.poll(() => rowOrder(page)).toEqual(byTicket)
+  await expect(pick).toHaveValue('ticket')
+
+  // Keyboard: the direction button is reachable and reverses the order.
+  await bar.getByRole('button', { name: /Order ascending/ }).focus()
+  await page.keyboard.press('Enter')
+  await expect.poll(() => rowOrder(page)).toEqual([...byTicket].reverse())
+  await expect(bar.getByRole('button', { name: /Order descending/ })).toBeVisible()
+
+  // Heartbeat has no column on phones; choosing it says how fresh beats compare.
+  await pick.selectOption('heartbeat')
+  await expect(bar.getByText('Beats under 3 minutes old count as equal', { exact: false })).toBeVisible()
+  await expect(pick).toHaveAccessibleDescription(/Beats under 3 minutes old/)
+
+  await page.getByRole('button', { name: 'Default order' }).click()
+  await expect.poll(() => rowOrder(page)).toEqual(start)
+  await expect(pick).toHaveValue('state')
+})

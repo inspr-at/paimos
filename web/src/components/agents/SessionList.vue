@@ -136,7 +136,15 @@ const COLUMNS: { key: SortKey; label: string; cls?: string }[] = [
 ]
 const effectiveSort = computed(() => sort.value ?? DEFAULT_SORT)
 const ariaSort = (key: SortKey) => effectiveSort.value.key === key ? (effectiveSort.value.dir === 'asc' ? 'ascending' : 'descending') : undefined
-const sortTip = (column: { key: SortKey; label: string }) => !sort.value && column.key === 'state' ? 'Default order: state, then start time' : `Sort by ${column.label.toLowerCase()}`
+const HEARTBEAT_HELP = 'Beats under 3 minutes old count as equal; start time and id then decide their order.'
+const sortTip = (column: { key: SortKey; label: string }) => column.key === 'heartbeat' ? `Sort by heartbeat. ${HEARTBEAT_HELP}` : !sort.value && column.key === 'state' ? 'Default order: state, then start time' : `Sort by ${column.label.toLowerCase()}`
+// Headers are hidden on narrow lists, so a compact control carries the same keys and direction.
+const sortable = computed(() => props.loaded && props.state === 'ready' && (showRemoved.value ? removedCount.value > 0 : total.value > 0))
+const dirWord = computed(() => effectiveSort.value.dir === 'asc' ? 'ascending' : 'descending')
+function pickSort(event: Event) {
+  const key = (event.target as HTMLSelectElement).value as SortKey
+  if (key !== effectiveSort.value.key) sortBy(key)
+}
 function sortBy(key: SortKey) {
   sort.value = nextSort(sort.value, key)
   writeSort(viewer.value, sort.value)
@@ -281,6 +289,21 @@ function rowClick(event: MouseEvent, id: string) {
       </span>
     </header>
 
+    <div v-if="sortable" class="sort-bar" role="group" aria-label="Sort sessions">
+      <label class="sort-pick">
+        <span class="sort-label">Sort</span>
+        <select class="sort-select" :value="effectiveSort.key" aria-describedby="sort-beat-help" @change="pickSort">
+          <option v-for="column in COLUMNS" :key="column.key" :value="column.key">{{ column.label }}</option>
+        </select>
+      </label>
+      <button
+        type="button" class="icon-btn sort-dir" :aria-label="`Order ${dirWord}; switch to ${effectiveSort.dir === 'asc' ? 'descending' : 'ascending'}`"
+        :data-tip="`Order ${dirWord}`" @click="sortBy(effectiveSort.key)"
+      ><AppIcon :name="effectiveSort.dir === 'asc' ? 'arrow-up' : 'arrow-down'" :size="14" /></button>
+      <p v-if="effectiveSort.key === 'heartbeat'" class="sort-note">{{ HEARTBEAT_HELP }}</p>
+    </div>
+    <span v-if="sortable" id="sort-beat-help" class="sr-only">{{ HEARTBEAT_HELP }}</span>
+
     <div v-if="state === 'forbidden'" class="state">
       <AppIcon name="agent" :size="20" />
       <h3>Sessions are visible to workspace members with agent access</h3>
@@ -301,7 +324,7 @@ function rowClick(event: MouseEvent, id: string) {
     <div v-else class="table" :class="{ 'has-eta': hasEta }" role="table" aria-label="Agent sessions">
       <div class="thead" role="row">
         <span v-for="column in COLUMNS" :key="column.key" role="columnheader" :class="column.cls" :aria-sort="ariaSort(column.key)">
-          <button type="button" class="th-sort" :class="{ on: sort?.key === column.key }" :data-tip="sortTip(column)" @click="sortBy(column.key)">
+          <button type="button" class="th-sort" :class="{ on: sort?.key === column.key }" :data-tip="sortTip(column)" :aria-describedby="column.key === 'heartbeat' ? 'sort-beat-help' : undefined" @click="sortBy(column.key)">
             <span>{{ column.label }}</span>
             <span v-if="ariaSort(column.key)" class="sort-mark" aria-hidden="true"><AppIcon :name="effectiveSort.dir === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" :class="{ 'default-sort': !sort }" /></span>
           </button>
@@ -478,6 +501,14 @@ function rowClick(event: MouseEvent, id: string) {
 .th-sort:focus-visible { box-shadow: var(--focus-ring); }
 .sort-mark { display: inline-grid; place-items: center; flex: none; width: 11px; height: 11px; }
 .default-sort { opacity: .55; }
+/* Where headers (or their Running and Heartbeat columns) are hidden, this bar carries the same keys and direction. */
+.sort-bar { display: none; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 18px 10px; border-top: 1px solid var(--line); }
+.sort-pick { display: inline-flex; align-items: center; gap: 8px; }
+.sort-label { font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+.sort-select { height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--field-bg); font: inherit; font-size: 13px; color: var(--ink); }
+.sort-select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.sort-dir { width: 34px; height: 34px; }
+.sort-note { flex-basis: 100%; font-size: 12px; color: var(--ink-3); }
 .group-row { margin: 10px 6px 2px; padding: 0 12px; }
 .group-label { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 8px; height: 26px; font: 500 10.5px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .group-row.attention .group-label { color: var(--gold-ink); }
@@ -595,6 +626,7 @@ function rowClick(event: MouseEvent, id: string) {
 /* Estimates need a ticket track wide enough for "overdue 5 min". */
 .table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(112px, .48fr) minmax(128px, .82fr) 80px 80px 76px; }
 @container sessions (max-width: 980px) {
+  .sort-bar { display: flex; }
   .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 72px 76px; }
   .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(104px, .42fr) minmax(116px, .75fr) 72px 76px; }
   .c-elapsed { display: none; }
@@ -665,5 +697,8 @@ function rowClick(event: MouseEvent, id: string) {
   .card-head { flex-wrap: wrap; align-items: center; padding: 6px 10px 2px 18px; }
   .head-tools { flex-wrap: wrap; justify-content: flex-end; }
   .head-tools .btn { min-height: 44px; }
+  .sort-bar { padding: 8px 18px; }
+  .sort-select { height: 44px; font-size: 16px; }
+  .sort-dir { width: 44px; height: 44px; }
 }
 </style>
