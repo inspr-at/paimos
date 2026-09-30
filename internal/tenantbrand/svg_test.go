@@ -5,6 +5,7 @@ package tenantbrand
 import (
 	"bytes"
 	"encoding/xml"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -195,6 +196,183 @@ func TestValidateLogo(t *testing.T) {
 	} {
 		if _, err := ValidateLogo(tc.declared, tc.body); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// doubledUse is the review's amplification payload: every level names the one
+// below it twice, so 94 source elements describe over a billion instances.
+func doubledUse(levels int) string {
+	var b strings.Builder
+	b.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs><g id="l0"><rect width="10" height="10"/></g>`)
+	for i := 1; i <= levels; i++ {
+		fmt.Fprintf(&b, `<g id="l%d"><use href="#l%d"/><use href="#l%d"/></g>`, i, i-1, i-1)
+	}
+	fmt.Fprintf(&b, `</defs><use href="#l%d"/></svg>`, levels)
+	return b.String()
+}
+
+// doubledMask amplifies through masks instead: each mask draws two elements
+// that are masked by the mask below.
+func doubledMask(levels int) string {
+	var b strings.Builder
+	b.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs><mask id="m0"><rect width="10" height="10" fill="#fff"/></mask>`)
+	for i := 1; i <= levels; i++ {
+		fmt.Fprintf(&b, `<mask id="m%d"><rect width="5" height="10" mask="url(#m%d)"/><rect x="5" width="5" height="10" mask="url(#m%d)"/></mask>`, i, i-1, i-1)
+	}
+	fmt.Fprintf(&b, `</defs><rect width="10" height="10" mask="url(#m%d)"/></svg>`, levels)
+	return b.String()
+}
+
+// Logos need no element references: <use> and <symbol> are dropped, nothing
+// chains through masks or clip paths, and an expanded-element budget backs it.
+func TestSanitizeSVGHasNoReferenceAmplification(t *testing.T) {
+	payload := doubledUse(46)
+	if len(payload) > 4000 {
+		t.Fatalf("payload grew to %d bytes", len(payload))
+	}
+	for name, in := range map[string]string{
+		"doubled use":  payload,
+		"doubled mask": doubledMask(46),
+		"use":          `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs><rect id="a" width="10" height="10"/></defs><use href="#a"/></svg>`,
+		"symbol":       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><symbol id="s"><rect width="10" height="10"/></symbol><use href="#s"/></svg>`,
+		"pattern":      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><pattern id="p" width="1" height="1"><rect width="1" height="1"/></pattern><rect width="10" height="10" fill="url(#p)"/></svg>`,
+		"marker":       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><marker id="k"><rect width="1" height="1"/></marker><path d="M0 0L5 5" marker-end="url(#k)"/></svg>`,
+		"clip in clip": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><clipPath id="a"><rect width="5" height="5"/></clipPath><clipPath id="b" clip-path="url(#a)"><rect width="5" height="5" clip-path="url(#a)"/></clipPath><rect width="10" height="10" clip-path="url(#b)"/></svg>`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, cleaned, err := SanitizeSVG([]byte(in))
+			if err != nil {
+				return // rejected outright is fine too
+			}
+			assertInert(t, out)
+			s := string(out)
+			for _, bad := range []string{"<use", "<symbol", "<pattern", "<marker"} {
+				if strings.Contains(s, bad) {
+					t.Fatalf("%s survived: %s", bad, s)
+				}
+			}
+			// Only a drawn element may name a mask or clip path, never one inside another.
+			if strings.Contains(s, "<mask") || strings.Contains(s, "<clipPath") {
+				dec := xml.NewDecoder(strings.NewReader(s))
+				depth := 0
+				for {
+					tok, err := dec.Token()
+					if err != nil {
+						break
+					}
+					switch e := tok.(type) {
+					case xml.StartElement:
+						if depth > 0 {
+							for _, a := range e.Attr {
+								if (a.Name.Local == "mask" || a.Name.Local == "clip-path") && strings.Contains(a.Value, "url(") {
+									t.Fatalf("a reference inside a mask or clip path survived: %s", s)
+								}
+							}
+						}
+						if e.Name.Local == "mask" || e.Name.Local == "clipPath" {
+							depth++
+						} else if depth > 0 {
+							depth++
+						}
+					case xml.EndElement:
+						if depth > 0 {
+							depth--
+						}
+					}
+				}
+			}
+			if !cleaned {
+				t.Fatalf("payload was not reported as cleaned: %s", s)
+			}
+		})
+	}
+}
+
+// One mask drawing a thousand shapes, named by a thousand shapes, is a million
+// instances: the expanded budget rejects it while a normal masked logo passes.
+func TestSanitizeSVGExpandedBudget(t *testing.T) {
+	build := func(inMask, users int) string {
+		var b strings.Builder
+		b.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs><mask id="m">`)
+		b.WriteString(strings.Repeat(`<rect width="1" height="1" fill="#fff"/>`, inMask))
+		b.WriteString(`</mask></defs>`)
+		b.WriteString(strings.Repeat(`<rect width="10" height="10" mask="url(#m)"/>`, users))
+		b.WriteString(`</svg>`)
+		return b.String()
+	}
+	if out, _, err := SanitizeSVG([]byte(build(1000, 1000))); err == nil {
+		t.Fatalf("a million expanded elements were accepted: %.200s", out)
+	}
+	if _, _, err := SanitizeSVG([]byte(build(3, 4))); err != nil {
+		t.Fatalf("a normal masked logo: %v", err)
+	}
+}
+
+// Gradients may inherit from one other gradient, never along a chain or a cycle.
+func TestSanitizeSVGGradientChains(t *testing.T) {
+	wrap := func(body string) []byte {
+		return []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs>` + body + `</defs></svg>`)
+	}
+	for name, body := range map[string]string{
+		"chain": `<linearGradient id="a"><stop offset="0"/></linearGradient><linearGradient id="b" href="#a"/><linearGradient id="c" href="#b"/>`,
+		"cycle": `<linearGradient id="a" href="#b"/><linearGradient id="b" href="#a"/>`,
+		"self":  `<linearGradient id="a" href="#a"/>`,
+	} {
+		if out, _, err := SanitizeSVG(wrap(body)); err == nil {
+			t.Errorf("%s accepted: %s", name, out)
+		}
+	}
+	if _, _, err := SanitizeSVG(wrap(`<linearGradient id="a"><stop offset="0"/></linearGradient><linearGradient id="b" href="#a"/><radialGradient id="c" href="#a"/><linearGradient id="d" href="#missing"/>`)); err != nil {
+		t.Errorf("single-level inheritance: %v", err)
+	}
+}
+
+// Every url() in an attribute or style value must be a fragment of this file;
+// a paint fallback is validated on its own and never carries another url().
+func TestSanitizeSVGURLsAreFragmentsOnly(t *testing.T) {
+	rect := func(attr string) string {
+		return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs><mask id="m"><rect width="1" height="1"/></mask><linearGradient id="g"><stop offset="0"/></linearGradient></defs><rect width="10" height="10" ` + attr + `/></svg>`
+	}
+	for name, attr := range map[string]string{
+		"review payload":     `mask="url(#m) , url(other.svg)"`,
+		"second url":         `mask="url(#m) url(https://evil.example/x.svg#a)"`,
+		"fill second url":    `fill="url(#g) url(https://evil.example/p.svg#g)"`,
+		"fill comma url":     `fill="url(#g), url(other.svg)"`,
+		"fill fallback url":  `fill="url(#g) url(data:image/svg+xml,x)"`,
+		"clip-path trailing": `clip-path="url(#m) , red"`,
+		"style second url":   `style="mask:url(#m) , url(other.svg)"`,
+		"mixed quotes":       `fill="url('#g&quot;)"`,
+		"uppercase":          `fill="URL(https://evil.example/p.svg#g)"`,
+		"spaced":             `fill="url( https://evil.example/p.svg#g )"`,
+	} {
+		out, _, err := SanitizeSVG([]byte(rect(attr)))
+		if err != nil {
+			continue
+		}
+		assertInert(t, out)
+		if strings.Count(string(out), "url(") > 0 && (strings.Contains(string(out), "other.svg") || strings.Contains(string(out), "evil")) {
+			t.Errorf("%s: a foreign url survived: %s", name, out)
+		}
+		if strings.Contains(string(out), `mask="url(#m) `) || strings.Contains(string(out), `clip-path="url(#m) `) {
+			t.Errorf("%s: a suffix after url() survived on a mask or clip path: %s", name, out)
+		}
+		if strings.Count(string(out), "url(") > 1 {
+			t.Errorf("%s: more than one url(): %s", name, out)
+		}
+	}
+	for name, tc := range map[string]struct{ attr, want string }{
+		"plain":            {`fill="url(#g)"`, `fill="url(#g)"`},
+		"quoted":           {`fill="url('#g')"`, `fill="url(#g)"`},
+		"fallback keyword": {`fill="url(#g) none"`, `fill="url(#g) none"`},
+		"fallback colour":  {`stroke="url(#g)  #0b6e6e"`, `stroke="url(#g) #0b6e6e"`},
+		"fallback rgb":     {`fill="url(#g) rgb(1, 2, 3)"`, `fill="url(#g) rgb(1, 2, 3)"`},
+		"mask":             {`mask="url(#m)"`, `mask="url(#m)"`},
+		"style":            {`style="fill: url(#g) currentColor"`, `fill="url(#g) currentColor"`},
+	} {
+		out, _, err := SanitizeSVG([]byte(rect(tc.attr)))
+		if err != nil || !strings.Contains(string(out), tc.want) {
+			t.Errorf("%s: want %s in %s (%v)", name, tc.want, out, err)
 		}
 	}
 }

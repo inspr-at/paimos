@@ -19,9 +19,15 @@ import (
 // presentation attributes; everything else is dropped with its subtree
 // (script, style, foreignObject, image, a, animation, filters, metadata,
 // foreign namespaces), as are comments, processing instructions and DOCTYPEs.
-// References may only point inside the file (href="#id", url(#id)). Inline
-// style declarations become presentation attributes, so the served file needs
-// no style-src at all.
+// Logos need no element references, so there are almost none: <use>,
+// <symbol>, <pattern> and <marker> are dropped; href survives only on a
+// gradient that inherits from one other gradient; url() is a single fragment
+// of this file on fill, stroke, clip-path and mask, and a mask or clip path
+// never names another (no chains); and the file's expanded size, every
+// element counted once per mask or clip path that draws it, stays under a
+// budget. Nothing a browser draws can multiply through references.
+// Inline style declarations become presentation attributes, so the served
+// file needs no style-src at all.
 //
 // Rewriting was chosen over server-side rasterization: it needs no renderer
 // in the binary, keeps the logo sharp at every size, and the output contains
@@ -32,14 +38,17 @@ const svgNS = "http://www.w3.org/2000/svg"
 const xlinkNS = "http://www.w3.org/1999/xlink"
 
 var svgElements = map[string]bool{
-	"svg": true, "g": true, "defs": true, "symbol": true, "use": true, "title": true, "desc": true,
+	"svg": true, "g": true, "defs": true, "title": true, "desc": true,
 	"path": true, "circle": true, "rect": true, "ellipse": true, "line": true, "polyline": true, "polygon": true,
 	"text": true, "tspan": true, "linearGradient": true, "radialGradient": true, "stop": true,
 	"clipPath": true, "mask": true,
 }
 
-// hrefElements may point at another element of the same file.
-var hrefElements = map[string]bool{"use": true, "linearGradient": true, "radialGradient": true}
+// hrefElements may inherit from another gradient of the same file.
+var hrefElements = map[string]bool{"linearGradient": true, "radialGradient": true}
+
+// maskElements draw what another element is clipped or masked by.
+var maskElements = map[string]bool{"mask": true, "clipPath": true}
 
 // textElements keep their character data; everywhere else it is layout whitespace.
 var textElements = map[string]bool{"text": true, "tspan": true, "title": true, "desc": true}
@@ -64,9 +73,16 @@ var presentation = map[string]bool{
 	"isolation": true, "mix-blend-mode": true,
 }
 
+const fragmentID = `#[A-Za-z_][A-Za-z0-9_.:-]*`
+
 var (
-	fragmentRef = regexp.MustCompile(`^#[A-Za-z_][A-Za-z0-9_.:-]*$`)
-	localURL    = regexp.MustCompile(`^url\(\s*['"]?#[A-Za-z_][A-Za-z0-9_.:-]*['"]?\s*\)(\s+[#A-Za-z0-9(),.%\s-]*)?$`)
+	fragmentRef = regexp.MustCompile(`^` + fragmentID + `$`)
+	// localURL is one url() naming an element of this file; what follows it is
+	// checked on its own, so a second url() can never ride along.
+	localURL = regexp.MustCompile(`(?s)^url\(\s*(?:'(` + fragmentID + `)'|"(` + fragmentID + `)"|(` + fragmentID + `))\s*\)(.*)$`)
+	// paintFallback is what may follow a paint server: a keyword, a colour name,
+	// a hex colour or an rgb()/hsl() function.
+	paintFallback = regexp.MustCompile(`^(?:none|currentColor|[A-Za-z]{3,32}|#[0-9A-Fa-f]{3,8}|(?:rgb|rgba|hsl|hsla)\([0-9.%\s,/+-]*\))$`)
 	// safeValue is every other value: numbers, lengths, colours, keywords,
 	// path data, transforms and font family names. No quotes, colons, angle
 	// brackets, slashes, backslashes, semicolons or url().
@@ -76,6 +92,9 @@ var (
 const (
 	maxSVGDepth    = 32
 	maxSVGElements = 20000
+	// maxSVGExpanded bounds the drawn elements once every mask and clip path is
+	// counted for each element that uses it.
+	maxSVGExpanded = 100000
 )
 
 // errNotSVG is returned for input whose root is not an <svg> element.
@@ -87,9 +106,14 @@ func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
 	dec.Strict = true
 	dec.Entity = map[string]string{} // only the five predefined entities
 	var buf bytes.Buffer
-	var stack []string // open kept elements
-	skip := 0          // depth inside a dropped subtree
-	elements := 0
+	var stack []svgFrame // open kept elements
+	skip := 0            // depth inside a dropped subtree
+	elements, kept := 0, 0
+	sizes := map[string]int{}     // id -> elements in its subtree, itself included
+	maskRefs := map[string]int{}  // id -> elements naming it as clip-path or mask
+	inherits := map[string]bool{} // ids of gradients that inherit from another
+	type edge struct{ from, to string }
+	var edges []edge
 	rootSeen, rootClosed := false, false
 	for {
 		tok, err := dec.Token()
@@ -123,6 +147,30 @@ func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
 				continue
 			}
 			attrs, dropped := cleanAttributes(t.Name.Local, t.Attr)
+			// A mask or clip path never names another: no chains to multiply through.
+			nested := maskElements[t.Name.Local] || len(stack) > 0 && stack[len(stack)-1].nested
+			id := ""
+			filtered := attrs[:0]
+			for _, a := range attrs {
+				switch {
+				case (a.name == "clip-path" || a.name == "mask") && strings.HasPrefix(a.value, "url("):
+					if nested {
+						dropped = true
+						continue
+					}
+					maskRefs[fragmentOf(a.value)]++
+				case a.name == "id":
+					id = a.value
+				}
+				filtered = append(filtered, a)
+			}
+			attrs = filtered
+			for _, a := range attrs {
+				if a.name == "href" && id != "" {
+					inherits[id] = true
+					edges = append(edges, edge{id, strings.TrimPrefix(a.value, "#")})
+				}
+			}
 			cleaned = cleaned || dropped
 			buf.WriteByte('<')
 			buf.WriteString(t.Name.Local)
@@ -137,7 +185,8 @@ func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
 				buf.WriteByte('"')
 			}
 			buf.WriteByte('>')
-			stack = append(stack, t.Name.Local)
+			stack = append(stack, svgFrame{name: t.Name.Local, id: id, start: kept, nested: nested})
+			kept++
 		case xml.EndElement:
 			if skip > 0 {
 				skip--
@@ -146,9 +195,12 @@ func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
 			if len(stack) == 0 {
 				continue
 			}
-			name := stack[len(stack)-1]
+			top := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
-			buf.WriteString("</" + name + ">")
+			if top.id != "" {
+				sizes[top.id] = max(sizes[top.id], kept-top.start)
+			}
+			buf.WriteString("</" + top.name + ">")
 			if len(stack) == 0 {
 				rootClosed = true
 			}
@@ -156,7 +208,7 @@ func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
 			if skip > 0 || len(stack) == 0 {
 				continue
 			}
-			if textElements[stack[len(stack)-1]] {
+			if textElements[stack[len(stack)-1].name] {
 				_ = xml.EscapeText(&buf, t)
 			}
 		case xml.ProcInst:
@@ -177,7 +229,33 @@ func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
 	if !rootClosed {
 		return nil, false, errors.New("invalid SVG: unclosed root element")
 	}
+	// A gradient inherits from one other gradient at most: no chains, no cycles.
+	for _, e := range edges {
+		if inherits[e.to] {
+			return nil, false, errors.New("SVG gradients inherit from each other in a chain")
+		}
+	}
+	// Every element counts once for each mask or clip path that draws it.
+	expanded := kept
+	for id, n := range maskRefs {
+		expanded += n * sizes[id]
+		if expanded > maxSVGExpanded {
+			return nil, false, errors.New("SVG is too complex")
+		}
+	}
 	return buf.Bytes(), cleaned, nil
+}
+
+// svgFrame is an open element that is being kept.
+type svgFrame struct {
+	name, id string
+	start    int  // kept elements before this one
+	nested   bool // this element or an ancestor is a mask or clip path
+}
+
+// fragmentOf returns the id of the url(#id) that cleanURL wrote.
+func fragmentOf(value string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(value, "url(#"), ")")
 }
 
 type attribute struct{ name, value string }
@@ -234,6 +312,29 @@ func cleanAttributes(element string, in []xml.Attr) ([]attribute, bool) {
 	return out, dropped
 }
 
+// cleanURL accepts one url() to a fragment of this file on a property that
+// takes a paint server or a mask, rewritten without quotes or spaces. Only a
+// paint may carry a fallback, and the fallback is validated on its own.
+func cleanURL(name, v string) (string, bool) {
+	paint := name == "fill" || name == "stroke"
+	if !paint && name != "clip-path" && name != "mask" {
+		return "", false
+	}
+	m := localURL.FindStringSubmatch(v)
+	if m == nil {
+		return "", false
+	}
+	out := "url(" + m[1] + m[2] + m[3] + ")"
+	rest := strings.TrimSpace(m[4])
+	switch {
+	case rest == "":
+		return out, true
+	case paint && paintFallback.MatchString(rest):
+		return out + " " + rest, true
+	}
+	return "", false
+}
+
 func cleanValue(name, raw string) (string, bool) {
 	v := strings.TrimSpace(raw)
 	if len(v) > 100000 {
@@ -243,7 +344,7 @@ func cleanValue(name, raw string) (string, bool) {
 		return v, fragmentRef.MatchString(v)
 	}
 	if strings.Contains(strings.ToLower(v), "url(") {
-		return v, (name == "fill" || name == "stroke" || name == "clip-path" || name == "mask") && localURL.MatchString(v)
+		return cleanURL(name, v)
 	}
 	if name == "font-family" {
 		// Quoted family names lose their quotes; the list stays readable.
