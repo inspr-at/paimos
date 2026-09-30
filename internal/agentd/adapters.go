@@ -669,7 +669,7 @@ func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
 	}
 	deps, err := agentsetup.ResolveClaudeRuntime(agentsetup.ClaudeDependencies{NodePath: a.NodePath, SDKPath: a.SDKPath}, workspace)
 	if err != nil {
-		return nil, errors.New("Claude dependencies changed/invalid: run aeon-agentd repin --harness claude; " + err.Error())
+		return nil, &agentsetup.HarnessIssue{Reason: "dependency_invalid", Err: errors.New("Claude dependencies changed/invalid: run aeon-agentd repin --harness claude; " + err.Error())}
 	}
 	cli, err := agentsetup.ResolveClaudeExecutable(a.ClaudePath, workspace)
 	if err != nil {

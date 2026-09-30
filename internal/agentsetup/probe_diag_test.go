@@ -262,7 +262,7 @@ func TestRuntimeNodeCheckUsesHomeWhenWorkspaceMissing(t *testing.T) {
 		t.Fatalf("fallback %q", got)
 	}
 	c := RuntimeConfig{Workspace: missing, Accounts: []RuntimeAccount{{Harness: "codex", Path: path, Node: node}}}
-	if err := ValidateHarnessRuntimeDependencies(c); err != nil {
+	if err := ValidateRuntimeDependencies(c); err != nil {
 		t.Fatal(err)
 	}
 }

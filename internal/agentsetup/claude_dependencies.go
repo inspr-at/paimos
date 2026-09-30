@@ -119,7 +119,7 @@ func ResolveClaudeExecutable(path, _ string) (string, error) {
 			return physical, nil
 		}
 	}
-	return "", errors.New("Claude CLI executable changed or unavailable; restore the approved physical executable, then retry")
+	return "", &HarnessIssue{Reason: "cli_unavailable", Err: errors.New("Claude CLI executable changed or unavailable; restore the approved physical executable, then retry")}
 }
 
 func trustedClaudeOwner(info os.FileInfo) bool {

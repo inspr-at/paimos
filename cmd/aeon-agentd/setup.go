@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -39,7 +40,7 @@ func (l localPairing) client() (agentdwire.Client, error) {
 	return agentdwire.OpenClient(filepath.Join(l.root, "daemon"))
 }
 func localStatus(s agentd.LifecycleStatus) agentsetup.LocalStatus {
-	return agentsetup.LocalStatus{HarnessErrors: s.HarnessErrors, ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults}
+	return agentsetup.LocalStatus{HarnessDetails: s.HarnessDetails, HarnessStatuses: s.HarnessStatuses, HarnessErrors: s.HarnessErrors, ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults, BlockedAccounts: append([]agentsetup.BlockedAccount(nil), s.BlockedAccounts...)}
 }
 func (l localPairing) Status(ctx context.Context, account string) (agentsetup.LocalStatus, error) {
 	if l.supervisor != nil {
@@ -491,5 +492,35 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 		}
 	}
 	_, err := fmt.Fprintf(out, "%s: %s\n", p.Stage, p.Action)
-	return err
+	if err != nil {
+		return err
+	}
+	// One line per harness that is not ready, then per blocked account; both
+	// use the shared reason codes and fix commands.
+	harnesses := make([]string, 0, len(p.HarnessDetails))
+	for harness, detail := range p.HarnessDetails {
+		if detail.State != "ready" {
+			harnesses = append(harnesses, harness)
+		}
+	}
+	sort.Strings(harnesses)
+	for _, harness := range harnesses {
+		detail := p.HarnessDetails[harness]
+		line := "harness " + harness + " " + detail.State
+		if detail.Reason != "" {
+			line += " reason " + detail.Reason
+		}
+		if detail.Fix.Command != "" {
+			line += " fix " + detail.Fix.Command
+		}
+		if _, err = fmt.Fprintln(out, line); err != nil {
+			return err
+		}
+	}
+	for _, blocked := range p.BlockedAccounts {
+		if _, err = fmt.Fprintf(out, "blocked account %s harness %s reason %s fix %s\n", blocked.AccountID, blocked.Harness, blocked.Reason, blocked.Fix.Command); err != nil {
+			return err
+		}
+	}
+	return nil
 }

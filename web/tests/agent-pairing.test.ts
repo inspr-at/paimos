@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { sessionEnded } from '../src/lib/api.ts'
 import {
   DEFAULT_REVIEW_CHOICE, LOOKUP_DEBOUNCE_MS, MIN_POLL_INTERVAL_MS, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
   agentRouteKind, canonicalUserCode, clearPairingClientState, createOngoingLimits, denyPairing,
-  describeComputerStatus, describeProgress, disconnectComputer, disconnectConfirm, disconnectEnrollment,
+  describeComputerStatus, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, describeProgress, harnessRecovery, disconnectComputer, disconnectConfirm, disconnectEnrollment,
   formatVerification, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
   ongoingLimitError, pairingPermissions, planApproval, planLookup, planOngoingLimits, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
@@ -796,6 +797,274 @@ function enrollment(overrides: Record<string, unknown> = {}) {
     ...overrides,
   }
 }
+
+test('harness status is scoped, optional and never claims readiness from stale evidence', async () => {
+  const connected = view({ state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online', harness_statuses: { claude: 'blocked', codex: 'ready' } })
+  assert.equal(describeHarnessStatus(connected, 'claude'), 'Needs attention')
+  assert.equal(describeHarnessStatus(connected, 'codex'), 'Ready')
+  assert.equal(describeHarnessStatus(connected, 'cursor'), '')
+  assert.equal(describeComputerStatus(connected).stateLabel, 'Connected')
+  assert.equal(describeProgress(connected).phase, 'connected')
+  assert.equal(describeHarnessStatus({ ...connected, connectivity: 'offline' }, 'codex'), 'Last reported: ready')
+  assert.equal(describeHarnessStatus({ ...connected, computer_state: 'revoked' }, 'codex'), '')
+  assert.equal(describeHarnessStatus({ ...connected, computer_state: 'draining' }, 'codex'), '')
+  globalThis.fetch = async () => jsonResponse({ computers: [connected] })
+  assert.deepEqual((await listPairingComputers())[0]?.harness_statuses, { claude: 'blocked', codex: 'ready' })
+  globalThis.fetch = async () => jsonResponse({ computers: [view({ harness_statuses: { claude: 'raw local diagnostics', future: 'ready', codex: 'ready' } })] })
+  assert.deepEqual((await listPairingComputers())[0]?.harness_statuses, { codex: 'ready' })
+  globalThis.fetch = async () => jsonResponse({ computers: [view()] })
+  assert.equal((await listPairingComputers())[0]?.harness_statuses, undefined)
+})
+
+test('harness details whitelist reasons and derive fixed commands without exposing diagnostics', async () => {
+  const report = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { claude: 'blocked', codex: 'ready' }, harness_details: { claude: { state: 'blocked', reason: 'repin_pending', fix: 'local-only command' }, codex: { state: 'ready' } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [report] })
+  let parsed = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Waiting for repin')
+  assert.equal(describeHarnessFix(parsed, 'claude'), '')
+  assert.equal(describeHarnessStatus({ ...parsed, connectivity: 'offline' }, 'claude'), 'Last reported: waiting for repin')
+  assert.equal(JSON.stringify(parsed).includes('local-only'), false)
+  report.harness_details = { claude: { state: 'blocked', reason: 'dependency_invalid', fix: 'local-only command' } }
+  parsed = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessFix(parsed, 'claude'), 'aeon-agentd repin --harness claude')
+  assert.equal(describeHarnessFix({ ...parsed, computer_state: 'revoked' }, 'claude'), '')
+  report.harness_details = { claude: { state: 'blocked', reason: 'future-code', fix: 'local-only command' }, codex: { state: 'ready', reason: 'dependency_invalid' }, future: { state: 'ready' } }
+  parsed = (await listPairingComputers())[0]!
+  assert.deepEqual(parsed.harness_details, {})
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Needs attention')
+  report.harness_statuses = { claude: 'ready' }
+  report.harness_details = { claude: { state: 'blocked', reason: 'dependency_invalid' } }
+  parsed = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Ready')
+  assert.equal(describeHarnessFix(parsed, 'claude'), '')
+})
+
+test('web fixes and labels follow the shared daemon/server vocabulary', async () => {
+  // Written by internal/agentsetup TestRecoveryFixIsOneSharedVocabulary from RecoveryFix.
+  const table = JSON.parse(readFileSync(new URL('../../internal/agentsetup/testdata/harness_recovery.json', import.meta.url), 'utf8')) as {
+    harnesses: string[]; reasons: string[]; fixes: Record<string, Record<string, { kind: string; command: string }>>
+  }
+  assert.ok(table.reasons.includes('pin_drifted') && table.reasons.includes('future_reason'))
+  for (const harness of table.harnesses) {
+    for (const reason of table.reasons) {
+      assert.deepEqual(harnessRecovery(harness, reason), table.fixes[harness]?.[reason], `${harness}/${reason}`)
+      const report = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { [harness]: 'blocked' }, harness_details: { [harness]: { state: 'blocked', reason, fix: 'untrusted' } } })
+      globalThis.fetch = async () => jsonResponse({ computers: [report] })
+      const parsed = (await listPairingComputers())[0]!
+      const label = describeHarnessStatus(parsed, harness)
+      // Every known code has its own words; only a newer code is shown raw.
+      assert.equal(label.startsWith('Needs attention'), reason === 'future_reason', `${harness}/${reason}: ${label}`)
+      assert.equal(label.includes('future_reason'), reason === 'future_reason')
+      assert.equal(describeHarnessFix(parsed, harness), table.fixes[harness]?.[reason]?.command ?? '')
+      assert.equal(JSON.stringify(parsed).includes('untrusted'), false)
+    }
+  }
+  const drifted = view({ computer_state: 'connected', connectivity: 'online', setup_state: 'connected', harness_statuses: { claude: 'blocked', codex: 'ready' }, harness_details: { claude: { state: 'blocked', reason: 'pin_drifted' }, codex: { state: 'ready' } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [drifted] })
+  let parsed = (await listPairingComputers())[0]!
+  assert.equal(describeComputerStatus(parsed).stateLabel, 'Connected')
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Pin changed')
+  assert.equal(describeHarnessFix(parsed, 'claude'), 'aeon-agentd repin --harness claude')
+  assert.equal(describeHarnessStatus(parsed, 'codex'), 'Ready')
+  assert.equal(describeHarnessFix(parsed, 'codex'), '')
+  // A newer state is omitted from the closed legacy map but stays visible.
+  const future = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { codex: 'ready' }, harness_details: { claude: { state: 'future_state', reason: 'future_reason' }, codex: { state: 'ready' } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [future] })
+  parsed = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Needs attention · future_reason')
+  assert.equal(describeHarnessFix(parsed, 'claude'), '')
+  assert.equal(describeHarnessHint(parsed, 'claude'), '')
+  for (const [reason, hint] of [['repin_pending', 'Retries automatically.'], ['cli_unavailable', 'Restore the approved executable, then retry.'], ['pin_drifted', '']]) {
+    const held = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { claude: 'blocked' }, harness_details: { claude: { state: 'blocked', reason } } })
+    globalThis.fetch = async () => jsonResponse({ computers: [held] })
+    assert.equal(describeHarnessHint((await listPairingComputers())[0]!, 'claude'), hint)
+  }
+})
+
+test('a ready harness keeps a blocked sibling account visible', async () => {
+  const blocked = '88888888-8888-4888-8888-888888888888'
+  const enrollments = [
+    enrollment({ account_id: ACCOUNT_2, account_key: 'codex-healthy', harness: 'codex', label: 'Healthy' }),
+    enrollment({ account_id: blocked, account_key: 'codex-blocked', harness: 'codex', label: 'Blocked' }),
+  ]
+  const report = view({
+    state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', reason: 'dependency_invalid', fix: { kind: 'restart', command: 'untrusted' }, attention_accounts: [
+      { account_id: blocked, reason: 'pin_drifted' },
+      { account_id: 'not-a-uuid', reason: 'pin_drifted' },
+      { account_id: ACCOUNT_2, reason: '' },
+    ] } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [report] })
+  const parsed = (await listPairingComputers())[0]!
+  assert.deepEqual(parsed.harness_details?.codex?.attention_accounts, [{ account_id: blocked, reason: 'pin_drifted' }])
+  assert.equal(parsed.harness_details?.codex?.reason, undefined)
+  assert.equal(JSON.stringify(parsed).includes('untrusted'), false)
+  assert.equal(describeComputerStatus(parsed).stateLabel, 'Connected')
+  assert.equal(describeHarnessStatus(parsed, 'codex'), 'Pin changed')
+  assert.equal(describeHarnessHint(parsed, 'codex'), '1 of 2 accounts needs attention')
+  assert.equal(describeHarnessFix(parsed, 'codex'), 'aeon-agentd add-harness --harness codex')
+  assert.equal(describeEnrollmentStatus(parsed, { account_id: ACCOUNT_2, harness: 'codex' }), 'Ready')
+  assert.equal(describeEnrollmentStatus(parsed, { account_id: blocked, harness: 'codex' }), 'Pin changed')
+  assert.equal(describeHarnessStatus({ ...parsed, connectivity: 'offline' }, 'codex'), 'Last reported: pin changed')
+  assert.equal(describeEnrollmentStatus({ ...parsed, connectivity: 'offline' }, { account_id: ACCOUNT_2, harness: 'codex' }), 'Last reported: ready')
+  const mixed = view({
+    state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', attention_accounts: [
+      { account_id: blocked, reason: 'pin_drifted' },
+      { account_id: ACCOUNT_2, reason: 'login_required' },
+    ] } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [mixed] })
+  const both = (await listPairingComputers())[0]!
+  assert.equal(both.harness_details?.codex?.state, 'ready')
+  assert.equal(both.harness_details?.codex?.attention_accounts, undefined)
+  assert.equal(describeHarnessStatus(both, 'codex'), 'Ready')
+  assert.equal(describeHarnessHint(both, 'codex'), '')
+  const unknown = view({
+    state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', attention_accounts: [{ account_id: blocked, reason: 'future_reason' }] } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [unknown] })
+  const future = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessStatus(future, 'codex'), 'Needs attention · future_reason')
+  assert.equal(describeHarnessFix(future, 'codex'), '')
+  assert.equal(describeHarnessHint(future, 'codex'), '1 of 2 accounts needs attention')
+  assert.equal(parsed.harness_details?.codex?.attention_count, 1)
+  assert.equal(parsed.harness_details?.codex?.attention_truncated, undefined)
+})
+
+test('six blocked accounts of seven keep the full count and are not labeled ready', async () => {
+  const ids = Array.from({ length: 7 }, (_, index) => `88888888-8888-4888-8888-88888888888${index}`)
+  const healthy = ids[0]!
+  const blocked = ids.slice(1)
+  const enrollments = ids.map((account_id, index) => enrollment({
+    account_id, account_key: `codex-${index}`, harness: 'codex', label: index ? `Blocked ${index}` : 'Healthy',
+  }))
+  const full = view({
+    state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', attention_count: 6, attention_accounts: blocked.map(account_id => ({ account_id, reason: 'pin_drifted' })) } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [full] })
+  const parsed = (await listPairingComputers())[0]!
+  assert.equal(parsed.harness_details?.codex?.attention_count, 6)
+  assert.equal(parsed.harness_details?.codex?.attention_truncated, undefined)
+  assert.equal(parsed.harness_details?.codex?.attention_accounts?.length, 6)
+  assert.equal(describeHarnessHint(parsed, 'codex'), '6 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(parsed, { account_id: healthy, harness: 'codex' }), 'Ready')
+  for (const account_id of blocked) {
+    const label = describeEnrollmentStatus(parsed, { account_id, harness: 'codex' })
+    assert.equal(label.includes('Ready'), false, label)
+    assert.equal(label, 'Pin changed')
+  }
+  const omitted = blocked[5]!
+  const truncated = view({
+    state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: {
+      state: 'ready', attention_count: 6, attention_truncated: true,
+      attention_accounts: blocked.slice(0, 5).map(account_id => ({ account_id, reason: 'pin_drifted' })),
+    } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [truncated] })
+  const capped = (await listPairingComputers())[0]!
+  assert.equal(capped.harness_details?.codex?.attention_count, 6)
+  assert.equal(capped.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeHarnessHint(capped, 'codex'), '6 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(capped, { account_id: omitted, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(capped, { account_id: healthy, harness: 'codex' }).includes('Ready'), false)
+  for (const account_id of blocked.slice(0, 5)) {
+    assert.equal(describeEnrollmentStatus(capped, { account_id, harness: 'codex' }), 'Pin changed')
+  }
+  const legacy = view({
+    state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', attention_accounts: blocked.slice(0, 5).map(account_id => ({ account_id, reason: 'login_required' })) } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [legacy] })
+  const old = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessHint(old, 'codex'), 'At least 5 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(old, { account_id: omitted, harness: 'codex' }).includes('Ready'), false)
+})
+
+function attentionAccountId(index: number): string {
+  return `88888888-8888-4888-8888-${String(index).padStart(12, '0')}`
+}
+
+test('legacy, count-only and truncation-only attention never call an omitted account ready', async () => {
+  async function parsedAttention(total: number, blockedCount: number, listed: number, detail: Record<string, unknown>) {
+    const ids = Array.from({ length: total }, (_, index) => attentionAccountId(index))
+    const healthy = ids[0]!
+    const blocked = ids.slice(1, 1 + blockedCount)
+    const enrollments = ids.map((account_id, index) => enrollment({
+      account_id, account_key: `codex-${index}`, harness: 'codex', label: index ? `Blocked ${index}` : 'Healthy',
+    }))
+    const computer = view({
+      state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+      harness_statuses: { codex: 'ready' },
+      enrollments,
+      harness_details: {
+        codex: {
+          state: 'ready',
+          attention_accounts: blocked.slice(0, listed).map(account_id => ({ account_id, reason: 'pin_drifted' })),
+          ...detail,
+        },
+      },
+    })
+    globalThis.fetch = async () => jsonResponse({ computers: [computer] })
+    const parsed = (await listPairingComputers())[0]!
+    return { healthy, blocked, parsed }
+  }
+
+  const legacy = await parsedAttention(7, 6, 5, {})
+  assert.equal(legacy.parsed.harness_details?.codex?.attention_count, 5)
+  assert.equal(legacy.parsed.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeHarnessHint(legacy.parsed, 'codex'), 'At least 5 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(legacy.parsed, { account_id: legacy.blocked[5]!, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(legacy.parsed, { account_id: legacy.healthy, harness: 'codex' }).includes('Ready'), false)
+
+  const countOnly = await parsedAttention(7, 6, 5, { attention_count: 6 })
+  assert.equal(countOnly.parsed.harness_details?.codex?.attention_count, 6)
+  assert.equal(countOnly.parsed.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeHarnessHint(countOnly.parsed, 'codex'), '6 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(countOnly.parsed, { account_id: countOnly.blocked[5]!, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(countOnly.parsed, { account_id: countOnly.healthy, harness: 'codex' }).includes('Ready'), false)
+  assert.equal(describeEnrollmentStatus(countOnly.parsed, { account_id: countOnly.blocked[0]!, harness: 'codex' }), 'Pin changed')
+
+  const flagOnly = await parsedAttention(7, 6, 5, { attention_truncated: true })
+  assert.equal(flagOnly.parsed.harness_details?.codex?.attention_count, 5)
+  assert.equal(flagOnly.parsed.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeHarnessHint(flagOnly.parsed, 'codex'), 'At least 5 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(flagOnly.parsed, { account_id: flagOnly.blocked[5]!, harness: 'codex' }), 'Needs attention')
+
+  for (const [total, blockedCount] of [[5, 4], [6, 5], [7, 6], [32, 31], [33, 32]] as const) {
+    const current = await parsedAttention(total, blockedCount, blockedCount, { attention_count: blockedCount })
+    assert.equal(current.parsed.harness_details?.codex?.attention_truncated, undefined, `total ${total}`)
+    assert.equal(current.parsed.harness_details?.codex?.attention_count, blockedCount)
+    assert.equal(describeEnrollmentStatus(current.parsed, { account_id: current.healthy, harness: 'codex' }), 'Ready', `total ${total}`)
+    assert.equal(describeHarnessHint(current.parsed, 'codex').startsWith('At least '), false, `total ${total}`)
+  }
+
+  const capped34 = await parsedAttention(34, 33, 32, { attention_count: 33, attention_truncated: true })
+  assert.equal(describeEnrollmentStatus(capped34.parsed, { account_id: capped34.blocked[32]!, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(capped34.parsed, { account_id: capped34.healthy, harness: 'codex' }).includes('Ready'), false)
+
+  const capped65 = await parsedAttention(65, 64, 32, { attention_count: 64, attention_truncated: true })
+  assert.equal(capped65.parsed.harness_details?.codex?.attention_count, 64)
+  assert.equal(capped65.parsed.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeEnrollmentStatus(capped65.parsed, { account_id: capped65.blocked[32]!, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(capped65.parsed, { account_id: capped65.healthy, harness: 'codex' }).includes('Ready'), false)
+})
 
 test('Homebrew commands are additive, bounded and published by this instance', async () => {
   const command = "brew install inspr-at/tap/aeon-agentd\nenv \"$(brew --prefix)/bin/aeon-agentd\" pair --url 'https://other.example'"

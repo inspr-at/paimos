@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -20,10 +21,13 @@ import (
 )
 
 func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []agentd.Adapter, error) {
-	// Non-Claude interpreter pins fail closed as before (AEON-334); Claude's
-	// dependencies hold only Claude (AEON-342, refreshPairedRuntime).
-	if err := agentsetup.ValidateHarnessRuntimeDependencies(c); err != nil {
-		return nil, nil, err
+	// Any pin problem stays enrolled and blocked. It must not veto startup
+	// or polling for every other account on this computer.
+	blocked := map[string]agentsetup.BlockedAccount{}
+	for _, block := range agentsetup.AccountPinBlocks(c) {
+		if _, seen := blocked[block.AccountID]; !seen {
+			blocked[block.AccountID] = block
+		}
 	}
 	codexHomes, emails, claudeHomes, cursorIDs := map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}
 	claudeEmails := map[string]string{}
@@ -35,11 +39,15 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	paths := map[string]string{}
 	accounts := []agentd.EnrolledAccount{}
 	for _, a := range c.Accounts {
+		block, isBlocked := blocked[a.AccountID]
+		accounts = append(accounts, agentd.EnrolledAccount{ID: a.AccountID, Key: a.Key, Harness: a.Harness, DependencyBlocked: isBlocked, PinReason: block.Reason, PinFix: block.Fix.Kind})
+		if isBlocked {
+			continue
+		}
 		if old := paths[a.Harness]; old != "" && old != a.Path {
 			return nil, nil, errors.New("harness executable binding changed")
 		}
 		paths[a.Harness] = a.Path
-		accounts = append(accounts, agentd.EnrolledAccount{ID: a.AccountID, Key: a.Key, Harness: a.Harness})
 		switch a.Harness {
 		case agentd.Codex:
 			codexHomes[a.Key] = a.Home
@@ -201,10 +209,10 @@ func servePaired(root string, capacityInterval time.Duration) error {
 		if err == nil {
 			next, _, readErr := agentsetup.ReadRuntime(root)
 			if readErr == nil {
-				// AEON-342: Claude repins and dependency repairs hold only
-				// Claude; identity or binding changes still stop the daemon.
+				// Claude repins and dependency repairs hold only Claude;
+				// identity or binding changes still stop the daemon.
 				c, readErr = pollPairedRuntime(op, s, root, c, next)
-				if readErr != nil {
+				if errors.Is(readErr, errStopDaemon) {
 					stopping = true
 				}
 			}
@@ -220,9 +228,9 @@ func servePaired(root string, capacityInterval time.Duration) error {
 
 func restartPairedClaude(ctx context.Context, s pairedRuntimeSupervisor, old, next agentsetup.RuntimeConfig, adapters []agentd.Adapter) error {
 	// Repin is not an account-enrollment or authority-change mechanism.
-	unchanged := next
-	unchanged.NodePath, unchanged.ClaudeSDKPath, unchanged.ClaudeRepinID = old.NodePath, old.ClaudeSDKPath, old.ClaudeRepinID
-	if next.ClaudeRepinID == "" || !reflect.DeepEqual(old, unchanged) {
+	// Another harness may renew its own interpreter pin in the same config
+	// when that pin passes its identity, launcher and interpreter checks.
+	if next.ClaudeRepinID == "" || !claudeRepinPreservesOtherBindings(old, next) {
 		return errors.New("repin changed more than Claude dependencies")
 	}
 	for _, adapter := range adapters {
@@ -233,15 +241,104 @@ func restartPairedClaude(ctx context.Context, s pairedRuntimeSupervisor, old, ne
 	return errors.New("repin has no approved Claude adapter")
 }
 
+// claudeRepinPreservesOtherBindings accepts Claude's shared pin replacement
+// plus a per-account interpreter pin that was validated on its own. Identity,
+// launcher, home and every other fence still have to match.
+func claudeRepinPreservesOtherBindings(old, next agentsetup.RuntimeConfig) bool {
+	rolled := next
+	rolled.Accounts = append([]agentsetup.RuntimeAccount(nil), next.Accounts...)
+	rolled.NodePath, rolled.ClaudeSDKPath, rolled.ClaudeRepinID = old.NodePath, old.ClaudeSDKPath, old.ClaudeRepinID
+	if len(rolled.Accounts) != len(old.Accounts) {
+		return false
+	}
+	used := map[int]bool{}
+	for i := range rolled.Accounts {
+		match := -1
+		for j := range old.Accounts {
+			if !used[j] && old.Accounts[j].AccountID == rolled.Accounts[i].AccountID {
+				match = j
+				break
+			}
+		}
+		if match < 0 {
+			return false
+		}
+		used[match] = true
+		if acceptedAccountPin(old.Accounts[match], rolled.Accounts[i], next.Workspace) {
+			rolled.Accounts[i].Node = old.Accounts[match].Node
+			rolled.Accounts[i].PiNode = old.Accounts[match].PiNode
+		}
+	}
+	return reflect.DeepEqual(old, rolled)
+}
+
+// acceptedAccountPin reports a no-op or a pin swap whose new interpreter
+// passes AccountPinBlocks on its own. Claude and Grok pins are not renewals.
+// An invalid new pin returns false so it cannot ride a Claude repin.
+func acceptedAccountPin(old, next agentsetup.RuntimeAccount, workspace string) bool {
+	if next.Harness == agentd.Claude || next.Harness == agentd.Grok || old.Harness == agentd.Claude || old.Harness == agentd.Grok {
+		return false
+	}
+	if old.Harness != next.Harness || old.Key != next.Key || old.AccountID != next.AccountID || old.Path != next.Path || old.Home != next.Home || old.Identity != next.Identity || old.Grok != next.Grok {
+		return false
+	}
+	if old.Node == next.Node && old.PiNode == next.PiNode {
+		return true
+	}
+	blocks := agentsetup.AccountPinBlocks(agentsetup.RuntimeConfig{Workspace: workspace, Accounts: []agentsetup.RuntimeAccount{next}})
+	return len(blocks) == 0
+}
+
+func adoptAcceptedPins(current, next agentsetup.RuntimeConfig) agentsetup.RuntimeConfig {
+	out := current
+	accounts := append([]agentsetup.RuntimeAccount(nil), current.Accounts...)
+	for i := range accounts {
+		for _, candidate := range next.Accounts {
+			if candidate.AccountID == accounts[i].AccountID && acceptedAccountPin(accounts[i], candidate, next.Workspace) {
+				accounts[i].Node = candidate.Node
+				accounts[i].PiNode = candidate.PiNode
+			}
+		}
+	}
+	out.Accounts = accounts
+	return out
+}
+
+func accountsExcept(accounts []agentd.EnrolledAccount, harness string) []agentd.EnrolledAccount {
+	kept := make([]agentd.EnrolledAccount, 0, len(accounts))
+	for _, account := range accounts {
+		if account.Harness != harness {
+			kept = append(kept, account)
+		}
+	}
+	return kept
+}
+
+func adaptersExceptClaude(adapters []agentd.Adapter) []agentd.Adapter {
+	kept := make([]agentd.Adapter, 0, len(adapters))
+	for _, adapter := range adapters {
+		if _, ok := adapter.(*agentd.ClaudeAdapter); ok {
+			continue
+		}
+		kept = append(kept, adapter)
+	}
+	return kept
+}
+
 type pairedRuntimeSupervisor interface {
-	SetHarnessHold(string, string)
+	SetHarnessHoldWithReason(string, string, string)
 	RefreshAccounts([]agentd.EnrolledAccount, []agentd.Adapter) error
+	PinHealthMatches([]agentd.EnrolledAccount) bool
 	RestartClaude(context.Context, *agentd.ClaudeAdapter) error
 	PollOnce(context.Context) error
 }
 
+// errStopDaemon marks a refresh failure that must end this daemon generation.
+var errStopDaemon = errors.New("paired daemon must stop")
+
 // pollPairedRuntime keeps recovery and other harnesses polling while Claude
-// waits for a repin or a dependency repair. Identity changes still fail closed.
+// waits for a repin or a dependency repair. Identity changes fail closed: no
+// poll, while fence sync continues; an approved binding change stops the daemon.
 func pollPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root string, c, next agentsetup.RuntimeConfig) (agentsetup.RuntimeConfig, error) {
 	current, err := refreshPairedRuntime(ctx, s, root, c, next)
 	if err == nil {
@@ -251,50 +348,65 @@ func pollPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root stri
 }
 
 func refreshPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root string, c, next agentsetup.RuntimeConfig) (agentsetup.RuntimeConfig, error) {
-	if next.Origin != c.Origin || next.TenantID != c.TenantID || next.PrincipalID != c.PrincipalID || next.DaemonID != c.DaemonID || next.Workspace != c.Workspace || next.ComputerID != c.ComputerID {
-		return c, errors.New("pairing configuration identity changed")
-	}
-	for _, nextAccount := range next.Accounts {
-		for _, oldAccount := range c.Accounts {
-			if oldAccount.AccountID == nextAccount.AccountID && oldAccount != nextAccount {
-				return c, errors.New("approved account binding changed")
-			}
+	_, ac, ad, stop, _, err := runtimeRefresh(c, next)
+	if err != nil {
+		if stop {
+			return c, fmt.Errorf("%w: %w", errStopDaemon, err)
 		}
+		return c, err
 	}
-	if !reflect.DeepEqual(c, next) {
-		ac, ad, err := pairedAdapters(next)
-		if err != nil {
-			return c, err
-		}
+	if !reflect.DeepEqual(c, next) || !s.PinHealthMatches(ac) {
 		if next.ClaudeRepinID != c.ClaudeRepinID {
-			s.SetHarnessHold(agentd.Claude, "Claude repin pending: waiting for active Claude runs to exit")
-			if err := agentsetup.ValidateClaudeRuntimeDependencies(next); err != nil {
-				s.SetHarnessHold(agentd.Claude, err.Error())
+			s.SetHarnessHoldWithReason(agentd.Claude, "repin_pending", "Claude repin pending: waiting for active Claude runs to exit")
+			if err := validatePairedClaude(next); err != nil {
+				s.SetHarnessHoldWithReason(agentd.Claude, agentsetup.HarnessFailureReason(err), err.Error())
 				return c, nil
 			}
 			if err := restartPairedClaude(ctx, s, c, next, ad); err != nil {
-				if !errors.Is(err, agentd.ErrDraining) {
-					s.SetHarnessHold(agentd.Claude, "Claude repin failed: "+err.Error())
+				if errors.Is(err, agentd.ErrDraining) {
+					// Apply the other harness's accepted pin now. Leave Claude's
+					// shared pins and repin id unchanged so the next tick retries
+					// the adapter swap after the live Claude process exits.
+					// Omit Claude accounts: their adapter is still the previous one,
+					// and RefreshAccounts rejects an unblocked account with no adapter.
+					if err := s.RefreshAccounts(accountsExcept(ac, agentd.Claude), adaptersExceptClaude(ad)); err != nil {
+						return c, err
+					}
+					return adoptAcceptedPins(c, next), nil
 				}
+				s.SetHarnessHoldWithReason(agentd.Claude, agentsetup.HarnessFailureReason(err), "Claude repin failed: "+err.Error())
 				return c, nil
 			}
-		} else if err := s.RefreshAccounts(ac, ad); err != nil {
+		}
+		if err := s.RefreshAccounts(ac, ad); err != nil {
 			return c, err
 		}
 		c = next
 	}
-	if err := agentsetup.ValidateClaudeRuntimeDependencies(c); err != nil {
-		s.SetHarnessHold(agentd.Claude, err.Error())
+	if err := validatePairedClaude(c); err != nil {
+		s.SetHarnessHoldWithReason(agentd.Claude, agentsetup.HarnessFailureReason(err), err.Error())
 		return c, nil
 	}
 	// c describes the adapter already installed above or at cold start. A
 	// receipt retry must not replace it again or depend on historical runs.
 	if err := acknowledgePairedClaude(root, c); err != nil {
-		s.SetHarnessHold(agentd.Claude, "Claude repin pending: acknowledgement unavailable; retrying automatically")
+		s.SetHarnessHoldWithReason(agentd.Claude, "repin_pending", "Claude repin pending: acknowledgement unavailable; retrying automatically")
 		return c, nil
 	}
-	s.SetHarnessHold(agentd.Claude, "")
+	s.SetHarnessHoldWithReason(agentd.Claude, "dependency_invalid", "")
 	return c, nil
+}
+
+// Claude acknowledgement never depends on another harness's pin health.
+func validatePairedClaude(c agentsetup.RuntimeConfig) error {
+	accounts := []agentsetup.RuntimeAccount{}
+	for _, a := range c.Accounts {
+		if a.Harness == agentd.Claude {
+			accounts = append(accounts, a)
+		}
+	}
+	c.Accounts = accounts
+	return agentsetup.ValidateRuntimeDependencies(c)
 }
 
 func acknowledgePairedClaude(root string, c agentsetup.RuntimeConfig) error {
@@ -311,6 +423,40 @@ func acknowledgePairedClaude(root string, c agentsetup.RuntimeConfig) error {
 		return err
 	}
 	return agentsetup.AcknowledgeClaudeRepin(root, c)
+}
+
+// runtimeRefresh classifies one poll tick. Pin problems are account blocks
+// inside the adapter set: they never stop the daemon or suppress polling.
+// A changed pairing identity suppresses polling. A non-pin binding change stops the daemon.
+func runtimeRefresh(current, next agentsetup.RuntimeConfig) (updated agentsetup.RuntimeConfig, accounts []agentd.EnrolledAccount, adapters []agentd.Adapter, stop, poll bool, err error) {
+	if next.Origin != current.Origin || next.TenantID != current.TenantID || next.PrincipalID != current.PrincipalID || next.DaemonID != current.DaemonID || next.Workspace != current.Workspace || next.ComputerID != current.ComputerID {
+		return current, nil, nil, false, false, errors.New("pairing configuration identity changed")
+	}
+	if nonPinBindingChanged(current, next) {
+		return current, nil, nil, true, false, errors.New("approved account binding changed")
+	}
+	accounts, adapters, err = pairedAdapters(next)
+	if err != nil {
+		return current, nil, nil, false, false, err
+	}
+	return next, accounts, adapters, false, true, nil
+}
+
+func nonPinBindingChanged(current, next agentsetup.RuntimeConfig) bool {
+	for _, nextAccount := range next.Accounts {
+		for _, oldAccount := range current.Accounts {
+			if oldAccount.AccountID == nextAccount.AccountID && pinFree(oldAccount) != pinFree(nextAccount) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func pinFree(account agentsetup.RuntimeAccount) agentsetup.RuntimeAccount {
+	account.Node = harnesslaunch.Node{}
+	account.PiNode = piprobe.Node{}
+	return account
 }
 
 func syncPairing(ctx context.Context, root, origin string, s *agentd.Supervisor) error {
