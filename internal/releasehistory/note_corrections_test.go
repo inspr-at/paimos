@@ -68,9 +68,19 @@ func TestReviewedAuditCoversFrozenOccurrences(t *testing.T) {
 		t.Fatal(err)
 	}
 	count := 0
+	repairs := map[string]string{
+		"AEON-401": "260930094206.0.0",
+		"AEON-439": "260930115354.0.0",
+	}
 	for _, r := range h.Releases {
 		for _, c := range r.Notes.Corrections {
 			count++
+			if repairs[c.Key] == r.Version {
+				if c.Group != GroupFixes || strings.TrimSpace(c.Reason) == "" || c.SHA256 != b.Releases[r.Version].SHA256 {
+					t.Fatal("repair lost its reviewed binding", c.Key)
+				}
+				delete(repairs, c.Key)
+			}
 			for _, i := range r.Notes.PublicItems {
 				if i.Key == c.Key && i.Group != GroupFixes {
 					t.Fatal("audit fix remained a feature", i.Key)
@@ -80,5 +90,8 @@ func TestReviewedAuditCoversFrozenOccurrences(t *testing.T) {
 	}
 	if count < 80 {
 		t.Fatalf("audit layer only covers %d occurrences", count)
+	}
+	if len(repairs) != 0 {
+		t.Fatalf("missing release 14/14.1 repair corrections: %v", repairs)
 	}
 }

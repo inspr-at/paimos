@@ -27,7 +27,28 @@ test('the PR must contain its own sequence, not just the previous release', () =
   notes.items.push({ key: 'AEON-405', group: 'fixes', pill_en: 'Honest release history', pill_de: 'Ehrliche Release Historie', benefit_en: 'Notes travel with this release.', benefit_de: 'Die Hinweise werden mit diesem Release ausgeliefert.' });
   save();
   assert.equal(checkOwnReleaseNotes(root).public_items, 1);
+  for (const field of ['release_sequence', 'release_channel']) {
+    const original = notes[field];
+    delete notes[field];
+    save();
+    assert.throws(() => checkOwnReleaseNotes(root), /channel\/sequence differs/);
+    notes[field] = original;
+  }
+  notes.release_channel = 'preview';
+  save();
+  assert.throws(() => checkOwnReleaseNotes(root), /channel\/sequence differs/);
+  notes.release_channel = 'stable';
   notes.items[0].benefit_de = '';
   save();
   assert.throws(() => checkOwnReleaseNotes(root), /benefit_de is required/);
+  notes.written_after_release = true;
+  save();
+  assert.throws(() => checkOwnReleaseNotes(root), /benefit_de is required/);
+  notes.items[0].benefit_de = 'Die Hinweise werden mit diesem Release ausgeliefert.';
+  notes.items[0].pill_de = 'Ehrlich';
+  save();
+  assert.throws(() => checkOwnReleaseNotes(root), /pill_de must contain 2–4 words/);
+  notes.items[0].pill_de = 'Ehrliche Release Historie';
+  save();
+  assert.equal(checkOwnReleaseNotes(root).public_items, 1);
 });

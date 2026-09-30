@@ -542,6 +542,20 @@
       "benefit_de": "Ältere Versionen zeigen jetzt Nutzen-Texte aus ihren öffentlichen Tickets, auch auf Instanzen ohne das AEON-Projekt."
     },
     {
+      "version": "260930094206.0.0",
+      "key": "AEON-401",
+      "snapshot_sha256": "ac6a53b384d63d55a8b7e77b21372fb375a8f883493f7d54c60967c3e7320934",
+      "reason": "Repairs pairing waiting indefinitely without a specific cause and status checks interrupting a running pair.",
+      "group": "fixes"
+    },
+    {
+      "version": "260930115354.0.0",
+      "key": "AEON-439",
+      "snapshot_sha256": "60149218f2504aa9232bcb34f6cc083e0f249ea67eecc5387a2a95660f53f1bf",
+      "reason": "Repairs attach failing from a default macOS terminal and requiring a tmux workaround.",
+      "group": "fixes"
+    },
+    {
       "version": "260930074921.0.0",
       "key": "AEON-396",
       "snapshot_sha256": "caff7363b3356b21295e582eea207ff5d744f8e81597400f149a205908b786cc",

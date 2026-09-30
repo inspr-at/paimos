@@ -15,10 +15,10 @@ export function checkOwnReleaseNotes(root = resolve(dirname(fileURLToPath(import
   const notes = bundle.releases?.[version.version];
   if (!notes) fail(`release ${version.release_sequence} (${version.version}) has no frozen entry in product-notes.json; export and pack its own notes before the PR`);
   if (!Array.isArray(notes.items) || !/^[a-f0-9]{64}$/.test(notes.snapshot_sha256) || !Number.isFinite(Date.parse(notes.captured_at)) || !Number.isInteger(notes.release_revision) || notes.release_revision < 1) fail('invalid capture provenance');
-  if ((notes.release_sequence !== undefined && notes.release_sequence !== version.release_sequence) || (notes.release_channel !== undefined && notes.release_channel !== version.release_channel)) fail('capture channel/sequence differs from version.json');
-  // Historic backfills preserve their original incomplete translations. New
-  // reservations must ship complete EN/DE text, including both short pills.
-  if (!notes.written_after_release) for (const item of notes.items) {
+  if (notes.release_sequence !== version.release_sequence || notes.release_channel !== version.release_channel) fail('capture channel/sequence differs from version.json');
+  // This checks only the own-release entry. Its provenance marker cannot waive
+  // the complete EN/DE text required for the release PR, including both pills.
+  for (const item of notes.items) {
     if (!/^AEON-[1-9][0-9]*$/.test(item.key) || !['features', 'fixes', 'other'].includes(item.group)) fail('invalid public item');
     for (const field of ['pill_en', 'pill_de', 'benefit_en', 'benefit_de']) {
       if (typeof item[field] !== 'string' || !item[field].trim()) fail(`${item.key}: ${field} is required`);

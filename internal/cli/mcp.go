@@ -65,11 +65,13 @@ type issueRefArgs struct {
 }
 
 type issueCreateArgs struct {
-	Project     string `json:"project" jsonschema:"project key"`
-	Title       string `json:"title" jsonschema:"issue title"`
-	Type        string `json:"type,omitempty" jsonschema:"issue type"`
-	Status      string `json:"status,omitempty" jsonschema:"initial status"`
-	Description string `json:"description,omitempty" jsonschema:"description markdown"`
+	Project     string   `json:"project" jsonschema:"project key"`
+	Title       string   `json:"title" jsonschema:"issue title"`
+	Type        string   `json:"type,omitempty" jsonschema:"issue type"`
+	Status      string   `json:"status,omitempty" jsonschema:"initial status"`
+	Description string   `json:"description,omitempty" jsonschema:"description markdown"`
+	Tags        []string `json:"tags,omitempty" jsonschema:"tag names preserved when filing the issue"`
+	Bug         bool     `json:"bug,omitempty" jsonschema:"mark a repair as a fix in release notes by adding the bug tag while preserving the issue type"`
 }
 
 type issueUpdateArgs struct {

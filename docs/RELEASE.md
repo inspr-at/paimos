@@ -483,13 +483,18 @@ hidden members contribute no key or text. The raw ignored export stays local.
 Identical reruns use that same export; changed observations conflict with the
 frozen original. Commit the public bundle alongside the version reservation
 before opening the PR. CI's `release-check` rejects a missing own-version entry,
-a mismatched sequence/channel or incomplete new bilingual notes. After
+a missing or mismatched sequence/channel or incomplete own-release bilingual
+notes, even when `written_after_release` is set. Historic entries remain
+immutable; reserve and capture the next release rather than rewriting a legacy
+entry to satisfy the gate. After
 publication, verify the same capture digest and both languages on the target
 instance; do not recapture or rewrite it.
 
 ### Reviewed corrections and fix markers (AEON-405)
 
 File bug-fix tickets with `paimos issue create ... --bug` (or `--tags bug`).
+The MCP `issue_create` argument schema exposes the same `bug` and `tags`
+fields; its existing R1 placeholder remains, so file through the CLI today.
 The helper preserves the ticket kind and writes the literal `bug` tag that the
 release classifier reads. Mark actual repairs when filing them; feature work
 keeps its feature classification. A mixed ticket's benefit can still describe

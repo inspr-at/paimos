@@ -119,7 +119,11 @@ func TestReservedNotesNonPPMTenant(t *testing.T) {
 	}
 	// A separate review record travels with the original capture; the raw
 	// frozen bundle and its digest are not rewritten by a wording correction.
-	reviewed := "This release carries its fixes."
+	original := b.Releases[r.Version].Items[1].BenefitEN
+	reviewed := "This release repairs pairing without interrupting a running setup."
+	if reviewed == original {
+		t.Fatal("wording correction must differ from the original")
+	}
 	layer, _ := json.Marshal(map[string]any{"schema": "aeon.product-note-corrections.v1", "corrections": []NoteCorrection{{Version: r.Version, Key: "AEON-2", SHA256: b.Releases[r.Version].SHA256, Reason: "Reviewed repair wording.", BenefitEN: &reviewed}}})
 	if err := os.WriteFile(filepath.Join(dir, NoteCorrectionsPath), layer, 0600); err != nil {
 		t.Fatal(err)
@@ -158,6 +162,13 @@ func TestReservedNotesNonPPMTenant(t *testing.T) {
 	}
 	if len(n.Corrections) != 1 || n.Corrections[0].Reason != "Reviewed repair wording." {
 		t.Fatal("lost correction audit trail")
+	}
+	if n.PublicItems[1].BenefitEN != reviewed || n.SHA256 != b.Releases[r.Version].SHA256 || b.Releases[r.Version].Items[1].BenefitEN != original {
+		t.Fatal("wording override lost or original capture changed")
+	}
+	unchanged, err := os.ReadFile(path)
+	if err != nil || string(unchanged) != string(packed) {
+		t.Fatal("history build rewrote the frozen bundle", err)
 	}
 	if out := os.Getenv("AEON_RESERVED_FIXTURE_OUT"); out != "" {
 		if err := os.WriteFile(out, w.Body.Bytes(), 0600); err != nil {

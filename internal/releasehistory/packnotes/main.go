@@ -24,22 +24,29 @@ func main() {
 }
 
 func run() error {
-	repo := flag.String("repo", ".", "Aeon checkout")
-	snapshots := flag.String("snapshots", "", "directory of frozen VERSION.json snapshot exports")
-	historyFile := flag.String("history", "", "reviewed /api/releases export with tenant_id and project_node_id; frozen notes only")
-	historic := flag.String("historic", "", "reviewed historic ticket export; freeze public fields for published Git membership")
-	snapshot := flag.String("snapshot", "", "one snapshot export for the reserved version")
-	reserve := flag.String("reserve", "", "explicitly freeze the preview for version.json's reserved coordinate")
-	tenant := flag.String("tenant", "", "expected source tenant UUID (required for exports)")
-	project := flag.String("project", "", "expected source AEON project UUID (required for exports)")
-	flag.Parse()
+	return runWithArgs(os.Args[1:])
+}
+
+func runWithArgs(args []string) error {
+	flags := flag.NewFlagSet("packnotes", flag.ContinueOnError)
+	repo := flags.String("repo", ".", "Aeon checkout")
+	snapshots := flags.String("snapshots", "", "directory of frozen VERSION.json snapshot exports")
+	historyFile := flags.String("history", "", "reviewed /api/releases export with tenant_id and project_node_id; frozen notes only")
+	historic := flags.String("historic", "", "reviewed historic ticket export; freeze public fields for published Git membership")
+	snapshot := flags.String("snapshot", "", "one snapshot export for the reserved version")
+	reserve := flags.String("reserve", "", "explicitly freeze the preview for version.json's reserved coordinate")
+	tenant := flags.String("tenant", "", "expected source tenant UUID (required for exports)")
+	project := flags.String("project", "", "expected source AEON project UUID (required for exports)")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
 	inputs := 0
 	for _, value := range []string{*snapshot, *snapshots, *historyFile, *historic} {
 		if value != "" {
 			inputs++
 		}
 	}
-	if flag.NArg() != 0 || (*snapshot != "" && *reserve == "") || (*reserve != "" && *snapshot == "" && *historic == "") || inputs > 1 {
+	if flags.NArg() != 0 || (*snapshot != "" && *reserve == "") || (*reserve != "" && *snapshot == "" && *historic == "") || inputs > 1 {
 		return fmt.Errorf("select one of -snapshots DIR, -history FILE, -historic FILE [-reserve VERSION] or -snapshot FILE -reserve VERSION; exports require -tenant UUID -project UUID")
 	}
 	if inputs > 0 && (*tenant == "" || *project == "") {
@@ -123,6 +130,14 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("snapshot %s rejected: %w", version, err)
 		}
+		if reserve {
+			reservation, err := releasehistory.ReadNoteReservation(*repo, version, []string{})
+			if err != nil {
+				return err
+			}
+			notes.ReleaseChannel = reservation.Channel
+			notes.ReleaseSequence = reservation.Sequence
+		}
 		return bundle.Add(version, notes)
 	}
 	if *snapshots != "" {
@@ -144,16 +159,6 @@ func run() error {
 		}
 	}
 	if *reserve != "" && *snapshot != "" {
-		raw, err := os.ReadFile(filepath.Join(*repo, "version.json"))
-		if err != nil {
-			return err
-		}
-		var head struct {
-			Version string `json:"version"`
-		}
-		if json.Unmarshal(raw, &head) != nil || head.Version != *reserve {
-			return fmt.Errorf("reserve must match version.json")
-		}
 		if err := add(*snapshot, *reserve, true); err != nil {
 			return err
 		}
