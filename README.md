@@ -1023,6 +1023,17 @@ text)** at the local prompt, or pass `--status-only` (no transcript needed), to
 report status without reading or sharing conversation text. Missing or unsafe
 transcripts never silently select status-only.
 
+On macOS, normal Terminal and Ghostty tabs and SSH terminals work with a
+root-owned `login` or `sshd-session` leader; tmux also remains supported.
+Ancestry and session-leader checks use kernel PID, parent, UID, start time,
+session and TTY metadata without reading ancestor paths. The helper must have
+a TTY and belong to the target's user. Neither process may be an ancestor of
+the other, and ancestor UIDs must be that user or root. The complete process
+graph is rechecked for PID reuse and reparenting on confirmation and polls.
+The target still requires its full physical folder and image validation.
+Run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-ancestry-mutations.py`
+on macOS to verify that the negative ancestry regressions catch removed guards.
+
 Claude, Codex and Cursor are identified from the kernel-observed running image,
 so an exec wrapper or a vendor auto-update does not require re-pairing. On macOS,
 the daemon verifies the signature against Apple's certificate chain and the
