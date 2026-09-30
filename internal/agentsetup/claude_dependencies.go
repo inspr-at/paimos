@@ -5,6 +5,7 @@ package agentsetup
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -52,29 +53,40 @@ func (d Discovery) resolveClaudeDependencies(given ClaudeDependencies, workspace
 		}
 	}
 	physicalNode, err := pinnedRegular(node, workspace, true)
-	if err != nil || filepath.Base(physicalNode) != "node" {
-		return logical, physical, errors.New("Claude Node executable is unsafe or unavailable; choose a user- or root-owned executable outside the workspace with --node-path")
+	if err == nil && filepath.Base(physicalNode) != "node" {
+		err = fmt.Errorf("%w: %q is not named node", ErrUnsafePath, physicalNode)
+	}
+	if err != nil {
+		return logical, physical, fmt.Errorf("Claude Node executable is unsafe or unavailable; %w; choose a user- or root-owned executable outside the workspace with --node-path", err)
 	}
 	sdk := given.SDKPath
 	if sdk == "" {
+		var installedErr error
 		roots := []string{filepath.Join(filepath.Dir(filepath.Dir(node)), "lib", "node_modules"), filepath.Join(filepath.Dir(filepath.Dir(physicalNode)), "lib", "node_modules")}
 		if filepath.IsAbs(d.Home) {
 			roots = append(roots, filepath.Join(d.Home, ".local", "lib", "node_modules"), filepath.Join(d.Home, ".npm-global", "lib", "node_modules"))
 		}
 		for _, root := range roots {
-			entry, e := sdkEntry(filepath.Join(root, "@anthropic-ai", "claude-agent-sdk"), workspace)
+			pkg := filepath.Join(root, "@anthropic-ai", "claude-agent-sdk")
+			entry, e := sdkEntry(pkg, workspace)
 			if e == nil {
 				sdk = entry
 				break
 			}
+			if _, statErr := os.Lstat(pkg); statErr == nil && installedErr == nil {
+				installedErr = e
+			}
 		}
 		if sdk == "" {
+			if installedErr != nil {
+				return logical, physical, fmt.Errorf("Claude Agent SDK module is unsafe or unavailable; %w; check the installed package or pass --claude-sdk-path outside the workspace", installedErr)
+			}
 			return logical, physical, errors.New(claudeDependencyAction)
 		}
 	}
 	physicalSDK, err := pinnedRegular(sdk, workspace, false)
 	if err != nil {
-		return logical, physical, errors.New("Claude Agent SDK module is unsafe or unavailable; pass --claude-sdk-path to its installed module entry outside the workspace")
+		return logical, physical, fmt.Errorf("Claude Agent SDK module is unsafe or unavailable; %w; pass --claude-sdk-path to its installed module entry outside the workspace", err)
 	}
 	if _, err := claudePackageDir(sdk, physicalSDK, workspace); err != nil {
 		return logical, physical, errors.New("Claude Agent SDK path must be the module entry declared by an installed @anthropic-ai/claude-agent-sdk package")
@@ -101,11 +113,7 @@ func claudePackageDir(logical, physical, workspace string) (string, error) {
 }
 
 func pinnedRegular(path, workspace string, executable bool) (string, error) {
-	physical, info, err := resolveOwnedPath(path, workspace)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 || executable && info.Mode().Perm()&0111 == 0 {
-		return "", ErrUnsafePath
-	}
-	return physical, nil
+	return installedPathPolicy().pinnedRegular(path, workspace, executable)
 }
 
 // ResolveClaudeExecutable preserves the CLI's existing physical executable
@@ -127,67 +135,8 @@ func trustedClaudeOwner(info os.FileInfo) bool {
 	return ok && (owner.Uid == 0 || int(owner.Uid) == os.Getuid())
 }
 
-// Check every traversed component, including intermediate links that disappear
-// from EvalSymlinks' result. Sticky shared ancestors (e.g. /tmp) protect owned
-// children; ordinary group/world-writable directories never do.
 func resolveOwnedPath(path, workspace string) (string, os.FileInfo, error) {
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
-		return "", nil, ErrUnsafePath
-	}
-	if repositoryPath(path) || workspace != "" && within(workspace, path) {
-		return "", nil, ErrUnsafePath
-	}
-	pending, physical, links := strings.Split(path, string(filepath.Separator)), string(filepath.Separator), 0
-	var info os.FileInfo
-	for len(pending) > 0 {
-		part := pending[0]
-		pending = pending[1:]
-		if part == "" || part == "." {
-			continue
-		}
-		if part == ".." {
-			physical = filepath.Dir(physical)
-			continue
-		}
-		next := filepath.Join(physical, part)
-		if repositoryPath(next) || workspace != "" && within(workspace, next) {
-			return "", nil, ErrUnsafePath
-		}
-		var err error
-		info, err = os.Lstat(next)
-		if err != nil {
-			return "", nil, ErrUnsafePath
-		}
-		if !trustedClaudeOwner(info) {
-			return "", nil, ErrUnsafePath
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			links++
-			if links > 40 {
-				return "", nil, ErrUnsafePath
-			}
-			target, err := os.Readlink(next)
-			if err != nil {
-				return "", nil, ErrUnsafePath
-			}
-			if filepath.IsAbs(target) {
-				physical = string(filepath.Separator)
-			}
-			pending = append(strings.Split(target, string(filepath.Separator)), pending...)
-			continue
-		}
-		if info.Mode().Perm()&0022 != 0 && !(info.IsDir() && info.Mode()&os.ModeSticky != 0) || len(pending) > 0 && !info.IsDir() {
-			return "", nil, ErrUnsafePath
-		}
-		physical = next
-	}
-	// A link target can end in '.' or '..', so the last traversed component's
-	// metadata need not describe the final physical path.
-	info, err := os.Lstat(physical)
-	if err != nil || !trustedClaudeOwner(info) || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0022 != 0 && !(info.IsDir() && info.Mode()&os.ModeSticky != 0) {
-		return "", nil, ErrUnsafePath
-	}
-	return physical, info, nil
+	return installedPathPolicy().resolve(path, workspace)
 }
 
 func sdkEntry(dir, workspace string) (string, error) {
@@ -195,16 +144,19 @@ func sdkEntry(dir, workspace string) (string, error) {
 		return "", ErrUnsafePath
 	}
 	physicalDir, info, err := resolveOwnedPath(dir, workspace)
-	if err != nil || !info.IsDir() {
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
 		return "", ErrUnsafePath
 	}
 	for _, path := range []string{physicalDir, filepath.Dir(physicalDir)} {
 		info, err := os.Stat(path)
-		if err != nil || !info.IsDir() || info.Mode().Perm()&0022 != 0 {
+		if err != nil || !info.IsDir() {
 			return "", ErrUnsafePath
 		}
-		if !trustedClaudeOwner(info) {
-			return "", ErrUnsafePath
+		if err := ownedComponentError(path, info, false); err != nil {
+			return "", err
 		}
 	}
 	manifest, err := pinnedRegular(filepath.Join(physicalDir, "package.json"), workspace, false)
@@ -261,7 +213,10 @@ func sdkEntry(dir, workspace string) (string, error) {
 		}
 	}
 	physicalEntry, err := pinnedRegular(filepath.Join(physicalDir, entry), workspace, false)
-	if err != nil || !within(physicalDir, physicalEntry) {
+	if err != nil {
+		return "", err
+	}
+	if !within(physicalDir, physicalEntry) {
 		return "", ErrUnsafePath
 	}
 	// Keep the package link, so an activation can move it to a new version.

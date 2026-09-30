@@ -794,10 +794,5 @@ func within(root, path string) bool {
 	return err == nil && (rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 func repositoryPath(path string) bool {
-	for p := path; p != "/" && p != "."; p = filepath.Dir(p) {
-		if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
-			return true
-		}
-	}
-	return false
+	return installedPathPolicy().repositoryError(path) != nil
 }

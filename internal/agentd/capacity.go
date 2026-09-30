@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/client"
 )
@@ -331,7 +332,7 @@ func (a *CodexAdapter) CaptureCapacity(ctx context.Context, key string) []capaci
 			Email string `json:"email"`
 		} `json:"account"`
 	}
-	if err != nil || json.Unmarshal(raw, &identity) != nil || identity.Account == nil || identity.Account.Type != "chatgpt" || !strings.EqualFold(strings.TrimSpace(identity.Account.Email), strings.TrimSpace(a.Emails[key])) {
+	if err != nil || json.Unmarshal(raw, &identity) != nil || identity.Account == nil || identity.Account.Type != "chatgpt" || !agentsetup.CodexAccountMatches(a.Emails[key], identity.Account.Email) {
 		return nil
 	}
 	if identity.Account.ID != "" {

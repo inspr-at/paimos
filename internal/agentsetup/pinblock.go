@@ -177,8 +177,7 @@ func pathUnsafe(path, workspace string, executable bool) bool {
 		if err != nil || !dir.IsDir() {
 			return false
 		}
-		owner, ok := dir.Sys().(*syscall.Stat_t)
-		if !ok || owner.Uid != 0 && int(owner.Uid) != os.Getuid() || dir.Mode().Perm()&0022 != 0 && dir.Mode()&os.ModeSticky == 0 {
+		if ownedComponentError(parent, dir, true) != nil {
 			return true
 		}
 		if parent == filepath.Dir(parent) {
