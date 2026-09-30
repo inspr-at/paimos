@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Migration compatibility
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: migration-compat-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Keep this job on hosted Linux, including PR and merge-queue candidates.
+  # Markus can require the migration-compat context in the main ruleset.
+  migration-compat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - name: Resolve the latest published stable release
+        id: previous
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
+          [[ "$tag" =~ ^v[0-9]{12}\.0\.0$ ]] || { echo 'Expected a published calendar release' >&2; exit 1; }
+          git fetch --no-tags --depth=1 origin "refs/tags/$tag:refs/tags/$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Static migration policy
+        env:
+          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
+        run: |
+          node --test scripts/check-migrations.test.mjs
+          node scripts/check-migrations.mjs --base-ref "$PREVIOUS_TAG"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.26"
+          cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - name: Previous binary on the candidate schema
+        env:
+          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
+        run: |
+          python3 -B -m unittest discover -s scripts -p migration_compat_probe_test.py
+          bash scripts/migration-compat.sh "$PREVIOUS_TAG"
