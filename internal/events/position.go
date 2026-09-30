@@ -50,13 +50,13 @@ var positionReads = map[string]bool{
 	"GET /api/harness-sessions":                                  true,
 	"GET /api/projects/{projectId}/harness-sessions":             true,
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}": true,
-	"GET /api/runs":                                              true,
-	"GET /api/runs/{runId}":                                      true,
-	"GET /api/agent-accounts":                                    true,
-	"GET /api/approvals":                                         true,
-	"GET /api/models":                                            true,
-	"GET /api/projects/{projectId}/messages":                     true,
-	"GET /api/projects/{projectId}/message-targets":              true,
+	"GET /api/runs":                                 true,
+	"GET /api/runs/{runId}":                         true,
+	"GET /api/agent-accounts":                       true,
+	"GET /api/approvals":                            true,
+	"GET /api/models":                               true,
+	"GET /api/projects/{projectId}/messages":        true,
+	"GET /api/projects/{projectId}/message-targets": true,
 }
 
 // PositionMiddleware sets PositionHeader on those reads and on every accepted

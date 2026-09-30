@@ -192,7 +192,10 @@ func TestPositionIsAbsentWhereItWouldMislead(t *testing.T) {
 	d, a, _ := fixture(t)
 	appendEvents(t, d, a, 1)
 	srv := positionServer(t, d, a, nil)
-	cases := []struct{ name, method, path string; anonymous bool }{
+	cases := []struct {
+		name, method, path string
+		anonymous          bool
+	}{
 		{"a read outside the list", "GET", "/api/nodes", false},
 		{"a refused write", "POST", "/api/runs/r1/refuse", false},
 		{"a HEAD", "HEAD", "/api/runs", false},
