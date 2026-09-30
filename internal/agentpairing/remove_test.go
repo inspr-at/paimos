@@ -180,3 +180,35 @@ func TestArchiveAccountDisconnectsBindingAndKeepsHistory(t *testing.T) {
 		t.Fatalf("removing one account changed the computer to %s", computer)
 	}
 }
+
+// A queued vendor-handoff retry is pinned only through retry_account_id; it
+// is cancelled with its account, not left queued with nowhere to route.
+func TestArchiveAccountCancelsQueuedHandoffRetry(t *testing.T) {
+	f := newFixture(t)
+	_, v := f.twoQualifiedEnrollments()
+	a, b := v.Enrollments[0], v.Enrollments[1]
+	insertRetry := func(target string) string {
+		var id string
+		if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,retry_of_run_id,retry_account_id)
+			SELECT tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,id,$2 FROM agent_runs WHERE id=$1 RETURNING id::text`,
+			*a.VerificationRunID, target).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	mine, other := insertRetry(a.AccountID), insertRetry(b.AccountID)
+	f.call("POST", "/api/agent-accounts/"+a.AccountID+"/archive", nil, true, "", 200)
+	status := func(id string) string {
+		var s string
+		if err := f.db.Admin.QueryRow(t.Context(), `SELECT status FROM agent_runs WHERE id=$1`, id).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if got := status(mine); got != "cancelled" {
+		t.Fatalf("retry pinned to the removed account is %s, want cancelled", got)
+	}
+	if got := status(other); got != "queued" {
+		t.Fatalf("retry pinned to another account is %s, want queued", got)
+	}
+}

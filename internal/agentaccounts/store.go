@@ -511,7 +511,9 @@ func archiveAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountI
 	if active {
 		return Account{}, &httpError{status: http.StatusConflict, msg: "a run is still working on this account", code: "account_busy"}
 	}
-	rows, err := tx.Query(ctx, `SELECT id::text FROM agent_runs WHERE status = 'queued' AND (account_id = $1::uuid OR requested_account_id = $1::uuid) ORDER BY id FOR UPDATE`, accountID)
+	// A vendor-handoff retry has no pin of its own; retry_account_id is its target.
+	rows, err := tx.Query(ctx, `SELECT id::text FROM agent_runs WHERE status = 'queued'
+		AND (account_id = $1::uuid OR COALESCE(requested_account_id, retry_account_id) = $1::uuid) ORDER BY id FOR UPDATE`, accountID)
 	if err != nil {
 		return Account{}, err
 	}
