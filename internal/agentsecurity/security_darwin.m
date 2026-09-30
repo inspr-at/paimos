@@ -57,6 +57,20 @@ static NSMutableDictionary *vault_query(const char *keyID) {
   (__bridge id)kSecUseAuthenticationUI:(__bridge id)kSecUseAuthenticationUIFail} mutableCopy];
 }
 
+// The legacy file Keychain retains the signed-daemon ACL and is device-local,
+// not iCloud-synced. Its bridge strips accessibility and synchronizable
+// attributes; no accessibility-class or device-bound backup guarantee is made.
+// The injected add operation lets fixtures exercise storage without Keychain I/O.
+OSStatus aeon_vault_add_item(const char *keyID, SecAccessRef access, NSData *data,
+ OSStatus (^add)(CFDictionaryRef, CFTypeRef *)) {
+ NSMutableDictionary *query = vault_query(keyID);
+ if (!query || !access || !data || !add) return errSecParam;
+ query[(__bridge id)kSecAttrSynchronizable] = @NO;
+ query[(__bridge id)kSecAttrAccess] = (__bridge id)access;
+ query[(__bridge id)kSecValueData] = data;
+ return add((__bridge CFDictionaryRef)query, NULL);
+}
+
 static int copy_data(NSData *data, void **raw, int *size) {
  if (!data || data.length == 0 || data.length > 1024*1024) return errSecAuthFailed;
  *raw = malloc(data.length); if (!*raw) return errSecAllocate;
@@ -162,9 +176,9 @@ int aeon_vault_write(const char *keyID, const void *raw, int size, int first) {
    if (status != errSecItemNotFound) return status;
   }
   SecAccessRef access = daemon_access(); if (!access) return errSecAuthFailed;
-  query[(__bridge id)kSecAttrAccess] = (__bridge id)access;
-  query[(__bridge id)kSecValueData] = data;
-  OSStatus status = SecItemAdd((__bridge CFDictionaryRef)query, NULL);
+  OSStatus status = aeon_vault_add_item(keyID, access, data, ^OSStatus(CFDictionaryRef attrs, CFTypeRef *result) {
+   return SecItemAdd(attrs, result);
+  });
   CFRelease(access); return status;
  }
 }
@@ -179,6 +193,14 @@ int aeon_vault_delete(const char *keyID) {
   if (!daemon_item_access(item)) { CFRelease(item); return errSecAuthFailed; }
   status = SecKeychainItemDelete(item); CFRelease(item); return status;
  }
+}
+
+// errSecSuccess means a key with this tag already exists. Treat that as a
+// duplicate instead of returning its public key without checking biometryCurrentSet.
+int aeon_enclave_create_disposition(int copyStatus) {
+ if (copyStatus == errSecItemNotFound) return errSecItemNotFound;
+ if (copyStatus == errSecSuccess) return errSecDuplicateItem;
+ return copyStatus;
 }
 
 static NSMutableDictionary *key_query(const char *keyID, LAContext *context) {
@@ -201,11 +223,21 @@ int aeon_enclave_create(const char *keyID, void **raw, int *size) {
   NSMutableDictionary *query = key_query(keyID, context); if (!query) return errSecParam;
   SecKeyRef key = NULL;
   OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&key);
-  if (status == errSecItemNotFound) {
+  // An existing tag is a create failure. Do not return its public key:
+  // that path skipped the biometryCurrentSet check.
+  int disposition = aeon_enclave_create_disposition(status);
+  if (disposition != errSecItemNotFound) {
+   if (key) CFRelease(key);
+   return disposition;
+  }
+  {
    CFErrorRef error = NULL;
    SecAccessControlRef access = SecAccessControlCreateWithFlags(kCFAllocatorDefault, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, kSecAccessControlBiometryCurrentSet | kSecAccessControlPrivateKeyUsage, &error);
    if (error) { CFRelease(error); error = NULL; }
    if (!access) return errSecAuthFailed;
+   // biometryCurrentSet is the enclave ACL. SecAccessControl cannot also pin
+   // the daemon's designated requirement; generic passwords do that above.
+   // The server binds the canonical reason into the signature hash.
    NSDictionary *attrs = @{(__bridge id)kSecAttrKeyType:(__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
     (__bridge id)kSecAttrKeySizeInBits:@256,
     (__bridge id)kSecAttrTokenID:(__bridge id)kSecAttrTokenIDSecureEnclave,
@@ -215,7 +247,7 @@ int aeon_enclave_create(const char *keyID, void **raw, int *size) {
    key = SecKeyCreateRandomKey((__bridge CFDictionaryRef)attrs, &error);
    CFRelease(access); if (error) CFRelease(error);
    if (!key) return 1; // No Secure Enclave: pairing may still use Aeon approval.
-  } else if (status != errSecSuccess) { return status; }
+  }
   SecKeyRef pub = SecKeyCopyPublicKey(key); CFRelease(key);
   if (!pub) return errSecAuthFailed;
   CFErrorRef error = NULL;
@@ -236,7 +268,7 @@ int aeon_enclave_create(const char *keyID, void **raw, int *size) {
 
 void *aeon_enclave_sign_start(const char *keyID, const void *hash, int size, const char *reason) {
  @autoreleasepool {
-  if (aeon_enclave_capability() != 0 || !hash || size != 32 || !reason) return NULL;
+  if (aeon_enclave_capability() != 0 || !hash || size != 32 || !reason || reason[0] == 0) return NULL;
   AeonEnclaveSigning *state = [AeonEnclaveSigning new];
   state.context = [LAContext new];
   state.context.touchIDAuthenticationAllowableReuseDuration = 0;

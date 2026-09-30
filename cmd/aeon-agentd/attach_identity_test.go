@@ -124,7 +124,7 @@ func TestAttachStartupRegistersWithUnverifiableFallback(t *testing.T) {
 			w.WriteHeader(404)
 			return
 		}
-		_, _ = w.Write([]byte(`{"state":"registered"}`))
+		_, _ = w.Write([]byte(`{"state":"registered","local_consent_proof_version":2}`))
 	}))
 	defer server.Close()
 	view := agentsetup.View{RequestID: request, TenantID: tenant, ComputerID: computer, PrincipalID: principal}

@@ -40,6 +40,7 @@ function limitation(computer: LocalAuthComputer): string | null {
   }
 }
 const canPickLocal = computed(() => computers.value.some(computer => computer.capability === 'available' && computer.pairing_upgraded))
+const upgradedDefault = computed(() => computers.value.some(computer => computer.pairing_upgraded))
 const savedUnavailable = computed(() => persisted.value && saved.value === 'local_auth' && !canPickLocal.value && computers.value.some(computer => computer.pairing_upgraded))
 // "Stay off" is a saved Mac confirmation. Before Save stores that choice, say what saving does on each computer.
 const storedLocal = computed(() => persisted.value && saved.value === 'local_auth' && choice.value === 'local_auth')
@@ -50,7 +51,7 @@ const blocked = computed(() => computers.value.flatMap(computer => {
   if (!computer.pairing_upgraded) return [`${line}. Approval stays in ${brand.value.short_name}.`]
   if (storedLocal.value) return [`${line}, so watches there stay off.`]
   if (savingLocal.value) return [`${line}. Saving turns watches off there.`]
-  if (computer.capability === 'no_gui') return [`${line}, so SSH and headless attaches keep approval in ${brand.value.short_name}.`]
+  if (!persisted.value) return [`${line}. Watches do not start until you save approval in ${brand.value.short_name}.`]
   return [`${line}, so approval stays in ${brand.value.short_name}.`]
 }))
 const unsavedDefault = computed(() => !persisted.value && choice.value === 'local_auth' && canPickLocal.value && blocked.value.length === 0)
@@ -96,12 +97,12 @@ onBeforeUnmount(() => { operation?.abort(); stopAccess() })
         <legend class="sr-only">Session watching consent</legend>
         <label :class="{ selected: choice === 'aeon' }">
           <input v-model="choice" type="radio" name="watch-consent" value="aeon" />
-          <span><strong>Approve in {{ brand.short_name }} <small v-if="!canPickLocal">Default</small></strong><span>Review the process and allow each watch here.</span></span>
+          <span><strong>Approve in {{ brand.short_name }} <small v-if="!upgradedDefault">Default</small></strong><span>Review the process and allow each watch here.</span></span>
         </label>
         <label :class="{ selected: choice === 'local_auth', unavailable: !canPickLocal }">
           <input v-model="choice" type="radio" name="watch-consent" value="local_auth" :disabled="!canPickLocal" />
           <span>
-            <strong>Also confirm on the Mac <small v-if="canPickLocal">Default</small></strong>
+            <strong>Also confirm on the Mac <small v-if="upgradedDefault">Default</small></strong>
             <span v-if="canPickLocal">After approval here, confirm with Touch ID.</span>
           </span>
         </label>
@@ -117,7 +118,7 @@ onBeforeUnmount(() => { operation?.abort(); stopAccess() })
       <footer><span role="status">{{ notice }}</span><button class="btn primary" type="submit" :disabled="busy || !canSave || !can('profile.write')">{{ busy ? 'Saving…' : 'Save setting' }}</button></footer>
     </form>
     <p v-if="error" class="error" role="alert">{{ error }} <button v-if="!saved" class="btn sm" type="button" @click="request()">Try again</button></p>
-    <details><summary><AppIcon name="chevron-right" class="disclosure-chev" :size="12" />About local confirmation</summary><p>The terminal WATCH prompt is a best-effort check that same-user processes can imitate.</p><p>Touch ID needs a person at the Mac, an upgraded pairing, a signed daemon and a graphical login; confirmation is signed by the key approved at pairing.</p><p>Before you save a choice, SSH and headless sessions keep approval in {{ brand.short_name }} where Touch ID cannot run.</p><p>Saving Mac confirmation turns watches off on upgraded computers that cannot use Touch ID; older pairings keep approval here until re-paired.</p><p>An unavailable or cancelled Touch ID prompt never activates a watch in Mac confirmation mode.</p></details>
+    <details><summary><AppIcon name="chevron-right" class="disclosure-chev" :size="12" />About local confirmation</summary><p>The terminal WATCH prompt is a best-effort check that same-user processes can imitate.</p><p>Touch ID needs a person at the Mac, an upgraded pairing, a signed daemon and a graphical login; confirmation is signed by the key approved at pairing.</p><p>Before you save a choice, an upgraded pairing still requires its Mac signature, including when Touch ID cannot run.</p><p>Saving Mac confirmation turns watches off on upgraded computers that cannot use Touch ID; older pairings keep approval here until re-paired.</p><p>An unavailable or cancelled Touch ID prompt never activates a watch in Mac confirmation mode.</p></details>
   </div>
 </template>
 

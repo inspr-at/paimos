@@ -3,10 +3,11 @@
 // Package dbtest gives each test a private Postgres database.
 //
 // AEON_TEST_DATABASE_URL is a maintenance database on a server where that user
-// can CREATE DATABASE (the CI service user is a superuser). Open bootstraps
-// pgvector as that user, applies migrations as a NOSUPERUSER NOBYPASSRLS app
-// role, and returns both pools. It drops the database and role on cleanup. Tests
-// run in parallel against one Postgres without sharing tables.
+// can CREATE DATABASE (the CI service user is a superuser). Open clones a
+// connection-free template migrated once per test binary as a NOSUPERUSER
+// NOBYPASSRLS role, then transfers its schema to a fresh restricted app role.
+// It drops the database and role on cleanup; the template is dropped when the
+// binary exits. Tests run in parallel without sharing tables or app roles.
 package dbtest
 
 import (
@@ -138,6 +139,13 @@ func newDatabase(ctx context.Context, migrate bool) (opened *DB, err error) {
 	if err != nil {
 		return nil, err
 	}
+	var template *DB
+	if migrate {
+		template, err = migratedTemplate(ctx, maint)
+		if err != nil {
+			return nil, err
+		}
+	}
 	d := &DB{maint: maint}
 	defer func() {
 		if err != nil {
@@ -153,7 +161,11 @@ func newDatabase(ctx context.Context, migrate bool) (opened *DB, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect maintenance database: %w", err)
 	}
-	if _, err = conn.Exec(ctx, `CREATE DATABASE `+quoteIdent(d.Name)); err != nil {
+	stmt := `CREATE DATABASE ` + quoteIdent(d.Name)
+	if template != nil {
+		stmt += ` TEMPLATE ` + quoteIdent(template.Name)
+	}
+	if _, err = conn.Exec(ctx, stmt); err != nil {
 		_ = conn.Close(ctx)
 		return nil, fmt.Errorf("create database %s: %w", d.Name, err)
 	}
@@ -169,8 +181,10 @@ func newDatabase(ctx context.Context, migrate bool) (opened *DB, err error) {
 	if err = d.Admin.Ping(ctx); err != nil {
 		return nil, fmt.Errorf("ping maintenance role: %w", err)
 	}
-	if _, err = d.Admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
-		return nil, fmt.Errorf("bootstrap vector extension: %w", err)
+	if template == nil {
+		if _, err = d.Admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
+			return nil, fmt.Errorf("bootstrap vector extension: %w", err)
+		}
 	}
 
 	password := randomIdent("")
@@ -180,15 +194,21 @@ func newDatabase(ctx context.Context, migrate bool) (opened *DB, err error) {
 	if err = grantApp(ctx, d.Admin, d.Name, d.Role); err != nil {
 		return nil, err
 	}
+	if template != nil {
+		// Transfer tables, sequences, types and SECURITY DEFINER functions,
+		// including their owner ACLs. Extension objects keep their bootstrap
+		// owner. REASSIGN leaves the template role's explicit schema grant,
+		// so revoke that copied grant without touching the template itself.
+		if _, err = d.Admin.Exec(ctx, `REASSIGN OWNED BY `+quoteIdent(template.Role)+` TO `+quoteIdent(d.Role)+
+			`; REVOKE ALL ON SCHEMA public FROM `+quoteIdent(template.Role)); err != nil {
+			return nil, fmt.Errorf("assign cloned schema to %s: %w", d.Role, err)
+		}
+	}
 	app := *base
 	app.Path = "/" + d.Name
 	app.User = url.UserPassword(d.Role, password)
 	d.AppURL = app.String()
-	if migrate {
-		d.App, err = db.Open(ctx, d.AppURL)
-	} else {
-		d.App, err = openApp(ctx, base, d.Name, d.Role, password)
-	}
+	d.App, err = openApp(ctx, base, d.Name, d.Role, password, migrate)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +295,7 @@ func adminURL(base *url.URL, dbName string) string {
 	return u.String()
 }
 
-func openApp(ctx context.Context, base *url.URL, dbName, role, password string) (*pgxpool.Pool, error) {
+func openApp(ctx context.Context, base *url.URL, dbName, role, password string, migrated bool) (*pgxpool.Pool, error) {
 	u := *base
 	u.Path = "/" + dbName
 	u.User = url.UserPassword(role, password)
@@ -288,7 +308,9 @@ func openApp(ctx context.Context, base *url.URL, dbName, role, password string) 
 	if _, set := cfg.ConnConfig.RuntimeParams["jit"]; !set && !strings.Contains(cfg.ConnConfig.RuntimeParams["options"], "jit") {
 		cfg.ConnConfig.RuntimeParams["jit"] = "off"
 	}
-	cfg.MaxConns = 4
+	if !migrated {
+		cfg.MaxConns = 4
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect app role: %w", err)

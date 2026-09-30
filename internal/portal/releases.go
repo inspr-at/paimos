@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,9 +26,12 @@ type publicNote struct {
 	BenefitDE string `json:"benefit_de"`
 }
 
+// publicRelease carries Codename, the marketing name of a release this build's
+// history knows (AEON-430); the portal shows it in front of the date.
 type publicRelease struct {
 	ReleasedAt string       `json:"released_at"`
 	Version    string       `json:"version,omitempty"`
+	Codename   string       `json:"codename,omitempty"`
 	Notes      []publicNote `json:"notes"`
 }
 
@@ -156,6 +160,9 @@ func projectPublicRelease(version *string, at time.Time, raw []byte) (publicRele
 	} else if rowVersion == "" && releasehistory.ValidVersion(snapVersion) {
 		rel.Version = snapVersion
 	}
+	if rel.Version != "" {
+		rel.Codename = publicCodename(rel.Version)
+	}
 	for _, ticket := range snap.Tickets {
 		note, ok := visiblePublicNote(ticket)
 		if !ok {
@@ -167,6 +174,25 @@ func projectPublicRelease(version *string, at time.Time, raw []byte) (publicRele
 		return publicRelease{}, false
 	}
 	return rel, true
+}
+
+var (
+	historyOnce sync.Once
+	history     releasehistory.History
+)
+
+// publicCodename names a version for the portal. Tests replace it.
+var publicCodename = historyCodename
+
+// historyCodename is the marketing name this build's release history gives a
+// version, or "" for a version it does not know (another product's release).
+func historyCodename(version string) string {
+	historyOnce.Do(func() {
+		if h, err := releasehistory.Embedded(); err == nil {
+			history = h
+		}
+	})
+	return releasehistory.CodenameOf(history, version)
 }
 
 // visiblePublicNote is the release-history rule: any non-empty public line

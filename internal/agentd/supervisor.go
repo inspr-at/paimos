@@ -56,6 +56,7 @@ type replay struct {
 // Record contains only local process provenance and bounded control digests.
 // The journal is AEON v2; classic journals are never opened implicitly.
 type Record struct {
+	AutomaticReview       bool   `json:"automatic_review,omitempty"`
 	VerificationReason    string `json:"verification_reason,omitempty"`
 	BudgetStopReason      string `json:"budget_stop_reason,omitempty"`
 	BudgetStopUnconfirmed bool   `json:"budget_stop_unconfirmed,omitempty"`
@@ -727,7 +728,8 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	verification := run.Purpose == VerificationPurpose
 	managedAdapter, managedOK := adapter.(ManagedControlAdapter)
-	managedPolicy := !verification && profile.Harness == Claude && managedOK && managedAdapter.ManagedControlSupported()
+	review := run.ReadOnlyReview
+	managedPolicy := !verification && !review && profile.Harness == Claude && managedOK && managedAdapter.ManagedControlSupported()
 	if verification {
 		s.mu.Lock()
 		entries := make([]*owned, 0, len(s.runs))
@@ -761,6 +763,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if order.NodeID != run.WorkOrderID || (order.Status != "ready" && order.Status != "running") {
 		return errors.New("work order is not dispatchable")
 	}
+	if review != (order.Kind == "review") {
+		return errors.New("review execution mode does not match its work order")
+	}
 	duration := s.maxRunDuration
 	if order.MaxDurationSeconds != nil {
 		if *order.MaxDurationSeconds <= 0 {
@@ -782,7 +787,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		prompt += "\n- " + criterion.ID + ": " + criterion.Description
 	}
 	branch := ""
-	if !verification {
+	if !verification && !review {
 		if output, branchErr := exec.CommandContext(ctx, "git", "-C", s.workspace, "branch", "--show-current").Output(); branchErr == nil {
 			branch = strings.TrimSpace(string(output))
 		}
@@ -878,7 +883,13 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			resultErr = errors.Join(resultErr, s.finishUnlaunched(cleanup, entry))
 		}
 	}()
-	if verification {
+	if review {
+		prompt, err = reviewPrompt(ctx, s.workspace, order, profile)
+		if err != nil {
+			return err
+		}
+	}
+	if verification || review {
 		runWorkspace, err = s.prepareScratch(s.workspace)
 		if err != nil {
 			return err
@@ -912,10 +923,10 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if managedPolicy {
 		caps = append(caps, managedControlCapability, "steer", "rename", "model", "effort")
 	}
-	if profile.Harness != Grok {
+	if profile.Harness != Grok && !review {
 		caps = append(caps, "interrupt")
 	}
-	entry.inboxCapable = !verification && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi)
+	entry.inboxCapable = !verification && !review && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi)
 	if entry.inboxCapable {
 		caps = append(caps, "inbox")
 		if !managedPolicy {
@@ -949,7 +960,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		s.stopHarness(cleanup, entry, reason)
 	}
 	var runTools *RunTools
-	if toolAPI, ok := s.api.(RunToolAPI); ok && !verification {
+	if toolAPI, ok := s.api.(RunToolAPI); ok && !verification && !review {
 		if signer, ok := s.api.(interface {
 			runCredential(string, string, string, string) string
 		}); ok {
@@ -996,13 +1007,14 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	// On a journal failure Start is never invoked; after success a crash is
 	// unconfirmed, even if no PID was subsequently persisted.
 	var launchRev, launchDefault string
-	if !verification {
+	if !verification && !review {
 		launchRev, launchDefault = workspaceHEAD(ctx, s.workspace), launchDefaultRev(ctx, s.workspace)
 	}
 	entry.mu.Lock()
 	intent := entry.record
 	intent.LaunchState, intent.State = launchAttempted, "starting"
 	intent.LaunchRev, intent.LaunchDefaultRev = launchRev, launchDefault
+	intent.AutomaticReview = order.Kind == "build"
 	intent.LaunchBranch = branch
 	err = s.journal.Put(intent)
 	if err == nil {
@@ -1281,9 +1293,13 @@ func (s *Supervisor) monitor(entry *owned) {
 	defer cancel()
 	entry.mu.Lock()
 	launchRev, launchDefault := entry.record.LaunchRev, entry.record.LaunchDefaultRev
+	automaticReview := entry.record.AutomaticReview
 	entry.mu.Unlock()
 	s.flushCapacity(ctx, entry)
 	final := Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: runCommits(ctx, s.workspace, launchRev, launchDefault)}
+	if automaticReview && status == "completed" && len(final.GitCommits) > 0 && launchRev != "" {
+		final.ReviewRange = completedReviewRange(ctx, s.workspace, launchRev)
+	}
 	if code == "vendor_limit" {
 		final.LimitWindow, final.LimitResetsAt = limit.Window, limit.ResetsAt
 	}

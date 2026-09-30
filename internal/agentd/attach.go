@@ -98,7 +98,7 @@ func (m *AttachManager) localView(id string, s *localAttach) AttachLocalView {
 	return AttachLocalView{ConsentMode: s.view.ConsentMode, ID: id, Origin: m.cfg.Origin, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), State: s.view.State, Code: s.view.UserCode, SessionID: s.view.SessionID}
 }
 func (m *AttachManager) request(s *localAttach, id, operation string) attachwatch.DeviceRequest {
-	return attachwatch.DeviceRequest{Operation: operation, RequestID: id, ComputerID: m.cfg.ComputerID, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), Sequence: s.sequence}
+	return attachwatch.DeviceRequest{LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: operation, RequestID: id, ComputerID: m.cfg.ComputerID, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), Sequence: s.sequence}
 }
 func (m *AttachManager) end(ctx context.Context, id string, s *localAttach) {
 	m.endAs(ctx, id, s, "detach")
@@ -340,11 +340,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		s.cancelConfirmation = cancel
 		result := make(chan localConsentResult, 1)
 		s.confirmation = result
-		action := "watching the conversation"
-		if s.snapshot.Mode == attachwatch.ModeLease {
-			action = "status only (no conversation text) for"
-		}
-		reason := fmt.Sprintf("Allow %s %s session PID %d on %s", action, s.snapshot.Harness, s.snapshot.Process.PID, s.snapshot.Host)
+		reason := attachwatch.LocalConsentReason(s.snapshot)
 		consent, nonce := view.ConsentDigest, view.LocalAuthNonce
 		go func() {
 			proof, err := m.cfg.LocalSigner(authCtx, consent, nonce, reason)

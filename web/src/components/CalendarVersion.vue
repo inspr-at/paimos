@@ -11,7 +11,9 @@ import { attachVersionReveal, revealControl } from '../lib/version-reveal'
 // a click copies). Inside a control (a release row, the footer's history button)
 // that control keeps its action and its hover or focus reveals the seconds.
 // Other versions read as text.
-const props = withDefaults(defineProps<{ value: string; scheme?: string }>(), { scheme: CALENDAR_DISPLAY_SCHEME })
+// `rest` draws the Pretty display as plain text (no copy button, no reveal of the
+// seconds): the stamp a marketing name shows on hover.
+const props = withDefaults(defineProps<{ value: string; scheme?: string; rest?: boolean }>(), { scheme: CALENDAR_DISPLAY_SCHEME, rest: false })
 const host = ref<HTMLElement>()
 let reveal: (() => void) | undefined
 watchEffect(() => {
@@ -19,8 +21,8 @@ watchEffect(() => {
   reveal?.(); reveal = undefined
   if (!element) return
   if (!parts(props.value, props.scheme)) { disposeVersion(element); element.textContent = props.value; return }
-  const control = revealControl(element)
-  renderVersion(element, props.value, props.scheme, { config: display, mode: 'pretty', brand: '#D69B31', interactive: !control, text: VERSION_COPY_TEXT })
+  const control = props.rest ? null : revealControl(element)
+  renderVersion(element, props.value, props.scheme, { config: display, mode: 'pretty', brand: '#D69B31', interactive: !props.rest && !control, text: VERSION_COPY_TEXT })
   if (control) reveal = attachVersionReveal(element, control)
 }, { flush: 'post' })
 onBeforeUnmount(() => { reveal?.(); if (host.value) disposeVersion(host.value) })

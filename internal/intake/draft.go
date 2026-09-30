@@ -76,12 +76,12 @@ func insertDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID s
 	row := tx.QueryRow(ctx, `
 		INSERT INTO intake_drafts (
 			tenant_id, project_node_id, kind, requirement_kind, target_node_id, title, body,
-			base_event_id, proposed_by_principal_id, idempotency_key)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7, $8, $9::uuid, $10)
+			base_event_id, proposed_by_principal_id, idempotency_key, extensions, document_bytes)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7, $8, $9::uuid, $10, $11, $12)
 		ON CONFLICT (tenant_id, project_node_id, idempotency_key) DO NOTHING
 		RETURNING id::text`,
 		p.TenantID, projectID, in.Kind, in.RequirementKind, in.TargetNodeID, in.Title, in.Body,
-		*in.BaseEventID, p.ID, in.IdempotencyKey)
+		*in.BaseEventID, p.ID, in.IdempotencyKey, extensionText(in.Extensions), in.DocumentBytes)
 	var id string
 	err = row.Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {

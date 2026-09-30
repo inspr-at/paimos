@@ -154,7 +154,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.Succeeds, "succeeds", 0, "stopped or heartbeat-lost predecessor coordinator UUID")
 			fs.string(&o.Parent, "parent-session", 0, "parent public session UUID")
 			fs.string(&o.Ticket, "ticket", 0, "ticket node key")
-			fs.string(&o.Shape, "work-shape", 0, "ship or scout")
+			fs.string(&o.Shape, "work-shape", 0, "required with --ticket; one of: ship, scout")
 			fs.string(&o.Management, "management", 0, "managed or unmanaged")
 			fs.string(&o.Role, "role", 0, "worker or coordinator")
 			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source and inbox index")
@@ -761,6 +761,10 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 			existing.disk.StartRev, _ = gitHEAD(ctx, o.Worktree)
 		}
 		existing.hold = session.hold
+		// State written before BoundTicket has no local binding. A restart
+		// without --ticket would then omit progress and ETA. The server's
+		// session binding is copied in and persisted.
+		rt.backfillBoundTicket(ctx, o, &existing)
 		return existing, false, nil
 	}
 	// Prove the owner before registration. A dead owner must not create a
@@ -819,6 +823,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		body["parent_harness_session_id"] = strings.ToLower(o.Parent)
 	}
 	attachVendorSessionRef(body, o.Harness, ref, lease)
+	var boundTicket string
 	if o.Ticket != "" {
 		ticketID, err := rt.harnessTicket(projectID, o.Ticket, 0)
 		if err != nil {
@@ -832,13 +837,14 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		}
 		body["ticket_node_id"] = *ticketID
 		body["work_shape"] = o.Shape
+		boundTicket = strings.TrimSpace(o.Ticket)
 	}
 	var out struct {
 		ID string `json:"id"`
 	}
 	// Capture the owner before registration: a long predecessor timeout must
 	// not attach the new generation to a process that reused the owner's PID.
-	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID}
+	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID, BoundTicket: boundTicket}
 	if proved.Start != "" {
 		disk.OwnerPID = proved.PID
 		disk.OwnerStart = proved.Start
@@ -985,6 +991,52 @@ func (rt *runtime) finishBoundedStop(ctx context.Context, o heartbeatOptions, st
 	return errHeartbeatStopRejected
 }
 
+// backfillBoundTicket copies the server's ticket binding into state that
+// predates BoundTicket. A missing or unbound session is left unchanged so
+// resume still heartbeats. A closed generation is skipped: it does not
+// report estimates, and a status read would be a new request on every open.
+func (rt *runtime) backfillBoundTicket(ctx context.Context, o heartbeatOptions, session *heartbeatSession) {
+	if session == nil || session.disk.Terminal || session.disk.Closed || strings.TrimSpace(session.disk.BoundTicket) != "" {
+		return
+	}
+	projectID := session.disk.ProjectID
+	if !validUUID(projectID) {
+		var err error
+		projectID, err = rt.harnessProjectCtx(ctx, o.Project)
+		if err != nil || !validUUID(projectID) {
+			return
+		}
+	}
+	var status struct {
+		ID           string  `json:"id"`
+		TicketNodeID *string `json:"ticket_node_id"`
+	}
+	if err := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id), "", nil, &status); err != nil {
+		return
+	}
+	if status.ID != "" && !strings.EqualFold(status.ID, session.id) {
+		return
+	}
+	if status.TicketNodeID == nil || !validUUID(*status.TicketNodeID) {
+		return
+	}
+	var node apiNode
+	if err := rt.doCtx(ctx, http.MethodGet, "/api/nodes/"+url.PathEscape(*status.TicketNodeID), nil, &node); err != nil {
+		return
+	}
+	if !strings.EqualFold(node.ID, *status.TicketNodeID) {
+		return
+	}
+	key := heartbeatText(node.Key, 200)
+	if key == "" {
+		return
+	}
+	session.disk.BoundTicket = key
+	if err := saveHeartbeatSession(session); err != nil {
+		fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
+	}
+}
+
 func bindHeartbeatWorktree(ctx context.Context, o heartbeatOptions, disk *heartbeatDisk) {
 	if strings.TrimSpace(o.Worktree) == "" {
 		return
@@ -1062,7 +1114,15 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if !status.ModifiedAt.IsZero() && now.Sub(status.ModifiedAt) > heartbeatProgressStale {
 		rt.printEstimateWarnings([]harness.EstimateWarning{{Code: "stale_progress", Hint: "Status file has not been updated for over 30 minutes; refresh pct, remaining_min and note."}}, &session.disk.WarningAt, now)
 	}
-	if o.Role == "worker" && o.Ticket != "" {
+	// Registration persists the ticket. A restarted helper for that same
+	// generation often has an empty --ticket flag and would otherwise drop
+	// progress_pct and eta_ready_at, leaving the server on missing_progress
+	// and missing_eta. An explicit flag still wins.
+	ticket := strings.TrimSpace(o.Ticket)
+	if ticket == "" && session != nil {
+		ticket = strings.TrimSpace(session.disk.BoundTicket)
+	}
+	if o.Role == "worker" && ticket != "" {
 		if status.Progress != nil {
 			body["progress_pct"] = *status.Progress
 		}

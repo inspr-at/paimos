@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -22,22 +23,23 @@ const GenerationHeader = "X-Aeon-Daemon-Generation"
 
 // Telemetry contains only bounded identifiers and counters, never vendor text.
 type Telemetry struct {
-	LimitWindow   string      `json:"limit_window,omitempty"`
-	LimitResetsAt *time.Time  `json:"limit_resets_at,omitempty"`
-	Sequence      int64       `json:"sequence"`
-	Kind          string      `json:"kind"`
-	Status        string      `json:"status,omitempty"`
-	Input         int64       `json:"input_tokens_delta"`
-	Output        int64       `json:"output_tokens_delta"`
-	Cached        int64       `json:"cached_input_tokens_delta"`
-	Reasoning     int64       `json:"reasoning_tokens_delta"`
-	Cost          int64       `json:"cost_micros_delta"`
-	Tools         int32       `json:"tool_count_delta"`
-	Turns         int32       `json:"turn_count_delta"`
-	Model         string      `json:"effective_model,omitempty"`
-	Evidence      string      `json:"model_evidence,omitempty"`
-	ErrorCode     string      `json:"error_code,omitempty"`
-	GitCommits    []GitCommit `json:"git_commits,omitempty"`
+	ReviewRange   *reviewgate.CommitRange `json:"review_range,omitempty"`
+	LimitWindow   string                  `json:"limit_window,omitempty"`
+	LimitResetsAt *time.Time              `json:"limit_resets_at,omitempty"`
+	Sequence      int64                   `json:"sequence"`
+	Kind          string                  `json:"kind"`
+	Status        string                  `json:"status,omitempty"`
+	Input         int64                   `json:"input_tokens_delta"`
+	Output        int64                   `json:"output_tokens_delta"`
+	Cached        int64                   `json:"cached_input_tokens_delta"`
+	Reasoning     int64                   `json:"reasoning_tokens_delta"`
+	Cost          int64                   `json:"cost_micros_delta"`
+	Tools         int32                   `json:"tool_count_delta"`
+	Turns         int32                   `json:"turn_count_delta"`
+	Model         string                  `json:"effective_model,omitempty"`
+	Evidence      string                  `json:"model_evidence,omitempty"`
+	ErrorCode     string                  `json:"error_code,omitempty"`
+	GitCommits    []GitCommit             `json:"git_commits,omitempty"`
 }
 
 // GitCommit is one commit this run introduced after its launch revision.
@@ -113,6 +115,9 @@ func (t Telemetry) validate() error {
 	if t.LimitResetsAt != nil && (t.LimitResetsAt.IsZero() || t.LimitResetsAt.After(time.Now().Add(366*24*time.Hour))) {
 		return workorders.Fail(400, "invalid limit reset")
 	}
+	if t.ReviewRange != nil && (!t.ReviewRange.Valid() || t.Kind != "finished" || (t.Status != "" && t.Status != "completed")) {
+		return workorders.Fail(400, "review range requires completed builder telemetry and distinct full commits")
+	}
 	if len(t.GitCommits) > 20 {
 		return workorders.Fail(400, "too many git commits")
 	}
@@ -125,6 +130,9 @@ func (t Telemetry) validate() error {
 }
 
 func sameTelemetry(a, b Telemetry) bool {
+	if (a.ReviewRange == nil) != (b.ReviewRange == nil) || a.ReviewRange != nil && *a.ReviewRange != *b.ReviewRange {
+		return false
+	}
 	if a.LimitWindow != b.LimitWindow || (a.LimitResetsAt == nil) != (b.LimitResetsAt == nil) || a.LimitResetsAt != nil && !a.LimitResetsAt.Equal(*b.LimitResetsAt) {
 		return false
 	}
@@ -224,6 +232,9 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		v.CachedInputTokens > 1_000_000_000_000-t.Cached || v.ReasoningTokens > 1_000_000_000_000-t.Reasoning {
 		return nil, workorders.Fail(400, "usage counter overflow")
 	}
+	if t.ReviewRange != nil && v.ReadOnlyReview {
+		return nil, workorders.Fail(400, "reviewers cannot request recursive reviews")
+	}
 	before := v
 	model, evidence := v.EffectiveModel, v.ModelEvidence
 	if t.Model != "" {
@@ -260,6 +271,11 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	if err = workorders.BlockBudget(ctx, tx, p, o); err != nil {
 		return nil, err
+	}
+	if t.ReviewRange != nil && m.reviews != nil {
+		if err = m.reviews(ctx, tx, p, v.ID, *t.ReviewRange); err != nil {
+			return nil, err
+		}
 	}
 	after := struct {
 		RunID    string          `json:"run_id"`

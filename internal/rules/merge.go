@@ -225,11 +225,11 @@ func (l LayerBytes) Of(layer string) int { return *l.ref(layer) }
 func DefaultBudget() Budget { return Budget{MaxBytes: LegacyMaxBytes} }
 
 // Validate keeps a budget inside the product bounds: the total between
-// MinBudgetBytes and MaxBytes, and every layer cap between 500 bytes and
+// MinBudgetBytes and MaxBudgetBytes, and every layer cap between 500 bytes and
 // the total.
 func (b Budget) Validate() error {
-	if b.MaxBytes < MinBudgetBytes || b.MaxBytes > MaxBytes {
-		return fail(400, "invalid_budget", fmt.Sprintf("the session file budget must be between %d and %d bytes", MinBudgetBytes, MaxBytes))
+	if b.MaxBytes < MinBudgetBytes || b.MaxBytes > MaxBudgetBytes {
+		return fail(400, "invalid_budget", fmt.Sprintf("the session file budget must be between %d and %d bytes", MinBudgetBytes, MaxBudgetBytes))
 	}
 	for _, layer := range LayerNames {
 		if v := b.Layers.Of(layer); v != 0 && (v < MinLayerBytes || v > b.MaxBytes) {
@@ -284,7 +284,7 @@ func Stub(m Merged) (string, error) {
 	}
 	text := "Register this session with Aeon and explicitly load its returned rules. If unavailable, use the verified context-bound cache marked stale. Keep this locked company floor in force:\n\n" + m.Floor
 	if len(text) > MaxBytes {
-		return "", fail(422, "rules_budget_exceeded", "stub plus company floor exceeds 64000 UTF-8 bytes")
+		return "", fail(422, "rules_budget_exceeded", fmt.Sprintf("stub plus company floor exceeds %d UTF-8 bytes", MaxBytes))
 	}
 	return text, nil
 }

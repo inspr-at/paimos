@@ -690,6 +690,33 @@ const shots: Shot[] = [
     await page.goto(`/releases/${releaseHistory().current}`)
     await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
   } },
+  // AEON-430: the list with codenames as row titles and beside a brief; a long
+  // codename next to the Current tag; a reservation that keeps its slot's name.
+  { screen: 'releases', state: 'history-codenames', setup: async page => {
+    await mockWork(page, fixtures())
+    const history = presentedHistory(PRESENTED_NOW)
+    history.releases[0].codename = 'Trailblazing Thermosphere'
+    Object.assign(history.releases.find(r => r.state === 'reserved')!, { release_sequence: 54, codename: 'Inner Iota' })
+    await mockReleases(page, history)
+  }, act: async page => {
+    await page.goto('/releases/all')
+    await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
+    await expect(page.getByRole('option').first()).toBeVisible()
+  } },
+  // AEON-430: a comparison names each release in the range, by brief or codename.
+  { screen: 'releases', state: 'history-compare', setup: async page => {
+    await mockWork(page, fixtures())
+    await mockReleases(page, presentedHistory(PRESENTED_NOW))
+  }, act: async page => {
+    await page.goto(`/releases/${presentedHistory(PRESENTED_NOW).releases[0].version}`)
+    const back = page.getByRole('button', { name: 'All releases' })
+    await expect(page.getByRole('option').first().or(back)).toBeVisible()
+    if (await back.isVisible()) await back.click() // phones open the release first
+    await expect(page.getByRole('option').first()).toBeVisible()
+    await page.getByRole('button', { name: 'Compare' }).click()
+    await page.getByRole('option').nth(4).click()
+    await expect(page.getByRole('heading', { name: 'Releases in this range' })).toBeVisible()
+  } },
   // AEON-305: a presented release, one with benefits only, one with internal changes only.
   ...([['history-presented', 0], ['history-benefits-only', 1], ['history-internal', 3]] as const).map(([state, index]) => ({ screen: 'releases', state, setup: async (page: Page) => {
     await mockWork(page, fixtures())

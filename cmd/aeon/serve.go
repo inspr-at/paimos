@@ -39,6 +39,7 @@ import (
 	"github.com/inspr-at/paimos/internal/business/quotes/confirmation"
 	publicquotes "github.com/inspr-at/paimos/internal/business/quotes/public"
 	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/embedding"
@@ -253,10 +254,22 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	})
 	go doctrineMod.EnsurePrivateGuards(ctx)
 	go doctrineMod.RunOutcomeAnalysis(ctx)
+	reviewApp := &crossreview.GitHubApp{Config: crossreview.AppConfig{
+		ID: cfg.ReviewAppID, InstallationID: cfg.ReviewInstallationID, KeyFile: cfg.ReviewAppKeyFile,
+		TenantID: cfg.ReviewAppTenantID, Repository: cfg.ReviewAppRepository,
+	}}
+	var reviewPublisher crossreview.StatusPublisher
+	if reviewApp.Configured(cfg.ReviewAppTenantID, cfg.ReviewAppRepository) {
+		reviewPublisher = reviewApp
+	}
+	reviewMod := crossreview.New(pool, reviewPublisher)
+	go reviewMod.RunStatusReporter(ctx)
 	api := &httpapi.Server{
 		Pool:  pool,
 		Brand: &productBrand,
-		Web:   webFS,
+		// AEON-430: the footer names the running release from /api/version.
+		Codename: historyMod.CodenameOf,
+		Web:      webFS,
 		Modules: []httpapi.Module{
 			authMod,
 			// ADR-003: permissions, roles, members, project members, invites and
@@ -286,7 +299,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			deliveryvote.New(pool),
 			usagedashboard.New(pool),
 			workorders.New(pool),
-			agentruns.New(pool, settleUsage),
+			reviewMod,
+			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
 			approvals.New(pool),
 			modelregistry.New(pool),
 			agentaccounts.New(pool),

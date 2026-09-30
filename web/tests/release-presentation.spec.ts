@@ -83,7 +83,7 @@ test('without a presentation: the blocks lead, and a release without them is ver
   const d = detail(page)
   await expect(d.locator('.kicker')).toHaveCount(0)
   await expect(d.locator('.headline')).toHaveCount(0)
-  await expect(d.getByRole('heading', { level: 2, name: history.releases[1]!.version })).toBeVisible()
+  await expect(d.getByRole('heading', { level: 2, name: history.releases[1]!.codename })).toBeVisible()
   await expect(d.locator('.summary')).toHaveCount(0)
   await expect(d.getByRole('region', { name: 'Features, 1' }).locator('.pill-title')).toHaveText('Wide lists')
   // PHAROS-11 has no pill, so it keeps its chip.
