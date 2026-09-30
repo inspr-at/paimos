@@ -223,13 +223,122 @@ func TestPlanningRoundedCostTie(t *testing.T) {
 	}
 }
 
+// 1.000001 h × $13.50 is 13.5000135 and rounds once to 13.500014 micro-dollars.
+// A spent row of that same figure ties by id; the neighbouring boundaries do too.
+func TestPlanningCostMicrosAgree(t *testing.T) {
+	w := planningSetup(t)
+	// An api charge on this harness makes the paid estimate follow list price.
+	bill := w.node(t, "BILL-1", "ticket", w.root.ID, "open", nil)
+	w.session(t, bill.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1000, 0, 0, "api", "")
+
+	mk := func(key string, hours any) nodeJSON {
+		t.Helper()
+		f := map[string]any{"route_role": "build-hard", "area": "backend"}
+		if hours != nil {
+			f["estimate_hours"] = hours
+		}
+		return w.node(t, key, "ticket", w.root.ID, "open", f)
+	}
+	zeroA, zeroB := mk("MIC-11", nil), mk("MIC-12", nil)
+	halfA, halfB := mk("MIC-21", nil), mk("MIC-22", nil)
+	low := mk("MIC-31", nil)
+	est := mk("MIC-41", nil)
+	spent := mk("MIC-51", nil)
+	big := mk("MIC-61", nil)
+	largeA, largeB := mk("MIC-71", nil), mk("MIC-72", nil)
+	for _, n := range []nodeJSON{zeroA, zeroB, halfA, halfB, low, spent, largeA, largeB} {
+		w.session(t, n.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1000, 0, 0, "api", "")
+	}
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields = jsonb_set(fields, '{estimate_hours}', '1.000001'::jsonb) WHERE id=$1`, est.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields = jsonb_set(fields, '{estimate_hours}', '200'::jsonb) WHERE id=$1`, big.ID); err != nil {
+			return err
+		}
+		// A huge estimate must not move a row whose spent figure is smaller.
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields = jsonb_set(fields, '{estimate_hours}', '200'::jsonb) WHERE id=$1`, low.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE harness_session_usage u SET estimated_cost_usd=v.cost
+			FROM harness_sessions s
+			JOIN (VALUES
+				($2::uuid, 0::numeric), ($3::uuid, 0::numeric),
+				($4::uuid, 2.5000005::numeric), ($5::uuid, 2.5000005::numeric),
+				($6::uuid, 13.500013::numeric), ($7::uuid, 13.500014::numeric),
+				($8::uuid, 100000000.1234565::numeric), ($9::uuid, 100000000.1234565::numeric)
+			) AS v(ticket, cost) ON s.ticket_node_id=v.ticket
+			WHERE u.tenant_id=s.tenant_id AND u.session_id=s.id AND s.tenant_id=$1`,
+			w.admin.TenantID, zeroA.ID, zeroB.ID, halfA.ID, halfB.ID, low.ID, spent.ID, largeA.ID, largeB.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCost := func(key, spent, estimated string) {
+		t.Helper()
+		for _, sort := range []string{"key", "list_cost"} {
+			view := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&q="+key+"&sort="+sort)[key]
+			if view == nil || view.Cost == nil {
+				t.Fatalf("%s via %s: no cost", key, sort)
+			}
+			got := func(p *string) string {
+				if p == nil {
+					return ""
+				}
+				return *p
+			}
+			if got(view.Cost.ListSpent) != spent || got(view.Cost.PaidSpent) != spent || got(view.Cost.ListEstimated) != estimated || got(view.Cost.PaidEstimated) != estimated {
+				t.Fatalf("%s via %s: list %q/%q paid %q/%q", key, sort, got(view.Cost.ListSpent), got(view.Cost.ListEstimated), got(view.Cost.PaidSpent), got(view.Cost.PaidEstimated))
+			}
+		}
+	}
+	wantCost("MIC-41", "", "13.500014")
+	wantCost("MIC-51", "13.500014", "")
+	wantCost("MIC-31", "13.500013", "2700.000000")
+	wantCost("MIC-21", "2.500001", "")
+	wantCost("MIC-11", "0.000000", "")
+	wantCost("MIC-71", "100000000.123457", "")
+	wantCost("MIC-61", "", "2700.000000")
+
+	byID := func(group []nodeJSON) []string {
+		g := append([]nodeJSON(nil), group...)
+		slices.SortFunc(g, func(a, b nodeJSON) int { return strings.Compare(a.ID, b.ID) })
+		out := make([]string, len(g))
+		for i, n := range g {
+			out[i] = n.Key
+		}
+		return out
+	}
+	groups := [][]nodeJSON{{zeroA, zeroB}, {halfA, halfB}, {low}, {est, spent}, {big}, {largeA, largeB}}
+	var asc []string
+	for _, group := range groups {
+		asc = append(asc, byID(group)...)
+	}
+	var desc []string
+	for i := len(groups) - 1; i >= 0; i-- {
+		desc = append(desc, byID(groups[i])...)
+	}
+	for _, field := range []string{"list_cost", "paid"} {
+		for _, dir := range []struct {
+			sort string
+			want []string
+		}{{field, asc}, {"-" + field, desc}} {
+			got := listKeys(t, w.admin, "/api/nodes?within="+w.root.ID+"&q=MIC-&sort="+dir.sort)
+			if !slices.Equal(got, dir.want) {
+				t.Fatalf("%s: got %v want %v", dir.sort, got, dir.want)
+			}
+		}
+	}
+}
+
 func TestPlanningBulkUsagePerformance(t *testing.T) {
 	w := planningSetup(t)
 	planningBulk(t, w, 1000, 4, "open", "PERF-", true)
 	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes, harness_sessions, harness_session_usage, model_prices`); err != nil {
 		t.Fatal(err)
 	}
-	// List cost so the explained sort key is the rounded projection. Every
+	// List cost so the explained sort key is the micro-dollar projection. Every
 	// row reports the same 4000 tokens, so the page check does not depend on
 	// which tied cost sorts first.
 	path := "/api/nodes?within=" + w.root.ID + "&kind=ticket&sort=list_cost&limit=50"
@@ -325,7 +434,7 @@ func planningPerfBudget() time.Duration {
 // planningListPlanProblems checks the list-with-planning plan: one grouped
 // aggregation over usage for the tickets that define the page, no per-row
 // subplan or nested loop from those tickets into usage, and a sort key that
-// rounds cost to the projected places.
+// uses the integer micro-dollar projection.
 func planningListPlanProblems(root map[string]any) []string {
 	ctes := map[string]map[string]any{}
 	var index func(map[string]any)
@@ -368,8 +477,8 @@ func planningListPlanProblems(root map[string]any) []string {
 	if usageAggs != 1 {
 		problems = append(problems, fmt.Sprintf("grouped usage aggregates = %d, want 1", usageAggs))
 	}
-	if !planSortUsesRoundedCost(root) {
-		problems = append(problems, "sort key does not use the rounded cost projection")
+	if !planSortUsesCostMicros(root) {
+		problems = append(problems, "sort key does not use the micro-dollar projection")
 	}
 	return problems
 }
@@ -377,7 +486,7 @@ func planningListPlanProblems(root map[string]any) []string {
 func TestPlanningListPlanShape(t *testing.T) {
 	good := `{
       "Node Type": "Sort",
-      "Sort Key": ["((round((plan.list_usd)::numeric, 6) IS NULL))", "round((plan.list_usd)::numeric, 6)", "f.id"],
+      "Sort Key": ["((plan.list_micros IS NULL))", "plan.list_micros", "f.id"],
       "Plans": [{
         "Node Type": "Aggregate", "Partial Mode": "Simple", "Group Key": ["plan_lines.id"],
         "Plans": [{
@@ -395,7 +504,7 @@ func TestPlanningListPlanShape(t *testing.T) {
 	}
 	nested := `{
       "Node Type": "Sort",
-      "Sort Key": ["round((plan.paid_usd)::numeric, 6)"],
+      "Sort Key": ["plan.paid_micros"],
       "Plans": [{
         "Node Type": "Nested Loop",
         "Plans": [
@@ -493,18 +602,18 @@ func planGroupKeyHasID(n map[string]any) bool {
 	return false
 }
 
-func planSortUsesRoundedCost(n map[string]any) bool {
+func planSortUsesCostMicros(n map[string]any) bool {
 	found := false
 	var walk func(map[string]any)
 	walk = func(n map[string]any) {
 		if keys, ok := n["Sort Key"].([]any); ok {
 			for _, key := range keys {
-				if s, ok := key.(string); ok && roundedCostSortKey(s) {
+				if s, ok := key.(string); ok && costMicrosSortKey(s) {
 					found = true
 				}
 			}
 		}
-		if s, ok := n["Window"].(string); ok && roundedCostSortKey(s) {
+		if s, ok := n["Window"].(string); ok && costMicrosSortKey(s) {
 			found = true
 		}
 		for _, child := range planChildren(n) {
@@ -515,8 +624,12 @@ func planSortUsesRoundedCost(n map[string]any) bool {
 	return found
 }
 
-func roundedCostSortKey(s string) bool {
-	return strings.Contains(s, "round(") && (strings.Contains(s, "list_usd") || strings.Contains(s, "paid_usd"))
+func costMicrosSortKey(s string) bool {
+	if strings.Contains(s, "list_micros") || strings.Contains(s, "paid_micros") {
+		return true
+	}
+	// A planner that inlines the CTE still has to sort by the one micro-dollar round.
+	return strings.Contains(s, "round(") && strings.Contains(s, "1000000") && (strings.Contains(s, "list_") || strings.Contains(s, "paid_"))
 }
 
 // planInputScansUsage reports whether n's own input reads harness_session_usage.

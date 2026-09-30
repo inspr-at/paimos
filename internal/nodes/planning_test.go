@@ -127,6 +127,34 @@ func TestPlanningSampleOf(t *testing.T) {
 	}
 }
 
+func TestUSDFromMicros(t *testing.T) {
+	n := func(v int64) *int64 { return &v }
+	cases := []struct {
+		in   *int64
+		want string
+	}{
+		{nil, ""},
+		{n(-1), ""},
+		{n(0), "0.000000"},
+		{n(13500014), "13.500014"},
+		{n(13500013), "13.500013"},
+		{n(2500001), "2.500001"},
+		{n(100000000123457), "100000000.123457"},
+	}
+	for _, tc := range cases {
+		got := usdFromMicros(tc.in)
+		if tc.want == "" {
+			if got != nil {
+				t.Fatalf("%v printed %q", tc.in, *got)
+			}
+			continue
+		}
+		if got == nil || *got != tc.want {
+			t.Fatalf("%v = %v, want %s", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestPlanningListCost(t *testing.T) {
 	n := func(v int64) *int64 { return &v }
 	s := func(v string) *string { return &v }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"slices"
@@ -170,22 +171,33 @@ type planSortRate struct {
 // statement multiplies. The sort key itself is SQL over the filtered rows, so
 // a tokens or cost sort does not build a planning view per matching row.
 func preparePlanningSort(ctx context.Context, tx pgx.Tx, q *listQuery) error {
+	raw, err := planningRates(ctx, tx, q.seen)
+	if err != nil {
+		return err
+	}
+	q.planRates = raw
+	return nil
+}
+
+// planningRates is the JSON the cost statements multiply. Sort and display
+// both read it, so an estimate is one product, not two.
+func planningRates(ctx context.Context, tx pgx.Tx, seen assigneeSeen) (json.RawMessage, error) {
 	var seeds []planRow
 	for _, role := range []string{"scout", "mechanical", "build", "build-hard", "review-gate"} {
 		seeds = append(seeds, planRow{role: role, area: "backend"})
 	}
 	routes, err := resolvePlanRoutes(ctx, tx, seeds)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	samples, err := loadCalibrationSamples(ctx, tx, routes, q.seen.costVisible)
+	samples, err := loadCalibrationSamples(ctx, tx, routes, seen.costVisible)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	billing := map[string]planBilling{}
 	if len(routes) > 0 {
-		if billing, err = loadPlanBilling(ctx, tx, routes, q.seen); err != nil {
-			return err
+		if billing, err = loadPlanBilling(ctx, tx, routes, seen); err != nil {
+			return nil, err
 		}
 	}
 	pl := &planner{routes: routes, samples: samples, billing: billing, calibrations: map[routeKey]calibration{}}
@@ -206,8 +218,7 @@ func preparePlanningSort(ctx context.Context, tx pgx.Tx, q *listQuery) error {
 		}
 		rates = append(rates, rate)
 	}
-	q.planRates, err = json.Marshal(rates)
-	return err
+	return json.Marshal(rates)
 }
 
 func (s assigneeSeen) costVisible(project string) bool {
@@ -229,15 +240,13 @@ type planUsage struct {
 	sessions, unreported  map[string]bool
 	input, output, cached int64
 	reported              bool
-	list, paid            *big.Rat
-	listed, paidKnown     bool
 	listUnpriced          bool
 	paidUnknown           bool
 	plans                 map[string]bool
 }
 
 func newPlanUsage() *planUsage {
-	return &planUsage{sessions: map[string]bool{}, unreported: map[string]bool{}, list: new(big.Rat), paid: new(big.Rat), plans: map[string]bool{}}
+	return &planUsage{sessions: map[string]bool{}, unreported: map[string]bool{}, plans: map[string]bool{}}
 }
 
 // usageLine is one harness_session_usage row with its session and list price.
@@ -294,10 +303,7 @@ func (u *planUsage) add(l usageLine) {
 		u.output += *l.output
 		u.cached += *l.cached
 	}
-	if cost := l.listCost(); cost != nil {
-		u.list.Add(u.list, cost)
-		u.listed = true
-	} else {
+	if l.listCost() == nil {
 		u.listUnpriced = true
 	}
 	switch {
@@ -307,12 +313,8 @@ func (u *planUsage) add(l usageLine) {
 		} else {
 			u.plans["Subscription"] = true
 		}
-		u.paidKnown = true
 	case l.billing != nil && *l.billing == "api" && l.cost != nil:
-		if v, ok := new(big.Rat).SetString(*l.cost); ok {
-			u.paid.Add(u.paid, v)
-			u.paidKnown = true
-		}
+		// Paid dollars are the SQL micro-dollar integer, not a second sum.
 	default:
 		u.paidUnknown = true
 	}
@@ -466,19 +468,37 @@ func sampleOf(lines []usageLine, seconds map[string]float64) (calibrationSample,
 }
 
 // usdPlaces is the precision list and paid amounts are projected with.
-// The SQL sort key rounds to the same places before the id tiebreaker.
+// SQL rounds once to this many decimal places, as integer micro-dollars,
+// and the API prints that integer. Nothing multiplies the rate again in Go.
 const usdPlaces = 6
 
-// usdString formats an exact amount at the projected precision.
-func usdString(v *big.Rat) *string {
-	s := v.FloatString(usdPlaces)
-	return &s
+// usdMicrosSQL rounds a non-negative USD amount to integer micro-dollars,
+// half away from zero, once. NULL stays NULL.
+func usdMicrosSQL(expr string) string {
+	return `round((` + expr + `)::numeric * 1000000)::bigint`
 }
-func usdFloat(v float64) *string {
-	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+
+// planMicros is the list and paid amounts for one row, in micro-dollars.
+// Spent is usage; est is the hour estimate. Nil means that figure is absent.
+type planMicros struct {
+	listSpent, listEst, paidSpent, paidEst *int64
+}
+
+func cloneInt64(p *int64) *int64 {
+	if p == nil {
 		return nil
 	}
-	s := new(big.Rat).SetFloat64(v).FloatString(usdPlaces)
+	v := *p
+	return &v
+}
+
+// usdFromMicros prints the SQL integer at six decimal places.
+func usdFromMicros(v *int64) *string {
+	if v == nil || *v < 0 {
+		return nil
+	}
+	n := *v
+	s := fmt.Sprintf("%d.%0*d", n/1_000_000, usdPlaces, n%1_000_000)
 	return &s
 }
 
@@ -503,9 +523,9 @@ type planner struct {
 }
 
 // planEstimate is one ticket's or task's estimate; tokens is nil without hours.
+// Dollar amounts are not stored here: SQL returns them as micro-dollars.
 type planEstimate struct {
 	tokens             *int64
-	list, paid         *float64
 	plans              []string
 	cal                calibration
 	anyRoute           bool
@@ -535,9 +555,8 @@ func (pl *planner) calibration(route *planRoute) calibration {
 	return c
 }
 
-// estimate multiplies the row's hours by its route's rate. Paid follows the
-// route harness's billing: 0 under a subscription, the list estimate when
-// billed per use, unknown otherwise.
+// estimate records the route's token rate and whether list or paid dollars
+// exist. The dollar product itself is SQL, shared with the sort.
 func (pl *planner) estimate(r planRow) planEstimate {
 	if r.hours == nil {
 		return planEstimate{}
@@ -545,31 +564,24 @@ func (pl *planner) estimate(r planRow) planEstimate {
 	route := pl.route(r)
 	c := pl.calibration(route)
 	n := int64(math.Round(*r.hours * c.tokensPerHour))
-	e := planEstimate{tokens: &n, cal: c, anyRoute: route == nil, unbilled: true}
-	if c.listPerHour != nil {
-		v := *r.hours * *c.listPerHour
-		e.list = &v
-	} else {
-		e.unpriced = true
-	}
+	e := planEstimate{tokens: &n, cal: c, anyRoute: route == nil, unbilled: true, unpriced: c.listPerHour == nil}
 	if route != nil {
 		switch b := pl.billing[route.view.Harness]; b.mode {
 		case "subscription":
-			zero := 0.0
-			e.paid, e.plans, e.unbilled = &zero, []string{b.plan}, false
+			e.plans, e.unbilled = []string{b.plan}, false
 		case "api":
-			e.paid, e.unbilled = e.list, e.list == nil
+			e.unbilled = c.listPerHour == nil
 		}
 	}
 	return e
 }
 
-// epicEstimate sums the estimates of an epic's open and done children.
+// epicEstimate sums the token estimates of an epic's open and done children
+// and folds their price flags. Dollar totals come back from SQL.
 func (pl *planner) epicEstimate(kids []planRow) (planEstimate, planningChildren) {
 	counts := planningChildren{Total: len(kids)}
 	var sum planEstimate
 	var tokens int64
-	var list, paid float64
 	for _, kid := range kids {
 		e := pl.estimate(kid)
 		if e.tokens == nil {
@@ -577,14 +589,6 @@ func (pl *planner) epicEstimate(kids []planRow) (planEstimate, planningChildren)
 		}
 		counts.Estimated++
 		tokens += *e.tokens
-		if e.list != nil {
-			list += *e.list
-			sum.list = &list
-		}
-		if e.paid != nil {
-			paid += *e.paid
-			sum.paid = &paid
-		}
 		sum.unpriced = sum.unpriced || e.unpriced
 		sum.unbilled = sum.unbilled || e.unbilled
 		sum.plans = append(sum.plans, e.plans...)
@@ -596,8 +600,9 @@ func (pl *planner) epicEstimate(kids []planRow) (planEstimate, planningChildren)
 }
 
 // view assembles one row. costVisible is harness.read on the row's project.
+// money is the SQL micro-dollar amounts; nil leaves the dollar strings empty.
 // Nil when there is nothing to show.
-func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisible bool) *planningView {
+func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisible bool, money *planMicros) *planningView {
 	view := &planningView{}
 	if used != nil {
 		view.Tokens.Sessions, view.Tokens.Unreported = len(used.sessions), len(used.unreported)
@@ -636,6 +641,12 @@ func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisib
 	view.Tokens.Estimated = e.tokens
 	if costVisible && (used != nil || e.tokens != nil) {
 		view.Cost = planCost(used, e)
+		if money != nil {
+			view.Cost.ListSpent = usdFromMicros(money.listSpent)
+			view.Cost.ListEstimated = usdFromMicros(money.listEst)
+			view.Cost.PaidSpent = usdFromMicros(money.paidSpent)
+			view.Cost.PaidEstimated = usdFromMicros(money.paidEst)
+		}
 	}
 	if view.Route == nil && view.RouteGap == "" && view.Tokens.Sessions == 0 && view.Tokens.Estimated == nil {
 		return nil
@@ -643,29 +654,18 @@ func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisib
 	return view
 }
 
-// planCost projects spent usage and the estimate into USD strings.
+// planCost projects price flags. The dollar strings are applied from the
+// SQL micro-dollar integers, which are also the sort keys.
 func planCost(used *planUsage, e planEstimate) *planningCost {
 	c := &planningCost{Plans: []string{}}
 	plans := map[string]bool{}
 	if used != nil {
-		if used.listed {
-			c.ListSpent = usdString(used.list)
-		}
-		if used.paidKnown {
-			c.PaidSpent = usdString(used.paid)
-		}
 		c.ListUnpriced, c.PaidUnknown = used.listUnpriced, used.paidUnknown
 		for plan := range used.plans {
 			plans[plan] = true
 		}
 	}
 	if e.tokens != nil {
-		if e.list != nil {
-			c.ListEstimated = usdFloat(*e.list)
-		}
-		if e.paid != nil {
-			c.PaidEstimated = usdFloat(*e.paid)
-		}
 		c.ListUnpriced = c.ListUnpriced || e.unpriced
 		c.PaidUnknown = c.PaidUnknown || e.unbilled
 		for _, plan := range e.plans {
@@ -681,7 +681,9 @@ func planCost(used *planUsage, e planEstimate) *planningCost {
 
 // loadPlanning computes the planning view for the page's tickets, tasks and
 // epics. The audience gates usage costs on both the row and source projects.
-func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigneeSeen) (map[string]*planningView, error) {
+// money, when non-nil, is the micro-dollar integers the list statement already
+// computed for the sort; otherwise they are read for this page with the same SQL.
+func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigneeSeen, money map[string]planMicros) (map[string]*planningView, error) {
 	cost := seen.costVisible
 	var ids []string
 	for _, item := range items {
@@ -716,6 +718,12 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 			return nil, err
 		}
 	}
+	if money == nil {
+		money, err = loadPlanMicros(ctx, tx, ids, seen)
+		if err != nil {
+			return nil, err
+		}
+	}
 	own := map[string]planRow{}
 	children := map[string][]planRow{}
 	for _, r := range rows {
@@ -730,11 +738,54 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 		if !ok {
 			continue
 		}
-		if view := pl.view(self, children[item.ID], usage[item.ID], visible(item)); view != nil {
+		m := money[item.ID]
+		if view := pl.view(self, children[item.ID], usage[item.ID], visible(item), &m); view != nil {
 			out[item.ID] = view
 		}
 	}
 	return out, nil
+}
+
+// loadPlanMicros reads list and paid micro-dollars for the page with the same
+// rounding the cost sort uses.
+func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeSeen) (map[string]planMicros, error) {
+	out := map[string]planMicros{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rates, err := planningRates(ctx, tx, seen)
+	if err != nil {
+		return nil, err
+	}
+	if len(rates) == 0 {
+		rates = json.RawMessage(`[]`)
+	}
+	projects := seen.projects
+	if projects == nil {
+		projects = []string{}
+	}
+	rows, err := tx.Query(ctx, `WITH filtered AS MATERIALIZED (
+        SELECT n.id, n.project_id, k.slug AS kind_slug
+        FROM nodes n
+        JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+        WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.deleted_at IS NULL
+            AND n.id = ANY($1::uuid[]) AND k.slug IN ('ticket','task','epic')
+    )`+planningSortSQL("$2", "$3", "$4", true)+`
+    SELECT id::text, list_spent_micros, list_est_micros, paid_spent_micros, paid_est_micros
+    FROM planning_values`, ids, string(rates), seen.harnessAll, projects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var m planMicros
+		if err := rows.Scan(&id, &m.listSpent, &m.listEst, &m.paidSpent, &m.paidEst); err != nil {
+			return nil, err
+		}
+		out[id] = m
+	}
+	return out, rows.Err()
 }
 
 // loadPlanRows reads role, area and hours for the page rows and for the open
@@ -879,10 +930,17 @@ func planCostVisibleSQL(project, harnessAll, projects string) string {
 
 // planningSortSQL is the tokens / list / paid sort key for every filtered
 // ticket, task and epic: spent usage when any of it was reported, otherwise
-// the estimate. Cost stays null where the caller cannot see it (AEON-370).
-func planningSortSQL(ratesArg, harnessAll, projects string) string {
+// the estimate. List and paid are integer micro-dollars, rounded once.
+// Cost stays null where the caller cannot see it (AEON-370).
+// pageUsage limits the usage read to the filtered sessions. The sort of a
+// whole list reads the tenant once instead; a page is small enough to probe.
+func planningSortSQL(ratesArg, harnessAll, projects string, pageUsage bool) string {
 	visible := planCostVisibleSQL("ps.project_id", harnessAll, projects)
 	rowVisible := planCostVisibleSQL("f.project_id", harnessAll, projects)
+	usageWhere := `u.tenant_id=current_setting('aeon.tenant_id')::uuid`
+	if pageUsage {
+		usageWhere += ` AND u.session_id IN (SELECT session_id FROM plan_sessions)`
+	}
 	rateCols := `raw.hours,
             (CASE WHEN spec.role IS NOT NULL THEN spec.tokens_per_hour ELSE anyr.tokens_per_hour END)::numeric AS tokens_per_hour,
             (CASE WHEN spec.role IS NOT NULL THEN spec.list_per_hour ELSE anyr.list_per_hour END)::numeric AS list_per_hour,
@@ -906,7 +964,7 @@ func planningSortSQL(ratesArg, harnessAll, projects string) string {
         SELECT u.session_id, u.model, u.input_tokens, u.output_tokens, u.cached_input_tokens,
             u.billing_mode, u.estimated_cost_usd
         FROM harness_session_usage u
-        WHERE u.tenant_id=current_setting('aeon.tenant_id')::uuid
+        WHERE ` + usageWhere + `
     ), plan_lines AS MATERIALIZED (
         SELECT ps.id,
             (u.model IS NOT NULL AND u.input_tokens IS NOT NULL AND u.output_tokens IS NOT NULL AND u.cached_input_tokens IS NOT NULL) AS complete,
@@ -929,18 +987,18 @@ func planningSortSQL(ratesArg, harnessAll, projects string) string {
     ), plan_usage_agg AS MATERIALIZED (
         SELECT id,
             CASE WHEN bool_or(complete) THEN coalesce(sum(tokens) FILTER (WHERE complete), 0) END AS tokens,
-            sum(list_usd) FILTER (WHERE list_usd IS NOT NULL) AS list_usd,
-            CASE WHEN bool_or(cost_ok AND (billing_mode = 'subscription' OR (billing_mode = 'api' AND estimated_cost_usd IS NOT NULL)))
+            ` + usdMicrosSQL(`sum(list_usd) FILTER (WHERE list_usd IS NOT NULL)`) + ` AS list_micros,
+            ` + usdMicrosSQL(`CASE WHEN bool_or(cost_ok AND (billing_mode = 'subscription' OR (billing_mode = 'api' AND estimated_cost_usd IS NOT NULL)))
                 THEN coalesce(sum(CASE
                     WHEN cost_ok AND billing_mode = 'subscription' THEN 0
                     WHEN cost_ok AND billing_mode = 'api' AND estimated_cost_usd IS NOT NULL THEN estimated_cost_usd
-                END), 0) END AS paid_usd
+                END), 0) END`) + ` AS paid_micros
         FROM plan_lines GROUP BY id
     ), plan_own AS MATERIALIZED (
         SELECT base.id,
             CASE WHEN base.kind_slug <> 'epic' AND rated.hours IS NOT NULL THEN round(rated.hours * rated.tokens_per_hour)::bigint END AS tokens,
-            CASE WHEN base.kind_slug <> 'epic' AND rated.hours IS NOT NULL THEN rated.hours * rated.list_per_hour END AS list_usd,
-            CASE WHEN base.kind_slug <> 'epic' AND rated.hours IS NOT NULL THEN rated.hours * rated.paid_per_hour END AS paid_usd
+            CASE WHEN base.kind_slug <> 'epic' AND rated.hours IS NOT NULL THEN ` + usdMicrosSQL(`rated.hours * rated.list_per_hour`) + ` END AS list_micros,
+            CASE WHEN base.kind_slug <> 'epic' AND rated.hours IS NOT NULL THEN ` + usdMicrosSQL(`rated.hours * rated.paid_per_hour`) + ` END AS paid_micros
         FROM (
             SELECT f.id, f.kind_slug, ` + estimateHoursSQL("nd.fields") + ` AS hours, ` + planRateRoleSQL("nd.fields") + ` AS role
             FROM filtered f
@@ -953,8 +1011,8 @@ func planningSortSQL(ratesArg, harnessAll, projects string) string {
     ), plan_child_est AS MATERIALIZED (
         SELECT e.id,
             (sum(round(r.hours * r.tokens_per_hour)) FILTER (WHERE r.hours IS NOT NULL))::bigint AS tokens,
-            sum(r.hours * r.list_per_hour) FILTER (WHERE r.hours IS NOT NULL AND r.list_per_hour IS NOT NULL) AS list_usd,
-            sum(r.hours * r.paid_per_hour) FILTER (WHERE r.hours IS NOT NULL AND r.paid_per_hour IS NOT NULL) AS paid_usd
+            ` + usdMicrosSQL(`sum(r.hours * r.list_per_hour) FILTER (WHERE r.hours IS NOT NULL AND r.list_per_hour IS NOT NULL)`) + ` AS list_micros,
+            ` + usdMicrosSQL(`sum(r.hours * r.paid_per_hour) FILTER (WHERE r.hours IS NOT NULL AND r.paid_per_hour IS NOT NULL)`) + ` AS paid_micros
         FROM filtered e
         JOIN nodes c ON c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.parent_id=e.id AND c.deleted_at IS NULL
         JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id AND ck.slug IN ('ticket','task')
@@ -968,8 +1026,12 @@ func planningSortSQL(ratesArg, harnessAll, projects string) string {
     ), planning_values AS MATERIALIZED (
         SELECT f.id,
             coalesce(u.tokens, CASE WHEN f.kind_slug='epic' THEN ch.tokens ELSE o.tokens END) AS tokens,
-            CASE WHEN ` + rowVisible + ` THEN coalesce(u.list_usd, CASE WHEN f.kind_slug='epic' THEN ch.list_usd ELSE o.list_usd END) END AS list_usd,
-            CASE WHEN ` + rowVisible + ` THEN coalesce(u.paid_usd, CASE WHEN f.kind_slug='epic' THEN ch.paid_usd ELSE o.paid_usd END) END AS paid_usd
+            CASE WHEN ` + rowVisible + ` THEN u.list_micros END AS list_spent_micros,
+            CASE WHEN ` + rowVisible + ` THEN CASE WHEN f.kind_slug='epic' THEN ch.list_micros ELSE o.list_micros END END AS list_est_micros,
+            CASE WHEN ` + rowVisible + ` THEN u.paid_micros END AS paid_spent_micros,
+            CASE WHEN ` + rowVisible + ` THEN CASE WHEN f.kind_slug='epic' THEN ch.paid_micros ELSE o.paid_micros END END AS paid_est_micros,
+            CASE WHEN ` + rowVisible + ` THEN coalesce(u.list_micros, CASE WHEN f.kind_slug='epic' THEN ch.list_micros ELSE o.list_micros END) END AS list_micros,
+            CASE WHEN ` + rowVisible + ` THEN coalesce(u.paid_micros, CASE WHEN f.kind_slug='epic' THEN ch.paid_micros ELSE o.paid_micros END) END AS paid_micros
         FROM filtered f
         LEFT JOIN plan_usage_agg u ON u.id=f.id
         LEFT JOIN plan_own o ON o.id=f.id
