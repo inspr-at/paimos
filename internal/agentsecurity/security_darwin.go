@@ -12,6 +12,8 @@ int aeon_vault_write(const char *, const void *, int, int);
 int aeon_vault_delete(const char *);
 int aeon_enclave_create(const char *, void **, int *);
 int aeon_enclave_capability(void);
+int aeon_enclave_create_disposition(int);
+int aeon_vault_add_is_device_only(const char *);
 void *aeon_enclave_sign_start(const char *, const void *, int, const char *);
 int aeon_enclave_sign_result(void *, void **, int *);
 void aeon_enclave_sign_close(void *);
@@ -26,6 +28,25 @@ import (
 	"time"
 	"unsafe"
 )
+
+// Referenced so the enclave build keeps these Keychain-free policy checks.
+var (
+	_ = enclaveCreateDisposition
+	_ = vaultAddIsDeviceOnly
+)
+
+func enclaveCreateDisposition(copyStatus int) int {
+	return int(C.aeon_enclave_create_disposition(C.int(copyStatus)))
+}
+
+func vaultAddIsDeviceOnly(account string) bool {
+	if account == "" {
+		return C.aeon_vault_add_is_device_only(nil) == 1
+	}
+	key := C.CString(account)
+	defer C.free(unsafe.Pointer(key))
+	return C.aeon_vault_add_is_device_only(key) == 1
+}
 
 type keychainVault struct{}
 type enclaveSigner struct{}
@@ -110,6 +131,9 @@ func (enclaveSigner) Create(ctx context.Context, id string) (string, error) {
 }
 func (enclaveSigner) Sign(ctx context.Context, id string, hash []byte, reason string) (string, error) {
 	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := localSignReason(reason); err != nil {
 		return "", err
 	}
 	if len(hash) != 32 {

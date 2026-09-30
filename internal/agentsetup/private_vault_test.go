@@ -166,6 +166,51 @@ func TestVaultMigrationRejectsConflictingOrLinkedLegacyState(t *testing.T) {
 
 func stringRepeat(b byte, n int) string { return string(bytes.Repeat([]byte{b}, n)) }
 
+func TestRefusedLegacyMigrationDoesNotRotateOrCreateEnclaveKey(t *testing.T) {
+	for _, conflict := range []string{"precreated", "hardlink", "denied"} {
+		t.Run(conflict, func(t *testing.T) {
+			e, _, _, opts, _ := engineFixture(t)
+			signer := &fixtureEnclave{}
+			e.Enclave = signer
+			e.Store.vault = nil
+			key := []byte("aeon_fixture_" + stringRepeat('b', 64))
+			if err := e.Store.Write("runtime.key", key, true); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(e.Store.Path(), "runtime.key")
+			v := &memoryVault{values: map[string][]byte{}}
+			switch conflict {
+			case "precreated":
+				v.values[e.Store.vaultID("runtime.key")] = []byte("attacker-item")
+			case "hardlink":
+				if err := os.Link(path, filepath.Join(e.Store.Path(), "linked-key")); err != nil {
+					t.Fatal(err)
+				}
+			case "denied":
+				v.denied = true
+			}
+			e.Store.vault = v
+			if _, err := e.Store.Read("runtime.key", 4096); err == nil {
+				t.Fatal("refused migration returned legacy bytes")
+			}
+			kept, err := os.ReadFile(path)
+			info, statErr := os.Stat(path)
+			if err != nil || statErr != nil || !bytes.Equal(kept, key) || info.Mode().Perm() != 0600 {
+				t.Fatal("refused migration changed or removed the legacy file")
+			}
+			if conflict == "precreated" && bytes.Equal(v.values[e.Store.vaultID("runtime.key")], key) {
+				t.Fatal("refusal rotated the legacy secret into the pre-created item")
+			}
+			if _, err := e.Begin(t.Context(), opts); err == nil {
+				t.Fatal("refused migration started a new pairing")
+			}
+			if signer.id != "" {
+				t.Fatal("refused migration created an enclave key")
+			}
+		})
+	}
+}
+
 func TestVaultedPairingBindsPublicRuntimeBeforeCredentialedRequests(t *testing.T) {
 	e, api, _, opts, _ := engineFixture(t)
 	e.Store.vault = &memoryVault{values: map[string][]byte{}}

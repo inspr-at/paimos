@@ -1040,12 +1040,13 @@ paths:
         '200':
           description: >-
             Per-person setting plus advisory capability for connected computers this person approved.
-            With no saved choice, consent_mode is local_auth when any upgraded connected computer reports available,
-            and a pending approval on an upgraded Mac that reports available uses it. Linux, a Mac without a graphical
-            login, and computers that cannot confirm stay on aeon until a choice is saved. consent_saved is
-            false for that default. A saved local_auth applies to every upgraded computer and fails closed where
-            confirmation cannot run. Pairings without a pinned key keep aeon until re-paired. The capability
-            report is advisory and never authorizes a watch.
+            With no saved choice, consent_mode is local_auth when any connected computer has a browser-pinned
+            local confirmation key. That key exists only on a Darwin pairing. A pending approval on that computer
+            uses local_auth and requires the pinned key's signature; the capability report cannot select aeon.
+            The snapshot platform must match the platform stored at pairing. Linux and pairings without a pinned
+            key stay on aeon. consent_saved is false for that default. A saved local_auth applies to every upgraded
+            computer and fails closed where confirmation cannot run. A saved aeon keeps Aeon approval where the
+            snapshot platform matches. The capability report is advisory and never authorizes a watch.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SessionWatchingSecurityView'}
@@ -1085,9 +1086,12 @@ paths:
         be resurrected. The server pins the owner's consent_mode at person approval.
         local_auth remains approved (no session or lease) until the registered daemon
         echoes consent_digest, the server-issued local_auth_nonce and a P-256 ASN.1 DER
-        local_auth_signature from its pairing-pinned Secure Enclave key. A bare
+        local_auth_signature from its pairing-pinned Secure Enclave key. The signature
+        covers the canonical Touch ID reason as well as the digest and nonce. A bare
         local_confirmed boolean is refused. Nonces are single-use and expire with
-        the request. Legacy pairings use Aeon approval until re-paired.
+        the request. Once a pairing has a pinned key, pending approval uses local_auth
+        regardless of local_auth_capability, and the snapshot platform must match the
+        platform stored at pairing. Legacy pairings use Aeon approval until re-paired.
         Missing confirmation never activates; request-supplied policy overrides are refused.
         Registration may report local_auth_capability. Omission is stored as unreported.
         That report is advisory and never satisfies local confirmation. A later poll cannot change it.
@@ -6765,12 +6769,13 @@ components:
       description: >-
         Consent plus the advisory capability last reported by each connected computer this person approved.
         The report never authorizes a watch. consent_saved is false when consent_mode is the unsaved default:
-        local_auth if any upgraded connected computer reports available, otherwise aeon. Pending approvals use
-        local_auth only for an upgraded darwin computer that reports available. Other computers keep aeon until a
-        choice is saved. A saved local_auth applies to upgraded pairings and fails closed where confirmation
-        cannot run. Pairings without a pinned key keep aeon until re-paired.
+        local_auth if any connected computer has a pinned local confirmation key, otherwise aeon. That key
+        exists only for a Darwin pairing. Pending approvals on an upgraded computer use local_auth regardless
+        of the capability report, and the snapshot platform must match the platform stored at pairing. Other
+        computers keep aeon until a choice is saved. A saved local_auth applies to upgraded pairings and fails
+        closed where confirmation cannot run. Pairings without a pinned key keep aeon until re-paired.
       properties:
-        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon, description: "aeon is the fallback when nothing is saved and no connected Mac reports available."}
+        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon, description: "Unsaved default is local_auth when any connected computer has a pinned local confirmation key. That key exists only for a Darwin pairing. Otherwise aeon. A capability report cannot select aeon for an upgraded computer, and the snapshot platform must match the paired platform."}
         consent_saved: {type: boolean, description: "False when consent_mode is the unsaved default. True after this person saves a choice."}
         local_auth_computers:
           type: array
@@ -6841,7 +6846,7 @@ components:
         consent_digest: {type: string, description: Echo of the server-selected consent binding; required for activation and every active poll in both modes}
         local_confirmed: {type: boolean, deprecated: true, description: 'Retained for wire compatibility; true is refused. Supply signed local confirmation instead.'}
         local_auth_nonce: {type: string, pattern: '^[0-9a-f]{64}$', description: Server-issued single-use challenge for the approved request}
-        local_auth_signature: {type: string, maxLength: 144, description: 'Base64 ASN.1 DER ECDSA P-256 signature over SHA-256("aeon.attach.local-consent.v1\0" + consent_digest + "\0" + local_auth_nonce). Never accepted on the local socket.'}
+        local_auth_signature: {type: string, maxLength: 144, description: 'Base64 ASN.1 DER ECDSA P-256 signature over SHA-256("aeon.attach.local-consent.v2\0" + consent_digest + "\0" + local_auth_nonce + "\0" + canonical reason). The reason is "Allow " + action + " " + harness + " session PID " + pid + " on " + host. Action is "watching the conversation" or "status only (no conversation text) for". Never accepted on the local socket.'}
         local_auth_capability:
           type: string
           enum: [available, unsupported, unsigned, no_gui, policy]

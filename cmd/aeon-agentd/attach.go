@@ -71,7 +71,7 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 			if c.LocalAuthKeyID == "" {
 				return "", agentsecurity.ErrUnavailable
 			}
-			return agentsecurity.DefaultSigner().Sign(ctx, c.LocalAuthKeyID, attachwatch.LocalConsentHash(consent, nonce), reason)
+			return agentsecurity.DefaultSigner().Sign(ctx, c.LocalAuthKeyID, attachwatch.LocalConsentHash(consent, nonce, reason), reason)
 		},
 		Exchange: func(ctx context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 			in.PollKey = pollKey
@@ -160,7 +160,7 @@ func attachCommand(args []string, out io.Writer) error {
 		fmt.Fprintf(tty, "Watch the conversation.\nTranscript: %s (%s)\nOnly new turns after approval. Audience: people explicitly granted harness.watch in this project.\n", view.Snapshot.Transcript, view.Snapshot.FileID)
 	}
 	fmt.Fprintln(tty, "Only attach a single trust context. Same-user processes are not isolated.")
-	fmt.Fprintln(tty, "Touch ID is the default on an upgraded Mac pairing that can use it; Linux, a headless Mac and older pairings keep approval in Aeon.")
+	fmt.Fprintln(tty, "Touch ID is the default on an upgraded Mac pairing even when this daemon reports that it cannot run. Linux and older pairings keep approval in Aeon. Save approval in Aeon to allow a headless Mac.")
 	fmt.Fprintf(tty, "Type %s for the local check, then approve in your paired browser: ", confirmation)
 	answer, err := readAttachAnswer(ctx, reader)
 	if err != nil {

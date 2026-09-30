@@ -285,32 +285,38 @@ one of two modes at approval:
   another terminal and request the review.
 - **Also confirm on the Mac** (`local_auth`): on an upgraded pairing, browser
   approval issues a random, one-use `local_auth_nonce`. The daemon signs
-  `SHA-256("aeon.attach.local-consent.v1\0" + consent_digest + "\0" + nonce)`
   with the pairing's P-256 Secure Enclave key. The wire signature is base64
-  ASN.1 DER ECDSA. The server verifies it against the immutable public key pinned
-  by browser-approved pairing, then consumes the nonce in the session/lease
-  transaction. A bare `local_confirmed: true`, wrong key, nonce, stale digest,
-  expired approval or replay is refused. No text is accepted before activation.
-  Changing biometric enrollment invalidates the key; re-pair to restore Touch ID.
+  ASN.1 DER ECDSA over
+  `SHA-256("aeon.attach.local-consent.v2\0" + consent_digest + "\0" + nonce + "\0" + reason)`.
+  The reason is the canonical Touch ID prompt:
+  `Allow watching the conversation <harness> session PID <pid> on <host>`,
+  or `Allow status only (no conversation text) for ...` for a metadata-only attach.
+  A signature over any other reason is rejected. The server verifies it against
+  the immutable public key pinned by browser-approved pairing, then consumes the
+  nonce in the session/lease transaction. A bare `local_confirmed: true`, wrong
+  key, nonce, reason, stale digest, expired approval or replay is refused. No
+  text is accepted before activation. Changing biometric enrollment invalidates
+  the key; re-pair to restore Touch ID. The prompt a different local process
+  displays is not inside the Secure Enclave signature. Enclave keys use
+  biometry access control, which cannot also pin the daemon's designated
+  requirement; generic-password items are pinned to that requirement.
 
-Until the person saves a choice, a pending attach on an upgraded Mac whose
-connected daemon reports `available` uses `local_auth`. Linux, older pairings,
-SSH to a machine without a graphical login, an empty or legacy platform,
-and a Mac that reports `no_gui`,
-`unsigned`, `policy`, `unsupported` or `unreported` stay on Aeon approval so
-those attaches keep working. SSH to a Mac that reports `available` shows the
-Touch ID prompt on that Mac's screen, not in the SSH terminal. Settings shows
-`local_auth` with `consent_saved: false` when any connected computer reports
-`available` and has a browser-pinned key, including when another computer would
-still approve in Aeon. Saving `local_auth` applies it to every upgraded computer
-and fails closed where confirmation cannot run; pairings without a key retain
-Aeon approval until re-paired. Saving `aeon` keeps Aeon approval everywhere. The
-daemon's platform and capability report are advisory: a hostile daemon can
-claim another platform or `no_gui` to skip the unsaved default. A saved
-`local_auth` on an upgraded pairing requires the pinned key's signature;
-capability reports cannot substitute for that proof. Touch ID needs a person
-at the Mac. Ancestry and session checks are defence in depth, not a guarantee
-that same-user code cannot request its own attach.
+Until the person saves a choice, a pending attach on a computer whose
+browser-approved pairing pinned a public key uses `local_auth` and requires
+that key's signature. The daemon's capability report cannot select Aeon
+approval. The snapshot platform must match the platform stored at pairing; a
+mismatch is rejected. Linux and pairings without a pinned key stay on Aeon
+approval. SSH to a Mac that can sign shows the Touch ID prompt on that Mac's
+screen, not in the SSH terminal. Settings shows `local_auth` with
+`consent_saved: false` when any connected computer has a browser-pinned key,
+including when another computer would still approve in Aeon and when the
+upgraded computer reports that Touch ID cannot run. Saving `local_auth`
+applies it to every upgraded computer and fails closed where confirmation
+cannot run; pairings without a key retain Aeon approval until re-paired.
+Saving `aeon` keeps Aeon approval where the snapshot platform matches the
+paired platform. Touch ID needs a person at the Mac. Ancestry and session
+checks are defence in depth, not a guarantee that same-user code cannot
+request its own attach.
 
 The `consent_digest` binds request ID, snapshot digest and mode with the
 `aeon.attach.consent.v1` domain. Settings changes affect pending requests;
@@ -334,8 +340,9 @@ this path. Linux remains CGO-free and uses Aeon approval.
 
 In the same release build, private pairing state (including device, runtime and
 lifecycle capabilities) and the runtime bearer live in Keychain generic-password
-items. Their ACL trusts the validated daemon's designated requirement, with
-root as ACL owner rather than the user's UID. Existing items must have the same
+items. New items set `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` and
+`kSecAttrSynchronizable=false`. Their ACL trusts the validated daemon's
+designated requirement, with root as ACL owner rather than the user's UID. Existing items must have the same
 code signing requirement and restrictive ACL; permissive pre-created items are
 refused. Requirement introspection is weak-linked and fails closed if macOS
 cannot provide it. Reads suppress authorization prompts and an ACL denial never

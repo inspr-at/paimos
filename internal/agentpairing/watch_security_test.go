@@ -120,7 +120,7 @@ func TestStrictWatchRequiresBoundDaemonConfirmation(t *testing.T) {
 	f.call("POST", "/api/agent-pairing/attach", in, false, key, 403)
 	in.LocalConfirmed = false
 	in.LocalAuthNonce = waiting.LocalAuthNonce
-	in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, waiting.LocalAuthNonce)
+	in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, waiting.LocalAuthNonce, in.Snapshot)
 	stolen := in
 	stolen.PollKey = ""
 	f.call("POST", "/api/agent-pairing/attach", stolen, false, key, 403)
@@ -143,12 +143,15 @@ func TestWatchSecurityCannotBeDowngradedByRequestOrStaleReview(t *testing.T) {
 	f.call("POST", "/api/agent-pairing/attach", in, false, key, 400)
 	in.ConsentDigest = ""
 	v := requestWatch(t, f, key, in)
-	setWatchMode(f, attachwatch.ConsentLocalAuth)
+	if v.ConsentMode != attachwatch.ConsentLocalAuth {
+		t.Fatal("upgraded pairing did not require a signature before a saved choice")
+	}
+	setWatchMode(f, attachwatch.ConsentAeon)
 	path := "/api/agent-pairing/attach/" + in.RequestID + "/approve"
 	f.call("POST", path, map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 409)
 	var fresh attachwatch.View
 	decodeResult(t, f.call("POST", "/api/agent-pairing/attach/lookup", map[string]string{"user_code": v.UserCode}, true, "", 200), &fresh)
-	if fresh.ConsentMode != attachwatch.ConsentLocalAuth || fresh.ConsentDigest == v.ConsentDigest {
+	if fresh.ConsentMode != attachwatch.ConsentAeon || fresh.ConsentDigest == v.ConsentDigest {
 		t.Fatal("stale policy retained")
 	}
 	// A client cannot submit a mode override at all.
@@ -161,8 +164,7 @@ func TestStrictWatchUnavailableOnLinuxAndLegacyDaemon(t *testing.T) {
 			setWatchMode(f, attachwatch.ConsentLocalAuth)
 			in.Snapshot.Platform = platform
 			in.Digest = in.Snapshot.Digest()
-			v := requestWatch(t, f, key, in)
-			f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 409)
+			f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
 		})
 	}
 }
@@ -297,7 +299,7 @@ func TestTouchIDDefaultIsMacOnlyUntilSaved(t *testing.T) {
 		f.call("POST", "/api/agent-pairing/attach", in, false, key, 403)
 		in.LocalConfirmed = false
 		in.LocalAuthNonce = waiting.LocalAuthNonce
-		in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce)
+		in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
 		decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &waiting)
 		if waiting.State != "active" || waiting.SessionID == nil {
 			t.Fatal("confirmed watch did not activate")
@@ -305,31 +307,50 @@ func TestTouchIDDefaultIsMacOnlyUntilSaved(t *testing.T) {
 	})
 	for _, capability := range []string{attachwatch.LocalAuthNoGUI, attachwatch.LocalAuthPolicy, attachwatch.LocalAuthUnsigned} {
 		t.Run(capability, func(t *testing.T) {
-			f, key, in, _ := upgradedWatchFixture(t)
+			f, key, in, signer := upgradedWatchFixture(t)
 			registerCapability(t, f, key, &in, capability)
 			in.Snapshot.Platform = "darwin"
 			v := requestWatch(t, f, key, in)
-			if v.ConsentMode != attachwatch.ConsentAeon {
-				t.Fatalf("headless or incapable mac left aeon: %s", v.ConsentMode)
+			if v.ConsentMode != attachwatch.ConsentLocalAuth {
+				t.Fatalf("capability report downgraded an upgraded pairing to %s", v.ConsentMode)
 			}
-			if got := readWatchSetting(t, f); got.ConsentMode != attachwatch.ConsentAeon || got.ConsentSaved {
+			if got := readWatchSetting(t, f); got.ConsentMode != attachwatch.ConsentLocalAuth || got.ConsentSaved || !got.Computers[0].PairingUpgraded {
 				t.Fatalf("settings %+v", got)
 			}
-			finishAeonWatch(t, f, key, &in, v)
+			f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200)
+			in.Operation, in.Sequence = "poll", 1
+			in.Digest, in.ConsentDigest = v.Digest, v.ConsentDigest
+			var waiting attachwatch.View
+			decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &waiting)
+			if waiting.State != "approved" || waiting.SessionID != nil || waiting.ConsentMode != attachwatch.ConsentLocalAuth {
+				t.Fatal("capability report activated without a signature")
+			}
+			in.LocalAuthNonce = waiting.LocalAuthNonce
+			in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
+			decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &waiting)
+			if waiting.State != "active" || waiting.SessionID == nil {
+				t.Fatal("signature was refused because of the capability report")
+			}
 		})
 	}
-	t.Run("linux available", func(t *testing.T) {
+	for _, platform := range []string{"linux", ""} {
+		t.Run("platform "+platform, func(t *testing.T) {
+			f, key, in, _ := upgradedWatchFixture(t)
+			registerCapability(t, f, key, &in, attachwatch.LocalAuthAvailable)
+			in.Snapshot.Platform = platform
+			in.Digest = in.Snapshot.Digest()
+			f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
+			if got := readWatchSetting(t, f); got.ConsentMode != attachwatch.ConsentLocalAuth || got.ConsentSaved {
+				t.Fatalf("settings display %+v", got)
+			}
+		})
+	}
+	t.Run("saved aeon still rejects a lied platform", func(t *testing.T) {
 		f, key, in, _ := upgradedWatchFixture(t)
-		registerCapability(t, f, key, &in, attachwatch.LocalAuthAvailable)
+		setWatchMode(f, attachwatch.ConsentAeon)
 		in.Snapshot.Platform = "linux"
-		v := requestWatch(t, f, key, in)
-		if v.ConsentMode != attachwatch.ConsentAeon {
-			t.Fatalf("linux request used %s", v.ConsentMode)
-		}
-		if got := readWatchSetting(t, f); got.ConsentMode != attachwatch.ConsentLocalAuth || got.ConsentSaved {
-			t.Fatalf("settings display %+v", got)
-		}
-		finishAeonWatch(t, f, key, &in, v)
+		in.Digest = in.Snapshot.Digest()
+		f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
 	})
 	t.Run("saved aeon opt-out", func(t *testing.T) {
 		f, key, in, _ := upgradedWatchFixture(t)

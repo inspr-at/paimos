@@ -324,7 +324,7 @@ func TestAttachModesProtectionMatrix(t *testing.T) {
 					}
 					if strings.HasPrefix(protection, "strict ") {
 						in.LocalAuthNonce = v.LocalAuthNonce
-						in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, v.LocalAuthNonce)
+						in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, v.LocalAuthNonce, in.Snapshot)
 					}
 					f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
 				} else {
@@ -469,7 +469,7 @@ func TestAttachEarlyTextAlwaysDetaches(t *testing.T) {
 				in.Operation, in.Sequence, in.Text = "poll", 1, "AEON352_EARLY_TEXT_MUST_NOT_PUBLISH"
 				if stage == "strict activation" {
 					in.LocalAuthNonce = v.LocalAuthNonce
-					in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, v.LocalAuthNonce)
+					in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, v.LocalAuthNonce, in.Snapshot)
 				}
 				f.call("POST", "/api/agent-pairing/attach", in, false, key, 400)
 				var state string

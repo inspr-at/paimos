@@ -23,9 +23,9 @@ func upgradedWatchFixture(t *testing.T) (*fixture, string, attachwatch.DeviceReq
 	f, bearer, in := watchFixtureWithKey(t, public)
 	return f, bearer, in, key
 }
-func signWatchConsent(t *testing.T, key *ecdsa.PrivateKey, digest, nonce string) string {
+func signWatchConsent(t *testing.T, key *ecdsa.PrivateKey, digest, nonce string, snap attachwatch.Snapshot) string {
 	t.Helper()
-	raw, err := ecdsa.SignASN1(rand.Reader, key, attachwatch.LocalConsentHash(digest, nonce))
+	raw, err := ecdsa.SignASN1(rand.Reader, key, attachwatch.LocalConsentHash(digest, nonce, attachwatch.LocalConsentReason(snap)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,17 +48,21 @@ func TestEnclaveConsentRejectsWrongKeyNonceReplayAndExpiredApproval(t *testing.T
 	in.ConsentDigest = approved.ConsentDigest
 	in.LocalAuthNonce = approved.LocalAuthNonce
 	wrong, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	in.LocalAuthSignature = signWatchConsent(t, wrong, in.ConsentDigest, in.LocalAuthNonce)
+	in.LocalAuthSignature = signWatchConsent(t, wrong, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
 	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
 	var sessions int
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM harness_sessions WHERE agent_principal_id=(SELECT principal_id FROM agent_pairing_computers WHERE id=$1)`, in.ComputerID).Scan(&sessions); err != nil || sessions != 0 {
 		t.Fatal("forged signature created session")
 	}
 	in.LocalAuthNonce = strings.Repeat("f", 64)
-	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce)
+	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
 	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
 	in.LocalAuthNonce = approved.LocalAuthNonce
-	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce)
+	lied := in.Snapshot
+	lied.Host = "other host"
+	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, lied)
+	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
+	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
 	var active attachwatch.View
 	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 200), &active)
 	if active.State != "active" || active.LocalAuthNonce != "" || active.SessionID == nil {
@@ -79,9 +83,9 @@ func TestEnclaveConsentRejectsWrongKeyNonceReplayAndExpiredApproval(t *testing.T
 	in.Sequence = 1
 	in.ConsentDigest = approved.ConsentDigest
 	in.LocalAuthNonce = approved.LocalAuthNonce
-	in.LocalAuthSignature = signWatchConsent(t, signer, active.ConsentDigest, in.LocalAuthNonce)
+	in.LocalAuthSignature = signWatchConsent(t, signer, active.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
 	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
-	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce)
+	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_requests SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, in.RequestID); err != nil {
 		t.Fatal(err)
 	}

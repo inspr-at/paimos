@@ -376,7 +376,7 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 				if err = tx.QueryRow(ctx, `SELECT local_auth_public_key FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&publicKey); err != nil {
 					return err
 				}
-				if out.Snapshot.Platform != "darwin" || out.LocalAuthNonce == "" || in.LocalAuthNonce != out.LocalAuthNonce || !attachwatch.VerifyLocalConsent(publicKey, out.ConsentDigest, out.LocalAuthNonce, in.LocalAuthSignature) {
+				if out.Snapshot.Platform != "darwin" || out.LocalAuthNonce == "" || in.LocalAuthNonce != out.LocalAuthNonce || !attachwatch.VerifyLocalConsent(publicKey, out.ConsentDigest, out.LocalAuthNonce, attachwatch.LocalConsentReason(out.Snapshot), in.LocalAuthSignature) {
 					return fail(403, "local_auth_proof_rejected", "signed local confirmation rejected")
 				}
 				// Consumed in the same transaction as session and lease creation.
