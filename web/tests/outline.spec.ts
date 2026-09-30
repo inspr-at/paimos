@@ -653,10 +653,78 @@ for (const scheme of ['light', 'dark'] as const) {
     await expect(pill).toBeVisible()
     expect(Math.abs((await row(page, 'PHAROS-10').boundingBox())!.y - before.y)).toBeLessThan(1)
     const pillBox = (await pill.boundingBox())!
-    expect(pillBox.y + pillBox.height).toBeLessThanOrEqual(before.y)
+    expect(pillBox.y).toBeGreaterThan(before.y + before.height)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await pill.click()
     await expect(row(page, added.key)).toBeVisible()
+    expect(errors).toEqual([])
+  })
+}
+
+for (const view of ['outline', 'list']) for (const audience of ['viewer', 'empty', 'selected']) for (const scheme of ['light', 'dark'] as const) {
+  test(`AEON-385 fix2: phone ${view} chip clears controls for ${audience} (${scheme})`, async ({ page }) => {
+    await controlledStream(page)
+    await page.setViewportSize({ width: 390, height: 950 })
+    await page.emulateMedia({ colorScheme: scheme })
+    const data = fixtures(), errors = watchErrors(page)
+    await mockWork(page, data, { readOnly: audience === 'viewer' })
+    await page.goto(`/p/PHAROS/tickets?view=${view}&closed=1${audience === 'empty' ? '&q=Zebra' : ''}`)
+    const rows = page.locator('tr.ticket-row:not(.ghost)')
+    if (audience === 'empty') await expect(page.getByText('No tickets match these filters', { exact: true })).toBeVisible()
+    else await expect(rows.first()).toBeVisible()
+    if (audience === 'selected') {
+      await page.locator('.phone-pick').getByRole('button', { name: 'Select', exact: true }).click()
+      await rows.first().getByRole('checkbox').check()
+      await expect(page.locator('.bulk-bar')).toBeVisible()
+    } else await expect(page.locator('.phone-pick')).toHaveCount(0)
+    const before = audience === 'empty' ? null : (await rows.first().boundingBox())!
+    // Hold the idle clock so each actual tap is checked while updates wait,
+    // including viewers and empty views which have no selection blocker.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100))
+    const added = { ...structuredClone(data.nodes.find(n => n.id === 'n-4')!), id: 'chip-new', key: 'PHAROS-99', title: 'Zebra arriving live', updated_at: ago(-1) }
+    data.nodes.push(added)
+    await outlineEvent(page, added, [], 'created')
+    await page.clock.runFor(200)
+    const pill = page.getByRole('button', { name: '1 update · Show' })
+    await expect(pill).toBeVisible()
+    if (before) expect(Math.abs((await rows.first().boundingBox())!.y - before.y)).toBeLessThan(1)
+    async function clearControls() {
+      const box = (await pill.boundingBox())!
+      expect(Math.abs(box.x + box.width / 2 - 195)).toBeLessThan(1)
+      expect(box.height).toBeGreaterThanOrEqual(44)
+      for (const control of await page.locator('.toolbar-wrap button, .toolbar-wrap input, .bulk-bar, .app-footer').all()) {
+        if (!await control.isVisible()) continue
+        const other = (await control.boundingBox())!
+        const overlap = box.x < other.x + other.width && box.x + box.width > other.x && box.y < other.y + other.height && box.y + box.height > other.y
+        expect(overlap, `chip intersects ${await control.getAttribute('aria-label') ?? await control.getAttribute('class')}`).toBe(false)
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    }
+    await clearControls()
+    if (process.env.OUTLINE_SHOTS_DIR) {
+      const { mkdirSync } = await import('node:fs')
+      mkdirSync(process.env.OUTLINE_SHOTS_DIR, { recursive: true })
+      await page.screenshot({ path: `${process.env.OUTLINE_SHOTS_DIR}/chip-${view}-${audience}-390-${scheme}.png` })
+    }
+    const search = page.getByRole('searchbox', { name: 'Search tickets in this project' })
+    await search.click(); await expect(search).toBeFocused()
+    await expect(pill).toBeVisible()
+    await page.getByRole('button', { name: 'Filters', exact: true }).click()
+    await expect(page.getByRole('dialog', { name: 'Filters', exact: true })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: 'New ticket', exact: true }).click()
+    await expect(page.getByRole('textbox', { name: 'New ticket title', exact: true })).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(pill).toBeVisible()
+    if (audience !== 'empty') {
+      await page.locator('#main').evaluate(el => { el.scrollTop = el.scrollHeight })
+      await clearControls()
+      const last = (await rows.last().boundingBox())!, chip = (await pill.boundingBox())!
+      expect(last.y + last.height).toBeLessThanOrEqual(chip.y)
+    }
+    await pill.click()
+    await expect(pill).toHaveCount(0)
+    await expect(rows.filter({ hasText: added.key })).toBeVisible()
     expect(errors).toEqual([])
   })
 }

@@ -566,6 +566,7 @@ async function runOutline(seed: number): Promise<string[]> {
   const calls: Read[] = []
   const readIn = new Map<string, number>()
   const own = new Set<string>()
+  let serverCollation = false
   fetchNow = (url, init = {}) => new Promise(resolve => {
     calls.push({ method: init.method ?? 'GET', url: new URL(url, 'http://aeon.test'), body: init.body ? JSON.parse(String(init.body)) : undefined, epoch, resolve })
   })
@@ -578,7 +579,9 @@ async function runOutline(seed: number): Promise<string[]> {
       // of the production page-size constant.
       const kinds = q.get('kind')?.split(',')
       const ids = q.get('ids')?.split(',')
-      const rows = [...data.values()].filter(n => (!q.has('parent_id') || n.parent_id === q.get('parent_id')) && (!ids || ids.includes(n.id)) && (!kinds || kinds.includes(n.kind_slug)) && (!q.has('q') || n.title.includes(q.get('q')!)) && (q.get('hide_closed') !== 'true' || n.state !== 'done')).sort(compareRows(effectiveSort(filtersFromQuery({ sort: q.get('sort') }))))
+      const rows = [...data.values()].filter(n => (!q.has('parent_id') || n.parent_id === q.get('parent_id')) && (!ids || ids.includes(n.id)) && (!kinds || kinds.includes(n.kind_slug)) && (!q.has('q') || n.title.includes(q.get('q')!)) && (q.get('hide_closed') !== 'true' || n.state !== 'done')).sort(serverCollation
+        ? (a, b) => a.title < b.title ? -1 : a.title > b.title ? 1 : a.id.localeCompare(b.id)
+        : compareRows(effectiveSort(filtersFromQuery({ sort: q.get('sort') }))))
       const start = Number(q.get('cursor') ?? 0), limit = q.has('parent_id') ? Math.min(2, Number(q.get('limit') ?? 2)) : Number(q.get('limit') ?? 200)
       json = { items: rows.slice(start, start + limit).map(copy), next_cursor: start + limit < rows.length ? String(start + limit) : null, facets: {} }
     } else if (path === '/api/nodes/bulk') {
@@ -717,6 +720,20 @@ async function runOutline(seed: number): Promise<string[]> {
     event(added.id, 'created', revision); await drain()
     outline.live.apply(); await settle(); await drain()
     if (outline.rows.value.filter(n => before.includes(n.id)).map(n => n.id).join() !== before.join()) fail('Show reordered lazy field-only patches')
+    phase = 'local insertion releases its previous sort snapshot'
+    const localDestination = pick(['a', 'b'])
+    const localOrigin = patch.parent_id!
+    outline.setExpanded(localDestination, true); await drain()
+    const neighbor = make('local-sort-neighbor', localOrigin); data.set(neighbor.id, neighbor)
+    event(neighbor.id, 'created', revision); await drain(); outline.live.apply(); await settle(); await drain()
+    await move(patch.id, localDestination)
+    await move(patch.id, localOrigin)
+    // A later Show rebuilds levels. After a round trip the parent is unchanged,
+    // but the accepted move must use its new sort snapshot, including updated_at.
+    const trigger = make('local-sort-trigger', root); data.set(trigger.id, trigger)
+    event(trigger.id, 'created', revision); await drain(); outline.live.apply(); await settle(); await drain()
+    const siblings = outline.rows.value.filter(n => n.parent_id === localOrigin).map(n => n.id)
+    if (siblings.indexOf(patch.id) >= siblings.indexOf(neighbor.id)) fail('local move kept its old sort snapshot after Show')
     // Randomly interleave lazy loads, pagination, expansion and repeated gaps.
     // A deletion during the gap is deliberately not delivered as an event.
     for (let round = 0; round < 5; round++) {
@@ -783,7 +800,9 @@ async function runOutline(seed: number): Promise<string[]> {
     await reload(); checkCounts()
     void outline.expandAll(); await drain()
     while (outline.hasMoreRoot.value) { outline.loadMoreRoot(); await drain() }
-    for (const id of ['a', 'b']) { const loading = outline.loadChildren(id, true); await drain(); await loading }
+    for (const id of ['a', 'b']) while (outline.entries.value.some(e => e.type === 'more' && e.parentId === id)) {
+      const loading = outline.loadChildren(id, true); await drain(); await loading
+    }
     if (outline.rows.value.map(n => n.id).sort().join() !== [...data.keys()].sort().join()) fail('fully loaded Outline differs from server')
     // A same-revision parent page is computed before a local move, but
     // arrives after it. Observe counts directly, before any correcting read.
@@ -939,6 +958,46 @@ async function runOutline(seed: number): Promise<string[]> {
     const context = outline.entries.value.find(e => e.type === 'row' && e.row.id === ancestor.id)
     if (context?.type !== 'row' || !context.tree.dimmed) fail('closed parent became a match instead of context')
     if (list.rows.value.some(row => row.id === ancestor.id)) fail('closed parent leaked into List matches')
+
+    phase = 'resync membership crossing a newer close'
+    ancestor.state = 'new'; ancestor.updated_at = at(++revision)
+    event(ancestor.id, 'updated', revision, ['state']); await drain()
+    outline.live.apply(); await settle(); await drain()
+    gap(); await settle()
+    const heldMembership = calls.find(c => !c.done && c.url.pathname === '/api/nodes' && !c.url.searchParams.has('ids') && c.url.searchParams.get('hide_closed') === 'true')
+    if (!heldMembership) fail('filtered resync did not start')
+    else {
+      process(heldMembership); heldMembership.done = true
+      if (!(heldMembership.answer!.json as { items: ListItem[] }).items.some(n => n.id === ancestor.id)) fail('resync snapshot did not include open ancestor')
+      ancestor.state = 'done'; ancestor.updated_at = at(++revision)
+      event(ancestor.id, 'updated', revision, ['state']); await drain()
+      outline.live.apply(); await settle(); await drain()
+      // A separate matching addition is ready for Show when the old page
+      // arrives; interleave its reads with the close's reads across seeds.
+      const incoming = make('membership-trigger', pick([root, 'a']))
+      data.set(incoming.id, incoming); event(incoming.id, 'created', revision); await drain()
+      deliver(heldMembership); await settle()
+      outline.live.apply(); await settle()
+      if (list.rows.value.some(row => row.id === ancestor.id)) fail('stale resync membership promoted a closed context ancestor')
+      await drain()
+    }
+
+    phase = 'pages preserve server collation'
+    serverCollation = true
+    for (const [index, title] of ['Zebra', 'apple', 'Éclair', 'Alpha', 'zulu', 'áster'].entries()) {
+      const n = make(`collation-${index}`, pick([root, 'a']))
+      n.title = title; data.set(n.id, n)
+    }
+    outlineFilters.value = filtersFromQuery({ closed: '1', sort: 'title' }); await settle(); await drain()
+    outline.setExpanded('a', true); await drain()
+    while (outline.hasMoreRoot.value) { outline.loadMoreRoot(); await drain() }
+    // Child pages also keep the server's ordering, independently of roots.
+    while (outline.entries.value.some(e => e.type === 'more' && e.parentId === 'a')) { const loading = outline.loadChildren('a', true); await drain(); await loading }
+    for (const under of [root, 'a']) {
+      const expected = [...data.values()].filter(n => n.parent_id === under && n.kind_slug === 'ticket').sort((a, b) => a.title < b.title ? -1 : a.title > b.title ? 1 : a.id.localeCompare(b.id)).map(n => n.id)
+      const actual = outline.rows.value.filter(n => n.parent_id === under && n.kind_slug === 'ticket').map(n => n.id)
+      if (actual.join() !== expected.join()) fail(`${under} changed server page order`)
+    }
   } finally { selected.value = null; scope.stop(); off(); vi.clearAllTimers(); vi.useRealTimers(); rowStore.clear() }
   return failures
 }

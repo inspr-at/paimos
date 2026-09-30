@@ -7,9 +7,9 @@ import { rowStore } from './rowStore'
 import { asListItem, kinds } from './useTicket'
 import { serializeSort, statusMeta } from './work'
 import type { LiveNodeStore } from './liveNodes'
-import { placeKey, useLiveList, type ListRead, type LiveListOptions } from './useLiveList'
+import { placeKey, useLiveList, type ListRead, type LiveListOptions, type LiveReadPurpose } from './useLiveList'
 
-interface Block { ids: string[]; cursor: string | null; loading: boolean; error: string }
+interface Block { ids: string[]; cursor: string | null; loading: boolean; error: string; paged?: Set<string> }
 type ListApi = { rows: Ref<ListItem[]>; loading: Ref<boolean>; names: Map<string, string>; reads?: Ref<ListRead | null>; load?: () => unknown }
 type LiveOptions = Partial<Pick<LiveListOptions, 'me' | 'quiet' | 'holds' | 'blockers' | 'around' | 'applied' | 'env'>> & { store?: LiveNodeStore }
 
@@ -157,7 +157,20 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
         const row = lazyNodes.get(id)
         return row && live.layout(row).parent_id === params.parent_id
       })
-      block.ids = [...new Set([...retained, ...ids])].sort((a, b) => comparePlaced(lazyNodes.get(a)!, lazyNodes.get(b)!))
+      // Merge new page rows by the requested sort keys. Keep both the server's
+      // page order (its collation may differ) and existing held placements.
+      const known = new Set(retained), merged: string[] = []
+      // Earlier pages precede this one even when a browser would collate their
+      // keys differently. Only rows placed locally beyond that edge need merging.
+      const edge = more ? retained.reduce((last, id, index) => block.paged?.has(id) ? index : last, -1) : -1
+      let at = 0
+      for (const id of ids) {
+        if (known.has(id)) continue
+        while (at < retained.length && (at <= edge || comparePlaced(lazyNodes.get(retained[at]!)!, lazyNodes.get(id)!) <= 0)) merged.push(retained[at++]!)
+        merged.push(id); known.add(id)
+      }
+      block.ids = [...merged, ...retained.slice(at)]
+      block.paged = new Set([...(more ? block.paged ?? [] : []), ...ids])
       block.cursor = page.next_cursor
       loadedOnce.value = true
       lazyRead.value = { kind: 'more', sent, behind: page.items.filter(item => rowStore.newer(item.id, item.updated_at)).map(item => item.id) }
@@ -291,12 +304,10 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       }
     },
   })
-  async function fetchLive(query: ListQuery) {
+  async function fetchLive(query: ListQuery, purpose: LiveReadPurpose) {
     const run = generation, sent = rowStore.mark()
     const page = await listNodes(query)
-    // apiParams always includes hide_closed (true or false). The unfiltered
-    // presence read omits it: existence must never establish filter membership.
-    if (!matchMode.value || run !== generation || query.hide_closed === undefined) return page
+    if (!matchMode.value || run !== generation || purpose === 'presence') return page
     // Ancestors place filtered matches even when they do not match themselves.
     // Read them afresh on relevant events; no project-lifetime cache of values.
     const ids = query.ids ?? []

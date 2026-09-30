@@ -94,6 +94,8 @@ const browserEnv: LiveListEnv = {
 // (a save, an event or a panel read landed while it ran): they are looked at again.
 // sent: when a load was sent (the row store's clock).
 export interface ListRead { kind: 'load' | 'more'; behind: string[]; sent?: number }
+// Presence reads establish existence only; they never establish filter membership.
+export type LiveReadPurpose = 'matches' | 'presence'
 
 export interface LiveListOptions {
   projectId: Ref<string | null>
@@ -129,7 +131,7 @@ export interface LiveListOptions {
   // Too many updates to apply: the list loads again.
   reload: () => void
   store?: LiveNodeStore
-  fetchList?: (query: ListQuery) => Promise<ListPage>
+  fetchList?: (query: ListQuery, purpose: LiveReadPurpose) => Promise<ListPage>
   env?: LiveListEnv
 }
 
@@ -266,7 +268,7 @@ export function useLiveList(options: LiveListOptions) {
       let matched: Map<string, ListItem>
       let present = new Map<string, ListItem>()
       try {
-        const page = await fetchList({ ...apiParams(project, filters.value, { limit: PAGE }), ids: chunk })
+        const page = await fetchList({ ...apiParams(project, filters.value, { limit: PAGE }), ids: chunk }, 'matches')
         if (run !== generation) { keep(page.items, sent); return false }
         // The store has what the query found at once, not after the next read.
         keep(page.items, sent)
@@ -274,7 +276,7 @@ export function useLiveList(options: LiveListOptions) {
         // Shown rows that no longer match: closed, or gone from the project?
         const missing = chunk.filter(id => !matched.has(id) && rowById(id) && batch.get(id)!.change.change !== 'deleted')
         if (missing.length) {
-          const found = await fetchList({ within: project, kind: WORK_KINDS, ids: missing, limit: PAGE })
+          const found = await fetchList({ within: project, kind: WORK_KINDS, ids: missing, limit: PAGE }, 'presence')
           if (run !== generation) { keep(found.items, sent); return false }
           present = new Map(found.items.map(item => [item.id, item]))
         }
@@ -522,9 +524,9 @@ export function useLiveList(options: LiveListOptions) {
     try {
       const queries = options.resyncQueries?.()
       if (queries) {
-        const pages = await Promise.all(queries.map(query => fetchList(query)))
+        const pages = await Promise.all(queries.map(query => fetchList(query, 'matches')))
         page = { items: pages.flatMap(page => page.items), next_cursor: null }
-      } else page = await fetchList(apiParams(project, filters.value, { limit: Math.max(PAGE / 4, Math.min(PAGE, rows.value.length)) }))
+      } else page = await fetchList(apiParams(project, filters.value, { limit: Math.max(PAGE / 4, Math.min(PAGE, rows.value.length)) }), 'matches')
     }
     catch { return run === generation }
     if (run !== generation) { keep(page.items, sent); return false }

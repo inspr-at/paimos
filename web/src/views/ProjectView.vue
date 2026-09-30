@@ -40,6 +40,7 @@ import TicketWorkspace from '../components/work/TicketWorkspace.vue'
 import ViewBar from '../components/work/ViewBar.vue'
 import SaveViewPanel from '../components/work/SaveViewPanel.vue'
 import BulkBar from '../components/work/BulkBar.vue'
+import LiveUpdatesChip from '../components/work/LiveUpdatesChip.vue'
 import LabelMenu, { type LabelChoice } from '../components/work/LabelMenu.vue'
 import OptionMenu from '../components/work/OptionMenu.vue'
 import EpicPicker from '../components/work/EpicPicker.vue'
@@ -227,6 +228,17 @@ const liveList = useLiveList({
 
 const activeLive = computed(() => outlineActive.value ? outline.live : liveList)
 const liveActive = computed(() => listActive.value || outlineActive.value)
+const bulkBar = ref<InstanceType<typeof BulkBar>>()
+const bulkHeight = ref(0)
+let bulkResize: ResizeObserver | undefined
+watch(bulkBar, bar => {
+  bulkResize?.disconnect()
+  bulkHeight.value = 0
+  const element = bar?.$el.querySelector('.bulk-bar') as HTMLElement | undefined
+  if (!element) return
+  bulkResize = new ResizeObserver(() => { bulkHeight.value = element.offsetHeight })
+  bulkResize.observe(element)
+}, { flush: 'post' })
 
 const toolbarWrap = ref<HTMLElement>()
 const stickMark = ref<HTMLElement>()
@@ -1457,6 +1469,7 @@ onBeforeUnmount(() => {
   clearInterval(clock)
   resize?.disconnect()
   stick?.disconnect()
+  bulkResize?.disconnect()
   list.invalidate()
   knowledge.stop()
   dockQuery.removeEventListener('change', onDockWidth)
@@ -1476,7 +1489,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 <template>
   <section class="project-page" :class="{ 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
-      <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size }">
+      <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size, 'has-live-updates': liveActive && activeLive.pill.value }" :style="{ '--live-obstacle-h': `${bulkHeight ? bulkHeight + 8 : 0}px` }">
       <header class="project-head" :class="{ 'glimpse-room': glimpseActive && !showViewBar }">
         <div class="head-flex" :class="{ 'with-glimpse': glimpseActive }">
         <div class="head-main">
@@ -1549,12 +1562,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
         :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />
       <template v-else>
-      <div v-if="liveActive && activeLive.pill.value" class="live-dock">
-        <button type="button" class="live-pill" :aria-label="activeLive.pill.value" aria-keyshortcuts="u" :data-tip="activeLive.pending.overflow ? 'Load the view again' : 'Show the updates · u'" @click="showUpdates">
-          <AppIcon :name="activeLive.pending.overflow ? 'refresh' : 'arrow-up'" :size="13" />
-          <span>{{ activeLive.pill.value.split(' · ')[0] }}</span><span class="dot" aria-hidden="true">·</span><b>{{ activeLive.pill.value.split(' · ')[1] }}</b>
-        </button>
-      </div>
+      <LiveUpdatesChip v-if="liveActive && activeLive.pill.value" :text="activeLive.pill.value" :overflow="activeLive.pending.overflow" @show="showUpdates" />
       <p v-if="liveActive" class="sr-only live-said" role="status" aria-live="polite">{{ activeLive.message.value }}</p>
       <TicketTable
         ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
@@ -1577,7 +1585,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       </template>
 
-      <BulkBar
+      <BulkBar ref="bulkBar"
         v-if="selectable && selected.size" :count="selected.size" :deleted="selectedDeleted.length" :loaded="sequence.length" :total="total" :busy="bulkBusy" :can-write="writable" :can-release="can('releases.write', project.id)" :frame="listFrame"
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
         @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, liveSelection())" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
@@ -1674,26 +1682,14 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .activity { font-size: 12px; color: var(--ink-3); }
 .activity time { color: var(--ink-2); }
 .stick-mark { height: 1px; margin-bottom: -1px; }
-/* Waiting live updates on a phone (the Title header carries them on wider
-   screens): a pill floats beside selection controls and never pushes cards down (AEON-326). */
-.live-dock { display: none; }
-.live-pill {
-  display: inline-flex; align-items: center; gap: 6px; height: 32px; margin-top: 4px; padding: 0 13px 0 11px; border: 1px solid var(--glass-edge); border-radius: 999px;
-  background: var(--glass); box-shadow: var(--shadow-pop); color: var(--ink-2); font-size: 12.5px; white-space: nowrap; pointer-events: auto;
-  -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2);
-}
-.live-pill svg { color: var(--teal-ink); }
-.live-pill b { font-weight: 600; color: var(--teal-ink); }
-.live-pill .dot { color: var(--ink-3); }
-.live-pill:hover { color: var(--ink); background: var(--surface-raised-2); }
-.live-pill:focus-visible { box-shadow: var(--focus-ring), var(--shadow-pop); }
-@media (prefers-reduced-motion: no-preference) {
-  .live-pill { animation: live-pill-in .2s cubic-bezier(.2, .7, .2, 1); }
-  @keyframes live-pill-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
-}
 /* While tickets are selected the bulk bar floats at the bottom: the list can scroll clear of it. */
 .list-view.selecting { padding-bottom: 76px; }
-@media (max-width: 720px) { .list-view.selecting { padding-bottom: calc(168px + env(safe-area-inset-bottom)); } }
+@media (max-width: 720px) {
+  .list-view.selecting { padding-bottom: calc(168px + env(safe-area-inset-bottom)); }
+  /* The fixed chip never moves rows when it arrives; the last row can scroll
+     above both it and the measured selection sheet. Desktop stays in the header. */
+  .list-view.has-live-updates { padding-bottom: calc(var(--live-obstacle-h, 0px) + 68px + env(safe-area-inset-bottom)); }
+}
 .phone-pick { display: none; }
 @media (max-width: 720px) {
   .phone-pick { display: flex; align-items: center; justify-content: flex-start; min-height: 44px; margin-top: -2px; }
@@ -1701,8 +1697,6 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .phone-pick-status b { font-size: 15px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
   .phone-pick .dot { color: var(--ink-3); }
   .phone-pick .gone { color: var(--ink-2); }
-  .live-dock { position: sticky; top: calc(var(--toolbar-h, 0px) + 4px); z-index: 6; height: 0; display: flex; align-items: flex-start; justify-content: flex-end; pointer-events: none; }
-  .live-pill { font-size: 13px; margin-top: -38px; }
   .phone-pick button { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 15px; font-weight: 600; }
   .phone-pick button.quiet { padding-left: 2px; color: var(--ink-2); font-weight: 600; }
   .phone-pick.on button { margin-left: -12px; color: var(--teal-ink); }

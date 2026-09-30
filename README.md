@@ -367,6 +367,9 @@ Outline retains expansion and tree placement while updates wait, refreshes
 filtered ancestors, and moves successful bulk results immediately. Stream loss
 invalidates outstanding reads before reconnect; older pages cannot overwrite
 locally changed child counts.
+On phones, List and Outline share a bottom-centred updates chip above the safe
+area, footer and selection sheet, with scroll clearance for the last row; the
+desktop action stays in the table header. Lazy pages retain the server's order.
 
 The auth adapter is isolated in `web/src/lib/api.ts`. Pending P0.3 contract
 confirmation, it expects `/api/me` to return
