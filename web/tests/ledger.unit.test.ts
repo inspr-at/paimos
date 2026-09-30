@@ -32,7 +32,7 @@ it('with no revision to compare, the server position decides before the start or
   expect(valueAfter(ledger, answer({ value: 'at-10', position: 10, start: late }))).toEqual(['at-10'])
   // Started earlier, answered higher: newer.
   expect(valueAfter(ledger, answer({ value: 'at-11', position: 11, start: early }))).toEqual(['at-11'])
-  // Started later than the held row was taken? No: this one was asked before, and answers lower.
+  // Asked before the row landed and answering lower: older.
   expect(valueAfter(ledger, answer({ value: 'at-9', position: 9, start: early }))).toEqual(['at-11'])
 })
 

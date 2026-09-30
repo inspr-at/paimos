@@ -321,3 +321,35 @@ it('an earlier-started read that the server answered later, at a higher position
 
   expect(agents.sessions.map(s => s.id).sort()).toEqual(['s1', 's2'])
 })
+
+it('a ticket view held across a newer copy History read does not rewind the row', async () => {
+  sessions = [session({ ticket_node_id: 'n1', revision: 1 })]
+  const agents = useAgents()
+  await agents.refreshSessions()
+
+  hold = /ticket=n1/
+  const ticket = agents.ensureTicket('n1')
+  await vi.waitFor(() => expect(held).toHaveLength(1))
+  hold = null
+  // The session stops (revision 2, position 11); History reads it.
+  commit(() => { sessions = sessions.map(s => ({ ...s, phase: 'stopped' as const, stopped_at: '2026-09-30T00:00:00Z', revision: 2 })) })
+  await agents.loadHistory()
+  expect(agents.sessions[0]?.revision).toBe(2)
+
+  release()
+  await ticket
+  expect(agents.sessions.map(s => [s.id, s.revision, s.phase])).toEqual([['s1', 2, 'stopped']])
+})
+
+it('a removal result that arrives after the undo that followed it does not bring the removal back', async () => {
+  const agents = useAgents()
+  await agents.refreshSessions()
+  commit(() => { sessions = [session({ revision: 3 })] })
+  agents.recordRemoval(session({ revision: 3 }))
+  // The answer to the earlier removal arrives late.
+  agents.recordRemoval(session({ archived_at: '2026-09-30T00:00:00Z', revision: 2 }))
+  expect(agents.removedViews).toHaveLength(0)
+  expect(agents.views.map(v => v.session.revision)).toEqual([3])
+  await settle()
+  expect(agents.views.map(v => v.session.revision)).toEqual([3])
+})
