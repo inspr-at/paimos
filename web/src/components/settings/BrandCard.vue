@@ -25,9 +25,10 @@ const darkInput = inputs.dark
 
 async function message(response: Response, fallback: string) {
   if (response.status === 403) return 'Only a workspace admin can change the brand.'
-  if (response.status === 413) return 'The file is larger than 256 KB.'
   const body = await response.json().catch(() => null) as { error?: string } | null
   const text = typeof body?.error === 'string' ? body.error : ''
+  // A 413 from a proxy has no body; the server's says which limit was hit.
+  if (response.status === 413 && !text) return 'The file is larger than 256 KB.'
   return text ? text[0]!.toUpperCase() + text.slice(1) + (/[.!?]$/.test(text) ? '' : '.') : fallback
 }
 
