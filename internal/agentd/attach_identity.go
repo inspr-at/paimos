@@ -6,12 +6,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 )
 
 // Observed from signed shipping binaries (AEON-435): Claude and native Codex
-// on mbp2606; Cursor.app on the operator workstation. Changes require new
+// CLIs, and Cursor.app. Changes require new
 // signed-binary evidence. Pairing paths and local requests cannot extend this.
 func attachVendorTeam(harness string) string {
 	switch harness {
@@ -44,7 +45,12 @@ func attachUnsafeImageError() error {
 }
 
 func sameAttachImage(a, b os.FileInfo) bool {
-	return a != nil && b != nil && os.SameFile(a, b) && a.Size() == b.Size() && a.ModTime() == b.ModTime() && a.Mode() == b.Mode()
+	if a == nil || b == nil {
+		return false
+	}
+	before, beforeOK := a.Sys().(*syscall.Stat_t)
+	after, afterOK := b.Sys().(*syscall.Stat_t)
+	return beforeOK && afterOK && before.Uid == after.Uid && before.Gid == after.Gid && os.SameFile(a, b) && a.Size() == b.Size() && a.ModTime() == b.ModTime() && a.Mode() == b.Mode()
 }
 func (m *AttachManager) unchangedHarnessImage(observed attachObservation, before os.FileInfo) bool {
 	physical, after, err := agentsetup.TrustedAttachExecutable(observed.Executable, m.cfg.Workspace)
@@ -80,7 +86,7 @@ func (m *AttachManager) validateHarnessImage(ctx context.Context, observed attac
 		} else {
 			identity, exists := m.cfg.Identities[harness]
 			pinned, pinErr := filepath.EvalSymlinks(approved)
-			if !(exists && identity.Matches(physical, info)) && (pinErr != nil || pinned != physical) {
+			if exists && !identity.Matches(physical, info) || !exists && (pinErr != nil || pinned != physical) {
 				return nil, attachIdentityError()
 			}
 		}

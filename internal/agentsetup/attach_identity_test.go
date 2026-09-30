@@ -61,7 +61,7 @@ func TestAttachUnknownLayoutStaysExactAndUnsafeRootIsNotRecorded(t *testing.T) {
 	}
 	identity := RecordAttachIdentity("claude", path, "")
 	info, _ := os.Stat(path)
-	if identity == nil || identity.InstallRoot != path || !identity.Matches(path, info) || identity.Matches(path+"-other", info) {
+	if identity == nil || identity.InstallRoot != path || !identity.Matches(path, info) || identity.Matches(path+"-other", info) || identity.Matches(filepath.Join(path, "child"), info) {
 		t.Fatal("wrapper widened trust")
 	}
 	if RecordAttachIdentity("grok", path, "") != nil {
@@ -129,5 +129,33 @@ func TestAttachNativeInstallerVersionsUseOnlyVendorRoot(t *testing.T) {
 				t.Fatal("native root widened beyond vendor")
 			}
 		})
+	}
+}
+
+func TestAttachRecordedRootSurvivesUnavailableOldVersion(t *testing.T) {
+	old := RuntimeConfig{Schema: "aeon.agent-runtime.v1", Origin: "https://paired.test", Workspace: physicalTemp(t), Accounts: []RuntimeAccount{{Harness: "claude", Key: "bound", AccountID: "bound-account", Identity: "fixture", Path: "/unavailable/node_modules/@anthropic-ai/claude-code/bin/claude"}}, AttachIdentities: map[string]AttachIdentity{"claude": {InstallRoot: "/unavailable/node_modules/@anthropic-ai/claude-code", Owner: os.Getuid()}}}
+	next := old
+	next.AttachIdentities = nil
+	next.preserveAttachIdentities(old)
+	next.RecordAttachIdentities()
+	if !reflect.DeepEqual(next.AttachIdentities, old.AttachIdentities) {
+		t.Fatal("unavailable old version erased the recorded root")
+	}
+	for _, change := range []string{"pairing", "account", "launcher"} {
+		changed := old
+		changed.AttachIdentities = nil
+		changed.Accounts = append([]RuntimeAccount(nil), old.Accounts...)
+		switch change {
+		case "pairing":
+			changed.ComputerID = "other"
+		case "account":
+			changed.Accounts[0].Key = "other"
+		case "launcher":
+			changed.Accounts[0].Path = "/other/launcher"
+		}
+		changed.preserveAttachIdentities(old)
+		if len(changed.AttachIdentities) != 0 {
+			t.Fatal("fallback crossed an approved binding", change)
+		}
 	}
 }

@@ -283,3 +283,31 @@ func TestAttachGrokRetainsExactPin(t *testing.T) {
 		t.Fatal("Grok path pin widened")
 	}
 }
+
+func TestAttachExactPinCannotBypassVendorOrRecordedOwner(t *testing.T) {
+	for _, attack := range []string{"foreign-signature", "invalid-signature", "wrong-recorded-owner"} {
+		t.Run(attack, func(t *testing.T) {
+			m, peer, _, req, image := attachIdentityFixture(t, Claude)
+			m.cfg.Executables[Claude] = image
+			switch attack {
+			case "foreign-signature":
+				m.signature = func(context.Context, string) (attachSignature, error) {
+					return attachSignature{TeamID: attachVendorTeam(Codex), Signed: true}, nil
+				}
+			case "invalid-signature":
+				m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, errAttachSignature }
+			case "wrong-recorded-owner":
+				identity := agentsetup.RecordAttachIdentity(Claude, image, m.cfg.Workspace)
+				if identity == nil {
+					t.Fatal("missing identity")
+				}
+				identity.Owner = os.Getuid() + 10000
+				m.cfg.Identities = map[string]agentsetup.AttachIdentity{Claude: *identity}
+				m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, nil }
+			}
+			if _, err := m.handle(t.Context(), peer, req); err == nil {
+				t.Fatal("exact path bypassed identity", attack)
+			}
+		})
+	}
+}

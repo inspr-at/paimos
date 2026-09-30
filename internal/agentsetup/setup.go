@@ -653,6 +653,10 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 			return e.progress(s), ErrCollision
 		}
 	}
+	var previous RuntimeConfig
+	if saved, err := e.Store.Read(RuntimeName, 128<<10); err == nil && json.Unmarshal(saved, &previous) == nil {
+		config.preserveAttachIdentities(previous)
+	}
 	config.RecordAttachIdentities()
 	raw, _ := json.Marshal(config)
 	if err := e.Store.Write(RuntimeName, raw, false); err != nil {

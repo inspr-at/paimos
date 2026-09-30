@@ -996,12 +996,23 @@ built-in vendor Team ID; legacy wrapper pairings work after upgrading and
 restarting agentd. Unsigned installations and Linux use a local installation
 root plus owner recorded at pairing or by `repin --harness claude`,
 `add-harness --harness codex` or `add-harness --harness cursor`; restart agentd
-after recording a fallback identity. Unknown layouts retain only the approved exact-file pin.
+after recording a fallback identity. Unknown layouts retain only the approved
+exact-file pin. Recorded roots survive removal of an old version and stay bound
+to the same pairing and account.
 The daemon does not interpret or execute wrappers to discover an install root.
 Every image and ancestor must satisfy the existing ownership and permission
 rules, and confirmation and polls recheck the image. Local HTTP 409 diagnostics
 include `harness_identity_mismatch`, `harness_executable_unsafe` or
 `harness_image_changed` with a repair hint; the attach client displays them.
+
+Identity regressions cover release-13 wrapper pairing upgrades, native exec
+chains, vendor updates, unsigned root fallback and its repair, signature
+failures, writable installations, file replacement and local 409 diagnostics.
+On macOS, run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-identity-mutations.py`
+to remove each guard temporarily and require a failing regression; the script
+rejects build failures as evidence and restores each source file. Real codesign
+checks also probe installed vendor binaries; an absent harness is reported as
+skipped, while fixture signature checks still run.
 
 Review the kernel-observed process, physical folder and chosen mode, type `WATCH`
 or `ATTACH` as shown, then enter its nine-digit code under **Agents → Attach

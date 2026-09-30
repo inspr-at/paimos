@@ -13,6 +13,7 @@ import (
 // pairing authority and never sent to the server. Wildcards match one path
 // component, so a version slot cannot escape into a sibling installation.
 type AttachIdentity struct {
+	Exact       bool   `json:"exact_file,omitempty"`
 	InstallRoot string `json:"install_root"`
 	Owner       int    `json:"owner"`
 }
@@ -70,7 +71,7 @@ func RecordAttachIdentity(harness, path, workspace string) *AttachIdentity {
 		root = strings.Join(rootParts, string(filepath.Separator))
 		break
 	}
-	return &AttachIdentity{InstallRoot: root, Owner: int(info.Sys().(*syscall.Stat_t).Uid)}
+	return &AttachIdentity{InstallRoot: root, Owner: int(info.Sys().(*syscall.Stat_t).Uid), Exact: root == physical}
 }
 
 func attachPackage(harness, pkg string) bool {
@@ -92,6 +93,9 @@ func (identity AttachIdentity) Matches(path string, info os.FileInfo) bool {
 	owner, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || identity.Owner < 0 || int(owner.Uid) != identity.Owner || !filepath.IsAbs(identity.InstallRoot) || filepath.Clean(identity.InstallRoot) != identity.InstallRoot || identity.InstallRoot == "/" {
 		return false
+	}
+	if identity.Exact {
+		return path == identity.InstallRoot
 	}
 	root, target := strings.Split(identity.InstallRoot, "/"), strings.Split(path, "/")
 	if len(target) < len(root) {
@@ -119,6 +123,26 @@ func (c *RuntimeConfig) RecordAttachIdentities() {
 	for _, a := range c.Accounts {
 		if identity := RecordAttachIdentity(a.Harness, a.Path, c.Workspace); identity != nil {
 			c.AttachIdentities[a.Harness] = *identity
+		}
+	}
+}
+
+// Preserve recorded roots when an old auto-update version no longer exists.
+// Only unchanged account bindings in this same pairing may retain a fallback.
+func (c *RuntimeConfig) preserveAttachIdentities(previous RuntimeConfig) {
+	if c.Schema != previous.Schema || c.Origin != previous.Origin || c.TenantID != previous.TenantID || c.PrincipalID != previous.PrincipalID || c.ComputerID != previous.ComputerID || c.DaemonID != previous.DaemonID || c.Workspace != previous.Workspace {
+		return
+	}
+	if c.AttachIdentities == nil {
+		c.AttachIdentities = make(map[string]AttachIdentity)
+	}
+	for _, account := range c.Accounts {
+		for _, old := range previous.Accounts {
+			if account.Harness == old.Harness && account.AccountID == old.AccountID && account.Key == old.Key && account.Home == old.Home && account.Identity == old.Identity && account.Path == old.Path {
+				if identity, exists := previous.AttachIdentities[account.Harness]; exists {
+					c.AttachIdentities[account.Harness] = identity
+				}
+			}
 		}
 	}
 }

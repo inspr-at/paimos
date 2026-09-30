@@ -521,6 +521,9 @@ func validAttachIdentityRefresh(current, next agentsetup.RuntimeConfig) bool {
 			}
 			derived := agentsetup.RecordAttachIdentity(harness, account.Path, next.Workspace)
 			valid = valid || derived != nil && *derived == identity
+			// A missing exact-file installation adds no authority beyond the
+			// existing approved path. It must not stall another harness's polling.
+			valid = valid || identity.Exact && identity.InstallRoot == account.Path && filepath.IsAbs(account.Path) && filepath.Clean(account.Path) == account.Path && (identity.Owner == 0 || identity.Owner == os.Getuid())
 		}
 		if !valid {
 			return false
