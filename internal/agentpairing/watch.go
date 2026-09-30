@@ -93,6 +93,7 @@ func (m *Module) mountWatch(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/me/security/session-watching", m.person("profile.write", m.watchSecurity))
 	mux.HandleFunc("POST /api/agent-pairing/attach", m.attachDevice)
 	mux.HandleFunc("POST /api/agent-pairing/attach/lookup", m.person("account.manage", m.attachLookup))
+	mux.HandleFunc("GET /api/agent-pairing/attach/pending", m.person("account.manage", m.attachPending))
 	mux.HandleFunc("POST /api/agent-pairing/attach/{requestId}/approve", m.person("account.manage", m.attachApprove))
 	mux.HandleFunc("POST /api/agent-pairing/attach/{requestId}/revoke", m.person("account.manage", m.attachRevoke))
 	mux.HandleFunc("GET /api/projects/{projectId}/harness-sessions/{sessionId}/watch", m.attachStream)

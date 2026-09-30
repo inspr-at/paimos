@@ -1143,6 +1143,34 @@ paths:
         '403': {description: Same-origin signed-in owner required}
         '404': {description: Code unavailable}
         '429': {description: Attempt cap reached}
+  /agent-pairing/attach/pending:
+    get:
+      operationId: listPendingAttach
+      summary: Paired computer owner lists their attach requests that are not a session yet
+      description: >-
+        Person-only, read-only and additive. Returns the signed-in owner's most recent
+        requests (at most eight, newest first, created in the last fifteen minutes)
+        that have not become a session: pending, approved and connecting, detached
+        (declined or cancelled) and unreachable (expired). An unpolled request past
+        its expiry is reported as unreachable without changing the row. Each item is
+        the same AttachView lookup returns, so the owner can approve it with the
+        request and consent digests and no code; user_code, session_id and
+        local_auth_nonce are never present. Approval keeps every existing check.
+      responses:
+        '200':
+          description: The owner's recent attach requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests]
+                additionalProperties: false
+                properties:
+                  requests:
+                    type: array
+                    maxItems: 8
+                    items: {$ref: '#/components/schemas/AttachView'}
+        '403': {description: Signed-in person with account.manage required}
   /agent-pairing/attach/{requestId}/approve:
     parameters:
       - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
