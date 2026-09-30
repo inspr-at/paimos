@@ -31,4 +31,13 @@
 //
 // Every read and write runs inside db.InTenant. The row and its event commit
 // in that same transaction via events.Append.
+//
+// AEON-463: optional typed extensions and the original document_bytes remain
+// immutable text, outside metadata event payloads. The native envelope retains
+// its required fields; document_bytes extracts the one submission candidate's
+// map without implementing the separate Aithema plugin protocol. Unknown
+// namespaces are retained. Aithema owns registry and canonical size validation;
+// the native 1 MiB transport cap accommodates 64 KiB maps plus escaping.
+// GET intake?node_id filters to accepted drafts for that node or its generating
+// requirement, with empty sources and turns and unchanged read authorization.
 package intake
