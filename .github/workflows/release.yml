@@ -11,13 +11,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  # write: attach paimos-agentd and aeon-cli binaries and SHA256SUMS to the GitHub release
-  contents: write
-  packages: write
-  attestations: write
-  id-token: write
-  # read: the release history lists the CI and Release runs of each tagged commit
-  actions: read
+  contents: read
 
 jobs:
   agentd-darwin:
@@ -50,7 +44,7 @@ jobs:
         env:
           AEON_DARWIN_ARCH: ${{ matrix.arch }}
         run: bash scripts/build-release-binaries.sh darwin-agentd
-      # Before upload: SHA256SUMS in the release job is computed over the signed
+      # Before upload: SHA256SUMS in the assets job is computed over the signed
       # binary. Bare binaries cannot be stapled; Gatekeeper checks online.
       - name: Sign and notarize paimos-agentd
         env:
@@ -123,24 +117,45 @@ jobs:
           path: dist/paimos-agentd-darwin-${{ matrix.arch }}
           if-no-files-found: error
 
-  release:
-    needs: agentd-darwin
+  # The server digest must never wait for signing/notarization or client builds.
+  image:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # Preserve push access for the draft-aware release immutability lookup.
+      contents: write
+      actions: read
+      packages: write
+      attestations: write
+      id-token: write
     outputs:
       version: ${{ steps.version.outputs.version }}
+      digest: ${{ steps.push.outputs.digest }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The release history reads every tag and the commits between them.
           fetch-depth: 0
           fetch-tags: true
-      - uses: actions/setup-node@v7
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
 
       - name: Validate inspr-calendar-v2 tag
         id: version
         run: node scripts/release-tag.mjs
+
+      - name: Require an annotated release tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+          if [ "$(git cat-file -t "refs/tags/$tag")" != tag ]; then
+            echo "Release tags must be annotated: git tag -a \"$tag\" -m \"Release $tag\"" >&2
+            exit 1
+          fi
 
       - name: Release checks
         run: node scripts/verify-release.mjs --release
@@ -153,24 +168,148 @@ jobs:
           got=$(node scripts/verify-release.mjs --release)
           node --input-type=module -e 'const got = JSON.parse(process.argv[1]); if (got.version !== process.env.VERSION) { console.error("version.json " + got.version + " does not match tag " + process.env.VERSION); process.exit(1); }' "$got"
 
-      # A rerun must never replace a published coordinate or its release assets.
+      # Include drafts: a rerun must never replace a reserved release or its assets.
       - name: Reject an existing GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-            --header @<(printf 'Authorization: Bearer %s' "$GH_TOKEN") \
-            --header 'Accept: application/vnd.github+json' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/v${VERSION}")"
-          case "$status" in
-            404) ;;
-            200) echo "Release v${VERSION} is already published; reserve a new coordinate" >&2; exit 1 ;;
-            *) echo "Cannot establish release immutability (HTTP ${status})" >&2; exit 1 ;;
-          esac
+          tags="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[].tag_name')"
+          if printf '%s\n' "$tags" | grep -Fx -- "v${VERSION}" >/dev/null; then
+            echo "Release v${VERSION} already exists (draft or published); reserve a new coordinate" >&2
+            exit 1
+          fi
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+
+      # Embed the history in both the smoked and pushed builds. Path context is
+      # intentional: the generated manifest is not committed to the tag.
+      - name: Release history
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go run ./internal/releasehistory/generate -repo . -repository "${GITHUB_REPOSITORY}"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Include images left by partial runs; a rerun cannot replace a coordinate.
+      - name: Reject an existing image tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          tags="$(gh api --paginate 'orgs/inspr-at/packages/container/aeon/versions?per_page=100' \
+            --jq '.[].metadata.container.tags[]?')"
+          if printf '%s\n' "$tags" | grep -Fx -- "$VERSION" >/dev/null; then
+            echo "Image tag ${VERSION} is already published; reserve a new coordinate" >&2
+            exit 1
+          fi
+
+      # Docker's local image store cannot retain provenance. Load the image for
+      # smoke, then use the same builder/context/args to export it with provenance.
+      - name: Build cached smoke image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          provenance: false
+          tags: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}
+          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:buildcache
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+
+      # BuildKit's config digest is not a runnable ID in every Docker image
+      # store. Resolve the loaded tag through the daemon, then pin that ID.
+      - name: Resolve loaded smoke image
+        id: smoke-image
+        env:
+          SMOKE_TAG: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          image="$(docker image ls --quiet --no-trunc "$SMOKE_TAG")"
+          if [[ ! "$image" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo 'Expected exactly one loaded smoke image' >&2
+            exit 1
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke production image
+        env:
+          AEON_SMOKE_IMAGE: ${{ steps.smoke-image.outputs.image }}
+          AEON_SMOKE_VERSION: ${{ steps.version.outputs.version }}
+        run: bash scripts/smoke-image.sh
+
+      # Only the calendar coordinate is a release tag. The mutable buildcache
+      # ref is a separate cache artifact; never publish a latest alias.
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          provenance: mode=max
+          tags: ghcr.io/inspr-at/aeon:${{ steps.version.outputs.version }}
+          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:buildcache
+          cache-to: type=registry,ref=ghcr.io/inspr-at/aeon:buildcache,mode=max
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+
+      - name: Attest pushed image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/inspr-at/aeon
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          # Keep existing token scopes: artifact-metadata:write is unnecessary.
+          create-storage-record: false
+
+      - name: Verify pushed image attestation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://ghcr.io/inspr-at/aeon@${DIGEST}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "$GITHUB_REF" \
+            --source-digest "$GITHUB_SHA"
+
+      - name: Record pushed digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          {
+            echo "### Pushed and verified image"
+            echo
+            echo "ghcr.io/inspr-at/aeon@${DIGEST}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  assets:
+    needs: [agentd-darwin, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
 
@@ -184,7 +323,7 @@ jobs:
           merge-multiple: true
       - name: Build linux paimos-agentd and aeon-cli
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.image.outputs.version }}
         run: |
           set -euo pipefail
           bash scripts/build-release-binaries.sh linux-agentd
@@ -204,68 +343,26 @@ jobs:
               > SHA256SUMS
           )
 
-      # inspr.release-history.v1: every v* tag with its changes and evidence, embedded
-      # in the server image (internal/releasehistory/data/history.json, not committed).
-      - name: Release history
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: go run ./internal/releasehistory/generate -repo . -repository "${GITHUB_REPOSITORY}"
-
-      - uses: docker/setup-buildx-action@v4
-
-      # Build and exercise the exact runtime layout before any image or release is published.
-      - name: Smoke production image
-        env:
-          AEON_SMOKE_VERSION: ${{ steps.version.outputs.version }}
-        run: bash scripts/smoke-image.sh
-
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # A previous partial run may have pushed the image before release creation.
-      - name: Reject an existing image tag
+      # Include drafts: a rerun must never replace a reserved release or its assets.
+      - name: Reject an existing GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.image.outputs.version }}
         run: |
           set -euo pipefail
-          tags="$(gh api --paginate 'orgs/inspr-at/packages/container/aeon/versions?per_page=100' \
-            --jq '.[].metadata.container.tags[]?')"
-          if printf '%s\n' "$tags" | grep -Fxq "$VERSION"; then
-            echo "Image tag ${VERSION} is already published; reserve a new coordinate" >&2
+          tags="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[].tag_name')"
+          if printf '%s\n' "$tags" | grep -Fx -- "v${VERSION}" >/dev/null; then
+            echo "Release v${VERSION} already exists (draft or published); reserve a new coordinate" >&2
             exit 1
           fi
 
-      # The only published tag is the calendar version. Never push a latest tag.
-      - name: Build and push
-        id: push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64
-          provenance: mode=max
-          tags: ghcr.io/inspr-at/aeon:${{ steps.version.outputs.version }}
-          # -X github.com/inspr-at/paimos/internal/version.Version=<version without v>
-          build-args: |
-            VERSION=${{ steps.version.outputs.version }}
-
-      - name: Record pushed digest
-        run: |
-          {
-            echo "### Pushed image"
-            echo
-            echo "ghcr.io/inspr-at/aeon@${{ steps.push.outputs.digest }}"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Attach paimos-agentd to the GitHub release
+      # Publication is an explicit post-deploy step; see docs/RELEASE.md.
+      - name: Create draft GitHub release with signed assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
-          DIGEST: ${{ steps.push.outputs.digest }}
+          VERSION: ${{ needs.image.outputs.version }}
+          DIGEST: ${{ needs.image.outputs.digest }}
         run: |
           set -euo pipefail
           tag="v${VERSION}"
@@ -288,27 +385,7 @@ jobs:
             dist/aeon-cli-linux-amd64 \
             dist/aeon-cli-linux-arm64 \
             dist/SHA256SUMS \
+            --draft \
+            --verify-tag \
             --title "$tag" \
             --notes "$notes"
-
-  # Runs only after the release assets exist. The homebrew-tap environment is
-  # limited to v* tags. App secrets are read only in the bump step. Absent
-  # secrets skip the pull request and succeed.
-  homebrew-tap:
-    needs: release
-    runs-on: ubuntu-latest
-    environment: homebrew-tap
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-      - name: Open Homebrew tap formula pull request
-        env:
-          HOMEBREW_TAP_APP_ID: ${{ secrets.HOMEBREW_TAP_APP_ID }}
-          HOMEBREW_TAP_APP_KEY: ${{ secrets.HOMEBREW_TAP_APP_KEY }}
-          VERSION: ${{ needs.release.outputs.version }}
-        run: node scripts/homebrew-tap-pr.mjs
