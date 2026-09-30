@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
 func statusState(v Review) string {
@@ -15,6 +16,9 @@ func statusState(v Review) string {
 		return "success"
 	}
 	if v.Result.Verdict == "changes" && v.Status == "completed" {
+		if v.modelEvidence != "vendor_reported" || v.Model == nil || v.EffectiveModel == nil || !reviewgate.ModelMatches(*v.Model, *v.EffectiveModel) {
+			return "error"
+		}
 		return "failure"
 	}
 	switch v.Status {

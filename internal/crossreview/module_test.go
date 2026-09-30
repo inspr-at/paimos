@@ -236,6 +236,45 @@ func TestMalformedAndChangesRemainClosed(t *testing.T) {
 	}
 }
 
+func TestChangesStatusRequiresVerifiedPinnedModel(t *testing.T) {
+	f := newFixture(t)
+	var v Review
+	f.call(t, f.person, "POST", "/api/nodes/"+f.ticket+"/reviews", f.input(), 201, &v)
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='running',account_id=$2,daemon_id='review-daemon',daemon_generation='review-generation',started_at=clock_timestamp() WHERE id=$1`, *v.RunID, f.account)
+		return err
+	})
+	f.call(t, f.agent, "POST", "/api/work-orders/"+v.OrderID+"/evidence", map[string]any{
+		"kind": "text", "reference": "FINDING: high main.go:1 Tenant constraint missing.\nVERDICT: changes", "run_id": *v.RunID,
+	}, 201, nil)
+	model, different := "review-model", "different-model"
+	for _, tc := range []struct {
+		name, evidence, want string
+		effective            *string
+	}{
+		{"unverified", "unverified", "error", &model},
+		{"missing model", "vendor_reported", "error", nil},
+		{"different model", "vendor_reported", "error", &different},
+		{"verified pinned model", "vendor_reported", "failure", &model},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f.tx(t, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='completed',ended_at=clock_timestamp(),model_evidence=$2,effective_model=$3 WHERE id=$1`, *v.RunID, tc.evidence, tc.effective); err != nil {
+					return err
+				}
+				loaded, err := load(t.Context(), tx, v.OrderID)
+				if err != nil {
+					return err
+				}
+				if loaded.GateOpen || loaded.Result.Verdict != "changes" || statusState(loaded) != tc.want {
+					t.Fatalf("completed changes status = %s, want %s with closed gate", statusState(loaded), tc.want)
+				}
+				return nil
+			})
+		})
+	}
+}
+
 func TestCompletedBuilderAutomaticallyRequestsIndependentReview(t *testing.T) {
 	f := newFixture(t)
 	var order workorders.Order

@@ -51,6 +51,102 @@ func TestReviewPromptUsesExactDiffAndFamily(t *testing.T) {
 	}
 }
 
+func reviewPromptFixture(t *testing.T) (*launchedRepo, WorkOrder, Profile) {
+	t.Helper()
+	r := newLaunchedRepo(t)
+	r.run("remote", "add", "origin", "https://github.com/example/review-fixture.git")
+	family, profile := "anthropic", "review-profile"
+	order := WorkOrder{Kind: "review", Review: &reviewgate.Binding{
+		TicketSnapshot: "Ticket: review the sealed commit tree",
+		Repository:     "example/review-fixture",
+		BaseSHA:        workspaceHEAD(t.Context(), r.dir),
+		AuthorFamily:   "openai", ReviewerFamily: &family, ProfileID: &profile,
+	}}
+	return r, order, Profile{ID: profile, Family: family}
+}
+
+func TestMutationReplaceRefHidesSealedTree(t *testing.T) {
+	r, order, profile := reviewPromptFixture(t)
+	if err := os.WriteFile(filepath.Join(r.dir, "sealed.txt"), []byte("SEALED_TREE_MARKER\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r.run("add", "sealed.txt")
+	r.run("commit", "-m", "sealed change")
+	order.Review.HeadSHA = workspaceHEAD(t.Context(), r.dir)
+	r.run("switch", "-c", "replacement", order.Review.BaseSHA)
+	if err := os.WriteFile(filepath.Join(r.dir, "replacement.txt"), []byte("REPLACEMENT_TREE_MARKER\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r.run("add", "replacement.txt")
+	r.run("commit", "-m", "innocent replacement")
+	r.run("replace", order.Review.HeadSHA, workspaceHEAD(t.Context(), r.dir))
+	prompt, err := reviewPrompt(t.Context(), r.dir, order, profile)
+	if errors.Is(err, errReviewContext) {
+		return
+	}
+	if err != nil || !strings.Contains(prompt, "+SEALED_TREE_MARKER") || strings.Contains(prompt, "REPLACEMENT_TREE_MARKER") {
+		t.Fatal("replace ref hid the sealed tree")
+	}
+}
+
+func TestMutationRenamedSecretPathIsRefused(t *testing.T) {
+	for _, name := range []string{".env", "secrets/fixture.txt", "id_fixture"} {
+		t.Run(name, func(t *testing.T) {
+			r, order, profile := reviewPromptFixture(t)
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(r.dir, name)), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(r.dir, name), []byte("synthetic path fixture only\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			r.run("add", name)
+			r.run("commit", "-m", "synthetic sensitive path")
+			order.Review.BaseSHA = workspaceHEAD(t.Context(), r.dir)
+			r.run("config", "diff.renames", "true")
+			r.run("mv", name, "notes.txt")
+			r.run("commit", "-m", "rename sensitive path")
+			order.Review.HeadSHA = workspaceHEAD(t.Context(), r.dir)
+			if prompt, err := reviewPrompt(t.Context(), r.dir, order, profile); !errors.Is(err, errReviewContext) || prompt != "" {
+				t.Fatal("renamed sensitive path entered the review prompt")
+			}
+		})
+	}
+}
+
+func TestReviewGitIgnoresInheritedObjectAndRefOverrides(t *testing.T) {
+	r, order, profile := reviewPromptFixture(t)
+	if err := os.WriteFile(filepath.Join(r.dir, "sealed.txt"), []byte("SEALED_TREE_MARKER\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r.run("add", "sealed.txt")
+	r.run("commit", "-m", "sealed change")
+	order.Review.HeadSHA = workspaceHEAD(t.Context(), r.dir)
+	for _, name := range []string{
+		"GIT_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
+		"GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_REPLACE_REF_BASE", "GIT_CONFIG",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, filepath.Join(r.dir, "nonexistent-override"))
+			prompt, err := reviewPrompt(t.Context(), r.dir, order, profile)
+			if err != nil || !strings.Contains(prompt, "+SEALED_TREE_MARKER") {
+				t.Fatal("inherited Git override changed the sealed review context")
+			}
+			if got := completedReviewRange(t.Context(), r.dir, order.Review.BaseSHA); got == nil || got.HeadSHA != order.Review.HeadSHA || got.Repository != order.Review.Repository {
+				t.Fatal("inherited Git override changed the completed review range")
+			}
+		})
+	}
+	t.Run("GIT_CONFIG_COUNT", func(t *testing.T) {
+		t.Setenv("GIT_CONFIG_COUNT", "1")
+		t.Setenv("GIT_CONFIG_KEY_0", "remote.origin.url")
+		t.Setenv("GIT_CONFIG_VALUE_0", "https://github.com/other/repository.git")
+		prompt, err := reviewPrompt(t.Context(), r.dir, order, profile)
+		if err != nil || !strings.Contains(prompt, "+SEALED_TREE_MARKER") {
+			t.Fatal("inherited Git config redirected the review repository")
+		}
+	})
+}
+
 func TestReadOnlyReviewRefusesUnqualifiedAdaptersBeforeStart(t *testing.T) {
 	no := false
 	run := Run{Purpose: "managed", ReadOnlyReview: true, RequestedAccountID: "account", RepositoryMutationAllowed: &no}

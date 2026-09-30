@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"os"
 	"os/exec"
 	"path"
 	"strings"
@@ -27,7 +28,15 @@ func (b *boundedReviewBuffer) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 func reviewGit(ctx context.Context, workspace string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", workspace}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", append([]string{"--no-replace-objects", "-C", workspace}, args...)...)
+	// Keep the sealed repository and object lookup independent of the daemon's
+	// inherited Git overrides, including config-based ref/object redirection.
+	cmd.Env = []string{}
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GIT_") {
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
 	out := &boundedReviewBuffer{limit: 192 << 10}
 	cmd.Stdout = out
 	if cmd.Run() != nil {
@@ -71,7 +80,7 @@ func reviewPrompt(ctx context.Context, workspace string, order WorkOrder, profil
 	if _, err := reviewGit(ctx, workspace, "merge-base", "--is-ancestor", b.BaseSHA, b.HeadSHA); err != nil {
 		return "", errReviewContext
 	}
-	names, err := reviewGit(ctx, workspace, "diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", b.BaseSHA+"..."+b.HeadSHA, "--")
+	names, err := reviewGit(ctx, workspace, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-only", "-z", b.BaseSHA+"..."+b.HeadSHA, "--")
 	if err != nil {
 		return "", err
 	}

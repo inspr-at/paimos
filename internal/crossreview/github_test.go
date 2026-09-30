@@ -100,14 +100,41 @@ func TestGitHubStatusExactHeadAndNarrowAuthority(t *testing.T) {
 	}
 }
 func TestStatusStateRequiresAnOpenGate(t *testing.T) {
+	model := "review-model"
 	for _, tc := range []struct {
 		status, verdict string
 		open            bool
 		want            string
 	}{{"completed", "ok", false, "error"}, {"completed", "ok", true, "success"}, {"completed", "changes", false, "failure"}, {"running", "ok", false, "pending"}, {"blocked", "", false, "error"}, {"cancelled", "ok", false, "error"}} {
-		v := Review{Status: tc.status, GateOpen: tc.open, Result: reviewgate.Result{Verdict: tc.verdict}}
+		v := Review{Status: tc.status, GateOpen: tc.open, Result: reviewgate.Result{Verdict: tc.verdict}, Model: &model, EffectiveModel: &model, modelEvidence: "vendor_reported"}
 		if statusState(v) != tc.want {
 			t.Fatal("closed gate published success")
 		}
+	}
+}
+
+func TestStatusStateRequiresVerifiedModelForChanges(t *testing.T) {
+	model, empty, different := "review-model", "", "different-model"
+	alias, concrete := "fable", "claude-fable-fixture"
+	for _, tc := range []struct {
+		name, evidence, want string
+		model, effective     *string
+	}{
+		{"no evidence", "", "error", &model, &model},
+		{"unverified", "unverified", "error", &model, &model},
+		{"missing pin", "vendor_reported", "error", nil, &model},
+		{"empty pin", "vendor_reported", "error", &empty, &model},
+		{"missing model", "vendor_reported", "error", &model, nil},
+		{"empty model", "vendor_reported", "error", &model, &empty},
+		{"different model", "vendor_reported", "error", &model, &different},
+		{"verified pinned model", "vendor_reported", "failure", &model, &model},
+		{"verified alias", "vendor_reported", "failure", &alias, &concrete},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := Review{Status: "completed", Result: reviewgate.Result{Verdict: "changes"}, Model: tc.model, EffectiveModel: tc.effective, modelEvidence: tc.evidence}
+			if got := statusState(v); got != tc.want {
+				t.Fatalf("completed changes status = %s, want %s", got, tc.want)
+			}
+		})
 	}
 }
