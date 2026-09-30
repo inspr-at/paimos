@@ -193,26 +193,27 @@ func inboxHookSession() (string, error) {
 	return strings.ToLower(id), nil
 }
 
-// resolveInboxHookSession applies env, then the private session index, then
-// the server vendor binding. Env wins. A rejected index entry does not fall
-// through: a stopped or tampered binding stays a quiet no-op.
+// resolveInboxHookSession applies env, then the private session index.
+// Env wins. A UUID session id is the indexed Claude path: a miss, a stopped
+// generation, or a dead owner is a quiet no-op with no server call. A non-UUID
+// harness id keeps the vendor binding lookup.
 func (rt *runtime) resolveInboxHookSession(ctx context.Context, vendor string) (string, error) {
 	id, err := inboxHookSession()
 	if err != nil || id != "" || hookSessionEnvSet() {
 		return id, err
 	}
-	indexed, _, result := lookupSessionIndex(vendor)
-	switch result {
-	case sessionIndexBound:
-		return indexed, nil
-	case sessionIndexRejected:
-		return "", nil
-	default:
-		if ref := normalizeVendorRef(vendor); ref != "" {
-			return rt.lookupVendorSession(ctx, ref)
+	source := strings.ToLower(strings.TrimSpace(vendor))
+	if validUUID(source) {
+		indexed, _, result := lookupSessionIndex(source)
+		if result == sessionIndexBound {
+			return indexed, nil
 		}
 		return "", nil
 	}
+	if ref := normalizeVendorRef(vendor); ref != "" {
+		return rt.lookupVendorSession(ctx, ref)
+	}
+	return "", nil
 }
 
 func sessionMessageFrame(msg inbox.Message) string {

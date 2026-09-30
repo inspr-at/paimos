@@ -8,6 +8,8 @@ func lookupSessionIndex(string) (string, string, sessionIndexResult) {
 	return "", "", sessionIndexAbsent
 }
 
-func writeSessionIndex(string, string) error { return nil }
+func writeSessionIndex(string, string, int, string) error { return nil }
 
 func removeSessionIndexForState(string) {}
+
+func stateDirSentLabel(string) string { return "" }

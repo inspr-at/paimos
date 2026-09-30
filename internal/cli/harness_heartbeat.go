@@ -355,7 +355,11 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 	if !dep.alive(o.OwnerPID) {
 		return rt.rejectDeadOwner(o, &session)
 	}
-	recordSessionIndex(rt, o, &session)
+	if err := recordSessionIndex(rt, o, &session); err != nil {
+		return err
+	}
+	// Runs before hold.release, so every return after publish withdraws the binding.
+	defer releaseSessionIndex(&session)
 	return rt.heartbeatLoop(ctx, o, dep, &session)
 }
 
@@ -381,6 +385,7 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 		case errors.Is(err, errHeartbeatTerminal):
 			rememberSettlement(session)
 			if serr := saveHeartbeatSession(session); serr != nil {
+				releaseSessionIndex(session)
 				return serr
 			}
 			releaseSessionIndex(session)
@@ -606,6 +611,7 @@ func (rt *runtime) finishStop(o heartbeatOptions, session *heartbeatSession) err
 		rememberStopIntent(session, false, 1, heartbeatStatus(err))
 		rememberSettlement(session)
 		_ = saveHeartbeatSession(session)
+		releaseSessionIndex(session)
 		return err
 	}
 	return persistStopSuccess(session)
@@ -708,9 +714,11 @@ func (rt *runtime) abandonHeartbeat(o heartbeatOptions, session *heartbeatSessio
 		fmt.Fprintf(rt.stderr, "heartbeat: could not close the new session\n")
 		_ = session.hold.writeFile("session.id", []byte(session.id+"\n"))
 		rememberStopIntent(session, false, 1, heartbeatStatus(err))
+		releaseSessionIndex(session)
 		return cause
 	}
 	_ = clearHeartbeatIdentity(&session.hold)
+	releaseSessionIndex(session)
 	return cause
 }
 
@@ -932,6 +940,7 @@ func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSessi
 			rememberSettlement(kept)
 			_ = saveHeartbeatSession(kept)
 		}
+		releaseSessionIndex(holder)
 		return stopErr
 	}
 	if kept != nil {
@@ -958,9 +967,11 @@ func (rt *runtime) finishBoundedStop(ctx context.Context, o heartbeatOptions, st
 		if strict {
 			fmt.Fprintf(rt.stderr, "heartbeat: owner %d failed the start check\n", o.OwnerPID)
 		}
+		releaseSessionIndex(&heartbeatSession{hold: hold})
 		return errHeartbeatStopBound
 	}
 	fmt.Fprintf(rt.stderr, "heartbeat: stop will not be retried\n")
+	releaseSessionIndex(&heartbeatSession{hold: hold})
 	return errHeartbeatStopRejected
 }
 
@@ -1196,6 +1207,7 @@ func (rt *runtime) rejectDeadOwner(o heartbeatOptions, session *heartbeatSession
 	if err != nil {
 		rememberStopIntent(session, true, 1, heartbeatStatus(err))
 		_ = saveHeartbeatSession(session)
+		releaseSessionIndex(session)
 		return err
 	}
 	if err := persistStopSuccess(session); err != nil {
