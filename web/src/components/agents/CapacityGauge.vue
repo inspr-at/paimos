@@ -3,9 +3,10 @@
 import type { Gauge } from '../../lib/capacity'
 
 // The capacity gauge, shared by the Agents desk and the Usage page: what is left,
-// today's share at its end, the stop tick, and today's spend as a hatch. "% used"
-// mirrors it, so the empty part on the left is what has been used. Without a
-// gauge it is an empty track (no reading yet).
+// what is kept for you (Keep for you, a dotted tint at the 0 end, the last part
+// any agent could reach), today's share at its end, the stop tick, and today's
+// spend as a hatch. "% used" mirrors it, so the empty part on the left is what
+// has been used. Without a gauge it is an empty track (no reading yet).
 withDefaults(defineProps<{
   gauge: Gauge | null
   /** Percent left of the binding window; where today's spend starts. */
@@ -25,8 +26,9 @@ withDefaults(defineProps<{
     :aria-valuenow="Math.round(value)" :aria-label="label" :data-tip="label || undefined"
   >
     <div class="track">
-      <i class="g-later" :style="{ left: '0', width: `${gauge.later}%` }" />
-      <i class="g-today" :style="{ left: `${gauge.later}%`, width: `${gauge.today}%` }" />
+      <i v-if="gauge.yours > 0" class="g-yours" :style="{ left: '0', width: `${gauge.yours}%` }" />
+      <i class="g-later" :style="{ left: `${gauge.yours}%`, width: `${gauge.later}%` }" />
+      <i class="g-today" :style="{ left: `${gauge.yours + gauge.later}%`, width: `${gauge.today}%` }" />
       <i class="g-spent" :style="{ left: `${left}%`, width: `${gauge.spent}%` }" />
     </div>
     <b v-if="gauge.tick !== null" class="g-tick" :style="{ left: `${gauge.tick}%` }" />
@@ -40,6 +42,7 @@ withDefaults(defineProps<{
 .track { position: absolute; inset: 3px 0; border-radius: 999px; background: var(--track); overflow: hidden; box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); }
 .track i { position: absolute; top: 0; bottom: 0; }
 .g-later { background: color-mix(in srgb, var(--teal) 32%, transparent); }
+.g-yours { background: radial-gradient(circle, color-mix(in srgb, var(--ink-3) 75%, transparent) 0 .8px, transparent 1.2px) 0 0 / 4px 4px, color-mix(in srgb, var(--ink-3) 16%, transparent); }
 .g-today { background: linear-gradient(90deg, color-mix(in srgb, var(--teal) 88%, var(--aqua)), var(--teal)); }
 .g-spent { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--teal) 55%, transparent) 0 1.5px, transparent 1.5px 4.5px); }
 .ahead .g-spent { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--gold) 75%, transparent) 0 1.5px, transparent 1.5px 4.5px); }

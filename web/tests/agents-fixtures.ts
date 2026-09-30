@@ -233,7 +233,8 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       if (answer) return answer.status === 204 ? route.fulfill({ status: 204, body: '' }) : route.fulfill({ status: answer.status ?? 200, json: answer.json })
       // Without a capacity world: accounts without readings and the default schedule.
       if (path === '/api/agent-accounts/capacity' || path === '/api/agent-accounts/capacity/preview') return route.fulfill({ json: data.accounts.map(a => ({ account_id: a.id, schedule: defaultSchedule(), windows: [] })) })
-      if (path === '/api/agent-accounts/capacity/schedule') return method === 'PUT' ? route.fulfill({ status: 204, body: '' }) : route.fulfill({ json: [] })
+      // Keep for you is confirmed (Auto), so the one-time plan card stays out of unrelated specs.
+      if (path === '/api/agent-accounts/capacity/schedule') return method === 'PUT' ? route.fulfill({ status: 204, body: '' }) : route.fulfill({ json: [{ scope: 'user', schedule: { ...defaultSchedule(), reserve: 'auto' } }] })
     }
     if (path === '/api/agent-accounts') return options.accountsForbidden ? route.fulfill({ status: 403, json: { error: 'admin session required' } }) : route.fulfill({ json: data.accounts })
     const account = /^\/api\/agent-accounts\/([^/]+)$/.exec(path)

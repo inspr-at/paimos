@@ -224,10 +224,21 @@ func TestCurrentBandAndSprintReset(t *testing.T) {
 	if err != nil || p.AvailableNowPercent != 0 {
 		t.Fatal("Sprint survived reset", p, err)
 	}
-	s.Override = "hold"
+	// Release 11 stored Hold without a date (the server cleared it); a dated
+	// Hold (AEON-375) ends at that date like Sprint.
+	s.Override, s.OverrideUntil = "hold", nil
 	in.Now = instant("2026-09-29T12:00:00Z")
 	p, err = Plan(in, s)
 	if err != nil || p.AvailableNowPercent != 0 {
 		t.Fatal("Hold allowed", p, err)
+	}
+	until = in.Now.Add(2 * time.Hour)
+	s.OverrideUntil = &until
+	if p, err = Plan(in, s); err != nil || p.AvailableNowPercent != 0 {
+		t.Fatal("dated Hold allowed", p, err)
+	}
+	in.Now = until
+	if p, err = Plan(in, s); err != nil || p.AvailableNowPercent == 0 {
+		t.Fatal("dated Hold survived its date", p, err)
 	}
 }

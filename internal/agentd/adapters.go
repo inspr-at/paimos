@@ -842,6 +842,11 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 						readings[i].Phase = "end"
 					}
 				}
+				// A rejection that names no window does not change stored
+				// percentages. The one-hour vendor stop is the fallback.
+				if capacity.ClaudeUnnamedStop(payload.Event) {
+					observe(AdapterEvent{Kind: "usage", ErrorCode: "vendor_limit"})
+				}
 				if len(readings) > 0 {
 					capacitySeen = true
 					observe(AdapterEvent{Capacity: readings})

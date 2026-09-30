@@ -119,22 +119,17 @@ func ingestReadings(ctx context.Context, tx pgx.Tx, p tenant.Principal, id strin
 		if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET capacity_allowed=false, capacity_retired=true WHERE account_id=$1 AND capacity_kind=$2 AND capacity_bucket=$3`, id, v.WindowKind, v.Bucket); err != nil {
 			return err
 		}
-		// A missing authority bit is not recovery from a vendor denial,
-		// including across reset. Only a later explicit vendor allowance clears it.
+		// A missing authority bit is not recovery from a vendor denial on this
+		// window, including across its own reset. Only a later explicit
+		// allowance on the same window clears it. Another window keeps its own.
 		allowed := true
 		var authority *bool
-		err = tx.QueryRow(ctx, `SELECT ordinary_usage_allowed FROM account_capacity_readings WHERE account_id=$1 AND source<>'estimate' AND ordinary_usage_allowed IS NOT NULL ORDER BY read_at DESC, CASE source WHEN 'harness' THEN 0 ELSE 1 END, ordinary_usage_allowed ASC LIMIT 1`, id).Scan(&authority)
+		err = tx.QueryRow(ctx, `SELECT ordinary_usage_allowed FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND source<>'estimate' AND ordinary_usage_allowed IS NOT NULL ORDER BY read_at DESC, CASE source WHEN 'harness' THEN 0 ELSE 1 END, ordinary_usage_allowed ASC LIMIT 1`, id, v.WindowKind, v.Bucket).Scan(&authority)
 		if err != nil && !isNoRows(err) {
 			return err
 		}
 		if authority != nil {
 			allowed = *authority
-		}
-		if !allowed {
-			// Vendor denial also fences reservations against other windows.
-			if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET capacity_allowed=false WHERE account_id=$1 AND capacity_kind IS NOT NULL`, id); err != nil {
-				return err
-			}
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_bucket,capacity_read_at,capacity_allowed,capacity_source)
    VALUES($1,$2,$3,$4,'percent',100,$5,'unrestricted',0,$6,$7,$8,$9,$10)
@@ -238,6 +233,7 @@ type accountCapacity struct {
 	OngoingUseApproved bool              `json:"ongoing_use_approved"`
 	ProbeFailure       string            `json:"probe_failure,omitempty"`
 	LimitingReset      *time.Time        `json:"limiting_reset,omitempty"`
+	AwaitingReading    bool              `json:"awaiting_reading,omitempty"`
 	Schedule           capacity.Schedule `json:"schedule"`
 	Windows            []capacityWindow  `json:"windows"`
 }
@@ -297,6 +293,7 @@ func (m *Module) capacityPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	var in struct {
 		Schedule *capacity.Schedule `json:"schedule"`
+		Pools    []poolReserve      `json:"pool_reserves"`
 	}
 	if err := decodeStrict(raw, &in); err != nil {
 		writeErr(w, err)
@@ -310,20 +307,37 @@ func (m *Module) capacityPreview(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fail(400, err.Error()))
 		return
 	}
+	if err := validPoolReserves(in.Pools); err != nil {
+		writeErr(w, err)
+		return
+	}
 	if !g.acquire() {
 		retryAfter(w, time.Second)
 		writeErr(w, fail(http.StatusServiceUnavailable, "previews are busy; try again shortly"))
 		return
 	}
 	defer g.release()
+	// Sprint and Hold are pool actions with their own ends; a drafted Away
+	// (Keep for you) previews until its date.
 	draft := *in.Schedule
-	draft.Override, draft.OverrideUntil = "", nil
+	if draft.Override != "away" {
+		draft.Override, draft.OverrideUntil = "", nil
+	}
 	ctx, cancel := context.WithDeadline(r.Context(), deadline)
 	defer cancel()
 	var out []accountCapacity
 	err = m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+		if draft.Override == "away" {
+			now, err := dbNow(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if err := awayUntilOK(*draft.OverrideUntil, now); err != nil {
+				return err
+			}
+		}
 		var err error
-		out, err = projectCapacity(ctx, tx, p.ID, &draft, g.budget)
+		out, err = projectCapacity(ctx, tx, p.ID, &previewDraft{draft, in.Pools}, g.budget)
 		return err
 	})
 	if err != nil {
@@ -336,10 +350,16 @@ func (m *Module) capacityPreview(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 
+// previewDraft is the person's drafted schedule and pools' drafted reserves.
+type previewDraft struct {
+	schedule capacity.Schedule
+	pools    []poolReserve
+}
+
 // projectCapacity builds the capacity projection for person. With a draft it
 // paces every account on the schedule it would follow after saving the draft,
 // walking at most budget integration steps.
-func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *capacity.Schedule, budget int) ([]accountCapacity, error) {
+func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previewDraft, budget int) ([]accountCapacity, error) {
 	out := []accountCapacity{}
 	accounts, err := listAccounts(ctx, tx)
 	if err != nil {
@@ -349,28 +369,23 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *capac
 	if err != nil {
 		return nil, err
 	}
-	var entries []scheduleEntry
-	var previous capacity.Schedule
-	if draft != nil {
-		if entries, err = loadScheduleEntries(ctx, tx, person); err != nil {
-			return nil, err
-		}
-		fallback, err := personDefaultSchedule(ctx, tx, person)
-		if err != nil {
-			return nil, err
-		}
-		previous = userSchedule(entries, fallback)
+	entries, err := loadScheduleEntries(ctx, tx, person)
+	if err != nil {
+		return nil, err
 	}
+	fallback, err := personDefaultSchedule(ctx, tx, person)
+	if err != nil {
+		return nil, err
+	}
+	previous := userSchedule(entries, fallback)
 	steps := 0
 	for _, a := range accounts {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		var s capacity.Schedule
+		s := resolveSchedule(entries, a, fallback, now)
 		if draft != nil {
-			s = scheduleWithDraft(entries, a, previous, *draft, now)
-		} else if s, err = effectiveSchedule(ctx, tx, person, a); err != nil {
-			return nil, err
+			s = scheduleWithDraft(entries, a, previous, draft.schedule, draft.pools, now)
 		}
 		item := accountCapacity{AccountID: a.ID, Schedule: s, Windows: []capacityWindow{}}
 		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected'))`, a.ID).Scan(&item.OngoingUseApproved); err != nil {
@@ -382,6 +397,23 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *capac
 		readings, err := readCapacity(ctx, tx, a.ID, true)
 		if err != nil {
 			return nil, err
+		}
+		if _, cleared, err := recoveryClearedAt(ctx, tx, a.ID); err != nil {
+			return nil, err
+		} else if cleared {
+			open := false
+			for _, v := range readings {
+				if v.Source != "estimate" && now.Before(v.ResetsAt) && (v.OrdinaryUsageAllowed == nil || *v.OrdinaryUsageAllowed) {
+					open = true
+					break
+				}
+			}
+			if !open {
+				item.AwaitingReading = true
+				item.LimitingReset = nil
+				out = append(out, item)
+				continue
+			}
 		}
 		for _, v := range readings {
 			if budget > 0 {
@@ -493,7 +525,12 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 		if err := in.Schedule.Validate(); err != nil {
 			return fail(400, err.Error())
 		}
-		if in.Schedule.Override == "sprint" {
+		now, err := dbNow(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		switch in.Schedule.Override {
+		case "sprint":
 			// Sprint is literal and bounded to the next limiting reset in scope.
 			var until *time.Time
 			if err := tx.QueryRow(r.Context(), `SELECT min(w.ends_at) FROM account_allowance_windows w JOIN agent_accounts a ON a.tenant_id=w.tenant_id AND a.id=w.account_id WHERE `+currentCapacityWindows+` AND ($1='user' OR ($1='pool' AND a.harness=$2) OR ($1='account' AND a.id::text=$2))`, in.Scope, key).Scan(&until); err != nil {
@@ -503,7 +540,20 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 				return fail(400, "Sprint requires a current capacity reset")
 			}
 			in.Schedule.OverrideUntil = until
-		} else {
+		case "hold":
+			// Hold for a while, until tomorrow's hours, or until you resume (no date).
+			if u := in.Schedule.OverrideUntil; u != nil && (!u.After(now) || u.After(now.Add(maxHold))) {
+				return fail(400, "Hold must end within 31 days")
+			}
+		case "away":
+			// I'm away until…: the person's own schedule, every pool, until the date.
+			if in.Scope != "user" {
+				return fail(400, "Away is set on your own schedule")
+			}
+			if err := awayUntilOK(*in.Schedule.OverrideUntil, now); err != nil {
+				return err
+			}
+		default:
 			in.Schedule.OverrideUntil = nil
 		}
 		if in.Scope == "account" {
@@ -515,7 +565,7 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 			return saveCarried(r.Context(), tx, p.TenantID, p.ID, *in.Schedule)
 		}
 		raw, _ := json.Marshal(in.Schedule)
-		_, err := tx.Exec(r.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,principal_id,scope,scope_key) DO UPDATE SET schedule=EXCLUDED.schedule`, p.TenantID, p.ID, in.Scope, key, account, raw)
+		_, err = tx.Exec(r.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,principal_id,scope,scope_key) DO UPDATE SET schedule=EXCLUDED.schedule`, p.TenantID, p.ID, in.Scope, key, account, raw)
 		return err
 	})
 	if err != nil {
@@ -528,18 +578,50 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteJSON(w, 200, out)
 	}
 }
-func effectiveSchedule(ctx context.Context, tx pgx.Tx, person string, a Account) (capacity.Schedule, error) {
-	var raw []byte
-	err := tx.QueryRow(ctx, `SELECT schedule FROM account_capacity_schedules WHERE principal_id=$1 AND ((scope='user' AND scope_key='') OR (scope='pool' AND scope_key=$2) OR (scope='account' AND scope_key=$3)) ORDER BY CASE scope WHEN 'account' THEN 0 WHEN 'pool' THEN 1 ELSE 2 END LIMIT 1`, person, a.Harness, a.ID).Scan(&raw)
-	if isNoRows(err) {
-		return personDefaultSchedule(ctx, tx, person)
+
+// maxHold and maxAway bound dated overrides: a hold is a pause, Away a trip.
+const (
+	maxHold = 31 * 24 * time.Hour
+	maxAway = 366 * 24 * time.Hour
+)
+
+func awayUntilOK(until, now time.Time) error {
+	if !until.After(now) || until.After(now.Add(maxAway)) {
+		return fail(400, "Away must end within a year")
 	}
+	return nil
+}
+
+func validPoolReserves(pools []poolReserve) error {
+	if len(pools) > 8 {
+		return fail(400, "too many pool reserves")
+	}
+	seen := map[string]bool{}
+	for _, r := range pools {
+		probe := capacity.DefaultSchedule()
+		probe.Reserve, probe.ReservePercent = r.Reserve, r.ReservePercent
+		if !validHarness(r.Pool) || seen[r.Pool] || probe.Validate() != nil {
+			return fail(400, "invalid pool reserve")
+		}
+		seen[r.Pool] = true
+	}
+	return nil
+}
+
+func effectiveSchedule(ctx context.Context, tx pgx.Tx, person string, a Account) (capacity.Schedule, error) {
+	entries, err := loadScheduleEntries(ctx, tx, person)
 	if err != nil {
 		return capacity.Schedule{}, err
 	}
-	var s capacity.Schedule
-	err = json.Unmarshal(raw, &s)
-	return s, err
+	fallback, err := personDefaultSchedule(ctx, tx, person)
+	if err != nil {
+		return capacity.Schedule{}, err
+	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return capacity.Schedule{}, err
+	}
+	return resolveSchedule(entries, a, fallback, now), nil
 }
 
 // Approval belongs to a person, never to a quota reporter. This preserves the
@@ -626,7 +708,7 @@ func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading
 			start, used = now, 0
 		}
 	}
-	p, err := capacity.Plan(capacity.PlanInput{Now: now, Reset: v.ResetsAt, WindowStart: start, Remaining: 100 - v.UsedPercent, UsedToday: used}, s)
+	p, err := capacity.Plan(capacity.PlanInput{Now: now, Reset: v.ResetsAt, WindowStart: start, Remaining: 100 - v.UsedPercent, UsedToday: used, WindowLength: time.Duration(v.WindowMinutes) * time.Minute}, s)
 	return p, known, err
 }
 
@@ -649,18 +731,29 @@ func routingSchedule(ctx context.Context, tx pgx.Tx, a Account) (capacity.Schedu
 	return effectiveSchedule(ctx, tx, *person, a)
 }
 
+// applyCapacityPacing sets each measured window's derived allowance (§2.3):
+// cap = min(today's paced share, left − R_eff); fits subtracts reservations.
+// Synthetic one-run grants are not vendor windows and keep no reserve.
 func applyCapacityPacing(ctx context.Context, tx pgx.Tx, a Account, windows []Window, now time.Time, s capacity.Schedule) error {
 	for i := range windows {
 		w := &windows[i]
 		if w.capacityReadAt == nil {
 			continue
 		}
+		ws := s
+		if synthetic(*w) {
+			ws.Reserve, ws.ReservePercent = capacity.ReserveOff, 0
+		}
 		v := capacity.Reading{WindowKind: w.capacityKind, Bucket: w.capacityBucket, WindowMinutes: int(w.EndsAt.Sub(w.StartsAt) / time.Minute), ResetsAt: w.EndsAt, ReadAt: *w.capacityReadAt, UsedPercent: float64(w.Used)}
-		p, _, err := readingPacing(ctx, tx, a.ID, v, now, s)
+		p, _, err := readingPacing(ctx, tx, a.ID, v, now, ws)
 		if err != nil {
 			return err
 		}
 		w.capacityBudget = &p.AvailableNowPercent
+		w.capacityShare, w.capacityReserveUntil = nil, nil
+		if share, binds := p.ReserveBinds(); binds {
+			w.capacityShare, w.capacityReserveUntil = &share, p.ReserveUntil
+		}
 	}
 	return nil
 }

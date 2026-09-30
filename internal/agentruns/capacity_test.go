@@ -9,22 +9,23 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (f *fixture) pinCapacitySchedule(t *testing.T, runID string) {
+// roundTheClock gives the run's account an owner schedule that is always in
+// hours, sprinting, with Keep for you off. These claims are about reading
+// authority and freshness. The default 08–22 band waits after 22:00 UTC, and a
+// window that crosses midnight otherwise keeps only today's slice — less than
+// the 100 units this run already holds. Sprint pins the whole remainder.
+func roundTheClock(t *testing.T, f *fixture, runID string) {
 	t.Helper()
-	// These tests exercise reading authority and reservation freshness, not
-	// working hours. Sprint keeps the full remaining quota available at night
-	// and on weekends without weakening either of those checks.
-	schedule := capacity.DefaultSchedule()
-	schedule.Override = "sprint"
-	raw, err := json.Marshal(schedule)
-	if err != nil {
-		t.Fatal(err)
+	s := capacity.DefaultSchedule()
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 	}
-	f.tx(t, f.person, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET capacity_owner=$2 WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1)`, runID, f.person.ID); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,schedule) VALUES($1,$2,'user','',$3)`, f.person.TenantID, f.person.ID, raw)
+	s.Reserve = capacity.ReserveOff
+	s.Override = "sprint"
+	raw, _ := json.Marshal(s)
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `WITH a AS (UPDATE agent_accounts SET capacity_owner=$2 WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1) RETURNING tenant_id,id)
+ INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) SELECT tenant_id,$2,'account',id::text,id,$3 FROM a`, runID, f.person.ID, raw)
 		return err
 	})
 }
@@ -34,7 +35,7 @@ func TestCapacityClaimRechecksReadingAuthorityAndFreshness(t *testing.T) {
 	o := f.order(t, nil)
 	run := f.run(t, o)
 	ids := f.reserve(t, run)
-	f.pinCapacitySchedule(t, run.ID)
+	roundTheClock(t, f, run.ID)
 	update := func(allowed bool, age string, used int) {
 		t.Helper()
 		f.tx(t, f.agent, func(tx pgx.Tx) error {
@@ -57,7 +58,7 @@ func TestCapacityClaimAllowsOnlyItsRecordedRefresh(t *testing.T) {
 	o := f.order(t, nil)
 	run := f.run(t, o)
 	ids := f.reserve(t, run)
-	f.pinCapacitySchedule(t, run.ID)
+	roundTheClock(t, f, run.ID)
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET unit='percent',allowance=100,used=0,reserved=1,capacity_kind='5h',capacity_read_at=clock_timestamp()-interval '11 minutes',capacity_allowed=true,capacity_refresh_run=$1 WHERE id=(SELECT window_id FROM account_reservations WHERE run_id=$1)`, run.ID)
 		if err != nil {

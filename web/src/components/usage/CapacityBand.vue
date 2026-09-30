@@ -12,8 +12,8 @@ import HarnessMark from '../agents/HarnessMark.vue'
 import PlanSentence from '../agents/PlanSentence.vue'
 
 // "Now" on the Usage page: one row per vendor pool, from the same store, gauge
-// and plan sentence as the Agents desk. What binds first comes first. Pacing is
-// changed on the Agents desk; this band only reads.
+// (with what is kept for you) and plan sentence as the Agents desk. What binds
+// first comes first. Pacing is changed on the Agents desk; this band only reads.
 const capacity = useCapacity()
 const agents = useAgents()
 const now = computed(() => agents.now)
@@ -28,7 +28,8 @@ const retry = () => Promise.all([agents.refreshAccounts(), capacity.load()])
 function gaugeLabel(row: BandRow) {
   if (row.left === null) return ''
   const scope = bandReadings(row) ? `, ${bandReadings(row)}` : row.accounts > 1 ? `, ${row.accounts} accounts` : ''
-  const base = `${row.pool.name}${scope}: ${Math.round(row.left)}% left`
+  const kept = row.gauge && row.gauge.yours >= 0.5 ? `, ${pct(row.gauge.yours)} kept for you` : ''
+  const base = `${row.pool.name}${scope}: ${Math.round(row.left)}% left${kept}`
   return row.today ? `${base}, ${row.today.used} of ${row.today.share} used today` : base
 }
 const planText = (row: BandRow) => [row.accounts > 1 && !bandReadings(row) ? `${row.accounts} accounts` : '', row.pool.plan].filter(Boolean).join(' · ')
@@ -43,7 +44,7 @@ function resetTip(row: BandRow) {
     <header class="band-head">
       <h2 id="band-title">Capacity</h2>
       <span v-if="capacity.ready.total" class="meta">{{ capacity.ready.live }} of {{ plural(capacity.ready.total, 'account') }} ready</span>
-      <RouterLink class="pacing" to="/agents" data-tip="Work days, nights, Sprint and Hold are on the Agents desk"><AppIcon name="sliders" :size="15" />Pacing</RouterLink>
+      <RouterLink class="pacing" to="/agents" data-tip="Work days, Keep for you, nights, Sprint and Hold are on the Agents desk"><AppIcon name="sliders" :size="15" />Pacing</RouterLink>
     </header>
 
     <div v-if="loading" class="rows" aria-hidden="true">
@@ -71,7 +72,7 @@ function resetTip(row: BandRow) {
         <p class="sentence" :class="{ ahead: poolSentence(row.pool, now).ahead }"><span v-if="bandReadings(row)" class="partial">{{ sentenceCase(bandReadings(row)) }}. </span><PlanSentence :sentence="poolSentence(row.pool, now)" /></p>
       </li>
     </ul>
-    <footer v-if="rows.some(r => r.gauge)" class="band-foot"><CapacityLegend /></footer>
+    <footer v-if="rows.some(r => r.gauge)" class="band-foot"><CapacityLegend :yours="rows.some(r => (r.gauge?.yours ?? 0) >= 0.5)" /></footer>
   </section>
 </template>
 

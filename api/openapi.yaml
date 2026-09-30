@@ -4433,7 +4433,7 @@ paths:
     post:
       operationId: previewAccountCapacity
       summary: Capacity paced with a draft schedule, without saving it
-      description: Person account.read permission. Returns the same projection as listAccountCapacity, paced on the schedule each account would follow after saving the draft as the person's schedule with carry_overrides (the same server rule) - deliberate pool or account schedules stay, entries that only carry Sprint/Hold follow the draft, ended overrides fall away. Nothing is stored. Rate limited per person, bounded in concurrency, time and integration work.
+      description: Person account.read permission. Returns the same projection as listAccountCapacity, paced on the schedule each account would follow after saving the draft as the person's schedule with carry_overrides (the same server rule) - deliberate pool or account schedules stay, entries that only carry Sprint/Hold or their own Keep for you follow the draft, ended overrides fall away. A drafted Away (override away with override_until) previews until its date; drafted Sprint and Hold are ignored. pool_reserves drafts each pool's own Keep for you. Nothing is stored. Rate limited per person, bounded in concurrency, time and integration work.
       requestBody:
         required: true
         content:
@@ -4444,6 +4444,18 @@ paths:
               required: [schedule]
               properties:
                 schedule: {$ref: '#/components/schemas/CapacitySchedule'}
+                pool_reserves:
+                  type: array
+                  maxItems: 8
+                  description: Drafted Keep for you per pool (AEON-375), at most one entry per pool. An empty reserve drops the pool's own choice so it follows the person's.
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [pool, reserve]
+                    properties:
+                      pool: {type: string, enum: [codex, claude, pi, cursor, grok]}
+                      reserve: {type: string, enum: ["", auto, fixed, off]}
+                      reserve_percent: {type: number, minimum: 10, maximum: 80, multipleOf: 5, description: Required with fixed; omitted otherwise.}
       responses:
         '200': {description: Capacity, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountCapacity'}}}}}
         '400': {description: Invalid schedule}
@@ -4461,7 +4473,7 @@ paths:
     put:
       operationId: putCapacitySchedule
       summary: Set current person's default, pool or account schedule
-      description: Person account.manage permission required. Pacing is enforced for measured windows using the pairing owner schedule (for unpaired accounts, the first person to save an account schedule establishes its schedule owner). Account override wins over pool (harness), then user default, then built-in default. Times are local to the explicit IANA timezone; week is Monday first. Shifts and hourly blocks replace work hours while nights is enabled. Null schedule removes an override.
+      description: Person account.manage permission required. Pacing is enforced for measured windows using the pairing owner schedule (for unpaired accounts, the first person to save an account schedule establishes its schedule owner). Account override wins over pool (harness), then user default, then built-in default. Keep for you (reserve) resolves separately - the most specific explicit reserve wins, Auto when none is set - so a pool or account entry without one follows the person's. Away is set on the user scope only (400 elsewhere), must end within a year and reaches every pool without an override of its own in force. Hold may carry override_until within 31 days (until tomorrow's hours, for 2 hours); without it Hold lasts until resumed. Times are local to the explicit IANA timezone; week is Monday first. Shifts and hourly blocks replace work hours while nights is enabled. Null schedule removes an override.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CapacityScheduleOverride'}}}}
       responses:
         '204': {description: Schedule saved}
@@ -9548,7 +9560,7 @@ components:
         until: {type: string, format: date-time}
         read_at: {type: string, format: date-time}
         timezone: {type: string}
-        run_now_allowed: {type: boolean, description: Only schedule or reserve waits can be skipped; all safety fences still apply.}
+        run_now_allowed: {type: boolean, description: Only schedule or reserve waits can be skipped; all safety fences still apply. A reserve wait means only Keep for you stands in the way; until is when the reserve is gone.}
     RunCreate:
       type: object
       required: [agent_principal_id, model_profile_id]
@@ -10418,8 +10430,10 @@ components:
       required: [timezone, week, off_days, nights, model, night, shifts, blocks]
       properties:
         timezone: {type: string, description: IANA timezone; defaults to the person profile timezone}
-        override_until: {type: string, format: date-time, description: Sprint expires at this reset; populated by the server from the earliest current reset in scope.}
-        override: {type: string, enum: ["", sprint, hold], description: Sprint uses remaining quota until reset; Hold prevents measured-capacity routing. Manual windows remain explicit overrides.}
+        override_until: {type: string, format: date-time, description: 'Sprint expires at this reset, populated by the server from the earliest current reset in scope. Away requires it (its date); Hold may carry it (a dated hold). The override ends at this instant.'}
+        override: {type: string, enum: ["", sprint, hold, away], description: 'Sprint uses remaining quota until reset; Hold prevents measured-capacity routing; Away (user scope) is a Sprint bounded by override_until, across resets, with no reserve. Manual windows remain explicit overrides.'}
+        reserve: {type: string, enum: ["", auto, fixed, off], description: 'Keep for you (AEON-375): how much of every window agents leave the person while they work, shrinking as a reset comes close (R_eff = R x min(1, H_you/H_ref)). Omitted or empty inherits the next scope up; on the user scope it means auto (30% until learned). off reproduces release 11 pacing.'}
+        reserve_percent: {type: number, minimum: 10, maximum: 80, multipleOf: 5, description: The fixed reserve level R; present only with reserve fixed.}
         week:
           type: array
           minItems: 7
@@ -10479,7 +10493,7 @@ components:
         usable_hours: {type: number}
         percent_per_hour: {type: number}
         suggested_today_percent: {type: number, description: Remaining share of the current schedule day}
-        available_now_percent: {type: number, description: Enforced remaining allowance in the active schedule band; zero outside work bands unless Sprint is active.}
+        available_now_percent: {type: number, description: 'Enforced remaining allowance in the active schedule band: min(paced share, remaining - reserve_effective_percent). Zero outside work bands unless Sprint or Away is active.'}
         budget_percent: {type: number}
         used_today_percent: {type: number, description: Observed usage since the schedule boundary when usage_today_known is true; otherwise since the first sample available in the period}
         tonight_percent: {type: number}
@@ -10489,6 +10503,9 @@ components:
         allow_off: {type: boolean}
         unused: {type: boolean}
         ahead: {type: boolean}
+        reserve_percent: {type: number, description: 'Keep for you level R for this window: auto (30 until learned), the fixed share, or 0 when off.'}
+        reserve_effective_percent: {type: number, description: 'R_eff now: what agents leave the person of this window. 0 under Sprint, Away and Run now once, and when no work hours remain before the reset.'}
+        reserve_until: {type: string, format: date-time, description: 'End of the person''s last work band before the reset, after which the reserve is gone. Absent when reserve_effective_percent is 0.'}
     AccountCapacity:
       type: object
       required: [account_id, schedule, windows]
@@ -10497,6 +10514,7 @@ components:
         ongoing_use_approved: {type: boolean, description: True for unpaired accounts or a separately approved connected pairing; readings never change this approval}
         probe_failure: {type: string, enum: [auth_failed, unavailable], description: 'Why the last probe failed; absent after a successful probe. Only auth_failed means the account needs a new sign-in.'}
         limiting_reset: {type: string, format: date-time, description: 'Earliest reset of the account''s current measured windows (including 5-hour windows); a Sprint in scope ends at the earliest of these.'}
+        awaiting_reading: {type: boolean, description: 'True after a recovery run cleared a denial and no later reading has arrived. Current windows are omitted until the next run measures capacity.'}
         schedule: {$ref: '#/components/schemas/CapacitySchedule'}
         windows:
           type: array
