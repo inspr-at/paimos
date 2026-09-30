@@ -1036,11 +1036,18 @@ on macOS to verify that the negative ancestry regressions catch removed guards.
 
 Claude and Codex are identified from the kernel-observed running image,
 so an exec wrapper or a vendor auto-update does not require re-pairing. On macOS,
-the daemon verifies the running PID against Apple's certificate chain and the
-built-in vendor Team ID and CLI signing identifier on preview, confirmation and
-every poll. A vendor file renamed over a foreign running binary cannot confer
-that identity. Cursor attach is refused on macOS until a signed cursor-agent
-CLI exists; Cursor.app's signature is not a harness identity.
+the daemon verifies the running PID against Apple's certificate chain, the
+Developer ID Application markers, and the built-in vendor Team ID and CLI
+signing identifier on preview, confirmation and every poll. A vendor file
+renamed over a foreign running binary cannot confer that identity. A Claude
+process whose environment contains a non-empty BUN_OPTIONS value is refused
+(`harness_identity_unsupported`): the signed executable can run other
+JavaScript from that variable and still keep the vendor signature. Unset it
+and attach again. When the kernel omits the environment, Claude is refused
+with the same code, because a missing environment is not evidence that the
+variable is unset. Codex's signed executable ignores the variable. Cursor
+attach is refused on macOS until a signed cursor-agent CLI exists;
+Cursor.app's signature is not a harness identity.
 Legacy Claude and Codex wrapper pairings work after upgrading and
 restarting agentd. Unsigned Claude and Codex images are refused on macOS,
 including when run through Rosetta. Linux uses a local installation

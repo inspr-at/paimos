@@ -297,6 +297,26 @@ func TestAttachCursorHasNoMacOSVendorIdentity(t *testing.T) {
 	}
 }
 
+func TestAttachClaudeBunOptionsIsUnsupported(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		hint string
+	}{
+		{errAttachRuntimeDenied, "This Claude process was started with BUN_OPTIONS, which the signed runtime can use to run other JavaScript. Start Claude with BUN_OPTIONS unset, then attach again."},
+		{errAttachRuntimeUnobservable, "This Claude process cannot be attached because macOS hid its environment, and the signed executable can run JavaScript from BUN_OPTIONS."},
+	} {
+		m, peer, _, req, _ := attachIdentityFixture(t, Claude)
+		m.signature = func(context.Context, string) (attachSignature, error) {
+			return attachSignature{}, tc.err
+		}
+		_, err := m.handle(t.Context(), peer, req)
+		var diagnostic *AttachLocalError
+		if !errors.As(err, &diagnostic) || diagnostic.Code != "harness_identity_unsupported" || diagnostic.Hint != tc.hint || len(m.sessions) != 0 {
+			t.Fatal("Claude runtime refusal lost its fixed unsupported diagnostic", err)
+		}
+	}
+}
+
 func TestAttachVerificationDoesNotHoldManagerLockOrResurrectSessions(t *testing.T) {
 	for _, operation := range []string{"preview", "confirm", "poll"} {
 		for _, removal := range []string{"detach", "close"} {

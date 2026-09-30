@@ -64,6 +64,16 @@ func TestAttachConflictDiagnosticIsSurfacedAndBounded(t *testing.T) {
 	if !errors.As(err, &detail) || detail.Code != "harness_identity_unsupported" || detail.Hint != "Cursor attach is unavailable on macOS until a signed cursor-agent CLI is available. Cursor.app cannot identify a Cursor harness." {
 		t.Fatal("unsupported harness diagnostic hidden", err)
 	}
+	body.Store(`{"code":"harness_identity_unsupported","hint":"This Claude process was started with BUN_OPTIONS, which the signed runtime can use to run other JavaScript. Start Claude with BUN_OPTIONS unset, then attach again."}`)
+	_, err = client.Attach(t.Context(), agentd.AttachLocalRequest{Operation: "preview"})
+	if !errors.As(err, &detail) || detail.Code != "harness_identity_unsupported" || detail.Hint != "This Claude process was started with BUN_OPTIONS, which the signed runtime can use to run other JavaScript. Start Claude with BUN_OPTIONS unset, then attach again." {
+		t.Fatal("BUN_OPTIONS diagnostic hidden", err)
+	}
+	body.Store(`{"code":"harness_identity_unsupported","hint":"This Claude process cannot be attached because macOS hid its environment, and the signed executable can run JavaScript from BUN_OPTIONS."}`)
+	_, err = client.Attach(t.Context(), agentd.AttachLocalRequest{Operation: "preview"})
+	if !errors.As(err, &detail) || detail.Code != "harness_identity_unsupported" || detail.Hint != "This Claude process cannot be attached because macOS hid its environment, and the signed executable can run JavaScript from BUN_OPTIONS." {
+		t.Fatal("hidden Claude environment diagnostic hidden", err)
+	}
 	for _, bad := range []string{strings.Repeat("x", 1025), `{"code":"harness_identity_mismatch","hint":"\u001b[31munsafe"}`, `{"code":"unknown","hint":"unreviewed"}`} {
 		body.Store(bad)
 		if _, err = client.Attach(t.Context(), agentd.AttachLocalRequest{}); err == nil || err.Error() != "local lifecycle request rejected" {

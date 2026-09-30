@@ -20,12 +20,33 @@ import (
 )
 
 func TestAttachCodesignRequiresValidAppleSignature(t *testing.T) {
-	for _, attack := range []string{"vendor", "unsigned", "foreign", "ad-hoc", "missing-team", "invalid-signature", "self-signed", "tool-error", "duplicate-team", "desktop-identifier", "duplicate-identifier", "cursor-app", "display-timeout", "verify-timeout"} {
+	for _, attack := range []string{"vendor", "unsigned", "foreign", "ad-hoc", "missing-team", "invalid-signature", "self-signed", "tool-error", "duplicate-team", "desktop-identifier", "duplicate-identifier", "cursor-app", "display-timeout", "verify-timeout", "bun-options", "benign-runtime-env", "codex-bun-options", "codex-env-hidden", "env-unobservable", "procargs-unavailable"} {
 		t.Run(attack, func(t *testing.T) {
 			calls := 0
+			envReads := 0
 			harness := Claude
-			if attack == "foreign" {
+			if attack == "foreign" || attack == "codex-bun-options" || attack == "codex-env-hidden" {
 				harness = Codex
+			}
+			readEnv := func(got string) (attachObservedEnv, error) {
+				envReads++
+				if got != "123" {
+					t.Fatal("procargs target was not the running PID")
+				}
+				switch attack {
+				case "bun-options":
+					return attachObservedEnv{entries: []string{"PATH=/usr/bin:/bin", "BUN_OPTIONS=--preload /fixture/marker.cjs"}, visible: true}, nil
+				case "codex-bun-options":
+					return attachObservedEnv{entries: []string{"BUN_OPTIONS=--preload /fixture/marker.cjs", "NODE_OPTIONS=--require /fixture/marker.cjs"}, visible: true}, nil
+				case "benign-runtime-env":
+					return attachObservedEnv{entries: []string{"BUN_OPTIONS=", "BUN_OPTIONS=   ", "NODE_OPTIONS=--require /fixture/marker.cjs", "FOO=BUN_OPTIONS=--preload /fixture/marker.cjs", "BUN_INSPECT_PRELOAD=/fixture/marker.cjs"}, visible: true}, nil
+				case "env-unobservable", "codex-env-hidden":
+					return attachObservedEnv{}, nil
+				case "procargs-unavailable":
+					return attachObservedEnv{}, errors.New("sysctl unavailable")
+				default:
+					return attachObservedEnv{entries: []string{"PATH=/usr/bin:/bin"}, visible: true}, nil
+				}
 			}
 			signature, err := inspectAttachSignatureWith(t.Context(), "123", func(_ context.Context, args ...string) (string, error) {
 				calls++
@@ -55,9 +76,9 @@ func TestAttachCodesignRequiresValidAppleSignature(t *testing.T) {
 					}
 					return "TeamIdentifier=" + attachVendorTeam(harness) + "\nIdentifier=" + attachVendorIdentifier(harness) + "\n", nil
 				}
-				requirement := `-R=anchor apple generic and certificate leaf[subject.OU] = "Q6L2SF6YDW" and identifier "com.anthropic.claude-code"`
+				requirement := `-R=anchor apple generic and certificate leaf[subject.OU] = "Q6L2SF6YDW" and identifier "com.anthropic.claude-code" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate 1[field.1.2.840.113635.100.6.2.6] exists`
 				if harness == Codex {
-					requirement = `-R=anchor apple generic and certificate leaf[subject.OU] = "2DC432GLL2" and identifier "codex"`
+					requirement = `-R=anchor apple generic and certificate leaf[subject.OU] = "2DC432GLL2" and identifier "codex" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate 1[field.1.2.840.113635.100.6.2.6] exists`
 				}
 				if !reflect.DeepEqual(args, []string{"--verify", "--strict", "-v", requirement, "123"}) {
 					t.Fatal("dynamic/static PID verification with pinned team and identifier removed", args)
@@ -69,22 +90,34 @@ func TestAttachCodesignRequiresValidAppleSignature(t *testing.T) {
 					return "", context.DeadlineExceeded
 				}
 				return "", nil
-			})
+			}, readEnv)
 			switch attack {
-			case "vendor", "foreign":
-				if err != nil || !signature.Signed || signature.TeamID != attachVendorTeam(harness) || signature.Identifier != attachVendorIdentifier(harness) || calls != 2 {
+			case "vendor", "foreign", "benign-runtime-env", "codex-bun-options", "codex-env-hidden":
+				if err != nil || !signature.Signed || signature.TeamID != attachVendorTeam(harness) || signature.Identifier != attachVendorIdentifier(harness) || calls != 2 || envReads != 1 {
 					t.Fatal("vendor not validated", err)
 				}
+			case "bun-options":
+				if !errors.Is(err, errAttachRuntimeDenied) || signature.Signed || calls != 2 || envReads != 1 {
+					t.Fatal("injected BUN_OPTIONS accepted", err)
+				}
+			case "env-unobservable":
+				if !errors.Is(err, errAttachRuntimeUnobservable) || signature.Signed || calls != 2 || envReads != 1 {
+					t.Fatal("hidden Claude environment accepted", err)
+				}
 			case "unsigned":
-				if err != nil || signature.Signed || calls != 1 {
+				if err != nil || signature.Signed || calls != 1 || envReads != 0 {
 					t.Fatal("unsigned image misidentified", err)
 				}
 			case "display-timeout", "verify-timeout":
-				if !errors.Is(err, errAttachSignatureUnavailable) {
+				if !errors.Is(err, errAttachSignatureUnavailable) || envReads != 0 {
 					t.Fatal("timeout misidentified", err)
 				}
+			case "procargs-unavailable":
+				if !errors.Is(err, errAttachSignatureUnavailable) || envReads != 1 || signature.Signed {
+					t.Fatal("unreadable procargs accepted", err)
+				}
 			default:
-				if err == nil {
+				if err == nil || envReads != 0 {
 					t.Fatal("unverified signature accepted")
 				}
 			}
@@ -97,6 +130,9 @@ func TestAttachCodesignRejectsPathAndNonPIDTargets(t *testing.T) {
 		if _, err := inspectAttachSignatureWith(t.Context(), target, func(context.Context, ...string) (string, error) {
 			t.Fatal("non-PID target reached codesign")
 			return "", nil
+		}, func(string) (attachObservedEnv, error) {
+			t.Fatal("non-PID target reached procargs")
+			return attachObservedEnv{}, nil
 		}); err == nil {
 			t.Fatal("invalid target accepted")
 		}
@@ -149,6 +185,9 @@ func TestAttachRealInstalledVendorSignatures(t *testing.T) {
 				got, err := inspectAttachSignature(t.Context(), fields[0])
 				after, observeErr := observeAttachProcess(pid)
 				if observeErr != nil || after.Process != before.Process {
+					continue
+				}
+				if errors.Is(err, errAttachRuntimeDenied) || errors.Is(err, errAttachRuntimeUnobservable) {
 					continue
 				}
 				if err != nil || !got.Signed || got.TeamID != attachVendorTeam(harness) || got.Identifier != attachVendorIdentifier(harness) {
@@ -221,7 +260,7 @@ func TestAttachRealRenameOverRunningImage(t *testing.T) {
 		t.Fatal("rename-over did not preserve process identity while changing disk inode", err)
 	}
 	// Prove the path alone now passes the exact vendor requirement.
-	requirement := `-R=anchor apple generic and certificate leaf[subject.OU] = "Q6L2SF6YDW" and identifier "com.anthropic.claude-code"`
+	requirement := `-R=anchor apple generic and certificate leaf[subject.OU] = "Q6L2SF6YDW" and identifier "com.anthropic.claude-code" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate 1[field.1.2.840.113635.100.6.2.6] exists`
 	if _, err = runAttachCodesign(t.Context(), "--verify", "--strict", "-v", requirement, image); err != nil {
 		t.Fatal("replacement was not a valid vendor file", err)
 	}
