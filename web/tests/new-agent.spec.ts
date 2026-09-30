@@ -22,7 +22,7 @@ for (const width of [390, 1600]) for (const colorScheme of ['light', 'dark'] as 
     await mockAccess(page, world)
     await page.goto('/settings/access/agents')
     await expect(page.locator('.agents-tab')).toBeVisible()
-    await expect(page.getByRole('link', { name: 'Connect a computer (the agent daemon, no key to handle)' })).toHaveAttribute('href', '/agents/register-agent')
+    await expect(page.getByRole('link', { name: 'Connect your machine (the agent daemon, no key to handle)' })).toHaveAttribute('href', '/agents/register-agent')
     await expect(page.locator('.agents-tab')).toContainText('New agent (a key for a CLI or script)')
     await shot(page, `${width}-${colorScheme}-empty`)
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
@@ -97,6 +97,22 @@ test('selected projects, clipboard rejection and duplicate-name recovery', async
   await expect(page).toHaveURL('/settings/access/agents')
   await page.reload()
   await expect(page.getByLabel('New agent key')).toHaveCount(0)
+})
+
+for (const who of ['member', 'viewer', 'agent'] as const) test(`empty agents hint stays hidden for ${who}`, async ({ page }) => {
+  await mockWork(page, fixtures())
+  const world = accessWorld({ role: who === 'agent' ? 'owner' : who })
+  world.agents = []
+  world.keys = []
+  await mockAccess(page, world)
+  if (who === 'agent') await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: ME, name: 'Agent', kind: 'agent' }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/settings/access/agents')
+  await expect(page.locator('.agents-tab')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Connect your machine (the agent daemon, no key to handle)' })).toBeVisible()
+  await expect(page.locator('.agents-tab')).not.toContainText('New agent (a key for a CLI or script)')
+  await expect(page.getByRole('button', { name: 'New agent', exact: true })).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
 
 for (const who of ['member', 'guest', 'agent'] as const) test(`${who} has no new-agent action`, async ({ page }) => {

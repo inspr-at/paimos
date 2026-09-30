@@ -13,12 +13,16 @@ const guest = ['authz.read', 'profile.read', 'kinds.read', 'nodes.read', 'relati
 
 export function mockGuestPermissions(projectId?: string, boundProjects: string[] = []) {
   const bound = !!projectId && boundProjects.includes(projectId)
-  return { workspace: { role: null, permissions: [] }, project: projectId ? { id: projectId, role: bound ? { id: 'role-guest', key: 'guest', name: 'Guest' } : null, permissions: bound ? guest : [] } : null }
+  const permissions = bound ? [...guest] : []
+  return { workspace: { role: null, permissions: [] }, project: projectId ? { id: projectId, role: bound ? { id: 'role-guest', key: 'guest', name: 'Guest' } : null, permissions } : null }
 }
 
+// Each call returns its own permission list. Callers add grants with push();
+// handing out the module arrays made a later spec see the previous spec's grants.
 export function mockEffectivePermissions(role: MockRole, projectId?: string) {
   if (role === 'guest') return mockGuestPermissions(projectId, projectId ? [projectId] : [])
-  const permissions = role === 'admin' ? admin : role === 'member' ? member : role === 'customer' ? ['authz.read', 'profile.read', 'profile.write', 'quotes.portal_read', 'quotes.portal_accept'] : common
+  const source = role === 'admin' ? admin : role === 'member' ? member : role === 'customer' ? ['authz.read', 'profile.read', 'profile.write', 'quotes.portal_read', 'quotes.portal_accept'] : common
+  const permissions = [...source]
   const ref = { id: `role-${role}`, key: role, name: role[0].toUpperCase() + role.slice(1) }
   // Copies: a test that adds a permission must not grant it to later tests in the worker.
   return { workspace: { role: ref, permissions: [...permissions] }, project: projectId ? { id: projectId, role: null, permissions: [...permissions] } : null }

@@ -151,9 +151,34 @@ func TestScheduleDSTAndValidation(t *testing.T) {
 		t.Fatal(e)
 	}
 	for _, v := range []float64{-1, 101, math.NaN(), math.Inf(1)} {
-		if _, e := Pace(v, time.Now(), time.Now().Add(time.Hour), s); e == nil {
+		now := instant("2026-09-28T14:00:00Z")
+		if _, e := Pace(v, now, now.Add(time.Hour), s); e == nil {
 			t.Fatal("bad remaining accepted")
 		}
+	}
+}
+
+func TestPacingAtNightAndDay(t *testing.T) {
+	for _, clock := range []string{"2026-09-29T03:00:00Z", "2026-09-29T14:00:00Z", "2026-10-04T03:00:00Z", "2026-10-04T14:00:00Z"} {
+		t.Run(clock, func(t *testing.T) {
+			now := instant(clock)
+			in := PlanInput{Now: now, WindowStart: now.Add(-time.Hour), Reset: now.Add(time.Hour), Remaining: 80}
+			for _, override := range []string{"", "sprint", "hold"} {
+				t.Run("override="+override, func(t *testing.T) {
+					s := DefaultSchedule()
+					s.Override = override
+					p, err := Plan(in, s)
+					if err != nil {
+						t.Fatal(err)
+					}
+					want := 0.0
+					if override == "sprint" || override == "" && now.Hour() == 14 {
+						want = 80
+					}
+					near(t, p.AvailableNowPercent, want)
+				})
+			}
+		})
 	}
 }
 

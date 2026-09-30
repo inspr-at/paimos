@@ -263,7 +263,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys</RouterLink>
         </div>
         <AttachApproval />
-        <RouterLink v-if="showConnect" class="btn connect" to="/agents/register-agent"><AppIcon name="monitor" :size="15" />Connect computer</RouterLink>
+        <RouterLink v-if="showConnect" class="btn connect" to="/agents/register-agent"><AppIcon name="monitor" :size="15" />Connect your machine</RouterLink>
         <button v-if="canStart" type="button" class="btn primary start-agent" @click="startDialog?.open()"><AppIcon name="plus" :size="15" />Start agent</button>
       </div>
     </header>
@@ -351,6 +351,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
   .start-agent { grid-area: start; }
   .connect { grid-area: connect; }
   .start-agent, .connect { min-height: 44px; justify-content: center; }
+  .connect { height: auto; line-height: 1.2; white-space: normal; padding-top: 8px; padding-bottom: 8px; }
   .head-links { grid-area: links; margin: 0 0 0 -10px; }
   .context-link { height: 36px; }
   .freshness { order: 9; margin: 0 0 0 auto; height: 36px; padding-right: 0; }

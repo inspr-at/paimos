@@ -187,7 +187,8 @@ let stick = true, lastTop = 0, entered = false, loaded = false
 let touchY: number | undefined
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 const markerPending = () => holdingMarker() || awaitingServerPlacement
-const upwardKey = (key: string) => key === 'ArrowUp' || key === 'PageUp' || key === 'Home'
+// Shift+Space pages up, the same as PageUp. Space alone pages down.
+const upwardKey = (event: KeyboardEvent) => event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home' || (event.key === ' ' && event.shiftKey)
 // A thread that already fits has scrollTop 0 and produces no scroll event, so
 // nothing would pin it again. An upward gesture unpins only when it can scroll.
 const canScrollUp = () => (scroller.value?.scrollTop ?? 0) > 0
@@ -231,7 +232,7 @@ function onScrollKey(event: KeyboardEvent) {
   if (target instanceof HTMLElement && target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return
   const pending = markerPending()
   if (!claimReader()) return
-  if ((upwardKey(event.key) && canScrollUp()) || pending) stick = false
+  if ((upwardKey(event) && canScrollUp()) || pending) stick = false
 }
 function readerMoved() {
   // Also cover scrollbar/accessibility/programmatic scrolling whose scroll

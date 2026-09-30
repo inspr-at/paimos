@@ -9,7 +9,8 @@ import {
   formatVerification, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
   pairingPermissions, planApproval, planLookup, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
-  peekPairingCode, presentPublicGuide, rememberPairingCode, takePairingCode,
+  peekPairingCode, presentPublicGuide, publicGuideSections, rememberPairingCode, takePairingCode,
+  chooseInstallMethod, homebrewPendingNote, installMethods, readPairingInstallMethod, writePairingInstallMethod,
   isAddHarness, pairingScopeKey, setHarnessAccount,
   addHarnessTargetProblem, applyComputerListRefresh, discardPairingReads, formatAllowanceMoment,
   pairingReadGeneration, unsupportedVerification, approvePairedAccounts,
@@ -460,6 +461,8 @@ test('the public guide uses the server address and stores only a human code', ()
   const presented = presentPublicGuide(published)
   const lead = [...presented.steps, presented.address, presented.note].join('\n')
   assert.match(presented.address, /https:\/\/aeon\.example\/agents\/register-agent/)
+  assert.equal(presented.steps.some(step => step.includes('Open this address')), false)
+  assert.match(publicGuideSections(published)[0]!.paragraphs.join('\n'), /Share this address: https:\/\/aeon\.example\/agents\/register-agent/)
   assert.match(presented.setupCommand, /pair --url 'https:\/\/aeon\.example'/)
   assert.match(presented.installNote, /not published a verified installer/)
   assert.equal(lead.includes(presented.setupCommand), false)
@@ -704,12 +707,68 @@ test('account approval stops between accounts when the signed-in scope changes',
 })
 
 test('Homebrew commands are additive, bounded and published by this instance', async () => {
-  const command = "brew install inspr-at/tap/aeon-agentd\naeon-agentd pair --url 'https://other.example'"
+  const command = "brew install inspr-at/tap/aeon-agentd\nenv \"$(brew --prefix)/bin/aeon-agentd\" pair --url 'https://other.example'"
   globalThis.fetch = async () => jsonResponse(guidePayload({ homebrew_command: command }))
   assert.equal(presentPublicGuide(await getPairingGuide()).homebrewCommand, command)
+  assert.equal(presentPublicGuide(await getPairingGuide()).homebrewState, 'legacy')
   assert.equal(presentPublicGuide(guidePayload()).homebrewCommand, '')
   for (const bad of [[], 'x'.repeat(4001)]) {
     globalThis.fetch = async () => jsonResponse(guidePayload({ homebrew_command: bad }))
     await assert.rejects(getPairingGuide)
   }
+  globalThis.fetch = async () => jsonResponse(guidePayload({ homebrew_formula_current: 'yes' }))
+  await assert.rejects(getPairingGuide(), PairingError)
+})
+
+test('Homebrew is shown only when the formula matches, and the last install choice is reused', () => {
+  const command = `brew install inspr-at/tap/aeon-agentd\nenv "$(brew --prefix)/bin/aeon-agentd" pair --url 'https://aeon.example'`
+  const target = {
+    platform: 'darwin' as const, arch: 'arm64' as const, service: 'launchd-user' as const, qualification: 'candidate',
+    artifact_url: 'https://example.com/darwin', checksums_url: 'https://example.com/SHA256SUMS', command: 'install-darwin-only',
+  }
+  const current = presentPublicGuide(guidePayload({ homebrew_command: command, homebrew_formula_current: true }))
+  assert.equal(current.homebrewState, 'current')
+  assert.equal(current.homebrewCommand, command)
+  assert.equal(current.homebrewPending, '')
+  assert.deepEqual(installMethods(current), ['homebrew', 'manual'])
+
+  const pending = presentPublicGuide(guidePayload({
+    homebrew_command: command, homebrew_formula_current: false, version: '260929120000.0.0',
+    install_available: true, install_targets: [target],
+  }))
+  assert.equal(pending.homebrewCommand, '')
+  assert.equal(pending.homebrewPending, 'Homebrew formula for 260929120000.0.0 is on its way; use the direct download.')
+  assert.deepEqual(installMethods(pending), ['manual'])
+  assert.equal(homebrewPendingNote(guidePayload({ homebrew_formula_current: false, version: '260929120000.0.0' })), 'Homebrew formula for 260929120000.0.0 is on its way.')
+
+  const unknown = presentPublicGuide(guidePayload({
+    homebrew_command: command, homebrew_formula_current: null, install_available: true, install_targets: [target],
+  }))
+  assert.equal(unknown.homebrewState, 'unknown')
+  assert.equal(unknown.homebrewCommand, '')
+  assert.equal(unknown.homebrewPending, '')
+  assert.deepEqual(installMethods(unknown), ['manual'])
+
+  const managed = {
+    command: 'env "$HOME/.nix-profile/bin/aeon-agentd" pair --url \'https://aeon.example\'',
+    service_option: 'services.aeon.enable', module_url: 'https://example.test/module.nix', service_note: 'Needs a paired-service update.',
+    platform_note: 'Service module: macOS only.',
+  }
+  const nix = presentPublicGuide(guidePayload({ managed_setup: managed }))
+  assert.equal(nix.nixLabel, 'macOS · Nix')
+  assert.equal(nix.nixHint, 'Nix or Home Manager on this Mac? Choose macOS · Nix.')
+  assert.equal(presentPublicGuide(guidePayload({ managed_setup: { ...managed, platform_note: 'Service module: Linux only.' } })).nixLabel, 'Linux · Nix')
+  assert.equal(presentPublicGuide(guidePayload({ managed_setup: { ...managed, platform_note: 'Service module: macOS and Linux.' } })).nixLabel, 'Nix / Home Manager')
+
+  const memory = new Map<string, string>()
+  const storage = {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => { memory.set(key, value) },
+  }
+  assert.equal(readPairingInstallMethod(storage), '')
+  writePairingInstallMethod(storage, 'nix')
+  assert.equal(chooseInstallMethod(['homebrew', 'manual', 'nix'], readPairingInstallMethod(storage)), 'nix')
+  assert.equal(chooseInstallMethod(['manual', 'nix'], 'homebrew'), 'manual')
+  writePairingInstallMethod({ setItem() { throw new Error('blocked') } }, 'nix')
+  assert.equal(readPairingInstallMethod({ getItem() { throw new Error('blocked') } }), '')
 })

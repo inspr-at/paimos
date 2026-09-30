@@ -59,7 +59,7 @@ func TestIssueEstimateRejectsConcurrentPersonEstimate(t *testing.T) {
 			t.Setenv("AEON_URL", srv.URL)
 			t.Setenv("AEON_API_KEY", testKey)
 			code, out, stderr := runCLI(append([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing")}, args...), "")
-			if code != 1 || !strings.Contains(stderr, "api 412: node has changed") || out != "" {
+			if code != 1 || !strings.Contains(stderr, "api 412: node has changed") || !strings.Contains(stderr, "nothing was written") || out != "" {
 				t.Fatalf("stale write: exit %d, stdout %q, stderr %q", code, out, stderr)
 			}
 			if writes != 1 || !rejected || string(ticket.Fields) != string(personFields) {
@@ -105,8 +105,8 @@ func TestEstimateCLIFlagsAndPlan(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(map[string]any{"items": []apiNode{ticket, existing}})
 		case r.Method == "PATCH" || r.Method == "POST":
-			if r.Header.Get("X-Aeon-Client") != "cli" {
-				t.Error("CLI client header missing")
+			if r.Header.Get("X-Aeon-Client") != "" {
+				t.Error("CLI must not ask the API to rephrase warnings")
 			}
 			if r.Method == "PATCH" && r.Header.Get("If-Unmodified-Since") != revision {
 				t.Error("missing revision")
@@ -169,5 +169,81 @@ func TestEstimateCLIFlagsAndPlan(t *testing.T) {
 	code, _, err = run(append(base, "--apply"), plan)
 	if code == 0 || !strings.Contains(err, "stopped at AEON-1") {
 		t.Fatal("conflict accepted", err)
+	}
+}
+
+func TestIssueUpdateRefusesMissingRevision(t *testing.T) {
+	isolate(t)
+	ticket := apiNode{ID: transcriptEntryID, Key: "AEON-1", KindID: "ticket-kind", Fields: json.RawMessage(`{"priority":"low"}`)}
+	writes := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
+			json.NewEncoder(w).Encode(kindPage{Items: []apiKind{{ID: "ticket-kind", Slug: "ticket"}}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
+			json.NewEncoder(w).Encode(nodePage{Items: []apiNode{ticket}})
+		case r.Method == http.MethodPatch:
+			writes++
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("AEON_URL", srv.URL)
+	t.Setenv("AEON_API_KEY", testKey)
+	for _, args := range [][]string{
+		{"issue", "update", "AEON-1", "--priority", "high"},
+		{"issue", "estimate", "AEON-1", "--hours", "2h"},
+	} {
+		writes = 0
+		code, out, stderr := runCLI(append([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing")}, args...), "")
+		if code == 0 || writes != 0 || out != "" || !strings.Contains(stderr, "no revision timestamp") || !strings.Contains(stderr, "nothing was written") {
+			t.Fatalf("%v: exit %d writes %d stdout %q stderr %q", args, code, writes, out, stderr)
+		}
+	}
+}
+
+func TestIssueCreateAddsEstimateHint(t *testing.T) {
+	isolate(t)
+	const warning = "add an agent-hours estimate in fields.estimate_hours (for example 2 or 0.5)"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Aeon-Client") != "" {
+			t.Error("CLI must not ask the API to rephrase warnings")
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
+			json.NewEncoder(w).Encode(kindPage{Items: []apiKind{{ID: "project-kind", Slug: "project"}, {ID: "ticket-kind", Slug: "ticket"}}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
+			json.NewEncoder(w).Encode(nodePage{Items: []apiNode{{ID: transcriptProjectID, Key: "PRJ-1", KindID: "project-kind", Fields: json.RawMessage(`{"project_key":"AEON"}`)}}})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/nodes":
+			json.NewEncoder(w).Encode(apiNode{ID: transcriptEntryID, Key: "AEON-9", KindID: "ticket-kind", Title: "Draft", State: "open", Warnings: []string{warning}})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("AEON_URL", srv.URL)
+	t.Setenv("AEON_API_KEY", testKey)
+	run := func(args []string) (int, string, string) {
+		return runCLI(append([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing")}, args...), "")
+	}
+	code, out, stderr := run([]string{"issue", "create", "--project", "AEON", "--title", "Draft"})
+	if code != 0 || !strings.Contains(out, "AEON-9") || !strings.Contains(stderr, warning) || !strings.Contains(stderr, "--estimate") {
+		t.Fatalf("text create: %d %q %q", code, out, stderr)
+	}
+	code, out, stderr = run([]string{"--json", "issue", "create", "--project", "AEON", "--title", "Draft"})
+	if code != 0 || !strings.Contains(stderr, "--estimate") {
+		t.Fatalf("json create stderr: %d %q", code, stderr)
+	}
+	var view issueView
+	if err := json.Unmarshal([]byte(out), &view); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(view.Warnings, "\n")
+	if !strings.Contains(joined, "fields.estimate_hours") || !strings.Contains(joined, "--estimate") {
+		t.Fatalf("json warnings: %v", view.Warnings)
 	}
 }

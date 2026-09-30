@@ -56,6 +56,11 @@ function gaugeLabel(row: AccountRow) {
 /** What the 5-hour window keeps for you now, when it keeps something. */
 const fiveKept = (w: CapacityWindow) => { const k = Math.min(w.remaining_percent, w.pacing.reserve_effective_percent ?? 0); return k >= 0.5 ? pct(k) : '' }
 const anyKept = computed(() => pools.value.some(p => p.rows.some(r => (planOf(r)?.reserve ?? 0) >= 0.5)))
+function fiveLine(row: AccountRow) {
+  if (!row.five) return ''
+  const n = Math.round(modeOf(row) === 'used' ? 100 - row.five.remaining_percent : row.five.remaining_percent)
+  return `5-hour window ${n}% ${modeOf(row)}${fiveKept(row.five) ? ` · keeps ${fiveKept(row.five)} for you` : ''} · resets ${when(row.five.reading.resets_at, now.value)}`
+}
 function toggleMode(row: AccountRow) { capacity.setGauge(toggleAccountMode(capacity.gauge, row.id)) }
 function setGlobal(mode: GaugeMode) { capacity.setGauge(setGlobalMode(capacity.gauge, mode)) }
 const globalMode = computed(() => capacity.gauge?.mode ?? 'left')
@@ -306,6 +311,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
           <button class="gear" type="button" aria-haspopup="dialog" :aria-expanded="editor?.kind === 'night'" aria-label="Customize night and shifts" :data-tip="mayManage ? 'Customize night and shifts' : manageTip" :disabled="!mayManage" @click="openEditor('night', $event)"><AppIcon name="gear" :size="15" /></button>
         </div>
       </div>
+      <RouterLink v-if="mayManage" class="manage add-account" to="/settings/accounts#add-account" aria-label="Add an account" data-tip="Add an account on a paired machine"><AppIcon name="plus" :size="15" /><span>Add<span class="long"> an account</span></span></RouterLink>
       <RouterLink class="manage" to="/settings/accounts" data-tip="Accounts in Settings: sign-ins, names, which accounts agents may use"><AppIcon name="sliders" :size="15" /><span>Manage<span class="long"> accounts</span></span></RouterLink>
       <div v-if="planCard" class="plan-card" role="region" aria-label="The plan">
         <p><b>{{ planCard.title }}</b> {{ planCard.text }}</p>
@@ -341,14 +347,14 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
           <div class="acct-name">
             <span class="dot" :class="row.state" :data-tip="DOT_TIP[row.state](row)"><span class="sr-only">{{ DOT_TIP[row.state](row) }}</span></span>
             <span class="nm" :title="row.name">{{ row.name }}</span>
-            <span v-if="row.host" class="chip host">{{ row.host }}</span>
+            <span v-if="row.host" class="chip host" :title="row.host">{{ row.host }}</span>
           </div>
           <div class="gauge-cell">
             <CapacityGauge
               :gauge="row.primary ? gaugeOf(row, planOf(row)) : null" :left="row.primary?.remaining_percent" :value="figure(row)" :used="modeOf(row) === 'used'"
               :label="gaugeLabel(row)" :ahead="!!planOf(row)?.ahead" :dim="row.state !== 'live' && row.state !== 'unread'"
             />
-            <div v-if="row.five" class="win5" :title="`5-hour window: ${pct(row.five.remaining_percent)} left${fiveKept(row.five) ? `, ${fiveKept(row.five)} kept for you` : ''}, resets ${whenFull(row.five.reading.resets_at)}`">5-hour <b>{{ Math.round(modeOf(row) === 'used' ? 100 - row.five.remaining_percent : row.five.remaining_percent) }}% {{ modeOf(row) }}</b><template v-if="fiveKept(row.five)"> · keeps <b>{{ fiveKept(row.five) }}</b> for you</template> · resets {{ when(row.five.reading.resets_at, now) }}</div>
+            <div v-if="row.five" class="win5" :data-tip="fiveLine(row)">5-hour window <b>{{ Math.round(modeOf(row) === 'used' ? 100 - row.five.remaining_percent : row.five.remaining_percent) }}% {{ modeOf(row) }}</b><template v-if="fiveKept(row.five)"> · keeps <b>{{ fiveKept(row.five) }}</b> for you</template> · resets {{ when(row.five.reading.resets_at, now) }}</div>
           </div>
           <button
             v-if="row.primary" type="button" class="left" :aria-label="`${row.name}: ${Math.round(figure(row))}% ${modeOf(row)}. Show % ${modeOf(row) === 'left' ? 'used' : 'left'} for this account`"
@@ -365,7 +371,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
             <span v-else-if="cell.kind === 'ahead'" class="today ahead" :data-tip="`Plan for today ${cell.plan}; ${cell.used} already used`"><b>{{ cell.used }}</b> of {{ cell.plan }} · ahead</span>
             <span v-else-if="cell.kind === 'share'" class="today" :data-tip="cell.tip"><b>{{ cell.value }}</b> today</span>
             <span v-else-if="cell.kind === 'reserve'" class="today kept" :data-tip="cell.tip">{{ cell.text }}</span>
-            <span v-else class="today quiet">{{ cell.text }}</span>
+            <span v-else class="today quiet" :data-tip="cell.text">{{ cell.text }}</span>
           </template>
           <span class="resets" :data-tip="row.primary ? whenFull(row.primary.reading.resets_at) : undefined">{{ row.primary ? `resets ${when(row.primary.reading.resets_at, now)}` : '' }}</span>
           <span class="source" :title="sourceLine(row, now)">{{ sourceLine(row, now) }}</span>
@@ -425,12 +431,12 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 </template>
 
 <style scoped>
-.cap { padding: 0; z-index: 3; }
-.cap-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px 18px 14px 20px; border-bottom: 1px solid var(--line); }
+.cap { padding: 0; z-index: 3; min-width: 0; container: cap / inline-size; }
+.cap-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; min-width: 0; padding: 14px 18px 14px 20px; border-bottom: 1px solid var(--line); }
 .cap-title { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
 .cap-title h2 { font-size: 19px; }
 .cap-meta { color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.settings { display: flex; align-items: center; gap: 22px; }
+.settings { display: flex; align-items: center; gap: 22px; min-width: 0; max-width: 100%; }
 .setting { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 13px; font-weight: 550; white-space: nowrap; }
 .setting .lbl { margin-right: 2px; }
 .setting.nights .lbl { cursor: pointer; }
@@ -473,32 +479,38 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .manage { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 10px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 550; white-space: nowrap; text-decoration: none; }
 @media (hover: hover) { .manage:hover { background: var(--row-hover); color: var(--ink); } }
 .manage:focus-visible { box-shadow: var(--focus-ring); }
+/* Phone: the word "Add" wraps Manage onto its own row. An icon keeps both actions on the title line. */
+@media (max-width: 720px) {
+  .manage.add-account { position: relative; flex: none; width: 44px; margin-right: 0; padding: 0; justify-content: center; }
+  .manage.add-account span { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+}
 .empty { display: flex; align-items: center; gap: 10px; padding: 16px 20px; color: var(--ink-3); font-size: 13px; }
 
-.pool { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 28px; padding: 16px 18px 16px 20px; }
+.pool { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; padding: 16px 18px 16px 20px; }
 .pool + .pool { border-top: 1px solid var(--line); }
 .pool-info { min-width: 0; }
-.pool-head { display: flex; align-items: center; gap: 10px; min-height: 32px; }
+.pool-head { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 32px; }
 .vendor { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(32, 60, 61, .06); color: var(--ink); }
-.pool-name { color: var(--ink); font-size: 15px; font-weight: 650; }
-.pool-plan { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
+/* Provider names stay one line. The plan label shrinks; free-form names wrap in .plan, .nm and .host. */
+.pool-name { flex: none; min-width: min-content; white-space: nowrap; color: var(--ink); font-size: 15px; font-weight: 650; }
+.pool-plan { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
 .pool-head .more { flex: none; width: 32px; height: 32px; margin-left: auto; }
 .override { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 2px 0 9px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .override.hold { background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); }
 .override button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; }
 .override button:hover { background: var(--row-hover); }
 .override button:focus-visible { box-shadow: var(--focus-ring); }
-.plan { margin-top: 8px; padding-left: 40px; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; text-wrap: pretty; }
+.plan { min-width: 0; margin-top: 8px; padding-left: 40px; overflow-wrap: anywhere; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; text-wrap: pretty; }
 .plan :deep(b) { color: var(--ink); font-weight: 600; }
 .plan :deep(.n) { color: var(--teal-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
 .plan.ahead :deep(.n) { color: var(--gold-ink); }
 
-.accts { display: grid; gap: 2px; align-self: start; margin: -6px 0 0; padding: 0; list-style: none; }
-.acct { display: grid; grid-template-columns: 170px minmax(160px, 1fr) 74px 124px 150px 204px; align-items: center; gap: 16px; min-height: 44px; padding: 6px 10px; border-radius: var(--radius-row); }
+.accts { display: grid; gap: 2px; align-self: start; min-width: 0; margin: -6px 0 0; padding: 0; list-style: none; }
+.acct { display: grid; grid-template-columns: minmax(0, 180px) minmax(140px, 1fr) 72px minmax(0, 120px) 150px minmax(0, 180px); align-items: center; gap: 16px; min-height: 44px; min-width: 0; padding: 6px 10px; border-radius: var(--radius-row); }
 @media (hover: hover) { .acct:hover { background: var(--row-hover); } }
 .acct-name { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.acct-name .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13.5px; font-weight: 600; }
-.host { flex: none; }
+.acct-name .nm { min-width: 0; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13.5px; font-weight: 600; }
+.host { display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; line-height: 22px; text-overflow: ellipsis; }
 .dot { position: relative; flex: none; width: 8px; height: 8px; border-radius: 50%; }
 .dot.live, .dot.unread { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
 .dot.offline, .dot.paused, .dot.unavailable { background: transparent; box-shadow: inset 0 0 0 1.6px var(--ink-3); }
@@ -515,8 +527,9 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
 .today.ahead b { color: var(--gold-ink); }
 .today.quiet, .today .quiet { color: var(--ink-3); }
 .today.kept { color: var(--gold-ink); font-weight: 600; }
-.today .btn { height: 26px; padding: 0 10px; font-size: 12px; }
-.resets { color: var(--ink-2); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.today .btn { height: 26px; max-width: 100%; padding: 0 10px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
+.resets { min-width: 0; overflow: hidden; color: var(--ink-2); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
+.gauge-cell { min-width: 0; }
 .source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; text-align: right; }
 .acct.dim .gauge, .acct.dim .left, .acct.dim .resets { opacity: .6; }
 .win5 { margin-top: 5px; color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -543,15 +556,20 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
 .scrim { position: absolute; inset: 0; background: var(--scrim); }
 @media (prefers-reduced-motion: reduce) { .tog::after { transition: none; } }
 
-/* Mid width: the plan sits above its accounts. */
-@media (max-width: 1320px) {
-  .pool { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-  .acct { grid-template-columns: 180px minmax(140px, 1fr) 72px 120px 124px 180px; }
-  .plan { padding-left: 40px; }
+/* The card's own width, not the viewport: the session panel narrows the page
+   without crossing a viewport breakpoint. Source and today shrink first; the
+   gauge keeps its floor. Wide enough, the plan sits beside the accounts. */
+@container cap (min-width: 1265px) {
+  .pool { grid-template-columns: 330px minmax(0, 1fr); gap: 28px; }
+  .acct { grid-template-columns: minmax(0, 170px) minmax(160px, 1fr) 74px minmax(0, 124px) 150px minmax(0, 204px); }
 }
-@media (max-width: 1100px) {
-  .acct { grid-template-columns: 150px minmax(120px, 1fr) 68px 110px 120px; }
+@container cap (max-width: 1044px) {
+  .acct { grid-template-columns: minmax(0, 150px) minmax(120px, 1fr) 68px minmax(0, 110px) 150px; }
   .source { display: none; }
+}
+@container cap (max-width: 640px) {
+  .settings { flex-wrap: wrap; row-gap: 6px; }
+  .setting { min-width: 0; max-width: 100%; }
 }
 /* Phone: stacked rows, the settings as one sunken group. */
 @media (max-width: 720px) {
@@ -597,6 +615,7 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .today { grid-area: today; }
   .resets { grid-area: resets; text-align: right; color: var(--ink-3); font-size: 12.5px; }
   .source { grid-area: source; display: block; text-align: left; font-size: 11.5px; }
+  .source:empty { display: none; }
   .today .btn { min-height: 36px; }
   .cap-foot { gap: 8px 14px; padding: 12px 14px; }
   .fine { width: 100%; margin-left: 0; }

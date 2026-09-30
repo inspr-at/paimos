@@ -33,6 +33,7 @@ type Module struct {
 	watch                 watchRelay
 	watchKeys             watchPollKeys
 	managed               *ManagedSetup
+	formula               *HomebrewFormula
 }
 type rate struct {
 	start time.Time
@@ -46,6 +47,15 @@ func New(pool *pgxpool.Pool, publicURL, defaultTenant string, nixGuide ...*confi
 	}
 	return &Module{pool: pool, origin: origin, defaultTenant: defaultTenant, clients: map[string]rate{}, managed: managedSetup(origin, nixGuide...)}
 }
+
+// SetHomebrewFormula attaches the tap check. Nil keeps the previous guide, which always publishes Homebrew.
+func (m *Module) SetHomebrewFormula(f *HomebrewFormula) {
+	if m == nil {
+		return
+	}
+	m.formula = f
+}
+
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountWatch(mux)
 	mux.HandleFunc("GET /api/agent-pairing/guide", m.guide)
@@ -77,7 +87,16 @@ func (m *Module) guide(w http.ResponseWriter, r *http.Request) {
 	if m.managed != nil {
 		guide["managed_setup"] = m.managed
 	}
-	guide["homebrew_command"] = homebrewCommand(m.origin)
+	if m.formula == nil {
+		guide["homebrew_command"] = homebrewCommand(m.origin)
+	} else if current, known := m.formula.Current(); !known {
+		guide["homebrew_formula_current"] = nil
+	} else {
+		guide["homebrew_formula_current"] = current
+		if current {
+			guide["homebrew_command"] = homebrewCommand(m.origin)
+		}
+	}
 	reply(w, guide)
 }
 

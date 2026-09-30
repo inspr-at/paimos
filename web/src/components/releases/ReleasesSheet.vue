@@ -89,7 +89,9 @@ const cursor = ref<string | null>(null)
 const mode = ref<'browse' | 'compare'>('browse')
 const compareFrom = ref<string | null>(null)
 // A direct release URL opens the detail on phones from the first frame.
-const showDetail = ref(window.matchMedia('(max-width: 760px)').matches && !!props.target && props.target !== 'all')
+// `current` (the footer, before the running version is known) stays on the list
+// until that intent resolves to a real release.
+const showDetail = ref(window.matchMedia('(max-width: 760px)').matches && !!props.target && props.target !== 'all' && props.target !== 'current')
 const help = ref(false)
 const evidence = ref(false)
 const missing = ref('')
@@ -129,9 +131,25 @@ const notice = computed(() => releaseNotice(pageRuns.value, server.value, missin
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
 
 // ---------- Selection ----------
+// `releases=all` (the header) stays on the list with nothing selected. `releases=current`
+// (the footer, when the running version is not known yet) becomes that release once
+// the history arrives. A phone opens the detail only then: a failed or empty history
+// stays on the list, where the error or the empty message is.
 function initialSelection() {
+  if (props.target === 'current') {
+    if (!history.value) { showDetail.value = false; return }
+    const version = currentKnown.value ? current.value : releases.value[0]?.version ?? ''
+    if (!version) { showDetail.value = false; return }
+    if (cursor.value === version && byVersion.value.has(version)) return
+    missing.value = ''
+    mode.value = 'browse'
+    cursor.value = version
+    if (phone.value) showDetail.value = true
+    return
+  }
   if (cursor.value && byVersion.value.has(cursor.value)) return
-  const wanted = props.target && props.target !== 'all' ? props.target.replace(/^v/, '') : ''
+  if (props.target === 'all') { showDetail.value = false; return }
+  const wanted = props.target ? props.target.replace(/^v/, '') : ''
   if (wanted && byVersion.value.has(wanted)) { cursor.value = wanted; if (phone.value) showDetail.value = true; return }
   // A version this build does not have cannot open as detail. Stay on the list,
   // where the one notice explains it.
@@ -139,9 +157,11 @@ function initialSelection() {
   cursor.value = currentKnown.value ? current.value : releases.value[0]?.version ?? null
 }
 watch(() => props.target, target => {
+  if (target === 'current') { initialSelection(); return }
   const wanted = target && target !== 'all' ? target.replace(/^v/, '') : ''
   if (wanted && wanted !== cursor.value && byVersion.value.has(wanted)) { mode.value = 'browse'; cursor.value = wanted }
 })
+watch(history, () => { if (props.target === 'current') initialSelection() })
 watch(cursor, async (value, old) => {
   if (!value) return
   if (mode.value === 'browse') emit('select', value)

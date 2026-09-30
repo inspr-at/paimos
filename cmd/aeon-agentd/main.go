@@ -315,8 +315,9 @@ func awaitDrainRetry() {
 func control(args []string, out io.Writer) error {
 	f := flag.NewFlagSet("control", flag.ContinueOnError)
 	f.SetOutput(io.Discard)
-	var socket, tenant, principal, run, generation, correlation, operation, text string
+	var socket, setupRoot, tenant, principal, run, generation, correlation, operation, text string
 	f.StringVar(&socket, "socket", "", "local socket")
+	f.StringVar(&setupRoot, "setup-root", "", "paired local setup root (instead of --socket)")
 	f.StringVar(&tenant, "tenant-id", "", "tenant UUID")
 	f.StringVar(&principal, "principal-id", "", "agent principal UUID")
 	f.StringVar(&run, "run-id", "", "AEON run UUID")
@@ -331,6 +332,16 @@ func control(args []string, out io.Writer) error {
 		return errors.New("unexpected arguments")
 	}
 	client := agentdwire.Client{Socket: socket, TokenFile: socket + ".token"}
+	if setupRoot != "" {
+		if socket != "" {
+			return errors.New("control accepts either --setup-root or --socket")
+		}
+		var err error
+		client, err = agentdwire.OpenClient(filepath.Join(setupRoot, "daemon"))
+		if err != nil {
+			return err
+		}
+	}
 	receipt, err := client.Control(context.Background(), agentd.ControlRequest{TenantID: tenant, PrincipalID: principal, RunID: run,
 		Generation: generation, CorrelationID: correlation, Operation: operation, Text: text})
 	if err != nil {

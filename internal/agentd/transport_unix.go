@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentsetup"
 )
 
 // LocalServer exposes fenced local control through an owner-only Unix socket.
@@ -24,19 +26,22 @@ type LocalServer struct {
 	TokenFile string
 	info      os.FileInfo
 	tokenInfo os.FileInfo
+	release   func()
 }
 
 func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*LocalServer, error) {
 	if s == nil || !filepath.IsAbs(socket) {
 		return nil, errors.New("invalid local socket")
 	}
+	dir, err := agentsetup.OpenStore(filepath.Dir(socket), false)
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
 	if _, err := os.Lstat(socket); err == nil {
 		return nil, errors.New("local socket already exists")
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
-	}
-	if info, err := os.Stat(filepath.Dir(socket)); err != nil || info.Mode().Perm()&0077 != 0 {
-		return nil, errors.New("local socket directory must be private")
 	}
 	token, err := randomID()
 	if err != nil {
@@ -81,6 +86,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 		_ = listener.Close()
 		return nil, err
 	}
+	listener.(*net.UnixListener).SetUnlinkOnClose(false)
 	mux := http.NewServeMux()
 	if len(attachments) == 1 && attachments[0] != nil {
 		mux.HandleFunc("POST /v1/attach", func(w http.ResponseWriter, r *http.Request) { attachments[0].serve(w, r, token) })
@@ -165,6 +171,9 @@ func authorized(r *http.Request, token string) bool {
 func (l *LocalServer) Close() error {
 	if l == nil {
 		return nil
+	}
+	if l.release != nil {
+		defer l.release()
 	}
 	err := l.Server.Close()
 	if info, e := os.Lstat(l.Socket); e == nil && os.SameFile(info, l.info) {

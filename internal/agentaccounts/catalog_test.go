@@ -214,7 +214,7 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 }
 
 func TestCatalogDefaultUsesOfferedProfileAndDeterministicAccount(t *testing.T) {
-	now := time.Now()
+	now := time.Date(2026, time.September, 29, 14, 0, 0, 0, time.UTC)
 	yes, priority := true, 1
 	base := Account{DaemonID: "host", Harness: "codex", State: "available", MaxParallel: 1, LastProbeAt: &now, LastProbeOK: &yes,
 		Windows: []Window{{Allowance: 100, StartsAt: now.Add(-time.Hour), EndsAt: now.Add(time.Hour), PaceModel: "unrestricted"}}}

@@ -36,3 +36,10 @@ export function estimateDisplay(item: Pick<WorkNode, 'fields' | 'estimate'> & { 
     hours !== null ? `${origin}${who ? ` by ${who}` : ''}${when ? `, ${when}` : ''}${agent && !draft ? ' · confirmed by working agent' : ''}\nAgent work time until ready for review` : text ? 'Legacy points estimate' : 'Set agent work hours until ready for review'
   return { hours, text, draft, tip }
 }
+export function estimateControlLabel(item: Parameters<typeof estimateDisplay>[0]): string {
+  const view = estimateDisplay(item)
+  if (!view.text) return 'Add estimate'
+  const author = item.estimate?.by?.name
+  const origin = view.draft ? `, agent draft, not confirmed${author ? `, by ${author}` : ''}` : ''
+  return `Estimate: ${view.text}${origin}. Edit estimate`
+}

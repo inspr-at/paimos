@@ -452,11 +452,12 @@ export function todayCell(row: AccountRow, plan: AccountPlan | null): TodayCell 
   const rest = Math.max(0, plan.budget - plan.used)
   return { kind: 'share', value: `~${pct(plan.budget)}`, tip: `Plan for today ~${pct(plan.budget)}: ${pct(plan.used)} used, ${pct(rest)} to go${plan.night >= 0.5 ? `; ~${pct(plan.night)} of it tonight` : ''}` }
 }
-/** One quiet line: who measured it and how old it is. Never "Unknown". */
+/** Who measured it, and how old it is. Empty when there is no reading yet. */
 export function sourceLine(row: AccountRow, now: number): string {
   const w = row.primary
   if (row.state === 'signin') return w ? `Sign-in expired · last read ${ago(w.reading.read_at, now)}` : 'Sign-in expired'
-  if (!w) return 'No reading yet — starts with the first run'
+  // The pool sentence already says there is no reading, and there is no source yet.
+  if (!w) return ''
   const r = w.reading
   const base = r.source === 'harness' ? `${HARNESS_NAME[row.harness] ?? row.harness} reported · ${ago(r.read_at, now)}`
     : r.source === 'agentd' ? `Read on ${row.host} · ${ago(r.read_at, now)}` : 'Estimated'

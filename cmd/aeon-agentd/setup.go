@@ -85,11 +85,33 @@ func (l localPairing) Fence(ctx context.Context, daemon, account string) (agents
 	return localStatus(s), nil
 }
 
+var errDeletedWorkingFolder = errors.New("Your current folder no longer exists. cd to another folder and run the command again.")
+
 func setupCommand(command string, args []string, out io.Writer) error {
 	return setupCommandInput(command, args, os.Stdin, out)
 }
 
+func requireExistingWorkingFolder() error {
+	return validateWorkingFolder(os.Getwd())
+}
+
+func validateWorkingFolder(dir string, err error) error {
+	if err != nil {
+		return errDeletedWorkingFolder
+	}
+	info, statErr := os.Stat(dir)
+	if statErr != nil || !info.IsDir() {
+		return errDeletedWorkingFolder
+	}
+	return nil
+}
+
 func setupCommandInput(command string, args []string, in io.Reader, out io.Writer) error {
+	if command == "pair" || command == "setup" {
+		if err := requireExistingWorkingFolder(); err != nil {
+			return err
+		}
+	}
 	pair := command == "pair"
 	if pair {
 		command = "setup"
@@ -156,6 +178,11 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	}
 	if err = agentsetup.ValidateStateLocation(root, ""); err != nil {
 		return err
+	}
+	if command == "setup" {
+		if _, err := agentsetup.ResolveSocketPath(filepath.Join(root, "daemon"), nil); err != nil {
+			return err
+		}
 	}
 	executable, err := os.Executable()
 	if err != nil {

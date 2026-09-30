@@ -1635,15 +1635,15 @@ paths:
               additionalProperties: false
               minProperties: 1
               properties:
-                add: {type: array, maxItems: 32, items: {type: string}}
-                remove: {type: array, maxItems: 32, items: {type: string}}
+                add: {type: array, maxItems: 256, items: {type: string}}
+                remove: {type: array, maxItems: 256, items: {type: string}}
       responses:
         '200':
           description: Updated key metadata without a secret
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AgentKey'}
-        '400': {description: Invalid scopes or more than 32 resulting scopes}
+        '400': {description: Invalid scopes}
         '401': {description: Not signed in}
         '403': {description: Person with keys.manage required or resulting scopes exceed a ceiling}
         '404': {description: Key not found in this tenant}
@@ -1949,7 +1949,7 @@ paths:
         Allocate a tenant-scoped key, or preserve a supplied import key.
         The created node includes the same read-only estimate view as a later read when it has hours or open children.
         Any create of a portal_product, portal_feature or portal_wish, and any create that places a node under a portal parent, requires a person with settings.manage. Agents are refused.
-        Optional header X-Aeon-Client with value cli changes only the wording of a missing-estimate warning; it grants nothing.
+        An agent creating a ticket or task without an estimate is warned to set fields.estimate_hours. The warning does not name a client flag.
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/NodeCreate'
@@ -7014,14 +7014,17 @@ components:
         platforms: {type: array, items: {type: string}}
         platform_qualification: {type: string, description: Candidate builds require exact-release service qualification evidence}
         setup_command: {type: string, description: Instance-bound pair command; defaults are confirmed locally before requesting person approval}
-        homebrew_command: {type: string, description: macOS Homebrew installation followed by the instance-bound pair command}
+        homebrew_command: {type: string, description: "Present when homebrew_formula_current is true, or when that field is absent on an older server. brew install, then env \"$(brew --prefix)/bin/aeon-agentd\" pair --url …. env is the command so the substitution stays out of command position in fish, zsh, and bash, and an older binary on PATH cannot shadow it."}
+        homebrew_formula_current:
+          type: [boolean, 'null']
+          description: "True when the formula on inspr-at/homebrew-tap main was read and its version equals this server. False when that formula was read and the versions differ. Null when the tap could not be read. Clients show Homebrew only when this is true, and otherwise the direct download. The browser does not call GitHub. Absent on servers that do not perform the check."
         managed_installation: {type: string}
         managed_setup:
           type: object
           description: Optional deployment-admin-configured Nix/Home Manager guide; omitted when the instance has no reviewed module configuration. Commands remain bound to the server origin and never install or change a managed service.
           required: [command, service_option, module_url, service_note]
           properties:
-            command: {type: string}
+            command: {type: string, description: "Instance-bound pair command: env \"$HOME/.nix-profile/bin/aeon-agentd\" pair --url …. env keeps the path out of command position in fish, zsh, and bash."}
             service_option: {type: string}
             module_url: {type: string, format: uri}
             service_note: {type: string}
@@ -11098,7 +11101,7 @@ components:
         warnings:
           type: array
           items: {type: string}
-          description: "Non-blocking ticket benefit guidance. An agent creating a ticket or task without estimate_hours is told to set that field. Header X-Aeon-Client set to cli names the --estimate flag instead, and changes only that sentence."
+          description: "Non-blocking ticket benefit guidance. An agent creating a ticket or task without estimate_hours is told to set fields.estimate_hours. The warning does not name a client flag."
         fields:
           type: object
           description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields is the route_role and area classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.

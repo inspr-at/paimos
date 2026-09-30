@@ -108,6 +108,11 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 }
 
 func servePaired(root string, capacityInterval time.Duration) error {
+	state := filepath.Join(root, "daemon")
+	socket, err := agentsetup.ResolveSocketPath(state, nil)
+	if err != nil {
+		return err
+	}
 	c, err := agentsetup.ReadRuntimeConfig(root)
 	if err != nil {
 		return err
@@ -131,7 +136,9 @@ func servePaired(root string, capacityInterval time.Duration) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	state := filepath.Join(root, "daemon")
+	if err := agentsetup.PrepareSocketDirectory(socket); err != nil {
+		return err
+	}
 	remote := agentd.NewRemote(c.Origin, string(key))
 	s, err := agentd.NewSupervisor(ctx, agentd.Config{CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1}})
 	if err != nil {
@@ -141,8 +148,6 @@ func servePaired(root string, capacityInterval time.Duration) error {
 	if s.TenantID() != c.TenantID || s.PrincipalID() != c.PrincipalID {
 		return errors.New("runtime identity differs from approved pairing")
 	}
-	// Generation-specific sockets avoid unlinking or adopting stale listeners.
-	name := "agentd-" + s.Generation() + ".sock"
 	watches, err := pairedAttach(root, c, remote)
 	if err != nil {
 		return err
@@ -152,7 +157,7 @@ func servePaired(root string, capacityInterval time.Duration) error {
 		defer cancel()
 		watches.Close(op)
 	}()
-	local, err := agentd.ServeLocal(s, filepath.Join(state, name), watches)
+	local, err := agentd.ServePairedLocal(s, socket, watches)
 	if err != nil {
 		return err
 	}
@@ -161,7 +166,7 @@ func servePaired(root string, capacityInterval time.Duration) error {
 	if err != nil {
 		return err
 	}
-	raw, _ := json.Marshal(map[string]string{"socket": name, "daemon_id": c.DaemonID, "generation": s.Generation()})
+	raw, _ := json.Marshal(agentsetup.ControlReference{Socket: socket, DaemonID: c.DaemonID, Generation: s.Generation()})
 	err = store.Write("control.json", raw, false)
 	store.Close()
 	if err != nil {

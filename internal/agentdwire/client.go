@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
-	"regexp"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentd"
@@ -35,15 +34,17 @@ func OpenClient(state string) (Client, error) {
 	if err != nil {
 		return Client{}, err
 	}
-	var ref struct {
-		Socket     string `json:"socket"`
-		DaemonID   string `json:"daemon_id"`
-		Generation string `json:"generation"`
-	}
-	if json.Unmarshal(raw, &ref) != nil || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(ref.Generation) || ref.Socket != "agentd-"+ref.Generation+".sock" || ref.DaemonID == "" {
+	var ref agentsetup.ControlReference
+	if json.Unmarshal(raw, &ref) != nil {
 		return Client{}, errors.New("local daemon reference unavailable")
 	}
-	socket := filepath.Join(state, ref.Socket)
+	socket, err := agentsetup.ResolveSocketPath(state, &ref)
+	if err != nil {
+		return Client{}, err
+	}
+	if err := agentsetup.CheckSocket(socket); err != nil {
+		return Client{}, err
+	}
 	return Client{Socket: socket, TokenFile: socket + ".token"}, nil
 }
 

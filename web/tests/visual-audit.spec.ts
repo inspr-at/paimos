@@ -15,7 +15,7 @@ import { fixtures, liveAgent, me, mockWork, type Fixtures } from './work-fixture
 import { mockEffectivePermissions } from './authz-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { mockStartAgent } from './start-agent-fixtures'
-import { mockAnonymousGuide, mockChecksumGuide, mockPairing } from './agent-pairing-fixtures'
+import { mockAnonymousGuide, mockChecksumGuide, mockFormulaGuide, mockPairing } from './agent-pairing-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { RULE_PERSON, RULE_PROJECT, mockRules } from './rules-fixtures'
 import { journeyWorld, mockJourney, PROJECT, retryJourneyWorld, type JourneyWorld } from './journey-fixtures'
@@ -528,29 +528,39 @@ const shots: Shot[] = [
   // 5. Connected computers and pairing
   { screen: 'pairing', state: 'nix-guide', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')
-    await heading(page, 'Connect a computer')
+    await heading(page, 'Connect your machine')
     await page.getByLabel('Install on this computer').selectOption('nix')
     await page.getByText('Declarative service', { exact: true }).click()
   } },
   { screen: 'pairing', state: 'homebrew-guide', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')
-    await heading(page, 'Connect a computer')
+    await heading(page, 'Connect your machine')
   } },
   { screen: 'pairing', state: 'homebrew-upgrades', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')
-    await heading(page, 'Connect a computer')
+    await heading(page, 'Connect your machine')
     await page.getByText('Release and upgrades', { exact: true }).click()
   } },
   { screen: 'pairing', state: 'fallback-guide', setup: mockChecksumGuide, act: async page => {
     await page.goto('/agents/register-agent')
-    await heading(page, 'Connect a computer')
+    await heading(page, 'Connect your machine')
     await page.getByLabel('Install on this computer').selectOption('manual')
     await page.getByText('Disconnect and uninstall', { exact: true }).click()
   } },
   { screen: 'pairing', state: 'public-guide', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')
-    await heading(page, 'Connect a computer')
+    await heading(page, 'Connect your machine')
     await page.getByText('Manual and agent setup').click()
+  } },
+  { screen: 'pairing', state: 'formula-pending', setup: page => mockFormulaGuide(page, false, true), act: async page => {
+    await page.goto('/agents/register-agent')
+    await heading(page, 'Connect your machine')
+    await expect(page.getByText(/is on its way/)).toBeVisible()
+  } },
+  { screen: 'pairing', state: 'formula-unknown', setup: page => mockFormulaGuide(page, null, true), act: async page => {
+    await page.goto('/agents/register-agent')
+    await heading(page, 'Connect your machine')
+    await expect(page.getByRole('button', { name: 'Copy checksum installer' })).toBeVisible()
   } },
   { screen: 'pairing', state: 'connected-computers', setup: pairingSetup, act: async page => {
     await page.goto('/agents/register-agent')
@@ -567,7 +577,7 @@ const shots: Shot[] = [
   } },
   { screen: 'pairing', state: 'setting-up', setup: pairingSetup, act: async page => {
     await pairingReview(page)
-    await page.getByRole('button', { name: 'Connect computer', exact: true }).click()
+    await page.getByRole('button', { name: 'Connect your machine', exact: true }).click()
     await heading(page, 'Setting up')
   } },
   { screen: 'pairing', state: 'disconnect-confirm', setup: pairingSetup, act: async page => {
@@ -787,7 +797,7 @@ async function pairingSetup(page: Page) {
 }
 async function pairingReview(page: Page) {
   await page.goto('/agents/register-agent')
-  await heading(page, 'Connect a computer')
+  await heading(page, 'Connect your machine')
   await page.getByLabel('Pairing code').fill('123-456-789')
   await page.getByRole('button', { name: 'Look up code' }).click()
   await expect(page.getByRole('region', { name: 'Pairing review' }).getByRole('heading', { name: 'Review this computer' })).toBeVisible()
