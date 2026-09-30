@@ -3,6 +3,7 @@ package agentpairing
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/db"
@@ -17,12 +18,15 @@ const attachRecentWindow = "15 minutes"
 
 // Two bounded parts, live first. A request that still waits is always listed,
 // however many newer ones ended after it: only its own expiry removes it. The
-// ended tail is recent and short, so a burst of cancellations cannot crowd it out.
+// live part is as large as admission allows (attachwatch.LiveMax), so the limit
+// never cuts a waiting request off. The ended tail is recent and short, so a burst
+// of cancellations cannot crowd it out.
 const (
-	pendingLiveMax  = "32"
 	pendingEndedMax = "4"
 	pendingColumns  = `id::text,digest,snapshot,state,expires_at,consent_mode,expires_at<=clock_timestamp()`
 )
+
+var pendingLiveMax = strconv.Itoa(attachwatch.LiveMax)
 
 // attachPending lists the signed-in owner's attach requests that have not become
 // a session yet: waiting for approval, approved and connecting (all of them, until

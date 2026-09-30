@@ -1130,7 +1130,19 @@ paths:
         '403': {description: Registered memory-only poll key required; lifecycle proof only authorizes registration}
         '409': {description: 'Snapshot or consent mismatch, poll sequence rejected, or update agentd required'}
         '410': {description: Expired or revoked; new owner approval required}
-        '429': {description: Attempt or stream quota exceeded}
+        '429':
+          description: >-
+            Attempt or stream quota exceeded, or (error code attach_live_limit) the person
+            already has 32 attach requests waiting or approved. Declining, approving into a
+            session or letting one expire frees a slot; a retry of an existing request is
+            still answered. The daemon prints this case in plain words.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: {type: string}
+                  code: {type: string, examples: [attach_live_limit, rate_limited]}
   /agent-pairing/attach/lookup:
     post:
       operationId: lookupAttach
@@ -1161,8 +1173,8 @@ paths:
       description: >-
         Person-only, read-only and additive. Returns the signed-in owner's requests
         that have not become a session, waiting ones first: every pending or approved
-        request that has not expired (newest first, at most 32, whatever else ended
-        after it), then up to four ended ones created in the last fifteen minutes,
+        request that has not expired (newest first; admission allows at most 32 per
+        person, so none is ever cut off, whatever else ended after it), then up to four ended ones created in the last fifteen minutes,
         detached (declined or cancelled) and unreachable (expired). An unpolled
         request past its expiry is an ended one, reported as unreachable without
         changing the row. Each item is

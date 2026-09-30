@@ -279,13 +279,18 @@ the link looks up and approves nothing.
 
 `GET /api/agent-pairing/attach/pending` lets the signed-in computer owner list
 their requests that are not a session yet, waiting ones first: every pending or
-approved request until it expires, however many newer ones ended after it (at most
-32), then up to four ended in the last fifteen minutes, detached (declined or
+approved request until it expires, however many newer ones ended after it, then up to four ended in the last fifteen minutes, detached (declined or
 cancelled) and unreachable (expired; an unpolled request past its expiry is reported
 so without changing the row). Each item is the immutable snapshot and digests lookup returns,
 so the owner can review and approve it without typing a code, with every
 existing approval check. It never returns the code, the Touch ID challenge or a
 session, changes no row and needs no origin header; /agents polls it while visible.
+Nothing that waits is ever cut off: a person may have at most 32 requests waiting or
+approved at once, and a new request beyond that is refused with HTTP 429, error code
+`attach_live_limit`, which the helper prints in plain words. Declining, approving into a
+session or letting one expire frees a slot; a retry of an existing request is still
+answered. This bound is about what the person has to review, apart from the ten-minute
+creation windows per tenant and per computer.
 
 The person's **Settings → Personal → Security → Session watching** setting is
 stored server-side in `person_watch_security`, scoped to that person and tenant.

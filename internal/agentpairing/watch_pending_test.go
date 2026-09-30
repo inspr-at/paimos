@@ -3,6 +3,7 @@ package agentpairing_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -183,4 +184,130 @@ func TestAttachPendingKeepsEveryWaitingRequestBehindNewerEndedOnes(t *testing.T)
 	if !found {
 		t.Fatalf("a request that has not expired stays listed: %+v", got.Requests)
 	}
+}
+
+// One more computer of the same owner, paired in the same workspace, registered
+// for attach: its own key, proof and poll key, the same project and ticket.
+func extraWatchComputer(t *testing.T, f *fixture, base attachwatch.DeviceRequest) (string, attachwatch.DeviceRequest) {
+	t.Helper()
+	p := f.proposePlatformKey("darwin", "arm64", "", "codex")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	in := base
+	in.ComputerID = *v.ComputerID
+	in.DeviceProof = p.lifecycle
+	in.Snapshot.ComputerID = *v.ComputerID
+	in.PollKey = nonce()
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
+	return key, in
+}
+
+// A person never has more waiting requests than the list can show. Five computers
+// of one owner are each under their own cap of eight, and the tenant's ten-minute
+// window rolls over in the middle (one request early, then the rest), which is
+// how 33 unexpired requests once fitted under the creation limits. The 33rd is
+// refused with its own code, every admitted request is listed, and each way a
+// request stops waiting frees exactly one slot.
+func TestAttachAdmissionBoundsLiveRequestsAcrossComputersAndWindowRollover(t *testing.T) {
+	f, key, in := watchFixture(t)
+	type computer struct {
+		key string
+		in  attachwatch.DeviceRequest
+	}
+	computers := []computer{{key, in}}
+	for len(computers) < 5 {
+		k, c := extraWatchComputer(t, f, in)
+		computers = append(computers, computer{k, c})
+	}
+	create := func(c computer, id string, status int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := c.in
+		req.RequestID = id
+		req.Digest = req.Snapshot.Digest()
+		return f.call("POST", "/api/agent-pairing/attach", req, false, c.key, status)
+	}
+	rollWindow := func() {
+		t.Helper()
+		if _, err := f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_limits SET starts_at=clock_timestamp()-interval '11 minutes' WHERE bucket='request'`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refused := func(c computer) {
+		t.Helper()
+		w := create(c, uuid(t, f.db), 429)
+		var body struct{ Error, Code string }
+		decodeResult(t, w, &body)
+		if body.Code != attachwatch.LiveLimitCode || body.Error != attachwatch.LiveLimitMessage {
+			t.Fatalf("the bound answers with its own code, not a rate limit: %s", w.Body.String())
+		}
+	}
+	var ids []string
+	for i := range attachwatch.LiveMax {
+		if i == 30 {
+			// The tenant window has admitted 30; a new one starts here.
+			rollWindow()
+		}
+		id := uuid(t, f.db)
+		create(computers[i%len(computers)], id, 200)
+		ids = append(ids, id)
+	}
+	refused(computers[0])
+	refused(computers[4])
+
+	live := func() map[string]string {
+		t.Helper()
+		got, _ := listPending(t, f)
+		states := map[string]string{}
+		for _, item := range got.Requests {
+			if item.State == "pending" || item.State == "approved" {
+				states[item.RequestID] = item.State
+			}
+		}
+		return states
+	}
+	listed := live()
+	if len(listed) != attachwatch.LiveMax {
+		t.Fatalf("every admitted request is listed: %d of %d", len(listed), attachwatch.LiveMax)
+	}
+	for _, id := range ids {
+		if _, ok := listed[id]; !ok {
+			t.Fatalf("admitted request %s is hidden", id)
+		}
+	}
+
+	// A retry of a request that already exists is answered, full list or not.
+	create(computers[0], ids[0], 200)
+	// Approving keeps the slot: the request is still the owner's to look at.
+	approve := func(id string) {
+		t.Helper()
+		var v attachwatch.View
+		decodeResult(t, f.call("POST", "/api/agent-pairing/attach/lookup", map[string]string{"user_code": codeOf(t, f, id)}, true, "", 200), &v)
+		f.call("POST", "/api/agent-pairing/attach/"+id+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200)
+	}
+	approve(ids[1])
+	refused(computers[1])
+
+	// Declining frees one slot, expiry frees one, and only one each.
+	f.call("POST", "/api/agent-pairing/attach/"+ids[2]+"/revoke", nil, true, "", 200)
+	create(computers[2], uuid(t, f.db), 200)
+	refused(computers[2])
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_requests SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, ids[3]); err != nil {
+		t.Fatal(err)
+	}
+	create(computers[3], uuid(t, f.db), 200)
+	refused(computers[3])
+	if got := live(); len(got) != attachwatch.LiveMax {
+		t.Fatalf("the list still shows every live request after the slots were reused: %d", len(got))
+	}
+}
+
+// The attach code of a request, read around the API the way the owner's terminal shows it.
+func codeOf(t *testing.T, f *fixture, id string) string {
+	t.Helper()
+	var code string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT user_code FROM harness_attach_requests WHERE id=$1`, id).Scan(&code); err != nil {
+		t.Fatal(err)
+	}
+	return code
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/attachwatch"
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
@@ -240,7 +241,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		view, err := m.cfg.Exchange(ctx, m.request(s, in.ID, "request"))
 		if err != nil {
 			m.end(ctx, in.ID, s)
-			return AttachLocalView{}, errors.New("paired instance refused attach")
+			return AttachLocalView{}, attachRefusal(err)
 		}
 		if view.Digest != s.snapshot.Digest() || view.RequestID != in.ID || view.Snapshot != s.snapshot {
 			m.end(ctx, in.ID, s)
@@ -373,6 +374,17 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	s.touched = time.Now()
 	return m.localView(in.ID, s), nil
 }
+
+// A full waiting list is something the person can fix in the browser, so the
+// helper names it; every other refusal stays generic and leaks nothing.
+func attachRefusal(err error) error {
+	var status *client.StatusError
+	if errors.As(err, &status) && status.Status == http.StatusTooManyRequests && status.Message == attachwatch.LiveLimitMessage {
+		return fmt.Errorf("%d attach requests already wait for approval in Aeon; approve or decline one there or let one expire, then run attach again", attachwatch.LiveMax)
+	}
+	return errors.New("paired instance refused attach")
+}
+
 func (m *AttachManager) serve(w http.ResponseWriter, r *http.Request, token string) {
 	if !authorized(r, token) {
 		http.Error(w, "unauthorized", 403)
