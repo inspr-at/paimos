@@ -9,67 +9,146 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
 	"testing"
 )
 
-func TestParseAttachProcargsSeparatesArgvAndEnvironment(t *testing.T) {
-	claude := attachVendorIdentifier(Claude)
-	injected := procargsBuffer(t, []string{"/bin/sleep", "20"}, []string{"BUN_OPTIONS=--preload /fixture/marker.cjs", "FOO=BUN_OPTIONS=--preload /fixture/other.cjs"}, true)
-	argv, env, visible, err := parseAttachProcargs(injected)
-	if err != nil || !visible || len(argv) != 2 || argv[0] != "/bin/sleep" || argv[1] != "20" || decideClaudeRuntime(claude, attachObservedEnv{entries: env, visible: visible}) != claudeRuntimeInjected {
-		t.Fatal("environment injection was not separated from argv", err)
-	}
-	kept := make([]string, 0, len(env))
-	for _, entry := range env {
-		if !strings.HasPrefix(entry, "BUN_OPTIONS=") {
-			kept = append(kept, entry)
+func TestScanAttachProcargs(t *testing.T) {
+	path := "/bin/sleep"
+	cleanEnv := []string{"PATH=/usr/bin:/bin", "NODE_OPTIONS=--require /fixture/marker.cjs", "NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem"}
+	t.Run("empty-argv0", func(t *testing.T) {
+		buf := procargsBuffer(t, path, []string{""}, []string{"BUN_OPTIONS=--preload /fixture/marker.cjs", "PATH=/usr/bin:/bin"}, true)
+		mustScan(t, buf, claudeRuntimeInjected)
+	})
+	t.Run("empty-argv", func(t *testing.T) {
+		buf := procargsBuffer(t, path, []string{"", "x"}, []string{"BUN_OPTIONS=--preload /fixture/marker.cjs", "PATH=/usr/bin:/bin"}, true)
+		mustScan(t, buf, claudeRuntimeInjected)
+	})
+	t.Run("empty-argv-pair", func(t *testing.T) {
+		buf := procargsBuffer(t, path, []string{"", "", "20"}, []string{"BUN_BE_BUN=1", "PATH=/usr/bin:/bin"}, true)
+		mustScan(t, buf, claudeRuntimeInjected)
+	})
+	t.Run("argv-assignment", func(t *testing.T) {
+		buf := procargsBuffer(t, path, []string{path, "BUN_CONFIG_FILE=/fixture/bunfig.toml"}, cleanEnv, true)
+		mustScan(t, buf, claudeRuntimeInjected)
+	})
+	t.Run("env-assignment", func(t *testing.T) {
+		for _, value := range []string{"--preload /fixture/marker.cjs", "-r /fixture/marker.cjs", "--require /fixture/marker.cjs", "--config /fixture/bunfig.toml", "--smol", " --preload /fixture/marker.cjs"} {
+			buf := procargsBuffer(t, path, []string{path, "20"}, []string{"BUN_OPTIONS=" + value, "FOO=BUN_OPTIONS=--preload /fixture/other.cjs"}, true)
+			mustScan(t, buf, claudeRuntimeInjected)
 		}
-	}
-	if decideClaudeRuntime(claude, attachObservedEnv{entries: kept, visible: true}) != claudeRuntimeAllow {
-		t.Fatal("decoy value counted as BUN_OPTIONS")
-	}
-	argvOnly := procargsBuffer(t, []string{"/bin/sleep", "--preload", "/fixture/marker.cjs", "-r", "/fixture/marker.cjs", "--config", "/fixture/bunfig.toml"}, []string{"NODE_OPTIONS=--require /fixture/marker.cjs"}, true)
-	argv, env, visible, err = parseAttachProcargs(argvOnly)
-	observed := attachObservedEnv{entries: env, visible: visible}
-	if err != nil || !visible || len(argv) != 7 || decideClaudeRuntime(claude, observed) != claudeRuntimeAllow || decideClaudeRuntime(attachVendorIdentifier(Codex), observed) != claudeRuntimeAllow {
-		t.Fatal("argv flags were treated as a signed-runtime injection", err)
-	}
-	apple := append([]byte(nil), injected...)
-	apple = append(apple, []byte("BUN_OPTIONS=--preload /fixture/apple.cjs\x00")...)
-	_, env, visible, err = parseAttachProcargs(apple)
-	if err != nil || !visible || len(env) != 2 {
-		t.Fatal("environment terminator was discarded", err)
-	}
-	_, appleEnv, appleVisible, err := parseAttachProcargs(append(procargsBuffer(t, []string{"/bin/sleep", "20"}, []string{"PATH=/usr/bin:/bin"}, true), []byte("BUN_OPTIONS=--preload /fixture/apple.cjs\x00")...))
-	if err != nil || !appleVisible || decideClaudeRuntime(claude, attachObservedEnv{entries: appleEnv, visible: appleVisible}) != claudeRuntimeAllow {
-		t.Fatal("apple vector was read as the environment", err)
-	}
-	if _, _, _, err = parseAttachProcargs(injected[:len(injected)-4]); err == nil {
-		t.Fatal("truncated environment accepted")
-	}
-	_, droppedTerminator, droppedVisible, err := parseAttachProcargs(injected[:len(injected)-1])
-	if err != nil || !droppedVisible || decideClaudeRuntime(claude, attachObservedEnv{entries: droppedTerminator, visible: droppedVisible}) != claudeRuntimeInjected {
-		t.Fatal("complete environment entries were rejected", err)
-	}
-	omitted := procargsBuffer(t, []string{"/bin/sleep", "30"}, nil, false)
-	_, omittedEnv, omittedVisible, err := parseAttachProcargs(omitted)
-	omittedObserved := attachObservedEnv{entries: omittedEnv, visible: omittedVisible}
-	if err != nil || omittedVisible || len(omittedEnv) != 0 || decideClaudeRuntime(claude, omittedObserved) != claudeRuntimeUnobservable || decideClaudeRuntime(attachVendorIdentifier(Codex), omittedObserved) != claudeRuntimeAllow {
-		t.Fatal("omitted environment counted as a clean Claude process", err)
-	}
-	if _, err = attachProcargsEnv(make([]byte, maxAttachProcargs+1)); err == nil {
-		t.Fatal("oversize procargs accepted")
+	})
+	t.Run("apple-assignment", func(t *testing.T) {
+		buf := withApple(procargsBuffer(t, path, []string{path, "20"}, []string{"PATH=/usr/bin:/bin"}, true), "BUN_OPTIONS=--preload /fixture/apple.cjs")
+		mustScan(t, buf, claudeRuntimeInjected)
+	})
+	t.Run("other-bun", func(t *testing.T) {
+		for _, entry := range []string{"BUN_INSPECT_PRELOAD=/fixture/marker.cjs", "BUN_CONFIG_FILE=/fixture/bunfig.toml", "BUN_BE_BUN=1"} {
+			buf := procargsBuffer(t, path, []string{path, "20"}, []string{entry, "PATH=/usr/bin:/bin"}, true)
+			mustScan(t, buf, claudeRuntimeInjected)
+		}
+	})
+	t.Run("allowlist", func(t *testing.T) {
+		env := append(append([]string{}, cleanEnv...), "BUN_INSTALL=/opt/homebrew", "BUN_OPTIONS=", "BUN_OPTIONS=   ")
+		mustScan(t, procargsBuffer(t, path, []string{path, "BUN_INSTALL=/opt/homebrew"}, env, true), claudeRuntimeAllow)
+		mustScan(t, withApple(procargsBuffer(t, path, []string{path, "20"}, env, true), "BUN_INSTALL=/opt/homebrew"), claudeRuntimeAllow)
+	})
+	t.Run("allowlist-exact", func(t *testing.T) {
+		buf := procargsBuffer(t, path, []string{path, "20"}, []string{"BUN_INSTALL_BIN=/opt/homebrew/bin", "PATH=/usr/bin:/bin"}, true)
+		mustScan(t, buf, claudeRuntimeInjected)
+	})
+	t.Run("node-prefix", func(t *testing.T) {
+		mustScan(t, procargsBuffer(t, path, []string{path, "20"}, cleanEnv, true), claudeRuntimeAllow)
+	})
+	t.Run("blank", func(t *testing.T) {
+		buf := procargsBuffer(t, path, []string{path, "20"}, []string{"BUN_OPTIONS=", "BUN_OPTIONS=   ", "BUN_BE_BUN=", "BUN_INSTALL=", "PATH=/usr/bin:/bin"}, true)
+		mustScan(t, buf, claudeRuntimeAllow)
+	})
+	t.Run("decoy", func(t *testing.T) {
+		buf := procargsBuffer(t, path, []string{path, "BUN_OPTIONS"}, []string{"FOO=BUN_OPTIONS=--preload /fixture/marker.cjs", "PATH=/usr/bin:/bin"}, true)
+		mustScan(t, buf, claudeRuntimeAllow)
+	})
+	t.Run("argv-flags", func(t *testing.T) {
+		buf := procargsBuffer(t, path, []string{path, "--preload", "/fixture/marker.cjs", "-r", "/fixture/marker.cjs", "--config", "/fixture/bunfig.toml"}, cleanEnv, true)
+		mustScan(t, buf, claudeRuntimeAllow)
+	})
+	t.Run("apple-harmless", func(t *testing.T) {
+		buf := withApple(procargsBuffer(t, path, []string{path, "20"}, cleanEnv, true), "pfz=0x1")
+		mustScan(t, buf, claudeRuntimeAllow)
+	})
+	t.Run("omitted", func(t *testing.T) {
+		mustScan(t, procargsBuffer(t, path, []string{path, "30"}, nil, false), claudeRuntimeUnobservable)
+	})
+	t.Run("omitted-empty-argv", func(t *testing.T) {
+		mustScanError(t, procargsBuffer(t, path, []string{"", ""}, nil, false))
+	})
+	t.Run("argv-injection-omitted-env", func(t *testing.T) {
+		buf := procargsBuffer(t, path, []string{path, "BUN_OPTIONS=--preload /fixture/marker.cjs"}, nil, false)
+		mustScan(t, buf, claudeRuntimeInjected)
+	})
+	t.Run("dropped-terminator", func(t *testing.T) {
+		full := procargsBuffer(t, path, []string{path, "20"}, []string{"BUN_OPTIONS=--preload /fixture/marker.cjs", "PATH=/usr/bin:/bin"}, true)
+		mustScan(t, full[:len(full)-1], claudeRuntimeInjected)
+	})
+	t.Run("truncated", func(t *testing.T) {
+		full := procargsBuffer(t, path, []string{path, "20"}, []string{"PATH=/usr/bin:/bin", "NODE_OPTIONS=--require /fixture/marker.cjs"}, true)
+		mustScanError(t, full[:len(full)-4])
+	})
+	t.Run("oversize", func(t *testing.T) {
+		valid := procargsBuffer(t, path, []string{path, "20"}, cleanEnv, true)
+		padded := append(append([]byte(nil), valid...), bytes.Repeat([]byte{0}, maxAttachProcargs)...)
+		mustScanError(t, padded)
+	})
+	t.Run("short", func(t *testing.T) {
+		mustScanError(t, nil)
+		mustScanError(t, []byte{1, 2, 3})
+	})
+	t.Run("argc-cap", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := binary.Write(&buf, binary.LittleEndian, uint32(4097)); err != nil {
+			t.Fatal(err)
+		}
+		buf.WriteString(path)
+		buf.WriteByte(0)
+		for i := 0; i < 4097; i++ {
+			buf.WriteString("a")
+			buf.WriteByte(0)
+		}
+		buf.WriteString("PATH=/usr/bin:/bin")
+		buf.WriteByte(0)
+		buf.WriteByte(0)
+		mustScanError(t, buf.Bytes())
+	})
+	t.Run("path-ignored", func(t *testing.T) {
+		buf := procargsBuffer(t, "BUN_OPTIONS=--preload /fixture/marker.cjs", []string{path, "20"}, cleanEnv, true)
+		mustScan(t, buf, claudeRuntimeAllow)
+	})
+}
+
+func mustScan(t *testing.T, buf []byte, want claudeRuntimeDecision) {
+	t.Helper()
+	got, err := scanAttachProcargs(buf)
+	if err != nil || got != want {
+		t.Fatalf("scan decision %v err %v", got, err)
 	}
 }
 
-func procargsBuffer(t *testing.T, argv, env []string, terminate bool) []byte {
+func mustScanError(t *testing.T, buf []byte) {
 	t.Helper()
+	if _, err := scanAttachProcargs(buf); err == nil {
+		t.Fatal("ambiguous procargs accepted")
+	}
+}
+
+func procargsBuffer(t *testing.T, path string, argv, env []string, terminate bool) []byte {
+	t.Helper()
+	if path == "" || len(argv) == 0 {
+		t.Fatal("procargs fixture needs a path and argv")
+	}
 	var buf bytes.Buffer
 	if err := binary.Write(&buf, binary.LittleEndian, uint32(len(argv))); err != nil {
 		t.Fatal(err)
 	}
-	buf.WriteString("/bin/sleep")
+	buf.WriteString(path)
 	buf.WriteByte(0)
 	buf.Write(bytes.Repeat([]byte{0}, 7))
 	for _, arg := range argv {
@@ -86,53 +165,41 @@ func procargsBuffer(t *testing.T, argv, env []string, terminate bool) []byte {
 	return buf.Bytes()
 }
 
-func TestClaudeBunOptionsPolicy(t *testing.T) {
-	claude := attachVendorIdentifier(Claude)
-	codex := attachVendorIdentifier(Codex)
-	for _, value := range []string{"--preload /fixture/marker.cjs", "-r /fixture/marker.cjs", "--require /fixture/marker.cjs", "--config /fixture/bunfig.toml", "--smol", " --preload /fixture/marker.cjs"} {
-		if decideClaudeRuntime(claude, attachObservedEnv{entries: []string{"BUN_OPTIONS=" + value}, visible: true}) != claudeRuntimeInjected {
-			t.Fatal("non-empty BUN_OPTIONS accepted")
-		}
+func withApple(buf []byte, entries ...string) []byte {
+	out := append([]byte(nil), buf...)
+	for _, entry := range entries {
+		out = append(out, entry...)
+		out = append(out, 0)
 	}
-	for _, env := range [][]string{
-		nil,
-		{"BUN_OPTIONS="},
-		{"BUN_OPTIONS=   "},
-		{"NODE_OPTIONS=--require /fixture/marker.cjs"},
-		{"FOO=BUN_OPTIONS=--preload /fixture/marker.cjs"},
-		{"BUN_INSPECT_PRELOAD=/fixture/marker.cjs"},
-		{"BUN_CONFIG_FILE=/fixture/bunfig.toml"},
-		{"BUN_BE_BUN=1"},
-	} {
-		if decideClaudeRuntime(claude, attachObservedEnv{entries: env, visible: true}) != claudeRuntimeAllow || decideClaudeRuntime(codex, attachObservedEnv{entries: []string{"BUN_OPTIONS=--preload /fixture/marker.cjs"}, visible: true}) != claudeRuntimeAllow {
-			t.Fatal("benign or non-Claude environment refused")
-		}
-	}
-	hidden := attachObservedEnv{}
-	if decideClaudeRuntime(claude, hidden) != claudeRuntimeUnobservable || decideClaudeRuntime(codex, hidden) != claudeRuntimeAllow {
-		t.Fatal("hidden environment was treated as a clean Claude process")
-	}
+	return out
 }
 
 func TestAttachProcargsReadsFixtureEnvironment(t *testing.T) {
-	claude := attachVendorIdentifier(Claude)
-	codex := attachVendorIdentifier(Codex)
 	denied := startProcargsFixture(t, []string{"PATH=/usr/bin:/bin", "BUN_OPTIONS=--preload /fixture/marker.cjs", "FOO=BUN_OPTIONS=--preload /fixture/other.cjs", "NODE_OPTIONS=--require /fixture/marker.cjs"})
-	allowed := startProcargsFixture(t, []string{"PATH=/usr/bin:/bin", "BUN_OPTIONS=", "NODE_OPTIONS=--require /fixture/marker.cjs"})
-	deniedEnv, err := readAttachProcargs(denied)
-	if err != nil || !deniedEnv.visible || decideClaudeRuntime(claude, deniedEnv) != claudeRuntimeInjected || decideClaudeRuntime(codex, deniedEnv) != claudeRuntimeAllow {
+	allowed := startProcargsFixture(t, []string{"PATH=/usr/bin:/bin", "BUN_INSTALL=/opt/homebrew", "BUN_OPTIONS=", "NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem", "NODE_OPTIONS=--require /fixture/marker.cjs"})
+	other := startProcargsFixture(t, []string{"PATH=/usr/bin:/bin", "BUN_BE_BUN=1"})
+	empty := startProcargsArgvFixture(t, []string{"", "-test.run=^TestAttachExecWrapperChild$"}, []string{"PATH=/usr/bin:/bin", "BUN_OPTIONS=--preload /fixture/marker.cjs"})
+	pair := startProcargsArgvFixture(t, []string{"", "", "-test.run=^TestAttachExecWrapperChild$"}, []string{"PATH=/usr/bin:/bin", "BUN_BE_BUN=1"})
+	if decision, err := readAttachProcargs(denied); err != nil || decision != claudeRuntimeInjected {
 		t.Fatal("live Claude BUN_OPTIONS was not refused", err)
 	}
-	allowedEnv, err := readAttachProcargs(allowed)
-	if err != nil || !allowedEnv.visible || decideClaudeRuntime(claude, allowedEnv) != claudeRuntimeAllow {
-		t.Fatal("empty BUN_OPTIONS was refused", err)
+	if decision, err := readAttachProcargs(allowed); err != nil || decision != claudeRuntimeAllow {
+		t.Fatal("allowlisted live environment was refused", err)
 	}
-	if _, err = readAttachProcargs("0"); err == nil {
+	if decision, err := readAttachProcargs(other); err != nil || decision != claudeRuntimeInjected {
+		t.Fatal("live BUN_BE_BUN was not refused", err)
+	}
+	if decision, err := readAttachProcargs(empty); err != nil || decision != claudeRuntimeInjected {
+		t.Fatal("live empty argv0 hid BUN_OPTIONS", err)
+	}
+	if decision, err := readAttachProcargs(pair); err != nil || decision != claudeRuntimeInjected {
+		t.Fatal("live empty argv pair hid BUN_BE_BUN", err)
+	}
+	if _, err := readAttachProcargs("0"); err == nil {
 		t.Fatal("invalid pid reached procargs")
 	}
 	omitted := startOmittedProcargsFixture(t)
-	omittedEnv, err := readAttachProcargs(omitted)
-	if err != nil || omittedEnv.visible || decideClaudeRuntime(claude, omittedEnv) != claudeRuntimeUnobservable || decideClaudeRuntime(codex, omittedEnv) != claudeRuntimeAllow {
+	if decision, err := readAttachProcargs(omitted); err != nil || decision != claudeRuntimeUnobservable {
 		t.Fatal("omitted live environment counted as a clean Claude process", err)
 	}
 }
@@ -143,8 +210,18 @@ func startProcargsFixture(t *testing.T, env []string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(self, "-test.run=^TestAttachExecWrapperChild$")
-	cmd.Env = append(append([]string{}, env...), "AEON_ATTACH_WRAPPER_CHILD=1")
+	return startProcargsArgvFixture(t, []string{self, "-test.run=^TestAttachExecWrapperChild$"}, env)
+}
+
+func startProcargsArgvFixture(t *testing.T, argv, env []string) string {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(self)
+	cmd.Args = append([]string{}, argv...)
+	cmd.Env = append(append([]string{}, env...), "HOME="+t.TempDir(), "AEON_ATTACH_WRAPPER_CHILD=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +232,7 @@ func startProcargsFixture(t *testing.T, env []string) string {
 func startOmittedProcargsFixture(t *testing.T) string {
 	t.Helper()
 	cmd := exec.Command("/bin/sleep", "30")
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "BUN_OPTIONS=--preload /fixture/marker.cjs"}
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + t.TempDir(), "BUN_OPTIONS=--preload /fixture/marker.cjs"}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

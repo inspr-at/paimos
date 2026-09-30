@@ -302,8 +302,8 @@ func TestAttachClaudeBunOptionsIsUnsupported(t *testing.T) {
 		err  error
 		hint string
 	}{
-		{errAttachRuntimeDenied, "This Claude process was started with BUN_OPTIONS, which the signed runtime can use to run other JavaScript. Start Claude with BUN_OPTIONS unset, then attach again."},
-		{errAttachRuntimeUnobservable, "This Claude process cannot be attached because macOS hid its environment, and the signed executable can run JavaScript from BUN_OPTIONS."},
+		{errAttachRuntimeDenied, "This Claude process was started with a BUN_* assignment other than BUN_INSTALL. The signed runtime can use those variables to run other JavaScript. Unset them, then attach again."},
+		{errAttachRuntimeUnobservable, "This Claude process cannot be attached because macOS hid its environment, and the signed executable can run JavaScript from a BUN_* variable."},
 	} {
 		m, peer, _, req, _ := attachIdentityFixture(t, Claude)
 		m.signature = func(context.Context, string) (attachSignature, error) {

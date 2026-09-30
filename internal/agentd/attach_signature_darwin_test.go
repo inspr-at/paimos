@@ -28,24 +28,20 @@ func TestAttachCodesignRequiresValidAppleSignature(t *testing.T) {
 			if attack == "foreign" || attack == "codex-bun-options" || attack == "codex-env-hidden" {
 				harness = Codex
 			}
-			readEnv := func(got string) (attachObservedEnv, error) {
+			readEnv := func(got string) (claudeRuntimeDecision, error) {
 				envReads++
 				if got != "123" {
 					t.Fatal("procargs target was not the running PID")
 				}
 				switch attack {
 				case "bun-options":
-					return attachObservedEnv{entries: []string{"PATH=/usr/bin:/bin", "BUN_OPTIONS=--preload /fixture/marker.cjs"}, visible: true}, nil
-				case "codex-bun-options":
-					return attachObservedEnv{entries: []string{"BUN_OPTIONS=--preload /fixture/marker.cjs", "NODE_OPTIONS=--require /fixture/marker.cjs"}, visible: true}, nil
-				case "benign-runtime-env":
-					return attachObservedEnv{entries: []string{"BUN_OPTIONS=", "BUN_OPTIONS=   ", "NODE_OPTIONS=--require /fixture/marker.cjs", "FOO=BUN_OPTIONS=--preload /fixture/marker.cjs", "BUN_INSPECT_PRELOAD=/fixture/marker.cjs"}, visible: true}, nil
-				case "env-unobservable", "codex-env-hidden":
-					return attachObservedEnv{}, nil
+					return claudeRuntimeInjected, nil
+				case "env-unobservable":
+					return claudeRuntimeUnobservable, nil
 				case "procargs-unavailable":
-					return attachObservedEnv{}, errors.New("sysctl unavailable")
+					return 0, errors.New("sysctl unavailable")
 				default:
-					return attachObservedEnv{entries: []string{"PATH=/usr/bin:/bin"}, visible: true}, nil
+					return claudeRuntimeAllow, nil
 				}
 			}
 			signature, err := inspectAttachSignatureWith(t.Context(), "123", func(_ context.Context, args ...string) (string, error) {
@@ -92,9 +88,13 @@ func TestAttachCodesignRequiresValidAppleSignature(t *testing.T) {
 				return "", nil
 			}, readEnv)
 			switch attack {
-			case "vendor", "foreign", "benign-runtime-env", "codex-bun-options", "codex-env-hidden":
+			case "vendor", "benign-runtime-env":
 				if err != nil || !signature.Signed || signature.TeamID != attachVendorTeam(harness) || signature.Identifier != attachVendorIdentifier(harness) || calls != 2 || envReads != 1 {
 					t.Fatal("vendor not validated", err)
+				}
+			case "foreign", "codex-bun-options", "codex-env-hidden":
+				if err != nil || !signature.Signed || signature.TeamID != attachVendorTeam(harness) || signature.Identifier != attachVendorIdentifier(harness) || calls != 2 || envReads != 0 {
+					t.Fatal("codex procargs were read", err)
 				}
 			case "bun-options":
 				if !errors.Is(err, errAttachRuntimeDenied) || signature.Signed || calls != 2 || envReads != 1 {
@@ -130,9 +130,9 @@ func TestAttachCodesignRejectsPathAndNonPIDTargets(t *testing.T) {
 		if _, err := inspectAttachSignatureWith(t.Context(), target, func(context.Context, ...string) (string, error) {
 			t.Fatal("non-PID target reached codesign")
 			return "", nil
-		}, func(string) (attachObservedEnv, error) {
+		}, func(string) (claudeRuntimeDecision, error) {
 			t.Fatal("non-PID target reached procargs")
-			return attachObservedEnv{}, nil
+			return 0, nil
 		}); err == nil {
 			t.Fatal("invalid target accepted")
 		}
@@ -160,8 +160,9 @@ func TestAttachRealCodesignTimeout(t *testing.T) {
 }
 
 func TestAttachRealInstalledVendorSignatures(t *testing.T) {
-	// Read executable names only. Never inspect process arguments/environments
-	// or launch another model CLI to manufacture a positive fixture.
+	// Names come from ps pid and comm only. inspectAttachSignature reads procargs
+	// for a Claude identifier; those bytes stay inside the verifier and this
+	// test never prints them. Do not launch another model CLI.
 	raw, err := exec.CommandContext(t.Context(), "/bin/ps", "-axo", "pid=,comm=").Output()
 	if err != nil {
 		t.Fatal("process-name enumeration unavailable", err)
@@ -187,8 +188,11 @@ func TestAttachRealInstalledVendorSignatures(t *testing.T) {
 				if observeErr != nil || after.Process != before.Process {
 					continue
 				}
-				if errors.Is(err, errAttachRuntimeDenied) || errors.Is(err, errAttachRuntimeUnobservable) {
+				if errors.Is(err, errAttachRuntimeDenied) {
 					continue
+				}
+				if errors.Is(err, errAttachRuntimeUnobservable) {
+					t.Fatal("running installed vendor procargs became unobservable", harness, err)
 				}
 				if err != nil || !got.Signed || got.TeamID != attachVendorTeam(harness) || got.Identifier != attachVendorIdentifier(harness) {
 					t.Fatal("running installed vendor verification failed", harness, err)

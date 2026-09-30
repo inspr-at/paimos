@@ -54,7 +54,7 @@ func (b *attachCodesignOutput) Write(p []byte) (int, error) {
 	_, _ = b.text.Write(p)
 	return len(p), nil
 }
-func inspectAttachSignatureWith(ctx context.Context, pid string, run func(context.Context, ...string) (string, error), readEnv func(string) (attachObservedEnv, error)) (attachSignature, error) {
+func inspectAttachSignatureWith(ctx context.Context, pid string, run func(context.Context, ...string) (string, error), readEnv func(string) (claudeRuntimeDecision, error)) (attachSignature, error) {
 	n, err := strconv.Atoi(pid)
 	if err != nil || n < 1 || strconv.Itoa(n) != pid {
 		return attachSignature{}, errAttachSignature
@@ -108,16 +108,19 @@ func inspectAttachSignatureWith(ctx context.Context, pid string, run func(contex
 		}
 		return attachSignature{}, errAttachSignature
 	}
-	env, envErr := readEnv(pid)
-	if envErr != nil {
-		return attachSignature{}, errAttachSignatureUnavailable
-	}
-	decision := decideClaudeRuntime(identifier, env)
-	if decision == claudeRuntimeInjected || decision == claudeRuntimeUnobservable {
-		if decision == claudeRuntimeUnobservable {
+	// Codex keeps its signature decision with its procargs unread. Claude's scan
+	// decides during the walk and does not retain the strings.
+	if identifier == attachVendorIdentifier(Claude) {
+		decision, envErr := readEnv(pid)
+		if envErr != nil {
+			return attachSignature{}, errAttachSignatureUnavailable
+		}
+		switch decision {
+		case claudeRuntimeInjected:
+			return attachSignature{}, errAttachRuntimeDenied
+		case claudeRuntimeUnobservable:
 			return attachSignature{}, errAttachRuntimeUnobservable
 		}
-		return attachSignature{}, errAttachRuntimeDenied
 	}
 	return attachSignature{TeamID: team, Identifier: identifier, Signed: true}, nil
 }
