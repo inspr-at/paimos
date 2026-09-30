@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -283,7 +284,12 @@ func sameResponse(t *testing.T, a, b *httptest.ResponseRecorder) {
 	if a.Code != b.Code || a.Body.String() != b.Body.String() {
 		t.Fatalf("status/body %d %s vs %d %s", a.Code, a.Body, b.Code, b.Body)
 	}
-	ah, bh := a.Header(), b.Header()
+	ah, bh := a.Header().Clone(), b.Header().Clone()
+	if !retryAfterAgrees(ah.Values("Retry-After"), bh.Values("Retry-After")) {
+		t.Fatalf("header Retry-After %v vs %v", ah.Values("Retry-After"), bh.Values("Retry-After"))
+	}
+	ah.Del("Retry-After")
+	bh.Del("Retry-After")
 	if len(ah) != len(bh) {
 		t.Fatalf("headers %#v vs %#v", ah, bh)
 	}
@@ -292,6 +298,56 @@ func sameResponse(t *testing.T, a, b *httptest.ResponseRecorder) {
 			t.Fatalf("header %s %v vs %v", key, values, bh[key])
 		}
 	}
+}
+
+// retryAfterAgrees accepts the one-second boundary of a shared limiter bucket.
+// allow() ceils the remaining minute from clock_timestamp(), so two denials a
+// moment apart can report 60 and then 59. Any wider gap is still a mismatch.
+func retryAfterAgrees(a, b []string) bool {
+	if strings.Join(a, "\n") == strings.Join(b, "\n") {
+		return true
+	}
+	if len(a) != 1 || len(b) != 1 {
+		return false
+	}
+	av, aerr := strconv.Atoi(a[0])
+	bv, berr := strconv.Atoi(b[0])
+	if aerr != nil || berr != nil {
+		return false
+	}
+	diff := av - bv
+	if diff < 0 {
+		diff = -diff
+	}
+	limit := int(publicLimitWindow / time.Second)
+	return av >= 1 && av <= limit && bv >= 1 && bv <= limit && diff <= 1
+}
+
+func TestSameResponseAllowsRetryAfterSecondBoundary(t *testing.T) {
+	a := rateLimited(t, "60")
+	b := rateLimited(t, "59")
+	sameResponse(t, a, b)
+}
+
+func TestRetryAfterAgreesOnlyWithinOneSecond(t *testing.T) {
+	if !retryAfterAgrees([]string{"60"}, []string{"59"}) || !retryAfterAgrees([]string{"59"}, []string{"60"}) || !retryAfterAgrees(nil, nil) {
+		t.Fatal("a one-second Retry-After boundary should agree")
+	}
+	if retryAfterAgrees([]string{"60"}, []string{"58"}) || retryAfterAgrees([]string{"60"}, nil) || retryAfterAgrees([]string{"61"}, []string{"60"}) || retryAfterAgrees([]string{"0"}, []string{"1"}) || retryAfterAgrees([]string{"soon"}, []string{"60"}) {
+		t.Fatal("a wider or invalid Retry-After gap should not agree")
+	}
+}
+
+func rateLimited(t *testing.T, retryAfter string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Content-Type", "application/json")
+	rec.Header().Set("Retry-After", retryAfter)
+	rec.WriteHeader(http.StatusTooManyRequests)
+	if _, err := rec.WriteString(`{"error":"too many attempts"}`); err != nil {
+		t.Fatal(err)
+	}
+	return rec
 }
 
 func TestPublicWishIntake(t *testing.T) {
