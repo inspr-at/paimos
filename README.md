@@ -32,6 +32,21 @@ then request a new deployment. Journey contract `journey/1.2` adds the optional
 `next_action.renewal_action`; clients must use it when present. Existing action
 keys and reporter major versions remain unchanged.
 
+Native intake drafts accept an optional Aithema `extensions` map and the
+original review snapshot as `document_bytes` alongside the required native
+projection fields. Aeon extracts extensions from the single confirmed,
+unbound item and stores both fields as immutable text, preserving evidence and
+JSON spelling; idempotent retries must keep the bytes unchanged. Aithema owns
+registry/schema validation and its canonical 16 KiB instance / 64 KiB map
+limits. Aeon's intake request cap remains 1 MiB, including JSON escaping and
+projection overhead. Drafts, accepted briefs, requirements and their generated
+tickets show each namespace/version in a neutral Extension data disclosure.
+`GET /api/projects/{projectId}/intake?node_id=UUID` returns only the accepted
+drafts for that node or the requirement that generated its ticket, with empty
+sources/turns and the same `intake.read` permission. This additive native API
+does not implement Aithema's snapshot-only plugin protocol or change Aithema's
+separate `pending_op.payload` limit.
+
 Wide project headers can show an ambient ticket graph (Display → Graph in
 project header). It uses a tilted 3D cloud with an optional elliptic force bias,
 fits the densest 85% of nodes by height, and fades out inside the empty space

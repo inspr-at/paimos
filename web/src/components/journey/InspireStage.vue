@@ -13,6 +13,7 @@ import GateCard from './GateCard.vue'
 import HistoryFold from './HistoryFold.vue'
 import ImportedOrigin from './ImportedOrigin.vue'
 import SourcesCard from './SourcesCard.vue'
+import ExtensionData from './ExtensionData.vue'
 
 // Inspire: what Aithema recorded (conversation and sources) and the drafts it
 // proposes from them, each citing its sources. Accepting the brief draft turns
@@ -89,6 +90,7 @@ async function accept(draft: IntakeDraft) {
             <span class="j-chip" :class="draft.status === 'accepted' ? 'ok' : draft.status === 'rejected' ? 'bad' : 'gold'">{{ draft.status }}</span>
           </header>
           <MarkdownBody v-if="draft.body" class="draft-body" :body="draft.body" />
+          <ExtensionData :extensions="draft.extensions" />
           <p v-if="draft.citations.length" class="cites">
             <button v-for="(cite, i) in draft.citations" :key="i" type="button" class="j-cite" @click="sources?.reveal(cite.source_id, cite.turn_id)">{{ sourceLabel(cite.source_id) }}{{ cite.locator ? ` · ${cite.locator}` : '' }}</button>
           </p>
