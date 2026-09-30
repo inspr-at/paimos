@@ -62,7 +62,7 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 	if registered.State != "registered" {
 		return nil, errors.New("paired instance refused attach registration; update agentd and Aeon")
 	}
-	return agentd.NewAttachManager(agentd.AttachConfig{Origin: c.Origin, ComputerID: c.ComputerID, Host: host, Workspace: c.Workspace, Executables: paths,
+	return agentd.NewAttachManager(agentd.AttachConfig{Origin: c.Origin, ComputerID: c.ComputerID, Host: host, Workspace: c.Workspace, Executables: paths, Identities: c.AttachIdentities,
 		Exchange: func(ctx context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 			in.PollKey = pollKey
 			var out attachwatch.View

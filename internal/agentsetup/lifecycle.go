@@ -6,23 +6,35 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 )
 
+// Status reads one atomically replaced snapshot and live, read-only daemon
+// telemetry. It never locks, reconciles, fences, saves or acknowledges cleanup.
 func (e *Engine) Status(ctx context.Context) (Progress, error) {
-	if err := e.Store.Lock(); err != nil {
-		return Progress{}, err
+	s, err := e.loadSnapshot(true)
+	if errors.Is(err, os.ErrNotExist) {
+		return Progress{Schema: "aeon.agent-setup.v1", Stage: "provisioning", LocalProcesses: "unconfirmed", Action: "Setup in progress; the first complete snapshot is not available yet."}, nil
 	}
-	s, err := e.load()
 	if err != nil {
 		return Progress{}, err
 	}
 	if s.View.ComputerID == "" {
 		return e.progress(s), nil
 	}
-	return e.reconcile(ctx, s)
+	if s.DisconnectAll || s.Phase == "draining" || s.Phase == "server_unconfirmed" || s.ComputerCleaned {
+		p := e.progress(s)
+		p.Action = "Setup cleanup is in progress. Run disconnect to resume reconciliation."
+		if s.ComputerCleaned {
+			p.Stage = "disconnected"
+			p.Action = "Local cleanup recorded; run disconnect to confirm server acknowledgement."
+		}
+		return p, nil
+	}
+	return e.connectionProgress(ctx, s), nil
 }
 
 func (e *Engine) Disconnect(ctx context.Context, accountID string) (Progress, error) {
@@ -290,7 +302,7 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 		proof.ComputerCleaned = s.ComputerCleaned
 		ack, err := e.API.Reconcile(ctx, proof)
 		if err != nil {
-			p.Action = "Local cleanup recorded; server acknowledgement pending. Resume status when online."
+			p.Action = "Local cleanup recorded; server acknowledgement pending. Resume disconnect when online."
 			return p, err
 		}
 		if err = validateView(s, ack, false); err != nil {
@@ -326,29 +338,43 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 		}
 		return p, nil
 	}
+	return e.connectionProgress(ctx, s), nil
+}
+
+func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
+	v := s.View
+	p := e.progress(s)
+	p.AccountingState = v.AccountingState
+
 	if e.Local != nil {
 		local, err := e.Local.Status(ctx, "")
 		if err == nil && local.DaemonID == v.DaemonID {
+			accountReport := local.AccountStatuses != nil
+			local = enrollmentReadiness(v, local)
 			p.HarnessDetails, p.HarnessStatuses = local.HarnessDetails, local.HarnessStatuses
 			p.BlockedAccounts = append([]BlockedAccount(nil), local.BlockedAccounts...)
 			// A Claude hold keeps its own stage: repin is a Claude-only flow.
-			if issue := local.HarnessErrors["claude"]; issue != "" {
+			if issue := local.HarnessErrors["claude"]; issue != "" && (!accountReport || local.HarnessDetails["claude"].Reason == "repin_pending") {
 				if local.HarnessDetails["claude"].Reason == "repin_pending" {
 					p.Stage = "repin_pending"
 					p.LocalProcesses = local.State
 					p.Action = "Waiting for repin; the daemon retries automatically after active runs finish."
-					return p, nil
+					return p
 				}
 				p.Stage = "blocked"
 				p.LocalProcesses = local.State
 				p.Action = issue
-				return p, nil
+				return p
+			}
+			if stage, action := readinessAction(v, local); action != "" {
+				p.Stage, p.Action, p.LocalProcesses = stage, action, local.State
+				return p
 			}
 			observed := observedProgress(v, local)
 			if local.ProfilePermissions && !local.Ready {
 				p.Stage = "blocked"
 				p.Action = "The pi local profile must be a private directory. Review its permissions, then resume setup."
-				return p, nil
+				return p
 			}
 			if local.HarnessFailed && !local.Ready {
 				p.Stage = "blocked"
@@ -356,25 +382,41 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 				if len(local.BlockedAccounts) > 0 {
 					p.Action = "No approved harness can start. Run the fix listed for each blocked account; the daemon resumes it on its next check."
 				}
-				return p, nil
+				return p
 			}
 			if observed.State == "login_required" {
 				p.Stage = "login_required"
 				p.Action = "An approved vendor account is no longer signed in with its approved identity. Use normal vendor login, then resume setup."
-				return p, nil
+				return p
+			}
+			for _, a := range v.Enrollments {
+				reason := local.VerificationReasons[a.VerificationRunID]
+				if reason == "" {
+					reason = a.VerificationReason
+				}
+				if a.State == "connected" && reason != "" && local.Ready {
+					p.Stage, p.LocalProcesses = "verification_unavailable", local.State
+					p.Action = verificationMessage(a.Harness, reason)
+					return p
+				}
 			}
 			if observed.State == "connected" && observed.ErrorCode == "verification_unavailable" {
 				p.Stage = "verification_unavailable"
 				p.LocalProcesses = local.State
 				p.Action = "This installed harness cannot enforce safe verification, so its verification was not launched. The computer remains paired. Use a qualified harness version, or choose Connect only during a fresh authenticated pairing approval."
-				return p, nil
+				return p
 			}
 		}
 		if err == nil && local.DaemonID == v.DaemonID && local.Ready {
 			p.LocalProcesses = local.State
 		} else {
 			p.Stage = "provisioning"
-			p.Action = "Approved daemon connectivity remains unconfirmed."
+			p.Action = "Daemon connectivity is unconfirmed: no heartbeat from the approved daemon. Check that its service is running."
+			if err == nil && local.DaemonID == v.DaemonID {
+				p.Stage = "blocked"
+				p.Action = "The daemon responded but supplied no account readiness reason. Update the helper, then resume setup."
+			}
+			return p
 		}
 	}
 	if p.Stage != "provisioning" {
@@ -408,7 +450,7 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 			p.Action = "Computer connected; ongoing limits remain separately controlled."
 		}
 	}
-	return p, nil
+	return p
 }
 
 func (e *Engine) removeAccount(id string) error {
@@ -568,12 +610,41 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 			candidate = i
 		}
 	}
-	if index < 0 || candidate < 0 || !pinBlocked(config, enrolled.AccountID) {
+	if index < 0 || candidate < 0 {
 		return e.progress(s), exists
 	}
 	current := config.Accounts[index]
 	if current.Path != c.Path || current.Home != c.Home || current.Identity != c.Identity {
 		return e.progress(s), errors.New("the signed-in account or executable differs from the enrolled one; remove this enrollment, then add the harness again")
+	}
+	if !pinBlocked(config, enrolled.AccountID) {
+		identity := RecordAttachIdentity(c.Harness, c.Path, config.Workspace)
+		if identity == nil || config.AttachIdentities[c.Harness] == *identity {
+			return e.progress(s), exists
+		}
+		id, err := uuid()
+		if err != nil {
+			return Progress{}, err
+		}
+		event, _ := json.Marshal(struct {
+			Kind      string         `json:"kind"`
+			ID        string         `json:"id"`
+			At        time.Time      `json:"at"`
+			AccountID string         `json:"account_id"`
+			Harness   string         `json:"harness"`
+			Identity  AttachIdentity `json:"attach_identity"`
+		}{"attach_identity_repaired", id, e.now(), enrolled.AccountID, c.Harness, *identity})
+		if err := e.Store.Write("attach-identity-repair-"+id+".json", event, true); err != nil {
+			return Progress{}, err
+		}
+		config.RecordAttachIdentities()
+		raw, _ = json.Marshal(config)
+		if err := e.Store.Write(RuntimeName, raw, false); err != nil {
+			return Progress{}, err
+		}
+		p := e.progress(s)
+		p.Action = "Local attach identity recorded; restart agentd to use it. No enrollment or interpreter pin changed."
+		return p, nil
 	}
 	current.Node, current.PiNode = c.Node, c.PiNode
 	config.Accounts[index] = current
@@ -601,6 +672,7 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 	if err := e.save(s, false); err != nil {
 		return Progress{}, err
 	}
+	config.RecordAttachIdentities()
 	raw, _ = json.Marshal(config)
 	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
 		return Progress{}, errors.New("pin renewal recorded but runtime update incomplete; rerun add-harness")
@@ -620,6 +692,7 @@ func pinBlocked(c RuntimeConfig, accountID string) bool {
 }
 
 func observedProgress(v View, local LocalStatus) *SetupProgress {
+	local = enrollmentReadiness(v, local)
 	p := &SetupProgress{State: "provisioning", HarnessStatuses: local.HarnessStatuses, HarnessDetails: local.HarnessDetails}
 	// A runtime hold or pin block is not an installation failure. Setup stays
 	// complete even when every harness is held; per-harness details carry the

@@ -797,21 +797,10 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 
 func (f *fixture) twoQualifiedEnrollments() (*proposal, agentpairing.View) {
 	f.t.Helper()
-	p := f.propose("claude")
+	// Both verifications belong to one approval. A later Add harness approval
+	// intentionally supersedes older queued verification (AEON-401).
+	p := f.propose("claude", "grok")
 	f.approve(p, "one_per_harness")
-	v := f.redeem(p)
-	q := &proposal{id: uuid(f.t, f.db), device: nonce(), runtime: p.runtime, lifecycle: p.lifecycle, request: map[string]any{}}
-	for k, x := range p.request {
-		q.request[k] = x
-	}
-	q.request["request_id"] = q.id
-	q.request["device_hash"] = hash(q.device)
-	q.request["existing_computer_id"] = *v.ComputerID
-	q.request["existing_lifecycle_secret"] = p.lifecycle
-	q.request["accounts"] = []map[string]string{{"account_key": "claude-second", "harness": "claude", "label": "Second selected account", "model_profile_id": f.profiles["claude"]}}
-	f.submit(q)
-	f.approve(q, "one_per_harness")
-	f.redeem(q)
 	return p, f.redeem(p)
 }
 

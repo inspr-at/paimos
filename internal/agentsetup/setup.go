@@ -69,17 +69,18 @@ type RuntimeAccount struct {
 	Node      harnesslaunch.Node `json:"node,omitempty"`
 }
 type RuntimeConfig struct {
-	Schema        string           `json:"schema"`
-	Origin        string           `json:"origin"`
-	TenantID      string           `json:"tenant_id"`
-	PrincipalID   string           `json:"principal_id"`
-	DaemonID      string           `json:"daemon_id"`
-	ComputerID    string           `json:"computer_id"`
-	Workspace     string           `json:"workspace"`
-	Accounts      []RuntimeAccount `json:"accounts"`
-	NodePath      string           `json:"node_path,omitempty"`
-	ClaudeSDKPath string           `json:"claude_sdk_path,omitempty"`
-	ClaudeRepinID string           `json:"claude_repin_id,omitempty"`
+	AttachIdentities map[string]AttachIdentity `json:"attach_identities,omitempty"`
+	Schema           string                    `json:"schema"`
+	Origin           string                    `json:"origin"`
+	TenantID         string                    `json:"tenant_id"`
+	PrincipalID      string                    `json:"principal_id"`
+	DaemonID         string                    `json:"daemon_id"`
+	ComputerID       string                    `json:"computer_id"`
+	Workspace        string                    `json:"workspace"`
+	Accounts         []RuntimeAccount          `json:"accounts"`
+	NodePath         string                    `json:"node_path,omitempty"`
+	ClaudeSDKPath    string                    `json:"claude_sdk_path,omitempty"`
+	ClaudeRepinID    string                    `json:"claude_repin_id,omitempty"`
 }
 
 type snapshot struct {
@@ -131,6 +132,8 @@ type Progress struct {
 	RetryAfterSeconds int                      `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
+	VerificationReasons                    map[string]string
+	AccountStatuses                        map[string]HarnessDetail
 	ProfilePermissions                     bool
 	HarnessFailed                          bool
 	HarnessDetails                         map[string]HarnessDetail
@@ -201,8 +204,16 @@ func uuid() (string, error) {
 	b[8] = (b[8] & 63) | 128
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
-func (e *Engine) load() (*snapshot, error) {
-	raw, err := e.Store.Read(snapshotName, 1<<20)
+func (e *Engine) load() (*snapshot, error) { return e.loadSnapshot(false) }
+
+func (e *Engine) loadSnapshot(readOnly bool) (*snapshot, error) {
+	var raw []byte
+	var err error
+	if readOnly {
+		raw, err = e.Store.readSnapshot()
+	} else {
+		raw, err = e.Store.Read(snapshotName, 1<<20)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -652,6 +663,11 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 			return e.progress(s), ErrCollision
 		}
 	}
+	var previous RuntimeConfig
+	if saved, err := e.Store.Read(RuntimeName, 128<<10); err == nil && json.Unmarshal(saved, &previous) == nil {
+		config.preserveAttachIdentities(previous)
+	}
+	config.RecordAttachIdentities()
 	raw, _ := json.Marshal(config)
 	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
 		return e.progress(s), err
@@ -682,17 +698,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		p.Action = "Start the approved daemon to verify connectivity."
 		return p, nil
 	}
-	local, err := e.Local.Status(ctx, "")
-	if err == nil && local.DaemonID == s.View.DaemonID && len(local.BlockedAccounts) > 0 {
-		p.BlockedAccounts = append([]BlockedAccount(nil), local.BlockedAccounts...)
-	}
-	if err != nil || local.DaemonID != s.View.DaemonID || !local.Ready {
-		p.Stage = "provisioning"
-		p.Action = "Daemon connectivity is unconfirmed; resume setup after the approved service starts."
-		return p, nil
-	}
-	p.LocalProcesses = local.State
-	return p, nil
+	return e.connectionProgress(ctx, s), nil
 }
 
 func ReadRuntimeConfig(root string) (RuntimeConfig, error) {

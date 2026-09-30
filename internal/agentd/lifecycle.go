@@ -25,6 +25,8 @@ type DrainRequest struct {
 // LifecycleStatus does not conflate telemetry acceptance with observed exit.
 // Only a drained status permits removing a pairing-owned service or credential.
 type LifecycleStatus struct {
+	VerificationReasons     map[string]string                   `json:"verification_reasons,omitempty"`
+	AccountStatuses         map[string]agentsetup.HarnessDetail `json:"account_statuses,omitempty"`
 	ProfilePermissions      bool                                `json:"profile_permissions,omitempty"`
 	HarnessFailed           bool                                `json:"harness_failed,omitempty"`
 	HarnessFailedAccountIDs []string                            `json:"harness_failed_account_ids,omitempty"`
@@ -136,8 +138,14 @@ func (s *Supervisor) Drain(req DrainRequest) (LifecycleStatus, error) {
 }
 
 func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
+	return s.lifecycleAt(accountID, time.Now())
+}
+
+func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatus {
 	v := LifecycleStatus{DaemonID: s.daemonID, Generation: s.generation, State: "drained", ActiveRunIDs: []string{}, UnconfirmedRunIDs: []string{}, SettlementPendingRunIDs: []string{}, FencedAccountIDs: []string{}, VerificationResults: map[string]string{}, HarnessErrors: map[string]string{}}
 	s.mu.Lock()
+	v.VerificationReasons = map[string]string{}
+	v.AccountStatuses = map[string]agentsetup.HarnessDetail{}
 	v.HarnessStatuses = map[string]string{}
 	v.HarnessDetails = map[string]agentsetup.HarnessDetail{}
 	if s.capacityCapturing {
@@ -191,15 +199,27 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 			} else if s.probedAccounts[a.ID] && !s.blockedAccounts[a.ID] {
 				status, reason = "ready", ""
 				v.Ready = true
+			} else if s.blockedAccounts[a.ID] && s.probePendingSince[a.ID].IsZero() {
+				status, reason = "blocked", "probe_failed"
 			} else {
-				reason = "starting"
+				reason = "probe_pending"
+				if since := s.probePendingSince[a.ID]; !since.IsZero() && now.Sub(since) >= time.Minute {
+					status, reason = "blocked", "probe_timeout"
+				}
 			}
-			// A pin-blocked account stays unlaunchable; its verification waits
-			// for the repair instead of being refused.
+			if status == "ready" && s.capacityCapturing && s.capacityAccountID == a.ID {
+				status, reason = "checking", "capacity_capture"
+				if now.Sub(s.capacityStartedAt) >= 10*time.Second {
+					status, reason = "blocked", "capacity_timeout"
+				}
+			}
+			// Pin-blocked accounts remain unlaunchable. A queued verification
+			// records its own no-launch refusal independently of this health report.
 			if adapter, ok := s.adapters[a.Harness].(VerificationAdapter); !a.DependencyBlocked && (!ok || !adapter.VerificationSupported()) {
 				v.VerificationUnavailable = append(v.VerificationUnavailable, a.ID)
 			}
 		}
+		v.AccountStatuses[a.ID], _ = agentsetup.HarnessReport(a.Harness, status, reason)
 		perHarness[a.Harness] = append(perHarness[a.Harness], harnessAccountState{id: a.ID, status: status, reason: reason})
 	}
 	assignHarnessReports(&v, perHarness)
@@ -237,6 +257,9 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 		}
 		if e.record.ExecutionMode == VerificationPurpose {
 			state := e.record.State
+			if e.record.LaunchState == launchRefused {
+				v.VerificationReasons[e.record.RunID] = e.record.VerificationReason
+			}
 			if e.record.LaunchState == launchRefused && !slices.Contains(v.VerificationUnavailable, e.record.AccountID) {
 				v.VerificationUnavailable = append(v.VerificationUnavailable, e.record.AccountID)
 			}
@@ -348,6 +371,7 @@ func blockedReport(a EnrolledAccount) agentsetup.BlockedAccount {
 func (s *Supervisor) freezeOnError(account string) {
 	s.mu.Lock()
 	s.blockedAccounts[account] = true
+	delete(s.probePendingSince, account)
 	s.mu.Unlock()
 }
 
@@ -430,6 +454,14 @@ func (s *Supervisor) SetHarnessHoldWithReason(harness, code, reason string) {
 		s.harnessHoldReasons = map[string]string{}
 	}
 	if reason == "" {
+		if s.harnessHolds[harness] != "" {
+			now := time.Now()
+			for _, a := range s.accounts {
+				if a.Harness == harness {
+					s.beginAccountProbe(a.ID, now)
+				}
+			}
+		}
 		delete(s.harnessHolds, harness)
 		delete(s.harnessHoldReasons, harness)
 		return
@@ -443,6 +475,18 @@ func (s *Supervisor) SetHarnessHoldWithReason(harness, code, reason string) {
 			s.blockedAccounts[a.ID] = true
 		}
 	}
+}
+
+// beginAccountProbe gives an added or unblocked account its own bounded wait.
+// Callers hold s.mu. Dispatch fences and existing failure flags are preserved;
+// only a fresh probe can establish readiness again.
+func (s *Supervisor) beginAccountProbe(accountID string, now time.Time) {
+	if s.probePendingSince == nil {
+		s.probePendingSince = map[string]time.Time{}
+	}
+	s.probePendingSince[accountID] = now
+	delete(s.probedAccounts, accountID)
+	delete(s.loginRequired, accountID)
 }
 
 // settlePending retries the exact persisted sequence; it never restarts a run.
@@ -504,6 +548,7 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 		configured[a.Name()] = a
 	}
 	merged := append([]EnrolledAccount(nil), s.accounts...)
+	now := time.Now()
 	for _, a := range accounts {
 		if a.ID == "" || a.Key == "" || (configured[a.Harness] == nil && !a.DependencyBlocked) {
 			return ErrScope
@@ -523,6 +568,7 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 		}
 		if !found {
 			merged = append(merged, a)
+			s.beginAccountProbe(a.ID, now)
 		} else {
 			for i := range merged {
 				if merged[i].ID != a.ID {
@@ -533,6 +579,7 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 				merged[i].PinReason = a.PinReason
 				merged[i].PinFix = a.PinFix
 				if wasBlocked && !a.DependencyBlocked {
+					s.beginAccountProbe(a.ID, now)
 					delete(s.blockedAccounts, a.ID)
 					if s.harnessFailed != nil {
 						delete(s.harnessFailed, a.ID)
@@ -597,10 +644,10 @@ func (s *Supervisor) RestartClaude(ctx context.Context, adapter *ClaudeAdapter) 
 		return ErrScope
 	}
 	s.adapters[Claude] = adapter
+	now := time.Now()
 	for _, account := range accounts {
 		if account.Harness == Claude {
-			delete(s.probedAccounts, account.ID)
-			delete(s.loginRequired, account.ID)
+			s.beginAccountProbe(account.ID, now)
 		}
 	}
 	return nil

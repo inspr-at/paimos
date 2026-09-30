@@ -700,6 +700,40 @@ sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 
 Licence: AGPL-3.0-only.
 
+### Pairing readiness and diagnostics
+
+`aeon-agentd status` reads the last atomic setup snapshot and live daemon status
+without taking `setup.lock`, reconciling enrollment, or performing cleanup.
+Use `pair`/`setup` to resume setup and `disconnect` to resume cleanup. Approved
+but unbound harnesses name the required `add-harness` command. Account checks
+report a 60-second bound from daemon start for each initial account, or from
+that account being added or unblocked by repin; refreshing unchanged accounts
+does not extend the wait. Capacity capture reports a 10-second bound.
+Unsupported or incomplete verification fails with `verification_unavailable`
+and a bounded cause, independently of account probing. Connect-only approval
+creates no verification, and a later approval cancels older queued verification
+on that same computer without interrupting claimed work.
+
+New pairing-owned macOS launchd services write diagnostics to
+`~/Library/Logs/aeon-agentd/{stdout,stderr}.log` in a private `0700` directory.
+Existing receipt-bound service definitions remain owned and unchanged; logging
+is added when a new service is installed. Managed Nix/Home Manager services
+retain their configuration ownership.
+
+The paired daemon writes bounded `agentd polling diagnostic` lines to stderr
+when the set of causes changes, then at most one reminder per cause every
+15 minutes while the set persists. A healthy poll clears the set, so a recurring
+cause is logged immediately. Multiple accounts sharing a cause produce one line:
+`reason=probe_failed` records an account readiness failure (a failed probe/report
+or a retained ownership/reporting block);
+`reason=probe_timeout` confirms an account exhausted its own pending probe wait;
+`reason=queue_unavailable` confirms `Queued()` returned an error before probing;
+`reason=dispatch_not_allowed` confirms a dispatch fence, fence-read failure or
+daemon shutdown prevented polling or an account probe. Correlate these lines
+with read-only `aeon-agentd status --json` for the affected account. Queue errors
+can therefore explain a subsequent probe timeout; the timeout alone does not
+identify the underlying cause. Raw errors and private bindings are not logged.
+
 ### Paired daemon socket paths
 
 Paired mode uses `<setup-root>/daemon/agentd.sock`. If that exceeds the
@@ -988,6 +1022,32 @@ physical file, as in the AEON-258 mirror. Choose **Status only (no conversation
 text)** at the local prompt, or pass `--status-only` (no transcript needed), to
 report status without reading or sharing conversation text. Missing or unsafe
 transcripts never silently select status-only.
+
+Claude, Codex and Cursor are identified from the kernel-observed running image,
+so an exec wrapper or a vendor auto-update does not require re-pairing. On macOS,
+the daemon verifies the signature against Apple's certificate chain and the
+built-in vendor Team ID; legacy wrapper pairings work after upgrading and
+restarting agentd. Unsigned installations and Linux use a local installation
+root plus owner recorded at pairing or by `repin --harness claude`,
+`add-harness --harness codex` or `add-harness --harness cursor`; restart agentd
+after recording a fallback identity. Unknown layouts retain only the approved
+exact-file pin. Recorded roots survive removal of an old version and stay bound
+to the same pairing and account. A recorded owner and root must match even
+when the running image still has the old exact path.
+The daemon does not interpret or execute wrappers to discover an install root.
+Every image and ancestor must satisfy the existing ownership and permission
+rules, and confirmation and polls recheck the image. Local HTTP 409 diagnostics
+include `harness_identity_mismatch`, `harness_executable_unsafe` or
+`harness_image_changed` with a repair hint; the attach client displays them.
+
+Identity regressions cover release-13 wrapper pairing upgrades, native exec
+chains, vendor updates, unsigned root fallback and its repair, signature
+failures, writable installations, file replacement and local 409 diagnostics.
+On macOS, run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-identity-mutations.py`
+to remove each guard temporarily and require a failing regression; the script
+rejects build failures as evidence and restores each source file. Real codesign
+checks also probe installed vendor binaries; an absent harness is reported as
+skipped, while fixture signature checks still run.
 
 Review the kernel-observed process, physical folder and chosen mode, type `WATCH`
 or `ATTACH` as shown, then enter its nine-digit code under **Agents → Attach
