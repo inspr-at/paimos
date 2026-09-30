@@ -20,9 +20,16 @@ import (
 	"unicode/utf8"
 )
 
-// shardCount is seven because five shards peaked at 232s and six shards, with
-// every package over 90s split into its own process, peaked at 254s.
-const shardCount = 7
+// Hosted retains the measured seven-way layout; the Mac pool has four slots.
+const hostedShardCount = 7
+const macShardCount = 4
+
+func checkShardCount(count int) error {
+	if count != hostedShardCount && count != macShardCount {
+		return fmt.Errorf("-count must be %d or %d", macShardCount, hostedShardCount)
+	}
+	return nil
+}
 
 const pairingPackage = "github.com/inspr-at/paimos/internal/agentpairing"
 const pathProofTest = "TestPathProofCommandsRunInShells"
@@ -31,10 +38,6 @@ const nodesPackage = "github.com/inspr-at/paimos/internal/nodes"
 // exemptPerformanceTest sanitises explain JSON. The name contains Performance
 // and the test has no wall-clock budget.
 const exemptPerformanceTest = "TestSafeListPerformancePlan"
-
-// timingHostShard is the shortest go-test job on ubuntu-latest run 36704871290.
-// Wall clock for shards 1..7 was 199s, 195s, 194s, 165s, 177s, 196s, 175s.
-const timingHostShard = 4
 
 // shardNeedsShell reports whether shard runs the pairing path-proof test.
 // A whole-package row runs every test, including that one.
@@ -344,15 +347,15 @@ func balance(items []Item, shards int) ([]Item, error) {
 	return out, nil
 }
 
-func formatFile(items []Item, splitAbove int) string {
+func formatFile(items []Item, splitAbove, count int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# AEON-408 CI Go shards. Regenerate with: go run ./scripts/ci-go-shards generate -log <job.log> -json <tests.json>\n")
+	fmt.Fprintf(&b, "# AEON-408/AEON-459 CI Go shards (%d). Regenerate with: go run ./scripts/ci-go-shards generate -count %d -log <job.log> -json <tests.json>\n", count, count)
 	fmt.Fprintf(&b, "# Whole-package times are go test elapsed milliseconds from ubuntu-latest run 36695656920.\n")
 	fmt.Fprintf(&b, "# Packages over %dms are split by test. Harness, nodes, and agentpairing keep their five-shard proportions.\n", splitAbove)
 	fmt.Fprintf(&b, "# Inbox was measured locally and scaled to that run. Pairing tests added in release 14 were measured locally and scaled by the same ratio as the rest of that package.\n")
 	fmt.Fprintf(&b, "# A package added after that run is listed at 0ms until the next measurement.\n")
 	fmt.Fprintf(&b, "# A package absent from this file runs on the lightest shard. A split package's lowest shard skips tests assigned elsewhere, so a new Test, Example, or Fuzz still runs.\n")
-	fmt.Fprintf(&b, "# TestList6000Performance, TestList6000FiltersPerformance and TestPlanningBulkUsagePerformance are wall-clock budgets. Every shard skips them. They run once, with -p 1, after the shortest shard.\n")
+	fmt.Fprintf(&b, "# TestList6000Performance, TestList6000FiltersPerformance and TestPlanningBulkUsagePerformance are wall-clock budgets. Every shard skips them. They run once, with -p 1, in the hosted go-timing job.\n")
 	fmt.Fprintf(&b, "# Columns: shard milliseconds import-path [TestName]\n")
 	for _, it := range items {
 		if it.Test == "" {
@@ -364,7 +367,10 @@ func formatFile(items []Item, splitAbove int) string {
 	return b.String()
 }
 
-func parseFile(text string) ([]Item, error) {
+func parseFile(text string, count int) ([]Item, error) {
+	if err := checkShardCount(count); err != nil {
+		return nil, err
+	}
 	var items []Item
 	for i, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
@@ -376,8 +382,8 @@ func parseFile(text string) ([]Item, error) {
 			return nil, fmt.Errorf("line %d: want 3 or 4 fields", i+1)
 		}
 		shard, err := strconv.Atoi(f[0])
-		if err != nil || shard < 1 || shard > shardCount {
-			return nil, fmt.Errorf("line %d: shard must be 1..%d", i+1, shardCount)
+		if err != nil || shard < 1 || shard > count {
+			return nil, fmt.Errorf("line %d: shard must be 1..%d", i+1, count)
 		}
 		ms, err := strconv.Atoi(f[1])
 		if err != nil || ms < 0 {
@@ -396,15 +402,15 @@ func parseFile(text string) ([]Item, error) {
 }
 
 // validate checks shape, longest-processing-time balance and the sequential budget.
-func validate(items []Item, budgetMS int) error {
-	if err := validateShape(items); err != nil {
+func validate(items []Item, budgetMS, count int) error {
+	if err := validateShape(items, count); err != nil {
 		return err
 	}
 	cleared := append([]Item(nil), items...)
 	for i := range cleared {
 		cleared[i].Shard = 0
 	}
-	want, err := balance(cleared, shardCount)
+	want, err := balance(cleared, count)
 	if err != nil {
 		return err
 	}
@@ -418,7 +424,7 @@ func validate(items []Item, budgetMS int) error {
 		}
 	}
 	seq := sequentialByShard(items)
-	for shard := 1; shard <= shardCount; shard++ {
+	for shard := 1; shard <= count; shard++ {
 		for path, ms := range seq[shard] {
 			if ms > budgetMS {
 				return fmt.Errorf("shard %d runs %s for %dms, over the %dms sequential budget", shard, path, ms, budgetMS)
@@ -428,12 +434,18 @@ func validate(items []Item, budgetMS int) error {
 	return nil
 }
 
-func validateShape(items []Item) error {
+func validateShape(items []Item, count int) error {
+	if err := checkShardCount(count); err != nil {
+		return err
+	}
 	seen := map[string]Item{}
 	whole := map[string]bool{}
 	split := map[string]bool{}
 	used := map[int]bool{}
 	for _, it := range items {
+		if it.Shard < 1 || it.Shard > count || it.MS < 0 {
+			return fmt.Errorf("invalid shard or weight for %s", it.Path)
+		}
 		if it.Path == "" || strings.Contains(it.Path, " ") {
 			return fmt.Errorf("bad import path %q", it.Path)
 		}
@@ -453,7 +465,7 @@ func validateShape(items []Item) error {
 			return fmt.Errorf("%s is listed both as a whole package and as individual tests", path)
 		}
 	}
-	for shard := 1; shard <= shardCount; shard++ {
+	for shard := 1; shard <= count; shard++ {
 		if !used[shard] {
 			return fmt.Errorf("shard %d has no packages", shard)
 		}
@@ -474,10 +486,10 @@ func sequentialByShard(items []Item) map[int]map[string]int {
 	return out
 }
 
-func shardStats(items []Item) string {
+func shardStats(items []Item, count int) string {
 	seq := sequentialByShard(items)
 	var b strings.Builder
-	for shard := 1; shard <= shardCount; shard++ {
+	for shard := 1; shard <= count; shard++ {
 		sum := 0
 		pkgs := len(seq[shard])
 		maxMS := 0
@@ -674,10 +686,10 @@ func (p shardPlan) runsTest(path, name string) bool {
 
 // lightestShard is the committed shard with the smallest total milliseconds.
 // Ties take the lower shard number. A package missing from the file runs there.
-func lightestShard(items []Item) int {
+func lightestShard(items []Item, count int) int {
 	sum := map[int]int{}
 	for _, it := range items {
-		if it.Shard < 1 || it.Shard > shardCount {
+		if it.Shard < 1 || it.Shard > count {
 			continue
 		}
 		sum[it.Shard] += it.MS
@@ -700,9 +712,12 @@ func lightestShard(items []Item) int {
 // packages go list currently returns. The lowest shard of a split package is
 // the catch-all: it skips only the names assigned to other shards, so a new
 // Test, Example, or Fuzz runs there and nowhere else.
-func planShard(items []Item, listed []string, shard int) (shardPlan, error) {
-	if shard < 1 || shard > shardCount {
-		return shardPlan{}, fmt.Errorf("shard must be 1..%d", shardCount)
+func planShard(items []Item, listed []string, shard, count int) (shardPlan, error) {
+	if err := checkShardCount(count); err != nil {
+		return shardPlan{}, err
+	}
+	if shard < 1 || shard > count {
+		return shardPlan{}, fmt.Errorf("shard must be 1..%d", count)
 	}
 	assigned := map[string]struct{}{}
 	for _, it := range items {
@@ -714,7 +729,7 @@ func planShard(items []Item, listed []string, shard int) (shardPlan, error) {
 			wholeSet[it.Path] = struct{}{}
 		}
 	}
-	if shard == lightestShard(items) {
+	if shard == lightestShard(items, count) {
 		for _, path := range listed {
 			if _, ok := assigned[path]; ok {
 				continue
@@ -849,16 +864,19 @@ func (p shardPlan) timingCommandArgs() ([]string, error) {
 // coverageHoles fails when a listed package or a runnable split-package test
 // would not run on exactly one shard. Drift of the committed file is separate
 // and stays advisory.
-func coverageHoles(items []Item, listed []string, runnable map[string][]string) error {
+func coverageHoles(items []Item, listed []string, runnable map[string][]string, count int) error {
+	if err := checkShardCount(count); err != nil {
+		return err
+	}
 	split := map[string]bool{}
 	for _, it := range items {
 		if it.Test != "" {
 			split[it.Path] = true
 		}
 	}
-	plans := make([]shardPlan, 0, shardCount)
-	for shard := 1; shard <= shardCount; shard++ {
-		plan, err := planShard(items, listed, shard)
+	plans := make([]shardPlan, 0, count)
+	for shard := 1; shard <= count; shard++ {
+		plan, err := planShard(items, listed, shard, count)
 		if err != nil {
 			return err
 		}

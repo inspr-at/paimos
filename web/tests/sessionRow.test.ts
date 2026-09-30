@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { SessionView } from '../src/stores/agents.ts'
-import { explicitOutcome, intendedResult, modelProvider, sessionContext, sessionExecution } from '../src/components/agents/sessionRow.ts'
+import { explicitOutcome, intendedResult, modelProvider, sessionContext, sessionExecution, sessionEtaEligible } from '../src/components/agents/sessionRow.ts'
 
 function view(partial: Partial<SessionView> & { session?: Partial<SessionView['session']> } = {}): SessionView {
   const session = {
@@ -16,6 +16,19 @@ function view(partial: Partial<SessionView> & { session?: Partial<SessionView['s
     ...partial, session,
   }
 }
+
+test('ETA guidance is limited to running sessions with a bound ticket in rows and panels', () => {
+  const ticket = { id: 'n', key: 'AEON-443', title: 'Estimates and ETAs', href: '/p/AEON/AEON-443' }
+  for (const role of ['worker', 'coordinator'] as const) {
+    assert.equal(sessionEtaEligible(view({ session: { role } })), false)
+    assert.equal(sessionEtaEligible(view({ ticket, session: { role } })), true)
+    assert.equal(sessionEtaEligible(view({ ticket, session: { role, stopped_at: '2026-09-30T12:00:00Z' } })), false)
+    assert.equal(sessionEtaEligible(view({ ticket, session: { role, archived_at: '2026-09-30T12:00:00Z' } })), false)
+    assert.equal(sessionEtaEligible(view({ ticket, session: { role, phase: 'stopped' } })), false)
+  }
+  assert.equal(sessionEtaEligible(view({ session: { eta_ready_at: '2026-09-30T12:25:00Z', progress_pct: 0 } })), false)
+  assert.equal(sessionEtaEligible(view({ ticket, session: { progress_pct: 0 } })), true)
+})
 
 test('intended result prefers an explicit phrase, then the bound ticket title, then the existing label', () => {
   const titled = view({ ticket: { id: 'n', key: 'AEON-211', title: 'Deploy approvals show the target server', href: '/p/AEON/AEON-211' }, session: { brief: 'AEON-211' } })

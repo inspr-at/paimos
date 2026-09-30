@@ -478,8 +478,14 @@ func TestDevLoginAndAgentKeys(t *testing.T) {
 
 	prod := newMod(t, Config{Env: "prod", SessionKey: bytes.Repeat([]byte{8}, 32), BootstrapTenantSlug: "inspr"})
 	prodApp := startApp(t, prod)
-	if status, _, _ = do(t, newHTTPClient(), http.MethodPost, prodApp.URL+"/api/auth/dev-login", `{"email":"admin@example.com"}`, nil); status != http.StatusNotFound {
-		t.Fatalf("prod dev-login %d", status)
+	for _, path := range []string{"/api/auth/dev-login", "/api/auth/%64ev-login"} {
+		status, _, res := do(t, newHTTPClient(), http.MethodPost, prodApp.URL+path, `{"email":"admin@example.com"}`, nil)
+		if status != http.StatusNotFound {
+			t.Fatalf("prod dev-login %s %d", path, status)
+		}
+		if cookies := res.Header.Values("Set-Cookie"); len(cookies) != 0 {
+			t.Fatalf("prod dev-login %s set a cookie", path)
+		}
 	}
 }
 

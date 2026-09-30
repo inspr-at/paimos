@@ -47,7 +47,7 @@ func withEstimateHints(warnings []string) []string {
 		if hinted || !strings.Contains(warning, "fields.estimate_hours") || strings.Contains(warning, "--estimate") {
 			continue
 		}
-		out = append(out, "pass --estimate (for example 2h or 30m)")
+		out = append(out, "pass --estimate-hours (for example 2 or 0.5), or --estimate 2h")
 		hinted = true
 	}
 	return out

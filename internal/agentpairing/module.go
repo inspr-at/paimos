@@ -245,7 +245,7 @@ func (m *Module) device(w http.ResponseWriter, r *http.Request) {
 			if state != "connected" {
 				return fail(409, "pairing_revoked", "computer is disconnecting or revoked; pair afresh")
 			}
-			if in.RuntimeHash != runtime || in.LifecycleHash != h || in.Workspace != original.Workspace || in.Platform != original.Platform || in.Arch != original.Arch || in.ComputerName != original.ComputerName {
+			if in.LocalAuthPublicKey != original.LocalAuthPublicKey || in.RuntimeHash != runtime || in.LifecycleHash != h || in.Workspace != original.Workspace || in.Platform != original.Platform || in.Arch != original.Arch || in.ComputerName != original.ComputerName {
 				return fail(409, "conflict", "existing computer binding must remain unchanged")
 			}
 		}

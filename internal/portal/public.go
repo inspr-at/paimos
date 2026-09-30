@@ -59,6 +59,7 @@ type portalDocument struct {
 	Comparison     []portalComparisonRow `json:"comparison,omitempty"`
 	Pace           *portalPace           `json:"pace,omitempty"`
 	ReleaseHistory bool                  `json:"release_history,omitempty"`
+	Roadmap        bool                  `json:"roadmap,omitempty"`
 }
 
 type voteResult struct {
@@ -89,6 +90,7 @@ const (
 	publicCatalog      = "catalog"
 	publicReleasesKind = "releases"
 	publicLlms         = "llms"
+	publicRoadmapKind  = "roadmap"
 )
 
 func (m *Module) read(w http.ResponseWriter, r *http.Request) {
@@ -101,6 +103,10 @@ func (m *Module) catalogFile(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) releases(w http.ResponseWriter, r *http.Request) {
 	m.servePublic(w, r, publicReleasesKind)
+}
+
+func (m *Module) roadmap(w http.ResponseWriter, r *http.Request) {
+	m.servePublic(w, r, publicRoadmapKind)
 }
 
 func (m *Module) llms(w http.ResponseWriter, r *http.Request) {
@@ -126,13 +132,21 @@ func (m *Module) servePublic(w http.ResponseWriter, r *http.Request, kind string
 	// portal and a missing slug do the same work and return the same 404.
 	var doc portalDocument
 	var releases []publicRelease
+	var roadmapItems []publicRoadmapItem
 	err = db.InTenant(db.AllProjects(r.Context(), "public portal read"), m.pool, tenantID, func(tx pgx.Tx) error {
 		loaded, loadErr := loadPortal(r.Context(), tx)
 		if loadErr != nil {
 			return loadErr
 		}
 		doc = loaded
-		if kind == publicCatalog || doc.Product == nil || !doc.ReleaseHistory {
+		if doc.Product != nil && kind != publicReleasesKind {
+			roadmapItems, loadErr = loadPublicRoadmap(r.Context(), tx)
+			if loadErr != nil {
+				return loadErr
+			}
+			doc.Roadmap = len(roadmapItems) > 0
+		}
+		if kind == publicCatalog || kind == publicRoadmapKind || doc.Product == nil || !doc.ReleaseHistory {
 			return nil
 		}
 		releases, loadErr = loadPublicReleases(r.Context(), tx)
@@ -151,6 +165,12 @@ func (m *Module) servePublic(w http.ResponseWriter, r *http.Request, kind string
 		releases = []publicRelease{}
 	}
 	switch kind {
+	case publicRoadmapKind:
+		if roadmapItems == nil {
+			roadmapItems = []publicRoadmapItem{}
+		}
+		w.Header().Set("Cache-Control", roadmapCache)
+		write(w, http.StatusOK, publicRoadmapDocument{Schema: roadmapSchema, Product: doc.Product, Items: roadmapItems})
 	case publicReleasesKind:
 		write(w, http.StatusOK, publicReleasesDocument{Product: doc.Product, Releases: releases})
 	case publicLlms:

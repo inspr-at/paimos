@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/inspr-at/paimos/internal/agentsecurity"
 	"golang.org/x/sys/unix"
 )
 
@@ -30,10 +31,11 @@ var (
 // lookup follows symlinks, including ancestors; no regular file may be linked.
 // The advisory lock serializes cooperating helpers, not hostile same-UID code.
 type Store struct {
-	mu   sync.Mutex
-	root *os.File
-	lock *os.File
-	path string
+	vault agentsecurity.Vault
+	mu    sync.Mutex
+	root  *os.File
+	lock  *os.File
+	path  string
 }
 
 func validName(name string) bool {
@@ -43,7 +45,11 @@ func validName(name string) bool {
 // OpenStore creates private missing directories only when create is true. It
 // never chmods, repairs, adopts or replaces an existing nonprivate state root.
 func OpenStore(path string, create bool) (*Store, error) {
-	return openDirectory(path, create, true)
+	s, err := openDirectory(path, create, true)
+	if err == nil {
+		s.vault = agentsecurity.DefaultVault()
+	}
+	return s, err
 }
 
 // ReadPrivateFile protects legacy explicit file flags too, without requiring
@@ -276,6 +282,9 @@ func (s *Store) Read(name string, max int64) ([]byte, error) { return s.readFile
 func (s *Store) readFile(name string, max int64, snapshotRead bool) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.vault != nil && vaultedName(name) {
+		return s.readVault(name, max)
+	}
 	f, err := s.openFile(name, unix.O_RDONLY, snapshotRead)
 	if err != nil {
 		return nil, err
@@ -295,6 +304,9 @@ func (s *Store) Write(name string, raw []byte, createOnly bool) error {
 	defer s.mu.Unlock()
 	if !validName(name) || len(raw) > 1<<20 {
 		return ErrUnsafePath
+	}
+	if s.vault != nil && vaultedName(name) {
+		return s.writeVault(name, raw, createOnly)
 	}
 	if f, err := s.open(name, unix.O_RDONLY); err == nil {
 		f.Close()
@@ -341,6 +353,19 @@ func (s *Store) Write(name string, raw []byte, createOnly bool) error {
 func (s *Store) RemoveExact(name, digest string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.vault != nil && vaultedName(name) {
+		raw, err := s.readVault(name, 1<<20)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if Hash(raw) != digest {
+			return ErrCollision
+		}
+		return s.vault.Delete(s.vaultID(name))
+	}
 	f, err := s.open(name, unix.O_RDONLY)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

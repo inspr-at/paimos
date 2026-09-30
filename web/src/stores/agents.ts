@@ -7,7 +7,7 @@ import {
   requestControl, resolveMessage, revokeApproval, sendMessage, setAccountState, archiveAccount, cancelRun,
   type AgentAccount, type AgentRun, type Approval, type HarnessSession, type ModelProfile, type ProjectMessage, type SessionControl,
 } from '../lib/agents'
-import { agentName, harnessLabel, heldRequests, mergeSessionEvidence, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
+import { agentName, byStart, byStopped, harnessLabel, heldRequests, mergeSessionEvidence, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
 import { advanceActivity, type ActivityEvidence } from '../lib/liveAgents'
 import { toast } from '../lib/toast'
 import { managedControlSession } from '../lib/managedControl'
@@ -271,10 +271,8 @@ export const useAgents = defineStore('agents', () => {
   const grouped = computed(() => {
     const out: Record<SessionStatus['group'], SessionView[]> = { problem: [], unresponsive: [], needs: [], awaiting: [], throttled: [], working: [], idle: [], stopped: [] }
     for (const view of views.value) out[view.status.group].push(view)
-    for (const [group, list] of Object.entries(out)) {
-      const at = (v: SessionView) => Date.parse((group === 'stopped' ? v.session.stopped_at : v.session.heartbeat_at) ?? v.session.created_at)
-      list.sort((a, b) => at(b) - at(a))
-    }
+    // Start order for live sessions, latest stop first for ended ones (AEON-468).
+    for (const [group, list] of Object.entries(out)) list.sort((a, b) => (group === 'stopped' ? byStopped : byStart)(a.session, b.session))
     return out
   })
   const byAgent = (principalId: string) => views.value.filter(v => v.session.agent_principal_id === principalId)

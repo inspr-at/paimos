@@ -169,6 +169,9 @@ func (f *fixture) propose(harnesses ...string) *proposal {
 	return f.proposePlatform("darwin", "arm64", harnesses...)
 }
 func (f *fixture) proposePlatform(platform, arch string, harnesses ...string) *proposal {
+	return f.proposePlatformKey(platform, arch, "", harnesses...)
+}
+func (f *fixture) proposePlatformKey(platform, arch, publicKey string, harnesses ...string) *proposal {
 	f.t.Helper()
 	p := &proposal{id: uuid(f.t, f.db), device: nonce(), runtime: nonce(), lifecycle: nonce()}
 	accounts := []map[string]string{}
@@ -176,6 +179,9 @@ func (f *fixture) proposePlatform(platform, arch string, harnesses ...string) *p
 		accounts = append(accounts, map[string]string{"account_key": h + "-local", "harness": h, "label": h + " personal test", "model_profile_id": f.profiles[h]})
 	}
 	p.request = map[string]any{"request_id": p.id, "tenant_id": f.tenantID, "device_hash": hash(p.device), "runtime_hash": hash(p.runtime), "lifecycle_hash": hash(p.lifecycle), "computer_name": "Test workstation", "platform": platform, "arch": arch, "workspace_path": "/tmp/pairing-fixture", "capabilities": []string{"managed_runs"}, "accounts": accounts}
+	if publicKey != "" {
+		p.request["local_auth_public_key"] = publicKey
+	}
 	f.submit(p)
 	return p
 }

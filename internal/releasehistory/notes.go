@@ -67,16 +67,17 @@ type NoteItem struct {
 	BenefitDE string `json:"benefit_de"`
 }
 type Notes struct {
-	PublicItems         []TicketNote `json:"public_items,omitempty"`
-	Source              string       `json:"source"`
-	Fallback            string       `json:"fallback,omitempty"`
-	SHA256              string       `json:"snapshot_sha256"`
-	CapturedAt          *time.Time   `json:"captured_at"`
-	Revision            int64        `json:"release_revision"`
-	Items               []NoteItem   `json:"items"`
-	Gaps                []string     `json:"gaps"`
-	Hidden              int          `json:"hidden"`
-	WrittenAfterRelease bool         `json:"written_after_release,omitempty"`
+	Corrections         []NoteCorrection `json:"corrections,omitempty"`
+	PublicItems         []TicketNote     `json:"public_items,omitempty"`
+	Source              string           `json:"source"`
+	Fallback            string           `json:"fallback,omitempty"`
+	SHA256              string           `json:"snapshot_sha256"`
+	CapturedAt          *time.Time       `json:"captured_at"`
+	Revision            int64            `json:"release_revision"`
+	Items               []NoteItem       `json:"items"`
+	Gaps                []string         `json:"gaps"`
+	Hidden              int              `json:"hidden"`
+	WrittenAfterRelease bool             `json:"written_after_release,omitempty"`
 }
 
 func MissingNotes() *Notes {

@@ -184,12 +184,15 @@ export function pinInput(value: string): Pick<DoctrineSourceInput, 'ref' | 'comm
 
 export interface DoctrineProposal {
   id: string; source_id: string; repository: string; path: string; rule_key: string
-  state: 'proposed' | 'in_review' | 'merged' | 'released' | 'pinned' | 'closed'
+  state: 'proposed' | 'in_review' | 'merged' | 'released' | 'pinned' | 'closed' | 'pending' | 'dismissed' | 'promoted'
   head_sha: string; pr_number: number; pr_url: string; proposed_by: string; approved_by?: string
   merge_commit?: string; release?: string; release_commit?: string; release_url?: string
   release_requested?: boolean; gate_ready: boolean; gate_reason?: string; pinned_machines: number; created_at: string
   branch?: string; orphaned?: boolean
   draft?: boolean; automatic?: boolean
+  /** Doctrine inbox (AEON-444). */
+  inbox?: boolean; ticket?: string; submitted_by?: string; edited_by?: string
+  dismissed_by?: string; dismiss_reason?: string; promoted_commit?: string
 }
 export interface DoctrineProposalInput {
   request_id: string; source_id: string; path: string; rule_key: string; rule_sha256: string
@@ -215,7 +218,58 @@ export function proposalState(p: Pick<DoctrineProposal, 'state' | 'pinned_machin
   if (p.orphaned && !p.pr_number) return 'Branch left on GitHub'
   if (p.draft && (p.state === 'proposed' || p.state === 'in_review')) return 'Draft'
   if (p.state === 'pinned') return `Pinned on ${p.pinned_machines} reported ${p.pinned_machines === 1 ? 'machine' : 'machines'}`
-  return { proposed: 'Proposed', in_review: 'In review', merged: 'Merged', released: 'Released', closed: 'Closed' }[p.state]
+  return { proposed: 'Proposed', in_review: 'In review', merged: 'Merged', released: 'Released', closed: 'Closed', pending: 'Waiting', dismissed: 'Dismissed', promoted: 'In the pinned doctrine' }[p.state]
+}
+
+// ---------- Doctrine inbox (AEON-444) ----------
+// Agents propose a rule change; it waits here until a person sends it to git
+// as a pull request, edits it first, or dismisses it with a reason.
+
+export interface DiffPart { op: 'eq' | 'del' | 'ins'; text: string }
+export interface DoctrineInboxItem extends DoctrineProposal {
+  heading: string; strength?: 'normal' | 'locked'; label: string
+  /** The rule at the current pin, and the waiting text. */
+  base: string; base_sha256?: string; proposed?: string
+  tldr?: DoctrineTldr; why?: string; diff: DiffPart[]; outdated?: boolean
+  proposer: string; proposer_kind: 'person' | 'agent' | ''; ticket_href?: string
+}
+/** notified: this person already claimed the proposal's toast. */
+export interface DoctrineInboxHeadline { id: string; label: string; created_at: string; notified?: boolean }
+export interface DoctrineInboxEdit { source?: string; tldr?: { en: string; de?: string }; why?: string; rule_sha256?: string }
+
+async function inboxRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  const response = await api(`/rules/doctrine/inbox${path}`, {
+    method, headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  if (response.status === 401) sessionGone()
+  if (!response.ok) {
+    const failure = await response.json().catch(() => ({})) as { code?: string; error?: string }
+    throw new DoctrineError(response.status, failure.code ?? '', failure.error || `Request failed (${response.status})`)
+  }
+  return response.json() as Promise<T>
+}
+export async function getDoctrineInbox(): Promise<{ pending: number; items: DoctrineInboxItem[] }> {
+  const out = await inboxRequest<{ pending: number; items: DoctrineInboxItem[] }>('')
+  return { pending: out.pending ?? 0, items: out.items ?? [] }
+}
+export async function getDoctrineInboxSummary(): Promise<{ pending: number; items: DoctrineInboxHeadline[] }> {
+  const out = await inboxRequest<{ pending: number; items: DoctrineInboxHeadline[] }>('/summary')
+  return { pending: out.pending ?? 0, items: out.items ?? [] }
+}
+/** Propose PR; with edits it is "edit then propose". */
+export const submitDoctrineInbox = (id: string, edit: DoctrineInboxEdit = {}) => inboxRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/pull-request`, 'POST', edit)
+export const dismissDoctrineInbox = (id: string, reason: string) => inboxRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/dismiss`, 'POST', { reason })
+/** Claims the toast for a waiting proposal: true only for this person's first claim. */
+export async function claimDoctrineInboxNotice(id: string): Promise<boolean> {
+  const out = await inboxRequest<{ claimed?: boolean }>(`/${encodeURIComponent(id)}/notified`, 'POST')
+  return out.claimed === true
+}
+
+/** "Estimate before work" — a headline short enough for a toast. */
+export function inboxLabel(label: string, max = 60): string {
+  const text = label.trim().replace(/\s+/g, ' ').replace(/[.。]$/, '')
+  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text
 }
 
 export interface DoctrineMetric {
@@ -235,7 +289,7 @@ export async function getDoctrineFindings(): Promise<DoctrineFinding[]> {
   if (!response.ok) throw new DoctrineError(response.status, '', 'Outcome proposals could not be loaded.')
   return ((await response.json()) as { findings: DoctrineFinding[] }).findings ?? []
 }
-export const findingState = (f: DoctrineFinding) => ({ pending: 'Queued', draft: 'Draft', awaiting_use: 'Awaiting outcomes', internal_note: 'Internal note', observed: 'Measured', closed: 'Closed' })[f.status]
+export const findingState = (f: DoctrineFinding) => ({ pending: 'Queued', draft: 'Proposed', awaiting_use: 'Awaiting outcomes', internal_note: 'Internal note', observed: 'Measured', closed: 'Closed' })[f.status]
 export function outcomeMetric(m: DoctrineMetric): string {
   if (m.name === 'fix_rounds' || m.name === 'review_rounds') return `${Number(m.value.toFixed(1))} rounds`
   if (m.name === 'time_to_done') return `${Number((m.value / 60).toFixed(1))} min`
