@@ -189,11 +189,14 @@ func withProductNotes(h History, bundle ProductNotes) History {
 }
 
 // withFrozenGroups makes the selected snapshot the only ticket text source.
-// A capture that already records a group keeps it. A capture without a group,
-// and a release with no capture, take only the group from live for every
-// commit ticket that has no frozen group: a bug is fixes, a visible benefit
-// is features. Live pill and benefit text is not attached.
+// Live pill and benefit text is dropped first: only Bug and PublicBenefit
+// remain, and Note stays nil. A capture that already records a group keeps
+// it. Commit tickets that capture does not name still take a group from those
+// two facts: a bug is fixes, a visible benefit is features. A capture without
+// a group, and a release with no capture, do that for every commit ticket.
+// Frozen pill and benefit text is not replaced.
 func withFrozenGroups(h History, live map[string]TicketMeta) History {
+	live = groupsOnly(live)
 	out := h
 	out.Releases = make([]Release, len(h.Releases))
 	for i, rel := range h.Releases {
@@ -219,6 +222,8 @@ func withFrozenGroups(h History, live map[string]TicketMeta) History {
 		}
 		if classifyCommits {
 			meta = mergeCommitClassification(rel, meta, live)
+		} else {
+			meta = mergeMissingCommitClassification(rel, meta, live)
 		}
 		// Clear annotations from earlier readers before deriving from the capture.
 		rel.Changes = append([]Change{}, rel.Changes...)
@@ -356,14 +361,16 @@ func unclassifiedCapturedKeys(rel Release) []string {
 }
 
 // classificationLookupKeys is the live classification query. A capture that
-// already has a group is asked only for its still-unclassified told tickets.
-// A capture with no group, and a release with no capture, are asked for every
-// commit ticket, plus any told ticket the commits do not name.
+// already has a group is asked for its still-unclassified told tickets and for
+// commit tickets the capture does not name. A capture with no group, and a
+// release with no capture, are asked for every commit ticket, plus any told
+// ticket the commits do not name.
 func classificationLookupKeys(h History) []string {
 	var keys []string
 	for _, rel := range h.Releases {
 		if captureHasGroup(rel) {
 			keys = append(keys, unclassifiedCapturedKeys(rel)...)
+			keys = append(keys, missingCommitKeys(rel)...)
 			continue
 		}
 		for _, change := range rel.Changes {
@@ -374,10 +381,68 @@ func classificationLookupKeys(h History) []string {
 	return uniqueTicketKeys(keys)
 }
 
+// groupsOnly keeps the two facts that may decide a group. Note stays nil, so
+// live pill and benefit text cannot be attached later by copying the value.
+func groupsOnly(in map[string]TicketMeta) map[string]TicketMeta {
+	if len(in) == 0 {
+		return in
+	}
+	out := make(map[string]TicketMeta, len(in))
+	for key, meta := range in {
+		out[key] = TicketMeta{Bug: meta.Bug, PublicBenefit: meta.PublicBenefit}
+	}
+	return out
+}
+
+// capturedKeys are the tickets the capture names. Public items win when the
+// release carries them; hidden members and members with no pill or benefit are
+// absent, and so is every commit ticket that was not a release member.
+func capturedKeys(rel Release) map[string]bool {
+	out := map[string]bool{}
+	if !HasSnapshot(rel) || rel.Notes == nil {
+		return out
+	}
+	if rel.Notes.PublicItems != nil {
+		for _, item := range rel.Notes.PublicItems {
+			out[item.Key] = true
+		}
+		return out
+	}
+	for _, item := range rel.Notes.Items {
+		out[item.Key] = true
+	}
+	return out
+}
+
+// missingCommitKeys are commit tickets a capture does not name.
+func missingCommitKeys(rel Release) []string {
+	known := capturedKeys(rel)
+	var keys []string
+	for _, change := range rel.Changes {
+		for _, key := range change.Tickets {
+			if !known[key] {
+				keys = append(keys, key)
+			}
+		}
+	}
+	return keys
+}
+
 // mergeCommitClassification fills groups for commit tickets the capture did
-// not already classify. Bug and PublicBenefit are kept; Note is cleared so
+// not already classify. Bug and PublicBenefit are kept; Note stays nil so
 // live pill and benefit text cannot reach linked_tickets.
 func mergeCommitClassification(rel Release, meta map[string]TicketMeta, live map[string]TicketMeta) map[string]TicketMeta {
+	return mergeLiveGroups(rel, meta, live, nil)
+}
+
+// mergeMissingCommitClassification fills groups for commit tickets a grouped
+// capture does not name. Tickets the capture already names keep their frozen
+// group. Note stays nil, same as mergeCommitClassification.
+func mergeMissingCommitClassification(rel Release, meta map[string]TicketMeta, live map[string]TicketMeta) map[string]TicketMeta {
+	return mergeLiveGroups(rel, meta, live, capturedKeys(rel))
+}
+
+func mergeLiveGroups(rel Release, meta map[string]TicketMeta, live map[string]TicketMeta, skip map[string]bool) map[string]TicketMeta {
 	if len(live) == 0 {
 		return meta
 	}
@@ -386,6 +451,9 @@ func mergeCommitClassification(rel Release, meta map[string]TicketMeta, live map
 	}
 	for _, change := range rel.Changes {
 		for _, key := range change.Tickets {
+			if skip[key] {
+				continue
+			}
 			if _, ok := meta[key]; ok {
 				continue
 			}

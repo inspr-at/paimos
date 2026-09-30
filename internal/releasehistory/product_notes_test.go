@@ -343,11 +343,18 @@ func TestGrouplessAndUncapturedCommitsMatchBaseGroups(t *testing.T) {
 	}
 	frozen := noteFixture()
 	frozen.Version = "260926120000.0.0"
-	frozen.Tickets = []NoteTicket{{ID: "77777777-7777-4777-8777-777777777720", Key: "AEON-20", Position: 1, UpdatedAt: &at, Group: GroupFixes, Fields: json.RawMessage(`{"pill_en":"Frozen kept","benefit_en":"Stays a fix."}`)}}
+	frozen.Tickets = []NoteTicket{
+		{ID: "77777777-7777-4777-8777-777777777720", Key: "AEON-20", Position: 1, UpdatedAt: &at, Group: GroupFixes, Fields: json.RawMessage(`{"pill_en":"Frozen kept","benefit_en":"Stays a fix."}`)},
+		{ID: "77777777-7777-4777-8777-777777777721", Key: "AEON-21", Position: 2, UpdatedAt: &at, Group: GroupFeatures, Fields: json.RawMessage(`{"pill_en":"Frozen feature","benefit_en":"Stays a feature."}`)},
+		{ID: "77777777-7777-4777-8777-777777777798", Key: "AEON-98", Position: 3, UpdatedAt: &at, Group: GroupFixes, Fields: json.RawMessage(`{"hide_from_release_notes":true,"tags":["bug"],"pill_en":"HIDDEN GROUPED BUG","benefit_en":"HIDDEN GROUPED BENEFIT"}`)},
+	}
 	raw, _ = json.Marshal(frozen)
 	kept, err := NotesFromSnapshot(raw, frozen.Version, "database-snapshot")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if kept.Hidden != 1 || len(kept.Items) != 2 || kept.Items[0].Key != "AEON-20" || kept.Items[1].Key != "AEON-21" {
+		t.Fatalf("grouped capture %+v", kept)
 	}
 	h := History{Schema: Schema, Product: "PAIMOS AEON", Repository: "inspr-at/paimos", Releases: []Release{
 		{Version: notesVersion, Notes: notes, Changes: []Change{
@@ -363,6 +370,9 @@ func TestGrouplessAndUncapturedCommitsMatchBaseGroups(t *testing.T) {
 		{Version: frozen.Version, Notes: kept, Changes: []Change{
 			{Commit: "g", Subject: "AEON-20: frozen group", Type: "other", Tickets: []string{"AEON-20"}},
 			{Commit: "h", Subject: "AEON-99: outside a grouped capture", Type: "other", Tickets: []string{"AEON-99"}},
+			{Commit: "i", Subject: "AEON-97: benefit outside a grouped capture", Type: "other", Tickets: []string{"AEON-97"}},
+			{Commit: "j", Subject: "AEON-98: hidden member of a grouped capture", Type: "other", Tickets: []string{"AEON-98"}},
+			{Commit: "k", Subject: "AEON-21: shared with a hidden bug", Type: "other", Tickets: []string{"AEON-21", "AEON-98"}},
 		}},
 	}}
 	liveNote := func(pill string) *TicketNote {
@@ -376,6 +386,9 @@ func TestGrouplessAndUncapturedCommitsMatchBaseGroups(t *testing.T) {
 		"AEON-15": {Bug: true, Note: liveNote("LIVE NOCAPTURE")},
 		"AEON-16": {PublicBenefit: true, Note: liveNote("LIVE BENEFIT ONLY")},
 		"AEON-20": {PublicBenefit: true, Note: liveNote("LIVE KEPT")},
+		"AEON-21": {PublicBenefit: true, Note: liveNote("LIVE TOLD FEATURE")},
+		"AEON-97": {PublicBenefit: true, Note: liveNote("LIVE OUTSIDE BENEFIT")},
+		"AEON-98": {Bug: true, Note: liveNote("LIVE HIDDEN GROUPED")},
 		"AEON-99": {Bug: true, Note: liveNote("LIVE OUTSIDE")},
 	}
 	// The base classified the same live facts with GroupChange, including note text.
@@ -400,8 +413,13 @@ func TestGrouplessAndUncapturedCommitsMatchBaseGroups(t *testing.T) {
 			t.Fatalf("lookup missed %s in %v", key, keys)
 		}
 	}
-	if seen["AEON-99"] || seen["AEON-20"] {
-		t.Fatalf("lookup reached a capture that already has a group: %v", keys)
+	for _, key := range []string{"AEON-97", "AEON-98", "AEON-99"} {
+		if !seen[key] {
+			t.Fatalf("lookup missed %s, a ticket the grouped capture does not name: %v", key, keys)
+		}
+	}
+	if seen["AEON-20"] || seen["AEON-21"] {
+		t.Fatalf("lookup re-read a ticket the capture already grouped: %v", keys)
 	}
 	body, _ := json.Marshal(got)
 	for _, leaked := range []string{"LIVE", "HIDDEN"} {
@@ -416,8 +434,9 @@ func TestGrouplessAndUncapturedCommitsMatchBaseGroups(t *testing.T) {
 		}
 		return out
 	}
-	// The base is live classification of every commit ticket. A capture that
-	// already stored a group is not that case: its frozen group stays put.
+	// The base is live classification of every commit ticket, including note
+	// text. A grouped capture keeps a group it already stored. Tickets it does
+	// not name take the base group and drop the note.
 	for i, rel := range got.Releases[:2] {
 		want := byCommit(base.Releases[i])
 		for _, change := range rel.Changes {
@@ -441,10 +460,28 @@ func TestGrouplessAndUncapturedCommitsMatchBaseGroups(t *testing.T) {
 		t.Fatalf("no capture %+v %+v", plain["e"], plain["f"])
 	}
 	grouped := byCommit(got.Releases[2])
-	if grouped["g"].Group != GroupFixes || len(grouped["g"].Linked) != 1 || grouped["g"].Linked[0].PillEN != "Frozen kept" || grouped["h"].Group != GroupOther || grouped["h"].Linked != nil {
-		t.Fatalf("frozen capture %+v %+v", grouped["g"], grouped["h"])
+	baseGrouped := byCommit(base.Releases[2])
+	if grouped["g"].Group != GroupFixes || len(grouped["g"].Linked) != 1 || grouped["g"].Linked[0].PillEN != "Frozen kept" || grouped["g"].Linked[0].Group != GroupFixes {
+		t.Fatalf("frozen group %+v", grouped["g"])
 	}
-	if h.Releases[0].Notes.Items[0].Group != "" {
+	if grouped["g"].Group == baseGrouped["g"].Group {
+		t.Fatal("frozen group followed the live classification")
+	}
+	for _, commit := range []string{"h", "i", "j", "k"} {
+		if grouped[commit].Group != baseGrouped[commit].Group || len(baseGrouped[commit].Linked) == 0 {
+			t.Fatalf("commit %s group %q, base %q, linked %d", commit, grouped[commit].Group, baseGrouped[commit].Group, len(baseGrouped[commit].Linked))
+		}
+	}
+	if grouped["h"].Group != GroupFixes || grouped["h"].Linked != nil || grouped["j"].Group != GroupFixes || grouped["j"].Linked != nil {
+		t.Fatalf("hidden and non-member bugs %+v %+v", grouped["h"], grouped["j"])
+	}
+	if grouped["i"].Group != GroupFeatures || grouped["i"].Linked != nil {
+		t.Fatalf("non-member benefit %+v", grouped["i"])
+	}
+	if grouped["k"].Group != GroupFixes || len(grouped["k"].Linked) != 1 || grouped["k"].Linked[0].Key != "AEON-21" || grouped["k"].Linked[0].PillEN != "Frozen feature" || grouped["k"].Linked[0].Group != GroupFeatures {
+		t.Fatalf("shared hidden bug %+v", grouped["k"])
+	}
+	if h.Releases[0].Notes.Items[0].Group != "" || h.Releases[2].Notes.Hidden != 1 || len(h.Releases[2].Notes.Items) != 2 || h.Releases[2].Notes.Items[0].Group != GroupFixes || h.Releases[2].Notes.Items[1].Group != GroupFeatures {
 		t.Fatal("mutated the stored capture")
 	}
 	failed := NewWith(h, notesVersion)
@@ -452,7 +489,8 @@ func TestGrouplessAndUncapturedCommitsMatchBaseGroups(t *testing.T) {
 		return nil, errors.New("lookup failed")
 	})
 	down := failed.annotated(ctx, h)
-	if byCommit(down.Releases[0])["b"].Group == GroupFixes || down.Releases[0].Notes.Items[0].Group != "" {
+	downGrouped := byCommit(down.Releases[2])
+	if byCommit(down.Releases[0])["b"].Group == GroupFixes || down.Releases[0].Notes.Items[0].Group != "" || downGrouped["h"].Group == GroupFixes || downGrouped["i"].Group == GroupFeatures || downGrouped["j"].Group == GroupFixes || downGrouped["k"].Group == GroupFixes {
 		t.Fatal("lookup failure invented a group")
 	}
 }
