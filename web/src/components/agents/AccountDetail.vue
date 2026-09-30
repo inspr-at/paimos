@@ -7,7 +7,7 @@ import {
   recentReadings, removeLimit, removeWindow, renameAccount, renameProblem, repeatWindow, putLimit, sameLimit, setByYou, setByYouText,
   sortWindows, sourceText, spendLine, UNIT_WORD, unitChoices, windowFacts, windowLabel, type LimitDraft,
 } from '../../lib/accountLimits'
-import type { AgentAccount, AllowanceWindow } from '../../lib/agents'
+import { putQuotaPool, type AgentAccount, type AllowanceWindow } from '../../lib/agents'
 import { pct, when, type AccountCapacity, type AccountRow, type CapacityReading } from '../../lib/capacity'
 import { confirmAction } from '../../lib/confirm'
 import AppIcon from '../AppIcon.vue'
@@ -19,7 +19,7 @@ import ClaudeStatuslineToggle from '../settings/ClaudeStatuslineToggle.vue'
 // money for an API key, and the Advanced sentence. Limits set by hand before
 // the sentence stay as "Set by you" with Remove and Make this repeat.
 const props = defineProps<{
-  account: AgentAccount; row?: AccountRow; cap?: AccountCapacity; now: number; timezone: string; mayManage: boolean; rename?: number; renameTrigger?: HTMLElement | null
+  account: AgentAccount; accounts?: AgentAccount[]; row?: AccountRow; cap?: AccountCapacity; now: number; timezone: string; mayManage: boolean; rename?: number; renameTrigger?: HTMLElement | null
 }>()
 const emit = defineEmits<{ changed: [] }>()
 
@@ -30,6 +30,27 @@ const primary = computed(() => windows.value[0] ?? null)
 const offline = computed(() => props.row?.state === 'offline')
 const use = computed(() => props.cap?.limit)
 const mine = computed(() => setByYou(props.account.windows, props.now))
+
+const poolBusy = ref(false)
+const poolError = ref('')
+const poolCandidates = computed(() => (props.accounts ?? []).filter(a => a.id !== props.account.id && a.harness === props.account.harness && !!props.account.quota_fingerprint && a.quota_fingerprint === props.account.quota_fingerprint && (!props.account.quota_pool_fingerprint || a.quota_pool_fingerprint !== props.account.quota_pool_fingerprint)))
+const loginName = (a: AgentAccount) => `${accountName(a)}${a.host_label ? ` · ${a.host_label}` : ''}`
+async function shareQuota(other?: AgentAccount) {
+  if (!props.mayManage || poolBusy.value) return
+  const account = props.account
+  const fingerprint = other ? account.quota_fingerprint : account.quota_pool_fingerprint
+  if (!fingerprint) return
+  const ok = await confirmAction(other
+    ? { title: 'Same login — pool them?', body: 'Confirm these accounts use the same vendor login before they share a quota.', points: [loginName(account), loginName(other)], confirmLabel: 'Pool accounts' }
+    : { title: 'Stop sharing quota?', body: `${loginName(account)} will use its own readings and limits.`, confirmLabel: 'Stop sharing' })
+  if (!ok) return
+  poolBusy.value = true; poolError.value = ''
+  try {
+    await putQuotaPool(other ? [account.id, other.id] : [account.id], fingerprint, !!other)
+    emit('changed')
+  } catch (e) { poolError.value = e instanceof Error ? e.message : 'The quota did not change. Please try again.' }
+  finally { poolBusy.value = false }
+}
 
 // ---------- The last readings ----------
 const readings = ref<CapacityReading[] | null>(null)
@@ -165,6 +186,15 @@ async function drop(w: AllowanceWindow) {
             <button type="button" class="btn sm ghost" :disabled="nameBusy" @click="cancelRename">Cancel</button>
           </form>
           <p v-if="nameError" class="problem" role="alert">{{ nameError }}</p>
+        </dd>
+      </div>
+
+      <div v-if="mayManage && (poolCandidates.length || account.quota_pool_fingerprint)" class="fact">
+        <dt>Shared login</dt>
+        <dd>
+          <button v-for="other in poolCandidates" :key="other.id" type="button" class="btn sm ghost" :disabled="poolBusy" @click="shareQuota(other)">Pool with {{ loginName(other) }}</button>
+          <button v-if="account.quota_pool_fingerprint" type="button" class="btn sm ghost" :disabled="poolBusy" @click="shareQuota()">Stop sharing quota</button>
+          <p v-if="poolError" class="problem" role="alert">{{ poolError }}</p>
         </dd>
       </div>
 

@@ -43,6 +43,59 @@ async function details(page: Page, id: string) {
 }
 const noScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)
 
+test('matching login hints need a person to confirm the selected pair', async ({ page }) => {
+  const errors = watchErrors(page)
+  const { capacity } = await setup(page)
+  const fingerprint = 'ab'.repeat(32)
+  for (const a of capacity.accounts.filter(a => a.harness === 'codex')) Object.assign(a, { quota_fingerprint: fingerprint, quota_pool_fingerprint: '' })
+  const writes: Record<string, unknown>[] = []
+  await page.route('**/api/agent-accounts/quota-pool', async route => {
+    const body = route.request().postDataJSON()
+    writes.push(body)
+    for (const a of capacity.accounts) if (body.account_ids.includes(a.id)) Object.assign(a, { quota_pool_fingerprint: body.confirmed ? body.quota_fingerprint : '' })
+    await route.fulfill({ status: 204 })
+  })
+  await open(page)
+  const detail = await details(page, ACCOUNTS.main)
+  const pool = detail.getByRole('button', { name: 'Pool with Spare · mbp2607', exact: true })
+  await pool.click()
+  const confirm = page.getByRole('dialog', { name: 'Same login — pool them?' })
+  await expect(confirm).toContainText('Main · mbp2607')
+  await expect(confirm).toContainText('Spare · mbp2607')
+  await confirm.getByRole('button', { name: 'Cancel' }).click()
+  expect(writes).toEqual([])
+  await pool.click()
+  await confirm.getByRole('button', { name: 'Pool accounts' }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  expect(writes[0]).toEqual({ account_ids: [ACCOUNTS.main, ACCOUNTS.spare], quota_fingerprint: fingerprint, confirmed: true })
+  await expect(detail.getByRole('button', { name: 'Stop sharing quota' })).toBeVisible()
+  await expect(detail.getByRole('button', { name: 'Pool with Studio · studio' })).toBeVisible()
+  await expect(pool).toHaveCount(0)
+  const shots = process.env.AEON397_SHOTS
+  if (shots) {
+    mkdirSync(shots, { recursive: true })
+    for (const width of [1600, 390]) for (const colorScheme of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.emulateMedia({ colorScheme })
+      expect(await noScroll(page)).toBe(true)
+      await page.screenshot({ path: `${shots}/quota-${width}-${colorScheme}.png`, fullPage: true })
+    }
+  }
+  await detail.getByRole('button', { name: 'Stop sharing quota' }).click()
+  await page.getByRole('dialog', { name: 'Stop sharing quota?' }).getByRole('button', { name: 'Stop sharing', exact: true }).click()
+  await expect.poll(() => writes.length).toBe(2)
+  expect(writes[1]).toEqual({ account_ids: [ACCOUNTS.main], quota_fingerprint: fingerprint, confirmed: false })
+  expect(errors).toEqual([])
+})
+
+test('a reader cannot confirm matching login hints', async ({ page }) => {
+  const { capacity } = await setup(page, { manage: false })
+  for (const a of capacity.accounts.filter(a => a.harness === 'codex')) Object.assign(a, { quota_fingerprint: 'ab'.repeat(32) })
+  await open(page)
+  const detail = await details(page, ACCOUNTS.main)
+  await expect(detail.getByRole('button', { name: /^Pool with/ })).toHaveCount(0)
+})
+
 test('accounts are a list by vendor with how each is read, and no allowance form', async ({ page }) => {
   const errors = watchErrors(page)
   await setup(page)

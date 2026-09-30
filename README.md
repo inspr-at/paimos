@@ -75,6 +75,17 @@ every admission.
 Workspace readers can request advice across their accounts; paired agents and
 keys with only `account.probe` see only accounts registered by that agent.
 
+Matching login fingerprints are hints. In Settings → Accounts, open an account
+and choose **Pool with…**, then confirm the named accounts use the same vendor
+login. Only those confirmed accounts share readings, holds and parallel slots;
+later enrollments require their own confirmation. **Stop sharing quota** removes
+an account, and a changed fingerprint clears its confirmation. Existing accounts
+start unconfirmed after migration 1054; prior holds can still settle or release.
+The person-only API is `PUT /api/agent-accounts/quota-pool` (`account.manage`).
+Ticket pins require edit permission in the ticket's visible project. If a queued
+account leaves its routing group, routing releases its old hold and slot before
+choosing a current member or returning a visible wait.
+
 Capacity learning uses tenant-local readings and usage only (AEON-388,
 migration 1020). Three matching run samples enable a decaying p75 hold; five
 observed work days enable an Auto reserve normalized to the window's usable

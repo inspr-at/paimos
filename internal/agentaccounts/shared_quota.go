@@ -3,25 +3,92 @@ package agentaccounts
 
 import (
 	"context"
+	"net/http"
 	"sort"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
-// quotaAccounts is tenant-scoped by RLS. Empty fingerprints never join two
-// enrollments, and a fingerprint never joins different harnesses.
+// quotaAccounts is tenant-scoped by RLS. Only a person's explicit confirmation
+// joins enrollments; a matching self-reported fingerprint grants no authority.
 const quotaAccounts = `SELECT sibling.id FROM agent_accounts own
  JOIN agent_accounts sibling ON sibling.tenant_id=own.tenant_id AND
- (sibling.id=own.id OR (own.quota_fingerprint<>'' AND sibling.quota_fingerprint=own.quota_fingerprint AND sibling.harness=own.harness))
+ (sibling.id=own.id OR (own.quota_pool_fingerprint<>'' AND sibling.quota_pool_fingerprint=own.quota_pool_fingerprint AND sibling.harness=own.harness))
  WHERE own.id=$1`
+
+type quotaPoolWrite struct {
+	AccountIDs       []string `json:"account_ids"`
+	QuotaFingerprint string   `json:"quota_fingerprint"`
+	Confirmed        *bool    `json:"confirmed"`
+}
+
+func (m *Module) quotaPool(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if err := m.requirePermission(r, p, "account.manage"); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var in quotaPoolWrite
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		return confirmQuotaPool(r.Context(), tx, p, in)
+	}); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func confirmQuotaPool(ctx context.Context, tx pgx.Tx, p tenant.Principal, in quotaPoolWrite) error {
+	if p.Kind != tenant.Person || authz.RequireTx(ctx, tx, p, "account.manage", authz.Scope{}) != nil {
+		return fail(http.StatusForbidden, "person account.manage required")
+	}
+	ids, err := idList(&in.AccountIDs)
+	if err != nil {
+		return err
+	}
+	if in.Confirmed == nil || len(ids) == 0 || len(ids) > 256 || len(ids) != len(in.AccountIDs) ||
+		!fingerprintRE.MatchString(in.QuotaFingerprint) || *in.Confirmed && len(ids) < 2 {
+		return fail(http.StatusBadRequest, "select accounts and confirm the same login")
+	}
+	// The module holds the pairing lock before account rows. Signals and
+	// reservations use that lock too, so the reviewed identities cannot race.
+	harness := ""
+	for _, id := range ids {
+		a, err := lockAccount(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if a.QuotaFingerprint != in.QuotaFingerprint || harness != "" && harness != a.Harness {
+			return fail(http.StatusConflict, "accounts no longer match the selected login")
+		}
+		harness = a.Harness
+	}
+	fingerprint := ""
+	if *in.Confirmed {
+		fingerprint = in.QuotaFingerprint
+	}
+	if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET quota_pool_fingerprint=$2 WHERE id::text=ANY($1::text[])`, ids, fingerprint); err != nil {
+		return err
+	}
+	return writeEvent(ctx, tx, p, "account.quota_pool_confirmed", nil, in)
+}
 
 // sharedQuotaWindows projects one reservation ledger across every door. Mutating
 // callers hold agentpairing.Lock before reading this view through reservation or
 // settlement, so a sibling cannot concurrently spend the same remaining quota.
 // Reservations keep their original window IDs for replay, release and settlement.
 func sharedQuotaWindows(ctx context.Context, tx pgx.Tx, a Account, own []Window, now time.Time) ([]Window, error) {
-	if a.QuotaFingerprint == "" {
+	if a.QuotaPoolFingerprint == "" {
 		return own, nil
 	}
 	rows, err := tx.Query(ctx, quotaAccounts, a.ID)

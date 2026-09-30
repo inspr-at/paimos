@@ -5,6 +5,7 @@ package agentaccounts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"sort"
@@ -101,6 +102,10 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 			err = agentpairing.RunFence(ctx, tx, existing.AccountID, run.ID, false)
 			if err == nil {
 				err = validateReservedAccount(ctx, tx, run, existing.AccountID)
+				var conflict *httpError
+				if errors.As(err, &conflict) && (conflict.code == "account_moved_out_of_group" || conflict.code == "quota_pool_changed") {
+					return rerouteMovedAccount(ctx, tx, r, p, run, daemonID, accountIDs, estimates, conflict.code)
+				}
 			}
 		}
 		return existing, err
@@ -169,7 +174,10 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO account_reservations (tenant_id, run_id, window_id, reserved_units)
 			VALUES ($1::uuid, $2::uuid, $3::uuid, $4)
-			RETURNING id::text`, p.TenantID, run.ID, window.ID, estimate).Scan(&id); err != nil {
+            ON CONFLICT (tenant_id,run_id,window_id) DO UPDATE
+            SET reserved_units=EXCLUDED.reserved_units,state='active',settled_at=NULL,actual_units=NULL
+            WHERE account_reservations.state='released'
+            RETURNING id::text`, p.TenantID, run.ID, window.ID, estimate).Scan(&id); err != nil {
 			return RouteResult{}, err
 		}
 		result.Reservations = append(result.Reservations, Reservation{ReservationID: id, WindowID: window.ID, Unit: window.Unit})
@@ -181,7 +189,9 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 }
 
 // ValidateReservedCapacity rechecks the router's capacity policy at launch.
-// The caller must authenticate ownership and hold the run/account locks first.
+// The caller must authenticate ownership and acquire agentpairing.Lock before
+// any run/account row locks. Re-entering the transaction lock here is safe only
+// in that order; it serializes quota signals, pooling, routing and launch.
 func ValidateReservedCapacity(ctx context.Context, tx pgx.Tx, runID, accountID string) error {
 	if err := agentpairing.Lock(ctx, tx); err != nil {
 		return err
@@ -191,6 +201,43 @@ func ValidateReservedCapacity(ctx context.Context, tx pgx.Tx, runID, accountID s
 		return err
 	}
 	return validateReservedAccount(ctx, tx, run, accountID)
+}
+
+// routeCommitError carries a client conflict after obsolete holds were freed.
+// Only the HTTP route wrapper consumes it and commits that release. Unexpected
+// errors still roll back the entire operation.
+type routeCommitError struct{ err error }
+
+func (e *routeCommitError) Error() string { return e.err.Error() }
+func (e *routeCommitError) Unwrap() error { return e.err }
+
+func rerouteMovedAccount(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal, run runRow, daemonID string, accountIDs []string, estimates map[string]int64, reason string) (RouteResult, error) {
+	if err := Release(ctx, tx, p, run.ID, "", ""); err != nil {
+		return RouteResult{}, err
+	}
+	// Retry in a savepoint: a failed candidate must not leave a partial new hold
+	// when the old release is committed for a client-visible wait.
+	retry, err := tx.Begin(ctx)
+	if err != nil {
+		return RouteResult{}, err
+	}
+	defer func() { _ = retry.Rollback(ctx) }()
+	result, err := reserve(ctx, retry, r, p, run.ID, daemonID, accountIDs, estimates)
+	if err == nil {
+		return result, retry.Commit(ctx)
+	}
+	if rollbackErr := retry.Rollback(ctx); rollbackErr != nil {
+		return RouteResult{}, rollbackErr
+	}
+	var conflict *httpError
+	if errors.As(err, &conflict) && conflict.status == http.StatusConflict {
+		message := "reserved account moved out of group; reservation released, waiting for an eligible account"
+		if reason == "quota_pool_changed" {
+			message = "quota pool confirmation changed; reservation released, waiting for an eligible account"
+		}
+		return RouteResult{}, &routeCommitError{&httpError{status: http.StatusConflict, code: reason, msg: message}}
+	}
+	return RouteResult{}, err
 }
 
 func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, accountID string) error {
@@ -211,7 +258,14 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 		return err
 	}
 	if len(eligible) == 0 {
-		return fail(http.StatusConflict, "reserved account is outside the routing fence")
+		return &httpError{status: http.StatusConflict, code: "account_moved_out_of_group", msg: "reserved account is outside the routing fence"}
+	}
+	var quotaChanged bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$2 AND r.state='active' AND w.account_id NOT IN (`+quotaAccounts+`))`, accountID, run.ID).Scan(&quotaChanged); err != nil {
+		return err
+	}
+	if quotaChanged {
+		return &httpError{status: http.StatusConflict, code: "quota_pool_changed", msg: "reserved quota pool confirmation changed"}
 	}
 	all, err := lockAccountWindows(ctx, tx, []string{accountID})
 	if err != nil {
@@ -355,7 +409,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,'')
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint
 		FROM agent_accounts
 		WHERE harness = $1 AND daemon_id = $2 AND registered_by_principal_id = $3::uuid
 		  AND id::text = ANY($4::text[]) AND state = 'available'
@@ -465,7 +519,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	primary := fingerprintPrimary(picks)
 	chosen := 0
 	for i := range picks {
-		fp := picks[i].account.QuotaFingerprint
+		fp := picks[i].account.QuotaPoolFingerprint
 		if fp == "" || primary[fp] == i {
 			chosen = i
 			break

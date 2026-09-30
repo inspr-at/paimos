@@ -4761,11 +4761,33 @@ paths:
         '204': {description: Schedule saved}
         '400': {description: Invalid schedule}
         '403': {description: Person account.manage permission required}
+  /agent-accounts/quota-pool:
+    put:
+      operationId: confirmAccountQuotaPool
+      summary: Confirm that selected accounts use the same vendor login
+      description: Person account.manage required. Only the explicitly selected accounts share quota; matching signals from later enrollments never join automatically. All accounts must report the supplied nonempty fingerprint and use the same harness. A changed signal clears that account's confirmation. Set confirmed to false to remove the selected accounts from the pool.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [account_ids, quota_fingerprint, confirmed]
+              properties:
+                account_ids: {type: array, minItems: 1, maxItems: 256, uniqueItems: true, items: {type: string, format: uuid}}
+                quota_fingerprint: {type: string, pattern: '^[a-f0-9]{64}$'}
+                confirmed: {type: boolean, description: Confirmation requires at least two accounts; removal may name one account.}
+      responses:
+        '204': {description: Confirmation saved or removed}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: An account no longer reports the selected fingerprint or uses another harness}
   /agent-accounts/groups:
     get:
       operationId: listAccountGroups
       summary: Groups that split a vendor pool
-      description: Person account.read. A group is one vendor, its member accounts, and an optional project fence.
+      description: Person account.read. A group is one vendor, its member accounts, and an optional project fence. Project IDs include only live projects visible to the caller.
       responses:
         '200': {description: Groups, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountGroup'}}}}}
     post:
@@ -4796,20 +4818,21 @@ paths:
   /agent-accounts/pins:
     get:
       operationId: listAccountPins
-      description: Person account.read. Pins for one ticket.
+      description: Person account.read. Pins for one live ticket visible to the caller; invisible tickets return an empty list.
       parameters: [{name: ticket_id, in: query, required: true, schema: {type: string, format: uuid}}]
       responses:
         '200': {description: Pins, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountTicketPin'}}}}}
     put:
       operationId: putAccountPin
       summary: Remember an account or a group for this ticket
-      description: Person run.create. Exactly one of account_id or group_id. A pin narrows routing and never crosses a project fence.
+      description: Person run.create and nodes.write in the visible ticket's project. Exactly one of account_id or group_id. A pin narrows routing and never crosses a project fence.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountTicketPin'}}}}
       responses:
         '204': {description: Pin saved}
         '400': {$ref: '#/components/responses/Error'}
     delete:
       operationId: deleteAccountPin
+      description: Person run.create and nodes.write in the visible ticket's project.
       parameters:
         - {name: ticket_id, in: query, required: true, schema: {type: string, format: uuid}}
         - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
@@ -5056,7 +5079,7 @@ paths:
   /agent-accounts/route:
     post:
       operationId: reserveAgentAccount
-      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing orders fitting accounts by soonest long-window reset, then larger available cap and account ID; concurrency reservations spread parallel work across accounts; fail closed when estimates are absent or no account fits. Queued retries recheck account state, probe, enabled profile and grants, returning conflict without changing a held reservation or falling back. The daemon resolves the opaque key to its local credential.
+      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing orders fitting accounts by soonest long-window reset, then larger available cap and account ID; concurrency reservations spread parallel work across accounts; fail closed when estimates are absent or no account fits. Queued retries recheck account state, probe, enabled profile and grants. If the reserved account leaves its routing fence or loses quota-pool confirmation, release its hold and slot and reroute within the current fence. When no replacement is eligible, return 409 with code account_moved_out_of_group or quota_pool_changed and leave the run unreserved. The daemon resolves the opaque key to its local credential.
       security: [{agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRouteRequest'}}}}
       responses:
@@ -11486,6 +11509,7 @@ components:
             ongoing_use_approved: {type: boolean, description: True for an unpaired account or an explicitly approved connected pairing enrollment. State and other dispatch fences still apply.}
             reading_support: {type: string, enum: [every_5_min, first_run, statusline, none]}
             quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
+            quota_pool_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$', description: Nonempty only after a person confirms this account for the pool.}
             statusline_enabled: {type: boolean}
             statusline_opt_in: {type: string, enum: [own, workspace], description: Present when this person may change the status line. own means they approved the paired computer. workspace means they are a workspace owner or admin and did not. Omitted when they cannot opt in.}
             id: {type: string, format: uuid}
@@ -11514,7 +11538,7 @@ components:
       required: [reading_support, quota_fingerprint]
       properties:
         reading_support: {type: string, enum: [every_5_min, first_run, statusline, none]}
-        quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$', description: Empty until a stable non-email vendor account ID is verified.}
+        quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$', description: Self-reported hint only; never authorizes quota pooling. Empty until a stable non-email vendor account ID is verified.}
     StatuslineConsent:
       type: object
       additionalProperties: false

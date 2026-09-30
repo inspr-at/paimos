@@ -393,7 +393,7 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
  (w.account_id=$2::uuid OR (NOT w.pairing_verification AND EXISTS(
   SELECT 1 FROM agent_accounts door JOIN agent_accounts ledger
    ON ledger.tenant_id=door.tenant_id AND ledger.harness=door.harness
-   AND door.quota_fingerprint<>'' AND ledger.quota_fingerprint=door.quota_fingerprint
+   AND door.quota_pool_fingerprint<>'' AND ledger.quota_pool_fingerprint=door.quota_pool_fingerprint
   WHERE door.id=$2::uuid AND ledger.id=w.account_id
    AND EXISTS(SELECT 1 FROM agent_runs owned WHERE owned.id=r.run_id AND owned.purpose='managed')))),w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp()
   AND (w.capacity_read_at IS NULL OR (w.capacity_allowed AND NOT w.capacity_retired AND (w.capacity_read_at>=clock_timestamp()-interval '10 minutes' OR w.capacity_refresh_run IS NOT DISTINCT FROM r.run_id) AND w.used+w.reserved<=w.allowance))

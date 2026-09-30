@@ -259,7 +259,7 @@ func (m *Module) use(w http.ResponseWriter, r *http.Request) {
 		}
 		quotas := map[string]bool{}
 		for _, a := range matched {
-			key := a.QuotaFingerprint
+			key := a.QuotaPoolFingerprint
 			if key == "" {
 				key = "account:" + a.ID
 			}
@@ -271,7 +271,7 @@ func (m *Module) use(w http.ResponseWriter, r *http.Request) {
 		sort.Slice(matched, func(i, j int) bool { return matched[i].ID < matched[j].ID })
 		out.Accounts = make([]UseAccount, 0, len(matched))
 		for _, a := range matched {
-			item := UseAccount{AccountID: a.ID, DaemonID: a.DaemonID, Harness: a.Harness, Label: a.Label, HostLabel: a.HostLabel, QuotaFingerprint: a.QuotaFingerprint}
+			item := UseAccount{AccountID: a.ID, DaemonID: a.DaemonID, Harness: a.Harness, Label: a.Label, HostLabel: a.HostLabel, QuotaFingerprint: a.QuotaPoolFingerprint}
 			if !publicUseAccount(item) {
 				return fail(http.StatusConflict, "account label is not available")
 			}
@@ -363,7 +363,7 @@ func attachGroupMembers(ctx context.Context, tx pgx.Tx, groups []AccountGroup) e
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	prows, err := tx.Query(ctx, `SELECT group_id::text, project_id::text FROM account_group_projects ORDER BY project_id`)
+	prows, err := tx.Query(ctx, `SELECT gp.group_id::text, gp.project_id::text FROM account_group_projects gp JOIN nodes n ON n.tenant_id=gp.tenant_id AND n.id=gp.project_id WHERE n.deleted_at IS NULL ORDER BY gp.project_id`)
 	if err != nil {
 		return err
 	}
@@ -588,7 +588,7 @@ func listPins(ctx context.Context, tx pgx.Tx, ticketID string) ([]TicketPin, err
 	if !uuidRE.MatchString(ticketID) {
 		return nil, fail(http.StatusBadRequest, "invalid ticket")
 	}
-	rows, err := tx.Query(ctx, `SELECT ticket_id::text, harness, COALESCE(account_id::text,''), COALESCE(group_id::text,'') FROM account_ticket_pins WHERE ticket_id=$1::uuid ORDER BY harness`, ticketID)
+	rows, err := tx.Query(ctx, `SELECT p.ticket_id::text, p.harness, COALESCE(p.account_id::text,''), COALESCE(p.group_id::text,'') FROM account_ticket_pins p JOIN nodes n ON n.tenant_id=p.tenant_id AND n.id=p.ticket_id WHERE p.ticket_id=$1::uuid AND n.deleted_at IS NULL ORDER BY p.harness`, ticketID)
 	if err != nil {
 		return nil, err
 	}
@@ -614,6 +614,9 @@ func putPin(ctx context.Context, tx pgx.Tx, p tenant.Principal, in pinWrite) err
 	if (in.AccountID == "") == (in.GroupID == "") || in.AccountID != "" && !uuidRE.MatchString(in.AccountID) || in.GroupID != "" && !uuidRE.MatchString(in.GroupID) {
 		return fail(http.StatusBadRequest, "invalid pin")
 	}
+	if err := canEditPin(ctx, tx, p, in.TicketID); err != nil {
+		return err
+	}
 	var account, group any
 	if in.AccountID != "" {
 		account = in.AccountID
@@ -632,6 +635,9 @@ func deletePin(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticketID, har
 	if !uuidRE.MatchString(ticketID) || !validHarness(harness) {
 		return fail(http.StatusBadRequest, "invalid pin")
 	}
+	if err := canEditPin(ctx, tx, p, ticketID); err != nil {
+		return err
+	}
 	tag, err := tx.Exec(ctx, `DELETE FROM account_ticket_pins WHERE ticket_id=$1::uuid AND harness=$2`, ticketID, harness)
 	if err != nil {
 		return err
@@ -640,6 +646,27 @@ func deletePin(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticketID, har
 		return nil
 	}
 	return writeEvent(ctx, tx, p, evPinSet, TicketPin{TicketID: ticketID, Harness: harness}, nil)
+}
+
+// Pins edit a ticket, rather than a work order. Resolve under the caller's
+// node RLS and require the same project write authority as a ticket edit.
+func canEditPin(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticketID string) error {
+	var project *string
+	err := tx.QueryRow(ctx, `SELECT n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND n.deleted_at IS NULL AND k.slug='ticket' FOR UPDATE OF n`, ticketID).Scan(&project)
+	if isNoRows(err) {
+		return fail(http.StatusNotFound, "ticket not found")
+	}
+	if err != nil {
+		return err
+	}
+	scope := authz.Scope{}
+	if project != nil {
+		scope.ProjectID = *project
+	}
+	if p.Kind != tenant.Person || authz.RequireTx(ctx, tx, p, "nodes.write", scope) != nil {
+		return fail(http.StatusForbidden, "ticket edit permission required")
+	}
+	return nil
 }
 
 func setRunTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID, accountID, groupID string) error {
@@ -942,12 +969,12 @@ func keepGroup(accounts []Account, id string) []Account {
 
 func quotaOccupancy(ctx context.Context, tx pgx.Tx) (map[string]int, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT a.quota_fingerprint, count(*)
+		SELECT a.harness || ':' || a.quota_pool_fingerprint, count(*)
 		FROM agent_runs r
 		JOIN agent_accounts a ON a.tenant_id=r.tenant_id AND a.id=r.account_id
-		WHERE a.quota_fingerprint<>'' AND r.account_id IS NOT NULL
+		WHERE a.quota_pool_fingerprint<>'' AND r.account_id IS NOT NULL
 		  AND r.status IN ('queued','starting','running','waiting')
-		GROUP BY a.quota_fingerprint`)
+		GROUP BY a.harness, a.quota_pool_fingerprint`)
 	if err != nil {
 		return nil, err
 	}
@@ -965,8 +992,8 @@ func quotaOccupancy(ctx context.Context, tx pgx.Tx) (map[string]int, error) {
 }
 
 func slotCount(a Account, byAccount, byQuota map[string]int) int {
-	if a.QuotaFingerprint != "" {
-		return byQuota[a.QuotaFingerprint]
+	if a.QuotaPoolFingerprint != "" {
+		return byQuota[a.Harness+":"+a.QuotaPoolFingerprint]
 	}
 	return byAccount[a.ID]
 }
@@ -991,17 +1018,18 @@ func annotateQuotas(out []accountCapacity, accounts []Account) {
 		if !ok {
 			continue
 		}
-		out[i].QuotaFingerprint = a.QuotaFingerprint
+		out[i].QuotaFingerprint = a.QuotaPoolFingerprint
 		out[i].GroupID = a.GroupID
 		out[i].GroupName = a.GroupName
 		out[i].HostLabel = a.HostLabel
-		if a.QuotaFingerprint == "" {
+		if a.QuotaPoolFingerprint == "" {
 			continue
 		}
-		b := groups[a.QuotaFingerprint]
+		key := a.Harness + ":" + a.QuotaPoolFingerprint
+		b := groups[key]
 		if b == nil {
 			b = &bucket{}
-			groups[a.QuotaFingerprint] = b
+			groups[key] = b
 		}
 		b.ids = append(b.ids, a.ID)
 		host := a.HostLabel
