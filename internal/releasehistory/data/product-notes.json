@@ -3416,6 +3416,38 @@
           "group": "features"
         }
       ]
+    },
+    "260930115354.0.0": {
+      "snapshot_sha256": "60149218f2504aa9232bcb34f6cc083e0f249ea67eecc5387a2a95660f53f1bf",
+      "captured_at": "2026-09-30T13:08:22Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-441",
+          "pill_en": "Safer attach",
+          "pill_de": "Sichereres Andocken",
+          "benefit_en": "Only the genuine, running Claude or Codex program can be attached to your session.",
+          "benefit_de": "Nur das echte, laufende Claude- oder Codex-Programm kann an deine Sitzung angedockt werden.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-439",
+          "pill_en": "Attach from any terminal",
+          "pill_de": "Aus jedem Terminal anhängen",
+          "benefit_en": "You can attach to a running agent session straight from Terminal or Ghostty, no tmux workaround needed.",
+          "benefit_de": "Du kannst dich direkt aus Terminal oder Ghostty an eine laufende Agentensitzung anhängen, ohne Umweg über tmux.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-402",
+          "pill_en": "Cancel queued runs",
+          "pill_de": "Wartende Läufe abbrechen",
+          "benefit_en": "You can cancel a run that is still waiting and tidy away computers you no longer use, straight from /agents.",
+          "benefit_de": "Du kannst einen noch wartenden Lauf abbrechen und nicht mehr genutzte Rechner direkt in /agents aufräumen.",
+          "group": "features"
+        }
+      ]
     }
   }
 }

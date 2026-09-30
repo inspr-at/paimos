@@ -357,7 +357,8 @@ classic database is contacted by the history builder.
 
 At reservation, the release coordinator reviews that export and freezes its
 public projection in `internal/releasehistory/data/product-notes.json` **before
-tagging** (AEON-372):
+the release PR** (AEON-405), so the release ships its own notes. Publication
+only verifies that capture; it does not fetch notes for the following release:
 
 ```sh
 go run ./internal/releasehistory/packnotes -repo . -snapshot SNAPSHOT.json -reserve VERSION -tenant TENANT_UUID -project AEON_PROJECT_UUID
@@ -459,6 +460,61 @@ The writing-rule proposal is `docs/proposals/ticket-benefit-writing.json`, using
 AR1's draft Rule DTO. It must be imported as a draft at the fetched revision and
 published separately by an authorized human; it changes no effective harness
 files or company rules.
+
+### Own-release notes without journey membership (AEON-405)
+
+At reservation, write an ignored JSON array of the release's reviewed ticket
+keys (for example `tmp/release-scope.json`). Use the exact scope being cut,
+including hidden members; `[]` explicitly declares an internal-only release.
+Do not infer this scope from earlier tags or require the release to be published.
+After updating `version.json`, capture through the configured PPM client and
+freeze the public projection in the same release PR:
+
+```sh
+go run ./internal/releasehistory/exporthistoric -repo . -client /path/to/ppm-client -tenant TENANT_UUID -project AEON_PROJECT_UUID -reserve VERSION -tickets tmp/release-scope.json -out tmp/own-release-notes.json
+go run ./internal/releasehistory/packnotes -repo . -historic tmp/own-release-notes.json -reserve VERSION -tenant TENANT_UUID -project AEON_PROJECT_UUID
+node scripts/check-own-release-notes.mjs
+```
+
+The explicit version, channel and sequence must match `version.json`. The
+exporter verifies the authenticated tenant and each member's project ancestry.
+Every public member must have both 2–4-word pills and both nonblank benefits;
+hidden members contribute no key or text. The raw ignored export stays local.
+Identical reruns use that same export; changed observations conflict with the
+frozen original. Commit the public bundle alongside the version reservation
+before opening the PR. CI's `release-check` rejects a missing own-version entry,
+a mismatched sequence/channel or invalid bilingual fields. AEON-405 pins the
+legacy cutoff at release sequence **113** (`LEGACY_RELEASE_SEQUENCE_CUTOFF` in
+the checker): captures through that sequence may omit channel/sequence and
+bilingual fields, but every field present is still validated. From sequence
+**114** onward, the complete matching channel/sequence and all four bilingual
+fields are required, even when `written_after_release` is set. The cutoff stays
+fixed; it does not follow `version.json` or future releases. Historic entries
+remain immutable; reserve and capture the next release rather than rewriting a
+legacy entry to satisfy the gate. After
+publication, verify the same capture digest and both languages on the target
+instance; do not recapture or rewrite it.
+
+### Reviewed corrections and fix markers (AEON-405)
+
+File bug-fix tickets with `paimos issue create ... --bug` (or `--tags bug`).
+The MCP `issue_create` argument schema exposes the same `bug` and `tags`
+fields; its existing R1 placeholder remains, so file through the CLI today.
+The helper preserves the ticket kind and writes the literal `bug` tag that the
+release classifier reads. Mark actual repairs when filing them; feature work
+keeps its feature classification. A mixed ticket's benefit can still describe
+its real new capability without overstating the repair.
+
+Published frozen entries stay insert-only. Reviewed corrections live separately
+in `internal/releasehistory/data/product-note-corrections.json`, with a version,
+ticket key, original snapshot SHA-256, reason, and new group and/or existing
+bilingual text. A correction must target a public item already in that capture;
+it cannot add hidden or absent members. Invalid bindings fail the history build.
+The served notes keep the original digest and expose the exact correction
+records under `notes.corrections`; Details → Evidence shows their keys and
+reasons. Tenant-local snapshots retain their existing precedence. The AEON-405
+layer applies the reviewed fix/feature and wording audit to each frozen public
+occurrence without rewriting the bundle, tags or published artifacts.
 
 ### Historic product notes without journey membership (AEON-398)
 

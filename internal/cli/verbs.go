@@ -4,6 +4,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -99,7 +100,7 @@ func (rt *runtime) cmdIssueCreate() *Command {
 	var project, title, typ, status, priority, parent, assignee string
 	var description, descriptionFile, ac, acFile, notes, notesFile string
 	var tags []string
-	var dryRun bool
+	var dryRun, bug bool
 	var benefits benefitFlags
 	var estimate string
 	return &Command{
@@ -123,6 +124,7 @@ func (rt *runtime) cmdIssueCreate() *Command {
 			fs.string(&notes, "notes", 0, "inline notes")
 			fs.string(&notesFile, "notes-file", 0, "notes file")
 			fs.strings(&tags, "tags", "tag name (repeatable)")
+			fs.bool(&bug, "bug", 0, "mark a repair as a fix in release notes (adds the bug tag)")
 			fs.bool(&dryRun, "dry-run", 0, "validate and print the action without writing")
 		},
 		run: func(args []string) error {
@@ -161,6 +163,9 @@ func (rt *runtime) cmdIssueCreate() *Command {
 				}
 				fmt.Fprintf(rt.stdout, "dry-run: would create %s in %s — %s\n", kind, strings.TrimSpace(project), strings.TrimSpace(title))
 				return nil
+			}
+			if bug && !slices.Contains(tags, "bug") {
+				tags = append(tags, "bug")
 			}
 			return rt.createIssue(issueInput{
 				Estimate: estimate, Benefits: benefits, Project: project, Title: title, Type: typ, Status: status, Priority: priority,
