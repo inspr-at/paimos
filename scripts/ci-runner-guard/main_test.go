@@ -4,8 +4,12 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestRepositoryWorkflows(t *testing.T) {
@@ -15,6 +19,58 @@ func TestRepositoryWorkflows(t *testing.T) {
 	}
 	if len(problems) != 0 {
 		t.Fatal(strings.Join(problems, "\n"))
+	}
+}
+
+func TestCITriggersAndRequiredChecks(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow map[string]any
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	events := mapping(workflow["on"])
+	var names []string
+	for name := range events {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if !reflect.DeepEqual(names, []string{"merge_group", "pull_request", "push", "workflow_dispatch"}) {
+		t.Fatalf("CI must cover main, PRs, the merge queue and manual runs exactly once: %v", names)
+	}
+	if !reflect.DeepEqual(mapping(events["push"]), map[string]any{"branches": []any{"main"}}) {
+		t.Fatalf("branch and tag pushes outside main must not duplicate PR CI: %v", events["push"])
+	}
+	if events["pull_request"] != nil {
+		t.Fatalf("required PR checks must run without path or activity filters: %v", events["pull_request"])
+	}
+	if !reflect.DeepEqual(mapping(events["merge_group"]), map[string]any{"types": []any{"checks_requested"}}) {
+		t.Fatalf("merge queue check requests must run CI: %v", events["merge_group"])
+	}
+
+	// These are the active main ruleset's contexts. Renaming or conditionally
+	// skipping them would strand a PR or merge queue waiting for its checks.
+	jobs := mapping(workflow["jobs"])
+	for _, context := range []string{"go", "web", "release-check", "e2e"} {
+		job := mapping(jobs[context])
+		if job == nil {
+			t.Fatalf("required check %q is missing", context)
+		}
+		if name, exists := job["name"]; exists && name != context {
+			t.Errorf("required check %q renamed to %v", context, name)
+		}
+		if context == "go" {
+			if job["if"] != "always()" {
+				t.Errorf("go must report failures even when its dependencies fail: %v", job["if"])
+			}
+			if !reflect.DeepEqual(job["needs"], []any{"go-test", "go-static", "go-timing"}) {
+				t.Errorf("go must gate every shard, static checks and timing: %v", job["needs"])
+			}
+		} else if job["if"] != nil {
+			t.Errorf("required check %q must run for every CI event: %v", context, job["if"])
+		}
 	}
 }
 
