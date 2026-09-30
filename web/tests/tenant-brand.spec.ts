@@ -23,7 +23,11 @@ const WIDE_DARK = wide('#f1f5f9')
 
 type Variant = 'light' | 'dark'
 interface Stored { body: string; type: string; width: number; height: number; sha: string }
-export interface BrandWorld { short_name: string; logos: Partial<Record<Variant, Stored>>; puts: { path: string; type: string; size: number }[]; codename?: string; fail?: string }
+export interface BrandWorld {
+  short_name: string; logos: Partial<Record<Variant, Stored>>; puts: { path: string; type: string; size: number }[]; codename?: string; fail?: string
+  // Writes wait on `hold`; `inflight` and `maxInflight` count writes the server is handling at once.
+  hold?: Promise<void>; arrived: number; inflight: number; maxInflight: number
+}
 
 function sizeOf(svg: string) {
   const box = /viewBox="0 0 (\d+) (\d+)"/.exec(svg)
@@ -49,7 +53,7 @@ function sessionBrand(w: BrandWorld) {
 
 export function brandWorld(options: { name?: string; light?: string; dark?: string; codename?: string } = {}): BrandWorld {
   return {
-    short_name: options.name ?? '', puts: [], codename: options.codename,
+    short_name: options.name ?? '', puts: [], codename: options.codename, arrived: 0, inflight: 0, maxInflight: 0,
     logos: { ...(options.light ? { light: stored(options.light) } : {}), ...(options.dark ? { dark: stored(options.dark) } : {}) },
   }
 }
@@ -69,22 +73,33 @@ export async function mockBrand(page: Page, w: BrandWorld, options: { admin?: bo
       const l = w.logos[logo[1] as Variant]
       return l ? route.fulfill({ body: l.body, contentType: l.type, headers: { 'X-Content-Type-Options': 'nosniff' } }) : route.fulfill({ status: 404, json: { error: 'logo not found' } })
     }
+    // A write the server takes its time over, so a test can edit the form meanwhile.
+    const write = async (handle: () => Promise<void> | void) => {
+      w.arrived++
+      w.maxInflight = Math.max(w.maxInflight, ++w.inflight)
+      try { await w.hold; await handle() } finally { w.inflight-- }
+    }
     if (path === '/api/settings/brand') {
       if (options.admin === false) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
-      if (method === 'PUT') w.short_name = String((request.postDataJSON() as { short_name: string }).short_name).trim()
+      if (method === 'PUT') {
+        const asked = String((request.postDataJSON() as { short_name: string }).short_name).trim()
+        return write(async () => { w.short_name = asked; await route.fulfill({ json: settingsOf(w) }) })
+      }
       return route.fulfill({ json: settingsOf(w) })
     }
     const upload = /^\/api\/settings\/brand\/logo\/(light|dark)$/.exec(path)
     if (upload) {
       const v = upload[1] as Variant
-      if (method === 'DELETE') { delete w.logos[v]; return route.fulfill({ json: settingsOf(w) }) }
+      if (method === 'DELETE') return write(async () => { delete w.logos[v]; await route.fulfill({ json: settingsOf(w) }) })
       const body = request.postDataBuffer()?.toString('utf8') ?? ''
       const type = (await request.headerValue('content-type')) ?? ''
-      w.puts.push({ path, type, size: body.length })
-      if (w.fail) return route.fulfill({ status: 400, json: { error: w.fail } })
-      const cleaned = body.includes('<script')
-      w.logos[v] = stored(body.replace(/<script[\s\S]*?<\/script>/g, ''), type)
-      return route.fulfill({ json: settingsOf(w, cleaned) })
+      return write(async () => {
+        w.puts.push({ path, type, size: body.length })
+        if (w.fail) return route.fulfill({ status: 400, json: { error: w.fail } })
+        const cleaned = body.includes('<script')
+        w.logos[v] = stored(body.replace(/<script[\s\S]*?<\/script>/g, ''), type)
+        return route.fulfill({ json: settingsOf(w, cleaned) })
+      })
     }
     return route.fallback()
   })
@@ -232,6 +247,55 @@ test('an admin sets the brand in Settings → Workspace; the header follows at o
   await field.press('Enter')
   await expect(lockup(page).locator('.mark-backing')).toBeVisible()
   expect(errors).toEqual([])
+})
+
+// The review's repro: an upload's response used to overwrite the name typed while it was in flight.
+test('a short name typed while a logo uploads is kept and saved after it, never overwritten; writes run one at a time', async ({ page }) => {
+  const errors = watchErrors(page)
+  const w = brandWorld({ name: 'Northwind' })
+  let release!: () => void
+  w.hold = new Promise<void>(resolve => { release = resolve })
+  await setup(page, w)
+  await page.goto('/settings/workspace#brand')
+  const card = page.locator('#brand')
+  const field = card.getByRole('textbox', { name: 'Short name' })
+  await expect(field).toHaveValue('Northwind')
+
+  await card.getByLabel('Logo file', { exact: true }).setInputFiles({ name: 'northwind.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(WIDE) })
+  await expect.poll(() => w.arrived).toBe(1)
+  await expect(field).toBeEditable()
+  await field.fill('Northwind Traders')
+  // Leaving the field while the upload is still in flight must not start a second write beside it.
+  await field.blur()
+  await page.waitForTimeout(150)
+  expect(w.arrived).toBe(1)
+  expect(w.maxInflight).toBe(1)
+
+  release()
+  await expect(card.getByRole('button', { name: 'Replace' })).toBeVisible()
+  await expect(field).toHaveValue('Northwind Traders')
+  await expect.poll(() => w.short_name).toBe('Northwind Traders')
+  await expect(lockup(page).locator('.tenant-name')).toHaveText('Northwind Traders')
+  expect(w.puts.map(put => put.path)).toEqual(['/api/settings/brand/logo/light'])
+  expect(w.maxInflight).toBe(1)
+
+  // Typed but not yet saved when a removal's response arrives: still the admin's text.
+  w.hold = undefined
+  await field.fill('Northwind Traders GmbH')
+  await card.getByRole('button', { name: 'Remove logo', exact: true }).click()
+  await expect(card.getByRole('button', { name: 'Upload logo' })).toBeVisible()
+  await expect.poll(() => w.short_name).toBe('Northwind Traders GmbH')
+  await expect(field).toHaveValue('Northwind Traders GmbH')
+  expect(w.maxInflight).toBe(1)
+  expect(errors).toEqual([])
+})
+
+test('the brand card, header and footer pass axe in dark mode too', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await setup(page, brandWorld({ name: 'Northwind', light: WIDE, dark: WIDE_DARK }))
+  await page.goto('/settings/workspace#brand')
+  await expect(page.locator('#brand').getByRole('heading', { name: 'Brand' })).toBeVisible()
+  expect((await new AxeBuilder({ page }).include('#brand').include('.app-header .lockup').include('footer.app-footer').analyze()).violations).toEqual([])
 })
 
 test('members do not see the brand settings', async ({ page }) => {

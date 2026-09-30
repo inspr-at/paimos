@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { api } from '../../lib/api'
 import { brand } from '../../lib/brand'
 import { toast } from '../../lib/toast'
@@ -17,7 +17,8 @@ type Variant = 'light' | 'dark'
 const session = useSession()
 const settings = ref<BrandSettings | null>(null)
 const name = ref('')
-const busy = ref<Variant | 'name' | ''>('')
+const working = reactive({ light: 0, dark: 0 }) // logo writes asked for and not yet answered
+const savingName = ref(false)
 const problem = ref('')
 const inputs = { light: ref<HTMLInputElement>(), dark: ref<HTMLInputElement>() }
 const lightInput = inputs.light
@@ -32,9 +33,22 @@ async function message(response: Response, fallback: string) {
   return text ? text[0]!.toUpperCase() + text.slice(1) + (/[.!?]$/.test(text) ? '' : '.') : fallback
 }
 
-function apply(next: BrandSettings) {
+// Writes run one at a time, in the order they were asked for: no response lands
+// on top of another request's, and a name is saved as the field reads when its
+// turn comes. `work` answers for its own failures.
+let queue: Promise<void> = Promise.resolve()
+function mutate(work: () => Promise<void>, variant?: Variant) {
+  if (variant) working[variant]++
+  queue = queue.then(work).catch(() => {}).finally(() => { if (variant) working[variant]-- })
+  return queue
+}
+
+// `answered` is the field text a name save sent; every other response only
+// refreshes a field nobody has typed in since the last save.
+function apply(next: BrandSettings, answered?: string) {
+  const untouched = !settings.value || name.value === settings.value.short_name || name.value === answered
   settings.value = next
-  name.value = next.short_name
+  if (untouched) name.value = next.short_name
   // The header follows at once, without another session round trip.
   if (session.identity) session.identity.tenant.brand = publicBrand(next)
 }
@@ -46,45 +60,49 @@ onMounted(async () => {
   } catch { /* the card stays hidden */ }
 })
 
-async function saveName() {
-  if (!settings.value) return
-  const next = name.value.replace(/\s+/g, ' ').trim()
-  if (next === settings.value.short_name) { name.value = next; return }
-  busy.value = 'name'
-  problem.value = ''
-  try {
-    const response = await api('/settings/brand', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ short_name: next }) })
-    if (!response.ok) { problem.value = await message(response, 'The short name could not be saved.'); return }
-    apply(await response.json() as BrandSettings)
-  } catch { problem.value = 'The short name could not be saved. Check the connection and try again.' } finally { busy.value = '' }
+function saveName() {
+  return mutate(async () => {
+    if (!settings.value) return
+    const typed = name.value
+    const next = typed.replace(/\s+/g, ' ').trim()
+    if (next === settings.value.short_name) { name.value = next; return }
+    savingName.value = true
+    problem.value = ''
+    try {
+      const response = await api('/settings/brand', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ short_name: next }) })
+      if (!response.ok) { problem.value = await message(response, 'The short name could not be saved.'); return }
+      apply(await response.json() as BrandSettings, typed)
+    } catch { problem.value = 'The short name could not be saved. Check the connection and try again.' } finally { savingName.value = false }
+  })
 }
 
-async function upload(variant: Variant, file: File | undefined) {
+function upload(variant: Variant, file: File | undefined) {
   if (!file) return
   problem.value = logoProblem(file)
   if (problem.value) return
-  busy.value = variant
-  try {
-    const response = await api(`/settings/brand/logo/${variant}`, { method: 'PUT', headers: { 'Content-Type': logoType(file) }, body: file })
-    if (!response.ok) { problem.value = await message(response, 'The logo could not be saved.'); return }
-    const next = await response.json() as BrandSettings
-    apply(next)
-    if (next.cleaned) toast('Saved. Parts of the SVG that could run code or load other files were removed.')
-  } catch { problem.value = 'The logo could not be saved. Check the connection and try again.' } finally {
-    busy.value = ''
-    const input = inputs[variant].value
-    if (input) input.value = ''
-  }
+  return mutate(async () => {
+    try {
+      const response = await api(`/settings/brand/logo/${variant}`, { method: 'PUT', headers: { 'Content-Type': logoType(file) }, body: file })
+      if (!response.ok) { problem.value = await message(response, 'The logo could not be saved.'); return }
+      const next = await response.json() as BrandSettings
+      apply(next)
+      if (next.cleaned) toast('Saved. Parts of the SVG that could run code or load other files were removed.')
+    } catch { problem.value = 'The logo could not be saved. Check the connection and try again.' } finally {
+      const input = inputs[variant].value
+      if (input) input.value = ''
+    }
+  }, variant)
 }
 
-async function remove(variant: Variant) {
-  busy.value = variant
-  problem.value = ''
-  try {
-    const response = await api(`/settings/brand/logo/${variant}`, { method: 'DELETE' })
-    if (!response.ok) { problem.value = await message(response, 'The logo could not be removed.'); return }
-    apply(await response.json() as BrandSettings)
-  } catch { problem.value = 'The logo could not be removed. Check the connection and try again.' } finally { busy.value = '' }
+function remove(variant: Variant) {
+  return mutate(async () => {
+    problem.value = ''
+    try {
+      const response = await api(`/settings/brand/logo/${variant}`, { method: 'DELETE' })
+      if (!response.ok) { problem.value = await message(response, 'The logo could not be removed.'); return }
+      apply(await response.json() as BrandSettings)
+    } catch { problem.value = 'The logo could not be removed. Check the connection and try again.' }
+  }, variant)
 }
 
 function dropped(variant: Variant, event: DragEvent) { void upload(variant, event.dataTransfer?.files[0]) }
@@ -102,7 +120,7 @@ const hasDark = computed(() => !!settings.value?.logo_dark)
     <div class="brand-form">
       <label class="name-field">
         <span class="label">Short name</span>
-        <input v-model="name" class="field" type="text" :maxlength="MAX_SHORT_NAME" autocomplete="organization" placeholder="Shown next to the logo" :disabled="busy === 'name'" @change="saveName" @keydown.enter.prevent="($event.target as HTMLInputElement).blur()" />
+        <input v-model="name" class="field" type="text" :maxlength="MAX_SHORT_NAME" autocomplete="organization" placeholder="Shown next to the logo" :disabled="savingName" @change="saveName" @keydown.enter.prevent="($event.target as HTMLInputElement).blur()" />
       </label>
       <div class="previews">
         <figure v-for="p in previews" :key="p.variant" class="preview" :class="p.variant" @dragover.prevent @drop.prevent="dropped(p.variant, $event)">
@@ -121,16 +139,16 @@ const hasDark = computed(() => !!settings.value?.logo_dark)
             <span v-if="p.variant === 'dark' && hasLogo && !hasDark" class="auto">Auto: your logo on a light plate</span>
             <span class="actions">
               <template v-if="p.variant === 'light'">
-                <button type="button" class="btn sm" :class="{ primary: !hasLogo }" :disabled="!!busy" @click="lightInput?.click()">
+                <button type="button" class="btn sm" :class="{ primary: !hasLogo }" :disabled="working.light > 0" @click="lightInput?.click()">
                   <AppIcon name="upload" :size="13" />{{ hasLogo ? 'Replace' : 'Upload logo' }}
                 </button>
-                <button v-if="hasLogo" type="button" class="icon-btn sm flat" aria-label="Remove logo" data-tip="Remove logo" :disabled="!!busy" @click="remove('light')"><AppIcon name="trash" :size="14" /></button>
+                <button v-if="hasLogo" type="button" class="icon-btn sm flat" aria-label="Remove logo" data-tip="Remove logo" :disabled="working.light > 0" @click="remove('light')"><AppIcon name="trash" :size="14" /></button>
               </template>
               <template v-else-if="hasLogo || hasDark">
-                <button type="button" class="btn sm" :disabled="!!busy" @click="darkInput?.click()">
+                <button type="button" class="btn sm" :disabled="working.dark > 0" @click="darkInput?.click()">
                   <AppIcon name="upload" :size="13" />{{ hasDark ? 'Replace' : 'Upload dark logo' }}
                 </button>
-                <button v-if="hasDark" type="button" class="icon-btn sm flat" aria-label="Remove dark logo" data-tip="Remove dark logo" :disabled="!!busy" @click="remove('dark')"><AppIcon name="trash" :size="14" /></button>
+                <button v-if="hasDark" type="button" class="icon-btn sm flat" aria-label="Remove dark logo" data-tip="Remove dark logo" :disabled="working.dark > 0" @click="remove('dark')"><AppIcon name="trash" :size="14" /></button>
               </template>
             </span>
           </figcaption>
