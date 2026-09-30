@@ -241,6 +241,12 @@ type accountCapacity struct {
 	LimitingReset      *time.Time        `json:"limiting_reset,omitempty"`
 	Schedule           capacity.Schedule `json:"schedule"`
 	Windows            []capacityWindow  `json:"windows"`
+	QuotaFingerprint   string            `json:"quota_fingerprint,omitempty"`
+	GroupID            string            `json:"group_id,omitempty"`
+	GroupName          string            `json:"group_name,omitempty"`
+	HostLabel          string            `json:"host_label,omitempty"`
+	Hosts              []string          `json:"hosts,omitempty"`
+	SameQuotaAs        string            `json:"same_quota_as,omitempty"`
 }
 
 func (m *Module) capacityList(w http.ResponseWriter, r *http.Request) {
@@ -430,7 +436,7 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 			out[i].Routing = &value
 		}
 	}
-
+	annotateQuotas(out, accounts)
 	return out, nil
 }
 
@@ -441,7 +447,8 @@ type scheduleOverride struct {
 	Schedule  *capacity.Schedule `json:"schedule"`
 	// CarryOverrides (user scope only) moves pool and account entries that only
 	// carry Sprint/Hold onto the new schedule in the same transaction.
-	CarryOverrides bool `json:"carry_overrides,omitempty"`
+	CarryOverrides bool   `json:"carry_overrides,omitempty"`
+	GroupID        string `json:"group_id,omitempty"`
 }
 
 func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
@@ -485,6 +492,9 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 				if v.Scope == "account" {
 					v.AccountID = key
 				}
+				if v.Scope == "group" {
+					v.GroupID = key
+				}
 				if err := json.Unmarshal(raw, &v.Schedule); err != nil {
 					return err
 				}
@@ -499,16 +509,16 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 		}
 		switch in.Scope {
 		case "user":
-			if in.Pool != "" || in.AccountID != "" {
+			if in.Pool != "" || in.AccountID != "" || in.GroupID != "" {
 				return fail(400, "invalid schedule scope")
 			}
 		case "pool":
-			if !validHarness(in.Pool) || in.AccountID != "" {
+			if !validHarness(in.Pool) || in.AccountID != "" || in.GroupID != "" {
 				return fail(400, "invalid pool")
 			}
 			key = in.Pool
 		case "account":
-			if !uuidRE.MatchString(in.AccountID) || in.Pool != "" {
+			if !uuidRE.MatchString(in.AccountID) || in.Pool != "" || in.GroupID != "" {
 				return fail(400, "invalid account")
 			}
 			key = strings.ToLower(in.AccountID)
@@ -516,6 +526,18 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 				return fail(404, "account not found")
 			}
 			account = key
+		case "group":
+			if !uuidRE.MatchString(in.GroupID) || in.Pool != "" || in.AccountID != "" {
+				return fail(400, "invalid group")
+			}
+			key = strings.ToLower(in.GroupID)
+			var exists bool
+			if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM account_groups WHERE id=$1::uuid)`, key).Scan(&exists); err != nil {
+				return err
+			}
+			if !exists {
+				return fail(404, "group not found")
+			}
 		default:
 			return fail(400, "invalid schedule scope")
 		}
@@ -534,7 +556,7 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 		case "sprint":
 			// Sprint is literal and bounded to the next limiting reset in scope.
 			var until *time.Time
-			if err := tx.QueryRow(r.Context(), `SELECT min(w.ends_at) FROM account_allowance_windows w JOIN agent_accounts a ON a.tenant_id=w.tenant_id AND a.id=w.account_id WHERE `+currentCapacityWindows+` AND ($1='user' OR ($1='pool' AND a.harness=$2) OR ($1='account' AND a.id::text=$2))`, in.Scope, key).Scan(&until); err != nil {
+			if err := tx.QueryRow(r.Context(), `SELECT min(w.ends_at) FROM account_allowance_windows w JOIN agent_accounts a ON a.tenant_id=w.tenant_id AND a.id=w.account_id WHERE `+currentCapacityWindows+` AND ($1='user' OR ($1='pool' AND a.harness=$2) OR ($1='account' AND a.id::text=$2) OR ($1='group' AND a.group_id::text=$2))`, in.Scope, key).Scan(&until); err != nil {
 				return err
 			}
 			if until == nil {

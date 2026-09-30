@@ -42,7 +42,7 @@ func TestFirstReadingGrantIsSingleUsePerGeneration(t *testing.T) {
 			for i := range s.Week {
 				s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 			}
-			callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+			callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false, ""}), 204, nil)
 			first := insertRun(t, person, runner, profile)
 			route := mustRoute(t, mod, runner, token, first, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
 			if len(route.Reservations) != 1 {
@@ -104,7 +104,7 @@ func TestBlindDayPolicyAndDurableDailyLimit(t *testing.T) {
 			for i := range s.Week {
 				s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 			}
-			callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+			callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false, ""}), 204, nil)
 			for i := 0; i < 3; i++ {
 				run := insertRun(t, person, runner, profile)
 				mustRoute(t, mod, runner, token, run, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
@@ -187,7 +187,7 @@ func TestAdmissionScheduleClockAndRunNowFences(t *testing.T) {
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"clock","harness":"codex","daemon_id":"daemon-a","label":"Main"}`, 201, &a)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	s := capacity.DefaultSchedule("Europe/Vienna")
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false, ""}), 204, nil)
 	loc, _ := time.LoadLocation(s.Timezone)
 	now := time.Date(2026, 9, 29, 23, 10, 0, 0, loc)
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
@@ -290,7 +290,7 @@ func TestVendorDenialRecoversOnceAfterReset(t *testing.T) {
 			for i := range s.Week {
 				s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 			}
-			callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+			callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false, ""}), 204, nil)
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			readAt := now.Add(-2 * time.Hour)
 			fiveReset := now.Add(-90 * time.Minute)
@@ -401,7 +401,7 @@ func TestBlindNightRunsDoNotCountTowardDailyLimit(t *testing.T) {
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	s := capacity.DefaultSchedule()
 	s.Timezone = "UTC"
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false, ""}), 204, nil)
 	night := time.Date(2026, 9, 29, 0, 30, 0, 0, time.UTC)
 	for i := 0; i < 3; i++ {
 		insertBlindAttempt(t, person, a.ID, insertRun(t, person, runner, profile), night.Add(time.Duration(i)*time.Minute))
@@ -447,7 +447,7 @@ func TestBlindVendorBackoffAdmitsOneRecovery(t *testing.T) {
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	s := capacity.DefaultSchedule()
 	s.Timezone = "UTC"
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false, ""}), 204, nil)
 	for _, hour := range []int{10, 11, 12} {
 		insertBlindAttempt(t, person, a.ID, insertRun(t, person, runner, profile), time.Date(2026, 9, 29, hour, 0, 0, 0, time.UTC))
 	}
@@ -516,7 +516,7 @@ func TestBlindCompletionClearsVendorStop(t *testing.T) {
 	for i := range s.Week {
 		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 	}
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false, ""}), 204, nil)
 	stop := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Microsecond)
 	cause := insertRun(t, person, runner, profile)
 	seed(func(tx pgx.Tx) error {
@@ -566,7 +566,7 @@ func TestHardLimitWaitPrecedesSchedule(t *testing.T) {
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"hard","harness":"codex","daemon_id":"daemon-a","label":"Main"}`, 201, &a)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	s := capacity.DefaultSchedule("Europe/Vienna")
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false, ""}), 204, nil)
 	loc, _ := time.LoadLocation(s.Timezone)
 	now := time.Date(2026, 9, 29, 23, 10, 0, 0, loc)
 	read := now.Add(-time.Minute)

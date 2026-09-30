@@ -329,7 +329,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, COALESCE(group_id::text,'')
 		FROM agent_accounts
 		WHERE harness = $1 AND daemon_id = $2 AND registered_by_principal_id = $3::uuid
 		  AND id::text = ANY($4::text[]) AND state = 'available'
@@ -353,6 +353,14 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	if err := rows.Err(); err != nil {
 		return Account{}, nil, err
 	}
+	accounts, err = narrowCandidates(ctx, tx, run, harness, accounts)
+	if err != nil {
+		return Account{}, nil, err
+	}
+	ids = ids[:0]
+	for _, account := range accounts {
+		ids = append(ids, account.ID)
+	}
 	if len(accounts) == 0 {
 		return Account{}, nil, fail(http.StatusConflict, "no eligible account")
 	}
@@ -364,9 +372,14 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	if err != nil {
 		return Account{}, nil, err
 	}
+	quotaSlots, err := quotaOccupancy(ctx, tx)
+	if err != nil {
+		return Account{}, nil, err
+	}
 	var picks []ranked
 	for _, account := range accounts {
-		if !probeFresh(account, now) || usedSlots[account.ID] >= account.MaxParallel {
+		slots := slotCount(account, usedSlots, quotaSlots)
+		if !probeFresh(account, now) || slots >= account.MaxParallel {
 			continue
 		}
 		var active []Window
@@ -378,7 +391,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 			}
 		} else {
 			var wait *CapacityWait
-			active, wait, err = admission(ctx, tx, account, windows[account.ID], now, usedSlots[account.ID], run, false)
+			active, wait, err = admission(ctx, tx, account, windows[account.ID], now, slots, run, false)
 			if err != nil {
 				return Account{}, nil, err
 			}
@@ -410,12 +423,25 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		if !ok {
 			continue
 		}
-		picks = append(picks, routeRank(account, active, usedSlots[account.ID], estimates, now))
+		picks = append(picks, routeRank(account, active, slots, estimates, now))
 	}
 	if len(picks) == 0 {
 		return Account{}, nil, fail(http.StatusConflict, "no eligible account")
 	}
 	orderPicks(picks)
+	// One door per quota. A sibling with no slots does not hide a later door.
+	primary := fingerprintPrimary(picks)
+	chosen := 0
+	for i := range picks {
+		fp := picks[i].account.QuotaFingerprint
+		if fp == "" || primary[fp] == i {
+			chosen = i
+			break
+		}
+	}
+	if chosen != 0 {
+		picks[0] = picks[chosen]
+	}
 	// Materialize a provisional grant only for the selected account; losing
 	// candidates must not consume their single refresh opportunity.
 	for i := range picks[0].windows {

@@ -21,6 +21,7 @@ type CapacityRouting struct {
 	AvailableSlots int           `json:"available_slots"`
 	ResetsAt       *time.Time    `json:"resets_at,omitempty"`
 	CapPercent     float64       `json:"cap_percent"`
+	SameQuotaAs    string        `json:"same_quota_as,omitempty"`
 	Wait           *CapacityWait `json:"wait,omitempty"`
 }
 type CapacityChoice struct {
@@ -80,6 +81,22 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 	p.slots = max(0, p.slots)
 	return p
 }
+
+// fingerprintPrimary is the ordered door that keeps the quota's slots.
+// A later door wins only when the earlier one has none left.
+func fingerprintPrimary(picks []ranked) map[string]int {
+	primary := map[string]int{}
+	for i, p := range picks {
+		fp := p.account.QuotaFingerprint
+		if fp == "" {
+			continue
+		}
+		if prev, ok := primary[fp]; !ok || picks[prev].slots == 0 && p.slots > 0 {
+			primary[fp] = i
+		}
+	}
+	return primary
+}
 func orderPicks(picks []ranked) {
 	sort.Slice(picks, func(i, j int) bool {
 		a, b := picks[i], picks[j]
@@ -104,6 +121,10 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 	if err != nil {
 		return nil, err
 	}
+	quotaUsed, err := quotaOccupancy(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	out := map[string]CapacityRouting{}
 	pools := map[string][]ranked{}
 	// Manual budgets have no learned unit conversion: advisory uses one unit;
@@ -119,7 +140,8 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 			out[a.ID] = CapacityRouting{Wait: waitFor("models")}
 			continue
 		}
-		windows, wait, err := admission(ctx, tx, a, a.Windows, now, used[a.ID], run, false)
+		slots := slotCount(a, used, quotaUsed)
+		windows, wait, err := admission(ctx, tx, a, a.Windows, now, slots, run, false)
 		if err != nil {
 			return nil, err
 		}
@@ -130,13 +152,19 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 			out[a.ID] = CapacityRouting{Wait: wait}
 			continue
 		}
-		p := routeRank(a, windows, used[a.ID], estimates, now)
+		p := routeRank(a, windows, slots, estimates, now)
 		pools[a.Harness] = append(pools[a.Harness], p)
 	}
 	for _, picks := range pools {
 		orderPicks(picks)
+		primary := fingerprintPrimary(picks)
 		for i, p := range picks {
-			out[p.account.ID] = CapacityRouting{Rank: i + 1, AvailableSlots: p.slots, ResetsAt: p.reset, CapPercent: p.cap}
+			routing := CapacityRouting{Rank: i + 1, AvailableSlots: p.slots, ResetsAt: p.reset, CapPercent: p.cap}
+			if fp := p.account.QuotaFingerprint; fp != "" && primary[fp] != i {
+				routing.AvailableSlots = 0
+				routing.SameQuotaAs = picks[primary[fp]].account.ID
+			}
+			out[p.account.ID] = routing
 		}
 	}
 	return out, nil
@@ -166,10 +194,14 @@ func NextForRun(ctx context.Context, tx pgx.Tx, runID, daemonID, only, exclude s
 	}
 	kept := []Account{}
 	for _, a := range accounts {
-		if a.RegisteredBy != run.AgentID || a.DaemonID != daemonID || a.Harness != harness || a.ID == exclude || only != "" && a.ID != only || run.RequestedAccountID != nil && a.ID != *run.RequestedAccountID {
+		if a.RegisteredBy != run.AgentID || a.DaemonID != daemonID || a.Harness != harness || a.ID == exclude || only != "" && a.ID != only {
 			continue
 		}
 		kept = append(kept, a)
+	}
+	kept, err = narrowCandidates(ctx, tx, run, harness, kept)
+	if err != nil {
+		return CapacityNext{}, err
 	}
 	// Run now once belongs to the original attempt, never to automatic retries.
 	advice, err := routingAdvice(ctx, tx, kept, *run.ProfileID, runRow{Purpose: "managed"}, now)

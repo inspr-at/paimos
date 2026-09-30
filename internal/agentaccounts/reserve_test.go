@@ -25,7 +25,7 @@ func TestRouterKeepsTheRunwayReserve(t *testing.T) {
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	s := capacity.DefaultSchedule("Europe/Vienna")
 	s.Nights = true
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false, ""}), 204, nil)
 	loc, _ := time.LoadLocation(s.Timezone)
 	at := func(d, h, m int) time.Time { return time.Date(2026, 9, d, h, m, 0, 0, loc) }
 	five := func(start time.Time, used int64, now time.Time) Window {

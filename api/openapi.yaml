@@ -4371,12 +4371,97 @@ paths:
     put:
       operationId: putCapacitySchedule
       summary: Set current person's default, pool or account schedule
-      description: Person account.manage permission required. Pacing is enforced for measured windows using the pairing owner schedule (for unpaired accounts, the first person to save an account schedule establishes its schedule owner). Account override wins over pool (harness), then user default, then built-in default. Keep for you (reserve) resolves separately - the most specific explicit reserve wins, Auto when none is set - so a pool or account entry without one follows the person's. Away is set on the user scope only (400 elsewhere), must end within a year and reaches every pool without an override of its own in force. Hold may carry override_until within 31 days (until tomorrow's hours, for 2 hours); without it Hold lasts until resumed. Times are local to the explicit IANA timezone; week is Monday first. Shifts and hourly blocks replace work hours while nights is enabled. Null schedule removes an override.
+      description: Person account.manage permission required. Pacing is enforced for measured windows using the pairing owner schedule (for unpaired accounts, the first person to save an account schedule establishes its schedule owner). Account override wins over the account's group, then pool (harness), then user default, then built-in default. Keep for you (reserve) resolves separately - the most specific explicit reserve wins, Auto when none is set - so a pool, group or account entry without one follows the person's. Away is set on the user scope only (400 elsewhere), must end within a year and reaches every pool without an override of its own in force. Hold may carry override_until within 31 days (until tomorrow's hours, for 2 hours); without it Hold lasts until resumed. Times are local to the explicit IANA timezone; week is Monday first. Shifts and hourly blocks replace work hours while nights is enabled. Null schedule removes an override. A group scope names group_id and leaves account_id empty.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CapacityScheduleOverride'}}}}
       responses:
         '204': {description: Schedule saved}
         '400': {description: Invalid schedule}
         '403': {description: Person account.manage permission required}
+  /agent-accounts/groups:
+    get:
+      operationId: listAccountGroups
+      summary: Groups that split a vendor pool
+      description: Person account.read. A group is one vendor, its member accounts, and an optional project fence.
+      responses:
+        '200': {description: Groups, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountGroup'}}}}}
+    post:
+      operationId: createAccountGroup
+      summary: Keep selected accounts separate
+      description: Person account.manage. Exclusive requires at least one project. A fenced project routes only inside the group. An exclusive group's other work waits rather than using its members.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroupWrite'}}}}
+      responses:
+        '201': {description: Group, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroup'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /agent-accounts/groups/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    patch:
+      operationId: updateAccountGroup
+      description: Person account.manage. account_ids and project_ids, when present, replace the membership. Omit a list to leave it.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroupWrite'}}}}
+      responses:
+        '200': {description: Group, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroup'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteAccountGroup
+      summary: Return the group's accounts to the vendor pool
+      description: Person account.manage. Members lose the group. The group's schedule rows are removed.
+      responses:
+        '204': {description: Group removed}
+        '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/pins:
+    get:
+      operationId: listAccountPins
+      description: Person account.read. Pins for one ticket.
+      parameters: [{name: ticket_id, in: query, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Pins, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountTicketPin'}}}}}
+    put:
+      operationId: putAccountPin
+      summary: Remember an account or a group for this ticket
+      description: Person run.create. Exactly one of account_id or group_id. A pin narrows routing and never crosses a project fence.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountTicketPin'}}}}
+      responses:
+        '204': {description: Pin saved}
+        '400': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteAccountPin
+      parameters:
+        - {name: ticket_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+      responses:
+        '204': {description: Pin removed}
+  /agent-accounts/use:
+    get:
+      operationId: useAccount
+      summary: Resolve a harness label to door ids for the local agent
+      description: Person account.read, or the same agent authority as capacity next. Returns ids, labels and the quota fingerprint only. No path, home, socket or credential. The shell export is printed by aeon use from the local agentd.
+      parameters:
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+        - {name: label, in: query, required: true, schema: {type: string, maxLength: 128}}
+      responses:
+        '200': {description: Doors of one quota, content: {application/json: {schema: {$ref: '#/components/schemas/AccountUse'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Several distinct quotas share that label}
+  /agent-accounts/runs/{runId}/target:
+    post:
+      operationId: setRunAccountTarget
+      summary: Move a queued run to an account or a group
+      description: Person run.create, and the caller can edit the work order. Only while the run is queued and has no account yet. account_id sets the existing requested-account pin. group_id clears that pin and stores a group target. Exactly one of the two.
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                account_id: {type: string, format: uuid}
+                group_id: {type: string, format: uuid}
+      responses:
+        '204': {description: Target saved}
+        '409': {description: Run is not awaiting an account}
   /agent-accounts/catalog:
     get:
       operationId: getAgentAccountCatalog
@@ -10254,9 +10339,10 @@ components:
       additionalProperties: false
       required: [scope, schedule]
       properties:
-        scope: {type: string, enum: [user, pool, account]}
+        scope: {type: string, enum: [user, pool, account, group]}
         pool: {type: string, enum: [codex, claude, pi, cursor, grok]}
         account_id: {type: string, format: uuid}
+        group_id: {type: string, format: uuid, description: Set when scope is group. The schedule sits between the account and the vendor pool.}
         schedule:
           anyOf:
             - {$ref: '#/components/schemas/CapacitySchedule'}
@@ -10290,6 +10376,7 @@ components:
         available_slots: {type: integer, minimum: 0, description: Additional runs that fit all windows and the concurrency limit right now.}
         resets_at: {type: string, format: date-time, description: Soonest current weekly or monthly reset; falls back to a shorter window only when no long window exists.}
         cap_percent: {type: number, minimum: 0, description: Smallest normalized available cap across all binding windows.}
+        same_quota_as: {type: string, format: uuid, description: Set on an extra door of a quota whose slots are already counted on another account.}
         wait: {$ref: '#/components/schemas/CapacityWait'}
     CapacityNext:
       type: object
@@ -10320,6 +10407,12 @@ components:
         probe_failure: {type: string, enum: [auth_failed, unavailable], description: 'Why the last probe failed; absent after a successful probe. Only auth_failed means the account needs a new sign-in.'}
         limiting_reset: {type: string, format: date-time, description: 'Earliest reset of the account''s current measured windows (including 5-hour windows); a Sprint in scope ends at the earliest of these.'}
         schedule: {$ref: '#/components/schemas/CapacitySchedule'}
+        quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
+        group_id: {type: string, format: uuid}
+        group_name: {type: string}
+        host_label: {type: string}
+        hosts: {type: array, items: {type: string}, description: Host chips when several doors share one quota. Slots are not summed across those doors.}
+        same_quota_as: {type: string, format: uuid, description: The freshest door of this quota. Windows for the single gauge come from that door.}
         windows:
           type: array
           items:
@@ -10333,6 +10426,51 @@ components:
               freshness: {type: string, enum: [fresh, aging, stale, expired]}
               usage_today_known: {type: boolean, description: False when no exact schedule-boundary observation exists; never infers daily usage from tokens}
               pacing: {$ref: '#/components/schemas/CapacityPacing'}
+    AccountGroup:
+      type: object
+      required: [id, harness, name, exclusive, account_ids, project_ids]
+      properties:
+        id: {type: string, format: uuid}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        exclusive: {type: boolean}
+        account_ids: {type: array, items: {type: string, format: uuid}}
+        project_ids: {type: array, items: {type: string, format: uuid}}
+    AccountGroupWrite:
+      type: object
+      additionalProperties: false
+      properties:
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        exclusive: {type: boolean}
+        account_ids: {type: array, items: {type: string, format: uuid}}
+        project_ids: {type: array, items: {type: string, format: uuid}}
+    AccountTicketPin:
+      type: object
+      additionalProperties: false
+      required: [ticket_id, harness]
+      properties:
+        ticket_id: {type: string, format: uuid}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        account_id: {type: string, format: uuid}
+        group_id: {type: string, format: uuid}
+    AccountUse:
+      type: object
+      required: [accounts]
+      properties:
+        accounts:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [account_id, daemon_id, harness, label, host_label, quota_fingerprint]
+            properties:
+              account_id: {type: string, format: uuid}
+              daemon_id: {type: string}
+              harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+              label: {type: string}
+              host_label: {type: string}
+              quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
     AgentAccountWrite:
       type: object
       required: [account_key, harness, daemon_id, label]
@@ -10361,6 +10499,8 @@ components:
             created_at: {type: string, format: date-time}
             plan: {type: string}
             host_label: {type: string}
+            group_id: {type: string, format: uuid}
+            group_name: {type: string}
             allowed_model_profile_ids:
               type: [array, 'null']
               description: Null preserves legacy tenant-harness catalog policy. Explicit arrays restrict model/effort pins; empty blocks new reservations.

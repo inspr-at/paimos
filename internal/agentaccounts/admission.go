@@ -473,6 +473,10 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 	if err != nil {
 		return nil, err
 	}
+	quotaUsed, err := quotaOccupancy(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	now, err := dbNow(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -483,9 +487,19 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 	} else if err != nil {
 		return nil, err
 	}
-	best := waitFor("offline")
+	same := []Account{}
 	for _, a := range accounts {
-		if a.RegisteredBy != run.AgentID || a.Harness != harness || run.RequestedAccountID != nil && a.ID != *run.RequestedAccountID || run.AccountID != nil && a.ID != *run.AccountID {
+		if a.RegisteredBy == run.AgentID && a.Harness == harness && (run.AccountID == nil || a.ID == *run.AccountID) {
+			same = append(same, a)
+		}
+	}
+	same, err = narrowCandidates(ctx, tx, run, harness, same)
+	if err != nil {
+		return nil, err
+	}
+	best := waitFor("offline")
+	for _, a := range same {
+		if run.RequestedAccountID != nil && a.ID != *run.RequestedAccountID || run.AccountID != nil && a.ID != *run.AccountID {
 			continue
 		}
 		if a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID) {
@@ -493,8 +507,8 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 			continue
 		}
 		claiming := run.AccountID != nil
-		slots := used[a.ID]
-		if claiming {
+		slots := slotCount(a, used, quotaUsed)
+		if claiming && slots > 0 {
 			slots--
 		}
 		windows, wait, err := admission(ctx, tx, a, a.Windows, now, slots, run, claiming)
