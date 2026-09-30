@@ -137,11 +137,13 @@ conflicts. Restore the file before re-reserving; do not export the preview again
 Conflicting entries fail instead of rewriting a reserved version.
 
 Every release also has a codename (AEON-430): an alliterative science-fiction
-name such as "Amber Aurora" or "Galactic Gyroscope", a pure function of
+name such as "Calm Coil" or "Solar Star", a pure function of
 `release_sequence` from the frozen, append-only lists in
-`internal/releasehistory/codename/words.txt`. The letter is
-`(release_sequence - 1) mod 26`, so release 1 is A and neighbouring releases
-start differently. The reserve step above writes it into `version.json` as
+`internal/releasehistory/codename/words.txt`. The letter steps through a
+fixed cycle of the 15 letters rich enough for thousands of good names
+(A B C D E F G H I L M P R S T), so release 1 is A and neighbouring releases
+start differently. Within a letter short names come first, and no name
+repeats before sequence 46,510 (56,421 names in version 1). The reserve step above writes it into `version.json` as
 `"codename"`, right after `release_sequence`; without a snapshot, run
 `just release-codename` (`go run ./internal/releasehistory/codename/stamp -repo .`)
 once `release_sequence` is set. Both are idempotent and refuse a name that

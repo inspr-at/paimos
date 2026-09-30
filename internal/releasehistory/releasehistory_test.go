@@ -157,7 +157,7 @@ func TestBuildFromGit(t *testing.T) {
 	for _, r := range h.Releases {
 		names = append(names, r.Codename)
 	}
-	if strings.Join(names, "|") != "Brisk Binary||Amber Aurora|" {
+	if strings.Join(names, "|") != "Blue Bot||Aqua Arc|" {
 		t.Fatalf("codenames %q", names)
 	}
 }
@@ -323,11 +323,11 @@ func TestHTTP(t *testing.T) {
 	var named struct {
 		Releases []map[string]any `json:"releases"`
 	}
-	if json.Unmarshal(get("/api/releases", true).Body.Bytes(), &named) != nil || named.Releases[0]["codename"] != "Brisk Binary" {
+	if json.Unmarshal(get("/api/releases", true).Body.Bytes(), &named) != nil || named.Releases[0]["codename"] != "Blue Bot" {
 		t.Fatalf("list codename %+v", named.Releases)
 	}
 	var one map[string]any
-	if json.Unmarshal(get("/api/releases/260923143005.0.0", true).Body.Bytes(), &one) != nil || one["codename"] != "Brisk Binary" || one["release_sequence"] != float64(2) {
+	if json.Unmarshal(get("/api/releases/260923143005.0.0", true).Body.Bytes(), &one) != nil || one["codename"] != "Blue Bot" || one["release_sequence"] != float64(2) {
 		t.Fatalf("one codename %+v", one)
 	}
 	if h.Releases[0].Codename != "" {
@@ -353,7 +353,7 @@ func TestWithCodenames(t *testing.T) {
 		names = append(names, r.Codename)
 	}
 	// The function wins over any stored name; a reservation keeps its own slot.
-	if strings.Join(names, "|") != "Gentle Gravity|Bold Booster|Amber Aurora||" {
+	if strings.Join(names, "|") != "Fuzzy Facet|Ideal Iris|Aqua Arc||" {
 		t.Fatalf("codenames %q", names)
 	}
 	if h.Releases[0].Codename != "Stale Name" || h.Releases[2].Codename != "" {

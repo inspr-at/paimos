@@ -40,11 +40,11 @@ test('the detail header reads "Release N · Codename" and search finds a codenam
   const header = sheet(page).locator('.detail .eyebrow.top')
   await expect(header).toContainText(`Release ${history.releases[0].release_sequence}`)
   await expect(header.locator('.codename')).toHaveText(CODENAMES[5])
-  await page.getByRole('searchbox', { name: 'Search releases' }).fill('cobalt')
+  await page.getByRole('searchbox', { name: 'Search releases' }).fill('cyan')
   await expect(options(page)).toHaveCount(1)
-  await expect(options(page).first().locator('mark')).toHaveText('Cobalt')
+  await expect(options(page).first().locator('mark')).toHaveText('Cyan')
   await expect(sheet(page).locator('.detail .eyebrow.top')).toContainText('Release 3')
-  await expect(sheet(page).locator('.detail .eyebrow.top .codename')).toHaveText('Cobalt Comet')
+  await expect(sheet(page).locator('.detail .eyebrow.top .codename')).toHaveText('Cyan Cell')
 })
 
 test('phones show the codename without horizontal scroll', async ({ page }) => {

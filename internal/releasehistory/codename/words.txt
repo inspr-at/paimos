@@ -3,12 +3,17 @@
 # Every release sequence gets an alliterative "Adjective Noun" name from these
 # lists: pure science fiction (astronomy, physics, spacecraft, AI, cosmic
 # phenomena), positive or neutral, easy to say, no brands, people or proper
-# nouns. The letter steps A to Z with the sequence; see codename.go.
+# nouns. The letter steps through the cycle below with the sequence, and within
+# a letter the shortest names come first; see codename.go.
+#
+# The cycle holds only letters with at least 45 adjectives and 45 nouns and
+# 2,000 allowed combinations, so no letter runs out early: letters × the
+# smallest letter capacity is at least 40,000 names before the first repeat.
+# J, K, N, O, Q, U, V, W, X, Y and Z do not have that many good words.
 #
 # THIS FILE IS APPEND-ONLY. A name that was handed out must never change, so
-# never reorder, edit or delete a line. The early names follow list order, so
-# the first words of each list are the best ones. To change the lists, append
-# a new block at the end:
+# never reorder, edit or delete a line. To change the lists, append a new block
+# at the end:
 #
 #   version N from S        the lines below take effect from release sequence S;
 #                           S must be above every sequence already reserved
@@ -17,205 +22,239 @@
 #   retire Word             never pick Word again from sequence S on
 #   deny Adjective Noun     never pick that combination from sequence S on
 #
-# The deny lines hold combinations that are redundant ("Orbital Orbit"),
-# awkward or unlucky ("Twin Tower", "Massive Meteor"). A test scans every
-# combination for rude or negative readings and fails until a new one is
+# The cycle is part of version 1 and never changes. The deny lines hold
+# combinations that are redundant ("Orbital Orbit", "Cosmic Cosmology"),
+# awkward or unlucky ("Massive Meteor"). A test scans every combination for
+# rude or negative readings and repeated stems and fails until a new one is
 # denied here or its word is not added.
 
 version 1 from 1
 
-A adj  Amber Astral Atomic Azure Agile Arctic Argent Ardent Able Absolute Abundant Accurate
-A adj  Acoustic Active Adaptive Adept Advanced Aerial Aglow Airy Alert Aligned Alive Allied
-A adj  Aloft Ambient Angular Apt Aqua Arched Artful Ascending Assured Astute Attuned Auroral
-A adj  Auric Avid Awake Axial
+cycle A B C D E F G H I L M P R S T
+
+A adj  Amber Astral Atomic Azure Agile Arctic Argent Ardent Absolute Abundant Accurate Acoustic
+A adj  Active Adaptive Adept Advanced Aerial Aglow Airy Alert Aligned Alive Aloft Ambient
+A adj  Angular Aqua Arched Artful Ascending Assured Astute Attuned Auroral Auric Avid Awake
+A adj  Axial Aerodynamic Agleam Airborne Alpine Amiable Ample Anodized Asymptotic Atmospheric
+A adj  Augmented Auspicious Austral Autonomous Axiomatic Achromatic Adroit Affine Amethyst
+A adj  Amplified Animated Aquamarine Automated
 A noun Aurora Array Axis Apogee Android Asteroid Antenna Astronaut Accelerator Accretion
 A noun Actuator Aerogel Airlock Albedo Algorithm Alloy Altimeter Altitude Amplifier Amplitude
 A noun Annulus Anode Antimatter Aperture Apex Aphelion Apsis Arc Archive Ascent Asterism
-A noun Astrolabe Atmosphere Atom Attractor Autopilot Automaton Avionics Axion Azimuth
+A noun Astrolabe Atmosphere Atom Attractor Autopilot Automaton Avionics Axion Azimuth Aerofoil
+A noun Aerospike Afterglow Agent Aileron Airframe Airship Almanac Alpha Ammeter Anemometer
+A noun Antiproton Anyon Apparatus Arcology Arcsecond Ark Armature Artifact Assembly Astrometry
+A noun Attitude Automation Autonomy Avatar Axle Aerostat
 
 B adj  Brisk Bright Bold Boundless Boreal Buoyant Brilliant Beryl Balanced Balmy Basalt Beaming
 B adj  Benevolent Bespoke Beveled Bionic Blazing Blended Blinking Blithe Blissful Blooming Blue
 B adj  Bonded Boosted Bountiful Bouncing Bracing Braided Brave Breezy Brimming Broad Bronze
-B adj  Brushed Bubbling Burnished Busy Bustling Buzzing
+B adj  Brushed Bubbling Burnished Busy Bustling Buzzing Beautiful Benign Biotic Bouncy Brainy
+B adj  Breathtaking Bridged Broadband Budding Buffered Binocular Biometric Bimodal Bistable
+B adj  Bitwise Barometric Baryonic Beamed Blueshifted Bolometric Bifocal
 B noun Binary Beacon Booster Bandwidth Blazar Bubble Boson Biosphere Barycenter Baryon Battery
 B noun Bay Beam Beamline Beamsplitter Bearing Belt Berth Biome Bioreactor Bit Bitstream Blip
 B noun Blueprint Blueshift Baseband Bolometer Borealis Bot Brane Bridge Broadcast Biosignature
-B noun Buffer Bulkhead Buoy Bandpass Bus Byte Bytecode
+B noun Buffer Bulkhead Buoy Bandpass Bus Byte Bytecode Backplane Ballast Balloon Band Bandgap
+B noun Barometer Baseline Benchmark Betatron Biochip Biodome Biosensor Bitmap Bitrate Bloom Bond
+B noun Bootloader Brainwave Breakthrough Brightness Brilliance Burst Backscatter Baffle Beta
+B noun Biolab Biosuit Blackbody
 
 C adj  Cobalt Cosmic Celestial Crisp Calm Curious Cyan Clever Candescent Candid Capable Carbon
 C adj  Catalytic Cerulean Charged Cheerful Chiral Chromatic Chrome Circular Clean Clear Coded
 C adj  Coherent Compact Composed Concise Constant Cool Copper Coral Coupled Covalent Crimson
-C adj  Cryogenic Crystal Cubic Curved Cybernetic Cyclic
+C adj  Cryogenic Crystal Cubic Curved Cybernetic Cyclic Calibrated Canny Captivating Cardinal
+C adj  Careful Cascading Centered Central Classic Cloudless Clustered Coaxial Colorful Colossal
+C adj  Complete Complex Concentric Confident Conic Connected Convex Cordial Courageous Creative
+C adj  Crystalline
 C noun Comet Capsule Cluster Circuit Cosmos Cosmonaut Cipher Cortex Capacitor Cargo Carrier
 C noun Catalyst Cathode Centrifuge Chronometer Channel Chip Chronograph Coil Collider Colony
 C noun Compass Compiler Condensate Conduit Conjunction Console Continuum Coordinate Core
 C noun Coronagraph Cosmodrome Coolant Cryopod Cryostat Cube Cubesat Cursor Cyclotron Cylinder
+C noun Cabin Cable Canopy Cascade Cell Cepheid Chamber Chart Chassis Checkpoint Chromosphere
+C noun Clock Cloud Codec Codex Cognition Coherence Collimator Command Component Computer
+C noun Conductor Cone Controller Copilot Corridor Cosmology Countdown Coupler Course Current
+C noun Cyberspace Cycle
 
 D adj  Distant Daring Diamond Deft Dazzling Deep Dauntless Dynamic Dappled Dashing Dawning
 D adj  Decimal Decisive Dedicated Definite Delicate Dependable Devoted Dewy Dexterous Diffuse
 D adj  Digital Diligent Dimensional Dipolar Direct Discrete Diurnal Divergent Docked Domed
-D adj  Dotted Dreamy Drifting Driven Dual Dulcet Duplex Durable
+D adj  Dotted Dreamy Drifting Driven Dual Dulcet Duplex Durable Dapper Decagonal Deductive
+D adj  Deluxe Detailed Determined Diagonal Diaphanous Differential Diffractive Directed
+D adj  Discerning Distinct Distributed Diverse Double Downward Dramatic Dusky Dutiful Daylit
+D adj  Delightful Debonair
 D noun Dawn Drone Dust Droid Delta Datastream Downlink Diode Dashboard Database Dataset Datum
 D noun Decagon Deck Declination Decoder Deflector Dendrite Density Descent Detector Deuterium
 D noun Deuteron Diagram Dial Diffraction Digit Digitizer Dimension Dipole Dish Disk Dock Dome
-D noun Domain Doublet Drive Duality Dynamics Dynamo
+D noun Domain Doublet Drive Duality Dynamics Dynamo Databank Dataflow Datalink Daylight Daystar
+D noun Decibel Degree Device Dewpoint Diaphragm Directory Discovery Display Distance Dockyard
+D noun Downdraft Drivetrain Droplet Duct Duplexer Dwarf Dyad
 
-E adj  Electric Elegant Eager Emerald Endless Epic Evolving Exotic Earnest Easy Echoing
-E adj  Ecliptic Efficient Elastic Elated Electronic Elevated Elliptic Eloquent Eminent
-E adj  Empirical Encoded Energetic Engaged Enduring Enhanced Entangled Equal Essential Eternal
-E adj  Ethereal Even Evergreen Exact Excited Expansive Expert Extended Extrasolar Exuberant
-E noun Echo Equinox Explorer Exoplanet Expanse Expedition Engine Electron Ecosphere Eclipse
-E noun Eddy Ejecta Electrode Element Elevator Elevon Ellipse Emission Emitter Emulator Encoder
+E adj  Electric Elegant Eager Emerald Endless Epic Evolving Exotic Earnest Easy Echoing Ecliptic
+E adj  Efficient Elastic Elated Electronic Elevated Elliptic Eloquent Eminent Empirical Encoded
+E adj  Energetic Engaged Enduring Enhanced Entangled Equal Essential Eternal Ethereal Even
+E adj  Evergreen Exact Excited Expansive Expert Extended Extrasolar Exuberant Eastern Eastward
+E adj  Ebullient Eclectic Effective Effortless Elemental Elite Embedded Emergent Emissive
+E adj  Empathic Enabled Energized Engineered Enlightened Enormous Enriched Epochal Equatorial
+E adj  Equipped Ergonomic Ethical Exalted Excellent Exemplary Expanding Experimental Exponential
+E adj  Express Exquisite Extensive
+E noun Echo Equinox Explorer Exoplanet Expanse Expedition Engine Electron Ecosphere Eclipse Eddy
+E noun Ejecta Electrode Element Elevator Elevon Ellipse Emission Emitter Emulator Encoder
 E noun Endpoint Energy Ensemble Envelope Ephemeris Epicycle Epoch Equator Equilibrium Estimator
-E noun Ether Exabyte Excitation Exobiology Exocomet Exomoon Exosphere Exosuit Eyepiece
+E noun Ether Exabyte Excitation Exobiology Exocomet Exomoon Exosphere Exosuit Eyepiece Earthrise
+E noun Ecosystem Efflux Eigenstate Eigenvalue Electronics Elevation Encounter Endeavor Engram
+E noun Entanglement Entropy Equation Era Etalon Event Evolution Exobase Exoskeleton Expansion
+E noun Experiment Exponent Extruder
 
-F adj  First Fluid Fearless Fleet Flawless Fractal Frosted Fabulous Fair Faithful Fancy
-F adj  Fantastic Faraway Fast Favored Fervent Festive Filtered Fine Finite Firm Fitted Flaring
-F adj  Flexible Floating Flowing Fluent Fluorescent Focused Foremost Formidable Fortunate
-F adj  Forward Framed Free Fresh Friendly Full Fused Futuristic
-F noun Flight Flux Frontier Freighter Fusion Filament Flare Fermion Facet Fairing Feed Feedback
-F noun Ferrofluid Fiber Field Fin Firmament Firmware Flagship Flash Floodlight Fluxgate Flyby
+F adj  First Fluid Fearless Fleet Flawless Fractal Frosted Fabulous Faithful Fancy Fantastic
+F adj  Faraway Fast Favored Fervent Festive Filtered Finite Fitted Flaring Flexible Floating
+F adj  Flowing Fluent Fluorescent Focused Foremost Formidable Fortunate Forward Framed Free
+F adj  Fresh Friendly Full Fused Futuristic Farsighted Fathomless Feisty Fertile Fiducial Fiery
+F adj  Flaxen Flourishing Fluidic Flying Focal Forthright Fractional Freeform Frictionless
+F adj  Frugal Fulgent Functional Fundamental Fuzzy
+F noun Flight Flux Frontier Freighter Fusion Filament Flare Fermion Facet Fairing Feedback
+F noun Ferrofluid Fiber Field Firmament Firmware Flagship Flash Floodlight Fluxgate Flyby
 F noun Flywheel Foam Focus Force Forcefield Forge Formation Formula Fountain Framework Frame
-F noun Frequency Fringe Fuel Fulcrum Function Fuselage
+F noun Frequency Fringe Fuel Fulcrum Function Fuselage Fabricator Fathom Ferrite Filter Firefly
+F noun Firewall Flipflop Flow Flowmeter Fluence Fluxon Forecast Framebuffer Freefall Fullerene
+F noun Funnel Furnace Future Farside
 
 G adj  Galactic Golden Gleaming Glacial Gentle Grand Gossamer Graceful Gallant Geared Generous
-G adj  Genial Genuine Geodesic Geometric Giant Gifted Gilded Glad Glassy Gleeful Glinting
-G adj  Glittering Global Glorious Glossy Glowing Gracious Gradual Granite Graphite Grateful
-G adj  Gravitic Great Green Grounded Growing Guided Gusty Gyroscopic
+G adj  Genial Genuine Geodesic Geometric Giant Gifted Gilded Glassy Gleeful Glinting Glittering
+G adj  Global Glorious Glossy Glowing Gracious Gradual Granite Graphite Grateful Gravitic Great
+G adj  Green Grounded Growing Guided Gusty Gyroscopic Galvanic Garnet Gaseous Generative
+G adj  Geomagnetic Gigantic Glimmering Glistening Gliding Gorgeous Granular Graphic Gregarious
+G adj  Groovy Guiding Gyrating Gargantuan Globular Glazed
 G noun Gyroscope Glow Gateway Gluon Gravity Galaxy Gimbal Glider Gamma Gantry Gate Gauge Gear
 G noun Generator Genesis Geoid Geometry Geyser Gigabyte Gleam Glimmer Glint Globe Globule Glyph
 G noun Gradient Grain Granule Graph Graphene Graticule Gravimeter Graviton Grid Guidance
-G noun Guidestar Gyre Gyrocompass
+G noun Guidestar Gyre Gyrocompass Gadget Gain Garden Geodesy Geode Gigaparsec Gigawatt Gigahertz
+G noun Glacier Gnomon Gondola Grating Gyrostat Gyrodyne Gearbox Germanium Geosphere
 
-H adj  Harmonic Heavenly Hopeful Helical Hybrid Halcyon Humming Hardy Hale Handy Happy Haptic
+H adj  Harmonic Heavenly Hopeful Helical Hybrid Halcyon Humming Hardy Handy Happy Haptic
 H adj  Harmonious Hazy Hearty Heliocentric Helpful Hermetic Heroic Hexagonal Hidden High
-H adj  Holistic Holographic Homing Honest Horizontal Hovering Huge Humane Humble Hushed
-H adj  Hydraulic Hyperbolic Hypersonic
+H adj  Holistic Holographic Honest Horizontal Hovering Huge Humane Humble Hushed Hydraulic
+H adj  Hyperbolic Hypersonic Handsome Healthy Hexadecimal Historic Homeward Honorable Hospitable
+H adj  Handcrafted Hardwired Heartfelt Heartening Honed Hyaline Hazel Habitable Harmonized
+H adj  Hardworking Hibernal Hinged Hypothetical Handheld Heightened Helmed Hoisted Hurtling
 H noun Horizon Halo Hypothesis Hadron Habitat Heliosphere Hub Hull Handshake Hangar Harbor
-H noun Hardware Harness Hatch Heatshield Heliograph Heliopause Heliostat Helium Helix
-H noun Hemisphere Heuristic Hexapod Hologram Homeworld Hopper Hotspot Hovercraft Hydrogen
-H noun Hydrosphere Hypercube Hyperdrive Hyperlink Hypernova Hyperplane Hyperspace
+H noun Hardware Harness Hatch Heatshield Heliograph Heliopause Heliostat Helium Helix Hemisphere
+H noun Heuristic Hexapod Hologram Homeworld Hopper Hotspot Hovercraft Hydrogen Hydrosphere
+H noun Hypercube Hyperdrive Hyperlink Hypernova Hyperplane Hyperspace Harmony Harvest Haven
+H noun Headset Headlamp Heading Heartbeat Heatsink Helipad Heliport Histogram Honeycomb
+H noun Hourglass Humanoid Hydrofoil Hydrometer Hygrometer Hyperbola Hyperon Hypersphere
+H noun Hysteresis Hexacopter Homestead Headway Heliogyro
 
 I adj  Intrepid Iridescent Infrared Ionic Intuitive Indigo Icy Ingenious Iconic Ideal Idyllic
 I adj  Illuminated Illustrious Imaginative Immense Immersive Impeccable Inaugural Inbound
-I adj  Incandescent Inclined Industrious Inertial Infinite Informed Inner Inquisitive
-I adj  Insightful Inspired Instant Intact Integral Intense Interactive Interstellar Invariant
-I adj  Inventive Isometric Isotropic Ivory
+I adj  Incandescent Inclined Industrious Inertial Infinite Informed Inner Inquisitive Insightful
+I adj  Inspired Instant Intact Integral Intense Interactive Interstellar Invariant Inventive
+I adj  Isometric Isotropic Ivory Immaculate Immutable Impressive Incisive Inclusive Incremental
+I adj  Independent Indelible Indexed Inductive Initial Innate Innovative Insulated Integrated
+I adj  Intelligent Intricate Invincible Isochronous Iterative Itinerant Inviting Ionized
 I noun Impulse Iris Imager Isotope Interface Infinity Island Iterator Icebreaker Ignition Image
 I noun Inclination Incubator Index Inertia Inference Injector Inlet Input Insight Instrument
 I noun Insulator Integer Integrator Intelligence Interlink Interlock Interval Iota Ion
-I noun Ionosphere Irradiance Isobar Isomer Isotherm Iteration
-
-J adj  Jovial Jade Joyful Jaunty Jovian Jubilant Jazzy Jolly Jeweled Jointed Joyous Judicious
-J adj  Jumbo Just
-J noun Jetstream Junction Journey Jumpgate Jet Jumpship Jumpdrive Jewel Jetpack Juncture
-
-K adj  Kinetic Keen Kindred Kind Kinematic Kindly Knowing Kindled Key
-K noun Kilonova Kernel Keystone Kite Keyframe Keel Knot Kiloparsec Keycard Kilobyte Keypad
-K noun Klystron Keyboard
+I noun Ionosphere Irradiance Isobar Isomer Isotherm Iteration Igniter Impeller Indicator
+I noun Inductor Inflow Influx Ingot Insignia Instance Intake Intellect Intercom Interpreter
+I noun Invention Inverter Itinerary Idea Identifier Illuminator Icosahedron Isoline Icon
 
 L adj  Lunar Luminous Lucid Liquid Lambent Limitless Lofty Lithe Laminar Large Lasting Latent
 L adj  Lateral Lavender Lavish Leading Legible Lenticular Level Levitating Light Lilac Limber
-L adj  Lime Liminal Limpid Linear Lively Logical Looping Lovely Loyal Lucent Lucky Lustrous
-L adj  Luxuriant Lyrical
-L noun Lander Lattice Logic Laser Lantern Lightspeed Lodestar Lepton Lab Laboratory Lamp
-L noun Latitude Launch Launchpad Layer Leap Ledger Lens Lever Library Lidar Lift Lighthouse
-L noun Lightsail Lightwave Liner Link Linkage Loader Locus Lodestone Logbook Longitude Loop
-L noun Lumen Luminosity Lunation
+L adj  Liminal Limpid Linear Lively Logical Looping Lovely Loyal Lucent Lucky Lustrous Luxuriant
+L adj  Lyrical Landed Laudable Layered Learned Leaping Legendary Leisurely Lifelike Lightweight
+L adj  Likeable Literate Local Lovable Luminescent Lush Luxurious Latticed Lawful Lilting Linked
+L adj  Logarithmic
+L noun Lander Lattice Logic Laser Lantern Lightspeed Lodestar Lepton Laboratory Lamp Latitude
+L noun Launch Launchpad Layer Leap Ledger Lens Lever Library Lidar Lift Lighthouse Lightsail
+L noun Lightwave Liner Link Linkage Loader Locus Lodestone Logbook Longitude Loop Lumen
+L noun Luminosity Lunation Landmark Layout Lemma Lexicon Liftoff Lightcone Lightyear Lithium
+L noun Lithosphere Locator Logarithm Lookout Launcher Luminary Language Learner Landfall
+L noun Lanthanum Lightship
 
 M adj  Magnetic Majestic Midnight Mellow Modular Mirrored Molten Mighty Magnificent Marbled
-M adj  Marvelous Massive Matte Mauve Maximal Measured Mechanical Melodic Merry Metallic
-M adj  Meteoric Methodical Mild Mindful Minimal Minted Misty Mobile Modern Modest Molecular
-M adj  Momentous Monumental Mosaic Motorized Multicore Mutual Myriad
+M adj  Marvelous Massive Matte Mauve Maximal Measured Mechanical Melodic Merry Metallic Meteoric
+M adj  Methodical Mild Mindful Minimal Minted Misty Mobile Modern Modest Molecular Momentous
+M adj  Monumental Mosaic Motorized Multicore Mutual Myriad Malleable Maneuverable Masterful
+M adj  Meaningful Mechanized Meditative Melodious Memorable Metric Microscopic Mineral Miniature
+M adj  Mirthful Moonlit Motivated Moving Multimodal Musical
 M noun Meridian Moonrise Meteor Muon Mainframe Moon Matter Momentum Machine Magnet Magnetar
-M noun Magnitude Maneuver Manifold Marker Maser Mass Mast Matrix Medium Memory Merger Mesh
-M noun Meson Meteorite Microchip Microwave Milestone Mirror Mission Model Module Molecule
-M noun Monitor Monolith Monopole Moonbase Moonlet Motor Multiverse
+M noun Magnitude Maneuver Manifold Marker Maser Mass Mast Matrix Medium Memory Merger Mesh Meson
+M noun Meteorite Microchip Microwave Milestone Mirror Mission Model Module Molecule Monitor
+M noun Monolith Monopole Moonbase Moonlet Motor Multiverse Magnifier Mantle Mechanism Megabyte
+M noun Megaparsec Megawatt Membrane Mesosphere Meteoroid Meter Method Metronome Micron Mind
+M noun Modem Modulator Monorail Moonbeam Moonshot Motherboard Motion Multimeter Multiplex
 
-N adj  Neon Nimble Noble Neural Nocturnal Nautical Nascent Northern Nanoscale Native Natural
-N adj  Navy Near Neat Nebular Nested Networked Neutral New Newborn Nifty Nodal Nomadic
-N adj  Nonlinear Nonstop Notable Novel Nuanced Numeric Nurturing
-N noun Nebula Nanobot Nova Network Nightglow Navigator Neutrino Nexus Nacelle Nanosat Nanotube
-N noun Nanowire Neuron Neutron Nimbus Node Notation Nozzle Nucleon Nucleus Number Nutation
-
-O adj  Orbital Opal Onward Optical Obsidian Outbound Olive Ornate Oblique Observant Oceanic
-O adj  Onboard Online Opaline Open Optimal Optimistic Opulent Orange Orchid Orderly Organic
-O adj  Oriented Original Oscillating Outer Overclocked Ovoid
-O noun Outpost Orrery Odyssey Observatory Orb Orbiter Oscillator Octant Objective Observer
-O noun Occultation Ocular Odometer Offset Ontology Opacity Operand Operator Optics Optimizer
-O noun Orbit Oscilloscope Outflow Output Overdrive Oxygen Ozone
-
-P adj  Photonic Pristine Parallel Polar Pioneering Precise Pure Playful Pacific Parabolic
-P adj  Pastel Patient Peaceful Pearly Peppy Perfect Perpetual Persistent Piloted Pinpoint
-P adj  Placid Planar Planetary Plentiful Plucky Poised Polished Portable Positive Potent
-P adj  Powerful Prime Prismatic Proactive Prolific Prompt Proud Pulsing Punctual Purple
+P adj  Photonic Pristine Parallel Polar Pioneering Precise Pure Playful Pacific Parabolic Pastel
+P adj  Patient Peaceful Pearly Peppy Perfect Perpetual Persistent Piloted Pinpoint Placid Planar
+P adj  Planetary Plentiful Plucky Poised Polished Portable Positive Potent Powerful Prime
+P adj  Prismatic Proactive Prolific Prompt Proud Pulsing Punctual Purple Panoramic Passionate
+P adj  Patterned Peerless Perceptive Perennial Periodic Peripheral Phased Pivotal Pleasant
+P adj  Practical Precious Predictive Primary Principled Profound Programmed Promising Propulsive
+P adj  Prosperous Proven Punchy
 P noun Pulsar Planet Parsec Protostar Probe Payload Positron Pixel Parallax Pathfinder Pendulum
 P noun Periapsis Perigee Perihelion Phase Phosphor Photon Photosphere Pilot Pinwheel Pipeline
 P noun Planetarium Planetoid Plasma Platform Plume Pod Polarity Portal Prism Processor Program
-P noun Projector Propulsion Protocol Proton Prototype Pulse Pylon
-
-Q adj  Quantum Quick Quiet Quirky Quartz Quaint Questing Quadratic
-Q noun Quasar Qubit Quark Query Quadrant Quest Quorum Queue Quaternion Quadcopter
+P noun Projector Propulsion Protocol Proton Prototype Pulse Pylon Packet Panel Parachute
+P noun Parameter Parity Particle Path Pathway Periscope Petabyte Phonon Photocell Pinnacle
+P noun Pioneer Piston Planetfall Plasmoid Polygon Polymer Precession Projection Propellant
+P noun Propeller Pyrometer Parabola
 
 R adj  Radiant Rapid Robotic Resonant Ruby Remote Rolling Russet Radial Rare Rational Reactive
 R adj  Ready Recursive Redshifted Refined Reflective Regal Relative Relaxed Reliable Renewed
 R adj  Resilient Resolute Resourceful Restful Retro Revolving Rhombic Rhythmic Rippling Rising
-R adj  Roaming Robust Rosy Rotating Rousing Roving Royal Rugged
+R adj  Roaming Robust Rosy Rotating Rousing Roving Royal Rugged Radiative Rarefied Reasoned
+R adj  Reassuring Receptive Rechargeable Regular Relentless Remarkable Renowned Resplendent
+R adj  Responsive Revered Reversible Rich Rigorous Riveted Rotary Rounded Ringed
 R noun Redshift Rocket Rover Relay Ray Radar Rotor Regolith Radiometer Radio Radius Ramjet
 R noun Rangefinder Ranger Reactor Receiver Recursion Reentry Reflector Refractor Register
 R noun Relativity Rendezvous Replicator Resistor Resonance Reticle Retina Ribbon Ring Robot
-R noun Rocketship Rosette Rotation Router Rudder Runway
+R noun Rocketship Rosette Rotation Router Rudder Runway Radiator Radome Raster Ratio Readout
+R noun Realm Recorder Rectifier Refinery Reservoir Resonator Retrorocket Rheostat Rhombus
+R noun Roadmap Rocketry Rubidium Runtime Rhythm Rainbow
 
 S adj  Stellar Solar Silver Swift Sentient Sidereal Serene Spectral Sapphire Savvy Scarlet
 S adj  Seamless Secure Sharp Shining Silent Skyward Sleek Smart Smooth Soaring Solid Sonic
 S adj  Sparkling Speedy Spherical Spiral Splendid Stable Stately Steady Sterling Streamlined
-S adj  Strong Stalwart Sublime Subtle Sunny Superb Synthetic
+S adj  Strong Stalwart Sublime Subtle Sunny Superb Synthetic Saffron Salient Scalable Scientific
+S adj  Shimmering Silken Simple Skilled Sovereign Spacefaring Spirited Starlit Steadfast
+S adj  Stochastic Subsonic Suborbital Sunlit Superfluid Supersonic Symmetric Synchronous
 S noun Starship Sail Satellite Shuttle Synapse Syzygy Solstice Supernova Scanner Scope Sensor
 S noun Server Servo Shield Signal Silicon Simulator Singularity Slipstream Solenoid Sonar
 S noun Spacecraft Spaceport Spacesuit Spark Spectrograph Spectrum Sphere Spin Star Starbase
-S noun Stardust Starfield Starlight Station String Subroutine Sunspot Synchrotron System
+S noun Stardust Starfield Starlight Station String Subroutine Sunspot Synchrotron System Sandbox
+S noun Saros Scalar Semaphore Sequence Skyhook Skyline Slingshot Snapshot Socket Software
+S noun Soliton Sonde Spaceplane Spacetime Spacewalk Splashdown Sprite Stack Stator Stratosphere
+S noun Summit Sundial Sunrise Supercluster Switch Synthesizer Stabilizer
 
 T adj  Temporal Tranquil Twinkling Toroidal Thermal Topaz Teal Trusty Tactile Talented Tangible
 T adj  Tawny Tectonic Telescopic Tenacious Tender Tensile Terrestrial Thoughtful Thrifty
-T adj  Thriving Tidal Tidy Tiered Timeless Tinted Tireless Trailblazing Transient Transonic
-T adj  Transparent Trim Triumphant True Trusted Tuned Turbo Twin
+T adj  Thriving Tidal Tiered Timeless Tinted Tireless Trailblazing Transient Transonic
+T adj  Transparent Triumphant True Trusted Tuned Turbo Tailored Tasteful Taut Technical Tempered
+T adj  Terrific Textured Thankful Theoretical Thorough Tilted Timely Tiny Tonal Towering Trained
+T adj  Transcendent Traveling Tremendous Trinary Tropical Truthful Tubular Tunable Turquoise
 T noun Tachyon Torus Telescope Tokamak Thruster Transit Tesseract Tracker Tangent Telemetry
 T noun Teleporter Tensor Terabyte Terraformer Terrain Theorem Thermosphere Tide Timekeeper
 T noun Timeline Token Topology Tower Tracer Trajectory Transceiver Transformer Transistor
 T noun Transmitter Transponder Traverse Triangle Tritium Tropopause Tunnel Turbine Tuner
-T noun Twilight
+T noun Twilight Tablet Tachometer Tailwind Tessellation Tether Theodolite Thermostat Threshold
+T noun Thrust Timepiece Timer Titanium Toolkit Touchdown Touchscreen Trail Transport Triode
+T noun Triplet Tripod Troposphere Truss Tuple Turbojet Turbofan
 
-U adj  Unified Upward Ultraviolet Utopian Upbeat Unbounded Urbane Uniform Ultrafast Ultrasonic
-U adj  Umber Unerring Unfolding Unique United Universal Unlimited Untamed Unwavering Uplifted
-U adj  Upright Useful Utmost
-U noun Universe Uplink Umbra Uptime Upload Utopia Upgrade Updraft Unit Umbilical Upsilon
-U noun Utility
-
-V adj  Vivid Vast Velvet Vernal Vigilant Vital Virtual Volant Valiant Valid Variable Vaulted
-V adj  Vectored Venerable Verdant Versatile Vertical Vibrant Victorious Vigorous Violet
-V adj  Virtuous Visible Visionary
-V noun Vortex Vacuum Vapor Vista Visor Velocity Voxel Vessel Valve Vane Vantage Vault Vector
-V noun Vehicle Vertex Viewfinder Viewport Volume Voyage
-
-W adj  Weightless Warm Wandering Wise Waxing Wide Watchful Woven Wakeful Welcome Whimsical
-W adj  Whirling Whirring Whole Windswept Wintry Wired Wireless Witty Wonderful Wondrous Worthy
-W noun Wave Wind Wormhole Waypoint Wavefront Web Window Waveform Wafer Warp Waveguide
-W noun Wavelength Wheel Wire Workstation
-
-X adj  Xenial Xanthic Xeric
-X noun Xenon Xenobot Xenolith
-
-Y adj  Yellow Young Youthful
-Y noun Yoke Yottabyte Yaw Yield Yardstick
-
-Z adj  Zealous Zippy Zodiacal Zesty Zonal
-Z noun Zenith Zettabyte Zone Zeta
 deny Auroral Aurora
 deny Atomic Atom
 deny Ascending Ascent
 deny Axial Axis
 deny Arched Arc
 deny Arctic Arc
+deny Anodized Anode
+deny Axial Axle
+deny Atmospheric Atmosphere
+deny Autonomous Autonomy
+deny Amplified Amplifier
+deny Amplified Amplitude
+deny Automated Automaton
+deny Automated Automation
 deny Beaming Beam
 deny Blazing Blazar
 deny Boosted Booster
@@ -227,6 +266,24 @@ deny Bubbling Bubble
 deny Busy Bus
 deny Buoyant Buoy
 deny Bustling Bus
+deny Bitwise Bitmap
+deny Bitwise Bitrate
+deny Bitwise Bitstream
+deny Bright Brightness
+deny Brilliant Brilliance
+deny Blooming Bloom
+deny Bonded Bond
+deny Brainy Brainwave
+deny Bridged Bridge
+deny Broadband Broadcast
+deny Buffered Buffer
+deny Biometric Biome
+deny Bitwise Bit
+deny Barometric Barometer
+deny Baryonic Baryon
+deny Beamed Beam
+deny Blueshifted Blueshift
+deny Bolometric Bolometer
 deny Cosmic Cosmos
 deny Circular Circuit
 deny Catalytic Catalyst
@@ -236,6 +293,22 @@ deny Cryogenic Cryopod
 deny Cryogenic Cryostat
 deny Cyclic Cyclotron
 deny Cool Coolant
+deny Cosmic Cosmology
+deny Cyclic Cycle
+deny Cybernetic Cyberspace
+deny Coded Codec
+deny Coded Codex
+deny Chromatic Chromosphere
+deny Chrome Chromosphere
+deny Conic Cone
+deny Coherent Coherence
+deny Compact Compass
+deny Composed Component
+deny Coupled Coupler
+deny Cascading Cascade
+deny Central Centrifuge
+deny Cloudless Cloud
+deny Clustered Cluster
 deny Dashing Dashboard
 deny Docked Dock
 deny Domed Dome
@@ -248,6 +321,20 @@ deny Dual Duality
 deny Dynamic Dynamics
 deny Dynamic Dynamo
 deny Driven Drive
+deny Docked Dockyard
+deny Dewy Dewpoint
+deny Daylit Daylight
+deny Downward Downlink
+deny Downward Downdraft
+deny Double Doublet
+deny Driven Drivetrain
+deny Distant Distance
+deny Direct Directory
+deny Duplex Duplexer
+deny Decagonal Decagon
+deny Diaphanous Diaphragm
+deny Diffractive Diffraction
+deny Directed Directory
 deny Echoing Echo
 deny Ecliptic Eclipse
 deny Elevated Elevator
@@ -263,16 +350,46 @@ deny Electric Electrode
 deny Epic Epicycle
 deny Electronic Electrode
 deny Ethereal Ether
+deny Energized Energy
+deny Equal Equation
+deny Evolving Evolution
+deny Expanding Expanse
+deny Expanding Expansion
+deny Electric Electronics
+deny Electronic Electronics
+deny Elevated Elevation
+deny Entangled Entanglement
+deny Even Event
+deny Expansive Expansion
+deny Expert Experiment
+deny Elemental Element
+deny Emissive Emission
+deny Engineered Engine
+deny Epochal Epoch
+deny Equatorial Equator
+deny Equatorial Equation
+deny Experimental Experiment
+deny Exponential Exponent
 deny Flaring Flare
 deny Focused Focus
 deny Framed Frame
 deny Fused Fusion
-deny Firm Firmware
-deny Firm Firmament
-deny Fair Fairing
-deny Fine Fin
-deny Finite Fin
 deny Framed Framework
+deny Focal Focus
+deny Flying Flyby
+deny Flying Flywheel
+deny Flowing Flowmeter
+deny Futuristic Future
+deny Freeform Freefall
+deny Framed Framebuffer
+deny Filtered Filter
+deny Flowing Flow
+deny Fluent Fluence
+deny Free Freefall
+deny Full Fullerene
+deny Farsighted Farside
+deny Fathomless Fathom
+deny Functional Function
 deny Gleaming Gleam
 deny Geometric Geometry
 deny Glowing Glow
@@ -288,24 +405,111 @@ deny Global Globule
 deny Golden Gate
 deny Geared Gear
 deny Golden Gateway
+deny Globular Globe
+deny Gliding Glider
+deny Guiding Guidance
+deny Guiding Guidestar
+deny Gyrating Gyre
+deny Geared Gearbox
+deny Gigantic Gigawatt
+deny Gigantic Gigahertz
+deny Gigantic Gigaparsec
+deny Gigantic Gigabyte
+deny Gyroscopic Gyrostat
+deny Gyroscopic Gyrodyne
+deny Glacial Glacier
+deny Generous Generator
+deny Geodesic Geodesy
+deny Geodesic Geode
+deny Graphite Graphene
+deny Gravitic Gravimeter
+deny Guided Guidestar
+deny Generative Generator
+deny Glimmering Glimmer
+deny Granular Granule
+deny Graphic Graph
+deny Graphic Graphene
+deny Globular Globule
 deny Helical Helix
 deny Holographic Hologram
 deny Hovering Hovercraft
 deny Hardy Hardware
 deny Horizontal Horizon
 deny Hypersonic Hyperspace
+deny Hardwired Hardware
+deny Homeward Homeworld
+deny Homeward Homestead
+deny Harmonic Harmony
+deny Harmonious Harmony
+deny Hearty Heartbeat
+deny Heliocentric Heliosphere
+deny Heliocentric Heliograph
+deny Heliocentric Heliopause
+deny Heliocentric Heliostat
+deny Heliocentric Heliogyro
+deny Humane Humanoid
+deny Hyperbolic Hypercube
+deny Hyperbolic Hyperdrive
+deny Hyperbolic Hyperlink
+deny Hyperbolic Hypernova
+deny Hyperbolic Hyperplane
+deny Hyperbolic Hyperspace
+deny Hyperbolic Hyperbola
+deny Hyperbolic Hyperon
+deny Hyperbolic Hypersphere
+deny Hypersonic Hypercube
+deny Hypersonic Hyperdrive
+deny Hypersonic Hyperlink
+deny Hypersonic Hypernova
+deny Hypersonic Hyperplane
+deny Hypersonic Hyperbola
+deny Hypersonic Hyperon
+deny Hypersonic Hypersphere
+deny Handsome Handshake
+deny Historic Histogram
+deny Heartfelt Heartbeat
+deny Heartening Heartbeat
+deny Habitable Habitat
+deny Harmonized Harmony
+deny Hardworking Hardware
+deny Hypothetical Hypothesis
 deny Inertial Inertia
 deny Infinite Infinity
 deny Inclined Inclination
 deny Integral Integrator
 deny Insightful Insight
 deny Ionic Ion
-deny Jeweled Jewel
-deny Key Keystone
-deny Key Keyframe
-deny Key Keycard
-deny Key Keypad
-deny Key Keyboard
+deny Iconic Icon
+deny Ideal Idea
+deny Illuminated Illuminator
+deny Insightful Insignia
+deny Instant Instance
+deny Integral Integer
+deny Interactive Interface
+deny Interactive Interlink
+deny Interactive Interlock
+deny Interactive Interval
+deny Interactive Intercom
+deny Interactive Interpreter
+deny Interstellar Interface
+deny Interstellar Interlink
+deny Interstellar Interlock
+deny Interstellar Interval
+deny Interstellar Intercom
+deny Interstellar Interpreter
+deny Inventive Invention
+deny Isometric Isomer
+deny Indexed Index
+deny Inductive Inductor
+deny Insulated Insulator
+deny Integrated Integer
+deny Integrated Integrator
+deny Intelligent Intelligence
+deny Intelligent Intellect
+deny Iterative Iterator
+deny Iterative Iteration
+deny Itinerant Itinerary
+deny Ionized Ion
 deny Logical Logic
 deny Luminous Luminosity
 deny Luminous Lumen
@@ -316,6 +520,31 @@ deny Light Lightsail
 deny Light Lightwave
 deny Lunar Lunation
 deny Level Lever
+deny Lithe Lithium
+deny Lithe Lithosphere
+deny Landed Landmark
+deny Landed Landfall
+deny Local Locator
+deny Luminous Luminary
+deny Light Lightcone
+deny Light Lightyear
+deny Light Lightship
+deny Landed Lander
+deny Layered Layer
+deny Learned Learner
+deny Leaping Leap
+deny Lightweight Lightspeed
+deny Lightweight Lighthouse
+deny Lightweight Lightsail
+deny Lightweight Lightwave
+deny Lightweight Lightcone
+deny Lightweight Lightyear
+deny Lightweight Lightship
+deny Luminescent Luminosity
+deny Luminescent Luminary
+deny Latticed Lattice
+deny Linked Link
+deny Logarithmic Logarithm
 deny Magnetic Magnet
 deny Magnetic Magnetar
 deny Massive Mass
@@ -330,27 +559,36 @@ deny Motorized Motor
 deny Mechanical Machine
 deny Momentous Momentum
 deny Matte Matter
-deny Nebular Nebula
-deny Networked Network
-deny Neural Neuron
-deny Nodal Node
-deny Numeric Number
-deny Notable Notation
-deny Nanoscale Nanobot
-deny Nanoscale Nanosat
-deny Nanoscale Nanotube
-deny Nanoscale Nanowire
-deny Navy Navigator
-deny Orbital Orbit
-deny Orbital Orbiter
-deny Oscillating Oscillator
-deny Oscillating Oscilloscope
-deny Optical Optics
-deny Optimal Optimizer
-deny Observant Observer
-deny Observant Observatory
-deny Orbital Orb
-deny Optimistic Optimizer
+deny Moonlit Moonrise
+deny Moonlit Moonbase
+deny Moonlit Moonbeam
+deny Moonlit Moonshot
+deny Modern Modem
+deny Motivated Motion
+deny Metric Meter
+deny Modular Modulator
+deny Magnificent Magnitude
+deny Magnificent Magnifier
+deny Massive Meteoroid
+deny Mechanical Mechanism
+deny Meteoric Meteoroid
+deny Methodical Method
+deny Mindful Mind
+deny Multicore Multiverse
+deny Multicore Multimeter
+deny Multicore Multiplex
+deny Maneuverable Maneuver
+deny Masterful Mast
+deny Mechanized Mechanism
+deny Memorable Memory
+deny Microscopic Microchip
+deny Microscopic Microwave
+deny Microscopic Micron
+deny Moonlit Moon
+deny Moonlit Moonlet
+deny Multimodal Multiverse
+deny Multimodal Multimeter
+deny Multimodal Multiplex
 deny Planetary Planet
 deny Planetary Planetoid
 deny Planetary Planetarium
@@ -365,8 +603,15 @@ deny Photonic Photon
 deny Piloted Pilot
 deny Portable Portal
 deny Parallel Parallax
-deny Questing Quest
-deny Quadratic Quadrant
+deny Photonic Photosphere
+deny Photonic Photocell
+deny Pioneering Pioneer
+deny Parabolic Parabola
+deny Planetary Planetfall
+deny Positive Positron
+deny Phased Phase
+deny Programmed Program
+deny Propulsive Propulsion
 deny Radial Radius
 deny Recursive Recursion
 deny Redshifted Redshift
@@ -378,29 +623,100 @@ deny Rotating Rotation
 deny Rotating Rotor
 deny Roving Rover
 deny Reactive Reactor
+deny Rotary Rotor
+deny Rotary Rotation
+deny Radiant Radiator
+deny Resonant Resonator
+deny Radial Radiator
+deny Rational Ratio
+deny Refined Refinery
+deny Retro Retrorocket
+deny Rhombic Rhombus
+deny Rhythmic Rhythm
+deny Radiative Radiator
+deny Ringed Ring
 deny Spectral Spectrum
 deny Spectral Spectrograph
 deny Spherical Sphere
 deny Stellar Star
 deny Sparkling Spark
+deny Starlit Starship
+deny Starlit Starbase
+deny Starlit Stardust
+deny Starlit Starfield
+deny Sunlit Sunspot
+deny Sunlit Sunrise
+deny Sunlit Sundial
+deny Sunny Sunrise
+deny Sunny Sundial
+deny Sunny Sunspot
+deny Stable Stabilizer
+deny Superb Supernova
+deny Superb Supercluster
+deny Synthetic Synthesizer
+deny Scalable Scalar
+deny Spacefaring Spacecraft
+deny Spacefaring Spaceport
+deny Spacefaring Spacesuit
+deny Spacefaring Spaceplane
+deny Spacefaring Spacetime
+deny Spacefaring Spacewalk
+deny Starlit Star
+deny Starlit Starlight
+deny Superfluid Supernova
+deny Superfluid Supercluster
+deny Supersonic Supernova
+deny Supersonic Supercluster
+deny Synchronous Synchrotron
 deny Toroidal Torus
 deny Telescopic Telescope
 deny Tidal Tide
 deny Tuned Tuner
 deny Thermal Thermosphere
 deny Terrestrial Terrain
-deny Twin Tower
 deny Turbo Turbine
 deny Transient Transit
 deny Transient Transistor
 deny Transparent Transponder
-deny Universal Universe
-deny Utopian Utopia
-deny Useful Utility
-deny United Unit
-deny Vectored Vector
-deny Vaulted Vault
-deny Wired Wire
-deny Wireless Wire
-deny Windswept Wind
-deny Zonal Zone
+deny Tunable Tuner
+deny Timely Timer
+deny Timeless Timepiece
+deny Timely Timepiece
+deny Timeless Timer
+deny Trusty Truss
+deny Trusted Truss
+deny True Truss
+deny Thermal Thermostat
+deny Timeless Timeline
+deny Trailblazing Trail
+deny Transient Transceiver
+deny Transient Transformer
+deny Transient Transmitter
+deny Transient Transponder
+deny Transient Transport
+deny Transonic Transit
+deny Transonic Transceiver
+deny Transonic Transformer
+deny Transonic Transistor
+deny Transonic Transmitter
+deny Transonic Transponder
+deny Transonic Transport
+deny Transparent Transit
+deny Transparent Transceiver
+deny Transparent Transformer
+deny Transparent Transistor
+deny Transparent Transmitter
+deny Transparent Transport
+deny Turbo Turbojet
+deny Turbo Turbofan
+deny Theoretical Theorem
+deny Timely Timeline
+deny Towering Tower
+deny Transcendent Transit
+deny Transcendent Transceiver
+deny Transcendent Transformer
+deny Transcendent Transistor
+deny Transcendent Transmitter
+deny Transcendent Transponder
+deny Transcendent Transport
+deny Traveling Traverse

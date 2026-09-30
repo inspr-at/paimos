@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -90,23 +91,27 @@ func TestVersionBlocksAreAppendOnly(t *testing.T) {
 }
 
 // version1SHA256 freezes the "version 1 from 1" block of words.txt.
-const version1SHA256 = "104bcf0a5581c7b7938b724695e596bb8797418aa541c7fa00e347ed0426ce15"
+const version1SHA256 = "7c9dcd1d54aa1421c78146590f1c9c6401e263afc3de606df51784591cc048f1"
 
 func TestLetterCycling(t *testing.T) {
-	names := defaultLists.Names(26 * 30)
+	cycle := defaultLists.cycle
+	names := defaultLists.Names(len(cycle) * 30)
 	for i, name := range names {
 		seq := i + 1
-		letter := byte('A' + (seq-1)%26)
+		letter := byte('A' + cycle[(seq-1)%len(cycle)])
 		words := strings.Fields(name)
 		if len(words) != 2 || words[0][0] != letter || words[1][0] != letter {
 			t.Fatalf("sequence %d: %q, want two words starting with %c", seq, name, letter)
+		}
+		if i > 0 && names[i-1][0] == name[0] {
+			t.Fatalf("sequences %d and %d both start with %c", seq-1, seq, name[0])
 		}
 	}
 	if Codename(0) != "" || Codename(-3) != "" {
 		t.Fatal("sequences below 1 have no codename")
 	}
-	if Codename(1)[0] != 'A' || Codename(26)[0] != 'Z' || Codename(27)[0] != 'A' {
-		t.Fatal("release 1 is A, 26 is Z, 27 starts the next A round")
+	if Codename(1)[0] != 'A' || Codename(15)[0] != 'T' || Codename(16)[0] != 'A' {
+		t.Fatal("release 1 is A, 15 is T, 16 starts the next A round")
 	}
 }
 
@@ -115,7 +120,7 @@ func TestLetterCycling(t *testing.T) {
 // never come up.
 func TestNoRepeatsWithinCapacity(t *testing.T) {
 	total := 0
-	for li := range 26 {
+	for _, li := range defaultLists.cycle {
 		capacity := defaultLists.letterCapacity(li, 1)
 		total += capacity
 		names := defaultLists.letterNames(li, capacity+1)
@@ -137,8 +142,100 @@ func TestNoRepeatsWithinCapacity(t *testing.T) {
 	if total != Capacity() {
 		t.Fatalf("letter capacities sum to %d, Capacity() = %d", total, Capacity())
 	}
-	if Capacity() < 20000 {
-		t.Fatalf("capacity %d: the lists should hold well over 20,000 names", Capacity())
+}
+
+// Only letters with at least 45 adjectives, 45 nouns and 2,000 allowed names
+// are in the cycle, and the smallest of them lasts at least 40,000 releases:
+// four to five years at 20 to 25 releases a day before any name repeats.
+func TestCycleCapacity(t *testing.T) {
+	l := defaultLists
+	smallest, firstRepeat := 0, 0
+	for p, li := range l.cycle {
+		ll, capacity := l.letters[li], l.letterCapacity(li, l.latest())
+		if len(ll.adj) < 45 || len(ll.noun) < 45 || capacity < 2000 {
+			t.Errorf("letter %c: %d adjectives, %d nouns, %d names; the cycle needs 45, 45 and 2,000", 'A'+li, len(ll.adj), len(ll.noun), capacity)
+		}
+		if smallest == 0 || capacity < smallest {
+			smallest = capacity
+		}
+		// The letter's first repeat is its round number capacity.
+		if repeat := p + 1 + len(l.cycle)*capacity; firstRepeat == 0 || repeat < firstRepeat {
+			firstRepeat = repeat
+		}
+	}
+	if len(l.cycle)*smallest < 40000 || firstRepeat < 40000 {
+		t.Fatalf("%d letters × smallest capacity %d = %d, first repeat at %d; want at least 40,000", len(l.cycle), smallest, len(l.cycle)*smallest, firstRepeat)
+	}
+	for li := range 26 {
+		if !slices.Contains(l.cycle, li) && (len(l.letters[li].adj) > 0 || len(l.letters[li].noun) > 0 || LetterCapacity(byte('A'+li)) != 0) {
+			t.Errorf("letter %c is outside the cycle but has words", 'A'+li)
+		}
+	}
+	t.Logf("%d letters, smallest capacity %d, capacity %d, first repeat at sequence %d", len(l.cycle), smallest, Capacity(), firstRepeat)
+}
+
+// Short names come first: the first 200 releases and every letter's first
+// 20 rounds are much shorter than the average name, and those rounds still
+// vary their words.
+func TestShortNamesFirst(t *testing.T) {
+	l := defaultLists
+	letters := func(name string) int { return len(name) - 1 }
+	early := 0
+	for _, name := range l.Names(200) {
+		early += letters(name)
+	}
+	all, count := 0, 0
+	for _, li := range l.cycle {
+		order := l.letterOrder(li, 1)
+		letterAll := 0
+		for _, p := range order {
+			letterAll += len(l.letters[li].adj[p[0]].text) + len(l.letters[li].noun[p[1]].text)
+		}
+		all, count = all+letterAll, count+len(order)
+		first, uses := 0, map[string]int{}
+		names := l.letterNames(li, 20)
+		for _, name := range names {
+			first += letters(name)
+			for _, w := range strings.Fields(name) {
+				if uses[w]++; uses[w] > 3 {
+					t.Errorf("letter %c: %q is in more than 3 of the first 20 names: %v", 'A'+li, w, names)
+				}
+			}
+		}
+		if avg, firstAvg := float64(letterAll)/float64(len(order)), float64(first)/20; firstAvg > avg-3 {
+			t.Errorf("letter %c: the first 20 names average %.1f letters, all %.1f", 'A'+li, firstAvg, avg)
+		}
+	}
+	earlyAvg, allAvg := float64(early)/200, float64(all)/float64(count)
+	if earlyAvg > allAvg-3 {
+		t.Fatalf("sequences 1-200 average %.2f letters, all names %.2f: short names must come first", earlyAvg, allAvg)
+	}
+	t.Logf("sequences 1-200 average %.2f letters, all names %.2f", earlyAvg, allAvg)
+}
+
+// The naming order is deterministic and cheapest first: each name costs its
+// letters plus spread per earlier use of each word.
+func TestOrderCosts(t *testing.T) {
+	l := defaultLists
+	for _, li := range l.cycle {
+		order := l.letterOrder(li, 1)
+		if again := l.order(li, 1); !slices.Equal(order, again) {
+			t.Fatalf("letter %c: the order is not deterministic", 'A'+li)
+		}
+		adjUses, nounUses := map[int]int{}, map[int]int{}
+		cost := func(p [2]int) int {
+			return len(l.letters[li].adj[p[0]].text) + len(l.letters[li].noun[p[1]].text) + spread*(adjUses[p[0]]+nounUses[p[1]])
+		}
+		for i, p := range order {
+			// No later name is cheaper at this step.
+			for _, q := range order[i+1 : min(len(order), i+40)] {
+				if cost(q) < cost(p) {
+					t.Fatalf("letter %c step %d: %v costs %d, later %v only %d", 'A'+li, i, p, cost(p), q, cost(q))
+				}
+			}
+			adjUses[p[0]]++
+			nounUses[p[1]]++
+		}
 	}
 }
 
@@ -184,9 +281,9 @@ func TestWordQuality(t *testing.T) {
 }
 
 // Every combination is scanned: a strong rude fragment where the words run
-// together, a known unlucky phrase, or a repeated stem ("Planetary Planet":
-// six shared letters, or one word starting with the other) must be on the
-// deny list, so the name can never be picked.
+// together, a known unlucky phrase, or a repeated stem ("Planetary Planet",
+// "Hypersonic Hyperdrive": five shared first letters, or one word starting
+// with the other) must be on the deny list, so the name can never be picked.
 var unluckyPhrases = []string{"golden gate", "golden gateway", "massive meteor", "twin tower", "eternal eclipse", "pulsing probe", "playful probe", "potent probe"}
 
 func TestCombinationDenyList(t *testing.T) {
@@ -209,7 +306,7 @@ func TestCombinationDenyList(t *testing.T) {
 					}
 				}
 				la, ln := strings.ToLower(a.text), strings.ToLower(n.text)
-				if sharedPrefix(la, ln) >= 6 || strings.HasPrefix(ln, la) || strings.HasPrefix(la, ln) {
+				if sharedPrefix(la, ln) >= 5 || strings.HasPrefix(ln, la) || strings.HasPrefix(la, ln) {
 					why = "repeated stem"
 				}
 				if why != "" && !denied(li, a.text, n.text) {
@@ -218,7 +315,7 @@ func TestCombinationDenyList(t *testing.T) {
 			}
 		}
 	}
-	if scanned < 25000 {
+	if scanned < 45000 {
 		t.Fatalf("scanned only %d combinations", scanned)
 	}
 	for _, phrase := range unluckyPhrases {
@@ -243,20 +340,26 @@ func sharedPrefix(a, b string) int {
 }
 
 // Lists of different lengths still enumerate every combination exactly once,
-// deterministically, before a letter repeats.
+// deterministically and shortest first, before a letter repeats.
 func TestUnevenLists(t *testing.T) {
 	l := mustParse(minimal("A adj Amber Astral Atomic\nA noun Aurora Array\n"))
 	got := l.letterNames(0, 7)
-	want := []string{"Amber Aurora", "Astral Array", "Atomic Aurora", "Amber Array", "Astral Aurora", "Atomic Array", "Amber Aurora"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("uneven lists: %v, want %v", got, want)
+	seen := map[string]bool{}
+	for _, name := range got[:6] {
+		seen[name] = true
 	}
+	if got[0] != "Amber Array" || len(seen) != 6 || got[6] != got[0] {
+		t.Fatalf("uneven lists: %v, want the 6 names once, the shortest first, then a repeat", got)
+	}
+	// Axis is the shortest noun, then Array; each use of Amber adds 4, so
+	// Aurora and Apogee (both 6 letters) follow, and the letter starts over.
 	l = mustParse(minimal("A adj Amber\nA noun Aurora Array Axis Apogee\n"))
-	if got := l.letterNames(0, 5); strings.Join(got, ",") != "Amber Aurora,Amber Array,Amber Axis,Amber Apogee,Amber Aurora" {
+	got = l.letterNames(0, 5)
+	if got[0] != "Amber Axis" || got[1] != "Amber Array" || got[4] != "Amber Axis" || !slices.Contains(got[2:4], "Amber Aurora") || !slices.Contains(got[2:4], "Amber Apogee") {
 		t.Fatalf("one adjective, four nouns: %v", got)
 	}
-	if got := l.Name(1 + 26*2); got != "Amber Axis" {
-		t.Fatalf("Name(53) = %q, want the third A name", got)
+	if got := l.Name(1 + 3); got != "Amber Array" {
+		t.Fatalf("Name(4) = %q, want the second A name", got)
 	}
 }
 
@@ -265,26 +368,26 @@ func TestUnevenLists(t *testing.T) {
 func TestAppendingKeepsOldNames(t *testing.T) {
 	base := minimal("A adj Amber Astral Atomic\nA noun Aurora Array Axis\n")
 	before := mustParse(base)
-	after := mustParse(base + "version 2 from 80\nA adj Azure\nA noun Apogee\nretire Array\ndeny Atomic Axis\n")
-	for seq := 1; seq < 80; seq++ {
+	after := mustParse(base + "version 2 from 11\nA adj Azure\nA noun Apogee\nretire Array\ndeny Atomic Axis\n")
+	for seq := 1; seq < 11; seq++ {
 		if before.Name(seq) != after.Name(seq) {
 			t.Fatalf("sequence %d changed from %q to %q", seq, before.Name(seq), after.Name(seq))
 		}
 	}
-	// A rounds 0-3 (sequences 1, 27, 53, 79) come before the new version. Their
+	// A rounds 0-3 (sequences 1, 4, 7, 10) come before the new version. Their
 	// names that are still allowed count against the letter's capacity.
 	seen := map[string]bool{}
 	for k := range 4 {
-		if name := after.Name(1 + 26*k); !strings.Contains(name, "Array") && name != "Atomic Axis" {
+		if name := after.Name(1 + 3*k); !strings.Contains(name, "Array") && name != "Atomic Axis" {
 			seen[name] = true
 		}
 	}
-	capacity := after.letterCapacity(0, 105)
-	seq := 105
-	for ; len(seen) < capacity; seq += 26 {
+	capacity := after.letterCapacity(0, 13)
+	seq := 13
+	for ; len(seen) < capacity; seq += 3 {
 		name := after.Name(seq)
 		if strings.Contains(name, "Array") || name == "Atomic Axis" {
-			t.Fatalf("sequence %d: %q uses a word or pair retired at 80", seq, name)
+			t.Fatalf("sequence %d: %q uses a word or pair retired at 11", seq, name)
 		}
 		if seen[name] {
 			t.Fatalf("sequence %d: %q repeats before the letter's capacity is used", seq, name)
@@ -294,18 +397,15 @@ func TestAppendingKeepsOldNames(t *testing.T) {
 	if !seen[after.Name(seq)] {
 		t.Fatalf("sequence %d: %q is new after the capacity was used", seq, after.Name(seq))
 	}
-	if after.letterCapacity(0, 80) != 4*3-1 {
-		t.Fatalf("capacity at 80 = %d, want 4 adjectives × 3 active nouns − 1 denied", after.letterCapacity(0, 80))
+	if after.letterCapacity(0, 11) != 4*3-1 {
+		t.Fatalf("capacity at 11 = %d, want 4 adjectives × 3 active nouns − 1 denied", after.letterCapacity(0, 11))
 	}
 }
 
+// minimal is a word list with the cycle A B C, a's lines for A and one
+// placeholder name for B and C.
 func minimal(a string) string {
-	var b strings.Builder
-	b.WriteString("version 1 from 1\n" + a)
-	for c := 'B'; c <= 'Z'; c++ {
-		fmt.Fprintf(&b, "%c adj %cx\n%c noun %cy\n", c, c, c, c)
-	}
-	return b.String()
+	return "version 1 from 1\ncycle A B C\n" + a + "B adj Bx\nB noun By\nC adj Cx\nC noun Cy\n"
 }
 
 func TestParseRejects(t *testing.T) {
@@ -320,9 +420,14 @@ func TestParseRejects(t *testing.T) {
 		"deny unknown":       minimal("A adj Amber\nA noun Aurora\ndeny Amber Axis\n"),
 		"retire unknown":     minimal("A adj Amber\nA noun Aurora\nretire Axis\n"),
 		"retire twice":       minimal("A adj Amber Astral\nA noun Aurora\n") + "version 2 from 9\nretire Amber\nretire Amber\n",
-		"empty letter":       strings.Replace(minimal("A adj Amber\nA noun Aurora\n"), "Z noun Zy\n", "", 1),
+		"empty letter":       strings.Replace(minimal("A adj Amber\nA noun Aurora\n"), "C noun Cy\n", "", 1),
+		"no cycle":           strings.Replace(minimal("A adj Amber\nA noun Aurora\n"), "cycle A B C\n", "", 1),
+		"letter not cycled":  minimal("A adj Amber\nA noun Aurora\nD adj Dx\n"),
+		"cycle twice":        minimal("A adj Amber\nA noun Aurora\ncycle A B\n"),
+		"cycle repeats":      strings.Replace(minimal("A adj Amber\nA noun Aurora\n"), "cycle A B C", "cycle A B C A", 1),
+		"cycle in version 2": minimal("A adj Amber\nA noun Aurora\n") + "version 2 from 9\ncycle A B C D\n",
 		"unknown line":       minimal("A adj Amber\nA noun Aurora\nrename Amber Azure\n"),
-		"deny across letter": minimal("A adj Amber\nA noun Aurora\ndeny Amber Bx\n"),
+		"deny across letter": minimal("A adj Amber\nA noun Aurora\ndeny Amber By\n"),
 	} {
 		if _, err := Parse(src); err == nil {
 			t.Errorf("%s: parsed", name)
@@ -357,7 +462,7 @@ func TestStampVersionFile(t *testing.T) {
 	if err != nil || string(again) != string(out) {
 		t.Fatalf("restamping is not idempotent: %v", err)
 	}
-	wrong := strings.Replace(string(out), Codename(111), "Amber Aurora", 1)
+	wrong := strings.Replace(string(out), Codename(111), Codename(112), 1)
 	if _, _, err := StampVersionFile([]byte(wrong)); err == nil {
 		t.Fatal("a codename that differs from the sequence's name must be refused")
 	}
@@ -365,7 +470,7 @@ func TestStampVersionFile(t *testing.T) {
 		t.Fatal("a file without release_sequence must be refused")
 	}
 	last, _, err := StampVersionFile([]byte(`{"version": "x", "release_sequence": 1}`))
-	if err != nil || string(last) != "{\n  \"version\": \"x\",\n  \"release_sequence\": 1,\n  \"codename\": \"Amber Aurora\"\n}\n" {
+	if err != nil || string(last) != "{\n  \"version\": \"x\",\n  \"release_sequence\": 1,\n  \"codename\": \"Aqua Arc\"\n}\n" {
 		t.Fatalf("stamp after the last member: %q, %v", last, err)
 	}
 }
@@ -389,7 +494,7 @@ func TestStampFile(t *testing.T) {
 	}
 	name, changed, err := StampFile(path)
 	raw, _ := os.ReadFile(path)
-	if err != nil || !changed || name != "Brisk Binary" || string(raw) != "{\n  \"release_sequence\": 2,\n  \"codename\": \"Brisk Binary\"\n}\n" {
+	if err != nil || !changed || name != "Blue Bot" || string(raw) != "{\n  \"release_sequence\": 2,\n  \"codename\": \"Blue Bot\"\n}\n" {
 		t.Fatalf("stamp: %q %v %v %q", name, changed, err, raw)
 	}
 	if _, changed, err := StampFile(path); changed || err != nil {
