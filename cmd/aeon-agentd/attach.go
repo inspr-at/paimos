@@ -59,19 +59,22 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var registered attachwatch.View
-	registration := map[string]any{"attach_protocol": attachwatch.Protocol, "operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey, "local_auth_capability": agentd.CurrentLocalAuthCapability()}
+	registration := map[string]any{"attach_protocol": attachwatch.Protocol, "local_consent_proof_version": attachwatch.LocalConsentProofVersion, "operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey, "local_auth_capability": agentd.CurrentLocalAuthCapability()}
 	if err = pairedClient.Do(ctx, "POST", "/api/agent-pairing/attach", registration, &registered); err != nil {
 		return nil, fmt.Errorf("paired instance refused attach registration: %w", err)
 	}
 	if registered.State != "registered" {
 		return nil, errors.New("paired instance refused attach registration; update agentd and Aeon")
 	}
+	if registered.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
+		return nil, errors.New("paired instance lacks local consent proof v2; upgrade Aeon and paimos-agentd, then restart; existing pairing keys remain valid")
+	}
 	return agentd.NewAttachManager(agentd.AttachConfig{Origin: c.Origin, ComputerID: c.ComputerID, Host: host, Workspace: c.Workspace, Executables: paths, Identities: c.AttachIdentities,
 		LocalSigner: func(ctx context.Context, consent, nonce, reason string) (string, error) {
 			if c.LocalAuthKeyID == "" {
 				return "", agentsecurity.ErrUnavailable
 			}
-			return agentsecurity.DefaultSigner().Sign(ctx, c.LocalAuthKeyID, attachwatch.LocalConsentHash(consent, nonce), reason)
+			return agentsecurity.DefaultSigner().Sign(ctx, c.LocalAuthKeyID, attachwatch.LocalConsentHash(consent, nonce, reason), reason)
 		},
 		Exchange: func(ctx context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 			in.PollKey = pollKey
@@ -160,7 +163,7 @@ func attachCommand(args []string, out io.Writer) error {
 		fmt.Fprintf(tty, "Watch the conversation.\nTranscript: %s (%s)\nOnly new turns after approval. Audience: people explicitly granted harness.watch in this project.\n", view.Snapshot.Transcript, view.Snapshot.FileID)
 	}
 	fmt.Fprintln(tty, "Only attach a single trust context. Same-user processes are not isolated.")
-	fmt.Fprintln(tty, "Touch ID is the default on an upgraded Mac pairing that can use it; Linux, a headless Mac and older pairings keep approval in Aeon.")
+	fmt.Fprintln(tty, "Touch ID is the default on an upgraded Mac pairing even when this daemon reports that it cannot run. Linux and older pairings keep approval in Aeon. Save approval in Aeon to allow a headless Mac.")
 	fmt.Fprintf(tty, "Type %s for the local check, then approve in your paired browser: ", confirmation)
 	answer, err := readAttachAnswer(ctx, reader)
 	if err != nil {

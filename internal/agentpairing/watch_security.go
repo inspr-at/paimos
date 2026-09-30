@@ -37,46 +37,46 @@ func watchConsentPreference(ctx context.Context, tx pgx.Tx, owner string) (mode 
 	return mode, true, err
 }
 
-// Touch ID is the default only for an upgraded Mac whose daemon reports it can run.
-// Linux, SSH without a graphical login, and a Mac that cannot confirm stay on
-// Aeon approval so those attaches keep working. The report never satisfies
-// confirmation; saving local_auth still fails closed where it cannot run.
-func defaultWatchConsent(ctx context.Context, tx pgx.Tx, platform, computer string) (string, error) {
-	if platform != "darwin" || computer == "" {
-		return attachwatch.ConsentAeon, nil
+// pairingLocalAuth returns the platform stored when this computer was paired
+// and whether browser approval pinned a local confirmation public key.
+func pairingLocalAuth(ctx context.Context, tx pgx.Tx, computer string) (platform string, upgraded bool, err error) {
+	err = tx.QueryRow(ctx, `SELECT coalesce(q.details->>'platform',''), c.local_auth_public_key<>''
+ FROM agent_pairing_computers c
+ JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+ WHERE c.id=$1 AND c.state='connected'`, computer).Scan(&platform, &upgraded)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
 	}
-	var capability string
-	err := tx.QueryRow(ctx, `SELECT local_auth_capability FROM agent_pairing_computers WHERE id=$1 AND state='connected'`, computer).Scan(&capability)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && capability != attachwatch.LocalAuthAvailable) {
-		return attachwatch.ConsentAeon, nil
-	}
+	return platform, upgraded, err
+}
+
+// Once a pairing has pinned a public key, the signature is required no matter
+// what capability the daemon reports. The snapshot platform must match the
+// platform stored at pairing; a lied platform cannot select Aeon approval.
+// Pairings without a key stay on Aeon approval. A saved aeon choice is an
+// explicit opt-out, and only for a snapshot that matches the paired platform.
+func computerWatchConsentMode(ctx context.Context, tx pgx.Tx, owner, snapshotPlatform, computer string) (string, error) {
+	mode, saved, err := watchConsentPreference(ctx, tx, owner)
 	if err != nil {
 		return "", err
 	}
-	return attachwatch.ConsentLocalAuth, nil
-}
-
-func effectiveWatchConsent(ctx context.Context, tx pgx.Tx, owner, platform, computer string) (string, error) {
-	mode, saved, err := watchConsentPreference(ctx, tx, owner)
-	if err != nil || saved {
-		return mode, err
+	pairingPlatform, upgraded, err := pairingLocalAuth(ctx, tx, computer)
+	if err != nil {
+		return "", err
 	}
-	return defaultWatchConsent(ctx, tx, platform, computer)
-}
-
-// Old pairings cannot prove local confirmation. Their effective policy is Aeon
-// approval until a fresh, browser-reviewed pairing pins the public key.
-func computerWatchConsentMode(ctx context.Context, tx pgx.Tx, owner, platform, computer string) (string, error) {
-	mode, err := effectiveWatchConsent(ctx, tx, owner, platform, computer)
-	if err != nil || mode != attachwatch.ConsentLocalAuth {
-		return mode, err
+	if upgraded && snapshotPlatform != pairingPlatform {
+		return "", fail(409, "conflict", "snapshot platform does not match the paired computer")
 	}
-	var upgraded bool
-	err = tx.QueryRow(ctx, `SELECT local_auth_public_key<>'' FROM agent_pairing_computers WHERE id=$1`, computer).Scan(&upgraded)
 	if !upgraded {
-		mode = attachwatch.ConsentAeon
+		if !saved || mode == attachwatch.ConsentLocalAuth {
+			return attachwatch.ConsentAeon, nil
+		}
+		return mode, nil
 	}
-	return mode, err
+	if saved && mode == attachwatch.ConsentAeon {
+		return attachwatch.ConsentAeon, nil
+	}
+	return attachwatch.ConsentLocalAuth, nil
 }
 
 func localAuthComputers(ctx context.Context, tx pgx.Tx, person string) ([]localAuthComputer, error) {
@@ -128,7 +128,7 @@ func (m *Module) watchSecurity(w http.ResponseWriter, r *http.Request, p tenant.
 			return err
 		}
 		for _, computer := range out.LocalAuthComputers {
-			if computer.Capability == attachwatch.LocalAuthAvailable && computer.PairingUpgraded {
+			if computer.PairingUpgraded {
 				out.ConsentMode = attachwatch.ConsentLocalAuth
 				break
 			}

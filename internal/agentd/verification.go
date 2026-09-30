@@ -54,7 +54,7 @@ func validExecutionMode(r Run, adapter Adapter) error {
 	if err := validQueuedExecutionMode(r, adapter); err != nil {
 		return err
 	}
-	if r.Purpose == VerificationPurpose && (r.AccountID == "" || r.RequestedAccountID != "" && r.AccountID != r.RequestedAccountID) {
+	if (r.Purpose == VerificationPurpose || r.ReadOnlyReview) && (r.AccountID == "" || r.RequestedAccountID != "" && r.AccountID != r.RequestedAccountID) {
 		return errors.New("verification account binding is incomplete or unsafe")
 	}
 	return nil
@@ -64,6 +64,16 @@ func validExecutionMode(r Run, adapter Adapter) error {
 // approved account. Check immutable policy/capability before routing;
 // adapters still require the strict, routed binding in validExecutionMode.
 func validQueuedExecutionMode(r Run, adapter Adapter) error {
+	if r.ReadOnlyReview {
+		a, ok := adapter.(VerificationAdapter)
+		if !ok || !a.VerificationSupported() {
+			return ErrVerificationUnavailable
+		}
+		if r.Purpose != "managed" || r.RepositoryMutationAllowed == nil || *r.RepositoryMutationAllowed || r.requestedAccount() == "" {
+			return errors.New("review binding is incomplete or unsafe")
+		}
+		return nil
+	}
 	if r.Purpose == "" || r.Purpose == "managed" {
 		return nil
 	}

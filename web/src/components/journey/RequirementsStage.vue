@@ -12,6 +12,7 @@ import AppIcon from '../AppIcon.vue'
 import GateApprovals from './GateApprovals.vue'
 import GateCard from './GateCard.vue'
 import LaterCard from './LaterCard.vue'
+import ExtensionData from './ExtensionData.vue'
 
 // Requirements: functional ones become features (epics) with tickets, non-functional
 // ones knowledge entries and acceptance criteria. Agreeing them needs the
@@ -20,6 +21,7 @@ const ctx = useJourneyContext()
 const store = useJourney()
 const journey = computed(() => ctx.journey.value)
 const all = computed(() => ctx.data.requirements.value.value)
+const extensionsFor = (nodeId: string) => ctx.data.intake.value.value.drafts.find(d => d.status === 'accepted' && d.target_node_id === nodeId)?.extensions
 const functional = computed(() => all.value.filter(r => r.kind === 'functional'))
 const nonfunctional = computed(() => all.value.filter(r => r.kind === 'nonfunctional'))
 const drafts = computed(() => all.value.filter(r => r.status === 'draft').length)
@@ -96,6 +98,7 @@ async function add() {
             <span class="rid mono">{{ group.id === 'functional' ? 'F' : 'N' }}{{ i + 1 }}</span>
             <div class="req-body">
               <p class="req-title">{{ req.title }}</p>
+              <ExtensionData :extensions="extensionsFor(req.node_id)" />
               <p class="req-meta">
                 <template v-if="req.kind === 'functional'"><AppIcon name="arrow" :size="11" />{{ req.generated_ticket_ids.length ? plural(req.generated_ticket_ids.length, 'ticket') : 'No tickets yet · Aithema breaks this feature down when you ask' }}</template>
                 <template v-else><AppIcon name="arrow" :size="11" />knowledge and acceptance criteria</template>

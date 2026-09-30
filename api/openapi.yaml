@@ -1040,12 +1040,13 @@ paths:
         '200':
           description: >-
             Per-person setting plus advisory capability for connected computers this person approved.
-            With no saved choice, consent_mode is local_auth when any upgraded connected computer reports available,
-            and a pending approval on an upgraded Mac that reports available uses it. Linux, a Mac without a graphical
-            login, and computers that cannot confirm stay on aeon until a choice is saved. consent_saved is
-            false for that default. A saved local_auth applies to every upgraded computer and fails closed where
-            confirmation cannot run. Pairings without a pinned key keep aeon until re-paired. The capability
-            report is advisory and never authorizes a watch.
+            With no saved choice, consent_mode is local_auth when any connected computer has a browser-pinned
+            local confirmation key. That key exists only on a Darwin pairing. A pending approval on that computer
+            uses local_auth and requires the pinned key's signature; the capability report cannot select aeon.
+            The snapshot platform must match the platform stored at pairing. Linux and pairings without a pinned
+            key stay on aeon. consent_saved is false for that default. A saved local_auth applies to every upgraded
+            computer and fails closed where confirmation cannot run. A saved aeon keeps Aeon approval where the
+            snapshot platform matches. The capability report is advisory and never authorizes a watch.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SessionWatchingSecurityView'}
@@ -1076,8 +1077,14 @@ paths:
         paired bearer, computer lifecycle proof and a fresh memory-only poll_key.
         Protocol-less registrations are acknowledged as registered with protocol 1 so older
         daemons keep serving; every other attach operation from those keys returns 409
-        update_agentd. Only keys registered with attach_protocol=2 can attach. Registration
-        invalidates all earlier watches on that computer, requiring new owner approval.
+        update_agentd. Only keys registered with attach_protocol=2 and
+        local_consent_proof_version=2 can attach. Omitted proof versions mean v1;
+        protocol-2 registrations with an unsupported proof version return 409 update_agentd
+        with guidance to upgrade paimos-agentd before any approval or Touch ID prompt.
+        Successful registration advertises the server's required proof version.
+        Upgrading the daemon preserves existing pairing keys; re-pairing is unnecessary.
+        Successful registration invalidates all earlier watches on that computer,
+        requiring new owner approval.
         All other operations require the paired bearer and registered poll_key; lifecycle
         proof alone is rejected. Neither daemon nor server persists the poll key. Codes never
         appear in URLs. Requests, activation and every poll
@@ -1085,9 +1092,12 @@ paths:
         be resurrected. The server pins the owner's consent_mode at person approval.
         local_auth remains approved (no session or lease) until the registered daemon
         echoes consent_digest, the server-issued local_auth_nonce and a P-256 ASN.1 DER
-        local_auth_signature from its pairing-pinned Secure Enclave key. A bare
+        local_auth_signature from its pairing-pinned Secure Enclave key. The signature
+        covers the canonical Touch ID reason as well as the digest and nonce. A bare
         local_confirmed boolean is refused. Nonces are single-use and expire with
-        the request. Legacy pairings use Aeon approval until re-paired.
+        the request. Once a pairing has a pinned key, pending approval uses local_auth
+        regardless of local_auth_capability, and the snapshot platform must match the
+        platform stored at pairing. Legacy pairings use Aeon approval until re-paired.
         Missing confirmation never activates; request-supplied policy overrides are refused.
         Registration may report local_auth_capability. Omission is stored as unreported.
         That report is advisory and never satisfies local confirmation. A later poll cannot change it.
@@ -1115,6 +1125,7 @@ paths:
                     additionalProperties: false
                     properties:
                       state: {type: string, const: registered}
+                      local_consent_proof_version: {type: integer, const: 2, description: Required consent signature version; independent of attach_protocol}
         '400': {description: Invalid attach request; conversation text on status-only or pre-activation polls detaches the attach}
         '403': {description: Registered memory-only poll key required; lifecycle proof only authorizes registration}
         '409': {description: 'Snapshot or consent mismatch, poll sequence rejected, or update agentd required'}
@@ -3476,6 +3487,30 @@ paths:
         '204': {description: Target disabled}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/reviews:
+    get:
+      operationId: listTicketReviews
+      summary: Cross-family review results for this ticket
+      description: Newest first, bounded to 50 reviews. A gate opens only for a completed, vendor-reported, other-family review of the exact commit range. No merge is performed.
+      security: *auth
+      parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Reviews, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TicketReview'}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: requestTicketReview
+      summary: Queue an independent managed review of a commit range
+      description: Requires work_orders.write and run.create on the ticket. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection.
+      security: *auth
+      parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TicketReviewCreate'}}}}
+      responses:
+        '201': {description: Review (queued or blocked), content: {application/json: {schema: {$ref: '#/components/schemas/TicketReview'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /work-orders:
     get:
       operationId: listWorkOrders
@@ -4487,7 +4522,9 @@ paths:
       operationId: listQueuedRuns
       description: Agent daemon sees queued runs for its principal only. Polling is a fallback when webhook wakes are missed. The daemon poll omits per-run wait; people read it on the run.
       security: [{agentKey: []}]
-      parameters: [{$ref: '#/components/parameters/Limit'}]
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {name: X-Aeon-Review-Policy, in: header, schema: {type: string, enum: [no_tools_v1]}, description: Advertise no_tools_v1 to receive review runs. Legacy daemons receive ordinary runs only.}
       responses:
         '200': {description: Queued runs, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}}}}
         '403': {$ref: '#/components/responses/Error'}
@@ -4504,7 +4541,9 @@ paths:
       operationId: claimAgentRun
       description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts.
       security: [{agentKey: []}]
-      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-Aeon-Review-Policy, in: header, schema: {type: string, enum: [no_tools_v1]}, description: Required for review claims. Ordinary run claims are unchanged.}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunClaim'}}}}
       responses:
         '200': {description: Claimed run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
@@ -5199,7 +5238,9 @@ paths:
       summary: Read intake history
       description: Aithema's current source, transcript and draft history; accepted and superseded proposals remain visible with citations.
       security: *auth
-      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: node_id, in: query, schema: {type: string, format: uuid}, description: Return accepted drafts for this node or the requirement that generated this ticket; sources and turns are empty. Requires the same intake.read permission.}
       responses:
         '200': {description: Intake snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSnapshot'}}}}
         '404': {$ref: '#/components/responses/Error'}
@@ -6765,12 +6806,13 @@ components:
       description: >-
         Consent plus the advisory capability last reported by each connected computer this person approved.
         The report never authorizes a watch. consent_saved is false when consent_mode is the unsaved default:
-        local_auth if any upgraded connected computer reports available, otherwise aeon. Pending approvals use
-        local_auth only for an upgraded darwin computer that reports available. Other computers keep aeon until a
-        choice is saved. A saved local_auth applies to upgraded pairings and fails closed where confirmation
-        cannot run. Pairings without a pinned key keep aeon until re-paired.
+        local_auth if any connected computer has a pinned local confirmation key, otherwise aeon. That key
+        exists only for a Darwin pairing. Pending approvals on an upgraded computer use local_auth regardless
+        of the capability report, and the snapshot platform must match the platform stored at pairing. Other
+        computers keep aeon until a choice is saved. A saved local_auth applies to upgraded pairings and fails
+        closed where confirmation cannot run. Pairings without a pinned key keep aeon until re-paired.
       properties:
-        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon, description: "aeon is the fallback when nothing is saved and no connected Mac reports available."}
+        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon, description: "Unsaved default is local_auth when any connected computer has a pinned local confirmation key. That key exists only for a Darwin pairing. Otherwise aeon. A capability report cannot select aeon for an upgraded computer, and the snapshot platform must match the paired platform."}
         consent_saved: {type: boolean, description: "False when consent_mode is the unsaved default. True after this person saves a choice."}
         local_auth_computers:
           type: array
@@ -6834,6 +6876,7 @@ components:
         request_id: {type: string, format: uuid}
         computer_id: {type: string, format: uuid}
         attach_protocol: {type: integer, enum: [1, 2], description: 'Registration only. Omission registers protocol 1; all later attach operations return 409 update_agentd. Protocol 2 declares paired-origin pinning, redirect refusal and kernel checks in both modes. A later request cannot upgrade a registered key.'}
+        local_consent_proof_version: {type: integer, minimum: 1, description: 'Registration-bound signature format. Omission means v1. Attach protocol 2 requires v2, which binds the canonical Touch ID reason; unsupported versions return 409 update_agentd with upgrade paimos-agentd guidance. A later request cannot upgrade a registered key. Existing pairing keys remain valid after upgrading the daemon.'}
         device_proof: {type: string, writeOnly: true, description: 'Existing computer lifecycle proof; registration only, never watch authority'}
         poll_key: {type: string, pattern: '^[a-f0-9]{64}$', writeOnly: true, description: Fresh daemon-start random key held only in memory; required for every operation}
         snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
@@ -6841,7 +6884,7 @@ components:
         consent_digest: {type: string, description: Echo of the server-selected consent binding; required for activation and every active poll in both modes}
         local_confirmed: {type: boolean, deprecated: true, description: 'Retained for wire compatibility; true is refused. Supply signed local confirmation instead.'}
         local_auth_nonce: {type: string, pattern: '^[0-9a-f]{64}$', description: Server-issued single-use challenge for the approved request}
-        local_auth_signature: {type: string, maxLength: 144, description: 'Base64 ASN.1 DER ECDSA P-256 signature over SHA-256("aeon.attach.local-consent.v1\0" + consent_digest + "\0" + local_auth_nonce). Never accepted on the local socket.'}
+        local_auth_signature: {type: string, maxLength: 144, description: 'Base64 ASN.1 DER ECDSA P-256 signature over SHA-256("aeon.attach.local-consent.v2\0" + consent_digest + "\0" + local_auth_nonce + "\0" + canonical reason). The reason is "Allow " + action + " " + harness + " session PID " + pid + " on " + host. Action is "watching the conversation" or "status only (no conversation text) for". Never accepted on the local socket.'}
         local_auth_capability:
           type: string
           enum: [available, unsupported, unsigned, no_gui, policy]
@@ -6861,6 +6904,7 @@ components:
         session_id: {type: [string, 'null'], format: uuid}
         user_code: {type: string, description: 'Nine digits, daemon response only'}
         local_auth_nonce: {type: string, description: 'Present only for an approved local_auth request; consumed at activation'}
+        local_consent_proof_version: {type: integer, const: 2, description: Required local consent signature format}
         consent_mode: {type: string, enum: [aeon, local_auth]}
         consent_digest: {type: string, description: 'SHA-256 binding of request ID, snapshot digest and server-selected mode; immutable after approval'}
 
@@ -8716,10 +8760,27 @@ components:
         target_node_id: {type: string, format: uuid}
         title: {type: string, minLength: 1}
         body: {type: string}
+        extensions: {$ref: '#/components/schemas/IntakeExtensions'}
+        document_bytes:
+          type: string
+          description: Original Aithema review snapshot JSON, preserved as text. Extensions are extracted from its single confirmed, unbound item; an explicit extensions map must match those exact bytes. This native draft envelope retains its required projection fields. The complete request is limited to 1 MiB, allowing a 64 KiB canonical extension map plus JSON escaping and projection overhead.
         base_event_id: {type: integer, minimum: 0, description: Last target-node event observed by Aithema; zero for a new target}
         citations: {type: array, minItems: 1, items: {$ref: '#/components/schemas/IntakeCitation'}}
         ticket_suggestions: {type: array, items: {$ref: '#/components/schemas/IntakeTicketSuggestion'}}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
+    IntakeExtensions:
+      type: object
+      maxProperties: 8
+      description: Aithema item.extensions, preserved without reshaping. Registry and canonical 16 KiB instance / 64 KiB map validation belong to Aithema; Aeon checks the envelope and retains unknown namespaces. Evidence strings are not trimmed or normalized. Changing the raw map or document on an idempotent retry returns 409.
+      additionalProperties: false
+      patternProperties:
+        '^x-[a-z0-9]+(\.[a-z0-9-]+)+@(0|[1-9][0-9]*)$':
+          type: object
+          additionalProperties: false
+          required: [version, data]
+          properties:
+            version: {type: string, maxLength: 33, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', description: Major must match the map key}
+            data: {}
     IntakeTicketSuggestion:
       type: object
       additionalProperties: false
@@ -10153,6 +10214,8 @@ components:
       required: [node_id, status, revision, criteria, created_at, updated_at]
       properties:
         node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [build, review]}
+        review: {$ref: '#/components/schemas/ReviewBinding'}
         status: {type: string, enum: [draft, ready, running, blocked, done, cancelled]}
         revision: {type: integer, format: int64}
         requested_by_principal_id: {type: string, format: uuid}
@@ -10162,6 +10225,69 @@ components:
         criteria: {type: array, items: {$ref: '#/components/schemas/WorkCriterion'}}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    TicketReviewCreate:
+      type: object
+      additionalProperties: false
+      required: [request_id, repository, base_sha, head_sha]
+      properties:
+        request_id: {type: string, format: uuid}
+        repository: {type: string, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$', maxLength: 200}
+        base_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
+        head_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
+        author_run_id: {type: string, format: uuid}
+        author_family: {type: string, enum: [openai, anthropic, xai, cursor], description: Person-only declaration for a change outside managed runs.}
+        pull_request: {type: integer, minimum: 1}
+    ReviewBinding:
+      type: object
+      required: [ticket_node_id, repository, base_sha, head_sha, author_family]
+      properties:
+        ticket_node_id: {type: string, format: uuid}
+        repository: {type: string}
+        base_sha: {type: string}
+        head_sha: {type: string}
+        author_family: {type: string}
+        ticket_snapshot: {type: string, description: Immutable ticket and acceptance-criteria snapshot supplied on the managed work order.}
+        author_run_id: {type: [string, 'null'], format: uuid}
+        reviewer_profile_id: {type: [string, 'null'], format: uuid}
+        reviewer_family: {type: [string, 'null']}
+        pull_request: {type: [integer, 'null']}
+    ReviewFinding:
+      type: object
+      required: [severity, file, line, message]
+      properties:
+        severity: {type: string, enum: [critical, high, medium, low]}
+        file: {type: string}
+        line: {type: integer, minimum: 1}
+        message: {type: string}
+    ReviewResult:
+      type: object
+      required: [verdict, findings, reason]
+      properties:
+        verdict: {type: string, enum: ['', ok, changes]}
+        findings: {type: array, items: {$ref: '#/components/schemas/ReviewFinding'}}
+        reason: {type: string, description: A missing or malformed final verdict keeps the gate closed.}
+    TicketReview:
+      allOf:
+        - {$ref: '#/components/schemas/ReviewBinding'}
+        - type: object
+          required: [work_order_id, request_id, status, gate_open, gate_reason, ladder, result, created_at, github_status]
+          properties:
+            work_order_id: {type: string, format: uuid}
+            request_id: {type: string, format: uuid}
+            run_id: {type: [string, 'null'], format: uuid}
+            status: {type: string, enum: [blocked, queued, starting, running, waiting, completed, failed, cancelled, ownership_lost]}
+            reviewer_model: {type: [string, 'null']}
+            reviewer_effort: {type: [string, 'null']}
+            reviewer_profile_version: {type: [string, 'null']}
+            effective_model: {type: [string, 'null']}
+            gate_open: {type: boolean}
+            gate_reason: {type: string}
+            result: {$ref: '#/components/schemas/ReviewResult'}
+            ladder: {type: array, items: {type: object, required: [profile_id, selected, skip_reasons], properties: {profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
+            cost_micros: {type: [integer, 'null'], format: int64, description: Reported USD cost; null when cost was not measured.}
+            duration_seconds: {type: [integer, 'null'], format: int64}
+            created_at: {type: string, format: date-time}
+            github_status: {type: string, enum: [unconfigured, pending, success, failure, error, stale]}
     WorkEvidenceWrite:
       type: object
       required: [kind, reference]
@@ -10913,6 +11039,7 @@ components:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
+        read_only_review: {type: boolean, description: A pinned review run using a qualified no-tools adapter; repository_mutation_allowed is false.}
         verification_error: {type: string, enum: [verification_unavailable], description: Present only for a verification refused before launch.}
         verification_reason: {type: string, enum: [adapter_unsupported, binding_incomplete, local_binding_missing], description: Bounded cause for verification_unavailable; never vendor diagnostics.}
         capacity_override: {type: string, enum: ['', now]}
@@ -10965,6 +11092,14 @@ components:
         error_code: {type: string, enum: [event_stream_bound, app_server_protocol, child_exit_failed, turn_failed, child_stop_failed, ownership_lost, reporter_unavailable, workspace_conflict, decision_refused, vendor_limit]}
         limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Present only when reported by the vendor.}
         limit_resets_at: {type: string, format: date-time, description: Present only when reported by the vendor.}
+        review_range:
+          type: object
+          description: Optional exact range produced by a completed builder run. Automatically requests an independent review of that run's parent ticket, subject to the caller's existing work_orders.write and run.create permissions. Reviewer runs cannot request recursive reviews.
+          required: [repository, base_sha, head_sha]
+          properties:
+            repository: {type: string, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'}
+            base_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
+            head_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
         git_commits:
           type: array
           maxItems: 20

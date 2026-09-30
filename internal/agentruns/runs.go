@@ -14,11 +14,13 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 type Run struct {
+	ReadOnlyReview            bool                        `json:"read_only_review,omitempty"`
 	VerificationError         string                      `json:"verification_error,omitempty"`
 	VerificationReason        string                      `json:"verification_reason,omitempty"`
 	CapacityHandoff           bool                        `json:"capacity_handoff,omitempty"`
@@ -63,9 +65,11 @@ type Run struct {
 // modules. A nil recorder performs no account settlement; production wiring
 // must supply the account module's recorder when account allowances are enabled.
 type UsageRecorder func(context.Context, pgx.Tx, tenant.Principal, Run, Telemetry) error
+type CompletionReviewer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange) error
 type module struct {
-	pool  *pgxpool.Pool
-	usage UsageRecorder
+	reviews CompletionReviewer
+	pool    *pgxpool.Pool
+	usage   UsageRecorder
 }
 
 // New returns the /api/runs and /api/work-orders/{id}/runs module. The optional
@@ -77,6 +81,11 @@ func New(pool *pgxpool.Pool, recorder ...UsageRecorder) httpapi.Module {
 		m.usage = recorder[0]
 	}
 	return m
+}
+
+// NewWithReviews atomically requests a review when a builder reports its range.
+func NewWithReviews(pool *pgxpool.Pool, usage UsageRecorder, reviews CompletionReviewer) httpapi.Module {
+	return &module{pool: pool, usage: usage, reviews: reviews}
 }
 func (m *module) Mount(mux *http.ServeMux) {
 	for _, route := range []struct {
@@ -109,16 +118,17 @@ func (m *module) Mount(mux *http.ServeMux) {
 }
 
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
- requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text,capacity_override,(retry_account_id IS NOT NULL),verification_unavailable_reason`
+ requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text,capacity_override,(retry_account_id IS NOT NULL),verification_unavailable_reason,
+ EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review')`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview)
 
 	if v.VerificationReason != "" {
 		v.VerificationError = "verification_unavailable"
 	}
-	v.RepositoryMutationAllowed = true
+	v.RepositoryMutationAllowed = !v.ReadOnlyReview
 	if v.Purpose == "pairing_verification" {
 		v.VerificationTask = agentpairing.VerificationTask
 		v.MaxDurationSeconds = agentpairing.VerificationSeconds
@@ -195,8 +205,8 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
   AND (((q.details->>'platform')||'/'||(q.details->>'arch')||'/'||a.harness=ANY($3::text[]) AND e.verification_run_id=agent_runs.id AND e.verification_claimed_at IS NULL AND e.verification_expires_at>clock_timestamp())
    OR (agent_runs.purpose='managed' AND e.ongoing_approved_at IS NOT NULL))))
 	 AND EXISTS(SELECT 1 FROM work_orders w JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id
-	 WHERE w.node_id=agent_runs.work_order_id AND w.status IN ('ready','running') AND n.deleted_at IS NULL)
-	 ORDER BY created_at,id LIMIT $2`, p.ID, limit, agentpairing.VerificationTargets())
+	 WHERE w.node_id=agent_runs.work_order_id AND (w.kind<>'review' OR $4::bool) AND w.status IN ('ready','running') AND n.deleted_at IS NULL)
+	 ORDER BY created_at,id LIMIT $2`, p.ID, limit, agentpairing.VerificationTargets(), r.Header.Get(reviewgate.PolicyHeader) == reviewgate.Policy)
 	if err != nil {
 		return nil, err
 	}
@@ -244,6 +254,9 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	}
 	if err = workorders.CanEdit(p, o); err != nil {
 		return nil, err
+	}
+	if o.Kind == "review" {
+		return nil, workorders.Fail(409, "review runs are pinned; request a new review")
 	}
 	if p.Kind == tenant.Agent && in.Agent != p.ID {
 		return nil, workorders.Fail(403, "agents may create only their own runs")
@@ -338,6 +351,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	if err = claimPermission(ctx, tx, p, v); err != nil {
 		return nil, err
+	}
+	if v.ReadOnlyReview && r.Header.Get(reviewgate.PolicyHeader) != reviewgate.Policy {
+		return nil, workorders.Fail(409, "review-capable daemon policy required")
 	}
 	if in.Refusal != "" {
 		if len(in.Reservations) != 0 {
