@@ -514,8 +514,8 @@ an owned mode-0600 regular file opened without following symlinks; it is retaine
 across restarts and is never deleted or renamed by startup, recovery or shutdown.
 After acquiring the lock, startup compares the descriptor's device and inode
 with the named file and retries a bounded number of times if they differ.
-Interrupted lock syscalls retry; only lock contention reports busy. The descriptor
-is close-on-exec, so harness children cannot keep the lock alive.
+Interrupted flock syscalls retry; only contention maps a flock error to busy.
+The descriptor is close-on-exec, so harness children cannot keep the lock alive.
 On macOS, a short directory flock serializes only the lock-file open: concurrent
 `O_CREAT|O_NOFOLLOW` opens can otherwise return `ENOENT` during creation. It is
 released before taking the lifetime file lock; open errors remain errors.
