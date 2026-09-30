@@ -316,7 +316,7 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	}
 	var keyPrefix string
 	err := tx.QueryRow(ctx, `SELECT c.state,c.principal_id::text,c.daemon_id,c.local_cleanup,c.local_processes,c.revision,k.prefix,c.setup_state,c.setup_error,c.harness_statuses,c.harness_details,c.last_seen_at,
- CASE WHEN EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id WHERE e.computer_id=c.id AND e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes') THEN 'online' WHEN c.last_seen_at IS NULL THEN 'unknown' ELSE 'offline' END FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.id=$1`, *rec.ComputerID).Scan(&v.ComputerState, &v.PrincipalID, &v.DaemonID, &v.Cleanup, &v.Processes, &v.Revision, &keyPrefix, &v.SetupState, &v.SetupError, &v.HarnessStatuses, &v.HarnessDetails, &v.LastSeenAt, &v.Connectivity)
+ CASE WHEN EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id WHERE e.computer_id=c.id AND e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes') THEN 'online' WHEN c.last_seen_at IS NULL THEN 'unknown' ELSE 'offline' END,c.archived_at FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.id=$1`, *rec.ComputerID).Scan(&v.ComputerState, &v.PrincipalID, &v.DaemonID, &v.Cleanup, &v.Processes, &v.Revision, &keyPrefix, &v.SetupState, &v.SetupError, &v.HarnessStatuses, &v.HarnessDetails, &v.LastSeenAt, &v.Connectivity, &v.ArchivedAt)
 	if err != nil {
 		return v, err
 	}
@@ -359,7 +359,7 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 func (m *Module) list(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
 	out := []View{}
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(r.Context(), `SELECT request_id::text FROM agent_pairing_computers ORDER BY created_at DESC,id LIMIT 100`)
+		rows, err := tx.Query(r.Context(), `SELECT request_id::text FROM agent_pairing_computers WHERE archived_at IS NULL ORDER BY created_at DESC,id LIMIT 100`)
 		if err != nil {
 			return err
 		}
