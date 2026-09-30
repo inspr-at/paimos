@@ -5,8 +5,11 @@
 // different computer retires every read and timer that was outstanding, so a
 // late answer or failure never restarts polling. Every later read (poll,
 // backoff, rate-limit wait) is armed by schedule() alone, and schedule() refuses
-// once the follow is retired or the last view is finished or failed.
-import { PairingError, getPairingComputer, pairingReadGeneration, pairingStillLive, planPoll, type PairingView } from './agentPairing'
+// once the follow is retired, the last view is finished or failed, or the fixed
+// lifetime would be used up before the read; it asks again when the timer fires.
+import {
+  MAX_REQUEST_POLL_MS, PairingError, getPairingComputer, pairingReadGeneration, pairingStillLive, planPoll, type PairingView,
+} from './agentPairing'
 
 export interface PairingFollowDeps {
   read?: (computerId: string) => Promise<PairingView>
@@ -88,8 +91,11 @@ export class PairingFollow {
    * The only authority for a read that happens later: no other code arms a
    * timer. It refuses when the follow is retired, a read is in flight (it arms
    * the next one when it lands), the last view is finished or failed, or the
-   * polling lifetime is used up. A live wake reads once through poke() and arms
-   * nothing by itself. Returns whether a read was scheduled.
+   * polling lifetime is used up or would be before the read is due (a
+   * Retry-After beyond the lifetime ends the follow; the last view stays as it
+   * is). The same lifetime check runs again when the timer fires, so a tab that
+   * slept past the deadline reads nothing. A live wake reads once through poke()
+   * and arms nothing by itself. Returns whether a read was scheduled.
    */
   private schedule(wait: { rateLimited?: boolean; retryAfterSeconds?: number | null } = {}): boolean {
     this.clearTimer()
@@ -101,10 +107,12 @@ export class PairingFollow {
       failures: this.failures, rateLimited: wait.rateLimited, retryAfterSeconds: wait.retryAfterSeconds,
     })
     if (plan.action === 'stop') return false
+    // The lifetime is measured from startedAt alone; a delay that reaches it never arms.
+    if (Date.now() + plan.delayMs - following.startedAt >= MAX_REQUEST_POLL_MS) return false
     this.timer = setTimeout(() => {
       this.timer = undefined
-      // Asked again at the moment of reading: the view may have settled or the follow been retired.
-      if (this.following === following && this.last && pairingStillLive(this.last)) void this.run()
+      // Asked again at the moment of reading: the view may have settled, the follow been retired or the lifetime run out (a slept tab).
+      if (this.following === following && this.last && pairingStillLive(this.last) && Date.now() - following.startedAt < MAX_REQUEST_POLL_MS) void this.run()
     }, plan.delayMs)
     return true
   }

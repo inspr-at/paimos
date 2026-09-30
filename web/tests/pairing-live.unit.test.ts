@@ -204,6 +204,46 @@ it('a wake that finds the pairing finished stops polling, and a failure after it
   expect(vi.getTimerCount()).toBe(0)
 })
 
+it('a tab that wakes after the lifetime ran out reads nothing', async () => {
+  const { follow, reads, failures } = harness()
+  follow.follow(settingUp())
+  vi.setSystemTime(Date.now() + 20 * 60 * 1000) // the tab slept; the timer fires late
+  await vi.advanceTimersByTimeAsync(5_000)
+  expect(reads).toHaveLength(0)
+  expect(failures).toHaveLength(0)
+  expect(vi.getTimerCount()).toBe(0)
+})
+
+it('a Retry-After beyond the lifetime ends the follow instead of reading later', async () => {
+  const { follow, reads, failures } = harness()
+  follow.follow(settingUp())
+  await vi.advanceTimersByTimeAsync(5_000)
+  expect(reads).toHaveLength(1)
+  reads[0].call.reject(new PairingError(429, 'slow down', { code: 'rate_limited', retryAfterSeconds: 3600 }))
+  await vi.advanceTimersByTimeAsync(0)
+  expect(vi.getTimerCount()).toBe(0)
+  await vi.advanceTimersByTimeAsync(3600 * 1000 * 2)
+  expect(reads).toHaveLength(1)
+  expect(failures).toHaveLength(0)
+})
+
+it('a Retry-After inside the lifetime still waits, and one that reaches the deadline does not', async () => {
+  const { follow, reads } = harness()
+  follow.follow(settingUp())
+  await vi.advanceTimersByTimeAsync(5_000)
+  reads[0].call.reject(new PairingError(429, 'slow down', { code: 'rate_limited', retryAfterSeconds: 120 }))
+  await vi.advanceTimersByTimeAsync(119_000)
+  expect(reads).toHaveLength(1)
+  await vi.advanceTimersByTimeAsync(1_000)
+  expect(reads).toHaveLength(2)
+  // 125 s in; a wait that would land at or past the 600 s deadline never arms.
+  await vi.advanceTimersByTimeAsync(MAX_REQUEST_POLL_MS - 130_000)
+  const before = reads.length
+  reads[before - 1].call.reject(new PairingError(429, 'slow down', { code: 'rate_limited', retryAfterSeconds: 600 }))
+  await vi.advanceTimersByTimeAsync(MAX_REQUEST_POLL_MS * 2)
+  expect(reads).toHaveLength(before)
+})
+
 it('only schedule() arms a timer and only run() reads, so a new path cannot skip the checks', () => {
   const source = readFileSync(new URL('../src/lib/pairingFollow.ts', import.meta.url), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
@@ -213,6 +253,8 @@ it('only schedule() arms a timer and only run() reads, so a new path cannot skip
   const scheduleBody = source.slice(source.indexOf('private schedule('), source.indexOf('private async run('))
   expect(scheduleBody).toContain('setTimeout(')
   expect(scheduleBody).toContain('pairingStillLive(last)')
+  // The lifetime is checked when arming and again when the timer fires.
+  expect(scheduleBody.match(/MAX_REQUEST_POLL_MS/g)!.length).toBeGreaterThanOrEqual(2)
 })
 
 class FakeStream {
