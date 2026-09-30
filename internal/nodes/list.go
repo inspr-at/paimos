@@ -483,7 +483,7 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			var assigneeID, assigneeName, parentID, parentKey, parentTitle, parentKind, projectID, projectKey, projectTitle, epicID, epicKey, epicTitle *string
 			var assigneeAvatar bool
 			var leadName, leadKey *string
-			var listSpent, listEst, paidSpent, paidEst *int64
+			var listSpent, listEst, paidSpent, paidEst *string
 			dest := []any{&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &assigneeAvatar, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle, &leadName, &leadKey}
 			if money != nil {
 				dest = append(dest, &listSpent, &listEst, &paidSpent, &paidEst)
@@ -494,7 +494,12 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 				return err
 			}
 			if money != nil {
-				money[item.ID] = planMicros{listSpent: cloneInt64(listSpent), listEst: cloneInt64(listEst), paidSpent: cloneInt64(paidSpent), paidEst: cloneInt64(paidEst)}
+				parsed, err := planMicrosFromText(listSpent, listEst, paidSpent, paidEst)
+				if err != nil {
+					rows.Close()
+					return err
+				}
+				money[item.ID] = parsed
 			}
 			if leadName != nil && leadKey != nil {
 				item.LeadWorker = &leadWorker{Name: *leadName, Key: *leadKey}
@@ -1092,7 +1097,7 @@ func listOrder(q listQuery) string {
 			parts = append(parts, "route.rank IS NULL ASC", "route.rank "+dir, "route.area IS NULL ASC", "route.area "+dir)
 		case "tokens", "list_cost", "paid":
 			// The same integer the cell prints: spent micro-dollars, else the
-			// estimate. Rounded once in the CTE, then the id tiebreaker.
+			// estimate. Rounded once in the CTE as numeric, then the id tiebreaker.
 			// The amount is a CTE projection, so an expression index cannot
 			// serve it, and rounding inside the usage aggregate does not shrink
 			// the plan: sorting those rows is noise next to building it.
@@ -1165,7 +1170,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	moneyJoin, moneyCols := "", ""
 	if sortsByPlanningValue(q) {
 		moneyJoin = ` LEFT JOIN planning_values pm ON pm.id=n.id`
-		moneyCols = `, pm.list_spent_micros, pm.list_est_micros, pm.paid_spent_micros, pm.paid_est_micros`
+		moneyCols = `, ` + usdMicrosTextSQL("pm.list_spent_micros") + `, ` + usdMicrosTextSQL("pm.list_est_micros") + `, ` + usdMicrosTextSQL("pm.paid_spent_micros") + `, ` + usdMicrosTextSQL("pm.paid_est_micros")
 	}
 	if sortsBy(q, "estimate") {
 		estimateJoin = ` LEFT JOIN LATERAL (` + estimateSQL(`SELECT n.id,n.fields,f.kind_slug FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=f.id`) + `) est ON true`

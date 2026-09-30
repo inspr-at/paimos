@@ -241,6 +241,67 @@ func fixedMicros(usd string) string {
 	return digits
 }
 
+// Five usage rows of $2e12 each sum past a bigint of micro-dollars. The list
+// still returns, with the integer text, numeric order, and six-place display.
+func TestPlanningHugeUsageDoesNotBreakTheList(t *testing.T) {
+	w := planningSetup(t)
+	huge := w.node(t, "BIG-1", "ticket", w.root.ID, "open", nil)
+	mid := w.node(t, "BIG-2", "ticket", w.root.ID, "open", nil)
+	for range 5 {
+		w.session(t, huge.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1000, 0, 0, "api", "")
+	}
+	w.session(t, mid.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1000, 0, 0, "api", "")
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(t.Context(), `UPDATE harness_session_usage u SET estimated_cost_usd=2000000000000::numeric
+			FROM harness_sessions s
+			WHERE u.tenant_id=s.tenant_id AND u.session_id=s.id AND s.tenant_id=$1 AND s.ticket_node_id=ANY($2::uuid[])`,
+			w.admin.TenantID, []string{huge.ID, mid.ID})
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 6 {
+			return fmt.Errorf("priced %d usage rows, want 6", tag.RowsAffected())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][2]string{
+		huge.Key: {"10000000000000.000000", "10000000000000000000"},
+		mid.Key:  {"2000000000000.000000", "2000000000000000000"},
+	}
+	for _, sort := range []string{"key", "list_cost", "paid"} {
+		views := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&q=BIG-&sort="+sort)
+		for key, pair := range want {
+			cost := views[key]
+			if cost == nil || cost.Cost == nil {
+				t.Fatalf("%s via %s: no cost", key, sort)
+			}
+			got := func(p *string) string {
+				if p == nil {
+					return ""
+				}
+				return *p
+			}
+			if got(cost.Cost.ListSpent) != pair[0] || got(cost.Cost.PaidSpent) != pair[0] || got(cost.Cost.ListEstimated) != "" || got(cost.Cost.PaidEstimated) != "" {
+				t.Fatalf("%s via %s display: list %q/%q paid %q/%q", key, sort, got(cost.Cost.ListSpent), got(cost.Cost.ListEstimated), got(cost.Cost.PaidSpent), got(cost.Cost.PaidEstimated))
+			}
+			if got(cost.Cost.ListCostMicros) != pair[1] || got(cost.Cost.PaidMicros) != pair[1] {
+				t.Fatalf("%s via %s micros: list %q paid %q, want %s", key, sort, got(cost.Cost.ListCostMicros), got(cost.Cost.PaidMicros), pair[1])
+			}
+		}
+	}
+	// BIG-2 is one $2e12 row; BIG-1 is five of them. Ascending order follows the numeric.
+	for _, field := range []string{"list_cost", "paid"} {
+		asc := listKeys(t, w.admin, "/api/nodes?within="+w.root.ID+"&q=BIG-&sort="+field)
+		desc := listKeys(t, w.admin, "/api/nodes?within="+w.root.ID+"&q=BIG-&sort=-"+field)
+		if !slices.Equal(asc, []string{mid.Key, huge.Key}) || !slices.Equal(desc, []string{huge.Key, mid.Key}) {
+			t.Fatalf("%s order asc %v desc %v", field, asc, desc)
+		}
+	}
+}
+
 // 1.000001 h × $13.50 is 13.5000135 and rounds once to 13.500014 micro-dollars.
 // A spent row of that same figure ties by id; the neighbouring boundaries do too.
 func TestPlanningCostMicrosAgree(t *testing.T) {

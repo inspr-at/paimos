@@ -5,6 +5,7 @@ package nodes
 import (
 	"encoding/json"
 	"math"
+	"math/big"
 	"regexp"
 	"slices"
 	"strconv"
@@ -128,7 +129,11 @@ func TestPlanningSampleOf(t *testing.T) {
 }
 
 func TestSortMicrosDecimal(t *testing.T) {
-	n := func(v int64) *int64 { return &v }
+	n := func(v int64) *big.Int { return big.NewInt(v) }
+	huge, ok := new(big.Int).SetString("10000000000000000000", 10)
+	if !ok {
+		t.Fatal("huge micros")
+	}
 	got := sortMicros(n(10000000000000001), n(1))
 	if got == nil || *got != "10000000000000001" {
 		t.Fatalf("spent wins: %v", got)
@@ -137,7 +142,11 @@ func TestSortMicrosDecimal(t *testing.T) {
 	if got == nil || *got != "10000000000000002" {
 		t.Fatalf("estimate: %v", got)
 	}
-	if sortMicros(nil, nil) != nil || sortMicros(n(-1), nil) != nil {
+	got = sortMicros(huge, n(1))
+	if got == nil || *got != "10000000000000000000" {
+		t.Fatalf("past int64: %v", got)
+	}
+	if sortMicros(nil, nil) != nil || sortMicros(big.NewInt(-1), nil) != nil {
 		t.Fatal("absent or negative")
 	}
 	zero := sortMicros(n(0), n(9_000_000))
@@ -147,18 +156,23 @@ func TestSortMicrosDecimal(t *testing.T) {
 }
 
 func TestUSDFromMicros(t *testing.T) {
-	n := func(v int64) *int64 { return &v }
+	n := func(v int64) *big.Int { return big.NewInt(v) }
+	huge, ok := new(big.Int).SetString("10000000000000000000", 10)
+	if !ok {
+		t.Fatal("huge micros")
+	}
 	cases := []struct {
-		in   *int64
+		in   *big.Int
 		want string
 	}{
 		{nil, ""},
-		{n(-1), ""},
+		{big.NewInt(-1), ""},
 		{n(0), "0.000000"},
 		{n(13500014), "13.500014"},
 		{n(13500013), "13.500013"},
 		{n(2500001), "2.500001"},
 		{n(100000000123457), "100000000.123457"},
+		{huge, "10000000000000.000000"},
 	}
 	for _, tc := range cases {
 		got := usdFromMicros(tc.in)
@@ -170,6 +184,26 @@ func TestUSDFromMicros(t *testing.T) {
 		}
 		if got == nil || *got != tc.want {
 			t.Fatalf("%v = %v, want %s", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestMicrosFromText(t *testing.T) {
+	huge := "10000000000000000000"
+	got, err := microsFromText(&huge)
+	if err != nil || got == nil || got.String() != huge {
+		t.Fatalf("huge: %v %v", got, err)
+	}
+	if v, err := microsFromText(nil); err != nil || v != nil {
+		t.Fatalf("nil: %v %v", v, err)
+	}
+	blank := "  "
+	if v, err := microsFromText(&blank); err != nil || v != nil {
+		t.Fatalf("blank: %v %v", v, err)
+	}
+	for _, bad := range []string{"1.5", "-1", "1e19", "abc"} {
+		if _, err := microsFromText(&bad); err == nil {
+			t.Fatalf("accepted %q", bad)
 		}
 	}
 }

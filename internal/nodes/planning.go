@@ -473,52 +473,95 @@ func sampleOf(lines []usageLine, seconds map[string]float64) (calibrationSample,
 }
 
 // usdPlaces is the precision list and paid amounts are projected with.
-// SQL rounds once to this many decimal places, as integer micro-dollars,
-// and the API prints that integer. Nothing multiplies the rate again in Go.
+// SQL rounds once to this many decimal places, as an integer numeric of
+// micro-dollars, and the API prints that integer. Nothing multiplies the
+// rate again in Go.
 const usdPlaces = 6
 
 // usdMicrosSQL rounds a non-negative USD amount to integer micro-dollars,
-// half away from zero, once. NULL stays NULL.
+// half away from zero, once. The result stays numeric, so a summed cost of
+// any accepted size still comes back with the list. NULL stays NULL.
+// Scans cast it with usdMicrosTextSQL; ORDER BY compares the numeric.
 func usdMicrosSQL(expr string) string {
-	return `round((` + expr + `)::numeric * 1000000)::bigint`
+	return `(round((` + expr + `)::numeric * 1000000))::numeric`
+}
+
+// usdMicrosTextSQL is one micro-dollar numeric as an integer decimal string.
+func usdMicrosTextSQL(expr string) string {
+	return `(` + expr + `)::text`
 }
 
 // planMicros is the list and paid amounts for one row, in micro-dollars.
 // Spent is usage; est is the hour estimate. Nil means that figure is absent.
+// The integers are arbitrary precision: five large usage rows sum past int64.
 type planMicros struct {
-	listSpent, listEst, paidSpent, paidEst *int64
+	listSpent, listEst, paidSpent, paidEst *big.Int
 }
 
-func cloneInt64(p *int64) *int64 {
-	if p == nil {
-		return nil
+// microsFromText parses one numeric::text micro-dollar integer into a new
+// value, so a reused scan buffer cannot alias the previous row. NULL is absent.
+func microsFromText(s *string) (*big.Int, error) {
+	if s == nil {
+		return nil, nil
 	}
-	v := *p
-	return &v
+	text := strings.TrimSpace(*s)
+	if text == "" {
+		return nil, nil
+	}
+	n, ok := new(big.Int).SetString(text, 10)
+	if !ok || n.Sign() < 0 {
+		return nil, fmt.Errorf("planning micro-dollars %q", text)
+	}
+	return n, nil
 }
 
-// usdFromMicros prints the SQL integer at six decimal places.
-func usdFromMicros(v *int64) *string {
-	if v == nil || *v < 0 {
+func planMicrosFromText(listSpent, listEst, paidSpent, paidEst *string) (planMicros, error) {
+	var m planMicros
+	var err error
+	if m.listSpent, err = microsFromText(listSpent); err != nil {
+		return planMicros{}, err
+	}
+	if m.listEst, err = microsFromText(listEst); err != nil {
+		return planMicros{}, err
+	}
+	if m.paidSpent, err = microsFromText(paidSpent); err != nil {
+		return planMicros{}, err
+	}
+	if m.paidEst, err = microsFromText(paidEst); err != nil {
+		return planMicros{}, err
+	}
+	return m, nil
+}
+
+// usdFromMicros prints the integer micro-dollar amount at six decimal places.
+// The split is integer division, so a total past the float64 mantissa stays exact.
+func usdFromMicros(v *big.Int) *string {
+	if v == nil || v.Sign() < 0 {
 		return nil
 	}
-	n := *v
-	s := fmt.Sprintf("%d.%0*d", n/1_000_000, usdPlaces, n%1_000_000)
+	scale := big.NewInt(1_000_000)
+	whole := new(big.Int)
+	frac := new(big.Int)
+	whole.QuoRem(new(big.Int).Set(v), scale, frac)
+	digits := frac.String()
+	if len(digits) < usdPlaces {
+		digits = strings.Repeat("0", usdPlaces-len(digits)) + digits
+	}
+	s := whole.String() + "." + digits
 	return &s
 }
 
 // sortMicros is the integer the list orders by: spent when SQL produced it,
-// otherwise the estimate. A decimal string keeps every micro-dollar, including
-// values a JSON number cannot tell apart.
-func sortMicros(spent, est *int64) *string {
+// otherwise the estimate. The decimal string is that integer; SQL ordered the numeric.
+func sortMicros(spent, est *big.Int) *string {
 	v := spent
 	if v == nil {
 		v = est
 	}
-	if v == nil || *v < 0 {
+	if v == nil || v.Sign() < 0 {
 		return nil
 	}
-	s := strconv.FormatInt(*v, 10)
+	s := v.String()
 	return &s
 }
 
@@ -793,7 +836,7 @@ func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeS
         WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.deleted_at IS NULL
             AND n.id = ANY($1::uuid[]) AND k.slug IN ('ticket','task','epic')
     )`+planningSortSQL("$2", "$3", "$4", true)+`
-    SELECT id::text, list_spent_micros, list_est_micros, paid_spent_micros, paid_est_micros
+    SELECT id::text, `+usdMicrosTextSQL("list_spent_micros")+`, `+usdMicrosTextSQL("list_est_micros")+`, `+usdMicrosTextSQL("paid_spent_micros")+`, `+usdMicrosTextSQL("paid_est_micros")+`
     FROM planning_values`, ids, string(rates), seen.harnessAll, projects)
 	if err != nil {
 		return nil, err
@@ -801,8 +844,12 @@ func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeS
 	defer rows.Close()
 	for rows.Next() {
 		var id string
-		var m planMicros
-		if err := rows.Scan(&id, &m.listSpent, &m.listEst, &m.paidSpent, &m.paidEst); err != nil {
+		var listSpent, listEst, paidSpent, paidEst *string
+		if err := rows.Scan(&id, &listSpent, &listEst, &paidSpent, &paidEst); err != nil {
+			return nil, err
+		}
+		m, err := planMicrosFromText(listSpent, listEst, paidSpent, paidEst)
+		if err != nil {
 			return nil, err
 		}
 		out[id] = m
