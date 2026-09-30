@@ -17,7 +17,7 @@ import AppIcon from '../AppIcon.vue'
 import AccountDetail from './AccountDetail.vue'
 import HarnessMark from './HarnessMark.vue'
 
-// Settings → Accounts (AEON-384): every vendor account, grouped by vendor,
+// Settings / Accounts (AEON-384): every vendor account, grouped by vendor,
 // with how Aeon reads it and whether agents may use it. A row opens its
 // detail inline: name, windows, last readings and the Advanced limit. There is
 // no allowance form: limits are observed, and a limit by hand is one sentence.

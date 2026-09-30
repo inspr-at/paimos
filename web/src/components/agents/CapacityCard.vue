@@ -6,6 +6,7 @@ import {
   accountPlan, daysLabel, daysSummary, gauge as gaugeOf, gaugeModeFor, nightLabel, pct, poolSentence, reserveLabel, reserveLevel, sameAccountCopy, usingNow, clone, putSchedule, setGlobalMode, sourceLine, timeLabel, todayCell, toggleAccountMode, when, whenFull, workStart,
   type AccountRow, type CapacitySchedule, type CapacityWindow, type GaugeMode, type Override, type PoolView,
 } from '../../lib/capacity'
+import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
 import { useAgents } from '../../stores/agents'
 import { useCapacity } from '../../stores/capacity'
@@ -22,7 +23,7 @@ import ScheduleEditor from './ScheduleEditor.vue'
 // The accounts agents work on, per vendor pool: what is left, what is kept for
 // you, today's share and where to stop tonight, one plan sentence per pool, and
 // the pacing controls (work days, Keep for you, nights) with a popover each.
-// Sign-ins, names and which accounts agents may use live in Settings → Accounts.
+// Sign-ins, names and which accounts agents may use live in Settings / Accounts.
 const capacity = useCapacity()
 const agents = useAgents()
 const session = useSession()
@@ -45,7 +46,7 @@ const DOT_TIP: Record<AccountRow['state'], (row: AccountRow) => string> = {
   offline: row => `${row.host} is offline`,
   signin: () => 'Sign-in expired',
   unavailable: row => `Could not check this account on ${row.host}; agents skip it until the next check`,
-  paused: () => 'Paused in Settings, under Accounts',
+  paused: row => row.disconnecting ? `Disconnecting from ${row.host}: no new work` : 'Paused in Settings / Accounts',
   unread: () => 'Signed in; no reading yet',
 }
 function gaugeLabel(row: AccountRow) {
@@ -69,6 +70,40 @@ const globalMode = computed(() => capacity.gauge?.mode ?? 'left')
 async function copyCommand(row: AccountRow, command: string) {
   try { await navigator.clipboard?.writeText(command) } catch { /* the toast still names it */ }
   toast(`Copied: ${command} — run it on ${row.host}.`)
+}
+
+// ---------- Remove an account (AEON-402) ----------
+// Person-only. The confirmation names what goes away; the server refuses while a
+// run works on it, and keeps the runs and history.
+const removing = ref('')
+async function removeAccount(row: AccountRow) {
+  if (removing.value || !mayManage.value) return
+  const queued = Object.values(agents.runs).filter(run => run.status === 'queued' && (run.account_id === row.id || run.requested_account_id === row.id)).length
+  const bound = capacity.computers.some(c => c.computer_state !== 'revoked' && c.enrollments.some(e => e.account_id === row.id && e.state !== 'revoked'))
+  const ok = await confirmAction({
+    title: `Remove ${row.name}?`,
+    body: 'It leaves Accounts and agents stop using it. Its runs and history stay.',
+    points: [
+      bound && row.host ? `Its binding on ${row.host} is disconnected.` : '',
+      queued ? `${queued === 1 ? 'One queued run' : `${queued} queued runs`} for it ${queued === 1 ? 'is' : 'are'} cancelled.` : '',
+    ].filter(Boolean),
+    confirmLabel: 'Remove account', danger: true,
+  })
+  if (!ok) return
+  const rows = [...(card.value?.querySelectorAll<HTMLElement>('.acct-remove') ?? [])]
+  const index = rows.findIndex(el => el.dataset.account === row.id)
+  removing.value = row.id
+  try {
+    await agents.removeAccount(row)
+    void capacity.load()
+    toast(`Removed ${row.name}. Its runs and history stay.`)
+    await nextTick()
+    const left = [...(card.value?.querySelectorAll<HTMLElement>('.acct-remove') ?? [])]
+    ;(left[Math.min(index, left.length - 1)] ?? card.value?.querySelector<HTMLElement>('#cap-title'))?.focus()
+  } catch (e) {
+    const busyRun = e instanceof Error && /still working/i.test(e.message)
+    toast(busyRun ? `A run is still working on ${row.name}. Remove it once that run ends.` : e instanceof Error ? e.message : 'The account was not removed. Please try again.', { tone: 'error' })
+  } finally { removing.value = '' }
 }
 
 // ---------- Simple controls ----------
@@ -288,7 +323,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
   <section ref="card" class="cap glass-card" aria-labelledby="cap-title">
     <div class="cap-head">
       <div class="cap-title">
-        <h2 id="cap-title">Accounts</h2>
+        <h2 id="cap-title" tabindex="-1">Accounts</h2>
         <span v-if="capacity.ready.total" class="cap-meta">{{ capacity.ready.live }} of {{ capacity.ready.total }} ready</span>
         <span v-if="capacity.away" class="away-chip" :data-tip="`Away: agents use everything left until ${whenFull(capacity.away)}`">
           Away until {{ when(capacity.away, now) }}
@@ -355,7 +390,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
         </div>
         <p class="plan" :class="{ ahead: sentence(pool).ahead }"><PlanSentence :sentence="sentence(pool)" /></p>
       </div>
-      <ul class="accts">
+      <ul class="accts" :class="{ manage: mayManage }">
         <li v-for="row in pool.rows" :key="row.id" class="acct" :class="{ dim: row.state !== 'live' && row.state !== 'unread', ahead: planOf(row)?.ahead }" :data-account="row.id">
           <div class="acct-name" :class="{ 'has-pi-model': piModelOf(row.id) }">
             <span class="dot" :class="row.state" :data-tip="DOT_TIP[row.state](row)"><span class="sr-only">{{ DOT_TIP[row.state](row) }}</span></span>
@@ -390,7 +425,11 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
             <span v-else class="today quiet" :data-tip="cell.text">{{ cell.text }}</span>
           </template>
           <span class="resets" :data-tip="row.primary ? whenFull(row.primary.reading.resets_at) : undefined">{{ row.primary ? `resets ${when(row.primary.reading.resets_at, now)}` : '' }}</span>
-          <span v-if="!row.sharedQuotaName" class="source" :title="sourceLine(row, now)">{{ sourceLine(row, now) }}</span>
+          <span class="source" :title="row.sharedQuotaName ? undefined : sourceLine(row, now)">{{ row.sharedQuotaName ? '' : sourceLine(row, now) }}</span>
+          <button
+            v-if="mayManage" type="button" class="icon-btn sm flat acct-remove" :data-account="row.id" :disabled="!!removing"
+            :aria-label="`Remove ${row.name}`" data-tip="Remove" @click="removeAccount(row)"
+          ><AppIcon name="trash" :size="15" /></button>
           <CapacityLearning class="row-learning" :learning="row.learning" :host="row.host" :now="now" :may-manage="mayManage" :saving="busy" @hours="useHours(row)" @away="openEditor('keep', $event)" />
         </li>
       </ul>
@@ -559,6 +598,10 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
 .today.kept { color: var(--gold-ink); font-weight: 600; }
 .source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; text-align: right; }
 .acct.dim .gauge, .acct.dim .left, .acct.dim .resets { opacity: .6; }
+/* Remove: a quiet trailing icon on rows a person may manage (AEON-402). */
+.accts.manage .acct { grid-template-columns: minmax(0, 180px) minmax(140px, 1fr) 72px minmax(0, 120px) 150px minmax(0, 180px) 28px; }
+.acct-remove { width: 28px; height: 28px; color: var(--ink-3); }
+@media (hover: hover) { .acct-remove { opacity: .55; } .acct:hover .acct-remove, .acct-remove:focus-visible { opacity: 1; } }
 .win5 { margin-top: 5px; color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .win5 b { color: var(--ink-2); font-weight: 600; }
 
@@ -589,9 +632,11 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
 @container cap (min-width: 1265px) {
   .pool { grid-template-columns: 330px minmax(0, 1fr); gap: 28px; }
   .acct { grid-template-columns: minmax(0, 170px) minmax(160px, 1fr) 74px minmax(0, 124px) 150px minmax(0, 204px); }
+  .accts.manage .acct { grid-template-columns: minmax(0, 170px) minmax(160px, 1fr) 74px minmax(0, 124px) 150px minmax(0, 204px) 28px; }
 }
 @container cap (max-width: 1044px) {
   .acct { grid-template-columns: minmax(0, 150px) minmax(120px, 1fr) 68px minmax(0, 110px) 150px; }
+  .accts.manage .acct { grid-template-columns: minmax(0, 150px) minmax(120px, 1fr) 68px minmax(0, 110px) 150px 28px; }
   .source { display: none; }
 }
 @container cap (max-width: 1000px) {
@@ -645,6 +690,8 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .row-learning { grid-area: learned; }
   .source { grid-area: source; display: block; text-align: left; font-size: 11.5px; }
   .source:empty { display: none; }
+  .accts.manage .acct { grid-template-columns: minmax(0, 1fr) auto 40px; grid-template-areas: "name left rm" "gauge gauge gauge" "today resets resets" "source source source" "learned learned learned"; }
+  .acct-remove { grid-area: rm; justify-self: end; width: 40px; height: 40px; margin-right: -8px; opacity: 1; }
   .today .btn { min-height: 36px; }
   .cap-foot { gap: 8px 14px; padding: 12px 14px; }
   .fine { width: 100%; margin-left: 0; }

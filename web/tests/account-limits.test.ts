@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-384: the Advanced sentence, limits set by hand before it, and the words
-// Settings → Accounts uses for readings and money.
+// Settings / Accounts uses for readings and money.
 import { afterEach, test } from 'node:test'
 import assert from 'node:assert/strict'
 import {

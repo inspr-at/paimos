@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-384: Settings → Accounts as a list with an inline detail. Windows with
+// AEON-384: Settings / Accounts as a list with an inline detail. Windows with
 // source and freshness, the last readings, inline rename with "Name it", the
 // Advanced sentence, old limits as "Set by you" (Remove, Make this repeat) and
 // money for an API key. No form asks for start, end, unit, pace or burst.

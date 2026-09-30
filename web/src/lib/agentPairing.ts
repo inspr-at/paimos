@@ -148,6 +148,8 @@ export interface PairingView {
   harness_details?: Partial<Record<string, HarnessDetail>>
   setup_error?: string | null
   last_seen_at?: string | null
+  /** Set once a person removed the computer; removed computers leave the list (AEON-402). */
+  archived_at?: string
   /** Recent probe evidence. Unknown and offline do not prove that local work stopped. */
   connectivity?: Connectivity
   /** Open run accounting. Unconfirmed means revoke did not settle it. */
@@ -600,10 +602,19 @@ export function connectDisabledReason(input: {
   if (input.busy === 'approve') return 'Connecting this computer…'
   if (input.busy === 'deny') return 'Denying this request…'
   if (input.busy) return 'Wait for the current action to finish.'
-  if (!input.canApprove) return 'Only a signed-in person who can manage accounts can connect this computer.'
+  if (!input.canApprove) return 'Only a signed-in person who can manage accounts can connect or deny this computer.'
   if (!input.selectedAccountKeys.length) return 'Choose at least one harness.'
   if (input.targetProblem?.code === 'name') return 'The computer name must match the computer you opened.'
   if (input.targetProblem) return 'Use the matching code, or review this as a new computer.'
+  return null
+}
+
+/** Deny is never disabled silently either (AEON-402); its reason shares Connect's line. */
+export function denyDisabledReason(input: { busy: string; canDeny: boolean }): string | null {
+  if (input.busy === 'deny') return 'Denying this request…'
+  if (input.busy === 'approve') return 'Connecting this computer…'
+  if (input.busy) return 'Wait for the current action to finish.'
+  if (!input.canDeny) return 'Only a signed-in person who can manage accounts can connect or deny this computer.'
   return null
 }
 
@@ -1229,6 +1240,24 @@ export async function disconnectComputer(view: PairingView, mode: DisconnectMode
   return oneFlight(`disconnect:${view.computer_id}:${mode}:${body.expected_revision}`, () => personJson(`/agent-pairing/computers/${pathId(view.computer_id!)}/disconnect`, 'POST', body, signal).then(parseView))
 }
 
+/**
+ * Remove, for a computer that is revoked, or approved but never confirmed
+ * (AEON-402). The server archives it with its account bindings; the history
+ * stays. Open run accounting keeps it listed. `reason` says why not, or ''.
+ */
+export function computerRemoval(view: Pick<PairingView, 'computer_id' | 'computer_state' | 'state' | 'last_seen_at' | 'enrollments'>, permissions: Pick<PairingPermissions, 'canDisconnect'>): { allowed: boolean; reason: string } {
+  if (!view.computer_id || !permissions.canDisconnect) return { allowed: false, reason: '' }
+  const neverConfirmed = view.computer_state !== 'revoked' && view.state !== 'redeemed' && !view.last_seen_at
+  if (view.computer_state !== 'revoked' && !neverConfirmed) return { allowed: false, reason: '' }
+  if (view.enrollments.some(item => item.active_run_ids.length)) return { allowed: false, reason: 'A run on this computer is not settled yet.' }
+  return { allowed: true, reason: '' }
+}
+
+export async function removeComputer(view: PairingView, permissions: PairingPermissions, signal?: AbortSignal): Promise<PairingView> {
+  if (!computerRemoval(view, permissions).allowed) throw new PairingError(0, 'This computer cannot be removed yet.', { code: 'blocked', next: 'Disconnect it first, and wait until its runs are settled.' })
+  return oneFlight(`remove:${view.computer_id}`, () => personJson(`/agent-pairing/computers/${pathId(view.computer_id!)}/remove`, 'POST', undefined, signal).then(parseView))
+}
+
 export async function disconnectEnrollment(view: PairingView, accountId: string, mode: DisconnectMode, permissions: PairingPermissions, signal?: AbortSignal): Promise<PairingView> {
   if (!view.computer_id) throw new PairingError(0, 'This enrollment is not on a connected computer.', { code: 'invalid_request', next: 'Refresh the computer list and choose the enrollment again.' })
   const enrollment = view.enrollments.find(item => item.account_id === accountId)
@@ -1371,6 +1400,14 @@ function explain(status: number, code: string, serverMessage: string, retryAfter
     enrollment_draining: {
       message: 'That harness is finishing current work.',
       next: 'Wait for its runs to finish. This page will not stop them.',
+    },
+    computer_connected: {
+      message: 'This computer is still connected.',
+      next: 'Disconnect it first. A connected computer is never removed from the list.',
+    },
+    runs_unsettled: {
+      message: 'A run on this computer is not settled yet.',
+      next: 'The computer stays listed until its runs report back or are settled.',
     },
     authorization_pending: {
       message: 'The computer is still waiting for approval.',
@@ -1546,6 +1583,7 @@ function parseView(data: unknown): PairingView {
   else if (record.setup_error === null || record.setup_error === '') view.setup_error = null
   if (record.last_seen_at === null) view.last_seen_at = null
   else if (typeof record.last_seen_at === 'string' && Number.isFinite(Date.parse(record.last_seen_at))) view.last_seen_at = record.last_seen_at
+  if (typeof record.archived_at === 'string' && Number.isFinite(Date.parse(record.archived_at))) view.archived_at = record.archived_at
   const connectivity = optionalEnum(record.connectivity, CONNECTIVITY)
   if (connectivity) view.connectivity = connectivity
   const accounting = readAccounting(record.accounting_state, 'accounting_state')

@@ -47,6 +47,7 @@ export const useCapacity = defineStore('capacity', () => {
       fingerprint: a.quota_fingerprint, groupId: a.group_id, groupName: a.group_name,
       // The computer's setup flag is computer-wide; sign-ins are judged per account (probe_failure).
       connectivity: computer?.connectivity,
+      disconnecting: computer?.enrollments.some(e => e.account_id === a.id && e.state === 'draining') ?? false,
     }
   }))
   const rows = computed(() => buildRows(inputs.value, capacityRead.data.value))
@@ -175,7 +176,7 @@ export const useCapacity = defineStore('capacity', () => {
   const setGauge = (next: GaugePreference) => gaugePref.save(next, 0)
 
   return {
-    state, loaded, stale, load, inputs, rows, byAccount, refreshCapacity: capacityRead.refresh, pools, ready, signins, schedule, timezone, saveSchedule, setPreset, setNights, setPoolOverride, gauge, setGauge,
+    state, loaded, stale, load, inputs, rows, byAccount, computers: computersRead.data, computersLoaded: computed(() => computersRead.status.value.updatedAt !== null), refreshCapacity: capacityRead.refresh, pools, ready, signins, schedule, timezone, saveSchedule, setPreset, setNights, setPoolOverride, gauge, setGauge,
     schedulesLoaded, away, reserveConfirmed, hasUserSchedule, poolReserves, saveKeep, confirmReserve, endAway,
     invalidate: () => { capacityRead.invalidate(); schedulesRead.invalidate(); computersRead.invalidate() },
   }

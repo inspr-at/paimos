@@ -4,7 +4,7 @@ import { computed, ref } from 'vue'
 import { APIError, getNode } from '../lib/api'
 import {
   decideApproval, getControl, listAccounts, listAllSessions, listApprovals, listMessages, listModels, listRuns, listTargets, requestManagedControl,
-  requestControl, resolveMessage, revokeApproval, sendMessage, setAccountState,
+  requestControl, resolveMessage, revokeApproval, sendMessage, setAccountState, archiveAccount, cancelRun,
   type AgentAccount, type AgentRun, type Approval, type HarnessSession, type ModelProfile, type ProjectMessage, type SessionControl,
 } from '../lib/agents'
 import { agentName, harnessLabel, heldRequests, mergeSessionEvidence, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
@@ -346,6 +346,14 @@ export const useAgents = defineStore('agents', () => {
     const updated = await setAccountState(account.id, state)
     accounts.value = accounts.value.map(a => a.id === account.id ? { ...a, ...updated } : a)
   }
+  // Remove leaves the list at once; its runs and history stay on the server (AEON-402).
+  async function removeAccount(account: Pick<AgentAccount, 'id'>) {
+    await archiveAccount(account.id)
+    accounts.value = accounts.value.filter(a => a.id !== account.id)
+  }
+  async function cancelQueuedRun(run: Pick<AgentRun, 'id'>) {
+    mergeRuns([await cancelRun(run.id)])
+  }
   function tick() { now.value = Math.max(now.value, Date.now()) }
   // Bumped by delivery events (AEON-280); an open chat re-reads its message status.
   const deliveryPulse = ref(0)
@@ -355,7 +363,7 @@ export const useAgents = defineStore('agents', () => {
     now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, models, eventPulseFor,
     loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordRemoval, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshAccounts, refreshSessions, refreshThread, refreshAgentRuns, tick, deliveryPulse, deliveryChanged,
-    viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount,
+    viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount, removeAccount, cancelQueuedRun,
     invalidatePolls: () => { sessionsRead.invalidate(); approvalsRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate() },
     recordRun: (run: AgentRun) => mergeRuns([run]),
   }
