@@ -33,7 +33,7 @@ type ClientReport struct {
 
 func (c ClientReport) Validate() error {
 	if c.MaxSessionFileBytes != nil && (*c.MaxSessionFileBytes < MinBudgetBytes || *c.MaxSessionFileBytes > MaxBytes) {
-		return fail(400, "invalid_client_limit", "max_session_file_bytes must be between 2000 and 64000")
+		return fail(400, "invalid_client_limit", fmt.Sprintf("max_session_file_bytes must be between %d and %d", MinBudgetBytes, MaxBytes))
 	}
 	if c.RulesClientVersion != nil && (!line(*c.RulesClientVersion, 80, true) || strings.TrimSpace(*c.RulesClientVersion) != *c.RulesClientVersion) {
 		return fail(400, "invalid_client_limit", "rules_client_version must be one line of at most 80 bytes")
@@ -77,14 +77,16 @@ func RecordClientReport(ctx context.Context, tx pgx.Tx, session string, c Client
 }
 
 type ClientBlocker struct {
-	Host    string `json:"host"`
-	Harness string `json:"harness"`
-	Version string `json:"version,omitempty"`
-	Maximum int    `json:"max_session_file_bytes"`
+	Host              string `json:"host"`
+	Harness           string `json:"harness"`
+	Version           string `json:"version,omitempty"`
+	Maximum           int    `json:"max_session_file_bytes"`
+	DeliveredMaxBytes int    `json:"delivered_max_bytes"`
+	Truncated         bool   `json:"truncated"`
 }
 
 // maxBlockingClients bounds the admin inventory. The rest is a count, not a
-// second page: the ceiling is still the minimum across every matching session.
+// second page. Inventory is diagnostic and never restricts the product ceiling.
 const maxBlockingClients = 50
 
 func listedBlockers(all []ClientBlocker) ([]ClientBlocker, int) {
@@ -104,25 +106,15 @@ func clientCeiling(ctx context.Context, tx pgx.Tx) (int, []ClientBlocker, error)
 		return 0, nil, err
 	}
 	defer rows.Close()
-	ceiling, count := MaxBytes, 0
 	blockers := []ClientBlocker{}
 	for rows.Next() {
 		var b ClientBlocker
 		if err := rows.Scan(&b.Host, &b.Harness, &b.Version, &b.Maximum); err != nil {
 			return 0, nil, err
 		}
-		count++
-		ceiling = min(ceiling, b.Maximum)
-		if b.Maximum < MaxBytes {
-			blockers = append(blockers, b)
-		}
+		blockers = append(blockers, b)
 	}
-	// A report under the legacy default must not make the editor refuse 12,000.
-	// putBudget already accepts that default; the published ceiling matches it.
-	if count == 0 || ceiling < LegacyMaxBytes {
-		ceiling = LegacyMaxBytes
-	}
-	return ceiling, blockers, rows.Err()
+	return MaxBudgetBytes, blockers, rows.Err()
 }
 
 func RequestMaximum(r *http.Request) (int, error) {
@@ -135,7 +127,7 @@ func RequestMaximum(r *http.Request) (int, error) {
 	}
 	n, err := strconv.Atoi(values[0])
 	if err != nil || n < MinBudgetBytes || n > MaxBytes {
-		return 0, fail(400, "invalid_client_limit", "client byte limit must be between 2000 and 64000")
+		return 0, fail(400, "invalid_client_limit", fmt.Sprintf("client byte limit must be between %d and %d", MinBudgetBytes, MaxBytes))
 	}
 	return n, nil
 }
@@ -155,8 +147,9 @@ func MergeDeliveredForClient(c Context, snapshots []Snapshot, now time.Time, b B
 	if maximum < MinBudgetBytes || maximum > MaxBytes {
 		return Merged{}, fail(400, "invalid_client_limit", "invalid client byte limit")
 	}
-	m, err := MergeDeliveredWithin(c, snapshots, now, b, cat)
 	legacyEnvelope := maximum <= LegacyMaxBytes
+	maximum = min(maximum, b.MaxBytes)
+	m, err := MergeDeliveredWithin(c, snapshots, now, b, cat)
 	if err != nil || (m.ByteSize <= maximum && (!legacyEnvelope || encodedSize(m) <= legacyBundleBytes)) {
 		return m, err
 	}
@@ -194,7 +187,10 @@ func MergeDeliveredForClient(c Context, snapshots []Snapshot, now time.Time, b B
 	}
 	ordered := slices.Clone(m.Rules)
 	slices.SortStableFunc(ordered, func(a, b Rule) int {
-		return rendered.from[a.Identity].Scope.rank() - rendered.from[b.Identity].Scope.rank()
+		if d := rendered.from[a.Identity].Scope.rank() - rendered.from[b.Identity].Scope.rank(); d != 0 {
+			return d
+		}
+		return strings.Compare(a.Identity, b.Identity)
 	})
 	for _, r := range ordered {
 		if r.Strength == "locked" {

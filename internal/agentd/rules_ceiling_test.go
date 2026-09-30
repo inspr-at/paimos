@@ -42,22 +42,27 @@ func TestClaudeBridgeRulesByteCeiling(t *testing.T) {
 	if err = os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, size := range []int{12000, 12001, rules.MaxBytes, rules.MaxBytes + 1} {
-		t.Run(fmt.Sprint(size), func(t *testing.T) {
-			// UTF-8 and JSON escaping must not be confused with decoded byte size.
-			body := strings.Repeat("界\"", size/4) + strings.Repeat("x", size%4)
-			raw, _ := json.Marshal(map[string]any{"op": "start", "prompt": "fixture", "rules": body, "purpose": "pairing_verification", "capabilities": []string{}})
-			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-			defer cancel()
-			cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, "/bin/true", root, "fixture", fmt.Sprint(size))
-			cmd.Stdin = strings.NewReader(string(raw) + "\n")
-			out, err := cmd.CombinedOutput()
-			if (err == nil) != (size <= rules.MaxBytes) {
-				t.Fatalf("bridge %d: %v %s", size, err, out)
-			}
-			if size <= rules.MaxBytes && !strings.Contains(string(out), `"kind":"turn_completed"`) {
-				t.Fatalf("rules not consumed: %s", out)
-			}
-		})
+	for _, size := range []int{12000, 12001, rules.MaxBudgetBytes, rules.MaxBytes, rules.MaxBytes + 1} {
+		for _, escaped := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%d/escaped-%t", size, escaped), func(t *testing.T) {
+				// UTF-8 and JSON escaping must not be confused with decoded byte size.
+				body := strings.Repeat("界\"", size/4) + strings.Repeat("x", size%4)
+				if escaped {
+					body = strings.Repeat("<", size)
+				}
+				raw, _ := json.Marshal(map[string]any{"op": "start", "prompt": "fixture", "rules": body, "purpose": "pairing_verification", "capabilities": []string{}})
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, "/bin/true", root, "fixture", fmt.Sprint(size))
+				cmd.Stdin = strings.NewReader(string(raw) + "\n")
+				out, err := cmd.CombinedOutput()
+				if (err == nil) != (size <= rules.MaxBytes) {
+					t.Fatalf("bridge %d: %v %s", size, err, out)
+				}
+				if size <= rules.MaxBytes && !strings.Contains(string(out), `"kind":"turn_completed"`) {
+					t.Fatalf("rules not consumed: %s", out)
+				}
+			})
+		}
 	}
 }
