@@ -13,19 +13,24 @@ done
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 # Docker Desktop/Colima share the home tree but need not share macOS /tmp.
-mkdir -p "$HOME/.cache"
-tmp="$(mktemp -d "$HOME/.cache/aeon-smoke.XXXXXXXX")"
+tmp_root="${AEON_SMOKE_TMP_ROOT:-$HOME/.cache}"
+mkdir -p "$tmp_root"
+tmp="$(mktemp -d "$tmp_root/aeon-smoke.XXXXXXXX")"
 suffix="$(openssl rand -hex 5)"
 db="aeon-smoke-db-$suffix"
 app="aeon-smoke-app-$suffix"
 network="aeon-smoke-$suffix"
 volume="aeon-smoke-files-$suffix"
-image="aeon-smoke:$suffix"
+# CI loads a cached build and passes its immutable image ID. Standalone runs
+# still build their own disposable image. Never remove a caller-owned image.
+image="${AEON_SMOKE_IMAGE:-aeon-smoke:$suffix}"
 cleanup() {
   docker container rm -f "$app" "$db" >/dev/null 2>&1 || true
   docker volume rm "$volume" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
-  docker image rm "$image" >/dev/null 2>&1 || true
+  if [[ -z "${AEON_SMOKE_IMAGE:-}" ]]; then
+    docker image rm "$image" >/dev/null 2>&1 || true
+  fi
   if command -v trash >/dev/null 2>&1; then
     trash "$tmp"
   else
@@ -66,8 +71,12 @@ if [[ "$(docker run --rm -v "$files_mount:/data/files" alpine:3.24 stat -c '%u:%
   files_mount="$volume"
 fi
 
-echo 'Building release image for smoke gate'
-docker build --build-arg "VERSION=${AEON_SMOKE_VERSION:-dev}" -t "$image" .
+if [[ -n "${AEON_SMOKE_IMAGE:-}" ]]; then
+  echo 'Using prebuilt release image for smoke gate'
+else
+  echo 'Building release image for smoke gate'
+  docker build --build-arg "VERSION=${AEON_SMOKE_VERSION:-dev}" -t "$image" .
+fi
 docker run --rm --entrypoint /bin/sh "$image" -c '
   test -s /usr/share/doc/aeon/NOTICE &&
   apk list --installed chromium | grep -Eq "^chromium-152[.]0[.]7977[.]82-r0 .*[(]BSD-3-Clause[)] \\[installed\\]$" &&
