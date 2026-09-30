@@ -30,30 +30,86 @@ a PR can modify those workflows or the guard, so runner-side admission is the
 enforcement boundary. The manual `Test runner smoke` workflow exercises the same
 router and small Go/Node checks. Normal PR and main CI retain the full Go suite.
 
-**Active admission contract: mode B (Free plan), the default as of 2026-09-30.**
-Publishing `AEON_MBP2606_AVAILABILITY` **requires** one of these runner-side
-boundaries to be implemented and verified first; a workflow guard is insufficient:
+**Active and required admission contract: mode B (Free plan), decided by Markus
+on 2026-09-30 and recorded on NIX-600.** Publishing
+`AEON_MBP2606_AVAILABILITY` requires all three controls below to be implemented
+and verified; workflow guards and matching labels cannot bind a JIT runner to
+the job the controller checked. GitHub can assign another queued job carrying
+those labels, including a fork job racing the verified job.
 
-- **A — Team plan:** an organization runner group restricted to `inspr-at/paimos`
-  and selected workflows `inspr-at/paimos/.github/workflows/ci.yml@refs/heads/main`
-  and `inspr-at/paimos/.github/workflows/test-runner-smoke.yml@refs/heads/main`.
-  A repo-level runner alone cannot provide this restriction. The current Free
-  plan does not provide this boundary; switching to A requires recording the
-  active mode here and verifying the group before publishing availability.
-- **B — Free plan:** no idle pre-registered runners. NIX-600 mints a JIT runner
-  only for an API-verified queued job: the run event is `push` or
-  `workflow_dispatch`, its head repository is `inspr-at/paimos`, its workflow
-  path is one of the two paths above at `refs/heads/main`, and its head SHA is
-  reachable from `main`. Missing or unverifiable metadata rejects admission.
-  The controller cancels every `pull_request` run targeting the mbp2606 labels,
-  including directly edited `runs-on`, before registering capacity. It must not
-  leave spare registrations available to unverified jobs.
+1. **Verified JIT minting:** no idle pre-registered runners. NIX-600 mints only
+   for an API-verified queued job whose event is `push` or `workflow_dispatch`,
+   head repository is `inspr-at/paimos`, workflow is
+   `inspr-at/paimos/.github/workflows/ci.yml@refs/heads/main` or
+   `inspr-at/paimos/.github/workflows/test-runner-smoke.yml@refs/heads/main`, and
+   head SHA is reachable from `main`. Missing or unverifiable metadata rejects
+   admission. Record the verified job ID, run ID/attempt and unique runner name.
+   Cancel every `pull_request` run targeting mbp2606 labels, including directly
+   edited `runs-on`, before registering capacity; leave no spare registrations.
+2. **Job-started hook:** bake an executable hook into the sealed VM image,
+   outside the checkout and actions-runner directory. Set
+   `ACTIONS_RUNNER_HOOK_JOB_STARTED` to its absolute path in the image's runner
+   startup configuration; never load the hook from the repository. Before any
+   workflow step, require `GITHUB_REPOSITORY` = `inspr-at/paimos`,
+   `GITHUB_EVENT_NAME` in exactly `{push, workflow_dispatch}`, and
+   `GITHUB_WORKFLOW_REF` equal to one of the two fully qualified workflow refs
+   above. For PR-shaped events/payloads, also require the event payload's
+   `pull_request.head.repo.full_name` = `inspr-at/paimos`; PR events remain
+   rejected by the event allowlist. Read the payload from `GITHUB_EVENT_PATH`.
+   Missing, malformed or mismatched metadata exits non-zero: the job fails
+   before any step and the controller discards its VM. See GitHub's
+   [job hook contract](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/run-scripts).
+3. **Controller post-job check:** query the actual completed job via the
+   [workflow-jobs API](https://docs.github.com/en/rest/actions/workflow-jobs#get-a-job-for-a-workflow-run).
+   Match its `runner_name` to the minted runner and confirm its job ID and run
+   ID/attempt are exactly those verified before minting, including assignments
+   from unexpected runs rather than checking only the expected run. A mismatch
+   alerts the operator and pauses mode B by clearing/refusing availability; missing or
+   unverifiable evidence also fails closed. This check runs outside the VM;
+   cleanup and verification must not depend on a job-controlled completion hook.
+
+The controller, hook and `ci.yml` router use the same smaller allowlist:
+**`push`, `workflow_dispatch` at `refs/heads/main` only**. `schedule` and
+`merge_group` are excluded; no tags are routed. Expanding events or refs requires
+a reviewed change to all three controls and the workflow guard.
+
+**Preconditions for availability and every mint:** paimos main ruleset
+**24240960** (AEON-411 part 1) must exist, have `enforcement: active`, and match
+the reviewed ruleset baseline, including rules, parameters, ref conditions and
+bypass actors. Missing, disabled, weakened, changed or unverifiable protection
+refuses minting and clears/refuses `AEON_MBP2606_AVAILABILITY` (mode B off).
+The NIX-600 app `inspr-mbp2606-runner` (**5134402**) has
+`administration:write` on paimos and can edit rulesets, so the controller verifies
+the ID, active enforcement and unchanged rules through the API before **every**
+mint; the app's permissions are not proof that protection remains intact.
+
+**Mode-B runtime:** every job gets one fresh Linux ARM64 Lima VM cloned from a
+sealed base image containing rootful Docker, actions-runner and the baked hook,
+with **no host mounts**. The JIT runner executes inside that VM. The job has
+root inside its VM, so the VM is the isolation boundary; the controller deletes
+it after completion or rejection. Persistent caches use one Lima disk per slot,
+mounted read-write **only for verified main pushes**; dispatches use read-only
+trusted caches plus disposable scratch/overlays.
+
+**Network precondition:** a host `pf` anchor for user `ci` blocks private ranges
+and host loopback except the Lima SSH ports, and permits DNS only to the router.
+The controller verifies that the host anchor is installed and active before
+publishing availability and before every mint; a missing, inactive or
+unverifiable anchor keeps mode B off. An in-VM firewall does not satisfy this
+boundary, because the job has root.
+
+Org state verified on 2026-09-30: only the **Default** runner group, public
+repositories not allowed, **0 runners**; Blacksmith is removed.
+
+Mode A is only a possible future Team-plan upgrade: a group restricted to paimos
+and the two selected main workflow refs, recorded and verified before adoption,
+retaining the baked job-started hook as defence in depth.
 
 Fork-PR approval is `all_external_contributors` (set by the lead, 2026-09-30).
 That is defence in depth, not the runner admission boundary. A `merge_group` run
 executes PR code, so queueing a PR is a decision to run it on the Mac if routing
 is ever enabled for that event. **It is excluded from the mbp2606 allowlist in
-both modes today**: GitHub documents exact pinned workflow refs; matching
+mode B today**: GitHub documents exact pinned workflow refs; matching
 `gh-readonly-queue/…` refs to the selected `main` workflows is unverified.
 Merge-queue CI continues on hosted runners. See GitHub's
 [runner-group workflow restrictions](https://docs.github.com/en/enterprise-cloud%40latest/actions/how-tos/manage-runners/self-hosted-runners/manage-access).
@@ -78,12 +134,21 @@ requires repository Administration read access; that belongs to the host
 controller, not the workflow token. Neither token permissions nor environment
 secrets are added here. The Linux ARM64 pool must provide Docker service-container
 support, Ubuntu-compatible `apt`/`sudo`, Go 1.26 and the shells used by the tests.
+Routable `go` and future routed `e2e` jobs must not assume amd64:
+`pgvector/pgvector:pg18` is multi-arch, and setup-go/setup-node select ARM64 on
+this runner. The guard rejects routed jobs referencing `amd64`, `x86_64` or
+`x64` artifacts, including action inputs, services, matrices and inherited
+environment/default settings. `release.yml` and `pairing-platform.yml` are
+**never routed**; their multi-platform artifacts and evidence remain hosted.
 
 **Off/drain:** after clearing availability, NIX-600 keeps minting JIT runners for
 API-verified queued jobs that still carry the mbp2606 label, until that queue
-empties, and lets running jobs finish. **Hard stop:** cancel those queued and
-running runs before stopping capacity; do not leave them stranded waiting for
-a runner. A lease is an admission check, not an atomic reservation: concurrent
+empties, and lets running jobs finish, with every mode-B control and precondition
+still enforced. A ruleset/network failure or post-job mismatch stops minting and
+cancels affected queued runs rather than draining through a failed boundary.
+**Hard stop:** cancel those queued and running runs before stopping capacity;
+do not leave them stranded waiting for a runner. A lease is an admission check,
+not an atomic reservation: concurrent
 admissions or host failure after selection remain a queue risk. Never publish
 a simple persistent `on` flag. Offline/busy smoke and full-suite timing must be
 recorded when the host becomes available.
@@ -117,8 +182,9 @@ and `.yaml` in any letter case. Hosted labels are exactly `ubuntu-latest`,
 `ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15` and `macos-15-intel`; the controller
 must not assign these labels to self-hosted runners. Its fixture tests reject
 direct labels, hosted-looking impostors, unsafe expressions, matrix labels,
-unguarded router outputs, routed jobs with secrets/environments/write permissions, and routed
-release/image/attestation/pin jobs. Unknown dynamic expressions fail closed.
+unguarded router outputs, routed jobs with secrets/environments/write permissions,
+amd64 artifact references, and routed release/pairing/image/attestation/pin jobs.
+Unknown dynamic expressions fail closed.
 The hosted `release-check` runs both guard and router tests. Release workflows,
 image build/relink, attestation and pin gates always stay hosted; attestation
 verification must retain `--deny-self-hosted-runners` in its owning gate.

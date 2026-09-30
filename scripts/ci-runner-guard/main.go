@@ -106,7 +106,10 @@ func checkWorkflow(name string, body []byte) ([]string, error) {
 		selection, ok := job["runs-on"].(string)
 		if ok && compact(selection) == compact(routedRunner) {
 			if protectedJob(name, id, job) {
-				reject("release/image/attestation/pin evidence must use hosted runners")
+				reject("release/pairing/image/attestation/pin evidence must use hosted runners")
+			}
+			if containsAMD64Artifact(job) || containsAMD64Artifact(workflow["env"]) || containsAMD64Artifact(workflow["defaults"]) {
+				reject("routed jobs run on Linux ARM64 and must not reference amd64/x86_64/x64 artifacts")
 			}
 			if !hasNeed(job["needs"], "runner-route") || mapping(jobs["runner-route"])["uses"] != "./.github/workflows/test-runner-route.yml" {
 				reject("routed tests must depend on the hosted runner-route workflow")
@@ -212,7 +215,8 @@ func matrixLabels(job map[string]any, axis string) ([]any, bool) {
 
 func protectedJob(file, id string, job map[string]any) bool {
 	file = strings.ToLower(file)
-	if file == "release.yml" || file == "release.yaml" || file == "test-runner-route.yml" {
+	switch strings.TrimSuffix(file, filepath.Ext(file)) {
+	case "release", "pairing-platform", "test-runner-route":
 		return true
 	}
 	name, _ := job["name"].(string)
@@ -233,6 +237,29 @@ func protectedJob(file, id string, job map[string]any) bool {
 		}
 		for _, word := range []string{"smoke-image.sh", "gh attestation", "docker build", "docker push", "docker buildx", "cosign ", "pin-gate", "pin_gate"} {
 			if strings.Contains(run, word) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Inspect parsed values (including inherited settings and matrix entries), not
+// YAML comments. Hosted jobs may still download or cross-build amd64 artifacts.
+func containsAMD64Artifact(v any) bool {
+	switch value := v.(type) {
+	case string:
+		value = strings.ToLower(value)
+		return strings.Contains(value, "amd64") || strings.Contains(value, "x86_64") || strings.Contains(value, "x64")
+	case map[string]any:
+		for key, child := range value {
+			if containsAMD64Artifact(key) || containsAMD64Artifact(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range value {
+			if containsAMD64Artifact(child) {
 				return true
 			}
 		}

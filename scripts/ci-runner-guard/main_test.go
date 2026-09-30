@@ -45,6 +45,9 @@ func TestProtectedJobsAndSecrets(t *testing.T) {
 		{"release.yml", "tests", ""}, {"release.yaml", "tests", ""},
 		{"RELEASE.YML", "tests", ""}, {"release.YaMl", "tests", ""},
 		{"test-runner-route.yml", "tests", ""}, {"test-runner-route.YML", "tests", ""},
+		{"test-runner-route.yaml", "tests", ""},
+		{"pairing-platform.yml", "tests", ""}, {"pairing-platform.yaml", "tests", ""},
+		{"PAIRING-PLATFORM.YML", "tests", ""}, {"pairing-platform.YaMl", "tests", ""},
 		{"ci.yml", "image", ""}, {"ci.yml", "attestation", ""}, {"ci.yml", "pin-gate", ""},
 		{"ci.yml", "tests", "    environment: release-signing\n"},
 		{"ci.yml", "tests", "    environment: homebrew-tap\n"},
@@ -63,6 +66,45 @@ func TestProtectedJobsAndSecrets(t *testing.T) {
 				t.Fatalf("protected job not rejected: %v %v", problems, err)
 			}
 		})
+	}
+}
+
+func TestRoutedJobsRejectAMD64Artifacts(t *testing.T) {
+	for _, extra := range []string{
+		"    steps: [{run: 'curl -fLO https://example.invalid/tool-linux-amd64.tar.gz'}]\n",
+		"    steps: [{run: 'curl -fLO https://example.invalid/tool_linux_x86_64.zip'}]\n",
+		"    steps: [{uses: 'actions/setup-node@sha', with: {architecture: x64}}]\n",
+		"    steps: [{uses: 'actions/setup-go@sha', with: {architecture: AMD64}}]\n",
+		"    services: {postgres: {image: 'example.invalid/postgres:x86_64'}}\n",
+		"    env: {TOOL_ARCH: linux_amd64}\n",
+		"    strategy: {matrix: {artifact: [tool-arm64, tool-x64]}}\n",
+	} {
+		t.Run(extra, func(t *testing.T) {
+			problems, err := checkWorkflow("ci.yml", []byte(routedWorkflow("tests", extra)))
+			if err != nil || len(problems) != 1 || !strings.Contains(problems[0], "Linux ARM64") {
+				t.Fatalf("incompatible artifact not rejected: %v %v", problems, err)
+			}
+			// The same artifact remains valid on a hosted runner.
+			hosted := strings.Replace(routedWorkflow("tests", extra), routedRunner, "ubuntu-latest", 1)
+			problems, err = checkWorkflow("ci.yml", []byte(hosted))
+			if err != nil || len(problems) != 0 {
+				t.Fatalf("hosted artifact rejected: %v %v", problems, err)
+			}
+		})
+	}
+	for _, inherited := range []string{
+		"env: {ARTIFACT: tool_linux_amd64}\n",
+		"defaults: {run: {working-directory: artifacts/x86_64}}\n",
+	} {
+		problems, err := checkWorkflow("ci.yml", []byte(inherited+routedWorkflow("tests", "")))
+		if err != nil || len(problems) != 1 || !strings.Contains(problems[0], "Linux ARM64") {
+			t.Fatalf("inherited incompatible artifact not rejected: %v %v", problems, err)
+		}
+	}
+	compatible := "    # Hosted release jobs may use amd64/x86_64/x64.\n    steps: [{uses: 'actions/setup-node@sha', with: {architecture: arm64}}, {run: 'curl -fLO https://example.invalid/tool-linux-aarch64.tar.gz'}]\n    services: {postgres: {image: 'pgvector/pgvector:pg18'}}\n"
+	problems, err := checkWorkflow("ci.yml", []byte(routedWorkflow("tests", compatible)))
+	if err != nil || len(problems) != 0 {
+		t.Fatalf("ARM64-compatible job rejected: %v %v", problems, err)
 	}
 }
 
