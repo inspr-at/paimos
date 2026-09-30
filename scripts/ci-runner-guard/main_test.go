@@ -21,6 +21,9 @@ func TestRepositoryWorkflows(t *testing.T) {
 func TestUntrustedRunnerSelections(t *testing.T) {
 	for _, selection := range []string{
 		"mbp2606", "[self-hosted, Linux, ARM64, mbp2606]", "[ubuntu-latest, mbp2606]",
+		"mbp2606-push", "mbp2606-dispatch",
+		"[self-hosted, Linux, ARM64, mbp2606, mbp2606-push]",
+		"[self-hosted, Linux, ARM64, mbp2606, mbp2606-dispatch]",
 		"ubuntu-2mbp2606", "macos-15-mbp2606", "windows-2025-mbp2606",
 		"${{ needs.runner-route.outputs.runs_on }}", "${{ fromJSON(vars.RUNNER) }}",
 		"${{ github.event_name != 'pull_request' && 'mbp2606' || 'ubuntu-latest' }}",
@@ -151,6 +154,23 @@ func TestCanonicalEventGuard(t *testing.T) {
 		problems, err = checkWorkflow("ci.yml", []byte(replacement))
 		if err != nil || len(problems) == 0 {
 			t.Fatalf("broken route not rejected: %v %v", problems, err)
+		}
+	}
+}
+
+func TestRoutedShardMatrixGuard(t *testing.T) {
+	for _, selection := range []string{
+		routedGoShards,
+		strings.Replace(routedGoShards, "outputs.run_attempt == github.run_attempt && ", "", 1),
+		strings.Replace(routedGoShards, "github.ref == 'refs/heads/main' && ", "", 1),
+		strings.Replace(routedGoShards, `"workflow_dispatch"`, `"pull_request"`, 1),
+		strings.Replace(routedGoShards, "outputs.runner_class == 'mbp2606' && ", "", 1),
+		"[1, 2, 3, 4]",
+	} {
+		body := routedWorkflow("go-test", "    strategy:\n      matrix:\n        shard: "+selection+"\n")
+		problems, err := checkWorkflow("ci.yml", []byte(body))
+		if err != nil || (len(problems) == 0) != (selection == routedGoShards) {
+			t.Fatalf("matrix selection %s: %v %v", selection, problems, err)
 		}
 	}
 }

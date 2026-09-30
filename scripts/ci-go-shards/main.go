@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Command ci-go-shards keeps the CI go test package list balanced across seven shards.
+// Command ci-go-shards keeps the CI go test package list balanced across four Mac or seven hosted shards.
 //
 //	go run ./scripts/ci-go-shards generate -log job.log -json tests.json
 //	go run ./scripts/ci-go-shards check
@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -66,23 +67,27 @@ func (e exitCode) Error() string { return fmt.Sprintf("exit %d", int(e)) }
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `usage:
-  ci-go-shards generate -log job.log -json tests.json [-out scripts/ci/go-shards.txt]
-  ci-go-shards check [-file scripts/ci/go-shards.txt]
-  ci-go-shards test -shard N [-file scripts/ci/go-shards.txt]
+  ci-go-shards generate -log job.log -json tests.json [-count 4|7] [-out FILE]
+  ci-go-shards check [-count 4|7] [-file FILE]
+  ci-go-shards test -shard N [-count 4|7] [-file FILE]
   ci-go-shards test-timing
-  ci-go-shards packages -shard N [-file scripts/ci/go-shards.txt]
-  ci-go-shards needs-shell -shard N [-file scripts/ci/go-shards.txt]
+  ci-go-shards packages -shard N [-count 4|7] [-file FILE]
+  ci-go-shards needs-shell -shard N [-count 4|7] [-file FILE]
 `)
 }
 
 func cmdGenerate(args []string) error {
 	fs := flag.NewFlagSet("generate", flag.ContinueOnError)
+	count := fs.Int("count", hostedShardCount, "shard count (4 Mac or 7 hosted)")
 	fs.SetOutput(os.Stderr)
 	logPath := fs.String("log", "", "GitHub Actions log (or go test output) with package elapsed times")
 	jsonPath := fs.String("json", "", "go test -json output covering packages over the split threshold")
-	outPath := fs.String("out", "", "shard file to write (default scripts/ci/go-shards.txt)")
+	outPath := fs.String("out", "", "shard file to write (default layout for -count)")
 	split := fs.Int("split-above", splitAboveMS, "split packages whose CI elapsed time exceeds this many milliseconds")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := checkShardCount(*count); err != nil {
 		return err
 	}
 	if *logPath == "" || *jsonPath == "" {
@@ -93,7 +98,7 @@ func cmdGenerate(args []string) error {
 		return err
 	}
 	if *outPath == "" {
-		*outPath = filepath.Join(root, "scripts/ci/go-shards.txt")
+		*outPath = shardFile(root, *count)
 	}
 	logText, err := os.ReadFile(*logPath)
 	if err != nil {
@@ -103,7 +108,7 @@ func cmdGenerate(args []string) error {
 	if err != nil {
 		return err
 	}
-	listed, err := goList(root)
+	listed, err := goList(root, *count)
 	if err != nil {
 		return err
 	}
@@ -135,7 +140,7 @@ func cmdGenerate(args []string) error {
 	}
 	var used []Item
 	for _, path := range splitPkgs {
-		names, err := listRunnableTests(root, path)
+		names, err := listRunnableTests(root, path, *count)
 		if err != nil {
 			return err
 		}
@@ -154,44 +159,48 @@ func cmdGenerate(args []string) error {
 	if err != nil {
 		return err
 	}
-	assigned, err := balance(items, shardCount)
+	assigned, err := balance(items, *count)
 	if err != nil {
 		return err
 	}
-	if err := validate(assigned, sequentialBudgetMS); err != nil {
+	if err := validate(assigned, sequentialBudgetMS, *count); err != nil {
 		return err
 	}
-	body := formatFile(assigned, *split)
+	body := formatFile(assigned, *split, *count)
 	if err := os.MkdirAll(filepath.Dir(*outPath), 0o755); err != nil {
 		return err
 	}
 	if err := os.WriteFile(*outPath, []byte(body), 0o644); err != nil {
 		return err
 	}
-	fmt.Fprint(os.Stdout, shardStats(assigned))
+	fmt.Fprint(os.Stdout, shardStats(assigned, *count))
 	return nil
 }
 
 func cmdCheck(args []string) error {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	count := fs.Int("count", hostedShardCount, "shard count (4 Mac or 7 hosted)")
 	fs.SetOutput(os.Stderr)
-	file := fs.String("file", "", "shard file (default scripts/ci/go-shards.txt)")
+	file := fs.String("file", "", "shard file (default layout for -count)")
 	budget := fs.Int("budget", sequentialBudgetMS, "maximum sequential milliseconds of one package on one shard")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := checkShardCount(*count); err != nil {
 		return err
 	}
 	root, err := moduleRoot()
 	if err != nil {
 		return err
 	}
-	items, err := loadItems(root, *file)
+	items, err := loadItems(root, *file, *count)
 	if err != nil {
 		return err
 	}
-	if err := validate(items, *budget); err != nil {
+	if err := validate(items, *budget, *count); err != nil {
 		return err
 	}
-	listed, err := goList(root)
+	listed, err := goList(root, *count)
 	if err != nil {
 		return err
 	}
@@ -219,17 +228,17 @@ func cmdCheck(args []string) error {
 		if _, ok := listedSet[path]; !ok {
 			continue
 		}
-		names, err := listRunnableTests(root, path)
+		names, err := listRunnableTests(root, path, *count)
 		if err != nil {
 			return err
 		}
 		runnable[path] = names
 	}
-	if err := coverageHoles(items, listed, runnable); err != nil {
+	if err := coverageHoles(items, listed, runnable, *count); err != nil {
 		return err
 	}
-	for shard := 1; shard <= shardCount; shard++ {
-		plan, err := planShard(items, listed, shard)
+	for shard := 1; shard <= *count; shard++ {
+		plan, err := planShard(items, listed, shard, *count)
 		if err != nil {
 			return err
 		}
@@ -237,14 +246,14 @@ func cmdCheck(args []string) error {
 			return fmt.Errorf("shard %d has no packages", shard)
 		}
 	}
-	found, err := listPerformanceTests(root)
+	found, err := listPerformanceTests(root, *count)
 	if err != nil {
 		return err
 	}
 	if err := unclassifiedPerformance(found); err != nil {
 		return err
 	}
-	fmt.Fprint(os.Stdout, shardStats(items))
+	fmt.Fprint(os.Stdout, shardStats(items, *count))
 	fmt.Printf("packages=%d split_packages=%d\n", len(inFile), len(splitPaths))
 	fmt.Fprint(os.Stdout, formatDrift(assignmentDrift(listed, items, runnable)))
 	return nil
@@ -260,7 +269,7 @@ func cmdTestTiming(args []string) error {
 	if err != nil {
 		return err
 	}
-	listed, err := goList(root)
+	listed, err := goList(root, hostedShardCount)
 	if err != nil {
 		return err
 	}
@@ -299,7 +308,7 @@ func requireTimingTests(root string, listed []string) error {
 		names, ok := runnable[spec.path]
 		if !ok {
 			var err error
-			names, err = listRunnableTests(root, spec.path)
+			names, err = listRunnableTests(root, spec.path, hostedShardCount)
 			if err != nil {
 				return err
 			}
@@ -321,28 +330,32 @@ func requireTimingTests(root string, listed []string) error {
 
 func cmdPackages(args []string) error {
 	fs := flag.NewFlagSet("packages", flag.ContinueOnError)
+	count := fs.Int("count", hostedShardCount, "shard count (4 Mac or 7 hosted)")
 	fs.SetOutput(os.Stderr)
 	shard := fs.Int("shard", 0, "shard number")
 	file := fs.String("file", "", "shard file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *shard < 1 || *shard > shardCount {
-		return fmt.Errorf("-shard must be 1..%d", shardCount)
+	if err := checkShardCount(*count); err != nil {
+		return err
+	}
+	if *shard < 1 || *shard > *count {
+		return fmt.Errorf("-shard must be 1..%d", *count)
 	}
 	root, err := moduleRoot()
 	if err != nil {
 		return err
 	}
-	items, err := loadItems(root, *file)
+	items, err := loadItems(root, *file, *count)
 	if err != nil {
 		return err
 	}
-	listed, err := goList(root)
+	listed, err := goList(root, *count)
 	if err != nil {
 		return err
 	}
-	plan, err := planShard(items, listed, *shard)
+	plan, err := planShard(items, listed, *shard, *count)
 	if err != nil {
 		return err
 	}
@@ -356,20 +369,24 @@ func cmdPackages(args []string) error {
 
 func cmdNeedsShell(args []string) error {
 	fs := flag.NewFlagSet("needs-shell", flag.ContinueOnError)
+	count := fs.Int("count", hostedShardCount, "shard count (4 Mac or 7 hosted)")
 	fs.SetOutput(os.Stderr)
 	shard := fs.Int("shard", 0, "shard number")
 	file := fs.String("file", "", "shard file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *shard < 1 || *shard > shardCount {
-		return fmt.Errorf("-shard must be 1..%d", shardCount)
+	if err := checkShardCount(*count); err != nil {
+		return err
+	}
+	if *shard < 1 || *shard > *count {
+		return fmt.Errorf("-shard must be 1..%d", *count)
 	}
 	root, err := moduleRoot()
 	if err != nil {
 		return err
 	}
-	items, err := loadItems(root, *file)
+	items, err := loadItems(root, *file, *count)
 	if err != nil {
 		return err
 	}
@@ -383,28 +400,32 @@ func cmdNeedsShell(args []string) error {
 
 func cmdTest(args []string) error {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	count := fs.Int("count", hostedShardCount, "shard count (4 Mac or 7 hosted)")
 	fs.SetOutput(os.Stderr)
 	shard := fs.Int("shard", 0, "shard number")
 	file := fs.String("file", "", "shard file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *shard < 1 || *shard > shardCount {
-		return fmt.Errorf("-shard must be 1..%d", shardCount)
+	if err := checkShardCount(*count); err != nil {
+		return err
+	}
+	if *shard < 1 || *shard > *count {
+		return fmt.Errorf("-shard must be 1..%d", *count)
 	}
 	root, err := moduleRoot()
 	if err != nil {
 		return err
 	}
-	items, err := loadItems(root, *file)
+	items, err := loadItems(root, *file, *count)
 	if err != nil {
 		return err
 	}
-	listed, err := goList(root)
+	listed, err := goList(root, *count)
 	if err != nil {
 		return err
 	}
-	plan, err := planShard(items, listed, *shard)
+	plan, err := planShard(items, listed, *shard, *count)
 	if err != nil {
 		return err
 	}
@@ -468,15 +489,23 @@ func stopCmds(cmds []*exec.Cmd) {
 	}
 }
 
-func loadItems(root, file string) ([]Item, error) {
+func shardFile(root string, count int) string {
+	name := "go-shards.txt"
+	if count == macShardCount {
+		name = "go-shards-4.txt"
+	}
+	return filepath.Join(root, "scripts/ci", name)
+}
+
+func loadItems(root, file string, count int) ([]Item, error) {
 	if file == "" {
-		file = filepath.Join(root, "scripts/ci/go-shards.txt")
+		file = shardFile(root, count)
 	}
 	b, err := os.ReadFile(file)
 	if err != nil {
 		return nil, err
 	}
-	return parseFile(string(b))
+	return parseFile(string(b), count)
 }
 
 func moduleRoot() (string, error) {
@@ -496,10 +525,10 @@ func moduleRoot() (string, error) {
 	}
 }
 
-func goList(root string) ([]string, error) {
+func goList(root string, count int) ([]string, error) {
 	cmd := exec.Command("go", "list", "./...")
 	cmd.Dir = root
-	cmd.Env = withLinux(os.Environ())
+	cmd.Env = withLinux(os.Environ(), count)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, commandErr("go list ./...", err)
@@ -517,10 +546,10 @@ func goList(root string) ([]string, error) {
 }
 
 // listPerformanceTests returns runnable tests whose names contain Performance.
-func listPerformanceTests(root string) (map[string][]string, error) {
+func listPerformanceTests(root string, count int) (map[string][]string, error) {
 	cmd := exec.Command("go", "list", "-json", "./...")
 	cmd.Dir = root
-	cmd.Env = withLinux(os.Environ())
+	cmd.Env = withLinux(os.Environ(), count)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, commandErr("go list -json ./...", err)
@@ -573,10 +602,10 @@ func listPerformanceTests(root string) (map[string][]string, error) {
 	return found, nil
 }
 
-func listRunnableTests(root, pkg string) ([]string, error) {
+func listRunnableTests(root, pkg string, count int) ([]string, error) {
 	cmd := exec.Command("go", "list", "-json", pkg)
 	cmd.Dir = root
-	cmd.Env = withLinux(os.Environ())
+	cmd.Env = withLinux(os.Environ(), count)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, commandErr("go list -json "+pkg, err)
@@ -612,10 +641,11 @@ func listRunnableTests(root, pkg string) ([]string, error) {
 	return names, nil
 }
 
-// withLinux lists the packages and tests ubuntu-latest runs. CGO_ENABLED=0
-// keeps that list buildable on a darwin host; this module has no linux cgo
-// files, so the set matches the CI run.
-func withLinux(env []string) []string {
+// withLinux uses the executing Linux runner's architecture, including partial
+// reruns that retain a four-shard layout on hosted AMD64. Off Linux, count picks
+// the intended CI target (four ARM64 or seven AMD64) for local inventory checks.
+// CGO_ENABLED=0 permits listing on Darwin; this module has no Linux cgo files.
+func withLinux(env []string, count int) []string {
 	out := make([]string, 0, len(env)+3)
 	for _, e := range env {
 		if strings.HasPrefix(e, "GOOS=") || strings.HasPrefix(e, "GOARCH=") || strings.HasPrefix(e, "CGO_ENABLED=") {
@@ -623,7 +653,13 @@ func withLinux(env []string) []string {
 		}
 		out = append(out, e)
 	}
-	return append(out, "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
+	arch := "amd64"
+	if runtime.GOOS == "linux" {
+		arch = runtime.GOARCH
+	} else if count == macShardCount {
+		arch = "arm64"
+	}
+	return append(out, "GOOS=linux", "GOARCH="+arch, "CGO_ENABLED=0")
 }
 
 func commandErr(name string, err error) error {

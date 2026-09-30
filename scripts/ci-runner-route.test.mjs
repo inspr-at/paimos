@@ -17,11 +17,28 @@ function route(event = "push", changes = {}, options = {}) {
   return routeRunner({ event, repository, ref: "refs/heads/main", availability: JSON.stringify({ ...available, ...changes }), now, ...options });
 }
 
-test("trusted events can use an online idle Linux ARM64 pool", () => {
+test("trusted events use base labels plus exactly their verified event class", () => {
   assert.deepEqual(trustedEvents, ["push", "workflow_dispatch"]);
-  for (const event of trustedEvents) {
-    assert.deepEqual(route(event).runs_on, ["self-hosted", "Linux", "ARM64", "mbp2606"]);
+  for (const [event, eventClass] of [["push", "mbp2606-push"], ["workflow_dispatch", "mbp2606-dispatch"]]) {
+    const labels = route(event).runs_on;
+    assert.deepEqual(labels, ["self-hosted", "Linux", "ARM64", "mbp2606", eventClass]);
+    assert.equal(labels.filter((label) => label === "mbp2606-push" || label === "mbp2606-dispatch").length, 1);
+    assert.ok(labels.every((label) => !/^(ubuntu|macos|windows)-/i.test(label)));
     assert.equal(route(event).runner_class, "mbp2606");
+  }
+});
+
+test("unmapped events cannot acquire the dispatch class, even if the allowlist grows", () => {
+  const events = ["future_event", "workflow_dispatch_extra", "constructor", "toString", "__proto__"];
+  trustedEvents.push(...events);
+  try {
+    for (const event of [...events, null, undefined, {}, 1]) {
+      assert.deepEqual(route(event, {}, { event }), {
+        runs_on: ["ubuntu-latest"], runner_class: "hosted", reason: "untrusted-event",
+      });
+    }
+  } finally {
+    trustedEvents.splice(-events.length);
   }
 });
 
@@ -91,5 +108,40 @@ test("router outputs bind each attempt and refuse a missing or invalid attempt",
   }
   for (const attempt of [undefined, 0, -1, NaN, 1.5, "2"]) {
     assert.throws(() => writeRoute(route(), undefined, undefined, attempt), /invalid run attempt/);
+  }
+});
+
+test("CI expressions keep PRs and stale attempts on seven hosted shards", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const shardJob = workflow.split("  go-test:\n")[1].split("\n  go-timing:")[0];
+  const runnerExpression = shardJob.match(/^    runs-on: (.+)$/m)[1];
+  const shardExpression = shardJob.match(/^        shard: (.+)$/m)[1];
+  // Evaluate the checked-in expressions, not a separate implementation of the
+  // workflow decision. These expressions use the common JS/Actions operators.
+  function evaluate(expression, github, outputs) {
+    const source = expression.slice(3, -2).replaceAll("needs.runner-route.outputs.", "outputs.");
+    return Function("github", "outputs", "contains", "fromJSON", `return (${source});`)(
+      github, outputs, (values, value) => values.includes(value), JSON.parse,
+    );
+  }
+  for (const event of ["push", "workflow_dispatch", "pull_request", "pull_request_target", "merge_group", "schedule"]) {
+    for (const ref of ["refs/heads/main", "refs/heads/work/aeon-459", "refs/tags/v1"]) {
+      for (const run_attempt of [1, 2]) {
+        // A forged Mac router output still cannot route a PR or a stale rerun.
+        const selected = route(event === "workflow_dispatch" ? event : "push");
+        const outputs = { ...selected, runs_on: JSON.stringify(selected.runs_on), run_attempt: "1" };
+        const github = { event_name: event, ref, run_attempt };
+        const admitted = trustedEvents.includes(event) && ref === "refs/heads/main" && run_attempt === 1;
+        assert.deepEqual(evaluate(runnerExpression, github, outputs), admitted ? selected.runs_on : ["ubuntu-latest"]);
+        assert.deepEqual(evaluate(shardExpression, github, outputs), admitted ? [1, 2, 3, 4] : [1, 2, 3, 4, 5, 6, 7]);
+      }
+    }
+  }
+  const github = { event_name: "push", ref: "refs/heads/main", run_attempt: 1 };
+  for (const changes of [{ online: false }, { busy: true }, { idle_runners: 3 }, { observed_at: new Date(now - 30000).toISOString() }]) {
+    const selected = route("push", changes, { requiredIdle: 4 });
+    const outputs = { ...selected, runs_on: JSON.stringify(selected.runs_on), run_attempt: "1" };
+    assert.deepEqual(evaluate(runnerExpression, github, outputs), ["ubuntu-latest"]);
+    assert.deepEqual(evaluate(shardExpression, github, outputs), [1, 2, 3, 4, 5, 6, 7]);
   }
 });

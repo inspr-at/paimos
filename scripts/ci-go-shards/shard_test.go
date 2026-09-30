@@ -6,9 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestParseLogPackageTimes(t *testing.T) {
@@ -144,19 +147,19 @@ func TestFileRoundTripAndValidate(t *testing.T) {
 		{MS: 4, Path: "long", Test: "TestA"}, {MS: 4, Path: "long", Test: "TestB"},
 		{MS: 3, Path: "long", Test: "TestC"}, {MS: 3, Path: "long", Test: "TestD"},
 	}
-	assigned, err := balance(items, shardCount)
+	assigned, err := balance(items, hostedShardCount)
 	if err != nil {
 		t.Fatal(err)
 	}
-	parsed, err := parseFile(formatFile(assigned, 5))
+	parsed, err := parseFile(formatFile(assigned, 5, hostedShardCount), hostedShardCount)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validate(parsed, 100); err != nil {
+	if err := validate(parsed, 100, hostedShardCount); err != nil {
 		t.Fatal(err)
 	}
-	parsed[0].Shard = parsed[0].Shard%shardCount + 1
-	if err := validate(parsed, 100); err == nil {
+	parsed[0].Shard = parsed[0].Shard%hostedShardCount + 1
+	if err := validate(parsed, 100, hostedShardCount); err == nil {
 		t.Fatal("hand-edited shard was accepted")
 	}
 }
@@ -237,7 +240,7 @@ func TestShardNeedsShellOnlyForPathProof(t *testing.T) {
 	}
 }
 
-func TestWorkflowShardMatrixMatchesCount(t *testing.T) {
+func TestWorkflowShardLayouts(t *testing.T) {
 	root, err := moduleRoot()
 	if err != nil {
 		t.Fatal(err)
@@ -246,19 +249,120 @@ func TestWorkflowShardMatrixMatchesCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nums := make([]string, shardCount)
-	for i := 1; i <= shardCount; i++ {
-		nums[i-1] = strconv.Itoa(i)
+	var workflow struct {
+		Jobs map[string]struct {
+			Needs    any               `yaml:"needs"`
+			RunsOn   string            `yaml:"runs-on"`
+			Env      map[string]string `yaml:"env"`
+			Strategy struct {
+				Matrix map[string]string `yaml:"matrix"`
+			} `yaml:"strategy"`
+			Steps []struct {
+				Run  string         `yaml:"run"`
+				With map[string]any `yaml:"with"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
 	}
-	needle := "shard: [" + strings.Join(nums, ", ") + "]"
-	if !strings.Contains(string(body), needle) {
-		t.Fatalf("ci.yml missing %s", needle)
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	job := workflow.Jobs["go-test"]
+	for _, count := range []int{macShardCount, hostedShardCount} {
+		nums := make([]string, count)
+		for i := range nums {
+			nums[i] = strconv.Itoa(i + 1)
+		}
+		if !strings.Contains(job.Strategy.Matrix["shard"], "["+strings.Join(nums, ", ")+"]") {
+			t.Fatalf("matrix missing %d-way layout", count)
+		}
+	}
+	for _, guard := range []string{"github.event_name", "refs/heads/main", "outputs.run_attempt == github.run_attempt"} {
+		if !strings.Contains(job.Strategy.Matrix["shard"], guard) {
+			t.Fatalf("matrix missing %s", guard)
+		}
+	}
+	if job.Env["AEON_GO_SHARD_COUNT"] != "${{ strategy.job-total }}" || job.Env["GOFLAGS"] != "${{ strategy.job-total == 4 && '-count=1' || '' }}" {
+		t.Fatal("shard commands must use the selected count and bypass Mac test caching")
+	}
+	if job.Steps[0].With["persist-credentials"] != false || job.Steps[1].With["cache"] != "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}" {
+		t.Fatal("routed checkout/cache trust policy changed")
+	}
+	for _, step := range job.Steps {
+		if strings.Contains(step.Run, "ci-go-shards test-timing") {
+			t.Fatal("timing budgets run on routed hardware")
+		}
+		if strings.Contains(step.Run, "ci-go-shards test ") || strings.Contains(step.Run, "ci-go-shards needs-shell ") {
+			if !strings.Contains(step.Run, `-count "$AEON_GO_SHARD_COUNT"`) {
+				t.Fatal("command ignores selected count")
+			}
+		}
 	}
 }
 
 func TestParseFileRejectsBadShard(t *testing.T) {
-	if _, err := parseFile("9 1 p\n"); err == nil {
+	if _, err := parseFile("9 1 p\n", hostedShardCount); err == nil {
 		t.Fatal("expected shard rejection")
+	}
+}
+
+func TestCheckedInLayoutsHaveTheSameMeasuredInventory(t *testing.T) {
+	root, err := moduleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hosted map[string]int
+	for _, count := range []int{hostedShardCount, macShardCount} {
+		items, err := loadItems(root, "", count)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := validate(items, sequentialBudgetMS, count); err != nil {
+			t.Fatalf("%d-way layout: %v", count, err)
+		}
+		inventory := map[string]int{}
+		for _, it := range items {
+			inventory[it.key()] = it.MS
+		}
+		if hosted == nil {
+			hosted = inventory
+			continue
+		}
+		if len(inventory) != len(hosted) {
+			t.Fatalf("four/seven inventory sizes differ: %d/%d", len(inventory), len(hosted))
+		}
+		for key, ms := range hosted {
+			if got, ok := inventory[key]; !ok || got != ms {
+				t.Fatalf("four-way inventory changes timing/item %q", key)
+			}
+		}
+	}
+}
+
+func TestCountAndShardBounds(t *testing.T) {
+	for _, count := range []int{0, -1, 1, 3, 5, 8} {
+		if _, err := parseFile("1 1 p\n", count); err == nil {
+			t.Fatalf("invalid count %d accepted", count)
+		}
+		for _, command := range []func([]string) error{cmdGenerate, cmdCheck, cmdTest, cmdPackages, cmdNeedsShell} {
+			if err := command([]string{"-count", strconv.Itoa(count)}); err == nil {
+				t.Fatalf("CLI accepted count %d", count)
+			}
+		}
+	}
+	if _, err := parseFile("5 1 p\n", macShardCount); err == nil {
+		t.Fatal("four-way layout accepted shard five")
+	}
+	for _, count := range []int{macShardCount, hostedShardCount} {
+		for _, shard := range []int{0, count + 1} {
+			if _, err := planShard(nil, nil, shard, count); err == nil {
+				t.Fatalf("count %d accepted shard %d", count, shard)
+			}
+			for _, command := range []func([]string) error{cmdTest, cmdPackages, cmdNeedsShell} {
+				if err := command([]string{"-count", strconv.Itoa(count), "-shard", strconv.Itoa(shard)}); err == nil {
+					t.Fatalf("CLI accepted count %d shard %d", count, shard)
+				}
+			}
+		}
 	}
 }
 
@@ -267,7 +371,7 @@ func TestLightestShardPrefersLowerNumber(t *testing.T) {
 		{Shard: 2, MS: 5, Path: "b"},
 		{Shard: 1, MS: 5, Path: "a"},
 	}
-	if got := lightestShard(items); got != 1 {
+	if got := lightestShard(items, hostedShardCount); got != 1 {
 		t.Fatalf("got %d", got)
 	}
 }
@@ -282,7 +386,7 @@ func TestAdditionsRunOnExactlyOneShard(t *testing.T) {
 	runnable := map[string][]string{
 		pkg: {"TestKeep", "TestOther", "TestNew", "FuzzNew", "Example_new"},
 	}
-	if err := coverageHoles(items, listed, runnable); err != nil {
+	if err := coverageHoles(items, listed, runnable, hostedShardCount); err != nil {
 		t.Fatal(err)
 	}
 	notes := formatDrift(assignmentDrift(listed, items, runnable))
@@ -298,8 +402,8 @@ func TestAdditionsRunOnExactlyOneShard(t *testing.T) {
 	owners := func(path, name string) []int {
 		t.Helper()
 		var got []int
-		for shard := 1; shard <= shardCount; shard++ {
-			plan, err := planShard(items, listed, shard)
+		for shard := 1; shard <= hostedShardCount; shard++ {
+			plan, err := planShard(items, listed, shard, hostedShardCount)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -320,7 +424,7 @@ func TestAdditionsRunOnExactlyOneShard(t *testing.T) {
 	if got := owners("q", "TestQ"); len(got) != 1 || got[0] != 2 {
 		t.Fatalf("new package runs on %v", got)
 	}
-	catchAll, err := planShard(items, listed, 1)
+	catchAll, err := planShard(items, listed, 1, hostedShardCount)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +435,7 @@ func TestAdditionsRunOnExactlyOneShard(t *testing.T) {
 	if len(args) != 1 || strings.Join(args[0], " ") != "test p -skip ^(TestOther)$" {
 		t.Fatalf("catch-all args %q", args)
 	}
-	other, err := planShard(items, listed, 2)
+	other, err := planShard(items, listed, 2, hostedShardCount)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,13 +449,19 @@ func TestAdditionsRunOnExactlyOneShard(t *testing.T) {
 }
 
 func TestCoverageHolesRejectsADroppedTest(t *testing.T) {
-	err := coverageHoles(nil, nil, map[string][]string{"p": {"TestNew"}})
+	err := coverageHoles(nil, nil, map[string][]string{"p": {"TestNew"}}, hostedShardCount)
 	if err == nil {
 		t.Fatal("dropped test was accepted")
 	}
 }
 
 func TestGoTestRunsAdditionsOnce(t *testing.T) {
+	for _, count := range []int{macShardCount, hostedShardCount} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) { runAdditionFixture(t, count) })
+	}
+}
+
+func runAdditionFixture(t *testing.T, count int) {
 	root := t.TempDir()
 	write := func(rel, body string) {
 		t.Helper()
@@ -445,8 +555,8 @@ func TestQ(t *testing.T) { hit("TestQ") }
 	hits := filepath.Join(root, "hits")
 	env := withoutEnvPrefix(os.Environ(), "HITS=")
 	env = append(env, "HITS="+hits)
-	for shard := 1; shard <= shardCount; shard++ {
-		plan, err := planShard(items, listed, shard)
+	for shard := 1; shard <= count; shard++ {
+		plan, err := planShard(items, listed, shard, count)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -510,10 +620,10 @@ func TestTimingBudgetsLeaveTheParallelShards(t *testing.T) {
 			"TestPlanningBulkUsagePerformance", "TestList6000Performance", "TestList6000FiltersPerformance",
 		},
 	}
-	if err := coverageHoles(items, listed, runnable); err != nil {
+	if err := coverageHoles(items, listed, runnable, hostedShardCount); err != nil {
 		t.Fatal(err)
 	}
-	catch, err := planShard(items, listed, 1)
+	catch, err := planShard(items, listed, 1, hostedShardCount)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +635,7 @@ func TestTimingBudgetsLeaveTheParallelShards(t *testing.T) {
 	if len(args) != 1 || strings.Join(args[0], " ") != wantSkip {
 		t.Fatalf("catch-all args %q", args)
 	}
-	other, err := planShard(items, listed, 2)
+	other, err := planShard(items, listed, 2, hostedShardCount)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,8 +647,8 @@ func TestTimingBudgetsLeaveTheParallelShards(t *testing.T) {
 	if len(args) != 1 || strings.Join(args[0], " ") != wantRun {
 		t.Fatalf("shard 2 args %q", args)
 	}
-	for shard := 1; shard <= shardCount; shard++ {
-		plan, err := planShard(items, listed, shard)
+	for shard := 1; shard <= hostedShardCount; shard++ {
+		plan, err := planShard(items, listed, shard, hostedShardCount)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -576,10 +686,10 @@ func TestWholePackageSkipsTimingBudgets(t *testing.T) {
 		{Shard: 7, MS: 4, Path: "g"},
 	}
 	listed := []string{nodesPackage, "b", "c", "d", "e", "f", "g"}
-	if err := coverageHoles(items, listed, nil); err != nil {
+	if err := coverageHoles(items, listed, nil, hostedShardCount); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := planShard(items, listed, 1)
+	plan, err := planShard(items, listed, 1, hostedShardCount)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -620,11 +730,7 @@ func TestClassifyTimedTests(t *testing.T) {
 	}
 }
 
-func TestTimingStepUsesTheMeasuredHost(t *testing.T) {
-	// Run 36704871290 wall clock, seconds: 199, 195, 194, 165, 177, 196, 175.
-	if timingHostShard != 4 {
-		t.Fatalf("host %d, measured shortest is shard 4", timingHostShard)
-	}
+func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 	root, err := moduleRoot()
 	if err != nil {
 		t.Fatal(err)
@@ -633,19 +739,56 @@ func TestTimingStepUsesTheMeasuredHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(body)
-	needle := "matrix.shard == " + strconv.Itoa(timingHostShard)
-	if !strings.Contains(text, "success() && "+needle) {
-		t.Fatalf("ci.yml missing success() && %s", needle)
+	var workflow struct {
+		Jobs map[string]struct {
+			RunsOn string `yaml:"runs-on"`
+			If     string `yaml:"if"`
+			Needs  any    `yaml:"needs"`
+			Steps  []struct {
+				Run string `yaml:"run"`
+				If  string `yaml:"if"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
 	}
-	parallel := strings.Index(text, "ci-go-shards test -shard")
-	serial := strings.Index(text, "ci-go-shards test-timing")
-	if parallel < 0 || serial < 0 || serial < parallel {
-		t.Fatal("timing step is not after the parallel shard step")
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	timing := workflow.Jobs["go-timing"]
+	if timing.RunsOn != "ubuntu-latest" || timing.If != "" {
+		t.Fatal("timing job must always run hosted")
+	}
+	count := 0
+	for _, step := range timing.Steps {
+		if strings.Contains(step.Run, "ci-go-shards test-timing") {
+			count++
+			if step.If != "" {
+				t.Fatal("timing budgets have a conditional skip")
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("timing command runs %d times", count)
+	}
+	gate := workflow.Jobs["go"]
+	needs, ok := gate.Needs.([]any)
+	hasTiming := false
+	for _, need := range needs {
+		if need == "go-timing" {
+			hasTiming = true
+		}
+	}
+	if gate.If != "always()" || !ok || !hasTiming || !strings.Contains(gate.Steps[0].Run, `test "${GO_TIMING}" = success`) {
+		t.Fatal("required go gate does not require successful timing budgets")
 	}
 }
 
 func TestTimingBudgetsRunOnceInGo(t *testing.T) {
+	for _, count := range []int{macShardCount, hostedShardCount} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) { runTimingFixture(t, count) })
+	}
+}
+
+func runTimingFixture(t *testing.T, count int) {
 	root := t.TempDir()
 	write := func(rel, body string) {
 		t.Helper()
@@ -704,13 +847,22 @@ func TestList6000FiltersPerformance(t *testing.T) { hit("TestList6000FiltersPerf
 		{Shard: 6, MS: 7, Path: "github.com/inspr-at/paimos/internal/filler6"},
 		{Shard: 7, MS: 6, Path: "github.com/inspr-at/paimos/internal/filler7"},
 	}
+	if count == macShardCount {
+		var selected []Item
+		for _, it := range items {
+			if it.Shard <= count {
+				selected = append(selected, it)
+			}
+		}
+		items = selected
+	}
 	listed := []string{nodesPackage}
 	hits := filepath.Join(root, "hits")
 	env := withoutEnvPrefix(os.Environ(), "HITS=")
 	env = append(env, "HITS="+hits)
 	ran := 0
-	for shard := 1; shard <= shardCount; shard++ {
-		plan, err := planShard(items, listed, shard)
+	for shard := 1; shard <= count; shard++ {
+		plan, err := planShard(items, listed, shard, count)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -792,13 +944,47 @@ import "testing"
 func TestKeep(t *testing.T) {}
 func TestExtraPerformance(t *testing.T) {}
 `)
-	got, err := listPerformanceTests(root)
+	got, err := listPerformanceTests(root, hostedShardCount)
 	if err != nil {
 		t.Fatal(err)
 	}
 	names := got["example.com/scan/p"]
 	if len(got) != 1 || len(names) != 1 || names[0] != "TestExtraPerformance" {
 		t.Fatalf("%v", got)
+	}
+}
+
+func TestLayoutInventoryUsesTheRunnerArchitecture(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/platform\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "p"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, arch := range []string{"amd64", "arm64"} {
+		body := "package p\nimport \"testing\"\nfunc Test_" + arch + "(t *testing.T) {}\n"
+		if err := os.WriteFile(filepath.Join(root, "p", "arch_"+arch+"_test.go"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		count int
+		arch  string
+	}{{macShardCount, "arm64"}, {hostedShardCount, "amd64"}} {
+		// Linux must list the tests this runner can execute even when a rerun
+		// retains the other runner class's shard count. Local Darwin checks
+		// still enumerate both intended CI architectures.
+		if runtime.GOOS == "linux" {
+			tc.arch = runtime.GOARCH
+		}
+		names, err := listRunnableTests(root, "example.com/platform/p", tc.count)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(names) != 1 || names[0] != "Test_"+tc.arch {
+			t.Fatalf("count %d lists %v, want %s", tc.count, names, tc.arch)
+		}
 	}
 }
 
