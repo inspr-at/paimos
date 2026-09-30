@@ -9,11 +9,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -23,14 +23,16 @@ import (
 type AttachConfig struct {
 	Origin, ComputerID, Host, Workspace string
 	Executables                         map[string]string
+	Identities                          map[string]agentsetup.AttachIdentity
 	LocalAuth                           LocalAuthenticator
 	Exchange                            func(context.Context, attachwatch.DeviceRequest) (attachwatch.View, error)
 }
 type AttachManager struct {
-	mu       sync.Mutex
-	cfg      AttachConfig
-	observe  func(int) (attachObservation, error)
-	sessions map[string]*localAttach
+	mu        sync.Mutex
+	cfg       AttachConfig
+	observe   func(int) (attachObservation, error)
+	signature func(context.Context, string) (attachSignature, error)
+	sessions  map[string]*localAttach
 }
 type localAttach struct {
 	peer               attachwatch.Process
@@ -43,6 +45,7 @@ type localAttach struct {
 	confirmation       chan error
 	cancelConfirmation context.CancelFunc
 	confirmedDigest    string
+	image              os.FileInfo
 }
 type AttachLocalRequest struct {
 	Operation  string `json:"operation"`
@@ -74,7 +77,7 @@ func NewAttachManager(c AttachConfig) (*AttachManager, error) {
 	if c.LocalAuth == nil {
 		c.LocalAuth = systemLocalAuthenticator{}
 	}
-	return &AttachManager{cfg: c, observe: observeAttachProcess, sessions: make(map[string]*localAttach)}, nil
+	return &AttachManager{cfg: c, observe: observeAttachProcess, signature: inspectAttachSignature, sessions: make(map[string]*localAttach)}, nil
 }
 func (m *AttachManager) localView(id string, s *localAttach) AttachLocalView {
 	return AttachLocalView{ConsentMode: s.view.ConsentMode, ID: id, Origin: m.cfg.Origin, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), State: s.view.State, Code: s.view.UserCode, SessionID: s.view.SessionID}
@@ -131,10 +134,9 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		if err != nil || observed.UID != os.Getuid() || !independentAttachPeer(peer, observed, m.observe) || !attachwatch.Within(m.cfg.Workspace, observed.CWD) {
 			return AttachLocalView{}, reject
 		}
-		approved := m.cfg.Executables[in.Harness]
-		physical, err := filepath.EvalSymlinks(approved)
-		if err != nil || approved == "" || observed.Executable != physical {
-			return AttachLocalView{}, reject
+		image, err := m.validateHarnessImage(ctx, observed, in.Harness)
+		if err != nil {
+			return AttachLocalView{}, err
 		}
 		// Status-only must be explicit; a missing transcript never downgrades watch consent.
 		if !in.StatusOnly && in.Transcript == "" {
@@ -161,6 +163,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		}
 		id := fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
 		s := &localAttach{peer: peer.Process, snapshot: attachwatch.Snapshot{Mode: mode, ComputerID: m.cfg.ComputerID, ProjectID: in.ProjectID, TicketID: in.TicketID, Host: m.cfg.Host, Harness: in.Harness, Process: observed.Process, Transcript: in.Transcript, FileID: fileID, Platform: runtime.GOOS}, tail: tail, touched: time.Now(), view: attachwatch.View{State: "local_review"}}
+		s.image = image
 		if !s.snapshot.Valid() {
 			if tail != nil {
 				tail.close()
@@ -185,7 +188,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		s.view.State = "confirmed_exited"
 		return m.localView(in.ID, s), nil
 	}
-	if err != nil || observed.Process != s.snapshot.Process || !independentAttachPeer(peer, observed, m.observe) || s.tail != nil && s.tail.check() != nil || in.Digest != s.snapshot.Digest() {
+	if err != nil || observed.Process != s.snapshot.Process || !m.unchangedHarnessImage(observed, s.image) || !independentAttachPeer(peer, observed, m.observe) || s.tail != nil && s.tail.check() != nil || in.Digest != s.snapshot.Digest() {
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("identity changed; watch detached")
 	}
@@ -256,7 +259,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		}
 	}
 	observed, err = m.observe(s.snapshot.Process.PID)
-	if err != nil || observed.Process != s.snapshot.Process || !independentAttachPeer(peer, observed, m.observe) || s.tail != nil && s.tail.check() != nil {
+	if err != nil || observed.Process != s.snapshot.Process || !m.unchangedHarnessImage(observed, s.image) || !independentAttachPeer(peer, observed, m.observe) || s.tail != nil && s.tail.check() != nil {
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("identity changed; watch detached")
 	}
@@ -325,7 +328,15 @@ func (m *AttachManager) serve(w http.ResponseWriter, r *http.Request, token stri
 	}
 	view, err := m.handle(r.Context(), peer, in)
 	if err != nil {
-		http.Error(w, err.Error(), 409)
+		var identityError *AttachLocalError
+		if errors.As(err, &identityError) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(identityError)
+		} else {
+			http.Error(w, err.Error(), 409)
+		}
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

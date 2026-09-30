@@ -69,17 +69,18 @@ type RuntimeAccount struct {
 	Node      harnesslaunch.Node `json:"node,omitempty"`
 }
 type RuntimeConfig struct {
-	Schema        string           `json:"schema"`
-	Origin        string           `json:"origin"`
-	TenantID      string           `json:"tenant_id"`
-	PrincipalID   string           `json:"principal_id"`
-	DaemonID      string           `json:"daemon_id"`
-	ComputerID    string           `json:"computer_id"`
-	Workspace     string           `json:"workspace"`
-	Accounts      []RuntimeAccount `json:"accounts"`
-	NodePath      string           `json:"node_path,omitempty"`
-	ClaudeSDKPath string           `json:"claude_sdk_path,omitempty"`
-	ClaudeRepinID string           `json:"claude_repin_id,omitempty"`
+	AttachIdentities map[string]AttachIdentity `json:"attach_identities,omitempty"`
+	Schema           string                    `json:"schema"`
+	Origin           string                    `json:"origin"`
+	TenantID         string                    `json:"tenant_id"`
+	PrincipalID      string                    `json:"principal_id"`
+	DaemonID         string                    `json:"daemon_id"`
+	ComputerID       string                    `json:"computer_id"`
+	Workspace        string                    `json:"workspace"`
+	Accounts         []RuntimeAccount          `json:"accounts"`
+	NodePath         string                    `json:"node_path,omitempty"`
+	ClaudeSDKPath    string                    `json:"claude_sdk_path,omitempty"`
+	ClaudeRepinID    string                    `json:"claude_repin_id,omitempty"`
 }
 
 type snapshot struct {
@@ -662,6 +663,11 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 			return e.progress(s), ErrCollision
 		}
 	}
+	var previous RuntimeConfig
+	if saved, err := e.Store.Read(RuntimeName, 128<<10); err == nil && json.Unmarshal(saved, &previous) == nil {
+		config.preserveAttachIdentities(previous)
+	}
+	config.RecordAttachIdentities()
 	raw, _ := json.Marshal(config)
 	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
 		return e.progress(s), err

@@ -64,6 +64,7 @@ func TestAttachModesIdentityAndLease(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer m.Close(t.Context())
+				m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, nil }
 				m.observe = func(pid int) (attachObservation, error) {
 					if pid == target.PID {
 						return target, observeErr
