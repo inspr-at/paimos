@@ -496,6 +496,25 @@ only with that same export file: a fresh export has a new `captured_at` and
 conflicts. Restore the file before re-reserving; do not export the preview again.
 Conflicting entries fail instead of rewriting a reserved version.
 
+Every release also has a codename (AEON-430): an alliterative science-fiction
+name such as "Cool Chip" or "Solar Star", a pure function of
+`release_sequence` from the frozen, append-only lists in
+`internal/releasehistory/codename/words.txt`. The letter steps through a
+fixed cycle of the 15 letters rich enough for thousands of good names
+(A B C D E F G H I L M P R S T), so release 1 is A and neighbouring releases
+start differently. Within a letter short names come first, and no name
+repeats before sequence 43,913 (50,419 names in version 1). The reserve step above writes it into `version.json` as
+`"codename"`, right after `release_sequence`; without a snapshot, run
+`just release-codename` (`go run ./internal/releasehistory/codename/stamp -repo .`)
+once `release_sequence` is set. Both are idempotent and refuse a name that
+differs from the sequence's. The codename is presentation only: the version
+stays the identity, and every earlier release has its name from the same
+function. To change the lists, append a new `version N from S` block with `S`
+above every reserved sequence; never edit, reorder or delete a line, so no
+existing name moves. `codename.Guard` enforces this in `just release-history` (and `TestGuard`, `TestRepositoryCodenames`): a recorded codename must stay its sequence's name, and a version after 1 must start above every release without one. Two-word collisions with obscure titles are an accepted
+residual risk. A reported collision is added to the pair deny list in the next
+list version; names of already-published releases never change.
+
 For historical backfill where snapshots exist, export stored snapshots as `VERSION.json` in
 one directory and run the same command with `-snapshots DIRECTORY -tenant
 TENANT_UUID -project AEON_PROJECT_UUID`. A run with no exports imports only

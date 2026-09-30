@@ -4,7 +4,7 @@ import { computed, ref } from 'vue'
 import { span, type ReleaseStats } from '../../lib/releases'
 import { absoluteTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
-import CalendarVersion from '../CalendarVersion.vue'
+import ReleaseName from '../ReleaseName.vue'
 
 // The header of the release history: what runs here, and the cadence at a glance.
 // Compact (phones): what runs here, today and this week; the rest behind More stats.
@@ -40,7 +40,7 @@ const days = computed(() => {
   <div class="stats" :class="{ compact }" role="group" aria-label="Release cadence">
     <div class="tile running">
       <p class="label">Running here</p>
-      <p class="value"><CalendarVersion v-if="current" :value="current" /></p>
+      <p class="value"><ReleaseName v-if="current" :version="current" /></p>
       <p v-if="live" class="sub" :data-tip="liveSince ? `Live on this server since ${absoluteTime(liveSince)}` : undefined">Live since {{ live }}</p>
     </div>
     <div class="tile">
@@ -91,6 +91,7 @@ const days = computed(() => {
 .value { font: 600 17px/1.35 var(--font); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.01em; }
 .value.num { font: 600 20px/1.25 var(--mono); font-variant-numeric: tabular-nums; }
 .running .value { font: 500 16px/1.45 var(--mono); }
+.running .value :deep(.rn-name) { font: 650 17px/1.35 var(--font); letter-spacing: -.01em; }
 .sub { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .spark { display: grid; column-gap: 2px; height: 30px; margin: 3px 0 1px; padding: 0; list-style: none; }
 .day { position: relative; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; }

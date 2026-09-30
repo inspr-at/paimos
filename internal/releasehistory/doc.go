@@ -44,6 +44,10 @@
 //	tag                the git tag, "v" + version (empty for a reservation without a tag)
 //	release_channel    "stable" unless version.json says otherwise
 //	release_sequence   the sequence from the tag message or version.json
+//	codename           the release's alliterative sci-fi name, a pure function
+//	                   of release_sequence (package codename, AEON-430). Every
+//	                   past release has one; a reservation whose sequence a
+//	                   published release took has none. Presentation only.
 //	state              "published" or "reserved" (reserved, never published)
 //	reserved_at        when the version was reserved (version.json reserved_at)
 //	tagged_at          when the annotated tag was made
