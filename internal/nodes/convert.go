@@ -30,13 +30,42 @@ type convertInput struct {
 	ToKind string `json:"to_kind"`
 }
 
-func issueKind(slug string) bool {
-	switch slug {
+// seededIssueNames are the issue kinds a tenant starts with. A kind schema
+// can mark issue_family instead; a custom slug that keeps one of these icons
+// is in the family too. Conversion is allowed between any two family members.
+func seededIssueName(name string) bool {
+	switch name {
 	case "epic", "ticket", "task":
 		return true
 	default:
 		return false
 	}
+}
+
+func explicitIssueFamily(raw json.RawMessage) (marked bool, ok bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false, false
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return false, false
+	}
+	value, exists := obj["issue_family"]
+	if !exists {
+		return false, false
+	}
+	flag, isBool := value.(bool)
+	if !isBool {
+		return false, false
+	}
+	return flag, true
+}
+
+func issueFamilyKind(kind kindJSON) bool {
+	if marked, ok := explicitIssueFamily(kind.FieldSchema); ok {
+		return marked
+	}
+	return seededIssueName(kind.Slug) || seededIssueName(kind.Icon)
 }
 
 func (m *Module) handleConvertNode(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +143,7 @@ func (m *Module) convertNode(ctx context.Context, p tenant.Principal, id, toKind
 			node.Estimate = views[id]
 			return nil
 		}
-		if !issueKind(currentKind.Slug) || !issueKind(target.Slug) {
+		if !issueFamilyKind(currentKind) || !issueFamilyKind(target) {
 			return conflictCoded("kind is immutable", codeKindChangeNotAllowed)
 		}
 		if err := requireCreateTarget(ctx, tx, p, target.Slug, current.ParentID); err != nil {
@@ -141,19 +170,31 @@ func (m *Module) convertNode(ctx context.Context, p tenant.Principal, id, toKind
 			return err
 		}
 		blockedChildren := offenders(children, target.AllowedChildKinds)
-		blockedFields, err := schemaFieldViolations(targetSchema, current.Fields)
+		storedFields, dropped, blockedFields, err := fitKindFields(targetSchema, current.Fields)
 		if err != nil {
 			return err
 		}
 		if parentBlocked || len(blockedChildren) > 0 || len(blockedFields) > 0 {
 			return conversionBlocked(target.Slug, parentBlocked, blockedChildren, blockedFields)
 		}
-		loaded, scanErr := scanNode(tx.QueryRow(ctx, `
-			UPDATE nodes
-			SET kind_id = $1::uuid,
-			    updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')
-			WHERE id = $2::uuid AND deleted_at IS NULL
-			RETURNING `+nodeReturning, target.ID, id))
+		var row pgx.Row
+		if len(dropped) > 0 {
+			row = tx.QueryRow(ctx, `
+				UPDATE nodes
+				SET kind_id = $1::uuid,
+				    fields = $2::jsonb,
+				    updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')
+				WHERE id = $3::uuid AND deleted_at IS NULL
+				RETURNING `+nodeReturning, target.ID, string(storedFields), id)
+		} else {
+			row = tx.QueryRow(ctx, `
+				UPDATE nodes
+				SET kind_id = $1::uuid,
+				    updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')
+				WHERE id = $2::uuid AND deleted_at IS NULL
+				RETURNING `+nodeReturning, target.ID, id)
+		}
+		loaded, scanErr := scanNode(row)
 		if errors.Is(scanErr, pgx.ErrNoRows) {
 			return notFound("node not found")
 		}
@@ -256,31 +297,58 @@ func offenders(children []kindOffender, allowed []string) []kindOffender {
 	return out
 }
 
-// schemaFieldViolations reports schema properties that are missing or invalid.
-// Properties the schema does not declare stay on the node and are not listed.
-func schemaFieldViolations(schema *jsSchema, fields json.RawMessage) ([]string, error) {
-	if schema == nil {
-		return nil, nil
+// fitKindFields keeps the fields the target schema allows. Fields it rejects as
+// undeclared are removed from the live node; the caller stores them in the
+// event's before snapshot. The kept object is accepted only by the same
+// schema.validate PATCH uses, including root constraints.
+func fitKindFields(schema *jsSchema, raw json.RawMessage) (stored json.RawMessage, dropped, violations []string, err error) {
+	if len(strings.TrimSpace(string(raw))) == 0 || string(raw) == "null" {
+		raw = json.RawMessage(`{}`)
 	}
-	if len(fields) == 0 {
-		fields = json.RawMessage(`{}`)
-	}
-	v, err := decodeValue(fields)
-	if err != nil {
-		return []string{"fields"}, nil
+	v, decErr := decodeValue(raw)
+	if decErr != nil {
+		return nil, nil, []string{"fields"}, nil
 	}
 	obj, ok := v.(map[string]any)
 	if !ok {
-		return []string{"fields"}, nil
+		return nil, nil, []string{"fields"}, nil
 	}
-	var bad []string
+	fitted := obj
+	if schema != nil && schema.additionalSet && !schema.additionalAllow && schema.additionalSchema == nil {
+		fitted = map[string]any{}
+		for name, child := range obj {
+			if _, declared := schema.props[name]; declared {
+				fitted[name] = child
+			} else {
+				dropped = append(dropped, name)
+			}
+		}
+		sort.Strings(dropped)
+	}
+	if schema != nil {
+		if valErr := schema.validate(fitted); valErr != nil {
+			return nil, dropped, violationNames(schema, fitted, valErr), nil
+		}
+	}
+	if len(dropped) == 0 {
+		return raw, nil, nil, nil
+	}
+	stored, err = json.Marshal(fitted)
+	if err != nil {
+		return nil, dropped, nil, err
+	}
+	return stored, dropped, nil, nil
+}
+
+func violationNames(schema *jsSchema, obj map[string]any, valErr error) []string {
+	var names []string
 	seen := map[string]bool{}
 	add := func(name string) {
 		if name == "" || seen[name] {
 			return
 		}
 		seen[name] = true
-		bad = append(bad, name)
+		names = append(names, name)
 	}
 	for _, name := range schema.required {
 		if _, ok := obj[name]; !ok {
@@ -292,15 +360,27 @@ func schemaFieldViolations(schema *jsSchema, fields json.RawMessage) ([]string, 
 		if !ok || sub == nil {
 			continue
 		}
-		if err := sub.validateAt("fields."+name, child); err != nil {
+		if sub.validateAt("fields."+name, child) != nil {
 			add(name)
 		}
 	}
-	sort.Strings(bad)
-	if len(bad) == 0 {
-		return nil, nil
+	if len(names) == 0 {
+		msg := valErr.Error()
+		if rest, ok := strings.CutPrefix(msg, "fields."); ok {
+			name := rest
+			if i := strings.IndexAny(rest, " .["); i > 0 {
+				name = rest[:i]
+			}
+			if name != "" && !strings.Contains(name, " ") {
+				add(name)
+				sort.Strings(names)
+				return names
+			}
+		}
+		add(msg)
 	}
-	return bad, nil
+	sort.Strings(names)
+	return names
 }
 
 func undoKindChange(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
@@ -350,12 +430,17 @@ func undoKindChange(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events
 	if len(offenders(children, oldKind.AllowedChildKinds)) > 0 {
 		return events.Change{}, events.ErrConflict
 	}
+	fields := before.Fields
+	if len(strings.TrimSpace(string(fields))) == 0 {
+		fields = json.RawMessage(`{}`)
+	}
 	restored, scanErr := scanNode(tx.QueryRow(ctx, `
 		UPDATE nodes
 		SET kind_id = $1::uuid,
+		    fields = $2::jsonb,
 		    updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')
-		WHERE id = $2::uuid AND deleted_at IS NULL
-		RETURNING `+nodeReturning, before.KindID, current.ID))
+		WHERE id = $3::uuid AND deleted_at IS NULL
+		RETURNING `+nodeReturning, before.KindID, string(fields), current.ID))
 	if scanErr != nil {
 		return events.Change{}, undoWriteErr(scanErr)
 	}

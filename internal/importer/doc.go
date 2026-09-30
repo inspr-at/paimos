@@ -20,7 +20,10 @@
 //     Unresolved source IDs remain in fields.classic. Every fetched issue
 //     value is also copied verbatim to fields.classic.<name>, including other
 //     billing, time, Jira, metadata and historical fields. The source URL hash
-//     is kept in fields.classic.source_id for safe reruns.
+//     is kept in fields.classic.source_id for safe reruns. An existing node
+//     whose kind differs from the imported type is a per-row conflict
+//     (kind_change_not_allowed, with the current and requested kind). That
+//     row is left unchanged, and the other rows in the snapshot continue.
 //   - Project knowledge is merged with its issue record, then imported with
 //     its original issue key. Orphan sprints become root nodes. Trash issues
 //     are fetched, and deleted_at is retained in fields.classic.deleted_at.

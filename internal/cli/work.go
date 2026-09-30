@@ -379,9 +379,6 @@ func (rt *runtime) noteKindUpdate(ref, requested string) error {
 	if requested == "" {
 		return nil
 	}
-	if !issueKinds[requested] {
-		return usagef("unknown issue type %q (kind is immutable; create a node of that kind)", requested)
-	}
 	n, err := rt.nodeByKey(ref)
 	if err != nil {
 		return err
@@ -391,14 +388,11 @@ func (rt *runtime) noteKindUpdate(ref, requested string) error {
 		return err
 	}
 	current := kinds.slug(n.KindID)
-	if !issueKinds[current] {
-		return rt.fail(fmt.Errorf("issue %q not found", ref), "")
-	}
 	if current == requested {
 		fmt.Fprintf(rt.stdout, "kind is already %s\n", current)
 		return nil
 	}
-	return rt.fail(fmt.Errorf("kind is immutable here: %s → %s; use \"aeon issue convert %s --to %s\"", current, requested, n.Key, requested), "")
+	return rt.fail(fmt.Errorf("kind_change_not_allowed: %s → %s; use \"aeon issue convert %s --to %s\"", current, requested, n.Key, requested), "")
 }
 
 func (rt *runtime) updateIssue(in issuePatch) error {
@@ -554,7 +548,7 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 	return nil
 }
 
-func (rt *runtime) convertIssue(ref, to string) error {
+func (rt *runtime) convertIssue(ref, to, sessionFile string) error {
 	if strings.HasPrefix(strings.TrimSpace(ref), "id:") {
 		return usagef("id:<n> is a classic numeric id; pass the issue key")
 	}
@@ -567,14 +561,18 @@ func (rt *runtime) convertIssue(ref, to string) error {
 		return err
 	}
 	current := kinds.slug(n.KindID)
-	if !issueKinds[current] {
-		return rt.fail(fmt.Errorf("issue %q not found", ref), "")
-	}
 	if current == to {
 		fmt.Fprintf(rt.stdout, "kind is already %s\n", current)
 		return nil
 	}
-	if err := rt.do(http.MethodPost, "/api/nodes/"+url.PathEscape(n.ID)+"/convert", map[string]string{"to_kind": to}, &n); err != nil {
+	post, err := rt.conversionDo(sessionFile)
+	if err != nil {
+		return err
+	}
+	if post == nil {
+		return rt.fail(fmt.Errorf("Converting a kind needs a person. Open %s, then use ⋯ → Convert to…", rt.ticketWebURL(n.Key)), "")
+	}
+	if err := post(http.MethodPost, "/api/nodes/"+url.PathEscape(n.ID)+"/convert", map[string]string{"to_kind": to}, &n); err != nil {
 		return err
 	}
 	if rt.jsonOut {

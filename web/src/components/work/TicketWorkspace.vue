@@ -69,10 +69,15 @@ const ticket = useTicket(item, {
 })
 const activity = useActivity(computed(() => props.item?.id ?? null))
 const convertOpen = ref(false)
+const header = ref<{ focusMore: () => void } | null>(null)
 function finishConvert() {
   convertOpen.value = false
   if (props.item) toast(`${props.item.key} is now ${kindLabel(props.item.kind_slug).toLowerCase()}`)
   activity.load()
+}
+function closeConvert() {
+  convertOpen.value = false
+  void nextTick(() => header.value?.focusMore())
 }
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
 const deletable = computed(() => props.canDelete && !ticket.readOnly.value && !ticket.gone.value)
@@ -439,6 +444,7 @@ defineExpose({
     @click.capture="rememberClick" @dragenter="dragEnter" @dragover="dragOverRoot" @dragleave="dragLeaveRoot" @drop="dropFiles" @paste="pasteFiles"
   >
     <TicketHeaderBar
+      ref="header"
       :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :position="position" :mode="mode" :can-write="editable"
       :can-delete="deletable" :can-move="movable && item?.kind_slug === 'ticket'" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
       :can-start-agent="canStartAgent" :open-in-project="openInProject" :back-label="backLabel"
@@ -449,7 +455,7 @@ defineExpose({
       @start-agent="item && startDialog?.open(item)"
     />
     <StartAgentDialog ref="startDialog" />
-    <ConvertKindSheet v-if="convertOpen && item" :item="item" :children="ticket.children.value" :children-loading="ticket.childrenLoading.value" :convert="ticket.convert" @close="convertOpen = false" @converted="finishConvert" />
+    <ConvertKindSheet v-if="convertOpen && item" :item="item" :children="ticket.children.value" :children-loading="ticket.childrenLoading.value" :convert="ticket.convert" @close="closeConvert" @converted="finishConvert" />
 
     <div ref="scroller" class="ws-scroll">
       <div v-if="ticket.gone.value" class="ws-state" role="alert">

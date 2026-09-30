@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import type { Kind } from '../../lib/api'
+import { isIssueKind } from '../../lib/kindConvert'
+import { kinds } from '../../lib/useTicket'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 
@@ -39,7 +42,10 @@ function pick(action: 'copyKey' | 'copyLink' | 'delete' | 'prev' | 'next') {
 }
 function pickMove() { const anchor = moreButton.value ?? null; moreAnchor.value = null; if (anchor) emit('move', anchor) }
 function pickConvert() { moreAnchor.value = null; emit('convert') }
-const canConvert = computed(() => props.canWrite && (props.kind === 'epic' || props.kind === 'ticket' || props.kind === 'task'))
+const catalog = ref<Kind[]>([])
+onMounted(() => { void kinds().then(rows => { catalog.value = rows }).catch(() => {}) })
+const canConvert = computed(() => props.canWrite && !!props.kind && isIssueKind(catalog.value.find(kind => kind.slug === props.kind) ?? props.kind))
+function focusMore() { moreButton.value?.focus() }
 function menuKeys(event: KeyboardEvent) {
   const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
   const index = items.indexOf(document.activeElement as HTMLButtonElement)
@@ -48,7 +54,7 @@ function menuKeys(event: KeyboardEvent) {
     items[event.key === 'ArrowDown' ? Math.min(items.length - 1, index + 1) : Math.max(0, index - 1)]?.focus()
   }
 }
-defineExpose({ closeMore })
+defineExpose({ closeMore, focusMore })
 void props
 </script>
 

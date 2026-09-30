@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { blockingChildren, convertTargets, isIssueKind, parentAllows } from '../src/lib/kindConvert.ts'
+import { blockingChildren, convertTargets, fieldsMovingToHistory, isIssueKind, parentAllows } from '../src/lib/kindConvert.ts'
 
 describe('kind conversion', () => {
   it('offers the other configured issue kinds', () => {
@@ -10,6 +10,15 @@ describe('kind conversion', () => {
     assert.deepEqual(convertTargets('project', ['epic', 'ticket', 'task']), [])
     assert.equal(isIssueKind('epic'), true)
     assert.equal(isIssueKind('release'), false)
+    assert.deepEqual(convertTargets('story', [
+      { slug: 'story', icon: 'book', field_schema: { issue_family: true } },
+      { slug: 'initiative', icon: 'flag', field_schema: { issue_family: true } },
+      { slug: 'release', icon: 'box', field_schema: {} },
+    ]), ['initiative'])
+    assert.equal(isIssueKind({ slug: 'memo', icon: 'ticket', field_schema: { issue_family: false } }), false)
+    assert.equal(isIssueKind({ slug: 'chore', icon: 'ticket', field_schema: {} }), true)
+    assert.deepEqual(fieldsMovingToHistory({ type: 'object', additionalProperties: false, properties: { priority: { type: 'string' } } }, { priority: 'high', scratch: 'keep' }), ['scratch'])
+    assert.deepEqual(fieldsMovingToHistory({ type: 'object' }, { scratch: 'keep' }), [])
   })
 
   it('blocks only children the target kind does not allow', () => {

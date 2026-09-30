@@ -210,6 +210,153 @@ func TestConvertWritesOneEventAndUndo(t *testing.T) {
 	}
 }
 
+func TestConvertDropsFieldsOutsideAClosedSchema(t *testing.T) {
+	p := newPrincipal(t, "kind-convert-fields")
+	project := kindBySlug(t, p, "project")
+	ticketKind := kindBySlug(t, p, "ticket")
+	epicKind := kindBySlug(t, p, "epic")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Field project","state":"active"}`)
+	status, raw := call(t, &p, http.MethodPatch, "/api/kinds/"+epicKind.ID, `{"field_schema":{"type":"object","additionalProperties":false,"properties":{"priority":{"type":"string"}}}}`)
+	if status != http.StatusOK {
+		t.Fatalf("epic schema: %d %s", status, raw)
+	}
+	node := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+root.ID+`","title":"Carries extra","fields":{"priority":"high","scratch":"keep-me"}}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+node.ID+"/convert", `{"to_kind":"epic"}`)
+	got := decode[nodeJSON](t, status, raw, http.StatusOK)
+	if strings.Contains(string(got.Fields), `"scratch"`) || !strings.Contains(string(got.Fields), "high") || got.KindID != epicKind.ID {
+		t.Fatalf("live fields: %s", got.Fields)
+	}
+	var before, after string
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT before::text, after::text FROM events WHERE type = 'node.kind_changed' AND undo_of IS NULL ORDER BY id DESC LIMIT 1`).Scan(&before, &after)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(before, "keep-me") || strings.Contains(after, `"scratch"`) {
+		t.Fatalf("event before %s after %s", before, after)
+	}
+	status, raw = call(t, &p, http.MethodPatch, "/api/nodes/"+node.ID, `{"fields":{"priority":"low"}}`)
+	if status != http.StatusOK || !strings.Contains(string(raw), "low") {
+		t.Fatalf("patch after convert: %d %s", status, raw)
+	}
+
+	kept := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+root.ID+`","title":"Undo me","fields":{"priority":"high","scratch":"keep-me"}}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+kept.ID+"/convert", `{"to_kind":"epic"}`)
+	if status != http.StatusOK {
+		t.Fatalf("convert for undo: %d %s", status, raw)
+	}
+	undoMod := events.New(appPool, events.WithUndoHandlers(UndoHandlers()))
+	id := latestKindChange(t, p.TenantID)
+	status, raw = callAs(t, undoMod, &p, http.MethodPost, "/api/events/"+strconv.FormatInt(id, 10)+"/undo", "")
+	if status != http.StatusCreated {
+		t.Fatalf("undo: %d %s", status, raw)
+	}
+	restored, _ := getNode(t, p, kept.ID)
+	if restored.KindID != ticketKind.ID || !strings.Contains(string(restored.Fields), "keep-me") || !strings.Contains(string(restored.Fields), "high") {
+		t.Fatalf("undo restore: kind %s fields %s", restored.KindID, restored.Fields)
+	}
+}
+
+func TestConvertValidatesRootSchemaConstraints(t *testing.T) {
+	p := newPrincipal(t, "kind-convert-root")
+	project := kindBySlug(t, p, "project")
+	ticketKind := kindBySlug(t, p, "ticket")
+	epicKind := kindBySlug(t, p, "epic")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Root project","state":"active"}`)
+	status, raw := call(t, &p, http.MethodPatch, "/api/kinds/"+epicKind.ID, `{"field_schema":{"type":"object","minProperties":1,"properties":{"priority":{"type":"string"}}}}`)
+	if status != http.StatusOK {
+		t.Fatalf("min schema: %d %s", status, raw)
+	}
+	empty := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+root.ID+`","title":"Empty","fields":{}}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+empty.ID+"/convert", `{"to_kind":"epic"}`)
+	if status != http.StatusConflict || !strings.Contains(string(raw), "too few properties") || !strings.Contains(string(raw), codeKindConversionBlocked) {
+		t.Fatalf("minProperties: %d %s", status, raw)
+	}
+	still, _ := getNode(t, p, empty.ID)
+	if still.KindID != ticketKind.ID {
+		t.Fatal("refused convert wrote the kind")
+	}
+
+	status, raw = call(t, &p, http.MethodPatch, "/api/kinds/"+epicKind.ID, `{"field_schema":{"type":"object","const":{"priority":"high"},"properties":{"priority":{"type":"string"}}}}`)
+	if status != http.StatusOK {
+		t.Fatalf("const schema: %d %s", status, raw)
+	}
+	low := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+root.ID+`","title":"Low","fields":{"priority":"low"}}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+low.ID+"/convert", `{"to_kind":"epic"}`)
+	if status != http.StatusConflict || !strings.Contains(string(raw), "const") {
+		t.Fatalf("const: %d %s", status, raw)
+	}
+	kept, _ := getNode(t, p, low.ID)
+	if kept.KindID != ticketKind.ID || !strings.Contains(string(kept.Fields), "low") {
+		t.Fatalf("const refusal changed the node: %s", kept.Fields)
+	}
+}
+
+func TestConvertCustomIssueFamily(t *testing.T) {
+	p := newPrincipal(t, "kind-convert-family")
+	project := kindBySlug(t, p, "project")
+	ticketKind := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Family project","state":"active"}`)
+	status, raw := call(t, &p, http.MethodPost, "/api/kinds", `{
+		"slug":"story","label":"Story","short_prefix":"STY","icon":"book",
+		"allowed_child_kinds":["initiative"],
+		"field_schema":{"type":"object","issue_family":true}
+	}`)
+	story := decode[kindJSON](t, status, raw, http.StatusCreated)
+	status, raw = call(t, &p, http.MethodPost, "/api/kinds", `{
+		"slug":"initiative","label":"Initiative","short_prefix":"INI","icon":"flag",
+		"allowed_child_kinds":[],
+		"field_schema":{"type":"object","issue_family":true}
+	}`)
+	initiative := decode[kindJSON](t, status, raw, http.StatusCreated)
+	status, raw = call(t, &p, http.MethodPost, "/api/kinds", `{
+		"slug":"memo","label":"Memo","short_prefix":"MMO","icon":"ticket",
+		"field_schema":{"type":"object","issue_family":false}
+	}`)
+	if status != http.StatusCreated {
+		t.Fatalf("memo: %d %s", status, raw)
+	}
+	status, raw = call(t, &p, http.MethodPost, "/api/kinds", `{
+		"slug":"chore","label":"Chore","short_prefix":"CHO","icon":"ticket",
+		"field_schema":{"type":"object"}
+	}`)
+	chore := decode[kindJSON](t, status, raw, http.StatusCreated)
+
+	node := mustNode(t, p, `{"kind_id":"`+story.ID+`","parent_id":"`+root.ID+`","title":"Custom"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+node.ID+"/convert", `{"to_kind":"initiative"}`)
+	got := decode[nodeJSON](t, status, raw, http.StatusOK)
+	if got.KindID != initiative.ID || got.Key != node.Key {
+		t.Fatalf("custom convert %#v", got)
+	}
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+node.ID+"/convert", `{"to_kind":"release"}`)
+	if status != http.StatusConflict || !strings.Contains(string(raw), codeKindChangeNotAllowed) {
+		t.Fatalf("release: %d %s", status, raw)
+	}
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+node.ID+"/convert", `{"to_kind":"memo"}`)
+	if status != http.StatusConflict || !strings.Contains(string(raw), codeKindChangeNotAllowed) {
+		t.Fatalf("explicit false: %d %s", status, raw)
+	}
+
+	plain := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+root.ID+`","title":"Seeded"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+plain.ID+"/convert", `{"to_kind":"chore"}`)
+	got = decode[nodeJSON](t, status, raw, http.StatusOK)
+	if got.KindID != chore.ID {
+		t.Fatalf("icon family %#v", got)
+	}
+
+	parent := mustNode(t, p, `{"kind_id":"`+story.ID+`","parent_id":"`+root.ID+`","title":"Parent story"}`)
+	child := mustNode(t, p, `{"kind_id":"`+initiative.ID+`","parent_id":"`+parent.ID+`","title":"Child initiative"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+child.ID+"/convert", `{"to_kind":"story"}`)
+	if status != http.StatusConflict || !strings.Contains(string(raw), codeKindConversionBlocked) || !strings.Contains(string(raw), "parent does not allow story") {
+		t.Fatalf("parent rule: %d %s", status, raw)
+	}
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+parent.ID+"/convert", `{"to_kind":"initiative"}`)
+	if status != http.StatusConflict || !strings.Contains(string(raw), codeKindConversionBlocked) || !strings.Contains(string(raw), child.Key) {
+		t.Fatalf("empty children: %d %s", status, raw)
+	}
+}
+
 func getNode(t *testing.T, p tenant.Principal, id string) (nodeJSON, []byte) {
 	t.Helper()
 	status, raw := call(t, &p, http.MethodGet, "/api/nodes/"+id, "")

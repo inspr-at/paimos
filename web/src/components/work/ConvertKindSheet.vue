@@ -2,11 +2,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { APIError, type Kind, type ListItem } from '../../lib/api'
-import { blockingChildren, convertTargets, parentAllows } from '../../lib/kindConvert'
+import { blockingChildren, convertTargets, fieldsMovingToHistory, parentAllows } from '../../lib/kindConvert'
 import { toast } from '../../lib/toast'
 import { kinds } from '../../lib/useTicket'
 import { kindLabel } from '../../lib/work'
-import AppIcon from '../AppIcon.vue'
+import AppIcon, { type IconName } from '../AppIcon.vue'
 
 const props = defineProps<{
   item: ListItem
@@ -34,8 +34,15 @@ onMounted(async () => {
   }
 })
 
-const targets = computed(() => convertTargets(props.item.kind_slug, known.value.map(kind => kind.slug)))
+const targets = computed(() => convertTargets(props.item.kind_slug, known.value))
 function kindBySlug(slug: string) { return known.value.find(kind => kind.slug === slug) }
+const knownIcons = new Set<string>(['epic', 'ticket', 'task', 'book', 'bug', 'layers', 'box', 'tag', 'folder'])
+function glyph(slug: string): IconName {
+  const icon = kindBySlug(slug)?.icon
+  if (icon && knownIcons.has(icon)) return icon as IconName
+  if (slug === 'epic' || slug === 'task') return slug
+  return 'ticket'
+}
 function localBlockers(slug: string) {
   const rows = props.children.map(child => ({ key: child.key, title: child.title, kind: child.kind_slug }))
   return blockingChildren(kindBySlug(slug)?.allowed_child_kinds, rows)
@@ -52,6 +59,7 @@ const blockers = computed(() => {
   if (serverChildren.value.length) return serverChildren.value.map(child => ({ ...child, title: child.title ?? kindLabel(child.kind) }))
   return choice.value ? localBlockers(choice.value) : []
 })
+const historyFields = computed(() => fieldsMovingToHistory(kindBySlug(choice.value)?.field_schema, props.item.fields))
 const canSubmit = computed(() => !!choice.value && !waiting.value && !busy.value && !parentBlocked.value && blockers.value.length === 0 && serverFields.value.length === 0)
 const sentence = computed(() => {
   const kept = `${props.item.key} keeps its key, history, relations, comments and attachments`
@@ -76,6 +84,17 @@ function pick(slug: string) {
   choice.value = slug
   serverChildren.value = []
   serverFields.value = []
+}
+function moveChoice(event: KeyboardEvent) {
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown' && event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  const list = targets.value
+  if (list.length < 2) return
+  event.preventDefault()
+  const index = Math.max(0, list.indexOf(choice.value))
+  const delta = event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1
+  pick(list[(index + delta + list.length) % list.length])
+  const group = event.currentTarget as HTMLElement
+  void nextTick(() => group.querySelector<HTMLButtonElement>('[role="radio"][aria-checked="true"]')?.focus())
 }
 function close() {
   dialog.value?.close()
@@ -112,22 +131,28 @@ async function submit() {
 <template>
   <dialog ref="dialog" class="convert" aria-labelledby="convert-title" @cancel.prevent="close" @click="backdrop">
     <div class="convert-card">
-      <h2 id="convert-title">Convert {{ item.key }}</h2>
-      <p class="lead">{{ sentence }}</p>
-      <div v-if="targets.length > 1" class="choices" role="radiogroup" aria-label="New kind">
-        <button v-for="slug in targets" :key="slug" type="button" class="choice" role="radio" :aria-checked="choice === slug" :class="{ on: choice === slug }" @click="pick(slug)">
-          <AppIcon :name="slug === 'epic' ? 'epic' : slug === 'task' ? 'task' : 'ticket'" :size="14" />
-          <span>{{ kindLabel(slug) }}</span>
-        </button>
+      <div class="convert-scroll">
+        <h2 id="convert-title">Convert {{ item.key }}</h2>
+        <p class="lead">{{ sentence }}</p>
+        <div v-if="targets.length > 1" class="choices" role="radiogroup" aria-label="New kind" @keydown="moveChoice">
+          <button v-for="slug in targets" :key="slug" type="button" class="choice" role="radio" :aria-checked="choice === slug" :tabindex="choice === slug ? 0 : -1" :class="{ on: choice === slug }" @click="pick(slug)">
+            <AppIcon :name="glyph(slug)" :size="14" />
+            <span>{{ kindLabel(slug) }}</span>
+          </button>
+        </div>
+        <p v-if="waiting" class="note">Checking children…</p>
+        <ul v-else-if="blockers.length" class="blockers" aria-label="Blocking children">
+          <li v-for="child in blockers" :key="child.key"><span class="mono">{{ child.key }}</span> {{ child.title }}</li>
+        </ul>
+        <p v-if="parentBlocked" class="note">The parent does not allow a {{ kindLabel(choice).toLowerCase() }}.</p>
+        <ul v-if="serverFields.length" class="blockers" aria-label="Fields that do not fit">
+          <li v-for="field in serverFields" :key="field">{{ field }}</li>
+        </ul>
+        <p v-if="historyFields.length" class="note">These fields move to the history: {{ historyFields.join(', ') }}.</p>
+        <ul v-if="historyFields.length" class="blockers" aria-label="Fields that move to the history">
+          <li v-for="field in historyFields" :key="field">{{ field }}</li>
+        </ul>
       </div>
-      <p v-if="waiting" class="note">Checking children…</p>
-      <ul v-else-if="blockers.length" class="blockers" aria-label="Blocking children">
-        <li v-for="child in blockers" :key="child.key"><span class="mono">{{ child.key }}</span> {{ child.title }}</li>
-      </ul>
-      <p v-if="parentBlocked" class="note">The parent does not allow a {{ kindLabel(choice).toLowerCase() }}.</p>
-      <ul v-if="serverFields.length" class="blockers" aria-label="Fields that do not fit">
-        <li v-for="field in serverFields" :key="field">{{ field }}</li>
-      </ul>
       <div class="actions">
         <button type="button" class="btn" @click="close">Cancel</button>
         <button ref="primary" type="button" class="btn on" :disabled="!canSubmit" @click="submit">{{ choice ? `Convert to ${kindLabel(choice).toLowerCase()}` : 'Convert' }}</button>
@@ -137,9 +162,11 @@ async function submit() {
 </template>
 
 <style scoped>
-.convert { width: min(420px, calc(100vw - 32px)); max-width: calc(100vw - 32px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.convert { display: flex; flex-direction: column; width: min(420px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: hidden; }
 .convert::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
-.convert-card { padding: 22px 24px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
+.convert-card { display: flex; flex-direction: column; min-height: 0; max-height: calc(100dvh - 32px); overflow: hidden; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
+.convert-scroll { min-height: 0; overflow: auto; padding: 22px 24px 0; }
+.actions { flex: none; padding: 0 24px 18px; }
 h2 { font-size: 18px; overflow-wrap: anywhere; }
 .lead, .note { margin-top: 8px; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
 .choices { display: grid; gap: 4px; margin-top: 14px; }

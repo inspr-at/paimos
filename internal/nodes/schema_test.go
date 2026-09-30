@@ -47,4 +47,10 @@ func TestFieldSchema(t *testing.T) {
 	if _, err := validateFields(open, nil); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := compileSchema(json.RawMessage(`{"type":"object","issue_family":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := compileSchema(json.RawMessage(`{"issue_family":"yes"}`)); err == nil || !strings.Contains(err.Error(), "issue_family") {
+		t.Fatalf("issue_family: %v", err)
+	}
 }

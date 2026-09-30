@@ -81,11 +81,36 @@ type issueUpdateArgs struct {
 	Kind        string `json:"kind,omitempty" jsonschema:"issue kind slug; a change is refused"`
 }
 
-func (rt *runtime) toolIssueUpdate(_ context.Context, _ *mcp.CallToolRequest, in issueUpdateArgs) (*mcp.CallToolResult, any, error) {
-	if strings.TrimSpace(in.Type) != "" || strings.TrimSpace(in.Kind) != "" {
-		return nil, nil, errors.New("kind_change_not_allowed")
+func (rt *runtime) toolIssueUpdate(ctx context.Context, _ *mcp.CallToolRequest, in issueUpdateArgs) (*mcp.CallToolResult, any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
 	}
-	return nil, nil, errors.New("issue_update arrives in R1")
+	requested := strings.TrimSpace(in.Kind)
+	if typ := strings.TrimSpace(in.Type); typ != "" {
+		if requested != "" && requested != typ {
+			return nil, nil, errors.New("kind and type disagree")
+		}
+		requested = typ
+	}
+	if requested == "" {
+		return nil, nil, errors.New("issue_update arrives in R1")
+	}
+	n, err := rt.nodeByKey(strings.TrimSpace(in.Ref))
+	if err != nil {
+		return nil, nil, err
+	}
+	kinds, err := rt.loadKinds()
+	if err != nil {
+		return nil, nil, err
+	}
+	current := kinds.slug(n.KindID)
+	if current == requested {
+		if strings.TrimSpace(in.Title) != "" || strings.TrimSpace(in.Status) != "" || strings.TrimSpace(in.Description) != "" {
+			return nil, nil, errors.New("issue_update arrives in R1")
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "kind is already " + current}}}, nil, nil
+	}
+	return nil, nil, errors.New("kind_change_not_allowed")
 }
 
 type issueCommentArgs struct {
