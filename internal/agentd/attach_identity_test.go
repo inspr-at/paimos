@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -67,11 +69,11 @@ func attachIdentityFixture(t *testing.T, harness string) (*AttachManager, attach
 		return attachObservation{}, errors.New("unknown fixture PID")
 	}
 	m.ancestry = m.observe
-	m.signature = func(_ context.Context, path string) (attachSignature, error) {
-		if path != target.Executable {
-			t.Fatal("signature was taken from the wrapper")
+	m.signature = func(_ context.Context, pid string) (attachSignature, error) {
+		if pid != strconv.Itoa(target.PID) {
+			t.Fatal("signature was not taken from the running PID")
 		}
-		return attachSignature{TeamID: attachVendorTeam(harness), Signed: true}, nil
+		return attachSignature{TeamID: attachVendorTeam(harness), Identifier: attachVendorIdentifier(harness), Signed: true}, nil
 	}
 	t.Cleanup(func() { m.Close(context.Background()) })
 	req := AttachLocalRequest{Operation: "preview", PID: 40, Harness: harness, ProjectID: "22222222-2222-4222-8222-222222222222", TicketID: "33333333-3333-4333-8333-333333333333", StatusOnly: true}
@@ -87,7 +89,7 @@ func writeAttachImage(t *testing.T, path string) {
 	}
 }
 func TestAttachRelease13WrapperPairingUpgradeWithoutRepin(t *testing.T) {
-	for _, harness := range []string{Claude, Codex, Cursor} {
+	for _, harness := range []string{Claude, Codex} {
 		t.Run(harness, func(t *testing.T) {
 			m, peer, target, req, image := attachIdentityFixture(t, harness)
 			if _, err := m.handle(t.Context(), peer, req); err != nil {
@@ -105,7 +107,7 @@ func TestAttachRelease13WrapperPairingUpgradeWithoutRepin(t *testing.T) {
 	}
 }
 func TestAttachIdentitySecurityChecks(t *testing.T) {
-	for _, attack := range []string{"unsigned", "foreign-team", "empty-team", "ad-hoc", "invalid-signature", "writable-directory", "writable-file", "workspace-image", "unenrolled", "kernel-image-change", "replacement-during-signature"} {
+	for _, attack := range []string{"unsigned", "foreign-team", "empty-team", "desktop-identifier", "empty-identifier", "ad-hoc", "invalid-signature", "writable-directory", "writable-file", "workspace-image", "unenrolled", "kernel-image-change", "replacement-during-signature"} {
 		t.Run(attack, func(t *testing.T) {
 			m, peer, target, req, image := attachIdentityFixture(t, Claude)
 			switch attack {
@@ -113,10 +115,20 @@ func TestAttachIdentitySecurityChecks(t *testing.T) {
 				m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, nil }
 			case "foreign-team":
 				m.signature = func(context.Context, string) (attachSignature, error) {
-					return attachSignature{TeamID: attachVendorTeam(Codex), Signed: true}, nil
+					return attachSignature{TeamID: attachVendorTeam(Codex), Identifier: attachVendorIdentifier(Codex), Signed: true}, nil
 				}
 			case "empty-team":
-				m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{Signed: true}, nil }
+				m.signature = func(context.Context, string) (attachSignature, error) {
+					return attachSignature{Identifier: attachVendorIdentifier(Claude), Signed: true}, nil
+				}
+			case "desktop-identifier", "empty-identifier":
+				m.signature = func(context.Context, string) (attachSignature, error) {
+					id := "com.anthropic.claudefordesktop"
+					if attack == "empty-identifier" {
+						id = ""
+					}
+					return attachSignature{TeamID: attachVendorTeam(Claude), Identifier: id, Signed: true}, nil
+				}
 			case "ad-hoc", "invalid-signature":
 				m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, errAttachSignature }
 			case "writable-directory":
@@ -135,7 +147,7 @@ func TestAttachIdentitySecurityChecks(t *testing.T) {
 			case "kernel-image-change":
 				m.signature = func(context.Context, string) (attachSignature, error) {
 					target.Started = "reused"
-					return attachSignature{TeamID: attachVendorTeam(Claude), Signed: true}, nil
+					return attachSignature{TeamID: attachVendorTeam(Claude), Identifier: attachVendorIdentifier(Claude), Signed: true}, nil
 				}
 			case "replacement-during-signature":
 				m.signature = func(context.Context, string) (attachSignature, error) {
@@ -143,7 +155,7 @@ func TestAttachIdentitySecurityChecks(t *testing.T) {
 						t.Fatal(err)
 					}
 					writeAttachImage(t, image)
-					return attachSignature{TeamID: attachVendorTeam(Claude), Signed: true}, nil
+					return attachSignature{TeamID: attachVendorTeam(Claude), Identifier: attachVendorIdentifier(Claude), Signed: true}, nil
 				}
 			}
 			_, err := m.handle(t.Context(), peer, req)
@@ -210,6 +222,136 @@ func TestAttachRechecksImageOnConfirmAndPoll(t *testing.T) {
 				}
 				if _, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: operation, ID: preview.ID, Digest: preview.Digest}); err == nil || len(m.sessions) != 0 {
 					t.Fatal("changed image retained attach authority", err)
+				}
+			})
+		}
+	}
+}
+
+func TestAttachRechecksRunningSignatureOnConfirmAndPoll(t *testing.T) {
+	for _, operation := range []string{"confirm", "poll"} {
+		for _, attack := range []string{"foreign-image", "timeout"} {
+			t.Run(operation+"/"+attack, func(t *testing.T) {
+				m, peer, _, req, _ := attachIdentityFixture(t, Claude)
+				preview, err := m.handle(t.Context(), peer, req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if operation == "poll" {
+					if _, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: "confirm", ID: preview.ID, Digest: preview.Digest}); err != nil {
+						t.Fatal(err)
+					}
+					m.sessions[preview.ID].touched = time.Now().Add(-2 * time.Second)
+				}
+				exchanges := 0
+				m.cfg.Exchange = func(_ context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
+					if in.Operation != "detach" {
+						exchanges++
+					}
+					return attachwatch.View{}, nil
+				}
+				// PID, start time, pathname and on-disk inode are all unchanged.
+				// Only dynamic verification reveals an exec followed by restoring
+				// the original vendor file at the reported path.
+				m.signature = func(context.Context, string) (attachSignature, error) {
+					if attack == "timeout" {
+						return attachSignature{}, context.DeadlineExceeded
+					}
+					return attachSignature{}, errAttachSignature
+				}
+				_, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: operation, ID: preview.ID, Digest: preview.Digest})
+				var diagnostic *AttachLocalError
+				code := "harness_identity_mismatch"
+				if attack == "timeout" {
+					code = "harness_identity_unavailable"
+				}
+				if !errors.As(err, &diagnostic) || diagnostic.Code != code || len(m.sessions) != 0 || exchanges != 0 {
+					t.Fatal("running identity was not revalidated before exchange", err)
+				}
+			})
+		}
+	}
+}
+
+func TestAttachCursorHasNoMacOSVendorIdentity(t *testing.T) {
+	m, peer, _, req, image := attachIdentityFixture(t, Cursor)
+	m.cfg.Executables[Cursor] = image
+	m.signature = func(context.Context, string) (attachSignature, error) {
+		if runtime.GOOS == "darwin" {
+			t.Fatal("Cursor must refuse before inspecting a signature")
+		}
+		return attachSignature{}, nil
+	}
+	_, err := m.handle(t.Context(), peer, req)
+	if (err != nil) != (runtime.GOOS == "darwin") || attachVendorTeam(Cursor) != "" {
+		t.Fatal("Cursor app identity enabled or Linux exact fallback lost", err)
+	}
+}
+
+func TestAttachVerificationDoesNotHoldManagerLockOrResurrectSessions(t *testing.T) {
+	for _, operation := range []string{"preview", "confirm", "poll"} {
+		for _, removal := range []string{"detach", "close"} {
+			t.Run(operation+"/"+removal, func(t *testing.T) {
+				m, peer, _, previewRequest, _ := attachIdentityFixture(t, Claude)
+				preview, err := m.handle(t.Context(), peer, previewRequest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request := AttachLocalRequest{Operation: operation, ID: preview.ID, Digest: preview.Digest}
+				if operation == "preview" {
+					request = previewRequest
+				}
+				if operation == "poll" {
+					if _, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: "confirm", ID: preview.ID, Digest: preview.Digest}); err != nil {
+						t.Fatal(err)
+					}
+					m.sessions[preview.ID].touched = time.Now().Add(-2 * time.Second)
+				}
+				entered, release := make(chan struct{}), make(chan struct{})
+				m.signature = func(ctx context.Context, _ string) (attachSignature, error) {
+					close(entered)
+					select {
+					case <-release:
+					case <-ctx.Done():
+						return attachSignature{}, ctx.Err()
+					}
+					return attachSignature{TeamID: attachVendorTeam(Claude), Identifier: attachVendorIdentifier(Claude), Signed: true}, nil
+				}
+				result := make(chan error, 1)
+				go func() { _, err := m.handle(t.Context(), peer, request); result <- err }()
+				select {
+				case <-entered:
+				case <-time.After(5 * time.Second):
+					t.Fatal("verification did not start")
+				}
+				removed := make(chan struct{})
+				go func() {
+					if removal == "close" {
+						m.Close(t.Context())
+					} else {
+						_, _ = m.handle(t.Context(), peer, AttachLocalRequest{Operation: "detach", ID: preview.ID})
+					}
+					close(removed)
+				}()
+				blocked := false
+				select {
+				case <-removed:
+				case <-time.After(time.Second):
+					blocked = true
+				}
+				close(release)
+				select {
+				case err := <-result:
+					// Detaching an earlier preview does not revoke a new preview.
+					if (operation != "preview" || removal == "close") && err == nil {
+						t.Fatal("removed watch regained authority")
+					}
+				case <-time.After(5 * time.Second):
+					t.Fatal("verification did not finish")
+				}
+				<-removed
+				if blocked {
+					t.Fatal("signature verification held the manager lock")
 				}
 			})
 		}
@@ -302,7 +444,7 @@ func TestAttachExactPinCannotBypassVendorOrRecordedOwner(t *testing.T) {
 			switch attack {
 			case "foreign-signature":
 				m.signature = func(context.Context, string) (attachSignature, error) {
-					return attachSignature{TeamID: attachVendorTeam(Codex), Signed: true}, nil
+					return attachSignature{TeamID: attachVendorTeam(Codex), Identifier: attachVendorIdentifier(Codex), Signed: true}, nil
 				}
 			case "invalid-signature":
 				m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, errAttachSignature }

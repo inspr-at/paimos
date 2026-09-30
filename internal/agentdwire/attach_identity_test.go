@@ -54,6 +54,11 @@ func TestAttachConflictDiagnosticIsSurfacedAndBounded(t *testing.T) {
 	if !errors.As(err, &detail) || detail.Code != "harness_identity_mismatch" || !strings.Contains(err.Error(), "Repair the local harness identity") {
 		t.Fatal("409 diagnostic hidden", err)
 	}
+	body.Store(`{"code":"harness_identity_unavailable","hint":"Retry attach after verification becomes available."}`)
+	_, err = client.Attach(t.Context(), agentd.AttachLocalRequest{Operation: "preview"})
+	if !errors.As(err, &detail) || detail.Code != "harness_identity_unavailable" || !strings.Contains(err.Error(), "Retry attach") {
+		t.Fatal("retry diagnostic hidden", err)
+	}
 	for _, bad := range []string{strings.Repeat("x", 1025), `{"code":"harness_identity_mismatch","hint":"\u001b[31munsafe"}`, `{"code":"unknown","hint":"unreviewed"}`} {
 		body.Store(bad)
 		if _, err = client.Attach(t.Context(), agentd.AttachLocalRequest{}); err == nil || err.Error() != "local lifecycle request rejected" {

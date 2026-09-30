@@ -6,13 +6,16 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"syscall"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 )
 
-// Observed from signed shipping binaries (AEON-435): Claude and native Codex
-// CLIs, and Cursor.app. Changes require new
+// Observed with codesign -dv on shipping CLI binaries (AEON-441), including
+// their signing identifiers. Cursor.app is a general-purpose Node runner,
+// not cursor-agent, and must never identify a Cursor harness. Changes require new
 // signed-binary evidence. Pairing paths and local requests cannot extend this.
 func attachVendorTeam(harness string) string {
 	switch harness {
@@ -20,15 +23,24 @@ func attachVendorTeam(harness string) string {
 		return "Q6L2SF6YDW"
 	case Codex:
 		return "2DC432GLL2"
-	case Cursor:
-		return "VDXQ22DGB9"
+	}
+	return ""
+}
+
+func attachVendorIdentifier(harness string) string {
+	switch harness {
+	case Claude:
+		return "com.anthropic.claude-code"
+	case Codex:
+		return "codex"
 	}
 	return ""
 }
 
 type attachSignature struct {
-	TeamID string
-	Signed bool
+	TeamID     string
+	Identifier string
+	Signed     bool
 }
 
 type AttachLocalError struct {
@@ -42,6 +54,12 @@ func attachIdentityError() error {
 }
 func attachUnsafeImageError() error {
 	return &AttachLocalError{Code: "harness_executable_unsafe", Hint: "The running executable or an ancestor is untrusted. Use an installation outside the workspace, owned by you or root, without group or world write access (macOS admin directories are allowed)."}
+}
+func attachIdentityUnavailableError() error {
+	return &AttachLocalError{Code: "harness_identity_unavailable", Hint: "The running image could not be verified in time. Retry attach; if verification remains unavailable, restart agentd and try again."}
+}
+func attachImageChangedError() error {
+	return &AttachLocalError{Code: "harness_image_changed", Hint: "The running image changed during verification; inspect the process and attach again."}
 }
 
 func sameAttachImage(a, b os.FileInfo) bool {
@@ -59,7 +77,7 @@ func (m *AttachManager) unchangedHarnessImage(observed attachObservation, before
 
 func (m *AttachManager) validateHarnessImage(ctx context.Context, observed attachObservation, harness string) (os.FileInfo, error) {
 	approved := m.cfg.Executables[harness]
-	if approved == "" || attachVendorTeam(harness) == "" && harness != Grok {
+	if approved == "" || harness != Claude && harness != Codex && harness != Cursor && harness != Grok || harness == Cursor && runtime.GOOS == "darwin" {
 		return nil, attachIdentityError()
 	}
 	physical, info, err := agentsetup.TrustedAttachExecutable(observed.Executable, m.cfg.Workspace)
@@ -75,12 +93,17 @@ func (m *AttachManager) validateHarnessImage(ctx context.Context, observed attac
 	} else {
 		// The vendor check always applies to signed images, including exact pins.
 		// An unsigned legacy exact-file pin remains the narrow fallback it was.
-		signature, err := m.signature(ctx, physical)
+		// A path may name a different inode after a rename over a running image.
+		// On Darwin codesign must validate the dynamic code identified by PID.
+		signature, err := m.signature(ctx, strconv.Itoa(observed.PID))
 		if err != nil {
+			if errors.Is(err, errAttachSignatureUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				return nil, attachIdentityUnavailableError()
+			}
 			return nil, attachIdentityError()
 		}
 		if signature.Signed {
-			if signature.TeamID == "" || signature.TeamID != attachVendorTeam(harness) {
+			if signature.TeamID == "" || signature.TeamID != attachVendorTeam(harness) || signature.Identifier == "" || signature.Identifier != attachVendorIdentifier(harness) {
 				return nil, attachIdentityError()
 			}
 		} else {
@@ -95,9 +118,34 @@ func (m *AttachManager) validateHarnessImage(ctx context.Context, observed attac
 	// reuse, exec, cwd change or replacement during verification fails closed.
 	again, err := m.observe(observed.PID)
 	if err != nil || again.Process != observed.Process || !m.unchangedHarnessImage(again, info) {
-		return nil, &AttachLocalError{Code: "harness_image_changed", Hint: "The running image changed during verification; inspect the process and attach again."}
+		return nil, attachImageChangedError()
 	}
 	return info, nil
 }
 
 var errAttachSignature = errors.New("vendor signature unavailable or invalid")
+var errAttachSignatureUnavailable = errors.New("vendor signature verification unavailable")
+
+// AttachConfig is immutable for a manager's lifetime. Session mutations remain
+// locked, but slow external verification must not block unrelated watches.
+// The caller holds m.mu; it is reacquired before this method returns.
+func (m *AttachManager) validateHarnessImageUnlocked(ctx context.Context, observed attachObservation, harness string) (os.FileInfo, error) {
+	m.mu.Unlock()
+	defer m.mu.Lock()
+	return m.validateHarnessImage(ctx, observed, harness)
+}
+
+func (m *AttachManager) recheckHarnessImage(ctx context.Context, peer, observed attachObservation, id string, s *localAttach) error {
+	info, err := m.validateHarnessImageUnlocked(ctx, observed, s.snapshot.Harness)
+	// A detach, sweep or close during verification must never resurrect a watch.
+	if m.closed || m.sessions[id] != s {
+		return attachImageChangedError()
+	}
+	if err != nil {
+		return err
+	}
+	if !sameAttachImage(s.image, info) || !independentAttachPeer(peer, observed, m.ancestry) || s.tail != nil && s.tail.check() != nil {
+		return attachImageChangedError()
+	}
+	return nil
+}

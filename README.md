@@ -1034,10 +1034,14 @@ The target still requires its full physical folder and image validation.
 Run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-ancestry-mutations.py`
 on macOS to verify that the negative ancestry regressions catch removed guards.
 
-Claude, Codex and Cursor are identified from the kernel-observed running image,
+Claude and Codex are identified from the kernel-observed running image,
 so an exec wrapper or a vendor auto-update does not require re-pairing. On macOS,
-the daemon verifies the signature against Apple's certificate chain and the
-built-in vendor Team ID; legacy wrapper pairings work after upgrading and
+the daemon verifies the running PID against Apple's certificate chain and the
+built-in vendor Team ID and CLI signing identifier on preview, confirmation and
+every poll. A vendor file renamed over a foreign running binary cannot confer
+that identity. Cursor attach is refused on macOS until a signed cursor-agent
+CLI exists; Cursor.app's signature is not a harness identity.
+Legacy Claude and Codex wrapper pairings work after upgrading and
 restarting agentd. Unsigned installations and Linux use a local installation
 root plus owner recorded at pairing or by `repin --harness claude`,
 `add-harness --harness codex` or `add-harness --harness cursor`; restart agentd
@@ -1048,17 +1052,20 @@ when the running image still has the old exact path.
 The daemon does not interpret or execute wrappers to discover an install root.
 Every image and ancestor must satisfy the existing ownership and permission
 rules, and confirmation and polls recheck the image. Local HTTP 409 diagnostics
-include `harness_identity_mismatch`, `harness_executable_unsafe` or
-`harness_image_changed` with a repair hint; the attach client displays them.
+include `harness_identity_mismatch`, `harness_executable_unsafe`,
+`harness_image_changed` or `harness_identity_unavailable` with a repair or retry
+hint; the attach client displays them. Signature checks run outside the manager
+lock, and recorded fallback identities are validated at startup and refresh.
 
 Identity regressions cover release-13 wrapper pairing upgrades, native exec
 chains, vendor updates, unsigned root fallback and its repair, signature
-failures, writable installations, file replacement and local 409 diagnostics.
+failures, writable installations, real running-process rename-over attacks,
+verification timeouts and concurrent detach, and local 409 diagnostics.
 On macOS, run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-identity-mutations.py`
 to remove each guard temporarily and require a failing regression; the script
 rejects build failures as evidence and restores each source file. Real codesign
-checks also probe installed vendor binaries; an absent harness is reported as
-skipped, while fixture signature checks still run.
+checks also probe running installed vendor binaries; a harness with no running
+process is reported as skipped, while fixture signature checks still run.
 
 Review the kernel-observed process, physical folder and chosen mode, type `WATCH`
 or `ATTACH` as shown, then enter its nine-digit code under **Agents → Attach

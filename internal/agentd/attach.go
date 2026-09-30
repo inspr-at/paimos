@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"runtime"
@@ -34,6 +35,7 @@ type AttachManager struct {
 	ancestry  func(int) (attachObservation, error)
 	signature func(context.Context, string) (attachSignature, error)
 	sessions  map[string]*localAttach
+	closed    bool
 }
 type localAttach struct {
 	peer               attachwatch.Process
@@ -47,6 +49,7 @@ type localAttach struct {
 	cancelConfirmation context.CancelFunc
 	confirmedDigest    string
 	image              os.FileInfo
+	checking           bool
 }
 type AttachLocalRequest struct {
 	Operation  string `json:"operation"`
@@ -78,6 +81,8 @@ func NewAttachManager(c AttachConfig) (*AttachManager, error) {
 	if c.LocalAuth == nil {
 		c.LocalAuth = systemLocalAuthenticator{}
 	}
+	c.Executables = maps.Clone(c.Executables)
+	c.Identities = maps.Clone(c.Identities)
 	return &AttachManager{cfg: c, observe: observeAttachProcess, ancestry: observeAttachProcessIdentity, signature: inspectAttachSignature, sessions: make(map[string]*localAttach)}, nil
 }
 func (m *AttachManager) localView(id string, s *localAttach) AttachLocalView {
@@ -119,6 +124,7 @@ func (m *AttachManager) Sweep(ctx context.Context) {
 func (m *AttachManager) Close(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.closed = true
 	for id, s := range m.sessions {
 		m.end(ctx, id, s)
 	}
@@ -127,6 +133,9 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	reject := errors.New("attach rejected; inspect the process and approved folder")
+	if m.closed {
+		return AttachLocalView{}, reject
+	}
 	if in.Operation == "preview" {
 		if len(m.sessions) >= 8 || !workorders.UUID(in.ProjectID) || !workorders.UUID(in.TicketID) {
 			return AttachLocalView{}, reject
@@ -135,9 +144,12 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		if err != nil || observed.UID != os.Getuid() || !independentAttachPeer(peer, observed, m.ancestry) || !attachwatch.Within(m.cfg.Workspace, observed.CWD) {
 			return AttachLocalView{}, reject
 		}
-		image, err := m.validateHarnessImage(ctx, observed, in.Harness)
+		image, err := m.validateHarnessImageUnlocked(ctx, observed, in.Harness)
 		if err != nil {
 			return AttachLocalView{}, err
+		}
+		if m.closed || len(m.sessions) >= 8 || !independentAttachPeer(peer, observed, m.ancestry) {
+			return AttachLocalView{}, reject
 		}
 		// Status-only must be explicit; a missing transcript never downgrades watch consent.
 		if !in.StatusOnly && in.Transcript == "" {
@@ -183,6 +195,11 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		s.view.State = "detached"
 		return m.localView(in.ID, s), nil
 	}
+	if s.checking {
+		return AttachLocalView{}, reject
+	}
+	s.checking = true
+	defer func() { s.checking = false }()
 	observed, err := m.observe(s.snapshot.Process.PID)
 	if errors.Is(err, errAttachExited) {
 		m.endAs(ctx, in.ID, s, "exited")
@@ -194,6 +211,12 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		return AttachLocalView{}, errors.New("identity changed; watch detached")
 	}
 	if in.Operation == "confirm" && !s.requested {
+		if err := m.recheckHarnessImage(ctx, peer, observed, in.ID, s); err != nil {
+			if m.sessions[in.ID] == s {
+				m.end(ctx, in.ID, s)
+			}
+			return AttachLocalView{}, err
+		}
 		// Best-effort terminal factor only; same-UID agents can emulate a PTY.
 		// The person approval is the gate; strict mode also needs LocalAuthentication.
 		s.sequence = 0
@@ -263,6 +286,12 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	if err != nil || observed.Process != s.snapshot.Process || !m.unchangedHarnessImage(observed, s.image) || !independentAttachPeer(peer, observed, m.ancestry) || s.tail != nil && s.tail.check() != nil {
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("identity changed; watch detached")
+	}
+	if err := m.recheckHarnessImage(ctx, peer, observed, in.ID, s); err != nil {
+		if m.sessions[in.ID] == s {
+			m.end(ctx, in.ID, s)
+		}
+		return AttachLocalView{}, err
 	}
 	view, err := m.cfg.Exchange(ctx, req)
 	// Never retry an uncertain text submission, and never retain it for recovery.

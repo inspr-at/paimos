@@ -26,6 +26,13 @@ import (
 )
 
 func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote) (*agentd.AttachManager, error) {
+	// Startup has no previously validated identities to grandfather. Apply the
+	// same provenance checks as refresh before registering any attach authority.
+	previous := c
+	previous.AttachIdentities = nil
+	if !validAttachIdentityRefresh(previous, c) {
+		return nil, errors.New("attach fallback differs from the approved installation")
+	}
 	// Freeze the paired origin even if a caller supplied a differently configured
 	// remote; never follow a redirect carrying registration or poll authority.
 	if remote == nil || remote.Client == nil || remote.Client.HTTP == nil {
