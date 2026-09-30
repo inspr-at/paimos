@@ -66,7 +66,19 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			if err = tx.QueryRow(ctx, `SELECT selected_account_keys FROM agent_pairing_requests WHERE id=$1`, rec.ID).Scan(&selected); err != nil {
 				return err
 			}
-			if rec.Mode == nil || *rec.Mode != in.Verification || !slices.Equal(selected, in.Selected) {
+			if rec.Mode != nil && *rec.Mode == "one_per_harness" && in.Verification == "connect_only" && slices.Equal(selected, in.Selected) {
+				// A person may withdraw pending verification, never replenish it.
+				if err = supersedeVerifications(ctx, tx, *rec.ComputerID, ""); err != nil {
+					return err
+				}
+				if _, err = tx.Exec(ctx, `UPDATE agent_pairing_requests SET verification='connect_only' WHERE id=$1`, rec.ID); err != nil {
+					return err
+				}
+				rec.Mode = &in.Verification
+				if err = audit(ctx, tx, p, "agent_pairing.verification_withdrawn", map[string]any{"request_id": rec.ID}); err != nil {
+					return err
+				}
+			} else if rec.Mode == nil || *rec.Mode != in.Verification || !slices.Equal(selected, in.Selected) {
 				return fail(409, "conflict", "approval is immutable")
 			}
 			out, err = view(ctx, tx, rec, false)
@@ -147,7 +159,12 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			if err = tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id::text`, p.TenantID, principal, rec.Details.ComputerName, prefix, rec.RuntimeHash, RuntimePermissions, p.ID).Scan(&key); err != nil {
 				return err
 			}
-			if _, err = tx.Exec(ctx, `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) VALUES($1,$2,$2,$3,$4,$5,$6)`, p.TenantID, computer, principal, key, daemon, rec.LifecycleHash); err != nil {
+			if _, err = tx.Exec(ctx, `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,local_auth_public_key) VALUES($1,$2,$2,$3,$4,$5,$6,$7)`, p.TenantID, computer, principal, key, daemon, rec.LifecycleHash, rec.Details.LocalAuthPublicKey); err != nil {
+				return err
+			}
+		}
+		if rec.Details.ExistingComputerID != "" {
+			if err = supersedeVerifications(ctx, tx, computer, rec.ID); err != nil {
 				return err
 			}
 		}
@@ -316,7 +333,7 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	}
 	var keyPrefix string
 	err := tx.QueryRow(ctx, `SELECT c.state,c.principal_id::text,c.daemon_id,c.local_cleanup,c.local_processes,c.revision,k.prefix,c.setup_state,c.setup_error,c.harness_statuses,c.harness_details,c.last_seen_at,
- CASE WHEN EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id WHERE e.computer_id=c.id AND e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes') THEN 'online' WHEN c.last_seen_at IS NULL THEN 'unknown' ELSE 'offline' END FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.id=$1`, *rec.ComputerID).Scan(&v.ComputerState, &v.PrincipalID, &v.DaemonID, &v.Cleanup, &v.Processes, &v.Revision, &keyPrefix, &v.SetupState, &v.SetupError, &v.HarnessStatuses, &v.HarnessDetails, &v.LastSeenAt, &v.Connectivity)
+ CASE WHEN EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id WHERE e.computer_id=c.id AND e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes') THEN 'online' WHEN c.last_seen_at IS NULL THEN 'unknown' ELSE 'offline' END,c.archived_at FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.id=$1`, *rec.ComputerID).Scan(&v.ComputerState, &v.PrincipalID, &v.DaemonID, &v.Cleanup, &v.Processes, &v.Revision, &keyPrefix, &v.SetupState, &v.SetupError, &v.HarnessStatuses, &v.HarnessDetails, &v.LastSeenAt, &v.Connectivity, &v.ArchivedAt)
 	if err != nil {
 		return v, err
 	}
@@ -328,7 +345,8 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	rows, err := tx.Query(ctx, `SELECT e.account_id::text,a.account_key,a.harness,a.label,e.model_profile_id::text,e.state,e.local_cleanup,e.verification_run_id::text,
   ARRAY(SELECT r.id::text FROM agent_runs r WHERE r.account_id=e.account_id AND r.status IN ('starting','running','waiting') ORDER BY r.id),
  CASE WHEN e.verification_run_id IS NULL THEN 'not_selected' WHEN e.verification_expired_at IS NOT NULL THEN 'expired' WHEN e.verification_expires_at<=clock_timestamp() AND (SELECT status FROM agent_runs WHERE id=e.verification_run_id)='queued' THEN 'expired' ELSE (SELECT status FROM agent_runs WHERE id=e.verification_run_id) END,
- coalesce((SELECT error_code FROM run_telemetry WHERE run_id=e.verification_run_id AND error_code IS NOT NULL ORDER BY sequence DESC LIMIT 1),'')
+ coalesce((SELECT error_code FROM run_telemetry WHERE run_id=e.verification_run_id AND error_code IS NOT NULL ORDER BY sequence DESC LIMIT 1),''),
+ coalesce((SELECT verification_unavailable_reason FROM agent_runs WHERE id=e.verification_run_id),'')
   FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$1 ORDER BY a.created_at,a.id`, *rec.ComputerID)
 	if err != nil {
 		return v, err
@@ -336,8 +354,11 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	defer rows.Close()
 	for rows.Next() {
 		var e Enrollment
-		if err = rows.Scan(&e.AccountID, &e.AccountKey, &e.Harness, &e.Label, &e.ProfileID, &e.State, &e.Cleanup, &e.VerificationRunID, &e.ActiveRunIDs, &e.VerificationState, &e.VerificationError); err != nil {
+		if err = rows.Scan(&e.AccountID, &e.AccountKey, &e.Harness, &e.Label, &e.ProfileID, &e.State, &e.Cleanup, &e.VerificationRunID, &e.ActiveRunIDs, &e.VerificationState, &e.VerificationError, &e.VerificationReason); err != nil {
 			return v, err
+		}
+		if e.VerificationReason != "" {
+			e.VerificationError = "verification_unavailable"
 		}
 		if e.VerificationState == "queued" && !v.VerificationCapabilities[e.Harness].Supported {
 			e.VerificationState = "unavailable"
@@ -359,7 +380,7 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 func (m *Module) list(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
 	out := []View{}
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(r.Context(), `SELECT request_id::text FROM agent_pairing_computers ORDER BY created_at DESC,id LIMIT 100`)
+		rows, err := tx.Query(r.Context(), `SELECT request_id::text FROM agent_pairing_computers WHERE archived_at IS NULL ORDER BY created_at DESC,id LIMIT 100`)
 		if err != nil {
 			return err
 		}

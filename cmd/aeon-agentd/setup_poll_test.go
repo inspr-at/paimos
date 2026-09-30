@@ -26,32 +26,31 @@ type disconnectPoller struct {
 
 func (p *disconnectPoller) Status(context.Context) (agentsetup.Progress, error) {
 	p.statusCalls++
-	if p.statusCalls == 1 {
+	return agentsetup.Progress{}, errors.New("read-only status must not reconcile cleanup")
+}
+func (p *disconnectPoller) Step(context.Context) (agentsetup.Progress, error) {
+	p.stepCalls++
+	if p.stepCalls == 1 {
 		return agentsetup.Progress{Stage: "draining", RetryAfterSeconds: 9}, p.err
 	}
 	return agentsetup.Progress{Stage: "disconnected", LocalProcesses: "drained", ServerRevocation: "confirmed"}, p.err
 }
 
-func (p *disconnectPoller) Step(context.Context) (agentsetup.Progress, error) {
-	p.stepCalls++
-	return agentsetup.Progress{}, errors.New("disconnect must reconcile status, not resume pairing")
-}
-
-func TestDisconnectPollsStatusUntilDrained(t *testing.T) {
+func TestDisconnectPollsReconciliationUntilDrained(t *testing.T) {
 	for _, jsonOutput := range []bool{false, true} {
 		poller := &disconnectPoller{}
 		var out bytes.Buffer
 		var waits []time.Duration
 		unlocks := 0
 		wait := func(_ context.Context, delay time.Duration) error {
-			if unlocks != poller.statusCalls {
+			if unlocks != poller.stepCalls {
 				t.Fatal("store stayed locked between polls")
 			}
 			waits = append(waits, delay)
 			return nil
 		}
 		p, err := pollSetupProgress(t.Context(), "disconnect", agentsetup.Progress{Stage: "draining"}, false, jsonOutput, &out, poller, func() { unlocks++ }, wait)
-		if err != nil || p.Stage != "disconnected" || p.ServerRevocation != "confirmed" || p.LocalProcesses != "drained" || poller.statusCalls != 2 || poller.stepCalls != 0 || unlocks != 2 {
+		if err != nil || p.Stage != "disconnected" || p.ServerRevocation != "confirmed" || p.LocalProcesses != "drained" || poller.statusCalls != 0 || poller.stepCalls != 2 || unlocks != 2 {
 			t.Fatalf("disconnect polling failed: %v", err)
 		}
 		if !reflect.DeepEqual(waits, []time.Duration{5 * time.Second, 9 * time.Second}) {
@@ -95,7 +94,7 @@ func TestDisconnectPollStopsForOnceTerminalErrorAndCancellation(t *testing.T) {
 	poller := &disconnectPoller{err: errors.New("fixture offline")}
 	unlocks := 0
 	_, err := pollSetupProgress(t.Context(), "disconnect", agentsetup.Progress{Stage: "draining"}, false, false, io.Discard, poller, func() { unlocks++ }, func(context.Context, time.Duration) error { return nil })
-	if !errors.Is(err, poller.err) || unlocks != 1 || poller.statusCalls != 1 || poller.stepCalls != 0 {
+	if !errors.Is(err, poller.err) || unlocks != 1 || poller.statusCalls != 0 || poller.stepCalls != 1 {
 		t.Fatal("poll error lost or lock retained")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -175,5 +174,48 @@ func TestStatusVersionMismatchIsAdvisoryAndBoundToInstance(t *testing.T) {
 				t.Fatal("version warning missing or invented")
 			}
 		})
+	}
+}
+
+func TestStatusCommandDuringPairLockIsReadOnly(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := agentsetup.OpenStore(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	if err = writer.Lock(); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err = setupCommandInput("status", []string{"--state-root", root, "--json"}, strings.NewReader(""), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Setup in progress") {
+		t.Fatal("missing in-progress report")
+	}
+	if _, err = os.Stat(filepath.Join(root, "daemon")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("status created daemon state")
+	}
+	reader, err := agentsetup.OpenStore(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	if err = reader.Lock(); !errors.Is(err, agentsetup.ErrBusy) {
+		t.Fatal("status released or aborted pair lock", err)
+	}
+}
+
+func TestVerificationRefusalCompletesPairPolling(t *testing.T) {
+	p := agentsetup.Progress{Stage: "verification_unavailable"}
+	if setupNeedsPoll("setup", p) || setupNeedsPoll("add-harness", p) {
+		t.Fatal("paired computer waits forever on unavailable verification")
 	}
 }

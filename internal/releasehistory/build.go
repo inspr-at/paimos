@@ -181,6 +181,15 @@ func Build(ctx context.Context, opts Options) (History, error) {
 			return History{}, err
 		}
 		h = withProductNotes(h, bundle)
+		if raw, err := os.ReadFile(filepath.Join(opts.Repo, NoteCorrectionsPath)); err == nil {
+			h, err = withNoteCorrections(h, bundle, raw)
+			if err != nil {
+				return History{}, err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return History{}, fmt.Errorf("read note corrections: %w", err)
+		}
+
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return History{}, fmt.Errorf("read product notes: %w", err)
 	}

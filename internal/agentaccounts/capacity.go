@@ -174,10 +174,16 @@ func ingestReadings(ctx context.Context, tx pgx.Tx, p tenant.Principal, id strin
 
 func readCapacity(ctx context.Context, tx pgx.Tx, id string, current bool) ([]capacity.Reading, error) {
 	query := `SELECT window_kind,bucket,window_minutes,used_percent::float8,resets_at,read_at,source,plan,ordinary_usage_allowed,COALESCE(run_id::text,''),phase,plus_minus::float8,evidence FROM account_capacity_readings WHERE account_id=$1 ORDER BY read_at DESC, CASE source WHEN 'harness' THEN 0 WHEN 'agentd' THEN 1 ELSE 2 END LIMIT 200`
+	args := []any{id}
 	if current {
-		query = `SELECT window_kind,bucket,window_minutes,used_percent::float8,resets_at,read_at,source,plan,ordinary_usage_allowed,COALESCE(run_id::text,''),phase,plus_minus::float8,evidence FROM (SELECT DISTINCT ON(window_kind,bucket) * FROM account_capacity_readings WHERE account_id=$1 AND (EXISTS(SELECT 1 FROM account_allowance_windows w WHERE w.account_id=account_capacity_readings.account_id AND w.capacity_kind=window_kind AND w.capacity_bucket=bucket AND w.capacity_read_at=read_at AND NOT w.capacity_retired)) ORDER BY window_kind,bucket,CASE WHEN source<>'estimate' AND read_at>=now()-interval '10 minutes' AND resets_at>now() THEN 0 ELSE 1 END,read_at DESC, CASE source WHEN 'harness' THEN 0 WHEN 'agentd' THEN 1 ELSE 2 END) r ORDER BY resets_at,window_kind,bucket`
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, now)
+		query = `SELECT window_kind,bucket,window_minutes,used_percent::float8,resets_at,read_at,source,plan,ordinary_usage_allowed,COALESCE(run_id::text,''),phase,plus_minus::float8,evidence FROM (SELECT DISTINCT ON(window_kind,bucket) * FROM account_capacity_readings WHERE account_id=$1 AND (EXISTS(SELECT 1 FROM account_allowance_windows w WHERE w.account_id=account_capacity_readings.account_id AND w.capacity_kind=window_kind AND w.capacity_bucket=bucket AND w.capacity_read_at=read_at AND NOT w.capacity_retired)) ORDER BY window_kind,bucket,CASE WHEN source<>'estimate' AND read_at>=$2::timestamptz-interval '10 minutes' AND resets_at>$2 THEN 0 ELSE 1 END,read_at DESC, CASE source WHEN 'harness' THEN 0 WHEN 'agentd' THEN 1 ELSE 2 END) r ORDER BY resets_at,window_kind,bucket`
 	}
-	rows, err := tx.Query(ctx, query, id)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -760,8 +766,10 @@ func (s *scheduleOverride) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-// Anchor at the period boundary when available, otherwise at the first actual
-// sample in this period. Never move the baseline forward on every route.
+// The schedule period determines the day's share. When its usage baseline is
+// missing, count use since the first actual sample and keep it marked unknown.
+// Anchoring the share at that sample would starve accounts first read late in
+// the day. Never move the usage baseline forward on every route.
 func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading, now time.Time, s capacity.Schedule) (capacity.Pacing, bool, error) {
 	period, _ := s.Period(now)
 	start, used, known := v.StartsAt(), v.UsedPercent, !v.StartsAt().Before(period)
@@ -773,9 +781,9 @@ func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading
 			return capacity.Pacing{}, false, err
 		}
 		if err == nil && baseline <= v.UsedPercent {
-			start, used, known = at, v.UsedPercent-baseline, at.Equal(period)
+			start, used, known = period, v.UsedPercent-baseline, at.Equal(period)
 		} else {
-			start, used = now, 0
+			start, used = period, 0
 		}
 	}
 	learned, err := loadLearning(ctx, tx, id)

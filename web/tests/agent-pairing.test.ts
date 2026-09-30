@@ -644,7 +644,7 @@ test('every disabled Connect state gives an actionable reason; mixed verificatio
   const ready = { busy: '', canApprove: true, selectedAccountKeys: ['claude-1', 'codex-1'], targetProblem: null }
   assert.equal(connectDisabledReason(ready), null)
   assert.equal(connectDisabledReason({ ...ready, selectedAccountKeys: [] }), 'Choose at least one harness.')
-  assert.equal(connectDisabledReason({ ...ready, canApprove: false }), 'Only a signed-in person who can manage accounts can connect this computer.')
+  assert.equal(connectDisabledReason({ ...ready, canApprove: false }), 'Only a signed-in person who can manage accounts can connect or deny this computer.')
   assert.equal(connectDisabledReason({ ...ready, busy: 'approve' }), 'Connecting this computer…')
   assert.equal(connectDisabledReason({ ...ready, busy: 'deny' }), 'Denying this request…')
   assert.equal(connectDisabledReason({ ...ready, busy: 'lookup' }), 'Wait for the current action to finish.')
@@ -1074,4 +1074,29 @@ test('Homebrew is shown only when the formula matches, and the last install choi
   assert.equal(chooseInstallMethod(['manual', 'nix'], 'homebrew'), 'manual')
   writePairingInstallMethod({ setItem() { throw new Error('blocked') } }, 'nix')
   assert.equal(readPairingInstallMethod({ getItem() { throw new Error('blocked') } }), '')
+})
+
+test('pairing readiness names unbound harnesses and bounded account checks', () => {
+  const computer = view({ computer_state: 'connected', connectivity: 'online',
+    harness_details: { codex: { state: 'blocked', reason: 'binding_missing' } },
+    harness_statuses: { codex: 'blocked' },
+  })
+  assert.match(describeHarnessHint(computer, 'codex'), /Codex was approved but isn't set up/)
+  assert.equal(describeHarnessFix(computer, 'codex'), 'aeon-agentd add-harness --harness codex')
+  for (const [reason, expected] of [['probe_pending', /60 seconds/], ['probe_timeout', /60 seconds/], ['capacity_capture', /10 seconds/], ['capacity_timeout', /10 seconds/]] as const) {
+    computer.harness_details = { codex: { state: reason.endsWith('timeout') ? 'blocked' : 'checking', reason } }
+    computer.harness_statuses = { codex: computer.harness_details.codex!.state as 'blocked' | 'checking' }
+    assert.match(describeHarnessStatus(computer, 'codex'), expected)
+  }
+})
+
+test('verification refusal names the harness and cause without claiming pairing failed', () => {
+  const computer = view({ computer_state: 'connected', connectivity: 'online', state: 'redeemed', setup_state: 'connected',
+    enrollments: [{ account_id: ACCOUNT, harness: 'claude', state: 'connected', verification_state: 'failed', verification_error: 'verification_unavailable', verification_reason: 'adapter_unsupported' }],
+  })
+  const hint = describeHarnessHint(computer, 'claude')
+  assert.match(hint, /Claude verification couldn't run/)
+  assert.match(hint, /installed adapter cannot enforce safe verification/)
+  assert.match(hint, /computer is paired/)
+  assert.match(describeProgress(computer).detail, /Claude verification couldn't run/)
 })

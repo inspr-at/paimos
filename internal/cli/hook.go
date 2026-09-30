@@ -73,19 +73,9 @@ func (rt *runtime) runInboxHook(ctx context.Context, event string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	session, err := inboxHookSession()
+	session, err := rt.resolveInboxHookSession(ctx, input.Session)
 	if err != nil {
 		return err
-	}
-	// A configured explicit binding that is missing or empty stays a no-op.
-	// Only a session with none of the AEON_SESSION sources set may use the vendor id.
-	if session == "" && os.Getenv("AEON_SESSION_ID") == "" && os.Getenv("AEON_SESSION_FILE") == "" && os.Getenv("AEON_SESSION_STATE_DIR") == "" {
-		if ref := normalizeVendorRef(input.Session); ref != "" {
-			session, err = rt.lookupVendorSession(ctx, ref)
-			if err != nil {
-				return err
-			}
-		}
 	}
 	if session == "" {
 		return nil
@@ -201,6 +191,29 @@ func inboxHookSession() (string, error) {
 		return "", errInvalidAeonSessionID
 	}
 	return strings.ToLower(id), nil
+}
+
+// resolveInboxHookSession applies env, then the private session index.
+// Env wins. A UUID session id is the indexed Claude path: a miss, a stopped
+// generation, or a dead owner is a quiet no-op with no server call. A non-UUID
+// harness id keeps the vendor binding lookup.
+func (rt *runtime) resolveInboxHookSession(ctx context.Context, vendor string) (string, error) {
+	id, err := inboxHookSession()
+	if err != nil || id != "" || hookSessionEnvSet() {
+		return id, err
+	}
+	source := strings.ToLower(strings.TrimSpace(vendor))
+	if validUUID(source) {
+		indexed, _, result := lookupSessionIndex(source)
+		if result == sessionIndexBound {
+			return indexed, nil
+		}
+		return "", nil
+	}
+	if ref := normalizeVendorRef(vendor); ref != "" {
+		return rt.lookupVendorSession(ctx, ref)
+	}
+	return "", nil
 }
 
 func sessionMessageFrame(msg inbox.Message) string {

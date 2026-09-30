@@ -35,8 +35,8 @@ func validateLaunchRecord(r Record) error {
 	return errors.New("invalid durable launch evidence")
 }
 
-func (s *Supervisor) refuseVerification(run Run) error {
-	r := Record{LaunchState: launchRefused, AccountID: run.requestedAccount(), ExecutionMode: run.Purpose,
+func (s *Supervisor) refuseVerification(run Run, reason string) error {
+	r := Record{VerificationReason: reason, LaunchState: launchRefused, AccountID: run.requestedAccount(), ExecutionMode: run.Purpose,
 		TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID,
 		Generation: s.generation, State: "verification_unavailable"}
 	if err := s.journal.Put(r); err != nil {
@@ -142,4 +142,19 @@ func (s *Supervisor) hasUnresolvedOldClaim(account string) bool {
 		}
 	}
 	return false
+}
+
+// A durable refusal is retried on each queue receipt, including after restart.
+// The server performs an idempotent terminal transition, never a launch claim.
+func (s *Supervisor) reportVerificationRefusal(ctx context.Context, run Run, reason string) error {
+	if reason == "" {
+		reason = "adapter_unsupported"
+	} // older journal
+	reporter, ok := s.api.(interface {
+		RefuseVerification(context.Context, string, string, string, string) error
+	})
+	if !ok {
+		return ErrVerificationUnavailable
+	}
+	return reporter.RefuseVerification(ctx, run.ID, s.daemonID, s.generation, reason)
 }

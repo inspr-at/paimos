@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/inspr-at/paimos/internal/agentsecurity"
 	"golang.org/x/sys/unix"
 )
 
@@ -30,10 +31,11 @@ var (
 // lookup follows symlinks, including ancestors; no regular file may be linked.
 // The advisory lock serializes cooperating helpers, not hostile same-UID code.
 type Store struct {
-	mu   sync.Mutex
-	root *os.File
-	lock *os.File
-	path string
+	vault agentsecurity.Vault
+	mu    sync.Mutex
+	root  *os.File
+	lock  *os.File
+	path  string
 }
 
 func validName(name string) bool {
@@ -43,7 +45,11 @@ func validName(name string) bool {
 // OpenStore creates private missing directories only when create is true. It
 // never chmods, repairs, adopts or replaces an existing nonprivate state root.
 func OpenStore(path string, create bool) (*Store, error) {
-	return openDirectory(path, create, true)
+	s, err := openDirectory(path, create, true)
+	if err == nil {
+		s.vault = agentsecurity.DefaultVault()
+	}
+	return s, err
 }
 
 // ReadPrivateFile protects legacy explicit file flags too, without requiring
@@ -236,6 +242,10 @@ func (s *Store) verifyLock(name string, lock *os.File) error {
 }
 
 func (s *Store) open(name string, flags int) (*os.File, error) {
+	return s.openFile(name, flags, false)
+}
+
+func (s *Store) openFile(name string, flags int, snapshotRead bool) (*os.File, error) {
 	if !validName(name) || s.root == nil {
 		return nil, ErrUnsafePath
 	}
@@ -248,17 +258,34 @@ func (s *Store) open(name string, flags int) (*os.File, error) {
 	}
 	f := os.NewFile(uintptr(fd), "private-file")
 	var st unix.Stat_t
-	if unix.Fstat(fd, &st) != nil || !privateArtifact(&st, unix.S_IFREG) {
+	if unix.Fstat(fd, &st) != nil {
+		f.Close()
+		return nil, ErrUnsafePath
+	}
+	// Atomic replacement can unlink the snapshot after openat, before fstat.
+	// Its opened inode remains a consistent read-only snapshot. No other read
+	// or mutation accepts an unlinked file; hardlinks still fail closed.
+	if snapshotRead && name == snapshotName && flags == unix.O_RDONLY && st.Nlink == 0 {
+		st.Nlink = 1
+	}
+	if !privateArtifact(&st, unix.S_IFREG) {
 		f.Close()
 		return nil, ErrUnsafePath
 	}
 	return f, nil
 }
 
-func (s *Store) Read(name string, max int64) ([]byte, error) {
+func (s *Store) readSnapshot() ([]byte, error) { return s.readFile(snapshotName, 1<<20, true) }
+
+func (s *Store) Read(name string, max int64) ([]byte, error) { return s.readFile(name, max, false) }
+
+func (s *Store) readFile(name string, max int64, snapshotRead bool) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f, err := s.open(name, unix.O_RDONLY)
+	if s.vault != nil && vaultedName(name) {
+		return s.readVault(name, max)
+	}
+	f, err := s.openFile(name, unix.O_RDONLY, snapshotRead)
 	if err != nil {
 		return nil, err
 	}
@@ -277,6 +304,9 @@ func (s *Store) Write(name string, raw []byte, createOnly bool) error {
 	defer s.mu.Unlock()
 	if !validName(name) || len(raw) > 1<<20 {
 		return ErrUnsafePath
+	}
+	if s.vault != nil && vaultedName(name) {
+		return s.writeVault(name, raw, createOnly)
 	}
 	if f, err := s.open(name, unix.O_RDONLY); err == nil {
 		f.Close()
@@ -323,6 +353,19 @@ func (s *Store) Write(name string, raw []byte, createOnly bool) error {
 func (s *Store) RemoveExact(name, digest string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.vault != nil && vaultedName(name) {
+		raw, err := s.readVault(name, 1<<20)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if Hash(raw) != digest {
+			return ErrCollision
+		}
+		return s.vault.Delete(s.vaultID(name))
+	}
 	f, err := s.open(name, unix.O_RDONLY)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

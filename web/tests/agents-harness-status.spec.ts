@@ -75,7 +75,9 @@ test('offline and revoked computers do not present prior harness reports as live
   await expect(computers).toContainText('Last reported: ready')
   report.computer_state = 'revoked'
   await page.getByRole('button', { name: 'Refresh computers' }).click()
-  await expect(computers.locator('.status')).toHaveText('Revoked')
+  // A revoked computer folds into the Revoked disclosure (AEON-402), with no harness reports.
+  await expect(computers.locator('.status')).toHaveCount(0)
+  await expect(computers.getByRole('button', { name: 'Revoked (1)' })).toBeVisible()
   await expect(computers.locator('.harness-report')).toHaveCount(0)
 })
 
@@ -236,3 +238,24 @@ for (const [width, theme] of [[1600, 'light'], [390, 'dark']] as const) test(`ev
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   expect(errors).toEqual([])
 })
+
+for (const [width, theme] of [[1600, 'light'], [390, 'dark']] as const) {
+  test(`pairing blockers and verification refusal are named at ${width} ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    await mockWork(page, fixtures())
+    const report = computerReport()
+    report.harness_statuses = { claude: 'ready', codex: 'blocked' }
+    report.harness_details = { claude: { state: 'ready' }, codex: { state: 'blocked', reason: 'binding_missing' } }
+    Object.assign(report.enrollments[0]!, { verification_state: 'failed', verification_error: 'verification_unavailable', verification_reason: 'adapter_unsupported' })
+    await mockPairing(page, {}, report)
+    await page.goto('/agents')
+    const computers = page.getByRole('region', { name: 'Connected computers' })
+    await expect(computers).toContainText("Codex was approved but isn't set up on this computer")
+    await expect(computers).toContainText("Claude verification couldn't run on this computer")
+    await expect(computers).toContainText('installed adapter cannot enforce safe verification')
+    await expect(computers).toContainText('aeon-agentd add-harness --harness codex')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    if (process.env.HARNESS_STATUS_SHOTS) await computers.screenshot({ path: join(process.env.HARNESS_STATUS_SHOTS, `pairing-reasons-${width}-${theme}.png`), animations: 'disabled' })
+  })
+}

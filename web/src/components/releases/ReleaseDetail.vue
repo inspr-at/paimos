@@ -99,7 +99,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
         <p class="headline" :lang="presented.headlineLang"><template v-for="(p, i) in parts(presented.headline)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.headlineLang, true)" :lang="presented.headlineLang" /></p>
         <p v-if="presented.intro" class="intro" :lang="presented.introLang"><template v-for="(p, i) in parts(presented.intro)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.introLang)" :lang="presented.introLang" /></p>
       </div>
-      <p v-if="noted && !noted.items.length && !noted.gaps.length" class="none">{{ emptyNotesLine(locale) }}</p>
+      <p v-if="noted && !(noted.public_items ?? noted.items).length && !noted.gaps.length" class="none">{{ emptyNotesLine(locale) }}</p>
       <TicketChips v-if="chipTickets.length" :tickets="chipTickets" class="tickets" />
       <ReleaseChanges v-if="counted" :presented="lines" :repository="repository" :query="query" :sole-ticket="soleTicket" :view="view" :lang="lang" />
       <p v-else-if="!noted" class="none" :lang="lang">{{ reserved ? copyText.nothingShipped : copyText.noChanges }}</p>
@@ -130,6 +130,9 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
         <template v-if="release.notes">
           <p class="none">Note source: {{ release.notes.source }}</p>
           <p v-if="release.notes.snapshot_sha256" class="mono wrap">Snapshot SHA-256: {{ release.notes.snapshot_sha256 }}</p>
+          <ul v-if="release.notes.corrections?.length" class="unavailable" :aria-label="lang === 'de' ? 'Geprüfte Korrekturen' : 'Reviewed corrections'">
+            <li v-for="correction in release.notes.corrections" :key="correction.key"><span><b>{{ correction.key }}</b>: {{ correction.reason }}</span></li>
+          </ul>
         </template>
         <dl>
           <div>

@@ -190,7 +190,7 @@ func TestSetupCannotClaimConnectedBeforeAccountProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, err := e.Step(t.Context())
-	if err != nil || p.Stage != "provisioning" {
+	if err != nil || p.Stage != "blocked" || !strings.Contains(p.Action, "supplied no account readiness reason") {
 		t.Fatal("approval/socket mistaken for account connectivity")
 	}
 }
@@ -324,6 +324,9 @@ func TestTypedProgressDistinguishesMissingLoginAndUnsafeVerification(t *testing.
 	}
 	a.view.Enrollments[0].VerificationRunID = otherAccount
 	a.view.Enrollments[0].VerificationState = "queued"
+	if err := e.SyncFences(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", Ready: true, VerificationUnavailable: []string{testAccount}}
 	p, err = e.Status(t.Context())
 	if err != nil || p.Stage != "verification_unavailable" {
@@ -343,6 +346,9 @@ func TestTypedProgressDistinguishesMissingLoginAndUnsafeVerification(t *testing.
 		t.Fatal("verification refusal claimed unconfirmed connectivity")
 	}
 	a.view.Enrollments[0].VerificationState = "unavailable"
+	if err := e.SyncFences(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", Ready: true}
 	p, err = e.Status(t.Context())
 	if err != nil || p.Stage != "verification_unavailable" {

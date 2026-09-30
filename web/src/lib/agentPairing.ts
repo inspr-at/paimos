@@ -94,6 +94,7 @@ export interface PairingEnrollment {
   active_run_ids: string[]
   /** Actual run result. A verification_run_id alone is not success. */
   verification_state?: VerificationState
+  verification_reason?: string
   verification_error?: string | null
   /** Drained only after the computer acknowledges cleanup. Revoke does not infer it. */
   local_processes?: ProcessState
@@ -148,6 +149,8 @@ export interface PairingView {
   harness_details?: Partial<Record<string, HarnessDetail>>
   setup_error?: string | null
   last_seen_at?: string | null
+  /** Set once a person removed the computer; removed computers leave the list (AEON-402). */
+  archived_at?: string
   /** Recent probe evidence. Unknown and offline do not prove that local work stopped. */
   connectivity?: Connectivity
   /** Open run accounting. Unconfirmed means revoke did not settle it. */
@@ -600,10 +603,19 @@ export function connectDisabledReason(input: {
   if (input.busy === 'approve') return 'Connecting this computer…'
   if (input.busy === 'deny') return 'Denying this request…'
   if (input.busy) return 'Wait for the current action to finish.'
-  if (!input.canApprove) return 'Only a signed-in person who can manage accounts can connect this computer.'
+  if (!input.canApprove) return 'Only a signed-in person who can manage accounts can connect or deny this computer.'
   if (!input.selectedAccountKeys.length) return 'Choose at least one harness.'
   if (input.targetProblem?.code === 'name') return 'The computer name must match the computer you opened.'
   if (input.targetProblem) return 'Use the matching code, or review this as a new computer.'
+  return null
+}
+
+/** Deny is never disabled silently either (AEON-402); its reason shares Connect's line. */
+export function denyDisabledReason(input: { busy: string; canDeny: boolean }): string | null {
+  if (input.busy === 'deny') return 'Denying this request…'
+  if (input.busy === 'approve') return 'Connecting this computer…'
+  if (input.busy) return 'Wait for the current action to finish.'
+  if (!input.canDeny) return 'Only a signed-in person who can manage accounts can connect or deny this computer.'
   return null
 }
 
@@ -813,12 +825,12 @@ function setupProgress(view: PairingView): PairingProgress {
   if (progress === 'service_conflict' || progress === 'setup_failed') {
     return { phase: 'setup', title: progress === 'service_conflict' ? 'Setup found a conflict' : 'Setup did not finish', detail: setupErrorText(view) || 'The computer reported that setup did not finish.', next: 'Resolve it on the computer. Approving again does not replace another service or refill a verification.', renewsAuthority: false }
   }
-  const unavailable = view.enrollments.find(item => item.verification_state === 'unavailable')
+  const unavailable = view.enrollments.find(item => item.verification_state === 'unavailable' || item.verification_error === 'verification_unavailable')
   if (unavailable) {
     return {
       phase: 'verify',
       title: 'Verification unavailable',
-      detail: verificationUnavailableDetail(unavailable.verification_error),
+      detail: unavailable.verification_reason ? verificationRefusalText(unavailable) : verificationUnavailableDetail(unavailable.verification_error),
       next: 'The computer stays paired. Turn verification off on a new approval, or leave that harness out. This is not an installation failure.',
       renewsAuthority: false,
     }
@@ -871,6 +883,15 @@ const SETUP_ERROR_COPY: Record<string, string> = {
   private_storage_failed: 'Private setup storage could not be prepared.',
   installation_failed: 'The verified setup tool could not be installed.',
   verification_unavailable: 'Verification is unavailable for a selected harness. The computer stays paired.',
+}
+
+function harnessDisplayName(harness: string): string {
+  return ({ claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok', pi: 'pi' } as Record<string, string>)[harness] ?? harness
+}
+
+function verificationRefusalText(item: { harness: string; verification_reason?: string }): string {
+  const cause: Record<string, string> = { adapter_unsupported: 'the installed adapter cannot enforce safe verification', binding_incomplete: 'the verification binding is incomplete or unsafe', local_binding_missing: 'the approved account has no usable local binding' }
+  return `${harnessDisplayName(item.harness)} verification couldn't run on this computer (${cause[item.verification_reason ?? ''] ?? 'safe verification is unavailable'}). The computer is paired; re-run verification from /agents with a new approval.`
 }
 
 function verificationUnavailableDetail(error: string | null | undefined): string {
@@ -931,7 +952,8 @@ function harnessFix(harness: string, reason?: HarnessReason): HarnessFix | undef
       ? { kind: 'repin', command: 'aeon-agentd repin --harness claude' }
       : { kind: 'add_harness', command: `aeon-agentd add-harness --harness ${harness}` }
   }
-  if (['harness_failed', 'cli_unavailable', 'profile_permissions'].includes(reason ?? '')) return { kind: 'restart', command: 'aeon-agentd setup' }
+  if (reason === 'binding_missing') return { kind: 'add_harness', command: `aeon-agentd add-harness --harness ${harness}` }
+  if (['harness_failed', 'cli_unavailable', 'profile_permissions', 'probe_timeout', 'probe_failed', 'capacity_timeout'].includes(reason ?? '')) return { kind: 'restart', command: 'aeon-agentd setup' }
   if (reason === 'login_required') return { kind: 'login', command: harness === 'claude' ? 'claude auth login' : harness === 'pi' ? 'pi' : `${harness === 'cursor' ? 'cursor-agent' : harness} login` }
 }
 
@@ -987,7 +1009,16 @@ function enrolledHarnessCount(view: HarnessView, harness: string): number {
 /** One short sentence that the command alone does not say; empty otherwise. */
 export function describeHarnessHint(view: HarnessView, harness: string): string {
   const detail = harnessDetail(view, harness)
-  if (view.computer_state !== 'connected' || !detail) return ''
+  if (view.computer_state !== 'connected') return ''
+  const refusal = view.enrollments?.find(item => item.harness === harness && item.state === 'connected' && item.verification_error === 'verification_unavailable')
+  if (refusal) return verificationRefusalText(refusal)
+  if (!detail) return ''
+  const accounts = view.enrollments?.filter(item => item.harness === harness && item.state === 'connected') ?? []
+  const accountName = accounts.length === 1 && accounts[0]?.label ? accounts[0].label : harnessDisplayName(harness)
+  if (detail.reason === 'binding_missing') return `${harnessDisplayName(harness)} was approved but isn't set up on this computer. Add it here or remove it from this computer in ${product()}.`
+  if (detail.reason === 'probe_pending') return `${accountName}: waiting for the sign-in and availability check; blocked after 60 seconds.`
+  if (detail.reason === 'capacity_capture') return `${accountName}: a short capacity check is in progress; expected within 10 seconds.`
+  if (['probe_timeout', 'probe_failed', 'capacity_timeout'].includes(detail.reason ?? '')) return `${accountName}: ${reasonLabel(detail.state, detail.reason).toLowerCase()}.`
   const attention = attentionReport(detail)
   const enrolled = enrolledHarnessCount(view, harness)
   if (attention && enrolled >= 2 && attention.count < enrolled) {
@@ -1001,7 +1032,7 @@ export function describeHarnessHint(view: HarnessView, harness: string): string 
 
 function reasonLabel(status: string, reason?: string): string {
   const labels: Record<string, string> = { ready: 'Ready', blocked: 'Needs attention', login_required: 'Sign in required', checking: 'Checking', draining: 'Draining' }
-  const reasons: Record<string, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair' }
+  const reasons: Record<string, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair', binding_missing: 'Approved, not set up here', probe_pending: 'Checking account (up to 60 seconds)', probe_timeout: 'Account check timed out after 60 seconds', probe_failed: 'Account availability check failed', capacity_capture: 'Capturing capacity (up to 10 seconds)', capacity_timeout: 'Capacity capture timed out after 10 seconds' }
   // A code from a newer daemon is shown raw rather than dropped or guessed.
   if (!HARNESS_STATES.includes(status as typeof HARNESS_STATES[number])) return `Needs attention · ${reason ?? status}`
   if (reason) return reasons[reason] ?? `Needs attention · ${reason}`
@@ -1229,6 +1260,24 @@ export async function disconnectComputer(view: PairingView, mode: DisconnectMode
   return oneFlight(`disconnect:${view.computer_id}:${mode}:${body.expected_revision}`, () => personJson(`/agent-pairing/computers/${pathId(view.computer_id!)}/disconnect`, 'POST', body, signal).then(parseView))
 }
 
+/**
+ * Remove, for a computer that is revoked, or approved but never confirmed
+ * (AEON-402). The server archives it with its account bindings; the history
+ * stays. Open run accounting keeps it listed. `reason` says why not, or ''.
+ */
+export function computerRemoval(view: Pick<PairingView, 'computer_id' | 'computer_state' | 'state' | 'last_seen_at' | 'enrollments'>, permissions: Pick<PairingPermissions, 'canDisconnect'>): { allowed: boolean; reason: string } {
+  if (!view.computer_id || !permissions.canDisconnect) return { allowed: false, reason: '' }
+  const neverConfirmed = view.computer_state !== 'revoked' && view.state !== 'redeemed' && !view.last_seen_at
+  if (view.computer_state !== 'revoked' && !neverConfirmed) return { allowed: false, reason: '' }
+  if (view.enrollments.some(item => item.active_run_ids.length)) return { allowed: false, reason: 'A run on this computer is not settled yet.' }
+  return { allowed: true, reason: '' }
+}
+
+export async function removeComputer(view: PairingView, permissions: PairingPermissions, signal?: AbortSignal): Promise<PairingView> {
+  if (!computerRemoval(view, permissions).allowed) throw new PairingError(0, 'This computer cannot be removed yet.', { code: 'blocked', next: 'Disconnect it first, and wait until its runs are settled.' })
+  return oneFlight(`remove:${view.computer_id}`, () => personJson(`/agent-pairing/computers/${pathId(view.computer_id!)}/remove`, 'POST', undefined, signal).then(parseView))
+}
+
 export async function disconnectEnrollment(view: PairingView, accountId: string, mode: DisconnectMode, permissions: PairingPermissions, signal?: AbortSignal): Promise<PairingView> {
   if (!view.computer_id) throw new PairingError(0, 'This enrollment is not on a connected computer.', { code: 'invalid_request', next: 'Refresh the computer list and choose the enrollment again.' })
   const enrollment = view.enrollments.find(item => item.account_id === accountId)
@@ -1371,6 +1420,14 @@ function explain(status: number, code: string, serverMessage: string, retryAfter
     enrollment_draining: {
       message: 'That harness is finishing current work.',
       next: 'Wait for its runs to finish. This page will not stop them.',
+    },
+    computer_connected: {
+      message: 'This computer is still connected.',
+      next: 'Disconnect it first. A connected computer is never removed from the list.',
+    },
+    runs_unsettled: {
+      message: 'A run on this computer is not settled yet.',
+      next: 'The computer stays listed until its runs report back or are settled.',
     },
     authorization_pending: {
       message: 'The computer is still waiting for approval.',
@@ -1546,6 +1603,7 @@ function parseView(data: unknown): PairingView {
   else if (record.setup_error === null || record.setup_error === '') view.setup_error = null
   if (record.last_seen_at === null) view.last_seen_at = null
   else if (typeof record.last_seen_at === 'string' && Number.isFinite(Date.parse(record.last_seen_at))) view.last_seen_at = record.last_seen_at
+  if (typeof record.archived_at === 'string' && Number.isFinite(Date.parse(record.archived_at))) view.archived_at = record.archived_at
   const connectivity = optionalEnum(record.connectivity, CONNECTIVITY)
   if (connectivity) view.connectivity = connectivity
   const accounting = readAccounting(record.accounting_state, 'accounting_state')
@@ -1601,8 +1659,9 @@ function enrollments(value: unknown): PairingEnrollment[] {
   })
 }
 
-function optionalVerification(record: Record<string, unknown>): { verification_state?: VerificationState; verification_error?: string | null } {
-  const extra: { verification_state?: VerificationState; verification_error?: string | null } = {}
+function optionalVerification(record: Record<string, unknown>): { verification_state?: VerificationState; verification_error?: string | null; verification_reason?: string } {
+  const extra: { verification_state?: VerificationState; verification_error?: string | null; verification_reason?: string } = {}
+  if (typeof record.verification_reason === 'string' && ['adapter_unsupported', 'binding_incomplete', 'local_binding_missing'].includes(record.verification_reason)) extra.verification_reason = record.verification_reason
   const state = optionalEnum(record.verification_state, VERIFICATION_STATES)
   if (state) extra.verification_state = state
   if (typeof record.verification_error === 'string' && record.verification_error) extra.verification_error = record.verification_error.slice(0, 500)

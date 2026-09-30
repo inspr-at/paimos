@@ -76,7 +76,8 @@ async function toggleUse(account: AgentAccount) {
   catch (e) { error.value = e instanceof Error ? e.message : 'The account did not change. Please try again.' }
   finally { busy.value = '' }
 }
-async function changed() { await Promise.all([agents.refreshAccounts(), capacity.refreshCapacity()]) }
+// Groups, names and limits are writes: every shared read starts over (AEON-402).
+const changed = () => agents.afterWrite()
 watch(() => props.accounts.map(a => a.id).join(), () => { if (open.value && !props.accounts.some(a => a.id === open.value)) open.value = '' })
 watch(mayManage, allowed => { if (!allowed) closeSeparate() })
 

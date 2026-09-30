@@ -128,11 +128,11 @@ const present = computed(() => {
   return {
     assigned: props.showAssignee,
     workers: listed.some(row => workersOf(row).length > 0 || !!row.lead_worker?.name),
-    estimate: rows.some(row => !!estimate(row) || (row.kind_slug === 'epic' && (row.estimate?.open_children ?? 0) > 0)),
+    estimate: rows.some(row => row.kind_slug === 'ticket' || row.kind_slug === 'task' || !!estimate(row) || (row.kind_slug === 'epic' && (row.estimate?.open_children ?? 0) > 0)),
     release: rows.some(row => !!releaseLabel(row.fields) || props.nativeReleases?.get(row.id)?.status === 'member'),
     tags: rows.some(row => tagList(row.fields).length > 0),
     progress: listed.some(row => progressOf(row) != null),
-    eta: listed.some(row => { const eta = etaFromTicket(row.eta); return !!eta?.ready || !!eta?.live }),
+    eta: listed.some(row => { const eta = etaFromTicket(row.eta); return !!eta?.ready || !!eta?.live || !!row.eta?.has_working_session }),
     ...planningPresent(rows),
   }
 })
@@ -261,7 +261,7 @@ watch(() => props.prefs?.widths, () => { if (!resizing) dragWidths.value = {} })
 function estimate(row: ListItem) { return estimateDisplay(row).text }
 // An epic with open children and no hours still has coverage to explain.
 function emptyEstimateTip(row: ListItem) {
-  if (row.kind_slug !== 'epic' || (row.estimate?.open_children ?? 0) < 1 || estimate(row)) return ''
+  if (row.kind_slug !== 'epic' || (row.estimate?.open_children ?? 0) < 1 || estimate(row)) return 'No estimate yet'
   return estimateDisplay(row).tip
 }
 const grid = ref<HTMLTableElement>()
@@ -762,7 +762,7 @@ defineExpose({
                   <span v-else class="empty" aria-label="No progress">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" /></div></td>
+              <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" :missing="!!entry.row.eta?.has_working_session" /></div></td>
               <td v-else-if="isPlanning(column.id)" :class="column.cls"><div class="cell"><PlanningCell :column="column.id" :row="entry.row" :row-id="entry.row.id" /></div></td>
             </template>
           </tr>

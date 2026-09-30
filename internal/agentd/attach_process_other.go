@@ -9,3 +9,7 @@ func attachPeerPID(int) (int, error) { return 0, errors.New("attach peer checks 
 func observeAttachProcess(int) (attachObservation, error) {
 	return attachObservation{}, errors.New("attach process checks unsupported")
 }
+
+func observeAttachProcessIdentity(pid int) (attachObservation, error) {
+	return observeAttachProcess(pid)
+}

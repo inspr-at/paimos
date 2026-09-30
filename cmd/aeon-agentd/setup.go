@@ -35,13 +35,14 @@ func (s *stringsFlag) Set(v string) error { *s = append(*s, v); return nil }
 type localPairing struct {
 	root       string
 	supervisor *agentd.Supervisor
+	readOnly   bool
 }
 
 func (l localPairing) client() (agentdwire.Client, error) {
 	return agentdwire.OpenClient(filepath.Join(l.root, "daemon"))
 }
 func localStatus(s agentd.LifecycleStatus) agentsetup.LocalStatus {
-	return agentsetup.LocalStatus{HarnessDetails: s.HarnessDetails, HarnessStatuses: s.HarnessStatuses, HarnessErrors: s.HarnessErrors, ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults, BlockedAccounts: append([]agentsetup.BlockedAccount(nil), s.BlockedAccounts...)}
+	return agentsetup.LocalStatus{VerificationReasons: s.VerificationReasons, AccountStatuses: s.AccountStatuses, HarnessDetails: s.HarnessDetails, HarnessStatuses: s.HarnessStatuses, HarnessErrors: s.HarnessErrors, ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults, BlockedAccounts: append([]agentsetup.BlockedAccount(nil), s.BlockedAccounts...)}
 }
 func (l localPairing) Status(ctx context.Context, account string) (agentsetup.LocalStatus, error) {
 	if l.supervisor != nil {
@@ -52,6 +53,9 @@ func (l localPairing) Status(ctx context.Context, account string) (agentsetup.Lo
 		if status, err := client.Lifecycle(ctx, account); err == nil {
 			return localStatus(status), nil
 		}
+	}
+	if l.readOnly {
+		return agentsetup.LocalStatus{}, errors.New("daemon heartbeat unavailable")
 	}
 	c, err := agentsetup.ReadRuntimeConfig(l.root)
 	if err != nil {
@@ -226,7 +230,19 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		return err
 	}
 	manager := &agentsetup.ServiceManager{Platform: platform, Home: home, UID: os.Getuid(), Executable: executable, Systemctl: systemctl}
-	engine := &agentsetup.Engine{Store: store, Services: manager, Local: localPairing{root: root}}
+	engine := &agentsetup.Engine{Store: store, Services: manager, Local: localPairing{root: root, readOnly: command == "status"}}
+	if command == "status" {
+		defer store.Close()
+		p, statusErr := engine.Status(context.Background())
+		if statusErr != nil {
+			return statusErr
+		}
+		if saved, savedErr := engine.SavedOptions(); savedErr == nil {
+			api := agentsetup.HTTPClient{Origin: saved.Origin}
+			p = setupVersionStatus(context.Background(), api, saved.Origin, p)
+		}
+		return printSetupProgress(out, jsonOutput, p)
+	}
 	var saved agentsetup.Options
 	var savedErr error = os.ErrNotExist
 	if store != nil {
@@ -457,11 +473,7 @@ func pollSetupProgress(ctx context.Context, command string, p agentsetup.Progres
 			return p, errors.New(command + " paused; rerun the same command to resume")
 		}
 		var err error
-		if command == "disconnect" {
-			p, err = engine.Status(ctx)
-		} else {
-			p, err = engine.Step(ctx)
-		}
+		p, err = engine.Step(ctx)
 		unlock()
 		if e := printSetupProgress(out, jsonOutput, p); e != nil {
 			return p, e

@@ -169,6 +169,8 @@ export const putPin = (body: { ticket_id: string; harness: string; account_id?: 
 export const deletePin = (ticketId: string, harness: string) => request<void>(`/agent-accounts/pins?ticket_id=${enc(ticketId)}&harness=${enc(harness)}`, 'DELETE')
 export const setRunTarget = (runId: string, body: { account_id?: string; group_id?: string }) => request<void>(`/agent-accounts/runs/${enc(runId)}/target`, 'POST', body)
 export const setAccountState = (id: string, state: AgentAccount['state']) => request<AgentAccount>(`/agent-accounts/${enc(id)}`, 'PATCH', { state })
+// Person-only Remove: the account leaves the lists; its runs and history stay (AEON-402).
+export const archiveAccount = (id: string) => request<AgentAccount>(`/agent-accounts/${enc(id)}/archive`, 'POST')
 export const getRun = (id: string) => request<AgentRun>(`/runs/${enc(id)}`)
 export const listApprovals = () => request<Approval[]>('/approvals?limit=200')
 export const decideApproval = (id: string, decision: 'approved' | 'denied', reason: string) => request<Approval>(`/approvals/${enc(id)}/decision`, 'POST', { decision, reason })
@@ -217,6 +219,8 @@ export function subscribeAgents(changed: () => void, connection: (live: boolean)
 
 export const approveAccountCapacity = (id: string) => request<void>(`/agent-accounts/${enc(id)}/capacity/approve`, 'POST', {})
 export const runNowOnce = (id: string) => request<AgentRun>(`/runs/${enc(id)}/capacity-override`, 'POST', { capacity_override: 'now' })
+// Person-only: a queued run ends as cancelled and its capacity holds are released (AEON-402).
+export const cancelRun = (id: string) => request<AgentRun>(`/runs/${enc(id)}/cancel`, 'POST')
 export const setClaudeStatusline = (id: string, enabled: boolean) => request<{ enabled: boolean }>(`/agent-accounts/${enc(id)}/statusline`, 'PUT', { enabled })
 
 export function claudeStatuslineCopy(audience: AgentAccount['statusline_opt_in'], name: string) {

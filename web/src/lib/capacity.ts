@@ -334,6 +334,8 @@ export interface AccountInput {
   state: 'available' | 'draining' | 'unavailable'; last_probe_ok?: boolean | null; plan?: string
   /** From the pairing projection of the account's computer, when it has one. */
   connectivity?: 'online' | 'offline' | 'unknown'
+  /** Its computer binding is draining: a disconnect, not a pause in Settings. */
+  disconnecting?: boolean
   /** From the capacity projection: why this account's last probe failed. */
   probeFailure?: 'auth_failed' | 'unavailable'
   fingerprint?: string
@@ -353,6 +355,7 @@ export interface AccountRow {
   hosts: string[]
   sameQuotaAs: string
   sharedQuotaName?: string
+  disconnecting?: boolean
 }
 export const HARNESS_NAME: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi' }
 export const POOL_ORDER = ['codex', 'claude', 'grok', 'cursor', 'pi']
@@ -396,6 +399,7 @@ export function buildRows(accounts: AccountInput[], capacity: AccountCapacity[])
       groupName: cap?.group_name || a.groupName || '',
       hosts: cap?.hosts?.length ? cap.hosts : (a.host ? [a.host] : []),
       sameQuotaAs: cap?.same_quota_as || cap?.routing?.same_quota_as || '',
+      ...(a.disconnecting ? { disconnecting: true } : {}),
     }
   })
 }
@@ -652,6 +656,11 @@ function reserveClause(live: { r: AccountRow; p: AccountPlan }[], at: (iso: stri
   if (!shrinking && kept.length === live.length) return [t(' Keeps '), n(`~${pct(kept[0].p.reserve)}`), t(' of each for you while you work.')]
   return [t(' Keeps '), ...joinList(kept.map(x => [n(`~${pct(x.p.reserve)}`), t(` of ${x.r.name}`)])), t(' for you.')]
 }
+/** A row's wait, named by its cause: a draining computer binding is not a pause in Settings. */
+export function rowWaitText(row: AccountRow, wait: CapacityWait, now: number): string {
+  if (wait.code === 'state' && row.disconnecting) return `Disconnecting from ${row.host}; agents start nothing new on it`
+  return capacityWaitText(wait, 'Agents', now)
+}
 export function poolSentence(pool: PoolView, now: number, timezone?: string): Sentence {
   if (pool.rows.length && pool.rows.every(r => r.sharedQuotaName)) return { segs: [t(`Shares quota with ${[...new Set(pool.rows.map(r => r.sharedQuotaName))].join(', ')}.`)] }
   const advised = pool.rows.length > 0 && pool.rows.every(r => r.routing)
@@ -659,10 +668,10 @@ export function poolSentence(pool: PoolView, now: number, timezone?: string): Se
   const paused = pool.rows.filter(r => r.routing?.rank === 0 && r.routing.wait)
   const active = advised && ready.length ? { ...pool, rows: ready, name: ready.length === 1 && pool.rows.length > 1 ? ready[0].name : pool.name } : pool
   const sentence = advised && !ready.length && paused.length
-    ? { segs: [b(`${pool.name}: `), t(`${capacityWaitText(paused[0].routing!.wait!, 'Agents', now)}.`)] }
+    ? { segs: [b(`${pool.name}: `), t(`${rowWaitText(paused[0], paused[0].routing!.wait!, now)}.`)] }
     : planSentence(active, now, timezone)
   if (advised && ready.length) for (const row of paused) {
-    if (row.state === 'live') sentence.segs.push(t(` ${row.name}: ${capacityWaitText(row.routing!.wait!, 'Agents', now)}.`))
+    if (row.state === 'live') sentence.segs.push(t(` ${row.name}: ${rowWaitText(row, row.routing!.wait!, now)}.`))
   }
   const yours = pool.rows.find(row => usingNow(row, now))
   if (yours && ready.length && ready[0].id !== yours.id) sentence.segs.push(t(` You're on ${yours.name}, so agents take ${ready[0].name} first.`))
@@ -681,7 +690,8 @@ function planSentence(pool: PoolView, now: number, timezone?: string): Sentence 
     }
     if (first.state === 'offline') return { segs: [b(`Waits for ${first.host} to come back online.`)] }
     if (first.state === 'unavailable') return { segs: [b(`Reading unavailable on ${first.host}.`), t(' Agents skip it until the next check succeeds.')] }
-    if (first.state === 'paused') return { segs: [b('Paused.'), t(' Agents leave it alone until you resume it in Settings.')] }
+    if (first.state === 'paused' && first.disconnecting) return { segs: [b(`Disconnecting from ${first.host}.`), t(' Agents start nothing new on it.')] }
+    if (first.state === 'paused') return { segs: [b('Paused in Settings / Accounts.'), t(' Turn “Agents may use it” back on there to resume.')] }
     if (first.awaitingReading) return { segs: [b('No reading yet'), t(' — starts with the next run.')] }
     if (first.learning && ['grok', 'cursor', 'pi'].includes(first.harness)) return { segs: [b(`${pool.name} doesn't show its limit.`), t(' One run at a time by day.')] }
     return { segs: [b('No reading yet'), t(' — starts with the first run.')] }
@@ -762,3 +772,11 @@ export function toggleAccountMode(pref: GaugePreference | null, accountId: strin
   return base
 }
 export const setGlobalMode = (_pref: GaugePreference | null, mode: GaugeMode): GaugePreference => ({ mode, accounts: {} })
+
+/** The folded Accounts and computers line on /agents (AEON-402): counts only, no filler. */
+export function setupSummary(input: { computers: number; ready: number; total: number }): string {
+  const parts: string[] = []
+  if (input.computers) parts.push(`${input.computers} ${input.computers === 1 ? 'computer' : 'computers'}`)
+  if (input.total) parts.push(input.ready === input.total ? `${input.total} ${input.total === 1 ? 'account' : 'accounts'} ready` : `${input.ready} of ${input.total} accounts ready`)
+  return parts.join(' · ')
+}

@@ -84,7 +84,9 @@ func unitQuote(s string) (string, error) {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, `%`, `%%`, `$`, `$$`).Replace(s) + `"`, nil
 }
 
-func (m ServiceManager) definition(root string) ([]byte, error) {
+func (m ServiceManager) definition(root string) ([]byte, error) { return m.definitionLogs(root, true) }
+
+func (m ServiceManager) definitionLogs(root string, logs bool) ([]byte, error) {
 	if !filepath.IsAbs(m.Executable) || !filepath.IsAbs(root) || strings.ContainsAny(m.Executable+root, "\x00\r\n") {
 		return nil, ErrUnsafePath
 	}
@@ -99,8 +101,13 @@ func (m ServiceManager) definition(root string) ([]byte, error) {
 		for _, a := range args {
 			b.WriteString("<string>" + xmlText(a) + "</string>")
 		}
+		b.WriteString("</array>")
+		if logs {
+			logDir := filepath.Join(m.Home, "Library", "Logs", "aeon-agentd")
+			b.WriteString("<key>StandardOutPath</key><string>" + xmlText(filepath.Join(logDir, "stdout.log")) + "</string><key>StandardErrorPath</key><string>" + xmlText(filepath.Join(logDir, "stderr.log")) + "</string>")
+		}
 		// Successful intentional shutdown is not an invitation to restart.
-		b.WriteString(`</array><key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict><key>Umask</key><integer>63</integer></dict></plist>`)
+		b.WriteString(`<key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict><key>Umask</key><integer>63</integer></dict></plist>`)
 		return []byte(b.String()), nil
 	}
 	quoted := []string{}
@@ -274,11 +281,26 @@ func (m ServiceManager) Install(ctx context.Context, s *Store, computerID string
 	if err != nil {
 		return nil, err
 	}
+	if receipt != nil && receipt.Digest != Hash(raw) {
+		// Keep exact ownership of older installed units; never silently replace
+		// an activated service just to add logging. New installs have log paths.
+		legacy, legacyErr := m.definitionLogs(s.Path(), false)
+		if legacyErr == nil && receipt.Digest == Hash(legacy) {
+			raw = legacy
+		}
+	}
 	if receipt == nil {
 		receipt = &ServiceReceipt{Name: name, Path: filepath.Join(dir, name), Digest: Hash(raw), ComputerID: computerID}
 	}
 	if receipt.Digest != Hash(raw) || receipt.Name != name || receipt.Path != filepath.Join(dir, name) || receipt.Unloaded {
 		return nil, ErrServiceConflict
+	}
+	if m.Platform.OS == "darwin" {
+		logs, err := OpenStore(filepath.Join(m.Home, "Library", "Logs", "aeon-agentd"), true)
+		if err != nil {
+			return nil, err
+		}
+		logs.Close()
 	}
 	if err = writeReceipt(s, receipt); err != nil {
 		return receipt, err
