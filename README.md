@@ -695,7 +695,9 @@ Licence: AGPL-3.0-only.
 without taking `setup.lock`, reconciling enrollment, or performing cleanup.
 Use `pair`/`setup` to resume setup and `disconnect` to resume cleanup. Approved
 but unbound harnesses name the required `add-harness` command. Account checks
-report a 60-second startup bound; capacity capture reports a 10-second bound.
+report a 60-second bound from daemon start for each initial account, or from
+that account being added or unblocked by repin; refreshing unchanged accounts
+does not extend the wait. Capacity capture reports a 10-second bound.
 Unsupported or incomplete verification fails with `verification_unavailable`
 and a bounded cause, independently of account probing. Connect-only approval
 creates no verification, and a later approval cancels older queued verification
@@ -706,6 +708,17 @@ New pairing-owned macOS launchd services write diagnostics to
 Existing receipt-bound service definitions remain owned and unchanged; logging
 is added when a new service is installed. Managed Nix/Home Manager services
 retain their configuration ownership.
+
+The paired daemon writes bounded `agentd polling diagnostic` lines to stderr:
+`reason=probe_failed` records an account readiness failure (a failed probe/report
+or a retained ownership/reporting block);
+`reason=probe_timeout` confirms an account exhausted its own pending probe wait;
+`reason=queue_unavailable` confirms `Queued()` returned an error before probing;
+`reason=dispatch_not_allowed` confirms a dispatch fence, fence-read failure or
+daemon shutdown prevented polling or an account probe. Correlate these lines
+with read-only `aeon-agentd status --json` for the affected account. Queue errors
+can therefore explain a subsequent probe timeout; the timeout alone does not
+identify the underlying cause. Raw errors and private bindings are not logged.
 
 ### Paired daemon socket paths
 
