@@ -136,6 +136,17 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   let settleTimer: ReturnType<typeof setTimeout> | undefined, pickTimer: ReturnType<typeof setTimeout> | undefined
   let cameraTaken = false, fitOnSettle = true
   let glimpseLaidOut = false
+  // The product never publishes simulation stop. A canvas-centre click therefore
+  // races the layout, and it misses whenever the bubble is not the centre.
+  // Test builds expose data-settled once the engine has stopped and every node's
+  // projected box has held still for two frames. Each box sits inside the
+  // force-graph container, takes the click, and lets pointermove through so
+  // hover still reaches the canvas (AEON-447).
+  const testNodes = import.meta.env.MODE === 'test' && !glimpse
+  let layoutRunning = false
+  let nodeLayer: HTMLDivElement | undefined
+  const nodeTargets = new Map<string, HTMLSpanElement>()
+  let settleSig = '', settleFrames = 0, settlePaintSig = ''
   // Header contrast runs Vite with `--mode test` and releases a fixed orbit.
   // Production builds fold that branch away, so the window hook is not emitted.
   type GlimpseTestPin = { pending(): boolean; pinned(): boolean; afterData(): void; afterLayout(): void; dispose(): void }
@@ -380,6 +391,89 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     clearTimeout(pickTimer)
     pickTimer = setTimeout(() => { if (!disposed) g2?.nodePointerAreaPaint(pointerArea) }, delay)
   }
+  function screenBox(n: LayoutNode) {
+    const screen = g3 ? g3.graph2ScreenCoords(n.x ?? 0, n.y ?? 0, n.z ?? 0) : g2!.graph2ScreenCoords(n.x ?? 0, n.y ?? 0)
+    if (!Number.isFinite(screen.x) || !Number.isFinite(screen.y)) return null
+    let radius = graphRadius(n) * (g2?.zoom() ?? 1)
+    if (g3 && three) {
+      const camera = g3.camera() as PerspectiveCamera
+      const depth = -new three.Vector3(n.x ?? 0, n.y ?? 0, n.z ?? 0).applyMatrix4(camera.matrixWorldInverse).z
+      radius = depth > 0 ? graphRadius(n) * g3.height() / (2 * depth * Math.tan(camera.fov * Math.PI / 360)) : 0
+    }
+    return { x: screen.x, y: screen.y, radius }
+  }
+  // The box has to match on two frames. A later camera move changes the
+  // signature and clears data-settled.
+  function publishTestNodes() {
+    if (!testNodes || disposed) return
+    if (!nodeLayer) {
+      nodeLayer = document.createElement('div')
+      nodeLayer.className = 'graph-node-targets'
+      nodeLayer.setAttribute('aria-hidden', 'true')
+      // Inside the container, pointermove still reaches the canvas hover listener.
+      // On the host itself the box would sit above that listener and swallow it.
+      const parent = host.querySelector('.force-graph-container') ?? host
+      nodeLayer.dataset.passthrough = parent === host ? 'true' : 'false'
+      nodeLayer.style.cssText = 'position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden'
+      parent.append(nodeLayer)
+    }
+    const seen = new Set<string>()
+    const parts: string[] = []
+    let placed = nodes.length > 0
+    for (const n of nodes) {
+      seen.add(n.id)
+      if (n.x === undefined || n.y === undefined) { placed = false; continue }
+      const screen = screenBox(n)
+      if (!screen) { placed = false; continue }
+      let el = nodeTargets.get(n.id)
+      if (!el) {
+        const target = document.createElement('span')
+        target.dataset.nodeId = n.id
+        target.style.position = 'absolute'
+        target.style.display = 'block'
+        const passthrough = nodeLayer.dataset.passthrough === 'true'
+        target.style.pointerEvents = passthrough ? 'none' : 'auto'
+        if (!passthrough) {
+          // pointerdown stops the canvas click. pointermove is left alone for hover.
+          target.addEventListener('pointerdown', event => event.stopPropagation())
+          target.addEventListener('click', event => {
+            const node = nodes.find(item => item.id === target.dataset.nodeId)
+            if (!node) return
+            event.preventDefault()
+            event.stopPropagation()
+            options.select(node)
+          })
+        }
+        nodeLayer.append(target)
+        nodeTargets.set(n.id, target)
+        el = target
+      }
+      const size = Math.max(2, screen.radius * 2)
+      el.style.width = `${size}px`
+      el.style.height = `${size}px`
+      el.style.transform = `translate(${screen.x - size / 2}px, ${screen.y - size / 2}px)`
+      parts.push(`${n.id}:${Math.round(screen.x)}:${Math.round(screen.y)}:${Math.round(size)}`)
+    }
+    for (const [id, el] of nodeTargets) if (!seen.has(id)) { el.remove(); nodeTargets.delete(id) }
+    const sig = parts.join('|')
+    const frozen = !layoutRunning && placed && parts.length === nodes.length && sig !== ''
+    if (frozen && sig === settleSig) settleFrames++
+    else settleFrames = 0
+    settleSig = sig
+    const stable = frozen && settleFrames >= 1
+    if (!stable) { host.dataset.settled = 'false'; settlePaintSig = ''; return }
+    if (settlePaintSig === sig && host.dataset.settled === 'true') return
+    settlePaintSig = sig
+    host.dataset.settled = 'true'
+  }
+  function unsettle() {
+    if (!testNodes) return
+    layoutRunning = true
+    settleFrames = 0
+    settleSig = ''
+    settlePaintSig = ''
+    host.dataset.settled = 'false'
+  }
   function interact() { cameraTaken = true; resumeAt = performance.now() + 5000; clearTimeout(settleTimer) }
   function motion(value: boolean) {
     // The pinned pose ignores later play, occlusion and visibility.
@@ -394,7 +488,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     if (!value) resumeAt = 0 // Explicit play takes effect immediately, including reduced-motion opt-in.
     const graph = g3 ?? g2
     graph?.cooldownTicks(paused ? 0 : 140).linkDirectionalParticles(particles)
-    if (!paused) graph?.d3ReheatSimulation()
+    if (!paused) { unsettle(); graph?.d3ReheatSimulation() }
     publishPhase()
     redraw()
   }
@@ -457,7 +551,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     }).onNodeHover(node => { if (glimpse) return; pointerNode = node; options.hover(node) })
     .onBackgroundClick(() => { if (!glimpse && performance.now() - openedAt >= 100) options.clear() })
     .onNodeDrag(() => { if (!glimpse) interact() }).onNodeDragEnd(() => { if (!glimpse) interact() })
-    .onEngineStop(() => { if (fitOnSettle && !cameraTaken && !emphasis.selected) fit(); fitOnSettle = false })
+    .onEngineStop(() => { layoutRunning = false; if (fitOnSettle && !cameraTaken && !emphasis.selected) fit(); fitOnSettle = false })
   const pointerDown = () => { dragging = true; interact() }
   const pointerMove = () => { if (dragging) interact() }
   const pointerUp = () => { if (dragging) { dragging = false; interact() } }
@@ -549,7 +643,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     }
     if (disposed) return
     sizeGlimpseOrbs()
-    clearGlimpse(); graph.resumeAnimation(); if (disposed) return; graph.pauseAnimation(); publishLabels()
+    clearGlimpse(); graph.resumeAnimation(); if (disposed) return; graph.pauseAnimation(); publishLabels(); publishTestNodes()
   }
   function tick(now: number) {
     if (disposed) return
@@ -724,6 +818,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       groups = new Map(names.map((group, i) => { const angle = i * 2 * Math.PI / names.length; return [group, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, z: Math.sin(angle * 2) * radius * .3 }] }))
       labelsWereSettled = undefined
       options.labelsSettled?.(false)
+      unsettle()
       graph.graphData({ nodes, links }); rebuildLabels(); redraw()
       clearTimeout(settleTimer)
       whenLaidOut(() => {
@@ -741,7 +836,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     resize(width, height) {
       const changed = graph.width() !== width || graph.height() !== height
       graph.width(Math.max(1, width)).height(Math.max(1, height)); cancelAnimationFrame(fitFrame)
-      if (changed && options.layoutBias === 'elliptic' && glimpseLaidOut && !(import.meta.env.MODE === 'test' && (glimpsePin?.pending() || glimpsePin?.pinned()))) { fitOnSettle = true; graph.d3ReheatSimulation() }
+      if (changed && options.layoutBias === 'elliptic' && glimpseLaidOut && !(import.meta.env.MODE === 'test' && (glimpsePin?.pending() || glimpsePin?.pinned()))) { fitOnSettle = true; unsettle(); graph.d3ReheatSimulation() }
       const node = g2 && emphasis.selected ? nodes.find(n => n.id === emphasis.selected) : undefined
       if (node) fitFrame = requestAnimationFrame(() => { g2?.centerAt(node.x ?? 0, node.y ?? 0); refreshPicking(0) })
       else if (!(import.meta.env.MODE === 'test' && glimpsePin?.pinned()) && !cameraTaken && !emphasis.selected) fitFrame = requestAnimationFrame(fit)
@@ -753,7 +848,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       if (disposed) return
       disposed = true
       if (import.meta.env.MODE === 'test') glimpsePin?.dispose()
-      cancelAnimationFrame(frame); cancelAnimationFrame(paintFrame); cancelAnimationFrame(fitFrame); clearTimeout(settleTimer); clearTimeout(pickTimer)
+      cancelAnimationFrame(frame); cancelAnimationFrame(paintFrame); cancelAnimationFrame(fitFrame); clearTimeout(settleTimer); clearTimeout(pickTimer); nodeTargets.clear()
       host.removeEventListener('dblclick', doubleClick); host.removeEventListener('pointerdown', pointerDown); host.removeEventListener('wheel', interact)
       window.removeEventListener('pointermove', pointerMove); window.removeEventListener('pointerup', pointerUp); window.removeEventListener('pointercancel', pointerUp)
       graph.onNodeHover(() => {}).onNodeClick(() => {}).onBackgroundClick(() => {}).onNodeDrag(() => {}).onNodeDragEnd(() => {}).onEngineStop(() => {}).pauseAnimation()

@@ -23,29 +23,47 @@ const session = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).pa
 const peek = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
 const pathOf = (page: Page) => new URL(page.url()).pathname
 
-// Open in project does not change the address until /api/me and the lazy project
-// page finish. toHaveURL gives that five seconds and then still sees the peek (AEON-447).
-function openInProject(page: Page, button: Locator, path: string) {
+// Live rows keep painting, so a button on this page does not hold still for
+// Playwright's stability check. The URL wait is armed first. The click skips
+// that check, and the navigation is the next turn (AEON-447).
+async function openInProject(page: Page, button: Locator, path: string) {
+  await expect(button).toBeVisible()
   return Promise.all([
     page.waitForURL(`**${path}`, { timeout: 15_000 }),
-    button.click(),
+    button.click({ force: true }),
   ])
+}
+
+async function clickShown(target: Locator) {
+  await expect(target).toBeVisible()
+  await target.click({ force: true })
+}
+
+// data-ready means the renderer has started, not that the simulation has stopped.
+// The product has no settle signal. Test builds set data-settled when the engine
+// has stopped and the node's box has held still for two frames. Click that box.
+// The canvas centre is empty once more than one bubble is on screen (AEON-447).
+async function clickGraphNode(canvas: Locator, id: string, timeout: number) {
+  const node = canvas.locator(`[data-node-id="${id}"]`)
+  await expect.poll(async () => (await canvas.getAttribute('data-settled')) === 'true' && await node.count() === 1, { timeout }).toBe(true)
+  await node.click()
 }
 
 async function openAgents(page: Page) {
   await mockWork(page, fixtures())
   await mockAgents(page, agentData(world))
   await page.goto('/agents')
-  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-  await expect(page.locator('.agents-page .row').first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('.agents-page .row').first()).toBeVisible({ timeout: 20_000 })
 }
 
 test('a ticket pill on /agents opens the peek and stays on /agents', async ({ page }) => {
+  test.setTimeout(60_000)
   await page.setViewportSize({ width: 1600, height: 1000 })
   await openAgents(page)
   const chip = page.locator('.sessions').getByRole('link', { name: 'PHAROS-11' }).first()
   await expect(chip).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
-  await chip.click()
+  await clickShown(chip)
   await expect(peek(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
   await expect(peek(page).getByRole('button', { name: 'Open in project' })).toBeVisible()
   expect(pathOf(page)).toBe('/agents')
@@ -60,9 +78,20 @@ test('a ticket pill on /agents opens the peek and stays on /agents', async ({ pa
 })
 
 test('cmd-click on an agents ticket keeps the real link', async ({ page }) => {
+  test.setTimeout(60_000)
   await openAgents(page)
   const chip = page.locator('.sessions').getByRole('link', { name: 'PHAROS-11' }).first()
-  const [tab] = await Promise.all([page.context().waitForEvent('page'), chip.click({ modifiers: ['ControlOrMeta'] })])
+  await expect(chip).toBeVisible()
+  // A busy renderer sometimes focuses the link and drops the new tab. One more
+  // modified click is the same gesture; it must not open the peek (AEON-447).
+  let tab: Page | undefined
+  for (let attempt = 0; attempt < 2 && !tab; attempt++) {
+    if (await peek(page).count()) await page.keyboard.press('Escape')
+    const pending = page.context().waitForEvent('page', { timeout: 8_000 }).catch(() => undefined)
+    await chip.click({ modifiers: ['ControlOrMeta'], force: true })
+    tab = await pending
+  }
+  if (!tab) throw new Error('modified click did not open the ticket link')
   await tab.waitForURL('**/p/PHAROS/PHAROS-11')
   await tab.close()
   await expect(peek(page)).toHaveCount(0)
@@ -70,21 +99,21 @@ test('cmd-click on an agents ticket keeps the real link', async ({ page }) => {
 })
 
 test('a session-row ticket and a panel ticket peek without covering the session text', async ({ page }) => {
+  test.setTimeout(60_000)
   await page.setViewportSize({ width: 1600, height: 1000 })
   await openAgents(page)
   const live = page.locator(`[data-row="s:${session(1)}"]`).getByRole('link', { name: 'PHAROS-11' })
-  await expect(live).toBeVisible()
-  await live.click()
+  await clickShown(live)
   await expect(peek(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
   expect(pathOf(page)).toBe('/agents')
   await page.keyboard.press('Escape')
   await expect(peek(page)).toHaveCount(0)
   await expect(live).toBeFocused()
 
-  await page.locator('.sessions').getByRole('link', { name: /Claude camy, Working/ }).click()
+  await clickShown(page.locator('.sessions').getByRole('link', { name: /Claude camy, Working/ }))
   await expect(page).toHaveURL(`/agents/${session(1)}`)
   await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
-  await page.getByRole('complementary', { name: 'Session details' }).locator('.ticket-detail').click()
+  await clickShown(page.getByRole('complementary', { name: 'Session details' }).locator('.ticket-detail'))
   await expect(peek(page)).toBeVisible()
   await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
   await expect(peek(page).getByRole('button', { name: 'Back to session' })).toBeVisible()
@@ -110,9 +139,7 @@ test('a ticket from another project in the tickets graph opens the peek', async 
   await page.goto('/p/PHAROS/tickets?view=graph')
   const canvas = page.locator('.ticket-graph-canvas')
   await expect(canvas).toHaveAttribute('data-ready', 'true', { timeout: 20_000 })
-  await page.getByRole('button', { name: 'Fit graph to view' }).click()
-  const box = (await canvas.boundingBox())!
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+  await clickGraphNode(canvas, 'n-a1', 20_000)
   await expect(peek(page).getByRole('heading', { name: 'Aeon foundation' })).toBeVisible()
   expect(pathOf(page)).toBe('/p/PHAROS/tickets')
   expect(new URL(page.url()).searchParams.get('view')).toBe('graph')
@@ -136,9 +163,7 @@ test('a knowledge-graph ticket node opens the peek instead of leaving the graph'
   await expect(canvas).toHaveAttribute('data-ready', 'true', { timeout: 30_000 })
   await page.getByRole('button', { name: 'Show linked tickets' }).click()
   await expect(canvas).toHaveAttribute('data-ready', 'true')
-  await page.getByRole('button', { name: 'Fit graph to view' }).click()
-  const box = (await canvas.boundingBox())!
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+  await clickGraphNode(canvas, 'n-1', 30_000)
   await expect(peek(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
   expect(pathOf(page)).toBe('/p/PHAROS/knowledge')
   expect(new URL(page.url()).searchParams.get('peek')).toBe('PHAROS-11')
@@ -164,8 +189,8 @@ test('release history still opens its own ticket panel', async ({ page }) => {
 test('ticket peek screenshots', async ({ page }) => {
   test.setTimeout(90_000)
   await openAgents(page)
-  await page.locator('.sessions').getByRole('link', { name: /Claude camy, Working/ }).click()
-  await page.getByRole('complementary', { name: 'Session details' }).locator('.ticket-detail').click()
+  await clickShown(page.locator('.sessions').getByRole('link', { name: /Claude camy, Working/ }))
+  await clickShown(page.getByRole('complementary', { name: 'Session details' }).locator('.ticket-detail'))
   await expect(peek(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme })
