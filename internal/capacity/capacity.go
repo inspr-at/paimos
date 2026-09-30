@@ -14,6 +14,8 @@ import (
 )
 
 type Reading struct {
+	PlusMinus            float64   `json:"plus_minus,omitempty"`
+	Evidence             *Evidence `json:"evidence,omitempty"`
 	WindowKind           string    `json:"window_kind"`
 	Bucket               string    `json:"bucket,omitempty"`
 	WindowMinutes        int       `json:"window_minutes"`
@@ -30,6 +32,20 @@ type Reading struct {
 var label = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._ -]*$`)
 
 func (r Reading) Validate(now time.Time) error {
+	if math.IsNaN(r.PlusMinus) || math.IsInf(r.PlusMinus, 0) || r.PlusMinus < 0 || r.PlusMinus > 100 {
+		return errors.New("invalid estimate uncertainty")
+	}
+	if r.Evidence != nil {
+		if r.Source != "estimate" || r.Evidence.Samples < 1 || r.Evidence.Samples > 100000 {
+			return errors.New("invalid estimate evidence")
+		}
+		switch r.Evidence.Kind {
+		case "runs", "tokens", "limit_hits", "drift":
+		default:
+			return errors.New("invalid estimate evidence")
+		}
+	}
+
 	if r.WindowMinutes < 1 || r.WindowMinutes > 527040 || math.IsNaN(r.UsedPercent) || math.IsInf(r.UsedPercent, 0) || r.UsedPercent < 0 || r.UsedPercent > 100 || r.ReadAt.IsZero() || r.ResetsAt.IsZero() || r.ReadAt.After(now.Add(time.Minute)) || !r.ResetsAt.After(r.ReadAt) || r.ReadAt.Before(r.StartsAt()) {
 		return errors.New("invalid capacity reading")
 	}

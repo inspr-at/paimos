@@ -1,0 +1,228 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package agentaccounts
+
+import (
+	"math"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+)
+
+func learningAccount(t *testing.T, harness string) (tenant.Principal, tenant.Principal, string, Account) {
+	t.Helper()
+	reset(t)
+	person := makePrincipal(t, "learn-"+harness, "person", "Ada", []string{"admin"})
+	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
+	key := issueKey(t, runner, []string{"account.manage", "account.probe", "run.claim"})
+	var a Account
+	callStatus(t, accountsMod(), &runner, key, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": "learned", "harness": harness, "daemon_id": "daemon-a", "label": "Main"}), 201, &a)
+	callStatus(t, accountsMod(), &runner, key, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, &a)
+	// All HTTP/routing checks pin the schedule; they cannot fail at night.
+	s := capacity.DefaultSchedule()
+	s.Week = capacity.Preset(7)
+	for i := range s.Week {
+		s.Week[i].Start = 0
+		s.Week[i].End = 24
+	}
+	s.Reserve = capacity.ReserveOff
+	callStatus(t, accountsMod(), &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &s}), 204, nil)
+	return person, runner, key, a
+}
+func inLearning(t *testing.T, p tenant.Principal, fn func(pgx.Tx) error) {
+	t.Helper()
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, fn); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestLearningRunIngestionReplayReservationAndTenantFence(t *testing.T) {
+	person, runner, key, a := learningAccount(t, "codex")
+	profile := codexProfile(t, person)
+	now := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
+	for i := 0; i < 12; i++ {
+		id := insertRun(t, person, runner, profile)
+		start := now.Add(time.Duration(i-13) * time.Hour)
+		end := start.Add(30 * time.Minute)
+		inLearning(t, person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2,status='completed',started_at=$3,ended_at=$4,input_tokens=1000000,effective_model='fixture-model' WHERE id=$1`, id, a.ID, start, end)
+			return err
+		})
+		reading := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, Plan: "Pro", Bucket: "codex", UsedPercent: 10, ReadAt: start, ResetsAt: start.Add(5 * time.Hour), Source: "harness", RunID: id, Phase: "start"}
+		path := "/api/agent-accounts/" + a.ID + "/readings"
+		callStatus(t, accountsMod(), &runner, key, "POST", path, encoded(t, readingsWrite{[]capacity.Reading{reading}}), 204, nil)
+		reading.ReadAt = end
+		reading.UsedPercent += float64(i + 1)
+		reading.Phase = "end"
+		for j := 0; j < 2; j++ {
+			callStatus(t, accountsMod(), &runner, key, "POST", path, encoded(t, readingsWrite{[]capacity.Reading{reading}}), 204, nil)
+		}
+	}
+	inLearning(t, person, func(tx pgx.Tx) error {
+		l, err := loadLearning(t.Context(), tx, a.ID)
+		if err != nil {
+			return err
+		}
+		if len(l.Windows) != 1 || len(l.Windows[0].Runs) != 12 || len(l.Windows[0].Own) != 0 {
+			t.Fatalf("sample attribution %+v", l)
+		}
+		metric := l.Windows[0].Summarize(now, capacity.DefaultSchedule(), profile)
+		if math.Abs(metric.HoldPercent-9) > 1 || metric.PerMillion <= 0 {
+			t.Fatalf("hold %+v", metric)
+		}
+		return nil
+	})
+	reading := capacity.Reading{WindowKind: "5h", Bucket: "codex", Plan: "Pro", WindowMinutes: 300, UsedPercent: 20, ReadAt: now, ResetsAt: now.Add(time.Hour), Source: "harness"}
+	callStatus(t, accountsMod(), &runner, key, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{reading}}), 204, nil)
+	id := insertRun(t, person, runner, profile)
+	mustRoute(t, accountsMod(), runner, key, id, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
+	if n := scalar(t, person, `SELECT reserved_units FROM account_reservations WHERE run_id=$1`, id); n < 9 || n > 10 {
+		t.Fatalf("flat hold remains: %d", n)
+	}
+	foreign := makePrincipal(t, "learn-foreign", "person", "Foreign", []string{"admin"})
+	if scalar(t, foreign, `SELECT count(*) FROM account_capacity_learning`) != 0 {
+		t.Fatal("learning crossed tenant")
+	}
+}
+
+func TestLearningOwnUsePresenceDriftAndPlanChange(t *testing.T) {
+	person, runner, key, a := learningAccount(t, "codex")
+	now := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
+	reading := capacity.Reading{WindowKind: "weekly", WindowMinutes: 10080, Plan: "Pro", ReadAt: now.Add(-15 * time.Minute), UsedPercent: 10, ResetsAt: now.Add(24 * time.Hour), Source: "agentd"}
+	path := "/api/agent-accounts/" + a.ID + "/readings"
+	callStatus(t, accountsMod(), &runner, key, "POST", path, encoded(t, readingsWrite{[]capacity.Reading{reading}}), 204, nil)
+	reading.ReadAt = now
+	reading.UsedPercent = 12
+	callStatus(t, accountsMod(), &runner, key, "POST", path, encoded(t, readingsWrite{[]capacity.Reading{reading}}), 204, nil)
+	inLearning(t, person, func(tx pgx.Tx) error {
+		l, err := loadLearning(t.Context(), tx, a.ID)
+		if err != nil {
+			return err
+		}
+		if l.PresenceUntil == nil || !l.PresenceUntil.Equal(now.Add(30*time.Minute)) {
+			t.Fatal("own use presence missing")
+		}
+		s := capacity.DefaultSchedule()
+		s.Reserve = capacity.ReserveOff
+		s.Override = "sprint"
+		p, _, err := readingPacing(t.Context(), tx, a.ID, reading, now.Add(30*time.Minute), s)
+		if err == nil && (math.Abs(p.DriftPercent-4) > 0.01 || math.Abs(p.AvailableNowPercent-84) > 0.01) {
+			t.Fatalf("aging drift %+v", p)
+		}
+		if l.summary(now.Add(31*time.Minute), s).PresenceUntil != nil {
+			t.Fatal("presence never expired")
+		}
+		return err
+	})
+	reading.ReadAt = now.Add(time.Millisecond)
+	reading.Plan = "Plus"
+	callStatus(t, accountsMod(), &runner, key, "POST", path, encoded(t, readingsWrite{[]capacity.Reading{reading}}), 204, nil)
+	inLearning(t, person, func(tx pgx.Tx) error {
+		l, err := loadLearning(t.Context(), tx, a.ID)
+		if len(l.Windows[0].Own) != 0 {
+			t.Fatal("plan change retained old capacity model")
+		}
+		return err
+	})
+}
+
+func TestLearningBlindLimitsAndFreshMeasuredWins(t *testing.T) {
+	person, runner, key, a := learningAccount(t, "grok")
+	now := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
+	inLearning(t, person, func(tx pgx.Tx) error {
+		l := capacityLearning{Hits: []capacity.LimitSample{{At: now.Add(-8 * 24 * time.Hour), Tokens: 1000}, {At: now.Add(-24 * time.Hour), Tokens: 1200}}, Tokens: 550, Runs: 2}
+		if err := saveLearning(t.Context(), tx, a.ID, l); err != nil {
+			return err
+		}
+		v := capacity.BlindEstimate(l.Hits, float64(l.Tokens), 0, now)
+		if v == nil {
+			t.Fatal("missing blind estimate")
+		}
+		if err := persistEstimate(t.Context(), tx, a, *v, now); err != nil {
+			return err
+		}
+		history, err := readCapacity(t.Context(), tx, a.ID, false)
+		if err != nil {
+			return err
+		}
+		if len(history) != 1 || history[0].Evidence == nil || history[0].Evidence.Samples != 2 || history[0].PlusMinus < 3 {
+			t.Fatal("lost estimate evidence")
+		}
+		return nil
+	})
+	measured := capacity.Reading{WindowKind: "other", Bucket: "learned", WindowMinutes: 10080, UsedPercent: 80, ReadAt: now.Add(time.Millisecond), ResetsAt: now.Add(6 * 24 * time.Hour), Source: "harness"}
+	callStatus(t, accountsMod(), &runner, key, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{measured}}), 204, nil)
+	inLearning(t, person, func(tx pgx.Tx) error {
+		v := measured
+		v.ReadAt = now.Add(time.Second)
+		v.Source = "estimate"
+		v.UsedPercent = 1
+		v.Evidence = &capacity.Evidence{Kind: "runs", Samples: 3}
+		if err := persistEstimate(t.Context(), tx, a, v, v.ReadAt); err != nil {
+			return err
+		}
+		history, err := readCapacity(t.Context(), tx, a.ID, true)
+		if err != nil {
+			return err
+		}
+		if len(history) != 1 || history[0].Source != "harness" || history[0].UsedPercent != 80 {
+			t.Fatalf("estimate beat measurement %+v", history)
+		}
+		l, err := loadLearning(t.Context(), tx, a.ID)
+		if err != nil {
+			return err
+		}
+		if l.Correction == nil || l.Windows[0].Sigma < 29 {
+			t.Fatal("contradiction did not widen uncertainty")
+		}
+		return nil
+	})
+	// Recording HTTP client: the public projection contains only typed evidence,
+	// never internal run IDs/model identifiers or local-path fields.
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/agent-accounts/capacity", nil)
+	r = r.WithContext(tenant.WithPrincipal(r.Context(), person))
+	mux := http.NewServeMux()
+	accountsMod().Mount(mux)
+	mux.ServeHTTP(rec, r)
+	if rec.Code != 200 {
+		t.Fatalf("projection status %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, bad := range []string{"/Users/", "/home/", "config_home", "TokenSamples", "fixture-model"} {
+		if strings.Contains(rec.Body.String(), bad) {
+			t.Fatalf("private learning leaked: %s", bad)
+		}
+	}
+}
+
+func TestLearningPresenceOrderAndSuggestions(t *testing.T) {
+	now := time.Date(2026, 10, 2, 20, 0, 0, 0, time.UTC)
+	s := capacity.DefaultSchedule()
+	l := capacityLearning{}
+	own := now.Add(-72 * time.Hour)
+	l.LastOwn = &own
+	for d := 0; d < 5; d++ {
+		l.Online = append(l.Online, now.Add(-time.Duration(d)*24*time.Hour))
+	}
+	summary := l.summary(now, s)
+	if !summary.Away || !summary.Sleeps {
+		t.Fatalf("observed suggestions %+v", summary)
+	}
+	l.Online = nil
+	if l.summary(now, s).Away {
+		t.Fatal("silence invented absence")
+	}
+	soon := now.Add(time.Hour)
+	later := now.Add(24 * time.Hour)
+	picks := []ranked{{account: Account{ID: "Main"}, presence: true, reset: &soon}, {account: Account{ID: "Spare"}, reset: &later}}
+	orderPicks(picks)
+	if picks[0].account.ID != "Spare" {
+		t.Fatal("presence did not steer ordering")
+	}
+}

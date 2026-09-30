@@ -104,7 +104,7 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		           SELECT 1 FROM account_reservations r
 		           WHERE r.tenant_id = w.tenant_id AND r.window_id = w.id
 		             AND r.state = 'settled' AND r.actual_units = 0
-		       ) AS provisional, w.capacity_read_at, w.capacity_allowed, COALESCE(w.capacity_kind,''), w.capacity_bucket, w.capacity_retired, w.capacity_refresh_run::text
+		       ) AS provisional, w.capacity_read_at, w.capacity_allowed, COALESCE(w.capacity_kind,''), w.capacity_bucket, w.capacity_retired, w.capacity_refresh_run::text, COALESCE(w.capacity_source,'')
 		FROM account_allowance_windows w
 		WHERE NOT w.pairing_verification AND NOT w.capacity_retired
 		ORDER BY w.account_id, w.starts_at, w.id`)
@@ -115,7 +115,7 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 	byAccount := map[string][]Window{}
 	for rows.Next() {
 		var w Window
-		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun); err != nil {
+		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun, &w.capacitySource); err != nil {
 			return nil, err
 		}
 		if w.capacityReadAt != nil {
@@ -317,6 +317,11 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	after, err := getAccount(ctx, tx, accountID)
 	if err != nil {
 		return Account{}, err
+	}
+	if after.LastProbeAt != nil {
+		if err := learnOnline(ctx, tx, after, *after.LastProbeAt); err != nil {
+			return Account{}, err
+		}
 	}
 	if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
 		return Account{}, err

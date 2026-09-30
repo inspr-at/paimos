@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -269,6 +270,12 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	if _, err := tx.Exec(ctx, `INSERT INTO harness_usage_receipts(tenant_id,session_id,report_id,model,sequence,payload_digest) VALUES($1,$2,$3,$4,$5,$6)`,
 		p.TenantID, s.ID, in.ReportID, in.Model, in.Sequence, sum[:]); err != nil {
 		return nil, err
+	}
+	if s.Management == "unmanaged" && out.AccountID != nil && old.AccountID != nil && *out.AccountID == *old.AccountID && out.InputTokens != nil && out.OutputTokens != nil && old.InputTokens != nil && old.OutputTokens != nil {
+		delta := *out.InputTokens + *out.OutputTokens - *old.InputTokens - *old.OutputTokens
+		if err := agentaccounts.ObserveSessionTokens(ctx, tx, p.ID, *out.AccountID, out.Model, delta, old.ReportedAt, out.ReportedAt); err != nil {
+			return nil, err
+		}
 	}
 	return usageReportResult{Usage: out}, record(ctx, tx, p, s, "usage_reported", before, out)
 }

@@ -53,6 +53,9 @@ type Window struct {
 	capacityReadAt      *time.Time
 	capacityAllowed     bool
 	capacityKind        string
+	capacitySource      string
+	capacityHold        int64
+	capacityPresence    bool
 	capacityBucket      string
 	capacityRetired     bool
 	capacityRefreshRun  *string

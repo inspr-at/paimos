@@ -3,6 +3,7 @@ package agentaccounts
 
 import (
 	"context"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -147,7 +148,7 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	blind := false
 	if blindHarness {
 		var observed bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id=$1)`, a.ID).Scan(&observed); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id=$1 AND source<>'estimate')`, a.ID).Scan(&observed); err != nil {
 			return nil, nil, err
 		}
 		// A content-free recovery probe is not a paced budget and not a daily
@@ -181,7 +182,7 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	}
 	stale := false
 	for _, w := range active {
-		if w.capacityReadAt != nil && (w.capacityKind == "refresh" || now.Sub(*w.capacityReadAt) > 10*time.Minute) {
+		if w.capacityReadAt != nil && (w.capacityKind == "refresh" || now.Sub(*w.capacityReadAt) > 10*time.Minute && w.capacitySource != "estimate") {
 			stale = true
 		}
 		if w.capacityReadAt != nil && !w.capacityAllowed {
@@ -222,10 +223,40 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
+	learned, err := loadLearning(ctx, tx, a.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	profile := ""
+	if run.ProfileID != nil {
+		profile = *run.ProfileID
+	}
+	for i := range active {
+		w := &active[i]
+		if w.capacityReadAt == nil || synthetic(*w) {
+			continue
+		}
+		v := capacity.Reading{WindowKind: w.capacityKind, Bucket: w.capacityBucket, WindowMinutes: int(w.EndsAt.Sub(w.StartsAt) / time.Minute)}
+		metric := learned.metric(v, now, s, profile)
+		// Stale measured windows retain their one-run refresh fence.
+		if now.Sub(*w.capacityReadAt) <= 10*time.Minute || w.capacitySource == "estimate" {
+			w.capacityHold = int64(math.Ceil(metric.HoldPercent))
+		}
+		w.capacityPresence = learned.PresenceUntil != nil && learned.PresenceUntil.After(now)
+	}
+	// Re-sort after attaching learning so the advice and reservation agree.
+	for i := range ordered {
+		for _, w := range active {
+			if w.ID == ordered[i].ID {
+				ordered[i] = w
+				break
+			}
+		}
+	}
 	need := boolInt(!claiming)
 	var hardUntil *time.Time
 	for _, w := range ordered {
-		if w.Allowance-w.Used-w.Reserved >= need {
+		if w.Allowance-w.Used-w.Reserved >= max(need, w.capacityHold*need) {
 			continue
 		}
 		end := w.EndsAt
@@ -242,10 +273,10 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	// that window's reset).
 	var reserve *CapacityWait
 	for _, w := range ordered {
-		if w.capacityBudget == nil || *w.capacityBudget >= float64(w.Reserved+need) {
+		if w.capacityBudget == nil || *w.capacityBudget >= float64(w.Reserved+max(need, w.capacityHold*need)) {
 			continue
 		}
-		if w.capacityShare != nil && *w.capacityShare >= float64(w.Reserved+need) {
+		if w.capacityShare != nil && *w.capacityShare >= float64(w.Reserved+max(need, w.capacityHold*need)) {
 			if reserve == nil || w.capacityReserveUntil != nil && (reserve.Until == nil || w.capacityReserveUntil.After(*reserve.Until)) {
 				reserve = &CapacityWait{Code: "reserve", Until: w.capacityReserveUntil, Timezone: s.Timezone, RunNowAllowed: true}
 			}
@@ -448,8 +479,8 @@ func lastRead(windows []Window) *time.Time {
 
 func windowWait(windows []Window, now time.Time) *CapacityWait {
 	for _, w := range windows {
-		if _, ok := fits(w, now, 1); !ok {
-			if w.capacityReadAt != nil && (synthetic(w) || now.Sub(*w.capacityReadAt) > 10*time.Minute) {
+		if _, ok := fits(w, now, max(1, windowEstimate(w, nil))); !ok {
+			if w.capacityReadAt != nil && (synthetic(w) || now.Sub(*w.capacityReadAt) > 10*time.Minute && w.capacitySource != "estimate") {
 				return &CapacityWait{Code: "reading", ReadAt: w.capacityReadAt}
 			}
 			return &CapacityWait{Code: "allowance", Until: &w.EndsAt}
