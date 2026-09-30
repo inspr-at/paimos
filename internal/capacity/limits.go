@@ -23,7 +23,7 @@ func VendorLimit(vendor string, raw []byte, known []Reading, at time.Time) *Limi
 	}
 	switch vendor {
 	case "codex":
-		return codexLimit(raw, known, at)
+		return CodexLimit(raw, known, at, "")
 	case "claude":
 		return claudeLimit(raw, known, at)
 	case "grok":
@@ -59,13 +59,20 @@ type codexNamed struct {
 }
 
 type codexWalk struct {
+	model string
 	stop  bool
 	reset *int64
 	named []codexNamed
 }
 
-func codexLimit(raw []byte, known []Reading, at time.Time) *LimitHit {
-	st := &codexWalk{}
+// CodexLimit scopes quota snapshots to the run's exact model/limit ID and the
+// default codex account bucket. Unknown buckets remain readings, not run stops.
+// Bound turn errors and explicit account-wide denials do not need a model ID.
+func CodexLimit(raw []byte, known []Reading, at time.Time, model string) *LimitHit {
+	if len(raw) > 1<<20 {
+		return nil
+	}
+	st := &codexWalk{model: model}
 	walkCodexQuota(unwrapMethod(raw), "", 0, st)
 	if !st.stop {
 		return nil
@@ -148,6 +155,13 @@ func walkCodexQuota(raw json.RawMessage, bucket string, depth int, st *codexWalk
 	if json.Unmarshal(raw, &obj) != nil {
 		return
 	}
+	if id, ok := jsonString(obj["limitId"]); ok && id != "" {
+		// A map key and an explicit ID must both belong to this run.
+		if !codexBucketApplies(id, st.model) {
+			return
+		}
+		bucket = id
+	}
 	if info, ok := obj["codexErrorInfo"]; ok {
 		if hit, reset := codexUsageLimit(info); hit {
 			st.stop = true
@@ -194,7 +208,9 @@ func walkCodexQuota(raw json.RawMessage, bucket string, depth int, st *codexWalk
 			}
 			sort.Strings(keys)
 			for _, k := range keys {
-				walkCodexQuota(by[k], k, depth+1, st)
+				if codexBucketApplies(k, st.model) {
+					walkCodexQuota(by[k], k, depth+1, st)
+				}
 			}
 		}
 	}
@@ -207,6 +223,10 @@ func walkCodexQuota(raw json.RawMessage, bucket string, depth int, st *codexWalk
 	if next, ok := obj["turn"]; ok {
 		walkCodexQuota(next, bucket, depth+1, st)
 	}
+}
+
+func codexBucketApplies(bucket, model string) bool {
+	return bucket == "codex" || model != "" && bucket == model
 }
 
 // usageLimitExceeded is a Codex error variant. 0.159.0 sends codexErrorInfo as

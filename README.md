@@ -197,14 +197,17 @@ Only that explicit opt-in lets the enrolled daemon install `aeon statusline` in
 its private Claude home; an existing user status line is preserved. The command
 prints one plan line and sends only the two supported quota windows to the local
 owner-only agentd socket. The registering agent reports at most once per minute,
-including across daemon restarts. Disabling removes only the matching owned entry.
+including across daemon restarts. The toggle requires `account.manage`. Disabling
+removes only the matching owned entry, even after the executable leaves PATH or
+its installation path changes or contains spaces.
 
 Structured vendor limit hits settle managed runs as `vendor_limit`; sessions show
-Throttled with the vendor's reset when known. Known denied windows are reported at
-100%; missing bounds remain unknown. Accounts publish `reading_support` and a
-tenant-keyed HMAC of a verified vendor account ID, never an email, token or local
-path. Missing verified IDs leave the fingerprint empty. Claude idle `get_usage`
-and Grok billing captures remain disabled until the coordinator verifies a
+Throttled with the vendor's reset when known. Codex model-specific bucket signals
+stop only the matching model; account-wide denials still apply. Known denied
+windows are reported at 100%; missing bounds remain unknown. Accounts publish
+`reading_support` and a tenant-keyed HMAC of a verified vendor account ID, never an
+email, token or local path. Missing verified IDs leave the fingerprint empty.
+Claude idle `get_usage` and Grok billing captures remain disabled until the coordinator verifies a
 quota-neutral exchange and adds an exact-version, exact-binary capability; this
 fixture implementation does not approve a production vendor capture.
 

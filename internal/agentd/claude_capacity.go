@@ -26,9 +26,10 @@ type claudeUsageCapability struct {
 }
 
 type capacityBinaryStamp struct {
-	path  string
-	size  int64
-	mtime int64
+	path          string
+	size          int64
+	mtime, ctime  int64
+	device, inode uint64
 }
 
 var capacityBinaryCache struct {
@@ -49,11 +50,10 @@ func exactCapacityBinary(path, digest string) bool {
 		return false
 	}
 	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
+	stamp, ok := stampCapacityBinary(path, f)
+	if !ok {
 		return false
 	}
-	stamp := capacityBinaryStamp{path, info.Size(), info.ModTime().UnixNano()}
 	capacityBinaryCache.Lock()
 	cached, ok := capacityBinaryCache.digest[stamp]
 	capacityBinaryCache.Unlock()
@@ -63,6 +63,10 @@ func exactCapacityBinary(path, digest string) bool {
 	h := sha256.New()
 	n, err := io.Copy(h, io.LimitReader(f, (512<<20)+1))
 	if err != nil || n > 512<<20 {
+		return false
+	}
+	// Never cache bytes that changed while they were being hashed.
+	if after, ok := stampCapacityBinary(path, f); !ok || after != stamp {
 		return false
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
