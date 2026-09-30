@@ -26,6 +26,15 @@ const shardCount = 7
 
 const pairingPackage = "github.com/inspr-at/paimos/internal/agentpairing"
 const pathProofTest = "TestPathProofCommandsRunInShells"
+const nodesPackage = "github.com/inspr-at/paimos/internal/nodes"
+
+// exemptPerformanceTest sanitises explain JSON. The name contains Performance
+// and the test has no wall-clock budget.
+const exemptPerformanceTest = "TestSafeListPerformancePlan"
+
+// timingHostShard is the shortest go-test job on ubuntu-latest run 36704871290.
+// Wall clock for shards 1..7 was 199s, 195s, 194s, 165s, 177s, 196s, 175s.
+const timingHostShard = 4
 
 // shardNeedsShell reports whether shard runs the pairing path-proof test.
 // A whole-package row runs every test, including that one.
@@ -39,6 +48,60 @@ func shardNeedsShell(items []Item, shard int) bool {
 		}
 	}
 	return false
+}
+
+// timingBudgetNames are the *Performance* tests whose assertions compare a
+// request's wall clock with a fixed budget. They share a runner with nothing
+// else: a parallel package makes the budget measure contention.
+func timingBudgetNames(path string) []string {
+	if path != nodesPackage {
+		return nil
+	}
+	return []string{
+		"TestList6000FiltersPerformance",
+		"TestList6000Performance",
+		"TestPlanningBulkUsagePerformance",
+	}
+}
+
+func isTimingBudget(path, name string) bool {
+	for _, n := range timingBudgetNames(path) {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+func isExemptPerformance(path, name string) bool {
+	return path == nodesPackage && name == exemptPerformanceTest
+}
+
+type budgetTest struct {
+	path string
+	name string
+}
+
+func timingBudgetSpecs() []budgetTest {
+	names := timingBudgetNames(nodesPackage)
+	out := make([]budgetTest, len(names))
+	for i, name := range names {
+		out[i] = budgetTest{path: nodesPackage, name: name}
+	}
+	return out
+}
+
+func dedupe(names []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
 }
 
 // splitAboveMS is the CI package elapsed past which one test binary cannot
@@ -289,6 +352,7 @@ func formatFile(items []Item, splitAbove int) string {
 	fmt.Fprintf(&b, "# Inbox was measured locally and scaled to that run. Pairing tests added in release 14 were measured locally and scaled by the same ratio as the rest of that package.\n")
 	fmt.Fprintf(&b, "# A package added after that run is listed at 0ms until the next measurement.\n")
 	fmt.Fprintf(&b, "# A package absent from this file runs on the lightest shard. A split package's lowest shard skips tests assigned elsewhere, so a new Test, Example, or Fuzz still runs.\n")
+	fmt.Fprintf(&b, "# TestList6000Performance, TestList6000FiltersPerformance and TestPlanningBulkUsagePerformance are wall-clock budgets. Every shard skips them. They run once, with -p 1, after the shortest shard.\n")
 	fmt.Fprintf(&b, "# Columns: shard milliseconds import-path [TestName]\n")
 	for _, it := range items {
 		if it.Test == "" {
@@ -696,15 +760,90 @@ func planShard(items []Item, listed []string, shard int) (shardPlan, error) {
 	for _, path := range paths {
 		g := groups[path]
 		if g.catch == shard {
-			runs = append(runs, namedRun{path: path, skip: true, names: append([]string(nil), g.others...)})
+			names := append([]string(nil), g.others...)
+			names = append(names, timingBudgetNames(path)...)
+			runs = append(runs, namedRun{path: path, skip: true, names: dedupe(names)})
 			continue
 		}
-		if len(g.mine) == 0 {
+		var mine []string
+		for _, name := range g.mine {
+			if isTimingBudget(path, name) {
+				continue
+			}
+			mine = append(mine, name)
+		}
+		if len(mine) == 0 {
 			continue
 		}
-		runs = append(runs, namedRun{path: path, names: append([]string(nil), g.mine...)})
+		runs = append(runs, namedRun{path: path, names: mine})
 	}
-	return shardPlan{whole: whole, runs: runs}, nil
+	plain := make([]string, 0, len(whole))
+	seenRun := map[string]struct{}{}
+	for _, run := range runs {
+		seenRun[run.path] = struct{}{}
+	}
+	for _, path := range whole {
+		if _, ok := seenRun[path]; ok {
+			continue
+		}
+		timed := timingBudgetNames(path)
+		if len(timed) == 0 {
+			plain = append(plain, path)
+			continue
+		}
+		runs = append(runs, namedRun{path: path, skip: true, names: append([]string(nil), timed...)})
+	}
+	return shardPlan{whole: plain, runs: runs}, nil
+}
+
+// timingShardPlan is the one serial command for wall-clock budgets. A package
+// that is not in listed is omitted so fixture modules can plan other packages.
+func timingShardPlan(listed []string) shardPlan {
+	listedSet := map[string]struct{}{}
+	for _, path := range listed {
+		listedSet[path] = struct{}{}
+	}
+	by := map[string][]string{}
+	var order []string
+	for _, spec := range timingBudgetSpecs() {
+		if _, ok := listedSet[spec.path]; !ok {
+			continue
+		}
+		if _, ok := by[spec.path]; !ok {
+			order = append(order, spec.path)
+		}
+		by[spec.path] = append(by[spec.path], spec.name)
+	}
+	var runs []namedRun
+	for _, path := range order {
+		runs = append(runs, namedRun{path: path, names: by[path]})
+	}
+	return shardPlan{runs: runs}
+}
+
+// timingCommandArgs is one go test process: -p 1, then the packages, then an
+// exact -run list. Packages in that process run one at a time.
+func (p shardPlan) timingCommandArgs() ([]string, error) {
+	if len(p.whole) != 0 || len(p.runs) == 0 {
+		return nil, fmt.Errorf("timing plan must name tests and no whole package")
+	}
+	var pkgs, names []string
+	for _, run := range p.runs {
+		if run.skip || len(run.names) == 0 {
+			return nil, fmt.Errorf("timing plan run %s is not an exact -run list", run.path)
+		}
+		pkgs = append(pkgs, run.path)
+		names = append(names, run.names...)
+	}
+	re, err := runRegex(names)
+	if err != nil {
+		return nil, err
+	}
+	args := make([]string, 0, 4+len(pkgs))
+	args = append(args, "test", "-p", "1")
+	args = append(args, pkgs...)
+	args = append(args, "-run", re)
+	return args, nil
 }
 
 // coverageHoles fails when a listed package or a runnable split-package test
@@ -725,6 +864,7 @@ func coverageHoles(items []Item, listed []string, runnable map[string][]string) 
 		}
 		plans = append(plans, plan)
 	}
+	serial := timingShardPlan(listed)
 	var holes []string
 	for _, path := range listed {
 		if split[path] {
@@ -745,19 +885,49 @@ func coverageHoles(items []Item, listed []string, runnable map[string][]string) 
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
+	seenTiming := map[string]struct{}{}
+	countRuns := func(path, name string) (n int, onSerial bool) {
+		for _, plan := range plans {
+			if plan.runsTest(path, name) {
+				n++
+			}
+		}
+		return n, serial.runsTest(path, name)
+	}
 	for _, path := range paths {
 		names := append([]string(nil), runnable[path]...)
 		sort.Strings(names)
 		for _, name := range names {
-			n := 0
-			for _, plan := range plans {
-				if plan.runsTest(path, name) {
-					n++
+			n, onSerial := countRuns(path, name)
+			if isTimingBudget(path, name) {
+				seenTiming[path+"\x00"+name] = struct{}{}
+				if n != 0 || !onSerial {
+					holes = append(holes, fmt.Sprintf("%s %s runs on %d shards, serial=%t", path, name, n, onSerial))
 				}
+				continue
+			}
+			if onSerial {
+				holes = append(holes, fmt.Sprintf("serial step also runs %s %s", path, name))
 			}
 			if n != 1 {
 				holes = append(holes, fmt.Sprintf("%s %s runs on %d shards", path, name, n))
 			}
+		}
+	}
+	listedSet := map[string]struct{}{}
+	for _, path := range listed {
+		listedSet[path] = struct{}{}
+	}
+	for _, spec := range timingBudgetSpecs() {
+		if _, ok := listedSet[spec.path]; !ok {
+			continue
+		}
+		if _, ok := seenTiming[spec.path+"\x00"+spec.name]; ok {
+			continue
+		}
+		n, onSerial := countRuns(spec.path, spec.name)
+		if n != 0 || !onSerial {
+			holes = append(holes, fmt.Sprintf("%s %s runs on %d shards, serial=%t", spec.path, spec.name, n, onSerial))
 		}
 	}
 	if len(holes) == 0 {
@@ -799,6 +969,42 @@ func assignmentDrift(listed []string, items []Item, runnable map[string][]string
 		}
 	}
 	return notes
+}
+
+// unclassifiedPerformance fails when a runnable *Performance* test is neither
+// a wall-clock budget nor the explicit exemption, or when a classified test
+// is no longer runnable.
+func unclassifiedPerformance(found map[string][]string) error {
+	seen := map[string]struct{}{}
+	var paths []string
+	for path := range found {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	var problems []string
+	for _, path := range paths {
+		names := append([]string(nil), found[path]...)
+		sort.Strings(names)
+		for _, name := range names {
+			seen[path+"\x00"+name] = struct{}{}
+			if isTimingBudget(path, name) || isExemptPerformance(path, name) {
+				continue
+			}
+			problems = append(problems, fmt.Sprintf("unclassified Performance test %s %s", path, name))
+		}
+	}
+	for _, spec := range timingBudgetSpecs() {
+		if _, ok := seen[spec.path+"\x00"+spec.name]; !ok {
+			problems = append(problems, fmt.Sprintf("timing budget test %s %s is not runnable", spec.path, spec.name))
+		}
+	}
+	if _, ok := seen[nodesPackage+"\x00"+exemptPerformanceTest]; !ok {
+		problems = append(problems, fmt.Sprintf("exempt Performance test %s %s is not runnable", nodesPackage, exemptPerformanceTest))
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("Performance tests must be timed alone or explicitly exempt:\n%s", strings.Join(problems, "\n"))
 }
 
 func formatDrift(notes []string) string {

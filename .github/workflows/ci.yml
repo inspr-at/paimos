@@ -58,6 +58,11 @@ jobs:
           fi
       - name: Test this shard
         run: go run ./scripts/ci-go-shards test -shard "${{ matrix.shard }}"
+      # Run 36704871290 wall clock: shards 1..7 finished in 199s, 195s, 194s, 165s, 177s, 196s, 175s.
+      # Shard 4 is the shortest, so the serial timing step is appended there.
+      - name: Timing budgets, alone
+        if: success() && matrix.shard == 4
+        run: go run ./scripts/ci-go-shards test-timing
 
   go-static:
     runs-on: ubuntu-latest

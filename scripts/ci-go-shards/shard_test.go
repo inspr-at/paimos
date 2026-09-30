@@ -486,6 +486,322 @@ func TestQ(t *testing.T) { hit("TestQ") }
 	}
 }
 
+func TestTimingBudgetsLeaveTheParallelShards(t *testing.T) {
+	items := []Item{
+		{Shard: 1, MS: 50, Path: nodesPackage, Test: "TestKeep"},
+		{Shard: 1, MS: 40, Path: nodesPackage, Test: "TestPlanningBulkUsagePerformance"},
+		{Shard: 2, MS: 30, Path: nodesPackage, Test: "TestSafeListPerformancePlan"},
+		{Shard: 4, MS: 20, Path: nodesPackage, Test: "TestList6000FiltersPerformance"},
+		{Shard: 3, MS: 9, Path: "github.com/inspr-at/paimos/internal/filler3"},
+		{Shard: 5, MS: 8, Path: "github.com/inspr-at/paimos/internal/filler5"},
+		{Shard: 6, MS: 7, Path: "github.com/inspr-at/paimos/internal/filler6"},
+		{Shard: 7, MS: 6, Path: "github.com/inspr-at/paimos/internal/filler7"},
+	}
+	listed := []string{
+		nodesPackage,
+		"github.com/inspr-at/paimos/internal/filler3",
+		"github.com/inspr-at/paimos/internal/filler5",
+		"github.com/inspr-at/paimos/internal/filler6",
+		"github.com/inspr-at/paimos/internal/filler7",
+	}
+	runnable := map[string][]string{
+		nodesPackage: {
+			"TestKeep", "TestNew", "TestSafeListPerformancePlan",
+			"TestPlanningBulkUsagePerformance", "TestList6000Performance", "TestList6000FiltersPerformance",
+		},
+	}
+	if err := coverageHoles(items, listed, runnable); err != nil {
+		t.Fatal(err)
+	}
+	catch, err := planShard(items, listed, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := catch.commandArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSkip := "test " + nodesPackage + " -skip ^(TestList6000FiltersPerformance|TestList6000Performance|TestPlanningBulkUsagePerformance|TestSafeListPerformancePlan)$"
+	if len(args) != 1 || strings.Join(args[0], " ") != wantSkip {
+		t.Fatalf("catch-all args %q", args)
+	}
+	other, err := planShard(items, listed, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err = other.commandArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRun := "test " + nodesPackage + " -run ^(TestSafeListPerformancePlan)$"
+	if len(args) != 1 || strings.Join(args[0], " ") != wantRun {
+		t.Fatalf("shard 2 args %q", args)
+	}
+	for shard := 1; shard <= shardCount; shard++ {
+		plan, err := planShard(items, listed, shard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range timingBudgetNames(nodesPackage) {
+			if plan.runsTest(nodesPackage, name) {
+				t.Fatalf("shard %d runs %s", shard, name)
+			}
+		}
+	}
+	serial := timingShardPlan(listed)
+	timed, err := serial.timingCommandArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTimed := "test -p 1 " + nodesPackage + " -run ^(TestList6000FiltersPerformance|TestList6000Performance|TestPlanningBulkUsagePerformance)$"
+	if strings.Join(timed, " ") != wantTimed {
+		t.Fatalf("timing args %q", timed)
+	}
+	for _, name := range runnable[nodesPackage] {
+		onSerial := serial.runsTest(nodesPackage, name)
+		if isTimingBudget(nodesPackage, name) != onSerial {
+			t.Fatalf("%s serial=%t", name, onSerial)
+		}
+	}
+}
+
+func TestWholePackageSkipsTimingBudgets(t *testing.T) {
+	items := []Item{
+		{Shard: 1, MS: 10, Path: nodesPackage},
+		{Shard: 2, MS: 9, Path: "b"},
+		{Shard: 3, MS: 8, Path: "c"},
+		{Shard: 4, MS: 7, Path: "d"},
+		{Shard: 5, MS: 6, Path: "e"},
+		{Shard: 6, MS: 5, Path: "f"},
+		{Shard: 7, MS: 4, Path: "g"},
+	}
+	listed := []string{nodesPackage, "b", "c", "d", "e", "f", "g"}
+	if err := coverageHoles(items, listed, nil); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := planShard(items, listed, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := plan.commandArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "test " + nodesPackage + " -skip ^(TestList6000FiltersPerformance|TestList6000Performance|TestPlanningBulkUsagePerformance)$"
+	if len(args) != 1 || strings.Join(args[0], " ") != want {
+		t.Fatalf("%q", args)
+	}
+	if !plan.runsTest(nodesPackage, "TestKeep") || plan.runsTest(nodesPackage, "TestList6000Performance") {
+		t.Fatal("whole package skip did not keep ordinary tests and drop the budget")
+	}
+}
+
+func TestClassifyTimedTests(t *testing.T) {
+	found := map[string][]string{
+		nodesPackage: {
+			"TestList6000FiltersPerformance",
+			"TestList6000Performance",
+			"TestPlanningBulkUsagePerformance",
+			"TestSafeListPerformancePlan",
+		},
+	}
+	if err := unclassifiedPerformance(found); err != nil {
+		t.Fatal(err)
+	}
+	extra := map[string][]string{
+		nodesPackage: append(append([]string{}, found[nodesPackage]...), "TestExtraPerformance"),
+	}
+	if err := unclassifiedPerformance(extra); err == nil {
+		t.Fatal("extra Performance test was accepted")
+	}
+	missing := map[string][]string{nodesPackage: {"TestSafeListPerformancePlan"}}
+	if err := unclassifiedPerformance(missing); err == nil {
+		t.Fatal("missing timing budget was accepted")
+	}
+}
+
+func TestTimingStepUsesTheMeasuredHost(t *testing.T) {
+	// Run 36704871290 wall clock, seconds: 199, 195, 194, 165, 177, 196, 175.
+	if timingHostShard != 4 {
+		t.Fatalf("host %d, measured shortest is shard 4", timingHostShard)
+	}
+	root, err := moduleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	needle := "matrix.shard == " + strconv.Itoa(timingHostShard)
+	if !strings.Contains(text, "success() && "+needle) {
+		t.Fatalf("ci.yml missing success() && %s", needle)
+	}
+	parallel := strings.Index(text, "ci-go-shards test -shard")
+	serial := strings.Index(text, "ci-go-shards test-timing")
+	if parallel < 0 || serial < 0 || serial < parallel {
+		t.Fatal("timing step is not after the parallel shard step")
+	}
+}
+
+func TestTimingBudgetsRunOnceInGo(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module github.com/inspr-at/paimos\n\ngo 1.26.0\n")
+	write("internal/nodes/budget_test.go", `package nodes
+
+import (
+	"fmt"
+	"os"
+	"testing"
+)
+
+func hit(name string) {
+	f, err := os.OpenFile(os.Getenv("HITS"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		panic(err)
+	}
+	if _, err := fmt.Fprintln(f, name); err != nil {
+		panic(err)
+	}
+	if err := f.Close(); err != nil {
+		panic(err)
+	}
+}
+
+func TestKeep(t *testing.T) { hit("TestKeep") }
+
+func TestNew(t *testing.T) { hit("TestNew") }
+
+func TestSafeListPerformancePlan(t *testing.T) { hit("TestSafeListPerformancePlan") }
+
+func TestPlanningBulkUsagePerformance(t *testing.T) {
+	hit("TestPlanningBulkUsagePerformance")
+	t.Run("sub", func(t *testing.T) { hit("TestPlanningBulkUsagePerformance/sub") })
+}
+
+func TestList6000Performance(t *testing.T) { hit("TestList6000Performance") }
+
+func TestList6000FiltersPerformance(t *testing.T) { hit("TestList6000FiltersPerformance") }
+`)
+	items := []Item{
+		{Shard: 1, MS: 50, Path: nodesPackage, Test: "TestKeep"},
+		{Shard: 1, MS: 40, Path: nodesPackage, Test: "TestPlanningBulkUsagePerformance"},
+		{Shard: 2, MS: 30, Path: nodesPackage, Test: "TestSafeListPerformancePlan"},
+		{Shard: 4, MS: 20, Path: nodesPackage, Test: "TestList6000FiltersPerformance"},
+		{Shard: 3, MS: 9, Path: "github.com/inspr-at/paimos/internal/filler3"},
+		{Shard: 5, MS: 8, Path: "github.com/inspr-at/paimos/internal/filler5"},
+		{Shard: 6, MS: 7, Path: "github.com/inspr-at/paimos/internal/filler6"},
+		{Shard: 7, MS: 6, Path: "github.com/inspr-at/paimos/internal/filler7"},
+	}
+	listed := []string{nodesPackage}
+	hits := filepath.Join(root, "hits")
+	env := withoutEnvPrefix(os.Environ(), "HITS=")
+	env = append(env, "HITS="+hits)
+	ran := 0
+	for shard := 1; shard <= shardCount; shard++ {
+		plan, err := planShard(items, listed, shard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmds, err := plan.commandArgs()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range cmds {
+			if !strings.Contains(strings.Join(args, " "), nodesPackage) {
+				continue
+			}
+			ran++
+			cmd := exec.Command("go", append(args, "-count=1", "-timeout=60s")...)
+			cmd.Dir = root
+			cmd.Env = env
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("shard %d go %s: %v\n%s", shard, strings.Join(args, " "), err, out)
+			}
+		}
+	}
+	if ran != 2 {
+		t.Fatalf("ran %d nodes commands, want the catch-all and the exempt test", ran)
+	}
+	timed, err := timingShardPlan(listed).timingCommandArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("go", append(timed, "-count=1", "-timeout=60s")...)
+	cmd.Dir = root
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("timing go %s: %v\n%s", strings.Join(timed, " "), err, out)
+	}
+	body, err := os.ReadFile(hits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		if line != "" {
+			got[line]++
+		}
+	}
+	want := []string{
+		"TestKeep", "TestNew", "TestSafeListPerformancePlan",
+		"TestPlanningBulkUsagePerformance", "TestPlanningBulkUsagePerformance/sub",
+		"TestList6000Performance", "TestList6000FiltersPerformance",
+	}
+	for _, name := range want {
+		if got[name] != 1 {
+			t.Fatalf("%s ran %d times; hits:\n%s", name, got[name], body)
+		}
+		delete(got, name)
+	}
+	if len(got) != 0 {
+		t.Fatalf("unexpected hits %v", got)
+	}
+}
+
+func TestListTimedTestNames(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/scan\n\ngo 1.26.0\n")
+	write("p/p_test.go", `package p
+
+import "testing"
+
+func TestKeep(t *testing.T) {}
+func TestExtraPerformance(t *testing.T) {}
+`)
+	got, err := listPerformanceTests(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := got["example.com/scan/p"]
+	if len(got) != 1 || len(names) != 1 || names[0] != "TestExtraPerformance" {
+		t.Fatalf("%v", got)
+	}
+}
+
 func withoutEnvPrefix(env []string, prefix string) []string {
 	out := make([]string, 0, len(env))
 	for _, e := range env {

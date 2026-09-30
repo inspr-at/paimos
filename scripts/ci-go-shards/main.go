@@ -8,10 +8,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,6 +34,8 @@ func main() {
 		err = cmdCheck(os.Args[2:])
 	case "test":
 		err = cmdTest(os.Args[2:])
+	case "test-timing":
+		err = cmdTestTiming(os.Args[2:])
 	case "packages":
 		err = cmdPackages(os.Args[2:])
 	case "needs-shell":
@@ -65,6 +69,7 @@ func usage() {
   ci-go-shards generate -log job.log -json tests.json [-out scripts/ci/go-shards.txt]
   ci-go-shards check [-file scripts/ci/go-shards.txt]
   ci-go-shards test -shard N [-file scripts/ci/go-shards.txt]
+  ci-go-shards test-timing
   ci-go-shards packages -shard N [-file scripts/ci/go-shards.txt]
   ci-go-shards needs-shell -shard N [-file scripts/ci/go-shards.txt]
 `)
@@ -223,9 +228,94 @@ func cmdCheck(args []string) error {
 	if err := coverageHoles(items, listed, runnable); err != nil {
 		return err
 	}
+	for shard := 1; shard <= shardCount; shard++ {
+		plan, err := planShard(items, listed, shard)
+		if err != nil {
+			return err
+		}
+		if plan.empty() {
+			return fmt.Errorf("shard %d has no packages", shard)
+		}
+	}
+	found, err := listPerformanceTests(root)
+	if err != nil {
+		return err
+	}
+	if err := unclassifiedPerformance(found); err != nil {
+		return err
+	}
 	fmt.Fprint(os.Stdout, shardStats(items))
 	fmt.Printf("packages=%d split_packages=%d\n", len(inFile), len(splitPaths))
 	fmt.Fprint(os.Stdout, formatDrift(assignmentDrift(listed, items, runnable)))
+	return nil
+}
+
+func cmdTestTiming(args []string) error {
+	fs := flag.NewFlagSet("test-timing", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	root, err := moduleRoot()
+	if err != nil {
+		return err
+	}
+	listed, err := goList(root)
+	if err != nil {
+		return err
+	}
+	if err := requireTimingTests(root, listed); err != nil {
+		return err
+	}
+	argv, err := timingShardPlan(listed).timingCommandArgs()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "timing: go %s\n", strings.Join(argv, " "))
+	cmd := exec.Command("go", argv...)
+	cmd.Dir = root
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return exitCode(exitErr.ExitCode())
+		}
+		return err
+	}
+	return nil
+}
+
+func requireTimingTests(root string, listed []string) error {
+	listedSet := map[string]struct{}{}
+	for _, path := range listed {
+		listedSet[path] = struct{}{}
+	}
+	runnable := map[string][]string{}
+	for _, spec := range timingBudgetSpecs() {
+		if _, ok := listedSet[spec.path]; !ok {
+			return fmt.Errorf("timing budget test %s %s is not in go list", spec.path, spec.name)
+		}
+		names, ok := runnable[spec.path]
+		if !ok {
+			var err error
+			names, err = listRunnableTests(root, spec.path)
+			if err != nil {
+				return err
+			}
+			runnable[spec.path] = names
+		}
+		found := false
+		for _, name := range names {
+			if name == spec.name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("timing budget test %s %s is not runnable", spec.path, spec.name)
+		}
+	}
 	return nil
 }
 
@@ -424,6 +514,63 @@ func goList(root string) ([]string, error) {
 		return nil, fmt.Errorf("go list returned no packages")
 	}
 	return paths, nil
+}
+
+// listPerformanceTests returns runnable tests whose names contain Performance.
+func listPerformanceTests(root string) (map[string][]string, error) {
+	cmd := exec.Command("go", "list", "-json", "./...")
+	cmd.Dir = root
+	cmd.Env = withLinux(os.Environ())
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, commandErr("go list -json ./...", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(out))
+	found := map[string][]string{}
+	for {
+		var listed struct {
+			ImportPath   string
+			Dir          string
+			TestGoFiles  []string
+			XTestGoFiles []string
+		}
+		if err := dec.Decode(&listed); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("go list -json: %w", err)
+		}
+		if listed.Dir == "" {
+			continue
+		}
+		seen := map[string]struct{}{}
+		var names []string
+		for _, name := range append(listed.TestGoFiles, listed.XTestGoFiles...) {
+			body, err := os.ReadFile(filepath.Join(listed.Dir, name))
+			if err != nil {
+				return nil, err
+			}
+			funcs, err := testNamesIn(name, body)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", name, err)
+			}
+			for _, fn := range funcs {
+				if !strings.Contains(fn, "Performance") {
+					continue
+				}
+				if _, ok := seen[fn]; ok {
+					return nil, fmt.Errorf("%s lists %s twice", listed.ImportPath, fn)
+				}
+				seen[fn] = struct{}{}
+				names = append(names, fn)
+			}
+		}
+		if len(names) > 0 {
+			sort.Strings(names)
+			found[listed.ImportPath] = names
+		}
+	}
+	return found, nil
 }
 
 func listRunnableTests(root, pkg string) ([]string, error) {
