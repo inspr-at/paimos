@@ -145,7 +145,7 @@ async function reactivate(agent: Agent) {
   try {
     await access.reactivate(agent.principal_id)
     // A computer never takes a key: it is connected by pairing it afresh.
-    if (agent.paired_computer) toast(`${agent.name} is active again; connect the computer afresh to use it`, { action: { label: 'Connect a computer', run: () => void router.push('/agents/register-agent') } })
+    if (agent.paired_computer) toast(`${agent.name} is active again; connect the computer afresh`, { action: { label: 'Connect a computer', run: () => void router.push('/agents/register-agent') } })
     else toast(`${agent.name} is active again; add a new key to connect it`)
     await nextTick()
     const active = document.activeElement

@@ -444,7 +444,7 @@ test('agents: reactivating a retired computer points to pairing afresh; no key i
   await page.getByRole('button', { name: /^Deactivated/ }).click()
   await page.getByRole('list', { name: 'Deactivated agents' }).getByRole('button', { name: 'Reactivate mbp2607 old' }).click()
   expect(calls(world, 'POST', new RegExp(`/members/${LAPTOP_OLD}/reactivate$`))).toHaveLength(1)
-  const toast = page.getByText('mbp2607 old is active again; connect the computer afresh to use it')
+  const toast = page.getByText('mbp2607 old is active again; connect the computer afresh')
   await expect(toast).toBeVisible()
   await expect(page.getByText(/add a new key/)).toHaveCount(0)
   // The reactivated identity has no keys and cannot get one: its panel offers pairing, not a key.
@@ -507,6 +507,16 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await expect(page.getByRole('menuitem', { name: 'Deactivate…' })).toBeVisible()
     const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
     expect(result.violations.filter(v => v.impact === 'serious' || v.impact === 'critical').map(v => `${v.id} ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([])
+    // A reactivated computer's panel offers pairing, not a key, and fits the phone too.
+    await page.keyboard.press('Escape')
+    await page.getByRole('list', { name: 'Deactivated agents' }).getByRole('button', { name: 'Reactivate mbp2607 old' }).click()
+    const old = page.getByRole('list', { name: 'Agents' }).getByRole('listitem').filter({ hasText: 'mbp2607 old' })
+    await old.getByRole('button', { name: /active keys?$/ }).click()
+    await expect(old.getByRole('link', { name: 'Connect a computer' })).toBeVisible()
+    await page.waitForTimeout(100)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    const again = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+    expect(again.violations.filter(v => v.impact === 'serious' || v.impact === 'critical').map(v => `${v.id} ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([])
   })
 }
 
