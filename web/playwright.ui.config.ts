@@ -8,12 +8,43 @@ import { defineConfig } from '@playwright/test'
 const derived = 5200 + (parseInt(createHash('sha256').update(process.cwd()).digest('hex').slice(0, 4), 16) % 700)
 const port = process.env.PLAYWRIGHT_PORT ?? String(derived)
 
+// Four workers is the default for a targeted run and for each CI shard. Specs mock
+// the API inside the page, and fixture factories return fresh objects (AEON-373).
+// scripts/check-fixture-mutation.mjs rejects a spec that mutates an imported fixture,
+// which is what leaked across files that shared one worker.
+const nightly = process.env.PW_NIGHTLY === '1'
+
 export default defineConfig({
   testDir: './tests',
   testMatch: '**/*.spec.ts',
   fullyParallel: true,
   workers: 4,
-  use: { baseURL: `http://127.0.0.1:${port}`, browserName: 'chromium', reducedMotion: 'reduce' },
+  // Stable tests do not retry. The quarantine project overrides this. Playwright
+  // applies a CLI --retries before the project value, so a nightly --retries=0
+  // clears the quarantine override on purpose.
+  retries: 0,
+  forbidOnly: !!process.env.CI,
+  reporter: process.env.CI ? [['github'], ['line']] : 'list',
+  use: {
+    baseURL: `http://127.0.0.1:${port}`,
+    browserName: 'chromium',
+    reducedMotion: 'reduce',
+    screenshot: 'only-on-failure',
+    trace: 'on-first-retry',
+  },
+  projects: [
+    { name: 'ui', grepInvert: /@quarantine/, retries: 0 },
+    {
+      // Known flakes only. Review weekly. Nightly sets PW_NIGHTLY=1 (and passes
+      // --retries=0) so these tests fail instead of hiding behind a retry.
+      // - releases.spec.ts compare (AEON-387)
+      // - palette.spec.ts actions, around line 153
+      // - ticket-workers.spec.ts narrow list at 800px
+      name: 'quarantine',
+      grep: /@quarantine/,
+      retries: nightly ? 0 : 2,
+    },
+  ],
   webServer: {
     // Mode test keeps the dev server (DEV stays true) and is the only build that
     // includes the header-glimpse pin. Production builds leave that hook out.

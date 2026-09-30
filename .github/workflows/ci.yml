@@ -4,12 +4,18 @@ name: CI
 on:
   push:
   pull_request:
+  merge_group:
+  schedule:
+    # Nightly full UI run. The quarantine project retries on other events;
+    # this run passes --retries=0 so a flake fails in the open.
+    - cron: '15 4 * * *'
 
 permissions:
   contents: read
 
 jobs:
   go:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -41,6 +47,7 @@ jobs:
         run: go run ./scripts/rules-bootstrap check
 
   web:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -51,12 +58,15 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - working-directory: web
         run: npm ci
+      - name: Reject mutations of imported fixtures
+        run: node --test scripts/check-fixture-mutation.test.mjs
       - working-directory: web
         run: npm run typecheck
       - working-directory: web
         run: npm run build
 
   release-check:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -67,6 +77,7 @@ jobs:
       - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs
 
   e2e:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -126,3 +137,79 @@ jobs:
             exit 1
           fi
           npm run e2e --prefix web
+
+  # UI suite. Four shards on pull_request (so a draft PR can be timed), merge_group,
+  # and the nightly schedule. --retries=0 on every shard. The quarantine project is
+  # a separate job: Playwright applies CLI --retries before a project's retries, so
+  # the shard flag must not be on that job or its retries: 2 would never run.
+  playwright-shard:
+    name: playwright (${{ matrix.shard }}/4)
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: npm ci
+      - working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: UI shard
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts --project=ui --shard=${{ matrix.shard }}/4 --workers=4 --retries=0
+
+  playwright-quarantine:
+    name: playwright (quarantine)
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: npm ci
+      - working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Quarantine project
+        working-directory: web
+        env:
+          PW_NIGHTLY: ${{ github.event_name == 'schedule' && '1' || '0' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--project=quarantine --workers=4)
+          if [ "$PW_NIGHTLY" = "1" ]; then
+            args+=(--retries=0)
+          fi
+          npx playwright test -c playwright.ui.config.ts "${args[@]}"
+
+  playwright:
+    name: playwright
+    needs: [playwright-shard, playwright-quarantine]
+    if: ${{ always() && !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every shard and the quarantine project
+        shell: bash
+        env:
+          SHARD: ${{ needs.playwright-shard.result }}
+          QUARANTINE: ${{ needs.playwright-quarantine.result }}
+        run: |
+          set -euo pipefail
+          echo "playwright-shard: ${SHARD}"
+          echo "playwright-quarantine: ${QUARANTINE}"
+          test "${SHARD}" = "success"
+          test "${QUARANTINE}" = "success"

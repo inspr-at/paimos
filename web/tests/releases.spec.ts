@@ -116,7 +116,8 @@ test('deep links open one release, and the address follows the selection', async
   await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
 })
 
-test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searches, c compares, Esc steps back', async ({ page }) => {
+// Quarantine: AEON-387 compare flake (AEON-410). Retries live on the quarantine project.
+test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searches, c compares, Esc steps back', { tag: '@quarantine' }, async ({ page }) => {
   const { history } = await setup(page)
   await page.goto('/releases')
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')

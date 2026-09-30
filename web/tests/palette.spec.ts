@@ -142,7 +142,8 @@ test('no results suggest a key, and a scoped search can widen with one click', a
   await expect(palette(page).locator('.hint .keycap')).toHaveText('PHAROS-296')
 })
 
-test('actions: outline, new ticket, theme and the shortcut sheet', async ({ page }) => {
+// Quarantine: palette.spec.ts:153 flake (AEON-410). Retries live on the quarantine project.
+test('actions: outline, new ticket, theme and the shortcut sheet', { tag: '@quarantine' }, async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' })
   await mockWork(page, fixtures())
   await page.goto('/p/PHAROS')

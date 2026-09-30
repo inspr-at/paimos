@@ -170,7 +170,8 @@ test('active workers earn the Assignee column when nobody is assigned, and a sav
   expect(calls.filter(call => call.path === '/api/harness-sessions/live').length).toBeGreaterThan(0)
 })
 
-test('a narrow list keeps a compact worker cue in the title', async ({ page }) => {
+// Quarantine: narrow 800px worker cue flake (AEON-410). Retries live on the quarantine project.
+test('a narrow list keeps a compact worker cue in the title', { tag: '@quarantine' }, async ({ page }) => {
   await mockWork(page, withWorkers())
   await page.setViewportSize({ width: 800, height: 800 })
   await page.goto('/p/PHAROS')
