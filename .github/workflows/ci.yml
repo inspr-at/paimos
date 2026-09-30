@@ -23,7 +23,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        # Five shards. Four-way balance of run 36692613348 stays over 3.5 minutes.
+        shard: [1, 2, 3, 4, 5]
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -50,8 +51,8 @@ jobs:
       - name: Install shells when this shard runs pairing path-proof tests
         run: |
           set -euo pipefail
-          pkgs="$(go run ./scripts/ci-go-shards packages -shard "${{ matrix.shard }}")"
-          if printf '%s\n' "$pkgs" | grep -qx 'github.com/inspr-at/paimos/internal/agentpairing'; then
+          need="$(go run ./scripts/ci-go-shards needs-shell -shard "${{ matrix.shard }}")"
+          if [ "$need" = yes ]; then
             sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
           fi
       - name: Test this shard

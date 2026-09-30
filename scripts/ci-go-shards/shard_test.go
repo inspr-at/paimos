@@ -3,6 +3,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -140,7 +143,7 @@ func TestFileRoundTripAndValidate(t *testing.T) {
 		{MS: 4, Path: "long", Test: "TestA"}, {MS: 4, Path: "long", Test: "TestB"},
 		{MS: 3, Path: "long", Test: "TestC"}, {MS: 3, Path: "long", Test: "TestD"},
 	}
-	assigned, err := balance(items, 4)
+	assigned, err := balance(items, shardCount)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +154,7 @@ func TestFileRoundTripAndValidate(t *testing.T) {
 	if err := validate(parsed, 100); err != nil {
 		t.Fatal(err)
 	}
-	parsed[0].Shard = parsed[0].Shard%4 + 1
+	parsed[0].Shard = parsed[0].Shard%shardCount + 1
 	if err := validate(parsed, 100); err == nil {
 		t.Fatal("hand-edited shard was accepted")
 	}
@@ -204,8 +207,42 @@ func BenchmarkHi(b *testing.B) {}
 	}
 }
 
+func TestShardNeedsShellOnlyForPathProof(t *testing.T) {
+	items := []Item{
+		{Shard: 1, Path: pairingPackage, Test: "TestPairingGuideReleaseContract"},
+		{Shard: 2, Path: pairingPackage, Test: pathProofTest},
+		{Shard: 3, Path: "other"},
+	}
+	if shardNeedsShell(items, 1) || !shardNeedsShell(items, 2) || shardNeedsShell(items, 3) {
+		t.Fatalf("split assignment")
+	}
+	whole := []Item{{Shard: 4, Path: pairingPackage}}
+	if !shardNeedsShell(whole, 4) || shardNeedsShell(whole, 5) {
+		t.Fatalf("whole package")
+	}
+}
+
+func TestWorkflowShardMatrixMatchesCount(t *testing.T) {
+	root, err := moduleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nums := make([]string, shardCount)
+	for i := 1; i <= shardCount; i++ {
+		nums[i-1] = strconv.Itoa(i)
+	}
+	needle := "shard: [" + strings.Join(nums, ", ") + "]"
+	if !strings.Contains(string(body), needle) {
+		t.Fatalf("ci.yml missing %s", needle)
+	}
+}
+
 func TestParseFileRejectsBadShard(t *testing.T) {
-	if _, err := parseFile("5 1 p\n"); err == nil {
+	if _, err := parseFile("9 1 p\n"); err == nil {
 		t.Fatal("expected shard rejection")
 	}
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Command ci-go-shards keeps the CI go test package list balanced across four shards.
+// Command ci-go-shards keeps the CI go test package list balanced across five shards.
 //
 //	go run ./scripts/ci-go-shards generate -log job.log -json tests.json
 //	go run ./scripts/ci-go-shards check
@@ -34,6 +34,8 @@ func main() {
 		err = cmdTest(os.Args[2:])
 	case "packages":
 		err = cmdPackages(os.Args[2:])
+	case "needs-shell":
+		err = cmdNeedsShell(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -64,6 +66,7 @@ func usage() {
   ci-go-shards check [-file scripts/ci/go-shards.txt]
   ci-go-shards test -shard N [-file scripts/ci/go-shards.txt]
   ci-go-shards packages -shard N [-file scripts/ci/go-shards.txt]
+  ci-go-shards needs-shell -shard N [-file scripts/ci/go-shards.txt]
 `)
 }
 
@@ -215,7 +218,7 @@ func cmdCheck(args []string) error {
 func cmdPackages(args []string) error {
 	fs := flag.NewFlagSet("packages", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	shard := fs.Int("shard", 0, "shard number 1..4")
+	shard := fs.Int("shard", 0, "shard number")
 	file := fs.String("file", "", "shard file")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -251,10 +254,37 @@ func cmdPackages(args []string) error {
 	return nil
 }
 
+func cmdNeedsShell(args []string) error {
+	fs := flag.NewFlagSet("needs-shell", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	shard := fs.Int("shard", 0, "shard number")
+	file := fs.String("file", "", "shard file")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *shard < 1 || *shard > shardCount {
+		return fmt.Errorf("-shard must be 1..%d", shardCount)
+	}
+	root, err := moduleRoot()
+	if err != nil {
+		return err
+	}
+	items, err := loadItems(root, *file)
+	if err != nil {
+		return err
+	}
+	if shardNeedsShell(items, *shard) {
+		fmt.Println("yes")
+	} else {
+		fmt.Println("no")
+	}
+	return nil
+}
+
 func cmdTest(args []string) error {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	shard := fs.Int("shard", 0, "shard number 1..4")
+	shard := fs.Int("shard", 0, "shard number")
 	file := fs.String("file", "", "shard file")
 	if err := fs.Parse(args); err != nil {
 		return err
