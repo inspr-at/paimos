@@ -285,8 +285,13 @@ func sameResponse(t *testing.T, a, b *httptest.ResponseRecorder) {
 		t.Fatalf("status/body %d %s vs %d %s", a.Code, a.Body, b.Code, b.Body)
 	}
 	ah, bh := a.Header().Clone(), b.Header().Clone()
-	if !retryAfterAgrees(ah.Values("Retry-After"), bh.Values("Retry-After")) {
-		t.Fatalf("header Retry-After %v vs %v", ah.Values("Retry-After"), bh.Values("Retry-After"))
+	aRetry, bRetry := ah.Values("Retry-After"), bh.Values("Retry-After")
+	if a.Code == http.StatusTooManyRequests {
+		if !retryAfterAgrees(aRetry, bRetry) {
+			t.Fatalf("header Retry-After %v vs %v", aRetry, bRetry)
+		}
+	} else if strings.Join(aRetry, "\n") != strings.Join(bRetry, "\n") {
+		t.Fatalf("header Retry-After %v vs %v", aRetry, bRetry)
 	}
 	ah.Del("Retry-After")
 	bh.Del("Retry-After")
@@ -300,41 +305,81 @@ func sameResponse(t *testing.T, a, b *httptest.ResponseRecorder) {
 	}
 }
 
-// retryAfterAgrees accepts the one-second boundary of a shared limiter bucket.
-// allow() ceils the remaining minute from clock_timestamp(), so two denials a
-// moment apart can report 60 and then 59. Any wider gap is still a mismatch.
+// retryAfterAgrees compares Retry-After on two 429 responses. Each side must
+// be one integer from 1 through the limiter window before the values are
+// compared. Equal values in that range agree. The only unequal pair that
+// agrees is 59 and 60, either order: allow() ceils the remaining minute from
+// clock_timestamp(), so two denials that straddle the top of that minute can
+// report 60 and then 59. Callers comparing any other status keep absent
+// headers and do not use this helper.
 func retryAfterAgrees(a, b []string) bool {
-	if strings.Join(a, "\n") == strings.Join(b, "\n") {
+	av, aok := oneRetryAfter(a)
+	bv, bok := oneRetryAfter(b)
+	if !aok || !bok {
+		return false
+	}
+	if av == bv {
 		return true
 	}
-	if len(a) != 1 || len(b) != 1 {
-		return false
+	return (av == 59 && bv == 60) || (av == 60 && bv == 59)
+}
+
+func oneRetryAfter(values []string) (int, bool) {
+	if len(values) != 1 {
+		return 0, false
 	}
-	av, aerr := strconv.Atoi(a[0])
-	bv, berr := strconv.Atoi(b[0])
-	if aerr != nil || berr != nil {
-		return false
-	}
-	diff := av - bv
-	if diff < 0 {
-		diff = -diff
+	seconds, err := strconv.Atoi(values[0])
+	if err != nil {
+		return 0, false
 	}
 	limit := int(publicLimitWindow / time.Second)
-	return av >= 1 && av <= limit && bv >= 1 && bv <= limit && diff <= 1
+	if seconds < 1 || seconds > limit {
+		return 0, false
+	}
+	return seconds, true
 }
 
 func TestSameResponseAllowsRetryAfterSecondBoundary(t *testing.T) {
-	a := rateLimited(t, "60")
-	b := rateLimited(t, "59")
+	sameResponse(t, rateLimited(t, "60"), rateLimited(t, "59"))
+	sameResponse(t, rateLimited(t, "59"), rateLimited(t, "60"))
+	sameResponse(t, rateLimited(t, "60"), rateLimited(t, "60"))
+}
+
+func TestSameResponseAllowsAbsentRetryAfterOffLimit(t *testing.T) {
+	a := httptest.NewRecorder()
+	b := httptest.NewRecorder()
+	a.WriteHeader(http.StatusNotFound)
+	b.WriteHeader(http.StatusNotFound)
 	sameResponse(t, a, b)
 }
 
-func TestRetryAfterAgreesOnlyWithinOneSecond(t *testing.T) {
-	if !retryAfterAgrees([]string{"60"}, []string{"59"}) || !retryAfterAgrees([]string{"59"}, []string{"60"}) || !retryAfterAgrees(nil, nil) {
-		t.Fatal("a one-second Retry-After boundary should agree")
+func TestRetryAfterAgreesOnlyAtFiftyNineSixty(t *testing.T) {
+	agree := [][2][]string{
+		{{"59"}, {"60"}},
+		{{"60"}, {"59"}},
+		{{"60"}, {"60"}},
 	}
-	if retryAfterAgrees([]string{"60"}, []string{"58"}) || retryAfterAgrees([]string{"60"}, nil) || retryAfterAgrees([]string{"61"}, []string{"60"}) || retryAfterAgrees([]string{"0"}, []string{"1"}) || retryAfterAgrees([]string{"soon"}, []string{"60"}) {
-		t.Fatal("a wider or invalid Retry-After gap should not agree")
+	for _, pair := range agree {
+		if !retryAfterAgrees(pair[0], pair[1]) {
+			t.Fatalf("Retry-After %v vs %v should agree", pair[0], pair[1])
+		}
+	}
+	reject := [][2][]string{
+		{{"1"}, {"2"}},
+		{{"58"}, {"59"}},
+		{{"0"}, {"0"}},
+		{{"61"}, {"61"}},
+		{nil, nil},
+		{{"60"}, {"58"}},
+		{{"60"}, nil},
+		{{"61"}, {"60"}},
+		{{"0"}, {"1"}},
+		{{"soon"}, {"60"}},
+	}
+	for _, pair := range reject {
+		if retryAfterAgrees(pair[0], pair[1]) {
+			t.Fatalf("Retry-After %v vs %v should not agree", pair[0], pair[1])
+		}
 	}
 }
 
