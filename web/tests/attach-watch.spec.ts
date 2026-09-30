@@ -185,7 +185,7 @@ test('an Aeon approval on Linux says that computer keeps this approval', async (
   await page.getByRole('button', { name: 'Attach session', exact: true }).click()
   await page.getByLabel('Attach code', { exact: true }).fill('123456789')
   await page.getByRole('button', { name: 'Review session' }).click()
-  await expect(page.getByRole('dialog')).toContainText('Linux and a headless Mac keep this approval, and Touch ID is the default only when that Mac can use it.')
+  await expect(page.getByRole('dialog')).toContainText('This computer keeps approval in AEON.')
 })
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) for (const consent_mode of ['aeon', 'local_auth'] as const) {

@@ -28,8 +28,9 @@ type watchPollKeys struct {
 	keys map[string]watchPollKey
 }
 type watchPollKey struct {
-	hash     string
-	protocol int
+	hash         string
+	protocol     int
+	proofVersion int
 }
 
 func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in attachwatch.DeviceRequest) error {
@@ -39,6 +40,9 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 	}
 	if protocol != 1 && protocol != attachwatch.Protocol {
 		return fail(409, "update_agentd", "update agentd to attach protocol 2; fresh approval required")
+	}
+	if protocol == attachwatch.Protocol && in.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
+		return fail(409, "update_agentd", "upgrade paimos-agentd to local consent proof v2 and restart; existing pairing keys remain valid; fresh approval required")
 	}
 	if !hashRE.MatchString(in.PollKey) || !hashRE.MatchString(in.DeviceProof) || in.PollKey == in.DeviceProof || in.Text != "" {
 		return fail(403, "forbidden", "fresh daemon poll key required")
@@ -83,7 +87,7 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 		if m.watchKeys.keys == nil {
 			m.watchKeys.keys = make(map[string]watchPollKey)
 		}
-		m.watchKeys.keys[key] = watchPollKey{hash: digest(in.PollKey), protocol: protocol}
+		m.watchKeys.keys[key] = watchPollKey{hash: digest(in.PollKey), protocol: protocol, proofVersion: in.LocalConsentProofVersion}
 	}
 	return err
 }
@@ -125,6 +129,7 @@ func loadAttach(ctx context.Context, tx pgx.Tx, id string) (attachwatch.View, st
 		v.ConsentMode, err = computerWatchConsentMode(ctx, tx, owner, v.Snapshot.Platform, v.Snapshot.ComputerID)
 	}
 	v.ConsentDigest = attachwatch.ConsentDigest(v.RequestID, v.Digest, v.ConsentMode)
+	v.LocalConsentProofVersion = attachwatch.LocalConsentProofVersion
 	return v, owner, code, err
 }
 
@@ -208,7 +213,7 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, err)
 			return
 		}
-		reply(w, map[string]string{"state": "registered"})
+		reply(w, map[string]any{"state": "registered", "local_consent_proof_version": attachwatch.LocalConsentProofVersion})
 		return
 	}
 	// Authenticate before processing watch IDs, snapshots, leases or text. A
@@ -222,6 +227,10 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	if expected.protocol != attachwatch.Protocol {
 		WriteError(w, fail(409, "update_agentd", "update agentd to attach protocol 2; fresh approval required"))
+		return
+	}
+	if expected.proofVersion != attachwatch.LocalConsentProofVersion {
+		WriteError(w, fail(409, "update_agentd", "upgrade paimos-agentd to local consent proof v2 and restart; existing pairing keys remain valid; fresh approval required"))
 		return
 	}
 	if !uuidRE.MatchString(in.RequestID) {
@@ -377,7 +386,7 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 				if err = tx.QueryRow(ctx, `SELECT local_auth_public_key FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&publicKey); err != nil {
 					return err
 				}
-				if out.Snapshot.Platform != "darwin" || out.LocalAuthNonce == "" || in.LocalAuthNonce != out.LocalAuthNonce || !attachwatch.VerifyLocalConsent(publicKey, out.ConsentDigest, out.LocalAuthNonce, in.LocalAuthSignature) {
+				if out.Snapshot.Platform != "darwin" || out.LocalAuthNonce == "" || in.LocalAuthNonce != out.LocalAuthNonce || !attachwatch.VerifyLocalConsent(publicKey, out.ConsentDigest, out.LocalAuthNonce, attachwatch.LocalConsentReason(out.Snapshot), in.LocalAuthSignature) {
 					return fail(403, "local_auth_proof_rejected", "signed local confirmation rejected")
 				}
 				// Consumed in the same transaction as session and lease creation.

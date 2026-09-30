@@ -21,6 +21,12 @@ func DefaultSigner() Signer { return unavailableSigner{} }
 type unavailableSigner struct{}
 
 func (unavailableSigner) Create(context.Context, string) (string, error) { return "", ErrUnavailable }
-func (unavailableSigner) Sign(context.Context, string, []byte, string) (string, error) {
+func (unavailableSigner) Sign(_ context.Context, _ string, hash []byte, reason string) (string, error) {
+	if err := localSignReason(reason); err != nil {
+		return "", err
+	}
+	if len(hash) != 32 {
+		return "", ErrDenied
+	}
 	return "", ErrUnavailable
 }

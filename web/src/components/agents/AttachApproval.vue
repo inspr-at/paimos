@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getNode } from '../../lib/api'
+import { brand } from '../../lib/brand'
 import { formatAttachCode, onAttachCode, takeAttachCode } from '../../lib/attachLink'
 import { attachAction, metadataOnlyAttach, type AttachReview } from '../../lib/attachWatch'
 import { can, ensurePermissions, onAccessChange } from '../../lib/authz'
@@ -19,7 +20,7 @@ const review = ref<AttachReview | null>(null)
 const metadataOnly = computed(() => !!review.value && metadataOnlyAttach(review.value.snapshot))
 const strict = computed(() => review.value?.consent_mode === 'local_auth')
 const localUnavailable = computed(() => strict.value && review.value?.snapshot.platform !== 'darwin')
-// Platform is the only signal on this review. A headless Mac is still darwin, so the line is for Linux and an unreported platform.
+// Platform is the only signal on this review. A headless Mac is still darwin, so the line is for Linux and an unreported platform on a pairing that did not pin a key.
 const otherComputerKeepsApproval = computed(() => !!review.value && !strict.value && review.value.snapshot.platform !== 'darwin')
 const busy = ref(false)
 const error = ref('')
@@ -127,7 +128,7 @@ onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
         <p v-if="metadataOnly" class="consent">Session status only; no conversation text is read or shared.</p>
         <p v-else class="consent">New turns will be visible to people explicitly granted conversation access in this project, until you revoke.</p>
         <p v-if="!metadataOnly" class="limits">Only approve a single trust context; redaction is best effort.</p>
-        <p v-if="otherComputerKeepsApproval" class="limits">Linux and a headless Mac keep this approval, and Touch ID is the default only when that Mac can use it.</p>
+        <p v-if="otherComputerKeepsApproval" class="limits">This computer keeps approval in {{ brand.short_name }}.</p>
         <p v-if="localUnavailable" class="consent" role="status">Local confirmation is unavailable on this computer; this setting requires an updated paired Mac daemon.</p>
         <p v-else-if="strict && review.state === 'pending'" class="local-step">Next, confirm on {{ review.snapshot.host }} with Touch ID.</p>
         <p v-if="strict && review.state === 'approved'" role="status">Waiting for confirmation on {{ review.snapshot.host }}. Nothing is shared until you confirm there.</p>

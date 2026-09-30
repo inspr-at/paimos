@@ -5,6 +5,7 @@ package agentsecurity
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 var ErrUnavailable = errors.New("Secure Enclave unavailable; use Aeon approval")
@@ -24,4 +25,13 @@ type Vault interface {
 type Signer interface {
 	Create(context.Context, string) (string, error)
 	Sign(context.Context, string, []byte, string) (string, error)
+}
+
+// localSignReason bounds the Touch ID prompt before any Keychain call.
+// The server binds this same string into the signature hash.
+func localSignReason(reason string) error {
+	if reason == "" || len(reason) > 256 || strings.ContainsAny(reason, "\x00\r\n") {
+		return ErrDenied
+	}
+	return nil
 }
