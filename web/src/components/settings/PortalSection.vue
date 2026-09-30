@@ -3,8 +3,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { APIError, api, createNode, getKinds, listNodes, type Kind, type ListItem } from '../../lib/api'
 import { calendarVersion, validVersion } from '../../lib/rules'
+import { useReleases } from '../../stores/releases'
 import AppIcon from '../AppIcon.vue'
-import CalendarVersion from '../CalendarVersion.vue'
+import ReleaseName from '../ReleaseName.vue'
 import PortalMarket from './PortalMarket.vue'
 import PortalPace from './PortalPace.vue'
 import SettingsCard from './SettingsCard.vue'
@@ -116,7 +117,8 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(load)
+// "Live since" names the release; the history knows its name (AEON-430).
+onMounted(() => { void useReleases().load(); void load() })
 
 async function setEnabled(enabled: boolean) {
   if (!settings.value || saving.value) return
@@ -348,7 +350,7 @@ async function setWish(node: ListItem, state: 'published' | 'hidden' | 'rejected
             <label>Summary<textarea v-model="draft.summary" class="field" maxlength="4000" rows="3" /></label>
             <label>Legal basis<input v-model="draft.legal" class="field" maxlength="240" /></label>
             <label v-if="draft.status === 'declined'">Reason<textarea v-model="draft.reason" class="field" maxlength="500" rows="2" /></label>
-            <p v-if="draft.status === 'live' && validVersion(draft.liveSince)" class="live">Live since <CalendarVersion :value="draft.liveSince" /></p>
+            <p v-if="draft.status === 'live' && validVersion(draft.liveSince)" class="live">Live since <ReleaseName :version="draft.liveSince" /></p>
             <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
             <div class="actions">
               <button class="btn primary" type="submit" :disabled="saving === 'feature'">Save</button>
@@ -358,7 +360,7 @@ async function setWish(node: ListItem, state: 'published' | 'hidden' | 'rejected
           <template v-else>
             <div class="row-copy">
               <p class="name">{{ item.title }}</p>
-              <p class="meta"><template v-if="item.state === 'live' && textField(item, 'live_since')">Live since <CalendarVersion :value="textField(item, 'live_since')" /></template><template v-else>{{ statusLabel(item.state) }}</template></p>
+              <p class="meta"><template v-if="item.state === 'live' && textField(item, 'live_since')">Live since <ReleaseName :version="textField(item, 'live_since')" /></template><template v-else>{{ statusLabel(item.state) }}</template></p>
             </div>
             <button type="button" class="btn sm" @click="startFeature(item)">Edit</button>
           </template>

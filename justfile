@@ -44,6 +44,10 @@ rules-check:
 release-history:
     go run ./internal/releasehistory/generate -repo . -repository inspr-at/aeon -offline
 
+# Write the reserved release's codename into version.json (AEON-430); idempotent.
+release-codename:
+    go run ./internal/releasehistory/codename/stamp -repo .
+
 # Pack the neutral INSPR quote document profile (AEON-155) into the reproducible
 # tar that `aeon quote-profile apply --bundle -` reads; prints its SHA-256.
 quote-profile-inspr out="dist/quote-profile-inspr.tar":

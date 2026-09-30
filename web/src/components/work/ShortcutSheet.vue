@@ -56,7 +56,7 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Open the release' },
     { keys: [['c']], label: 'Compare two releases' },
     { keys: [['e']], label: 'Show or hide the evidence' },
-    { keys: [['/']], label: 'Search headlines, changes and ticket keys' },
+    { keys: [['/']], label: 'Search names, changes and ticket keys' },
   ] },
   { title: 'Ticket list', rows: [
     { keys: [['j'], [{ icon: 'arrow-down', label: 'Down arrow' }]], label: 'Next ticket' },

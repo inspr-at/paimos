@@ -21,6 +21,7 @@ import { useReleases } from './stores/releases'
 import { brand } from './lib/brand'
 import { toast } from './lib/toast'
 import { getRelease, releaseTitle } from './lib/releases'
+import { updateToast } from './lib/codenames'
 import { useProfile } from './stores/profile'
 import { headerFolded } from './lib/chrome'
 import { usePoller } from './lib/usePolledData'
@@ -159,8 +160,10 @@ watch(() => releases.available, async version => {
   if (version !== releases.available) return
   const title = release ? releaseTitle(release, profile.profile?.locale) : ''
   const about = title ? `: ${title}` : ''
-  toast(`${brand.value.wordmark} was updated to ${version}${about}`, {
-    sticky: true, key: 'update',
+  // The marketing name leads; the calendar version shows on hover, and stands in only for a release with no known name.
+  const { message, release: named } = updateToast(brand.value.wordmark, version, release?.codename, about)
+  toast(message, {
+    sticky: true, key: 'update', release: named,
     actions: [{ label: 'What’s new', run: () => openReleases(version) }, { label: 'Reload', run: () => window.location.reload() }],
   })
 })

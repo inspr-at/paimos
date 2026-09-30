@@ -39,6 +39,8 @@ type Server struct {
 	// Brand is the product's names from AEON_BRAND_FILE (brand.Load at startup);
 	// nil serves the embedded brand.json.
 	Brand *brand.Brand
+	// Codename names a release version (AEON-430); nil, or "", serves no name.
+	Codename func(version string) string
 
 	// serving is set when the process is in http.Server.Serve.
 	// draining is set on SIGTERM before Shutdown. Readiness is serving and
