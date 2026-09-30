@@ -16,6 +16,7 @@ import (
 )
 
 const routedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
+const routedGoShards = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
 
 var matrixRunner = regexp.MustCompile(`^\$\{\{\s*matrix\.([a-zA-Z_][a-zA-Z0-9_-]*)\s*\}\}$`)
 
@@ -109,6 +110,12 @@ func checkWorkflow(name string, body []byte) ([]string, error) {
 		}
 		selection, ok := job["runs-on"].(string)
 		if ok && compact(selection) == compact(routedRunner) {
+			if shards, exists := mapping(mapping(job["strategy"])["matrix"])["shard"]; exists {
+				selection, ok := shards.(string)
+				if !ok || compact(selection) != compact(routedGoShards) {
+					reject("routed shard count must use the same event/ref/attempt guards as runner selection")
+				}
+			}
 			if protectedJob(name, id, job) {
 				reject("release/pairing/image/attestation/pin evidence must use hosted runners")
 			}

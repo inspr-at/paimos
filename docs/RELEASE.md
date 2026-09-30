@@ -20,18 +20,27 @@ with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `C
 
 ## Workflow
 
-### Test runner routing (AEON-438)
+### Test runner routing (AEON-438, AEON-459)
 
-CI's hosted `runner-route` job calls `test-runner-route.yml` as a live router
-proof; its outputs have no consumer in CI until Mac shard integration. The
-manual smoke job consumes its JSON `runs_on` output behind independent event,
-ref and rerun-attempt guards.
-Only `push` and `workflow_dispatch` on `refs/heads/main` may select `[self-hosted,
-Linux, ARM64, mbp2606]`. The reviewed workflows route PRs to `ubuntu-latest`;
+CI's hosted `runner-route` job calls `test-runner-route.yml`, requests four idle
+slots, and selects the entire Go batch behind independent event, ref and
+rerun-attempt guards. The manual smoke workflow calls its own router for one
+slot. Only `push` and `workflow_dispatch` on `refs/heads/main` may use the pool:
+
+- A verified main push: `runs-on: [self-hosted, Linux, ARM64, mbp2606, mbp2606-push]`.
+- A verified main dispatch: `runs-on: [self-hosted, Linux, ARM64, mbp2606, mbp2606-dispatch]`.
+
+The controller mints the base labels `self-hosted, Linux, ARM64, mbp2606` plus
+**exactly one** class label matching the API-verified run's event. It never
+assigns both classes or any hosted-looking label. `could_take` remains a
+case-insensitive **subset** check against this complete minted label set; it
+must not require a class label on a competing job before considering that job.
+The reviewed workflows route PRs to `ubuntu-latest`;
 a PR can modify those workflows or the guard, so runner-side admission is the
 enforcement boundary. The manual `Test runner smoke` workflow exercises the same
-router and small Go/Node checks. Normal PR and main CI retain the full Go suite
-on seven hosted shards; Mac shard integration remains pending below.
+router and small Go/Node checks. Go tests use four pool shards when routing
+admits the batch, otherwise the existing seven hosted shards. Timing budgets,
+static checks and the required `go` aggregate always run hosted.
 
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** Publishing
@@ -48,7 +57,9 @@ a fork job racing the verified job.
    `inspr-at/paimos/.github/workflows/test-runner-smoke.yml@refs/heads/main`, and
    head SHA is reachable from `main`. Missing or unverifiable metadata rejects
    admission. Record the verified job ID, run ID/attempt and unique runner name.
-   Before **every mint**, sweep every queued paimos job whose `runs-on` labels
+   Mint base labels plus `mbp2606-push` for a verified push, or base labels plus
+   `mbp2606-dispatch` for a verified dispatch, never both. Before **every mint**,
+   sweep every queued paimos job whose `runs-on` labels
    are a **case-insensitive subset of the labels of the runner about to be
    minted**. Cancel the runs for matching jobs the controller has not verified,
    or refuse to mint while any such job remains. This includes jobs requesting
@@ -64,7 +75,11 @@ a fork job racing the verified job.
    workflow step, require `GITHUB_REPOSITORY` = `inspr-at/paimos`,
    `GITHUB_EVENT_NAME` in exactly `{push, workflow_dispatch}`, and
    `GITHUB_WORKFLOW_REF` equal to one of the two fully qualified workflow refs
-   above. Read and validate the payload from `GITHUB_EVENT_PATH`.
+   above. Read and validate the payload from `GITHUB_EVENT_PATH`. Bind the
+   verified event and job labels to the minted runner class: a push requires
+   `mbp2606-push`, a dispatch requires `mbp2606-dispatch`, and the opposite class
+   must be absent. Missing or mismatched class attribution denies admission;
+   the class label alone never substitutes for API and payload verification.
    **PR-shaped events or payloads are always denied**, including same-repository
    PRs; a matching `pull_request.head.repo.full_name` never admits them.
    On missing, malformed or mismatched metadata, the hook must kill both
@@ -216,24 +231,33 @@ not a lease that expires after initial job scheduling; the controller's draining
 duties cover already queued jobs. See GitHub's
 [rerun behavior](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
 
-**TODO (AEON-408):** main now includes the seven-shard Go layout; this branch
-keeps those shards and the static/aggregate gates hosted. On Mac integration,
-use **4 Go shards on mbp2606, 7 on hosted**, driven by the router's runner class;
-require 4 idle slots for the mbp2606 batch. The current tool has
-`shardCount = 7` in `scripts/ci-go-shards/shard.go` and a seven-way
-`scripts/ci/go-shards.txt`: first add a count parameter or a separate four-way
-split, with coverage checks for both plans. Keep the **Timing budgets, alone**
-step hosted (`matrix.shard == 4`), where its budgets were calibrated; do not
-move it onto Mac shard 4. Set **`GOFLAGS=-count=1`** for every Mac shard so the
-tool's `go test` commands produce fresh evidence. Retain the shard commands and
-hosted aggregate/static gates, add `runner-route` to `needs`, and use the smoke
-job's guarded `runs-on` and actual runner-class evidence. Set `setup-go` cache
-to `${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}` and
-checkout's **`persist-credentials: false`** on every routed job. The current
-seven-way inventory includes `scripts/ci-runner-guard`; include it in the Mac
-split too. Insufficient capacity sends the entire batch to hosted; broader
-routed fan-outs must request their whole simultaneous capacity through
-`required-idle-runners`.
+**Go shard integration (AEON-459):** `go-test` depends on `runner-route` and
+uses its guarded runner selection and class to choose **4 Go shards on
+mbp2606, 7 on hosted**. The same event/ref/attempt guards protect the matrix;
+an old router output on a failed-job rerun selects seven hosted shards.
+`scripts/ci-go-shards` accepts `-count` (default 7). Its checked-in plans are
+`scripts/ci/go-shards.txt` and `scripts/ci/go-shards-4.txt`; both retain the same
+timing weights and inventory, including `scripts/ci-runner-guard`. Static
+coverage checks prove exactly-once execution for both layouts, including new
+packages and tests, with timing tests excluded from the parallel commands.
+The **Timing budgets, alone** step runs once in its own `go-timing` job on
+`ubuntu-latest`, where its budgets were calibrated. It is unconditional for
+both routes and required by `go`; moving it out of hosted shard 4 prevents
+reruns or a route switch from skipping it. The required check names remain
+`go`, `web`, `release-check` and `e2e`.
+Every Mac shard sets **`GOFLAGS=-count=1`** and records its actual runner class,
+source commit and event. Routed checkout uses **`persist-credentials: false`**,
+and `setup-go` cache is enabled only on main pushes. Insufficient capacity
+sends the entire batch to hosted; broader routed fan-outs must request their
+whole simultaneous capacity through `required-idle-runners`.
+
+**Measurement gate:** the pool stays off during worker validation. The lead
+must record five successful Mac runs and five successful hosted runs of the
+same commit and event on AEON-459, with run IDs and median Go-phase wall time.
+Measure from the first start of `go-test`, `go-static` or `go-timing` to the
+completion of the required `go` aggregate; the aggregate's own short duration
+does not measure the tests. Include queue delay within that phase. Keep this
+route only if the Mac median is lower; otherwise retain hosted routing.
 
 Every evidence-producing Go test on mbp2606 uses **`go test -count=1`** to bypass
 cached test results. Routed action caches and the controller's persistent Go,

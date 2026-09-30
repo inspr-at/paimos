@@ -31,7 +31,8 @@ export function routeRunner({ event, repository, ref, availability = "", require
   if (!Number.isSafeInteger(lease.idle_runners) || lease.idle_runners < requiredIdle) {
     return hosted("insufficient-idle-capacity");
   }
-  return { runs_on: ["self-hosted", "Linux", "ARM64", "mbp2606"], runner_class: "mbp2606", reason: "fresh-idle-lease" };
+  const eventClass = event === "push" ? "mbp2606-push" : "mbp2606-dispatch";
+  return { runs_on: ["self-hosted", "Linux", "ARM64", "mbp2606", eventClass], runner_class: "mbp2606", reason: "fresh-idle-lease" };
 }
 
 export function writeRoute(route, output, summary, runAttempt) {
