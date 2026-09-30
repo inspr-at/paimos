@@ -98,13 +98,13 @@ func TestFakeVendorProcess(t *testing.T) {
 				}
 				var request struct {
 					Params struct {
-						Rules  string `json:"developerInstructions"`
 						Config struct {
-							Maximum int `json:"project_doc_max_bytes"`
+							Maximum int    `json:"project_doc_max_bytes"`
+							Rules   string `json:"developer_instructions"`
 						} `json:"config"`
 					} `json:"params"`
 				}
-				if json.Unmarshal(read.Bytes(), &request) != nil || request.Params.Config.Maximum != expected || request.Params.Rules != strings.Repeat("<", expected) {
+				if json.Unmarshal(read.Bytes(), &request) != nil || request.Params.Config.Maximum != expected || request.Params.Config.Rules != strings.Repeat("<", expected) {
 					os.Exit(2)
 				}
 			}

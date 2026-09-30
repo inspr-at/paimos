@@ -263,7 +263,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		// Only this fresh thread receives the delivered byte allowance and
 		// ephemeral rules. Never edit account config or repository instructions.
 		config["project_doc_max_bytes"] = len(r.Rules)
-		threadArgs["developerInstructions"] = r.Rules
+		config["developer_instructions"] = r.Rules
 	}
 	if r.Tools != nil {
 		config["mcp_servers"] = map[string]any{"aeon": map[string]any{
