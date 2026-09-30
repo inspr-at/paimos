@@ -10,13 +10,15 @@ import { mockEffectivePermissions } from './authz-fixtures'
 // requests (no code), the terminal's link only fills the code in, and expiry or
 // cancellation is shown instead of silence.
 const shots = process.env.ATTACH_DISCOVERABLE_SHOTS ?? '/private/tmp/aeon-440-shots'
+// The page runs on this clock and every expiry is relative to it, so no assertion depends on the wall time.
+const NOW = Date.parse('2026-09-30T12:00:00Z')
 const PENDING = '**/api/agent-pairing/attach/pending'
 
 type State = 'pending' | 'approved' | 'detached' | 'unreachable'
 function request(id: string, state: State, options: { mins?: number; host?: string; harness?: string; mode?: 'lease'; consent?: 'aeon' | 'local_auth' } = {}) {
   return {
     request_id: id, request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64), consent_mode: options.consent ?? 'aeon', state,
-    expires_at: new Date(Date.now() + (options.mins ?? 9) * 60_000).toISOString(),
+    expires_at: new Date(NOW + (options.mins ?? 9) * 60_000).toISOString(),
     snapshot: {
       ...(options.mode ? { mode: options.mode } : {}), platform: 'darwin', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: options.host ?? 'Markus’s MacBook', harness: options.harness ?? 'claude',
       transcript: options.mode ? '' : '/Users/markus/.claude/projects/pharos/session.jsonl', file_id: options.mode ? '' : '1:234567',
@@ -26,6 +28,7 @@ function request(id: string, state: State, options: { mins?: number; host?: stri
 }
 
 async function setup(page: Page, options: { theme?: 'light' | 'dark'; manage?: boolean } = {}) {
+  await page.clock.install({ time: NOW })
   const work = fixtures()
   work.preferences.theme = { choice: options.theme ?? 'light' }
   await mockWork(page, work, { admin: true })
@@ -194,6 +197,127 @@ test('a person who cannot attach gets no dialog from the link, and the code leav
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
   await expect.poll(() => new URL(page.url()).hash).toBe('')
   await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
+const OLA = { principal: { id: '33333333-3333-4333-8333-333333333333', name: 'Ola Nordmann', kind: 'person', roles: ['admin'] }, tenant: { id: 't2', name: 'Other Studio' } }
+const gate = () => { let open!: () => void; const passed = new Promise<void>(resolve => { open = resolve }); return { passed, open } }
+
+test('a list still on its way when the person changes is never shown to the next person', async ({ page }) => {
+  await setup(page)
+  const previous = gate(), next = gate(), permissions = gate()
+  let asked = 0, permissionsAsked = false
+  await page.route(PENDING, async route => {
+    const call = ++asked
+    await (call === 1 ? previous : next).passed
+    await route.fulfill({ json: { requests: [call === 1 ? request('r-previous', 'pending', { host: 'Previous person’s Mac' }) : request('r-next', 'pending', { host: 'Ola’s Mac' })] } }).catch(() => undefined)
+  })
+  await page.goto('/agents')
+  await expect.poll(() => asked).toBe(1)
+  // Ola signs in to another workspace; the next navigation refreshes the session. Her
+  // permissions are slow, so the old answer lands while nobody is allowed yet, and the
+  // new list is slow too: the old rows must not show in between.
+  await page.route('**/api/me', route => route.fulfill({ json: OLA }))
+  await page.route('**/api/me/permissions*', async route => {
+    permissionsAsked = true
+    await permissions.passed
+    const value = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    value.workspace.permissions = [...value.workspace.permissions, 'account.manage']
+    await route.fulfill({ json: value })
+  })
+  await page.locator('[data-row^="s:"] .c-state').first().click()
+  await expect(page).toHaveURL(/\/agents\/.+/)
+  await expect.poll(() => permissionsAsked).toBe(true)
+  previous.open()
+  await page.waitForTimeout(300)
+  permissions.open()
+  await expect.poll(() => asked).toBeGreaterThanOrEqual(2)
+  await page.waitForTimeout(300)
+  await expect(page.getByText('Previous person’s Mac')).toHaveCount(0)
+  await expect(strip(page)).toHaveCount(0)
+  next.open()
+  await expect(strip(page).locator('[data-outcome="waiting"]')).toContainText('Ola’s Mac')
+  await expect(page.getByText('Previous person’s Mac')).toHaveCount(0)
+})
+
+test('the attach code never reaches a sign-in address, even when the session has ended', async ({ page }) => {
+  await setup(page)
+  const urls: string[] = []
+  page.on('request', r => urls.push(r.url()))
+  await page.goto('/agents')
+  await expect(page.getByRole('button', { name: 'Attach session' })).toBeVisible()
+  await page.route('**/api/me', route => route.fulfill({ status: 401, json: { error: 'unauthorized' } }))
+  await page.evaluate(() => { location.hash = '#attach=123456789' })
+  await expect(page).toHaveURL(/\/signin\?error=expired&return=(\/|%2F)agents$/)
+  expect(page.url()).not.toMatch(/123456789|attach/)
+  // A reload sends this address to the server; it carries no code.
+  await page.reload()
+  expect(urls.filter(url => /123456789|attach=/.test(url))).toEqual([])
+  expect(await page.evaluate(() => `${sessionStorage.getItem('aeon.signInReturn') ?? ''}${localStorage.length}`)).not.toMatch(/123456789/)
+})
+
+test('a link followed inside the open Agents page fills the code in again', async ({ page }) => {
+  await setup(page)
+  await page.goto('/agents')
+  await expect(page.getByRole('button', { name: 'Attach session' })).toBeVisible()
+  for (const code of ['123456789', '987654321']) {
+    await page.evaluate(hash => { location.hash = hash }, `#attach=${code}`)
+    await expect(page.getByLabel('Attach code')).toHaveValue(`${code.slice(0, 3)} ${code.slice(3, 6)} ${code.slice(6)}`)
+    await expect.poll(() => new URL(page.url()).hash).toBe('')
+    await page.getByRole('button', { name: 'Close attach review' }).click()
+  }
+})
+
+for (const entry of ['the list', 'a typed code'] as const) {
+  test(`approval waits for the project and ticket names (${entry})`, async ({ page }) => {
+    await setup(page)
+    const names = gate()
+    for (const id of ['p-pharos', 'n-2']) await page.route(`**/api/nodes/${id}`, async route => { await names.passed; await route.fallback() })
+    const posts: string[] = []
+    await page.route('**/api/agent-pairing/attach/**', route => {
+      if (route.request().method() === 'GET') return route.fallback()
+      posts.push(route.request().url())
+      return route.fulfill({ json: route.request().url().endsWith('/lookup') ? request('r-wait', 'pending') : request('r-wait', 'approved') })
+    })
+    await list(page, [request('r-wait', 'pending')])
+    await page.goto('/agents')
+    const dialog = page.getByRole('dialog')
+    if (entry === 'the list') await strip(page).getByRole('button', { name: 'Review' }).click()
+    else {
+      await page.getByRole('button', { name: 'Attach session' }).click()
+      await dialog.getByLabel('Attach code').fill('123456789')
+      await dialog.getByRole('button', { name: 'Review session' }).click()
+    }
+    await expect(dialog).toContainText('Requested by a process on Markus’s MacBook.')
+    // Still reading: names are pending, so the button is off and nothing can be sent.
+    await expect(dialog.getByText('Loading…')).toHaveCount(2)
+    const allow = dialog.getByRole('button', { name: 'Allow live watch' })
+    await expect(allow).toBeDisabled()
+    await expect(dialog.getByRole('button', { name: 'Decline' })).toBeEnabled()
+    await allow.click({ force: true })
+    expect(posts.filter(url => url.endsWith('/approve'))).toEqual([])
+    names.open()
+    await expect(dialog).toContainText('PDF worker image')
+    await expect(allow).toBeEnabled()
+    await allow.click()
+    await expect(dialog).toContainText('Approved. Keep the attach terminal open to share new turns.')
+    // Deciding does not take the names away.
+    await expect(dialog).toContainText('PDF worker image')
+    await expect(dialog).toContainText('Pharos')
+    await expect(dialog.getByText('Loading…')).toHaveCount(0)
+  })
+}
+
+test('names that cannot be read fall back to the ids and approval is possible', async ({ page }) => {
+  await setup(page)
+  await page.route('**/api/nodes/p-pharos', route => route.fulfill({ status: 404, json: { error: 'not_found' } }))
+  await page.route('**/api/nodes/n-2', route => route.fulfill({ status: 404, json: { error: 'not_found' } }))
+  await list(page, [request('r-wait', 'pending')])
+  await page.goto('/agents')
+  await strip(page).getByRole('button', { name: 'Review' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
+  await expect(dialog.locator('dd[title="p-pharos"]')).toHaveText('p-pharos')
+  await expect(dialog.locator('dd[title="n-2"]')).toHaveText('n-2')
 })
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {

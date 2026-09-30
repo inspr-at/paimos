@@ -7,7 +7,7 @@ import { useSession } from './stores/session'
 import { sessionEnded } from './lib/api'
 import { can, ensurePermissions, permissionsRevoked } from './lib/authz'
 import { toast } from './lib/toast'
-import { attachCodeFromHash, dropAttachCode, hasAttachFragment, holdAttachCode } from './lib/attachLink'
+import { announceAttachCode, attachCodeFromHash, dropAttachCode, hasAttachFragment, holdAttachCode } from './lib/attachLink'
 import { expiredSignIn, takeSignInReturn } from './lib/signInReturn'
 import ProjectsView from './views/ProjectsView.vue'
 import SignInView from './views/SignInView.vue'
@@ -200,5 +200,7 @@ router.beforeEach(async (to, from) => {
     }
   }
 })
+// A held attach code is offered once the navigation that cleaned the address bar has settled.
+router.afterEach((to, _from, failure) => { if (!failure && to.path === '/agents') announceAttachCode() })
 // A new page names the tab; a query change (filters, the release sheet) keeps the page's own title.
 router.afterEach((to, from) => { if (to.path !== from.path || !from.matched.length) setPageTitle(String(to.meta.title ?? '')) })

@@ -88,7 +88,8 @@ async function decide(revoke = false) {
   } catch (e) { if (!controller.signal.aborted) error.value = e instanceof Error ? e.message : 'Could not update this watch.' }
   finally { if (operation === controller) busy.value = false }
 }
-watch(() => [identity.identity?.tenant.id, identity.identity?.principal.id, allowed.value], close)
+// The same person refreshing their session keeps the review; a different person, workspace or right closes it.
+watch(() => `${identity.identity?.tenant.id}/${identity.identity?.principal.id}/${allowed.value}`, close)
 const stopAccess = onAccessChange(() => close())
 onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
 </script>
