@@ -43,6 +43,8 @@ test('the unit menu offers what the account can count, likeliest first', () => {
   assert.deepEqual(unitChoices({ harness: 'codex', measured: false, money: false }), ['percent', 'runs'])
   assert.deepEqual(unitChoices({ harness: 'grok', measured: false, money: false }), ['runs'])
   assert.deepEqual(unitChoices({ harness: 'pi', measured: false, money: true }), ['dollars', 'runs'])
+  assert.deepEqual(unitChoices({ harness: 'pi', measured: false, money: false }), ['runs'])
+  assert.deepEqual(unitChoices({ harness: 'pi', measured: false, money: false, current: 'cost_micros' }), ['runs'])
   assert.deepEqual(unitChoices({ harness: 'cursor', measured: true, money: false, current: 'requests' }), ['percent', 'runs', 'requests'])
 })
 

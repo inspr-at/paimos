@@ -60,6 +60,7 @@ export interface AccountCapacity {
   /** The Advanced sentence with its use this period (AEON-384). */
   limit?: LimitUse
   /** List-price spend this month, in dollars, for an account billed by API key. */
+  cost_limit_supported?: boolean
   spend_month_usd?: string
 }
 export interface ScheduleOverride { scope: 'user' | 'pool' | 'account'; pool?: Pool; account_id?: string; schedule: CapacitySchedule | null; carry_overrides?: boolean }

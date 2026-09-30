@@ -4437,20 +4437,22 @@ paths:
     post:
       operationId: repeatAccountWindow
       summary: Make a limit set by hand repeat
-      description: Person account.manage permission. Turns a manual window into the account's Advanced limit - its allowance and unit per the period its length matches (up to 36 hours a day, up to 10 days a week, else a month) - and removes the window in the same transaction. Replaces an existing limit, which stays as history.
+      description: Person account.manage permission. Turns a manual window into the account's Advanced limit - its allowance and unit per the period its length matches (up to 36 hours a day, up to 10 days a week, else a month) - and hides the window in the same transaction. Its original cap stays binding until expiry. An existing Advanced limit is preserved and returns 409.
       security: [{session: []}]
       parameters:
         - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: windowId, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
         '200': {description: The limit now in force, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLimitRule'}}}}
+        '409': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+        '422': {description: 'unsupported_limit_unit - this account does not report priced run usage.', content: {application/json: {schema: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string, const: unsupported_limit_unit}}}}}}
   /agent-accounts/{accountId}/limit:
     put:
       operationId: putAccountLimit
       summary: Set the Advanced limit of an account
-      description: 'Person account.manage permission. One sentence per account - "Let agents use at most <amount> <unit> of this account per <period>" - in the account owner''s schedule timezone. It caps on top of readings, pacing and Keep for you and never replaces them. percent counts the rise of each current vendor window within the period (a reset inside the period starts that count again; the person''s own use counts too); runs counts managed runs started in, or holding the account during, the period; requests, tokens and cost_micros count run telemetry in the period, so a run that starts under the limit may finish above it. A reached limit waits with code allowance until the period ends, and Run now does not skip it. An identical sentence is a no-op; a different one replaces the old, which stays as history.'
+      description: 'Person account.manage permission. One sentence per account - "Let agents use at most <amount> <unit> of this account per <period>" - in the account owner''s schedule timezone. It caps on top of readings, pacing and Keep for you and never replaces them. percent sums positive reading deltas across vendor resets within the owner calendar period, including the person''s use; the largest total across vendor window kinds and buckets binds. Synthetic refresh runs obey the same cap. Admission atomically counts measured usage plus outstanding per-run estimates (one run, learned request/token/cost estimates or conservative defaults). Missing cost telemetry retains its estimate. cost_micros requires priced run accounting; unsupported accounts return 422 unsupported_limit_unit. A run may finish above its estimate. A reached limit waits with code allowance until the period ends, and Run now does not skip it. An identical sentence is a no-op; a different one replaces the old, which stays as history.'
       security: [{session: []}]
       parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLimitWrite'}}}}
@@ -4459,6 +4461,7 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+        '422': {description: 'unsupported_limit_unit - this account does not report priced run usage.', content: {application/json: {schema: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string, const: unsupported_limit_unit}}}}}}
     delete:
       operationId: removeAccountLimit
       summary: Remove the Advanced limit of an account
@@ -10321,8 +10324,9 @@ components:
             - type: object
               required: [used, period_end]
               properties:
-                used: {type: number, minimum: 0, description: Counted this period in the rule's unit; for percent the largest rise among the current vendor windows.}
+                used: {type: number, minimum: 0, description: Measured usage plus outstanding estimates in the owner calendar period; percent retains positive deltas across vendor resets.}
                 period_end: {type: string, format: date-time, description: When the period ends and the count starts again.}
+        cost_limit_supported: {type: boolean, description: True only when this account reports priced run usage; only then may cost_micros limits be set.}
         spend_month_usd: {type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: 'List-price spend this local month, in dollars, for an account whose usage is billed by API key. Absent for subscriptions. An estimate, not a billed charge.'}
     AgentAccountWrite:
       type: object
@@ -10437,18 +10441,26 @@ components:
         available: {type: boolean}
         host_label: {type: string, maxLength: 128, description: Optional display-only host name reported by the owner daemon; fills an empty label without overwriting configured metadata.}
         failure: {type: string, enum: [auth_failed, unavailable], description: 'Only with available=false. auth_failed only when the vendor status command confirmed this account is signed out or signed in as another identity; every other failure is unavailable (the default when omitted).'}
-    AccountLimitWrite:
+    AccountLimitProperties:
       type: object
-      additionalProperties: false
       required: [amount, unit, period]
       description: 'Let agents use at most <amount> <unit> of this account per <period>.'
       properties:
         amount: {type: integer, format: int64, minimum: 1, maximum: 1000000000000000, description: At most 100 for percent. Money is in cost_micros.}
         unit: {type: string, enum: [percent, runs, requests, tokens, cost_micros]}
         period: {type: string, enum: [day, week, month], description: 'Local calendar day, week (Monday first) or month of the account owner''s schedule timezone.'}
+    AccountLimitWrite:
+      type: object
+      additionalProperties: false
+      allOf:
+        - {$ref: '#/components/schemas/AccountLimitProperties'}
+      properties:
+        amount: {}
+        unit: {}
+        period: {}
     AccountLimitRule:
       allOf:
-        - {$ref: '#/components/schemas/AccountLimitWrite'}
+        - {$ref: '#/components/schemas/AccountLimitProperties'}
         - type: object
           required: [id, account_id, created_at]
           properties:

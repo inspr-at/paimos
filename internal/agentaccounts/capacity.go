@@ -243,7 +243,8 @@ type accountCapacity struct {
 	// Limit is the Advanced sentence with its use this period (AEON-384).
 	Limit *limitUse `json:"limit,omitempty"`
 	// SpendMonthUSD is list-price spend this month for an API-key account.
-	SpendMonthUSD string `json:"spend_month_usd,omitempty"`
+	SpendMonthUSD      string `json:"spend_month_usd,omitempty"`
+	CostLimitSupported bool   `json:"cost_limit_supported"`
 }
 
 func (m *Module) capacityList(w http.ResponseWriter, r *http.Request) {
@@ -396,6 +397,10 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 			s = scheduleWithDraft(entries, a, previous, draft.schedule, draft.pools, now)
 		}
 		item := accountCapacity{AccountID: a.ID, Schedule: s, Windows: []capacityWindow{}}
+		item.CostLimitSupported, err = costLimitSupported(ctx, tx, a.ID)
+		if err != nil {
+			return nil, err
+		}
 		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected'))`, a.ID).Scan(&item.OngoingUseApproved); err != nil {
 			return nil, err
 		}

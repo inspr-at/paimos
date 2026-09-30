@@ -147,8 +147,14 @@ test('names that clash ask to be named, and a rename changes only the name', asy
   const { capacity } = await setup(page, { clash: true })
   await open(page)
   await expect(card(page).getByRole('button', { name: /^Name it/ })).toHaveCount(2)
-  await row(page, ACCOUNTS.studio).getByRole('button', { name: /^Name it/ }).click()
+  await details(page, ACCOUNTS.studio)
+  const trigger = row(page, ACCOUNTS.studio).getByRole('button', { name: /^Name it/ })
+  await trigger.click()
   const input = page.locator(`#account-detail-${ACCOUNTS.studio}`).getByRole('textbox', { name: 'New name for Main' })
+  await expect(input).toBeFocused()
+  await input.press('Escape')
+  await expect(trigger).toBeFocused()
+  await trigger.press('Enter')
   await expect(input).toBeFocused()
   await input.fill('Studio')
   await input.press('Enter')
@@ -164,6 +170,7 @@ test('names that clash ask to be named, and a rename changes only the name', asy
   await expect(main.getByRole('alert')).toHaveText('Give the account a name.')
   await main.getByRole('textbox').press('Escape')
   await expect(main.locator('.nm')).toHaveText('Main')
+  await expect(main.getByRole('button', { name: 'Rename Main' })).toBeFocused()
 })
 
 test('an API key shows money, and a dollar limit reads back', async ({ page }) => {
@@ -180,6 +187,16 @@ test('an API key shows money, and a dollar limit reads back', async ({ page }) =
   await pi.getByRole('button', { name: 'Apply' }).click()
   expect(capacity.writes.at(-1)).toEqual({ path: `/api/agent-accounts/${ACCOUNTS.pi}/limit`, method: 'PUT', body: { amount: 50_000_000, unit: 'cost_micros', period: 'month' } })
   await expect(pi).toContainText('Spend$12.40 of $50 · resets Sun 1 Nov')
+})
+
+test('accounts without priced run usage never offer dollar limits', async ({ page }) => {
+  await setup(page, { unread: true })
+  await open(page)
+  for (const id of [ACCOUNTS.main, ACCOUNTS.pi]) {
+    const detail = await details(page, id)
+    await detail.getByRole('button', { name: 'Set a limit by hand' }).click()
+    await expect(detail.getByLabel('Counted in').locator('option[value="dollars"]')).toHaveCount(0)
+  }
 })
 
 test('without account.manage the list is read-only', async ({ page }) => {

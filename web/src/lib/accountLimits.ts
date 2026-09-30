@@ -162,10 +162,10 @@ const toDraftUnit = (unit: LimitUnit): DraftUnit => (unit === 'cost_micros' ? 'd
 export function unitChoices(input: { harness: string; measured: boolean; money: boolean; current?: LimitUnit }): DraftUnit[] {
   const out: DraftUnit[] = []
   if (input.measured || input.harness === 'codex' || input.harness === 'claude') out.push('percent')
-  if (input.money || input.harness === 'pi') out.push('dollars')
+  if (input.money) out.push('dollars')
   out.push('runs')
   const current = input.current ? toDraftUnit(input.current) : null
-  if (current && !out.includes(current)) out.push(current)
+  if (current && (current !== 'dollars' || input.money) && !out.includes(current)) out.push(current)
   return out
 }
 export function draftFor(rule: LimitWrite | null | undefined, choices: DraftUnit[]): LimitDraft {

@@ -150,6 +150,18 @@
 // account state, probe, profile and grants; revoked eligibility returns conflict
 // without rerouting or releasing the held reservation.
 //
+// Advanced limits use the capacity owner's local day, Monday-first week, or
+// month. Positive percent deltas survive vendor resets; the largest total per
+// vendor series binds. Refresh grants obey the same limit. Each managed route
+// snapshots per-run estimates with its account reservation under the account
+// lock. Admission counts recorded use plus remaining live holds; a terminal run
+// with missing usage retains its estimate in the start period. Unmeasured
+// defaults are one request, 100k tokens and one dollar; measured estimates use
+// the largest total from the last twenty finished runs. Dollar limits require
+// positive priced run telemetry (422 unsupported_limit_unit otherwise).
+// Make this repeat retains the original manual cap until its expiry, preserves
+// its ledger, and refuses to overwrite an existing Advanced sentence.
+//
 // Settle and Release run inside the caller's db.InTenant transaction. Settle
 // turns monotonic telemetry sums into used units and is idempotent per
 // reservation. Release returns unused reserved units only for a queued run or

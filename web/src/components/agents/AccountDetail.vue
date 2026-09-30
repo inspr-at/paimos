@@ -17,7 +17,7 @@ import AppIcon from '../AppIcon.vue'
 // money for an API key, and the Advanced sentence. Limits set by hand before
 // the sentence stay as "Set by you" with Remove and Make this repeat.
 const props = defineProps<{
-  account: AgentAccount; row?: AccountRow; cap?: AccountCapacity; now: number; timezone: string; mayManage: boolean; rename?: boolean
+  account: AgentAccount; row?: AccountRow; cap?: AccountCapacity; now: number; timezone: string; mayManage: boolean; rename?: number; renameTrigger?: HTMLElement | null
 }>()
 const emit = defineEmits<{ changed: [] }>()
 
@@ -33,7 +33,6 @@ const mine = computed(() => setByYou(props.account.windows, props.now))
 const readings = ref<CapacityReading[] | null>(null)
 const recent = computed(() => recentReadings(readings.value ?? [], primary.value))
 onMounted(async () => {
-  if (props.rename) startRename()
   try { readings.value = await listReadings(props.account.id) } catch { readings.value = [] }
 })
 
@@ -43,7 +42,11 @@ const nameDraft = ref('')
 const nameError = ref('')
 const nameBusy = ref(false)
 const nameInput = ref<HTMLInputElement | null>(null)
-async function startRename() {
+const nameButton = ref<HTMLButtonElement | null>(null)
+let nameReturn: HTMLElement | null = null
+watch(() => props.rename, activation => { if (activation) void startRename(props.renameTrigger) }, { immediate: true })
+async function startRename(trigger?: HTMLElement | null) {
+  nameReturn = trigger ?? nameButton.value
   nameDraft.value = name.value === 'Unlabeled account' ? '' : name.value
   nameError.value = ''
   renaming.value = true
@@ -51,7 +54,12 @@ async function startRename() {
   nameInput.value?.focus()
   nameInput.value?.select()
 }
-function cancelRename() { renaming.value = false; nameError.value = '' }
+async function cancelRename() {
+  renaming.value = false; nameError.value = ''
+  await nextTick()
+  const target = nameReturn?.isConnected ? nameReturn : nameButton.value
+  target?.focus({ preventScroll: true })
+}
 async function saveName() {
   const problem = renameProblem(nameDraft.value)
   if (problem) { nameError.value = problem; return }
@@ -67,7 +75,7 @@ async function saveName() {
 }
 
 // ---------- The Advanced sentence ----------
-const choices = computed(() => unitChoices({ harness: props.account.harness, measured: windows.value.length > 0, money: !!props.cap?.spend_month_usd, current: use.value?.unit }))
+const choices = computed(() => unitChoices({ harness: props.account.harness, measured: windows.value.length > 0, money: props.cap?.cost_limit_supported === true, current: use.value?.unit }))
 const draft = ref<LimitDraft>(draftFor(use.value, choices.value))
 const sentenceOpen = ref(false)
 const showSentence = computed(() => !!use.value || sentenceOpen.value)
@@ -144,7 +152,7 @@ async function drop(w: AllowanceWindow) {
         <dt>Name</dt>
         <dd v-if="!renaming" class="name-line">
           <span class="nm" :title="name">{{ name }}</span>
-          <button v-if="mayManage" type="button" class="icon-btn flat sm" :aria-label="`Rename ${name}`" data-tip="Rename" @click="startRename"><AppIcon name="edit" :size="14" /></button>
+          <button v-if="mayManage" ref="nameButton" type="button" class="icon-btn flat sm" :aria-label="`Rename ${name}`" data-tip="Rename" @click="startRename()"><AppIcon name="edit" :size="14" /></button>
         </dd>
         <dd v-else>
           <form class="rename" @submit.prevent="saveName" @keydown.esc.prevent="cancelRename">

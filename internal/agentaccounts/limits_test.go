@@ -198,7 +198,7 @@ func TestAdvancedSentenceRoundTripsAndCaps(t *testing.T) {
 			for _, r := range []struct {
 				at   time.Time
 				used float64
-			}{{noon.Add(-14*time.Hour - 10*time.Minute), 10}, {noon.Add(-5 * time.Hour), 18}, {noon.Add(-time.Minute), float64(used)}} {
+			}{{noon.Add(-14*time.Hour - 10*time.Minute), 10}, {noon.Add(-5 * time.Hour), 18}, {noon.Add(-time.Minute).Add(time.Duration(used) * time.Millisecond), float64(used)}} {
 				if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly',10080,$3,$4,$5,'harness') ON CONFLICT DO NOTHING`, f.admin.TenantID, f.account.ID, r.used, resets, r.at); err != nil {
 					return err
 				}
@@ -263,7 +263,7 @@ func TestMakeThisRepeat(t *testing.T) {
 	mod := accountsMod()
 	now := time.Now().UTC().Truncate(time.Second)
 	var old Window
-	callStatus(t, mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", windowBody(now.Add(-time.Hour), now.Add(30*24*time.Hour), "requests", 100, "steady"), 201, &old)
+	callStatus(t, mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", windowBody(now.Add(-time.Hour), now.Add(30*24*time.Hour), "requests", 100, "unrestricted"), 201, &old)
 	path := "/api/agent-accounts/" + f.account.ID + "/windows/" + old.ID + "/repeat"
 	callStatus(t, mod, &f.runner, f.token, "POST", path, "", 403, nil)
 	var rule LimitRule

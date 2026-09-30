@@ -4,6 +4,7 @@ package agentaccounts
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"sort"
@@ -17,6 +18,7 @@ import (
 )
 
 type runRow struct {
+	LimitEstimates        map[string]int64
 	CapacityOverride      string
 	Purpose               string
 	VerificationAccountID *string
@@ -39,11 +41,11 @@ func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 	err := tx.QueryRow(ctx, `
 		SELECT r.id::text, r.agent_principal_id::text, r.model_profile_id::text, r.account_id::text,
          r.status, r.daemon_id, r.daemon_generation, r.requested_account_id::text,
-         r.purpose, e.account_id::text, e.verification_expires_at, r.capacity_override
+         r.purpose, e.account_id::text, e.verification_expires_at, r.capacity_override, r.account_limit_estimates
   FROM agent_runs r LEFT JOIN agent_pairing_enrollments e
    ON e.tenant_id=r.tenant_id AND e.verification_run_id=r.id
   WHERE r.id = $1::uuid FOR UPDATE OF r`, id).
-		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation, &run.RequestedAccountID, &run.Purpose, &run.VerificationAccountID, &run.VerificationExpiresAt, &run.CapacityOverride)
+		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation, &run.RequestedAccountID, &run.Purpose, &run.VerificationAccountID, &run.VerificationExpiresAt, &run.CapacityOverride, &run.LimitEstimates)
 	if isNoRows(err) {
 		return runRow{}, fail(http.StatusNotFound, "run not found")
 	}
@@ -128,9 +130,17 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if err = agentpairing.RunFence(ctx, tx, account.ID, run.ID, false); err != nil {
 		return RouteResult{}, err
 	}
+	limitEstimates, err := learnedLimitEstimates(ctx, tx, account.ID, estimates)
+	if err != nil {
+		return RouteResult{}, err
+	}
+	rawEstimates, err := json.Marshal(limitEstimates)
+	if err != nil {
+		return RouteResult{}, err
+	}
 	tag, err := tx.Exec(ctx, `
-		UPDATE agent_runs SET account_id = $2::uuid
-		WHERE id = $1::uuid AND account_id IS NULL AND status = 'queued'`, run.ID, account.ID)
+		UPDATE agent_runs SET account_id = $2::uuid, account_limit_estimates = $3
+		WHERE id = $1::uuid AND account_id IS NULL AND status = 'queued'`, run.ID, account.ID, rawEstimates)
 	if err != nil {
 		return RouteResult{}, err
 	}
@@ -376,6 +386,10 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 			}
 		} else {
 			var wait *CapacityWait
+			run.LimitEstimates, err = learnedLimitEstimates(ctx, tx, account.ID, estimates)
+			if err != nil {
+				return Account{}, nil, err
+			}
 			active, wait, err = admission(ctx, tx, account, windows[account.ID], now, usedSlots[account.ID], run, false)
 			if err != nil {
 				return Account{}, nil, err
@@ -443,7 +457,7 @@ func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (ma
 		SELECT id::text, account_id::text, starts_at, ends_at, unit, allowance, used, reserved,
 		       pace_model, burst_ratio::float8, pairing_verification, capacity_read_at, capacity_allowed, COALESCE(capacity_kind,''), capacity_bucket, capacity_retired, capacity_refresh_run::text
 		FROM account_allowance_windows
-		WHERE account_id::text = ANY($1::text[]) AND removed_at IS NULL
+		WHERE account_id::text = ANY($1::text[]) AND (removed_at IS NULL OR EXISTS (SELECT 1 FROM account_limit_rules l WHERE l.from_window_id=account_allowance_windows.id AND l.removed_at IS NULL))
 		ORDER BY id
 		FOR UPDATE`, accountIDs)
 	if err != nil {

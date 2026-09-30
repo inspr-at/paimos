@@ -29,6 +29,8 @@ const busy = ref('')
 const error = ref('')
 const open = ref('')
 const renameAt = ref('')
+const renameActivation = ref(0)
+const renameTrigger = ref<HTMLElement | null>(null)
 
 const rowOf = computed(() => new Map(capacity.rows.map(r => [r.id, r])))
 const clashes = computed(() => nameClashes(props.accounts))
@@ -56,7 +58,10 @@ function toggleOpen(id: string) {
   open.value = open.value === id ? '' : id
   renameAt.value = ''
 }
-function nameIt(id: string) { open.value = id; renameAt.value = id }
+function nameIt(id: string, event: Event) {
+  renameTrigger.value = event.currentTarget as HTMLElement
+  open.value = id; renameAt.value = id; renameActivation.value++
+}
 // A click on the row's quiet parts opens it; its buttons act on their own.
 function onHead(event: MouseEvent, id: string) {
   if ((event.target as HTMLElement).closest('button, a, input, select')) return
@@ -95,7 +100,7 @@ watch(() => props.accounts.map(a => a.id).join(), () => { if (open.value && !pro
               <span class="dot" :class="stateOf(a)" aria-hidden="true" />
               <div class="ident">
                 <span class="name" :title="accountName(a)">{{ accountName(a) }}</span>
-                <button v-if="clashes.has(a.id) && mayManage" type="button" class="name-it" :aria-label="`Name it: another ${group.name} account is also called ${accountName(a)}`" :data-tip="`Another ${group.name} account is also called ${accountName(a)}`" @click="nameIt(a.id)">Name it</button>
+                <button v-if="clashes.has(a.id) && mayManage" type="button" class="name-it" :aria-label="`Name it: another ${group.name} account is also called ${accountName(a)}`" :data-tip="`Another ${group.name} account is also called ${accountName(a)}`" @click="nameIt(a.id, $event)">Name it</button>
                 <span v-if="host(a)" class="chip host" :title="host(a)">{{ host(a) }}</span>
                 <span v-if="limitChip(a)" class="chip mine">{{ limitChip(a) }}</span>
                 <span class="meta">
@@ -112,7 +117,7 @@ watch(() => props.accounts.map(a => a.id).join(), () => { if (open.value && !pro
             </div>
             <AccountDetail
               v-if="open === a.id" :id="`account-detail-${a.id}`" :account="a" :row="rowOf.get(a.id)" :cap="capacity.byAccount.get(a.id)" :now="now"
-              :timezone="capacity.timezone" :may-manage="mayManage" :rename="renameAt === a.id" @changed="changed"
+              :timezone="capacity.timezone" :may-manage="mayManage" :rename="renameAt === a.id ? renameActivation : 0" :rename-trigger="renameTrigger" @changed="changed"
             />
           </li>
         </ul>

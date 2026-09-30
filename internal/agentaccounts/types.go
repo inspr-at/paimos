@@ -98,6 +98,7 @@ type HarnessHealth struct {
 }
 
 type httpError struct {
+	code   string
 	status int
 	msg    string
 }
@@ -147,6 +148,10 @@ func writeErr(w http.ResponseWriter, err error) {
 	}
 	var he *httpError
 	if errors.As(err, &he) {
+		if he.code != "" {
+			httpapi.WriteJSON(w, he.status, map[string]string{"error": he.msg, "code": he.code})
+			return
+		}
 		httpapi.WriteError(w, he.status, he.msg)
 		return
 	}
