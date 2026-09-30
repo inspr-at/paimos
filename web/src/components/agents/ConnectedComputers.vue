@@ -85,6 +85,12 @@ const poller = usePoller(() => load(), 20_000, { enabled: () => props.permission
 onMounted(() => poller.start())
 onBeforeUnmount(() => { stopAccess(); poller.stop() })
 
+// An accepted write wins over any list read already in flight (AEON-402).
+function supersedeLoads() {
+  loadTurn += 1
+  refreshing.value = false
+}
+
 function dropSignedInList() {
   computers.value = []
   state.value = 'idle'
@@ -184,6 +190,7 @@ async function commit(mode: DisconnectMode) {
       ? await disconnectEnrollment(fresh, request.accountId, mode, props.permissions)
       : await disconnectComputer(fresh, mode, props.permissions)
     if (started !== pairingReadGeneration()) return
+    supersedeLoads()
     replace(next)
     closeDialog()
   } catch (error) {
@@ -218,6 +225,7 @@ async function remove(computer: PairingView) {
   try {
     await removeComputer(computer, props.permissions)
     if (started !== pairingReadGeneration()) return
+    supersedeLoads()
     computers.value = computers.value.filter(item => keyOf(item) !== key)
     toast(`Removed ${computer.computer_name}. Its history stays in the audit log.`)
     emit('removed', computer)

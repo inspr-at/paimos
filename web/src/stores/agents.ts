@@ -101,6 +101,8 @@ export const useAgents = defineStore('agents', () => {
     for (const item of items) if (item.to && !names[item.recipient_principal_id]) { names[item.recipient_principal_id] = item.to; changed = true }
     if (changed) addresses.value = names
   }
+  // Bumped by every accepted run write; a per-agent read started before one is dropped.
+  let runWrites = 0
   function mergeRuns(list: AgentRun[]) {
     if (list.length) runs.value = { ...runs.value, ...Object.fromEntries(list.map(run => [run.id, run])) }
   }
@@ -192,8 +194,10 @@ export const useAgents = defineStore('agents', () => {
     } catch (e) { if (messagingState.value !== 'ready') messagingState.value = availability(e) }
   }
   async function refreshAgentRuns(principalId: string) {
+    const started = runWrites
     try {
       const { items } = await listRuns({ agent: principalId, limit: 10 })
+      if (started !== runWrites) return
       mergeRuns(items)
       agentRuns.value = { ...agentRuns.value, [principalId]: items.map(run => run.id) }
     } catch { /* the panel says no runs were reported */ }
@@ -342,17 +346,23 @@ export const useAgents = defineStore('agents', () => {
     await sendMessage(session.project_id, { to, body, recipient_session_id: session.id, idempotency_key: crypto.randomUUID(), expects_reply: false, is_action_request: false, delivery_level: level, ...(replyTo ? { reply_to: replyTo } : {}) })
     await refreshThread(session.project_id, session.id)
   }
+  // An accepted write wins over any list read already in flight (AEON-402).
   async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
     const updated = await setAccountState(account.id, state)
+    accountsRead.invalidate()
     accounts.value = accounts.value.map(a => a.id === account.id ? { ...a, ...updated } : a)
   }
   // Remove leaves the list at once; its runs and history stay on the server (AEON-402).
   async function removeAccount(account: Pick<AgentAccount, 'id'>) {
     await archiveAccount(account.id)
+    accountsRead.invalidate()
     accounts.value = accounts.value.filter(a => a.id !== account.id)
   }
   async function cancelQueuedRun(run: Pick<AgentRun, 'id'>) {
-    mergeRuns([await cancelRun(run.id)])
+    const cancelled = await cancelRun(run.id)
+    runsRead.invalidate()
+    runWrites++
+    mergeRuns([cancelled])
   }
   function tick() { now.value = Math.max(now.value, Date.now()) }
   // Bumped by delivery events (AEON-280); an open chat re-reads its message status.
