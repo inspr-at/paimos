@@ -37,7 +37,35 @@ func TestHistoricProductBundleIsShipped(t *testing.T) {
 		groups[note.Group] = true
 	}
 	if !groups[GroupFeatures] || !groups[GroupFixes] {
-		t.Fatal("stable105 lost its captured features or fixes")
+		t.Fatal("stable105 backfilled features or fixes are missing")
+	}
+	for _, tc := range []struct {
+		version string
+		present []string
+		absent  []string
+	}{
+		{version: "260929203122.0.0", present: []string{"AEON-367"}},
+		{version: "260929215406.0.0", absent: []string{"AEON-367"}},
+		{version: "260929232203.0.0", present: []string{"AEON-357", "AEON-358", "AEON-365", "AEON-371"}, absent: []string{"AEON-351", "AEON-373"}},
+	} {
+		notes, ok := bundle.Releases[tc.version]
+		if !ok {
+			t.Fatalf("historic notes missing for %s", tc.version)
+		}
+		keys := map[string]bool{}
+		for _, item := range notes.Items {
+			keys[item.Key] = true
+		}
+		for _, key := range tc.present {
+			if !keys[key] {
+				t.Errorf("%s missing from %s", key, tc.version)
+			}
+		}
+		for _, key := range tc.absent {
+			if keys[key] {
+				t.Errorf("%s incorrectly included in %s", key, tc.version)
+			}
+		}
 	}
 }
 

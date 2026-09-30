@@ -4,8 +4,8 @@
   "repository": "inspr-at/aeon",
   "releases": {
     "260923134631.0.0": {
-      "snapshot_sha256": "01e8459840f4c8daec820b3b3be17eec624ca32d0a196db22d8479b238c54be2",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "cb4c755faee366ecf153e04439699334612ec0fcb1976222427757ff4997126c",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -36,15 +36,15 @@
       ]
     },
     "260923140805.0.0": {
-      "snapshot_sha256": "0edc413fb2b9ea5784d8fa56b19ff96c3c89fd326a982d3050d4b148a02b297b",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "04e60b48d166857d5325011e853ce2619ac1b2edb7bb5b9b0dc13c6645d68f5a",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": []
     },
     "260923143005.0.0": {
-      "snapshot_sha256": "b2e999025141b296fbbaa35166daf4d263c65ec948e33828d89c269e2bf7de7e",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "eeb6095dfb778fdd8aebc6cad16448e602a6216387ad6e6a66c9f44fab702df1",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -107,8 +107,8 @@
       ]
     },
     "260923152659.0.0": {
-      "snapshot_sha256": "328a4a3b7d229d02c77b62c115260df13dbb535c8447f13b461afcf38987b3c9",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "073ef0e344ff5fd2b2cfac209e5e259793351fba04982a53fe4ad1e55d8cb04c",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -123,8 +123,8 @@
       ]
     },
     "260923154901.0.0": {
-      "snapshot_sha256": "8ed51738b63ebc41bc132003ad663ec03af5cce60bd2fb8f0aab7e3cb0044d32",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "d2773fe269e126641af5b838fe9b814739434c897c3feaa5dcba777c18e529d8",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -187,8 +187,8 @@
       ]
     },
     "260923161128.0.0": {
-      "snapshot_sha256": "a48076399ab151e2c4cc0d08c34204382d64fbbdd5ccc68e3ea77ea0e5f58567",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "2de05b737161dbd79d7946d9be012470f0ed6144a9709af3c45af2c4db16efcc",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -203,8 +203,8 @@
       ]
     },
     "260923173841.0.0": {
-      "snapshot_sha256": "93407ac81b7a55c4d675319886459f9dbb008aa930944d71771f65ffa672f46c",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "1630e6c934c17f475963caf3321cc77e3bc6b7767924d6b7660f8063c9c243f6",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -275,8 +275,8 @@
       ]
     },
     "260923180522.0.0": {
-      "snapshot_sha256": "0ccb80fc1cb36cc61fcc0b77bf1e2a11753f519720fba1f2c221c83c97a1c5ca",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "ebf12db8a0caa582aad8cf57d31361ada135284c22f46c2771b82e6d15de61e0",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -291,8 +291,8 @@
       ]
     },
     "260923185021.0.0": {
-      "snapshot_sha256": "254e1a4bdd5a8c65eb838e7bb41dcb29166b6e76153ff048034de7ff440e2f25",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "0d01854127d8ff4a3bb4423becccb50252638606fca7bd0435f8601068e05b88",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -347,8 +347,8 @@
       ]
     },
     "260923193604.0.0": {
-      "snapshot_sha256": "8c316bf2c815b82a644b337eb1839fa7b56e3acf043465785120ac517f95e0a7",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "42b27f62484c2ef7c66d9660f79fa92b423c0e8ef8baee802ade37491dfb2e16",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -363,8 +363,8 @@
       ]
     },
     "260923215400.0.0": {
-      "snapshot_sha256": "3ff52bf67d2d2cbb92fedb847cceb9cf048e90d8c898c87fcb123e4f0f83a6c6",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "3568411b1e0fe210c2d61c1c601aff949bc45470b7e72481f357e15f9f9c67f1",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -427,8 +427,8 @@
       ]
     },
     "260923225830.0.0": {
-      "snapshot_sha256": "5c250f38b1448d48dd511cda8b1a4de4b461c46fbb2f61c44f337fbfb9cccc89",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "18937fddf420ed23834f8cfab8667aaaa971c2129d8fa25eca2d3c02d005fe1e",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -451,8 +451,8 @@
       ]
     },
     "260923235214.0.0": {
-      "snapshot_sha256": "5d9af4ce26c817d4317905cb8c4fab78f3d8d8bee265cc9cb241e40ed52fdbe1",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "ae636eb697e65b0624eeb103b38ab0360cb783556bce82f88dd620171cc17659",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -483,8 +483,8 @@
       ]
     },
     "260924003305.0.0": {
-      "snapshot_sha256": "e0857cf37a270a7f4aa85f1e8ed1a9e08fdf95f39a269a0ead1732bb83a5ae67",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "77e347a0af85494f17f639e8ab63f785fcbbbf0ee1e7ef797a7ecb669870bebb",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -499,8 +499,8 @@
       ]
     },
     "260924020145.0.0": {
-      "snapshot_sha256": "e00e9a60f957ad573dfb0d4f66ee474f915e29068ae1e52a25257371fd2c2878",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "f44a4058fb684cc8ace4eba0dd901adca7e8c5cfacf2c1036b3fafce0b8cd3aa",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -531,8 +531,8 @@
       ]
     },
     "260924023936.0.0": {
-      "snapshot_sha256": "4620061fe0b5887d41f673f3b228cc0c791e6189c32faefebc0a31a0a5c91f8a",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "b586b1ffcdff27cf1794ff4fcf72d82843892ab9d7acabefb7aaac07bfa84525",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -547,8 +547,8 @@
       ]
     },
     "260924080611.0.0": {
-      "snapshot_sha256": "3b4146969db8dbd0edf99ff0b9e5164e0d007060876693fda76ab8e4f31fe8ea",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "aed479c7614a27935b9617ee26dd1551c3cec912e49f88010569a5392f325f7a",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -571,8 +571,8 @@
       ]
     },
     "260924090430.0.0": {
-      "snapshot_sha256": "4a762e6866a250ca2eba5bf676736e77869982192e8847d7dfc07ece7e324386",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "b129dc721fa2975c25a86ad13feb98dc568272ff1d1559fd90835940b6f40a26",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -587,8 +587,8 @@
       ]
     },
     "260924092015.0.0": {
-      "snapshot_sha256": "47a05dbe0fdc67f590e1c8f33c0f243c7fe0afd11f5aa753a5b2855c81b7a615",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "3254ce66b9f569148fd91ea794eb6e87c17cbeeac437ea0f9b254a0a98106256",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -603,8 +603,8 @@
       ]
     },
     "260924101407.0.0": {
-      "snapshot_sha256": "bf8a068e7e5c6e36a0c6aa7b04932e205565afd558fa7e49dc6124af0dac4844",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "adddb752a0796e7abffad0e2be64786170aaaa1f7bc08f2548cae8b2c42dffbd",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -619,8 +619,8 @@
       ]
     },
     "260924105615.0.0": {
-      "snapshot_sha256": "15ace73d33eb929fc54567293f61eddf9e1033362d771acef9d530f97ba79e37",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "c19b13a04096c7ca67cdf24adbcb890c1bb74f8aee307d594821ab52d07e012e",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -643,8 +643,8 @@
       ]
     },
     "260924110804.0.0": {
-      "snapshot_sha256": "9caf0a288f8edc5a030431cd9673f56fcea0394a708c51c205511d5197abe780",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "11e565bc4fa60d52f3c2bbe18441fdb19db82444a5239af9685987be8b9e010e",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -667,8 +667,8 @@
       ]
     },
     "260924120053.0.0": {
-      "snapshot_sha256": "45d328fc690db56dfce2902035dc29c25e7327e605b582698890b061e49a8d02",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "b4af8f5b718498c665986820e277ce0cb6abc9047f8fdbe1d4568b9c8cc4d297",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -683,8 +683,8 @@
       ]
     },
     "260924135825.0.0": {
-      "snapshot_sha256": "815dbd0b095c47e1dc9af5ab9599560e2895d6efdc6b0589f56efaf50b8f0031",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "9443b957106ac055d016e75ae606e015f9770c10cdc28c446e7989298feee938",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -707,8 +707,8 @@
       ]
     },
     "260924141244.0.0": {
-      "snapshot_sha256": "59a8759756faa18138c1c17065b6bcc85a7cfed2fad4e0f92bf9c0bbf61ce2ba",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "f84cc7d7aec5efda490282bbf21493a72a4695c4e047f96b03e6aa8999f9edb3",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -723,8 +723,8 @@
       ]
     },
     "260924153851.0.0": {
-      "snapshot_sha256": "072f0d8a1ad42378726aa807845f19a8163833e764daabc1306b35cfc696e6fa",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "486cc41d13ac3182347522aa2b34c46274943eda0206e5208c94707754468e23",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -763,8 +763,8 @@
       ]
     },
     "260924163237.0.0": {
-      "snapshot_sha256": "498fc01637f84bbdfb92957136ceceebe6100c1f3e863977a3cf5c24ec4cbab8",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "0d3388e57c795475e26a76cca310fd6e2926e1dc08b74beb140b95de63ca14ed",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -795,8 +795,8 @@
       ]
     },
     "260924170915.0.0": {
-      "snapshot_sha256": "d6a71497dc485a229ae0911336e825ee762ed056eb4ea2ec74167af36d484584",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "f782a146552e655441f3e96c995c0cfbf63cc24e3a4966a3fab789f982da745d",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -827,8 +827,8 @@
       ]
     },
     "260924172923.0.0": {
-      "snapshot_sha256": "261b9fcec141cc60e4c4d175d5976ec42156191546646b979e498a1f97bba53b",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "022cc200fbc882de2ba811750bde978db31901f7e7c8d8c69ea4690639e4cc95",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -843,8 +843,8 @@
       ]
     },
     "260924174551.0.0": {
-      "snapshot_sha256": "93f20384289df11f4790d2be9b7a11bf29eb284cddd8a984f88c87c33ca0300c",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "b97f8c720074ee630454816aeda3e2ba13b60613d696271e38215a280c25729d",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -867,8 +867,8 @@
       ]
     },
     "260924181452.0.0": {
-      "snapshot_sha256": "0a6de76ff558fac2ba19ad54fd0339d48649ee6bf8e2690b2afbfbb72cde4f99",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "6036d05fd1606651534ee3fcf5fbcd09447736429c1801abd3265feffa2caada",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -891,15 +891,15 @@
       ]
     },
     "260924182829.0.0": {
-      "snapshot_sha256": "e1dbacd8e0425299e5dea40aaa05ecf8f74d705e30942dc4361ba3c49a36ced5",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "918dfc37673185b5cb8e30e5b84a5edc0cbfc2e87d69672f31f2f07b8893c0cd",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": []
     },
     "260924190255.0.0": {
-      "snapshot_sha256": "16258d368cfe74b9f2b73b051c3a2f53ce98d454da38ccaf51ef037808139ee8",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "567bbcd8b6b3365b85bf3bb3135979b5cd99a09118432c3fa612e69a6dc86148",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -922,8 +922,8 @@
       ]
     },
     "260924202446.0.0": {
-      "snapshot_sha256": "b0ec21bacf57177dceaca6b01ccd53677a523ff2082e187dc44a9afb373f23c8",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "cece2cc88af91731d64ae73b40b722e40a122bc292c387fc437c6d378b25a94d",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -954,8 +954,8 @@
       ]
     },
     "260924213323.0.0": {
-      "snapshot_sha256": "61aa9aeecd104b3a122db136ffc0acd8fb5a7824c28c8c8aee839a626cc3d4c4",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "0fd822c11b03f05494699a3bafde2dae009612a76970b432d516f5c5061c8c5e",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -970,8 +970,8 @@
       ]
     },
     "260924214847.0.0": {
-      "snapshot_sha256": "6aaf269058b61084c51ce1b1049a888d3070c9bed5db14f02713e081b9e6af33",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "3ec06350024fec39ef04c969cf5315a931815d71a921a37d4f79fd647a6d66ed",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -986,8 +986,8 @@
       ]
     },
     "260925013352.0.0": {
-      "snapshot_sha256": "7972b98763e96502792d90edbaceddace70e8f7c31bdc3fc09186224a478da75",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "cdc77668f3d84d27c6f8790e4bd6fa8c279a507dfa8e8c8ff2c84e0c8f2a2e60",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1010,8 +1010,8 @@
       ]
     },
     "260925030702.0.0": {
-      "snapshot_sha256": "8e705ba440263fcb02e370bcf9dc124f1bb22668510ff85b045bb59ad324ed29",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "239495a026ec24aeea5561f680c9fa228e30c2c45340b13d811c040446fc0d39",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1058,8 +1058,8 @@
       ]
     },
     "260925032936.0.0": {
-      "snapshot_sha256": "be4528596dc3e08f035286796faae5558d9789fff961ed64c079be8ac9d546fb",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "deaea52d16c84e182894f0da6524e24a60c5f2b0c4eee43931ab045a5e182902",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1074,22 +1074,22 @@
       ]
     },
     "260925040559.0.0": {
-      "snapshot_sha256": "d6f2008de95a9c8357a6e483a1a7d7c38b53221e012758525c0d4ffacfe8cd6a",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "d2fa957787b2e280c3d37179085b60d9bd8dcdd81f224f760115e7ee7e4ffcd1",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": []
     },
     "260925045650.0.0": {
-      "snapshot_sha256": "7fb9b6d945987604ef7a39f2ab04860289e5607a0ff95802c61fd0a74b3316b6",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "abb54970d060c8d1ae057af5b9928eb1daf492b12d47400d195600fdc0c23065",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": []
     },
     "260925054834.0.0": {
-      "snapshot_sha256": "843d7187d1e40909cc9badd1d1cd4334189bb5b2db08d089c4a05835335f5e17",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "ad93fd1ca3202dd992d501ba200d697c43711866cf3738532b0046403e9274f7",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1104,22 +1104,22 @@
       ]
     },
     "260925065536.0.0": {
-      "snapshot_sha256": "cb0c4be318c81690cec7408c3c159bb507621da57c535fc0fd57eaaee0f767b7",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "9af2519c298743877fba4a178e1555f0b0c31ca225219e7dcf4e72c2fcdbbeb2",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": []
     },
     "260925081247.0.0": {
-      "snapshot_sha256": "525f8701b81c7be106d085be6c357bc92bd828fa64c39dd8d932992d9030f6b4",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "b71433f8383797a220d4c3d3fe14e2179c2ae862b562b486f45ce39783d8d9ec",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": []
     },
     "260925090550.0.0": {
-      "snapshot_sha256": "3bb2bd832f894ff77aa50622954f457694d9d177ab9918b5c6e171080dc1bf43",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "97956f10a689319bcd0425b0558a1a840e3ada4dec1a79bd4faee3d9abcbc1a6",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1134,8 +1134,8 @@
       ]
     },
     "260925110255.0.0": {
-      "snapshot_sha256": "38fae1fc17810f39f7536b64c572869d584c0d0312c0dc7a96489d32ec0c6d20",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "bfee6ca49879d277ec4a32a8b7370df7818dc105f28c5834f722b6edf2064c98",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1158,8 +1158,8 @@
       ]
     },
     "260925141137.0.0": {
-      "snapshot_sha256": "e6f0486a870025140613d5a6e0558020a643ff308ba018cc9e37f2585bbd9559",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "fc62e0ca1d7bb95b95423f5a3c4e16d5f6cc12b758a78861051f2bcb3e84c201",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1206,15 +1206,15 @@
       ]
     },
     "260925144844.0.0": {
-      "snapshot_sha256": "664866519ee00b02d64b8ff166f9a05fff30ab228013b245d8cb7fddb9a2f209",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "3b0f8218c69cbcdb748cf1d99de64650cb74c79601e56aa3801543f0da0e8a6f",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": []
     },
     "260925150544.0.0": {
-      "snapshot_sha256": "5572633dbfc7f97d079f59e36a39e4454ffe082235ebc5220925bf1c92c02bf5",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "3da7d5b16e2050b426ab8d3f96db97a2f46689f0aa0d0aed2fffc7ce70da8d2a",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1237,8 +1237,8 @@
       ]
     },
     "260925153844.0.0": {
-      "snapshot_sha256": "d62aec81fa6ffafb2f15a2f64191db2c39f9def850bd0803286063be61f4f6c4",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "46fa3c703a5132adacbe8664aef77b6bbe98b31cb582ee239e823d226633d4c9",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1253,8 +1253,8 @@
       ]
     },
     "260925175201.0.0": {
-      "snapshot_sha256": "2e6b2a895e771424afacfe74c71b2ab96489103509029202fe76ef9616e9d74a",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "cf874df505f8c16fcdcb445f5f142330eb502f8690537dec1718cd7bbca9b159",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1269,8 +1269,8 @@
       ]
     },
     "260925213523.0.0": {
-      "snapshot_sha256": "284d4e797c540956a67d900cd8a2eeae028b1de7e37958d32ec65703ab7508e8",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "b2ca42aef19596323eb8f85b34e92399fadb9107b24dfae8554ea7e8ce06f740",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1301,8 +1301,8 @@
       ]
     },
     "260925222406.0.0": {
-      "snapshot_sha256": "3cbaf36a6cd51f5f1dea383b8c65379cbe14470896714c02f5c082570738d9c0",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "5f79a71a5ee272cdb7cabcbecb2c541f9dc77093ed67b0bc232131f8177e9c1c",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1317,8 +1317,8 @@
       ]
     },
     "260925232340.0.0": {
-      "snapshot_sha256": "a4da468ca0a57f4cc445cc7365d4d8995c3eec17fa17bb1dcfecf793b7ca2858",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "02a82bbd02f0c888ff954f9ece2cad72104e1f7dacc6d75cb99863dc13e856f2",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1333,8 +1333,8 @@
       ]
     },
     "260925234356.0.0": {
-      "snapshot_sha256": "05636cb404238b4287fb55c80c0e6b88205e8fd425761d44eff6d318cf40f529",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "c5e1d849c7a30fd5e19158bb3700641a8168a56438fbd9c59bc47e3e503698c3",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1349,8 +1349,8 @@
       ]
     },
     "260926010821.0.0": {
-      "snapshot_sha256": "c046bf084407d32727b7f65000d19aca0f61645c2a97ec2e5368b2e96425bc7d",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "802f69ab53c77d57feaa516d03bdb20a516510d2c2bb1e345b4414a8299a285d",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1365,8 +1365,8 @@
       ]
     },
     "260926041436.0.0": {
-      "snapshot_sha256": "fe57845a600a4a794c3df111c4b020717b318d6870adf789b75bb00c8016a9ba",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "1929ae4bda65f11a663a5a0e386fdb349f8cd6bcd44796515667bded8c5ffc36",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1381,8 +1381,8 @@
       ]
     },
     "260926064658.0.0": {
-      "snapshot_sha256": "f63905909bfa61d312fc70fd2c1d293f54219673c9ffe86e187f18c14abf4a31",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "ab554a999572d9e886511220a9af59dbe6b7929f9df89ce78be97a5750afe46c",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1397,15 +1397,15 @@
       ]
     },
     "260926071154.0.0": {
-      "snapshot_sha256": "9b32f6864a22eab6aa6bad112236f589267ffefd6ec6b9ab5728e7e80b1b1990",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "7bfe8aa235dea31ec0c08e917b044cb8f37dc513e351583c0aec6c3c93f49372",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": []
     },
     "260926083057.0.0": {
-      "snapshot_sha256": "4126605b14c6ff50ae5d2315eceb0fb51db596a019f0942dc78ce4fffb3c705f",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "69bae4302475af0321c9a7021a5d62bc2f72b4d21444a5b0bd16bcd0ed1e3e81",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1428,8 +1428,8 @@
       ]
     },
     "260926085451.0.0": {
-      "snapshot_sha256": "ba40f98ea0ac3da6ed3ce11ec1bbf720f969ddcd3a52b118f70a52621bfaae23",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "7dc84dd5a60f8e856f7542c8eff843f6e4d02f6dd7dd916fac446eca3e360e25",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1452,8 +1452,8 @@
       ]
     },
     "260926093605.0.0": {
-      "snapshot_sha256": "92199162db8a071d4d6c23efb1a4afb396ec8097779362a3a257eade163e0118",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "b027a6cd3db306649642200eed041ab37a0d92233fc64e944dfc22a387a84eae",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1468,8 +1468,8 @@
       ]
     },
     "260926095249.0.0": {
-      "snapshot_sha256": "be69c2950dd3368e3fab13cb0a221f1a0939292397a02230a539d6b415d39a29",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "9adbb98ce839065d9103150721057a0a30fd9b01e787d0db6fced2148574ea5a",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1484,8 +1484,8 @@
       ]
     },
     "260926103235.0.0": {
-      "snapshot_sha256": "8e8b2f50dfd0f9c02196430a5005913c11a60c2c5e0ee33f7d193061e37ef8d7",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "c40f595b49201c3d6bfebcaae1fb160fa05226792eb7d6e9afae5f6af4a5cf0d",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1500,8 +1500,8 @@
       ]
     },
     "260926135024.0.0": {
-      "snapshot_sha256": "eab75e7a470ee58510751a6a6820791b88df8238dc908e388dc4b7244069b14a",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "6b61f9404e1d512fdcf90a8f331a39daec225f6956b4aec39a2fbbe591b13716",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1524,8 +1524,8 @@
       ]
     },
     "260926151716.0.0": {
-      "snapshot_sha256": "f73b5bd80207d52a1f910a21bc432134895a6025af6831cb59c37a268c5ae4a5",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "85e2ebed30a80f5a0228dc7d758239a00106f4d682288178aef3b9b300f106f7",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1572,8 +1572,8 @@
       ]
     },
     "260926153431.0.0": {
-      "snapshot_sha256": "1b46f474e5e9c5a0b631729b8913d348c0f44e006eb96e1162152d865b086f47",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "530137095715969c75f416ef744a96da6aa384b41ae6f0fb79f0484cce5d16c8",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1596,8 +1596,8 @@
       ]
     },
     "260926162107.0.0": {
-      "snapshot_sha256": "d386992399082bce6e21640656207bced57066309b5b66dd399cc409fcf366ab",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "9659dbd382eef793f872dda5b964255e28169301fe77772ef124707456fc4f59",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1612,8 +1612,8 @@
       ]
     },
     "260926164818.0.0": {
-      "snapshot_sha256": "22b96b33a7ae183c92a7e395cdd25d2d587f7ac0159f5802e6fec54bfe879521",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "dfe029394247153744414a09078e964ac95001dd61661fe6933647c2b94100c0",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1636,15 +1636,15 @@
       ]
     },
     "260926170637.0.0": {
-      "snapshot_sha256": "4bd51e45d3e93161a63ff9ec9cdee8c4f1a2cfccf11106652354dd4007c20f3e",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "5503efbbd34006dc8472bee83022a16284dfe894106b089f26fadb2b459fb5c1",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": []
     },
     "260926185841.0.0": {
-      "snapshot_sha256": "565ef3526db67584d1e1945a42bebe5d47075967222d5594cf6b8d70c7da865e",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "74c01e6a203b21033eb51fd511d26002f30a985969afea348cf80860d975e729",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1675,8 +1675,8 @@
       ]
     },
     "260926195056.0.0": {
-      "snapshot_sha256": "4c6471aff7e6da2c2920552686d5dc3852359005557ad2e26989b9927f2a88e8",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "41cb7d80c7545712567d335ce33ebb19d2e8d1c5e8d0dca9bd6fdfbbadd1a89b",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1699,8 +1699,8 @@
       ]
     },
     "260926210025.0.0": {
-      "snapshot_sha256": "9b98bf84f28abfbfa3cd58cfe835f0281ec38543ab09af1d260dbb29225f22a3",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "6c79b182324889fd74207ecffb8f267fbba2b516f35d5f5a8a63d926d378ca74",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1739,8 +1739,8 @@
       ]
     },
     "260926213753.0.0": {
-      "snapshot_sha256": "5b89a51b2ea61e94ff0b6473bda5656093609383674e07a2e98751472424baf0",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "5e40c7e1e8cfb4e5db5309c06ccf54526d1c9559cfe7edb99aa2597a91d99f8c",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1763,8 +1763,8 @@
       ]
     },
     "260927045735.0.0": {
-      "snapshot_sha256": "09f69b8ab17730db0471dd0fa0f517179cec97925c56de482e3e7d5e23c2f480",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "037d0ca9330f0376bce50d84055b8c14e9de8812da880220fac7bd141f7ad162",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1779,8 +1779,8 @@
       ]
     },
     "260927053712.0.0": {
-      "snapshot_sha256": "e7713597c0c985b2e9881e4e0d6323b408c2758b2f7630aabc3f14dc241d130c",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "71dca2f35b47fbbd250c24d6b95a2a5dd3549ec072f34db8d688808ce50ef370",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1795,8 +1795,8 @@
       ]
     },
     "260927061901.0.0": {
-      "snapshot_sha256": "c436a3c01ed8acd45ee6b2660f89b11ce8d142b0ce7fb9c6deb63d2013aaf11b",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "09bd6a4cca84ad4e5807a6427dd5c5b3862a790722c62d1a10c16f0199b2e88f",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1811,8 +1811,8 @@
       ]
     },
     "260927071728.0.0": {
-      "snapshot_sha256": "455e5a7bd8f02b99de2ca56cd4f11bf54b4be8372940ebcbdaebe365883b7256",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "e222d423cc22da665c91a27d1c57e7f0a6501123d7d559ed1dccaff980d732dc",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1827,8 +1827,8 @@
       ]
     },
     "260927090745.0.0": {
-      "snapshot_sha256": "41f1ddc946d0ffbcf5309357f6bfc34371b178790b4a157c31e5d14c5d3027da",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "50d0f4fa2968fbe9345e1c678809417e11af54b162a59ed307ae1fb0e017298e",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1859,8 +1859,8 @@
       ]
     },
     "260927101716.0.0": {
-      "snapshot_sha256": "782cff9fb7c136772ceb0655a59e633d65e7ae1c1c93dbb53b73948455ea99eb",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "83e942ef6ae8a290da80dbd1932c9019d7d9daef8ad4764779428deff86b5840",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1875,8 +1875,8 @@
       ]
     },
     "260927112915.0.0": {
-      "snapshot_sha256": "437836ac29a16c1ef077a5867c3fdcf5735d764ca1c24817c77c253dd9666bce",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "94421bc1f63e4835673627479f8ce4e7f00c99b60f4f7dd82d7a47dc99a1f612",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1923,8 +1923,8 @@
       ]
     },
     "260927120613.0.0": {
-      "snapshot_sha256": "0029471c0f4f8d90ebfd9b00c3f3651628a507ebd463767a0c75e0203aaa493a",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "5e387d245c0709ecdc20c5d302a646a7cafc54d07fdcd8714b0167226e594cec",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -1955,8 +1955,8 @@
       ]
     },
     "260927134617.0.0": {
-      "snapshot_sha256": "280e1ac6f4c04cc935a21e0ccdc1fa80facdfafc1b3be5316f9798ae0b2b2795",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "5308e7da0b3a04e03b6210424cd1dadf3864f8b6da193292d8bffc597a2078a2",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2019,8 +2019,8 @@
       ]
     },
     "260927160212.0.0": {
-      "snapshot_sha256": "9646825b6360f0a28c8b2aefbf0171325dccb15f97506add0a26a2f548f8c241",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "a70c7f1c3123abea690b488fc057db336d23a9b9358cc314bc3833bb755b1f55",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2067,8 +2067,8 @@
       ]
     },
     "260927181849.0.0": {
-      "snapshot_sha256": "c9eb2b51740b246f57b5dbf9f459bf12c3b6ad07b86c321e99f4edaee94cb345",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "987c988e88ac58f40fe643879acbaf6fa670e026f83518047e38555a52f8484c",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2083,8 +2083,8 @@
       ]
     },
     "260928055400.0.0": {
-      "snapshot_sha256": "3b11eb288944e93893bcb5aaad38c3938d6b13ce3f9f3232e6a6257c21ead798",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "38e8a8789bf9ac460ec7fa983c4a367410a9dea2477e6c51d7066871f69a2270",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2099,8 +2099,8 @@
       ]
     },
     "260928080324.0.0": {
-      "snapshot_sha256": "8fd7d184d1050b15141c59bd4f438a50932582750989c3c3ca74848cbca7c5be",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "4d154c501e45d3ea216eae2e2e68f999e218945ad28ea0d185fd0a616d89f93c",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2147,8 +2147,8 @@
       ]
     },
     "260928085354.0.0": {
-      "snapshot_sha256": "151747b91ad169ccf490eee3a3a62904d2ab4c26b0f9ef96dbabc3396873079b",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "42a54b8dd0d9108593115620ee1c8fa0c20897c9cc95c38c4640afa4cba74428",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2163,8 +2163,8 @@
       ]
     },
     "260928111408.0.0": {
-      "snapshot_sha256": "42e281ab4bddbe0ceb62bfffb846d1d91147572af047dbc25b37d1371b44cc8e",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "096474c4eb99b2d4d4e798d5194a324e7d4183b748016c0e9256034f2d8d36ea",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2187,8 +2187,8 @@
       ]
     },
     "260928130526.0.0": {
-      "snapshot_sha256": "1b735a1c6304827b0fa195608fbb7f975f9dd7bda441aadbcaaeb7ba667d51a1",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "54f8b08e9d90189a17e7dbc731ddf8cfa3390aa793952e9673fa6b84ee4d5c45",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2235,8 +2235,8 @@
       ]
     },
     "260928141717.0.0": {
-      "snapshot_sha256": "1b10e859b8471f36d4dcc12aca3dfc1653a1d43ff44d4fd4695f55ed52f28e32",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "441e82a3e8c1de479eae9292d0920fa7ed78700e9c0cfc6f70ff3d562810f194",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2267,15 +2267,15 @@
       ]
     },
     "260928143846.0.0": {
-      "snapshot_sha256": "e8c7bad0826cbe991f8bf1e60b578bf89bb2e1f83da0692801bc954f19fc127b",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "cf7b6d3ca0a490bfeb6b9fa4c50c7a7faaa004b406344392db75c5f2136da8d2",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": []
     },
     "260928150616.0.0": {
-      "snapshot_sha256": "9bf0dceeb4a1929ca7ae58fb1027c044ed77db58c1a81f69c2b7c112e6996a28",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "56e8f2157580de08ac83c1fd04302f4108eac7d15f81842dda4defc73531e2bc",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2290,8 +2290,8 @@
       ]
     },
     "260928155912.0.0": {
-      "snapshot_sha256": "00933d20c444c71acbd310eab4c44ec66c1771feda8a75e3f8120eece3905bbc",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "a8e4d55d71d40f3baa40845eb57b280b10ff59a17a504c9ff5d62884a6023d0a",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2306,8 +2306,8 @@
       ]
     },
     "260928214842.0.0": {
-      "snapshot_sha256": "40d6e7f143046220c4ba70613ce76062f7d62bf0c5dce9b5969182b77a829566",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "26f3e79188281f540cda5d432d699f2c74a4050bf3aafa29c96157c064cc54cf",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2338,8 +2338,8 @@
       ]
     },
     "260928223247.0.0": {
-      "snapshot_sha256": "be293c049d413550c2309eafafd5a13b99fa5b54a161b7763b690c7524add58e",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "850c31731762a0aca7fbac8840ac402b9f4ceec8976688c6cd75f301b8863a48",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2378,8 +2378,8 @@
       ]
     },
     "260929000754.0.0": {
-      "snapshot_sha256": "5d098c8a97eb78dde7bf49bea2ae8268c7e72acb958f43b6e53e73ce6114e83f",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "9cdf492a59072be465b6fef571040ed66391efac5f97c718a297a1808bab0cbf",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2418,8 +2418,8 @@
       ]
     },
     "260929052224.0.0": {
-      "snapshot_sha256": "7bb3db857d20dba1fb1b336028a9c639c47bea1139e467b6fc7fd11093ba5910",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "3bad80a38cba2ceba9d80471407ad966eb724e84dd14b102e2a64b661a7ddb2c",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2450,8 +2450,8 @@
       ]
     },
     "260929062507.0.0": {
-      "snapshot_sha256": "9dc411d3f9483b770c91c9db510becfbeca0a74ea7e8c7a9176c8968705285ab",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "f6de45627b70a6958b1a4dae22ac80102232178cf06b0d9ce47618bce45cd28c",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2490,8 +2490,8 @@
       ]
     },
     "260929072754.0.0": {
-      "snapshot_sha256": "511359b3896a712ef253b76d213604c6a7172ccec0632b54b02c9c0597d5af93",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "3d881217923ba28ab93f3292cdc267fe65ba1a10f7c20fcdbb38f0ff6ef011ab",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2522,8 +2522,8 @@
       ]
     },
     "260929082208.0.0": {
-      "snapshot_sha256": "1a93b4ae6a17e23eba34ce0f2e6731dde6ecb0a1dfcddd88c7f7e222c3434619",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "0d4a654794693698f5b6c69ae4659a731fbbf139c6fe8be7592bec18d8943d1d",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2570,8 +2570,8 @@
       ]
     },
     "260929091245.0.0": {
-      "snapshot_sha256": "75cb718d7db865af05351bd5db5ba77c9b971a2fc5fb7a5dc6982c75054767b3",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "7c5c4df240dba4935a669d82f3eeba2a16a6cfd6663f4019fe1623d21b12bc8d",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2618,8 +2618,8 @@
       ]
     },
     "260929095359.0.0": {
-      "snapshot_sha256": "2a0acd8a005c90802b069bba0ba2390bced4102db638684144a043316fadf2d0",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "178658db6cdc6601c656a5f4b91859087a4d5b2423ddf55e0245430be0e67414",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2658,8 +2658,8 @@
       ]
     },
     "260929113854.0.0": {
-      "snapshot_sha256": "be8d28e3342ac6ed09d205778654d0c7f9ac0541e198df5f1e312d71435d8f21",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "a67863d8dd2de256bbaca9b10302f1ff1095d71920d92b11c6ff71996041c050",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2714,8 +2714,8 @@
       ]
     },
     "260929162827.0.0": {
-      "snapshot_sha256": "a6cac95d14cf8ba16aa597aa11748971b1089aa136cfeeb92939c366d10ebe5d",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "9a0b3347a638557463ada264ca8ee4e9b57548ad493826d60aec4cda58328250",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -2922,8 +2922,8 @@
       ]
     },
     "260929193046.0.0": {
-      "snapshot_sha256": "fd7fab1913207ae5d0662765af8493ad7a9d516f5005fb443b0fea8952a9b608",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "56e6449f5a2a7c2e583b9de6f564d02428ffad69c12b5945e81ff38f2ef053bd",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -3097,9 +3097,25 @@
         }
       ]
     },
+    "260929203122.0.0": {
+      "snapshot_sha256": "c341250884caab6a06466110934334dd1b15cef428d25fc6f0b0b9e1f47fd4e6",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-367",
+          "pill_en": "Keys without scope cap",
+          "pill_de": "Schlüssel ohne Scope-Limit",
+          "benefit_en": "An agent key can hold every permission its role allows; the old limit of 32 scopes is gone.",
+          "benefit_de": "Ein Agenten-Schlüssel kann alle Berechtigungen seiner Rolle tragen; das alte Limit von 32 Scopes entfällt.",
+          "group": "features"
+        }
+      ]
+    },
     "260929215406.0.0": {
-      "snapshot_sha256": "1ef7bf9c177c5bb5bdba29a412ca1911bdfb02e6bcc6187e599582f1d6956357",
-      "captured_at": "2026-09-30T05:43:55Z",
+      "snapshot_sha256": "c70dc9e137c536067e7c222383c9478436c8564ad26958a60d84e69ba91a8d92",
+      "captured_at": "2026-09-30T06:11:57Z",
       "release_revision": 1,
       "written_after_release": true,
       "items": [
@@ -3128,19 +3144,51 @@
           "group": "features"
         },
         {
-          "key": "AEON-367",
-          "pill_en": "Keys without scope cap",
-          "pill_de": "Schlüssel ohne Scope-Limit",
-          "benefit_en": "An agent key can hold every permission its role allows; the old limit of 32 scopes is gone.",
-          "benefit_de": "Ein Agenten-Schlüssel kann alle Berechtigungen seiner Rolle tragen; das alte Limit von 32 Scopes entfällt.",
-          "group": "features"
-        },
-        {
           "key": "AEON-355",
           "pill_en": "Accounts card fits",
           "pill_de": "Kontenkarte passt",
           "benefit_en": "The Accounts card on the Agents page fits every screen width without text spilling out on the right.",
           "benefit_de": "Die Kontenkarte auf der Agenten-Seite passt bei jeder Bildschirmbreite, ohne dass rechts Text herausläuft.",
+          "group": "features"
+        }
+      ]
+    },
+    "260929232203.0.0": {
+      "snapshot_sha256": "ad26b061e4e2eed66a4eb216a4154eefa8c678f10305747d3cecfa367ce610e9",
+      "captured_at": "2026-09-30T06:11:57Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-358",
+          "pill_en": "Pairing guide that works",
+          "pill_de": "Kopplungsanleitung, die funktioniert",
+          "benefit_en": "Connecting a computer works on the first try: the page starts with the install step, its commands run the right agentd, and Nix Macs are pointed to the Nix option.",
+          "benefit_de": "Einen Rechner verbinden klappt beim ersten Versuch: Die Seite beginnt mit der Installation, die Befehle starten den richtigen agentd, und Nix-Macs werden zur Nix-Option geführt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-365",
+          "pill_en": "Add accounts easily",
+          "pill_de": "Konten einfach hinzufügen",
+          "benefit_en": "Settings shows how to add a vendor account to a connected machine, with the exact commands to copy.",
+          "benefit_de": "Die Einstellungen zeigen, wie ein Anbieter-Konto auf einem verbundenen Rechner hinzukommt, mit den genauen Befehlen zum Kopieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-357",
+          "pill_en": "Release history opens right",
+          "pill_de": "Versionshistorie öffnet richtig",
+          "benefit_en": "The Release history entry in the header menu opens the full list of releases.",
+          "benefit_de": "Der Eintrag Versionshistorie im Kopfmenü öffnet die vollständige Liste aller Versionen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-371",
+          "pill_en": "Glanceable release notes",
+          "pill_de": "Versionshinweise auf einen Blick",
+          "benefit_en": "Each change in the release notes carries a small symbol for feature, fix or other, so the list reads faster.",
+          "benefit_de": "Jede Änderung in den Versionshinweisen trägt ein kleines Symbol für Funktion, Korrektur oder Sonstiges, damit sich die Liste schneller liest.",
           "group": "features"
         }
       ]

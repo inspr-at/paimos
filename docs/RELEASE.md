@@ -8,7 +8,7 @@ Releases up to `260929113854.0.0` (release 10, sequence 105) were reserved under
 
 The version pill uses the shared INSPR renderer: six segments (`YY·MM·DD hh:mm`, seconds on hover, focus or tap), never the `v` or `.0.0`. Copying always yields the exact canonical version, `.0.0` included. The label table (`schemes.json`) names the schemes INSPR-CalVer3, INSPR-CalVer2 and INSPR-CalVer1.
 
-The git tag is `v` plus the `version` field, for example `v260926064658.0.0`. `scripts/release-tag.mjs` checks that a pushed tag has that shape. `scripts/verify-release.mjs` checks that `version.json` matches the scheme and that the vendored calendar presentation bundle under `web/src/vendor/calendar-version-display` matches `scripts/calendar-version-bundle-pin.json`. `just release-check` runs the verifier. A production web build runs the same check before it emits assets.
+The git tag is `v` plus the `version` field, for example `v260926064658.0.0`. Create an annotated tag with a message: `git tag -a "$tag" -m "Release $tag"`. `scripts/release-tag.mjs` checks that a pushed tag has that shape; the release workflow rejects it unless `git cat-file -t "refs/tags/$tag"` returns `tag`. `scripts/verify-release.mjs` checks that `version.json` matches the scheme and that the vendored calendar presentation bundle under `web/src/vendor/calendar-version-display` matches `scripts/calendar-version-bundle-pin.json`. `just release-check` runs the verifier. A production web build runs the same check before it emits assets.
 
 Development builds leave the linker version at `dev`. A release build sets:
 
@@ -227,6 +227,12 @@ releases without a capture, use the same Git tag history and union of release
 and commit ticket keys as the history builder. This is explicitly later
 `release-manifest-tickets` evidence, not original journey membership. No
 database write, migration, tag rewrite or deployment is involved.
+
+The history also recognizes historical lightweight release tags when their
+committed `version.json` matches the tag and the coordinate is not an unpublished
+reservation. Their channel and sequence come from that file, and their release
+time comes from the tagged commit's committer date. Keep published tags unchanged;
+new releases require annotated tags as described above.
 
 From a full checkout with release tags, use a configured PPM agent client (or
 wrapper) with `nodes.read`. It must select the approved PPM tenant; no credential

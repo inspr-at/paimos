@@ -140,6 +140,17 @@ jobs:
         id: version
         run: node scripts/release-tag.mjs
 
+      - name: Require an annotated release tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+          if [ "$(git cat-file -t "refs/tags/$tag")" != tag ]; then
+            echo 'Release tags must be annotated: git tag -a "$tag" -m "Release $tag"' >&2
+            exit 1
+          fi
+
       - name: Release checks
         run: node scripts/verify-release.mjs --release
 
