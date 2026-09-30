@@ -106,7 +106,6 @@ test('agent proposals wait in the doctrine inbox with a diff, a dot and one toas
   await expect(estimate.getByText('builder')).toBeVisible()
   await expect(estimate.getByRole('link', { name: 'INSPR-491' })).toHaveAttribute('href', '/p/INSPR/INSPR-491')
   await expect(estimate.getByText(/an estimate before work makes every heartbeat ETA honest/)).toBeVisible()
-  await expect(estimate.getByText('TL;DR')).toBeVisible()
   const reviewed = inbox.getByRole('article', { name: 'Keep commits small and reviewed' })
   await expect(reviewed.locator('del')).toContainText('- Small')
 

@@ -34,7 +34,7 @@ async function submit() {
 }
 </script>
 <template>
-  <RulesDialog :title="draft ? 'Edit, then propose' : 'Propose change'" :lede="`A pull request in ${source.repository}; a person approves after checks and review.`" size="wide" :busy="busy" @close="emit('close')">
+  <RulesDialog :title="draft ? 'Edit, then propose' : 'Propose change'" :lede="draft ? `Your edits replace ${draft.proposer || 'the proposer'}’s text in a pull request to ${source.repository}.` : `A pull request in ${source.repository}; a person approves after checks and review.`" size="wide" :busy="busy" @close="emit('close')">
     <form id="doctrine-proposal-form" class="form" @submit.prevent="submit">
       <label>Rule<textarea v-model="sourceText" class="field mono" rows="5" required :readonly="frozen" data-autofocus /></label>
       <label>TL;DR · English<input v-model="en" class="field" maxlength="300" required :readonly="frozen"></label>

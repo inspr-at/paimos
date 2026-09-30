@@ -5,7 +5,7 @@
 // proposed it, the ticket it came from and why. Propose PR sends it to git
 // through the normal proposal path; Edit changes it first; Dismiss sends a
 // reason back to the proposer.
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import DoctrineProposalDialog from './DoctrineProposalDialog.vue'
 import { can, onAccessChange } from '../../lib/authz'
@@ -42,7 +42,7 @@ async function load() {
 function publish() { emit('count', items.value.length); inboxChanged(items.value.length) }
 function drop(id: string) { items.value = items.value.filter(item => item.id !== id); publish() }
 
-// The pinned rule the proposal is diffed against, for Edit and the TL;DR line.
+// The pinned rule the proposal is diffed against, for Edit.
 function pinned(item: DoctrineInboxItem) {
   const source = props.sources.find(s => s.id === item.source_id)
   const file = source?.files.find(f => f.path === item.path)
@@ -51,7 +51,11 @@ function pinned(item: DoctrineInboxItem) {
 }
 // The accessible name of a proposal: its label, without a final full stop.
 const name = (item: DoctrineInboxItem) => inboxLabel(item.label, 120)
-const tldrChanged = (item: DoctrineInboxItem) => !!item.tldr?.en && item.tldr.en !== pinned(item)?.rule.tldr?.en
+// A changed run is marked without its surrounding spaces.
+function runs(text: string): [string, string, string] {
+  const match = /^(\s*)([\s\S]*?)(\s*)$/.exec(text)!
+  return [match[1]!, match[2]!, match[3]!]
+}
 
 async function send(item: DoctrineInboxItem) {
   if (busy.value) return
@@ -74,7 +78,12 @@ function edited(proposal: DoctrineProposal) {
   emit('proposed', proposal)
   toast('Pull request created')
 }
-function startDismiss(item: DoctrineInboxItem) { dismissing.value = item.id; reason.value = '' }
+async function startDismiss(item: DoctrineInboxItem) {
+  dismissing.value = item.id
+  reason.value = ''
+  await nextTick()
+  document.getElementById(`dismiss-${item.id}`)?.focus()
+}
 async function dismiss(item: DoctrineInboxItem) {
   const text = reason.value.trim()
   if (!text || busy.value) return
@@ -105,8 +114,7 @@ onBeforeUnmount(() => { generation++; stopAccess() })
           <strong class="label" :title="item.label">{{ item.label }}</strong>
           <span class="where" :title="`${item.repository}/${item.path}`">{{ item.heading }} · {{ repoName(item.repository) }}/{{ fileName(item.path) }}</span>
         </div>
-        <pre class="diff" :aria-label="`Change to ${item.heading}`"><template v-for="(part, index) in item.diff" :key="index"><del v-if="part.op === 'del'"><span class="sr-only">removed: </span>{{ part.text }}</del><ins v-else-if="part.op === 'ins'"><span class="sr-only">added: </span>{{ part.text }}</ins><span v-else>{{ part.text }}</span></template></pre>
-        <p v-if="tldrChanged(item)" class="tldr"><span class="quiet-label">TL;DR</span> {{ item.tldr?.en }}</p>
+        <pre class="diff" :aria-label="`Change to ${item.heading}`"><template v-for="(part, index) in item.diff" :key="index"><template v-if="part.op === 'eq'">{{ part.text }}</template><template v-else>{{ runs(part.text)[0] }}<del v-if="part.op === 'del'"><span class="sr-only">removed: </span>{{ runs(part.text)[1] }}</del><ins v-else><span class="sr-only">added: </span>{{ runs(part.text)[1] }}</ins>{{ runs(part.text)[2] }}</template></template></pre>
         <p v-if="item.why" class="why" :title="item.why">{{ item.why }}</p>
         <p v-if="item.outdated" class="note">The rule changed since this was proposed. Edit it against the current rule to propose it.</p>
         <div class="foot">
@@ -124,7 +132,7 @@ onBeforeUnmount(() => { generation++; stopAccess() })
         </div>
         <form v-if="dismissing === item.id" class="dismiss" @submit.prevent="dismiss(item)">
           <label class="sr-only" :for="`dismiss-${item.id}`">Why dismiss it</label>
-          <input :id="`dismiss-${item.id}`" v-model="reason" class="field" maxlength="500" required placeholder="Why not? The proposer sees this." data-autofocus @keydown.esc="dismissing = ''">
+          <input :id="`dismiss-${item.id}`" v-model="reason" class="field" maxlength="500" required placeholder="Why not? The proposer sees this." @keydown.esc="dismissing = ''">
           <button type="button" class="btn sm ghost" :disabled="!!busy" @click="dismissing = ''">Cancel</button>
           <button type="submit" class="btn sm primary" :disabled="!!busy || !reason.trim()">{{ busy === item.id ? 'Dismissing…' : 'Dismiss' }}</button>
         </form>
@@ -142,14 +150,13 @@ h4 { margin: 0; color: var(--ink-2); font-size: 13px; font-weight: 650; }
 .list > * + * { border-top: 1px solid var(--line); }
 .item { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; min-width: 0; }
 .item-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; min-width: 0; }
-.label { flex: 1 1 240px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 14px; font-weight: 650; }
+.label { flex: 1 1 240px; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
 .where { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; }
 .diff { margin: 0; padding: 10px 12px; border-radius: 9px; background: var(--surface-2); color: var(--ink-2); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-.diff ins { border-radius: 3px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.diff ins { padding: 0 1px; border-radius: 3px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.diff del + ins { margin-left: 3px; }
 .diff del { color: var(--ink-3); text-decoration: line-through; text-decoration-thickness: 1px; }
-.tldr, .why, .note { margin: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
-.tldr { color: var(--ink-2); }
-.quiet-label { margin-right: 4px; color: var(--ink-3); font-size: 11px; font-weight: 650; letter-spacing: .02em; }
+.why, .note { margin: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .why { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: var(--ink); }
 .note { color: var(--ink-2); }
 .foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; min-width: 0; }
