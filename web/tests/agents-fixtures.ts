@@ -313,3 +313,7 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
   await page.route('**/api/**', handler)
   return calls
 }
+// Reads of the tenant-wide session list the Agents page keeps fresh. Every accepted
+// write on the page reads it again (AEON-449): compare the count before and after.
+export const sessionListReads = (calls: { path: string; method: string; query?: URLSearchParams }[]) =>
+  calls.filter(call => call.method === 'GET' && call.path === '/api/harness-sessions' && call.query?.get('view') === 'current').length

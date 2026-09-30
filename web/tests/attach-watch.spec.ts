@@ -3,10 +3,11 @@ import { mkdirSync } from 'node:fs'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
-import { agentData, mockAgents } from './agents-fixtures'
+import { agentData, mockAgents, sessionListReads } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 const shots = process.env.ATTACH_SHOTS ?? '/private/tmp/aeon-258-shots'
+let calls: Awaited<ReturnType<typeof mockAgents>>
 async function setup(page: Page, grant = true, theme: 'light' | 'dark' = 'light') {
   const work = fixtures()
   work.preferences.theme = { choice: theme }
@@ -28,7 +29,7 @@ async function setup(page: Page, grant = true, theme: 'light' | 'dark' = 'light'
   Object.assign(worker, { management_mode: 'unmanaged', advertised_capabilities: [], watch: { request_id: 'attach-fixture', owner_id: me.id, state: 'active', lease_until: new Date(Date.now() + 60_000).toISOString() } })
   data.sessions.splice(0, data.sessions.length, worker)
   data.runs.splice(0); data.approvals.splice(0); data.messages.splice(0)
-  await mockAgents(page, data)
+  calls = await mockAgents(page, data)
   await page.route(`**/api/projects/${worker.project_id}/harness-sessions/${worker.id}`, route => route.fulfill({ json: worker }))
   // Real relay isolation/revocation is tested in Go. Control individual frames
   // here to exercise inert rendering and client closure without timing races.
@@ -91,6 +92,38 @@ test('control characters clear the stream and owner revocation closes access', a
   await expect(page.getByLabel('Agent-written live text')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Watch live', exact: true })).toHaveCount(0)
 })
+test('revoking a watch reads the lists again', async ({ page }) => {
+  const worker = await setup(page)
+  await page.goto(`/agents/${worker.id}`)
+  await page.route('**/api/agent-pairing/attach/attach-fixture/revoke', route => route.fulfill({ json: { state: 'detached' } }))
+  await expect(page.getByRole('button', { name: 'Revoke watch for everyone' })).toBeVisible()
+  const before = sessionListReads(calls)
+  await page.getByRole('button', { name: 'Revoke watch for everyone' }).click()
+  await expect(page.getByRole('button', { name: 'Revoke watch for everyone' })).toHaveCount(0)
+  await expect.poll(() => sessionListReads(calls)).toBeGreaterThan(before)
+})
+
+test('approving an attach request reads the lists again', async ({ page }) => {
+  await setup(page)
+  const review = {
+    request_id: 'approve-fixture', request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64), consent_mode: 'aeon', state: 'pending', expires_at: new Date(Date.now() + 600_000).toISOString(),
+    snapshot: { platform: 'darwin', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Markus’s MacBook', harness: 'codex', transcript: '/Users/markus/.codex/sessions/session.jsonl', file_id: '1:234567', process: { pid: 4812, uid: 501, started: '2026-09-29T00:12:30Z', executable: '/opt/homebrew/bin/codex', cwd: '/Users/markus/Code/pharos' } },
+  }
+  await page.route('**/api/nodes/p-pharos', route => route.fulfill({ json: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' } }))
+  await page.route('**/api/nodes/n-2', route => route.fulfill({ json: { id: 'n-2', key: 'PHAROS-12', title: 'PDF worker image' } }))
+  await page.route('**/api/agent-pairing/attach/**', route => route.fulfill({ json: route.request().url().endsWith('/lookup') ? review : { ...review, state: 'approved' } }))
+  await page.goto('/agents')
+  await page.getByRole('button', { name: 'Attach session', exact: true }).click()
+  await page.getByLabel('Attach code', { exact: true }).fill('123456789')
+  await page.getByRole('button', { name: 'Review session' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('PDF worker image')
+  const before = sessionListReads(calls)
+  await dialog.getByRole('button', { name: 'Allow live watch' }).click()
+  await expect(dialog.getByText('Approved. Keep the attach terminal open to share new turns.')).toBeVisible()
+  await expect.poll(() => sessionListReads(calls)).toBeGreaterThan(before)
+})
+
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) for (const consent_mode of ['aeon', 'local_auth'] as const) {
   test(`approval and live watch layout ${theme} ${width} ${consent_mode}`, async ({ page }) => {
     const worker = await setup(page, true, theme)

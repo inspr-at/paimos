@@ -73,12 +73,12 @@ export async function mockStartAgent(page: Page, options: { wait?: CapacityWait;
   if (options.catalog === 'pi-openrouter') Object.assign(account, { harness: 'pi', provider: 'openrouter', model: 'stealth/space-bunny-alpha', model_status: 'known' })
   const state = { orders: [] as WorkOrder[], runs: [] as AgentRun[], sessions: [] as HarnessSession[], failQueue: !!options.failQueue, revoked: false, catalogMisses: options.catalog === 'retry' ? 1 : 0 }
   const pins = options.pin ? [{ ...options.pin }] : [] as { ticket_id: string; harness: string; account_id?: string; group_id?: string }[]
-  const calls: { method: string; path: string; body: Record<string, unknown> | null }[] = []
+  const calls: { method: string; path: string; body: Record<string, unknown> | null; query: URLSearchParams }[] = []
   await page.route('**/api/**', async route => {
     const req = route.request(), url = new URL(req.url()), path = url.pathname, method = req.method()
     const json = (value: unknown, status = 200) => route.fulfill({ status, json: value })
     const body = req.postData() ? req.postDataJSON() as Record<string, unknown> : null
-    calls.push({ method, path, body })
+    calls.push({ method, path, body, query: url.searchParams })
     if (path === '/api/me/permissions') {
       const permissions = mockEffectivePermissions(options.readOnly ? 'viewer' : 'admin', url.searchParams.get('project_id') ?? undefined)
       if (!options.readOnly) permissions.workspace.permissions.push('run.create', 'run.read', 'models.read', 'account.read', 'work_orders.read')
