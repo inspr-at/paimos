@@ -252,9 +252,13 @@ func TestFinishedIsARequiredBooleanInEveryPayload(t *testing.T) {
 	mustBe("detail", decode(t, w), true)
 	w = f.call(f.person, "GET", base, nil, "")
 	expect(t, w, 200)
+	var items []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil {
+		t.Fatal(err)
+	}
 	listed := false
-	for _, raw := range decode(t, w)["items"].([]any) {
-		if item := raw.(map[string]any); item["id"] == id {
+	for _, item := range items {
+		if item["id"] == id {
 			mustBe("list", item, true)
 			listed = true
 		}
