@@ -270,9 +270,6 @@ func TestLiveAgents(t *testing.T) {
 	expect(t, f.call(f.agent, "GET", "/api/harness-sessions/live", nil, ""), 403)
 }
 
-// Coordinator children share one agent principal. The live feed must keep that
-// principal name and still return each session's own display_label, and it must
-// withhold the label from anyone who lacks harness.read at the project.
 // AEON-437: the live feed carries the reported percent, so a screen can tell a
 // worker that finished from one that was lost. No report leaves the field out.
 func TestLiveCarriesReportedProgress(t *testing.T) {
@@ -312,6 +309,9 @@ func TestLiveCarriesReportedProgress(t *testing.T) {
 	}
 }
 
+// Coordinator children share one agent principal. The live feed must keep that
+// principal name and still return each session's own display_label, and it must
+// withhold the label from anyone who lacks harness.read at the project.
 func TestLiveDisplayLabelIsNotThePrincipalName(t *testing.T) {
 	f := fixture(t)
 	ctx := t.Context()

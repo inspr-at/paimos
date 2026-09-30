@@ -787,12 +787,14 @@ func assigneeLeadKeyExpr(harnessAll string) string {
 // assigneeLeadOrder is the server's only lead choice. Rank matches the web
 // STATE_PRIORITY at this viewer's normalized thresholds (yellow awaiting,
 // red unresponsive): problem, unresponsive, waiting, awaiting, throttled,
-// working, idle, stale, done. Done is a session that reported 100% and then
-// went quiet; it never leads over live work (AEON-437). Waiting is a yielded
-// phase, a waiting run, a stale estimate, or a pending approval on this
-// session's run. Ties break by a worker before a coordinator, then start,
-// then heartbeat, then public session facts, the projected name and the
-// stable viewer-visible key. A withheld label or session id must not decide which name is shown or sorted.
+// working, idle, stale. Waiting is a yielded phase, a waiting run, a stale
+// estimate, or a pending approval on this session's run. Only a live session can
+// lead, and a finished one has stopped, so reported progress never changes the
+// rank: a quiet worker at 100% is still awaiting or unresponsive, and a pending
+// approval still makes it wait (AEON-437). Ties break by a worker before a
+// coordinator, then start, then heartbeat, then public session facts, the
+// projected name and the stable viewer-visible key. A withheld label or session
+// id must not decide which name is shown or sorted.
 func assigneeLeadOrder(yellow, red int, shown, key string) string {
 	if yellow == 0 && red == 0 {
 		yellow, red = 3, 10
@@ -801,9 +803,6 @@ func assigneeLeadOrder(yellow, red int, shown, key string) string {
 	return fmt.Sprintf(`CASE
     WHEN coalesce(run.status IN ('failed','ownership_lost','blocked'), false)
       OR coalesce(s.stop_reason <> 'heartbeat_lost' AND replace(replace(s.stop_reason, '_', ' '), '-', ' ') ~* '\m(error|errored|failed|failure|blocked|crash(ed)?|ownership lost|heartbeat lost|timeout|timed out)\M', false) THEN 0
-    WHEN s.progress_pct >= 100 AND s.phase IN ('starting','working','stopping') AND s.activity <> 'throttled'
-      AND NOT coalesce(run.status = 'waiting', false)
-      AND coalesce(s.heartbeat_at, s.created_at) <= now() - make_interval(mins => %d) THEN 8
     WHEN s.phase IN ('starting','working','stopping') AND s.activity NOT IN ('idle','throttled')
       AND coalesce(s.heartbeat_at, s.created_at) <= now() - make_interval(mins => %d) THEN 1
     WHEN s.phase = 'yielded' OR coalesce(run.status = 'waiting', false)
@@ -821,7 +820,7 @@ func assigneeLeadOrder(yellow, red int, shown, key string) string {
     WHEN s.phase IN ('starting','working','stopping') AND s.activity NOT IN ('idle','throttled') THEN 5
     WHEN s.heartbeat_at IS NULL OR s.heartbeat_at <= now() - make_interval(mins => %d) THEN 7
     ELSE 6
-END, (s.role = 'coordinator'), s.created_at, s.heartbeat_at NULLS LAST, s.harness, s.activity_sequence, s.phase, s.activity, (`+shown+`) COLLATE "C", (`+key+`) COLLATE "C"`, yellow, red, yellow, yellow)
+END, (s.role = 'coordinator'), s.created_at, s.heartbeat_at NULLS LAST, s.harness, s.activity_sequence, s.phase, s.activity, (`+shown+`) COLLATE "C", (`+key+`) COLLATE "C"`, red, yellow, yellow)
 }
 
 // assigneeWorkerEligible is who may lead: bound, not stopped, not archived.

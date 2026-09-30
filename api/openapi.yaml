@@ -10659,6 +10659,7 @@ components:
         needs_attention: {type: boolean, description: "Bound run waiting or an exact bound-run approval pending. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
         attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
         has_problem: {type: boolean, description: "Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false. Omitted when not loaded."}
+        finished: {type: boolean, description: "True when the session reported 100% and stopped with a recorded clean exit (stop reason process_exited). Anything else that stopped, a silence the server closed, and a session that is still open are false. Derived, so it is present even where stop_reason is withheld. Omitted when not loaded (AEON-437)."}
         id: {type: string, format: uuid}
         project_id: {type: string, format: uuid}
         agent_principal_id: {type: string, format: uuid}
@@ -10781,6 +10782,9 @@ components:
       description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent.
       properties:
         has_working_session: {type: boolean, description: True when a visible working session is bound to this ticket in its current project. Omitted when false; enables a quiet no ETA hint even before the first estimate.}
+        finished: {type: boolean, description: True when no session is open on the ticket and the last worker to leave reported 100% and recorded a clean exit. The only evidence that reads as Done; progress_pct is then 100 and the estimate is not kept. Omitted when false (AEON-437).}
+        finished_at: {type: string, format: date-time, description: When that worker stopped. Present with finished.}
+        finished_by: {type: string, description: Name of that worker, when known. Present with finished.}
         eta_ready_at: {type: string, format: date-time}
         eta_live_at: {type: string, format: date-time}
         progress_pct: {type: integer, minimum: 0, maximum: 100}
@@ -10975,6 +10979,7 @@ components:
         needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Shared inbox attention and nonblocking replies do not set this flag; stopped sessions are false."}
         attention_reasons: {type: array, description: "Authorized content-free reasons; withheld without harness.read at this project.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
         has_problem: {type: boolean, description: 'Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false.'}
+        finished: {type: boolean, description: 'True when the session reported 100% and stopped with a recorded clean exit (stop reason process_exited). Derived, so it is present even where stop_reason is withheld (AEON-437).'}
         stopped_at: {type: [string, 'null'], format: date-time}
         stop_reason: {type: [string, 'null'], description: Present only with harness.read at the project.}
         project_id: {type: string, format: uuid}
@@ -11006,7 +11011,7 @@ components:
         since: {type: string, format: date-time, description: When the session started}
         heartbeat_at: {type: [string, 'null'], format: date-time}
         eta_stale: {type: boolean, description: True when the session estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
-        progress_pct: {type: integer, minimum: 0, maximum: 100, description: The last percent the session reported. Omitted until one is reported. A session at 100% that stops cleanly or goes quiet is finished (AEON-437).}
+        progress_pct: {type: integer, minimum: 0, maximum: 100, description: The last percent the session reported. Omitted until one is reported. Reported progress alone never means finished; read finished (AEON-437).}
     ProjectMessage:
       allOf:
         - {$ref: './openapi-messaging.yaml#/components/schemas/Message'}
