@@ -1004,7 +1004,10 @@ func TestBlindSpentRecoveryDoesNotSayReading(t *testing.T) {
 	s := capacity.DefaultSchedule()
 	s.Timezone = "UTC"
 	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &s}), 204, nil)
-	stop := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Microsecond)
+	// AEON-448: derive the vendor stop from the same fixed clock as the admission checks below;
+	// time.Now() made the 1-hour vendor window overlap `day` between 11:00 and 12:00 UTC on 2026-09-30.
+	day := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	stop := day.Add(-2 * time.Hour)
 	cause := insertRun(t, person, runner, profile)
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2, status='cancelled' WHERE id=$1`, cause, a.ID); err != nil {
@@ -1038,7 +1041,6 @@ func TestBlindSpentRecoveryDoesNotSayReading(t *testing.T) {
 		}
 		return wait
 	}
-	day := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
 	if w := admit(day); w == nil || w.Code != "reading" || w.ReadAt != nil || w.Timezone != "UTC" || w.RunNowAllowed {
 		t.Fatalf("daytime spent grant: %+v", w)
 	}
