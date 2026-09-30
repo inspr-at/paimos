@@ -135,3 +135,52 @@ func TestAttachPendingIsOwnerOnly(t *testing.T) {
 		t.Fatalf("another tenant's owner sees %d requests", len(got.Requests))
 	}
 }
+
+// A request that still waits is always listed, however many newer ones ended after
+// it and however old it is: the server filters to live requests first, the page
+// never has to recover one by sorting. Ended requests stay a short, recent tail.
+func TestAttachPendingKeepsEveryWaitingRequestBehindNewerEndedOnes(t *testing.T) {
+	f, key, in := watchFixture(t)
+	requestWatch(t, f, key, in)
+	waiting := in.RequestID
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_requests SET created_at=clock_timestamp()-interval '14 minutes', expires_at=clock_timestamp()+interval '3 minutes' WHERE id=$1`, waiting); err != nil {
+		t.Fatal(err)
+	}
+	for range 9 {
+		ended := in
+		ended.RequestID = uuid(t, f.db)
+		requestWatch(t, f, key, ended)
+		f.call("POST", "/api/agent-pairing/attach/"+ended.RequestID+"/revoke", nil, true, "", 200)
+	}
+	got, _ := listPending(t, f)
+	var live, endedCount int
+	found := false
+	for _, item := range got.Requests {
+		if item.RequestID == waiting {
+			found = item.State == "pending"
+		}
+		if item.State == "pending" || item.State == "approved" {
+			live++
+		} else {
+			endedCount++
+		}
+	}
+	if !found || live != 1 {
+		t.Fatalf("the older waiting request must be listed while nine newer ended ones exist: %+v", got.Requests)
+	}
+	if endedCount == 0 || endedCount > 4 {
+		t.Fatalf("ended requests are a short recent tail, got %d", endedCount)
+	}
+	// Waiting requests are not bound by the recent window: only expiry ends them.
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_requests SET created_at=clock_timestamp()-interval '40 minutes', expires_at=clock_timestamp()+interval '1 minute' WHERE id=$1`, waiting); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = listPending(t, f)
+	found = false
+	for _, item := range got.Requests {
+		found = found || (item.RequestID == waiting && item.State == "pending")
+	}
+	if !found {
+		t.Fatalf("a request that has not expired stays listed: %+v", got.Requests)
+	}
+}
