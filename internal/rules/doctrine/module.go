@@ -86,6 +86,11 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/rules/doctrine/proposals/{proposalId}/refresh", m.handle(m.refreshProposal))
 	mux.HandleFunc("POST /api/rules/doctrine/proposals/{proposalId}/approve", m.handle(m.approveProposal))
 	mux.HandleFunc("POST /api/rules/doctrine/proposals/{proposalId}/pins", m.handle(m.reportPin))
+	mux.HandleFunc("GET /api/rules/doctrine/inbox", m.handle(m.listInbox))
+	mux.HandleFunc("GET /api/rules/doctrine/inbox/summary", m.handle(m.inboxSummary))
+	mux.HandleFunc("POST /api/rules/doctrine/inbox", m.handle(m.proposeToInbox))
+	mux.HandleFunc("POST /api/rules/doctrine/inbox/{proposalId}/pull-request", m.handle(m.submitInbox))
+	mux.HandleFunc("POST /api/rules/doctrine/inbox/{proposalId}/dismiss", m.handle(m.dismissInbox))
 	mux.HandleFunc("POST /api/rules/doctrine/sources", m.handle(m.create))
 	mux.HandleFunc("PUT /api/rules/doctrine/sources/{sourceId}", m.handle(m.update))
 	mux.HandleFunc("DELETE /api/rules/doctrine/sources/{sourceId}", m.handle(m.remove))
@@ -135,7 +140,7 @@ func (m *Module) handle(fn func(*http.Request, tenant.Principal) (any, error)) h
 		if err != nil {
 			// A transaction timeout can follow a successful external write.
 			// Never promise "nothing changed" for a proposal operation.
-			if strings.HasPrefix(r.URL.Path, "/api/rules/doctrine/proposals") {
+			if strings.HasPrefix(r.URL.Path, "/api/rules/doctrine/proposals") || strings.HasSuffix(r.URL.Path, "/pull-request") {
 				var known *failure
 				var decode *workorders.Error
 				if !errors.As(err, &known) && !errors.As(err, &decode) && !errors.Is(err, authz.ErrForbidden) && !errors.Is(err, errNoSource) && !errors.Is(err, ErrCredential) && !errors.Is(err, ErrGit) {
@@ -573,6 +578,16 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 			return err
 		}
 		if err := storePublicMain(ctx, tx, p.TenantID, s, main); err != nil {
+			return err
+		}
+		// Inbox proposals the new pin contains close as promoted (AEON-444).
+		// A failure there is logged; it never costs the index.
+		if sp, err := tx.Begin(ctx); err != nil {
+			return err
+		} else if err := promoteLanded(ctx, sp, p, s, files); err != nil {
+			_ = sp.Rollback(ctx)
+			slog.Error("doctrine inbox promotion", "source", id, "err", err)
+		} else if err := sp.Commit(ctx); err != nil {
 			return err
 		}
 		_, err = events.Append(ctx, tx, p, events.Change{Type: "doctrine.indexed", After: map[string]any{

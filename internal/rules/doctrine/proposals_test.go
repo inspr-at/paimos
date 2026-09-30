@@ -53,6 +53,7 @@ type proposalForge struct {
 	proposalID      string
 	labels          int
 	bodies          []string
+	mainSHA         string
 }
 
 func (f *proposalForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +139,11 @@ func (f *proposalForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case suffix == "/branches/main":
-		send(map[string]any{"protected": f.protected, "commit": map[string]string{"sha": fixtureCommit}})
+		main := fixtureCommit
+		if f.mainSHA != "" {
+			main = f.mainSHA
+		}
+		send(map[string]any{"protected": f.protected, "commit": map[string]string{"sha": main}})
 	case strings.HasPrefix(suffix, "/git/commits/"):
 		send(map[string]any{"tree": map[string]string{"sha": strings.Repeat("a", 40)}})
 	case suffix == "/git/trees" && r.Method == "POST":

@@ -150,6 +150,12 @@ func latinPublicText(text string) bool {
 // editRule changes exactly one indexed rule and its sidecar entry. Parse both
 // sides, preserve every other rule, and reject malformed sidecars (no clobber).
 func editRule(s Source, files []File, in ProposalInput) (map[string]string, error) {
+	changed, _, _, err := editRuleViews(s, files, in)
+	return changed, err
+}
+
+// editRuleViews is editRule that also returns the rule before and after.
+func editRuleViews(s Source, files []File, in ProposalInput) (map[string]string, RuleView, RuleView, error) {
 	var target FileView
 	for _, v := range Render(s.Repository, s.Commit, s.Visibility == "private", files) {
 		if v.Path == in.Path {
@@ -157,7 +163,7 @@ func editRule(s Source, files []File, in ProposalInput) (map[string]string, erro
 		}
 	}
 	if target.Path == "" || target.Problem != "" {
-		return nil, fail(409, "stale_rule", "The selected doctrine file is not indexed at this pin.")
+		return nil, RuleView{}, RuleView{}, fail(409, "stale_rule", "The selected doctrine file is not indexed at this pin.")
 	}
 	var old RuleView
 	idx := -1
@@ -172,10 +178,10 @@ func editRule(s Source, files []File, in ProposalInput) (map[string]string, erro
 		}
 	}
 	if keyCount > 1 {
-		return nil, fail(409, "ambiguous_rule", "This rule key appears more than once; fix its identity in git first.")
+		return nil, RuleView{}, RuleView{}, fail(409, "ambiguous_rule", "This rule key appears more than once; fix its identity in git first.")
 	}
 	if idx < 0 {
-		return nil, fail(409, "stale_rule", "The rule changed; reload it before proposing.")
+		return nil, RuleView{}, RuleView{}, fail(409, "stale_rule", "The rule changed; reload it before proposing.")
 	}
 	var original []byte
 	var side []byte
@@ -199,24 +205,24 @@ func editRule(s Source, files []File, in ProposalInput) (map[string]string, erro
 	lines := rawLines(original)
 	content := strings.Join(lines[:old.StartLine-1], "") + replacement + strings.Join(lines[old.EndLine:], "")
 	if len(content) > 256<<10 {
-		return nil, fail(400, "invalid_request", "The changed file exceeds the doctrine size limit.")
+		return nil, RuleView{}, RuleView{}, fail(400, "invalid_request", "The changed file exceeds the doctrine size limit.")
 	}
 	rendered := Render(s.Repository, s.Commit, s.Visibility == "private", []File{{Path: in.Path, Content: []byte(content)}})
 	if len(rendered) != 1 || rendered[0].Problem != "" || len(rendered[0].Rules) != len(target.Rules) {
-		return nil, fail(400, "invalid_request", "Keep exactly one rule in the same section, with its existing marker.")
+		return nil, RuleView{}, RuleView{}, fail(400, "invalid_request", "Keep exactly one rule in the same section, with its existing marker.")
 	}
 	next := rendered[0].Rules[idx]
 	if next.Set != old.Set || next.Source != replacement || (!strings.HasPrefix(old.Key, "t-") && next.Key != old.Key) {
-		return nil, fail(400, "invalid_request", "Keep the rule section and explicit marker unchanged.")
+		return nil, RuleView{}, RuleView{}, fail(400, "invalid_request", "Keep the rule section and explicit marker unchanged.")
 	}
 	for i, r := range rendered[0].Rules {
 		if i != idx && r.Key == next.Key {
-			return nil, fail(400, "ambiguous_rule", "The edit would share a TL;DR key with another rule; keep rule identities distinct.")
+			return nil, RuleView{}, RuleView{}, fail(400, "ambiguous_rule", "The edit would share a TL;DR key with another rule; keep rule identities distinct.")
 		}
 	}
 	for i, r := range target.Rules {
 		if i != idx && r.Source != rendered[0].Rules[i].Source {
-			return nil, fail(400, "invalid_request", "An edit may change only its selected rule.")
+			return nil, RuleView{}, RuleView{}, fail(400, "invalid_request", "An edit may change only its selected rule.")
 		}
 	}
 	sc := sidecarFile{}
@@ -225,7 +231,7 @@ func editRule(s Source, files []File, in ProposalInput) (map[string]string, erro
 		d.KnownFields(true)
 		var extra any
 		if d.Decode(&sc) != nil || d.Decode(&extra) != io.EOF || target.Sidecar == nil || target.Sidecar.Problem != "" {
-			return nil, fail(409, "invalid_sidecar", "Fix the existing TL;DR sidecar in git before proposing here.")
+			return nil, RuleView{}, RuleView{}, fail(409, "invalid_sidecar", "Fix the existing TL;DR sidecar in git before proposing here.")
 		}
 	}
 	if sc.Rules == nil {
@@ -235,13 +241,13 @@ func editRule(s Source, files []File, in ProposalInput) (map[string]string, erro
 	sc.Rules[next.Key] = sidecarText{EN: strings.TrimSpace(in.TLDR.EN), DE: strings.TrimSpace(in.TLDR.DE), Basis: textBasis(next.Text)}
 	encoded, err := yaml.Marshal(sc)
 	if err != nil {
-		return nil, err
+		return nil, RuleView{}, RuleView{}, err
 	}
 	if len(encoded) > MaxSidecarBytes {
-		return nil, fail(400, "invalid_request", "The TL;DR sidecar exceeds its size limit.")
+		return nil, RuleView{}, RuleView{}, fail(400, "invalid_request", "The TL;DR sidecar exceeds its size limit.")
 	}
 	if err := guardPublic(s.Repository, in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation); err != nil {
-		return nil, err
+		return nil, RuleView{}, RuleView{}, err
 	}
-	return map[string]string{in.Path: content, SidecarPath(in.Path): string(encoded)}, nil
+	return map[string]string{in.Path: content, SidecarPath(in.Path): string(encoded)}, old, next, nil
 }

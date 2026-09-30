@@ -50,6 +50,19 @@ type Proposal struct {
 	Version          int64     `json:"-"`
 	OperationID      string    `json:"-"`
 	OperationUntil   time.Time `json:"-"`
+	// Doctrine inbox (AEON-444): references and decisions, never prose.
+	Inbox          bool   `json:"inbox,omitempty"`
+	BaseRuleSHA    string `json:"base_rule_sha256,omitempty"`
+	ProposedSHA    string `json:"proposed_rule_sha256,omitempty"`
+	Ticket         string `json:"ticket,omitempty"`
+	TicketID       string `json:"ticket_id,omitempty"`
+	SubmittedBy    string `json:"submitted_by,omitempty"`
+	EditedBy       string `json:"edited_by,omitempty"`
+	DismissedBy    string `json:"dismissed_by,omitempty"`
+	DismissReason  string `json:"dismiss_reason,omitempty"`
+	PromotedCommit string `json:"promoted_commit,omitempty"`
+	RuleSet        string `json:"rule_set,omitempty"`
+	RuleIndex      int    `json:"rule_index,omitempty"`
 }
 
 type proposalData struct {
@@ -62,10 +75,10 @@ type proposalData struct {
 
 const proposalColumns = `id::text,source_id::text,repository,path,rule_key,input_digest,base_commit,proposed_by::text,created_at,data`
 
-func scanProposal(row pgx.Row) (Proposal, error) {
+func scanProposal(row pgx.Row, extra ...any) (Proposal, error) {
 	var p Proposal
 	var raw []byte
-	err := row.Scan(&p.ID, &p.SourceID, &p.Repository, &p.Path, &p.RuleKey, &p.InputDigest, &p.BaseCommit, &p.ProposedBy, &p.CreatedAt, &raw)
+	err := row.Scan(append([]any{&p.ID, &p.SourceID, &p.Repository, &p.Path, &p.RuleKey, &p.InputDigest, &p.BaseCommit, &p.ProposedBy, &p.CreatedAt, &raw}, extra...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, fail(404, "not_found", "That proposal is not in this workspace.")
 	}
@@ -88,7 +101,8 @@ func getProposal(ctx context.Context, tx pgx.Tx, id string) (Proposal, error) {
 	return scanProposal(tx.QueryRow(ctx, `SELECT `+proposalColumns+` FROM doctrine_proposals WHERE id=$1 FOR UPDATE`, id))
 }
 func countPins(ctx context.Context, tx pgx.Tx, p *Proposal) error {
-	if p.ReleaseCommit == "" {
+	// A promoted inbox proposal is final: the pinned doctrine holds it.
+	if p.ReleaseCommit == "" || p.State == "promoted" {
 		return nil
 	}
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM doctrine_machine_pins WHERE repository=$1 AND commit_sha=$2`, p.Repository, p.ReleaseCommit).Scan(&p.PinnedMachines); err != nil {
@@ -123,6 +137,13 @@ func saveProposal(ctx context.Context, tx pgx.Tx, actor tenant.Principal, p *Pro
 		after["branch"] = p.Branch
 		after["orphaned"] = p.Orphaned
 	}
+	if p.Inbox {
+		after["inbox"] = true
+		after["ticket"] = p.Ticket
+		after["submitted_by"] = p.SubmittedBy
+		after["dismissed_by"] = p.DismissedBy
+		after["promoted_commit"] = p.PromotedCommit
+	}
 	_, err = events.Append(ctx, tx, actor, events.Change{Type: event, After: after})
 	return err
 }
@@ -143,7 +164,8 @@ func (m *Module) listProposals(r *http.Request, actor tenant.Principal) (any, er
 		Proposals []Proposal `json:"proposals"`
 	}{Proposals: []Proposal{}}
 	err := m.tx(r.Context(), actor, "rules.read", func(tx pgx.Tx) error {
-		rows, err := tx.Query(r.Context(), `SELECT `+proposalColumns+` FROM doctrine_proposals ORDER BY created_at DESC LIMIT 100`)
+		// Inbox proposals without a PR live in the doctrine inbox (AEON-444).
+		rows, err := tx.Query(r.Context(), `SELECT `+proposalColumns+` FROM doctrine_proposals WHERE NOT (COALESCE(data->>'inbox','false')='true' AND COALESCE((data->>'pr_number')::int,0)=0) ORDER BY created_at DESC LIMIT 100`)
 		if err != nil {
 			return err
 		}
@@ -257,53 +279,11 @@ func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, i
 		}
 		return *existing, nil
 	}
-	changed, err := editRule(source, files, in)
-	if err != nil {
-		return nil, err
-	}
-	quoteTexts := []string{in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation}
-	exemptMain, err := m.checkPrivateQuotes(ctx, actor, source, files, guard, quoteTexts...)
-	if err != nil {
-		return nil, err
-	}
-	g, err := m.appClient(ctx, actor.TenantID, source.Repository)
+	changed, main, g, err := m.preparePublication(ctx, actor, source, files, guard, in)
 	if err != nil {
 		return nil, err
 	}
 	defer g.revoke()
-	g.beforeWrite = func(ctx context.Context) error { return m.reauthorize(ctx, actor, "rules.write") }
-	main, err := g.main(ctx, source.Repository)
-	if err != nil {
-		return nil, err
-	}
-	// Compare both touched files with main. Never replace newer source/sidecar
-	// bytes with a stale pinned view. Unrelated main commits are safe to rebase.
-	tree, err := g.Tree(ctx, source.Repository, main)
-	if err != nil {
-		return nil, err
-	}
-	current := map[string]string{}
-	for _, e := range tree {
-		current[e.Path] = e.SHA
-	}
-	// These reads belong to PR preparation, after the local guard accepted.
-	// An exemption is bound to the main commit the guard actually checked;
-	// a changed main cannot reuse it or trigger a second networked guard.
-	if exemptMain != "" && exemptMain != main {
-		_ = m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
-			return storePublicMain(ctx, tx, actor.TenantID, source, nil)
-		})
-		return nil, fail(409, "stale_source", "Main changed since its cached quotation check. Reindex the public source and retry.")
-	}
-	cached := map[string]string{}
-	for _, f := range files {
-		cached[f.Path] = f.BlobSHA
-	}
-	for path := range changed {
-		if current[path] != cached[path] {
-			return nil, fail(409, "stale_source", "The rule file or TL;DR changed on main. Update the source pin and reload.")
-		}
-	}
 	// Reserve before the first GitHub mutation; same input recovers failures.
 	err = m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, actor.TenantID); err != nil {
@@ -317,7 +297,7 @@ func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, i
 			return fail(409, "rule_proposal_open", "An outcome proposal already reserves this rule.")
 		}
 		if in.automatic {
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM doctrine_proposals WHERE source_id=$1 AND path=$2 AND rule_key=$3 AND id<>$4::uuid AND COALESCE(data->>'state','proposed') NOT IN ('closed','merged','released','pinned'))`, in.SourceID, in.Path, in.RuleKey, in.RequestID).Scan(&duplicate); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM doctrine_proposals WHERE source_id=$1 AND path=$2 AND rule_key=$3 AND id<>$4::uuid AND COALESCE(data->>'state','proposed') NOT IN ('closed','merged','released','pinned','dismissed','promoted'))`, in.SourceID, in.Path, in.RuleKey, in.RequestID).Scan(&duplicate); err != nil {
 				return err
 			}
 			if duplicate {
@@ -349,8 +329,72 @@ func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, i
 	})
 }
 
+// preparePublication runs the identical edit, private guard, main and
+// authority checks for every path that publishes a rule change: the editor,
+// the outcome job and a promoted inbox proposal (AEON-444). The caller
+// revokes the returned client.
+func (m *Module) preparePublication(ctx context.Context, actor tenant.Principal, source Source, files []File, guard *guardCorpus, in ProposalInput) (map[string]string, string, *GitHub, error) {
+	changed, err := editRule(source, files, in)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	quoteTexts := []string{in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation}
+	exemptMain, err := m.checkPrivateQuotes(ctx, actor, source, files, guard, quoteTexts...)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	g, err := m.appClient(ctx, actor.TenantID, source.Repository)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			g.revoke()
+		}
+	}()
+	g.beforeWrite = func(ctx context.Context) error { return m.reauthorize(ctx, actor, "rules.write") }
+	main, err := g.main(ctx, source.Repository)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	// Compare both touched files with main. Never replace newer source/sidecar
+	// bytes with a stale pinned view. Unrelated main commits are safe to rebase.
+	tree, err := g.Tree(ctx, source.Repository, main)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	current := map[string]string{}
+	for _, e := range tree {
+		current[e.Path] = e.SHA
+	}
+	// These reads belong to PR preparation, after the local guard accepted.
+	// An exemption is bound to the main commit the guard actually checked;
+	// a changed main cannot reuse it or trigger a second networked guard.
+	if exemptMain != "" && exemptMain != main {
+		_ = m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
+			return storePublicMain(ctx, tx, actor.TenantID, source, nil)
+		})
+		return nil, "", nil, fail(409, "stale_source", "Main changed since its cached quotation check. Reindex the public source and retry.")
+	}
+	cached := map[string]string{}
+	for _, f := range files {
+		cached[f.Path] = f.BlobSHA
+	}
+	for path := range changed {
+		if current[path] != cached[path] {
+			return nil, "", nil, fail(409, "stale_source", "The rule file or TL;DR changed on main. Update the source pin and reload.")
+		}
+	}
+	ok = true
+	return changed, main, g, nil
+}
+
 func (m *Module) refreshProposal(r *http.Request, actor tenant.Principal) (any, error) {
 	return m.withProposal(r, actor, "rules.write", func(ctx context.Context, g *GitHub, p *Proposal) (string, error) {
+		if p.State == "promoted" || p.State == "dismissed" {
+			return "", nil
+		}
 		previousRelease, previousMerge := p.ReleaseCommit, p.MergeCommit
 		if err := m.observe(ctx, g, p); err != nil {
 			return "", err
@@ -528,6 +572,9 @@ func (m *Module) approveProposal(r *http.Request, actor tenant.Principal) (any, 
 	_, err := m.withProposal(r, actor, "rules.publish", func(ctx context.Context, g *GitHub, p *Proposal) (string, error) {
 		if in.Head != p.HeadSHA {
 			return "", fail(409, "stale_head", "Reload the PR before approving its current commit.")
+		}
+		if p.State == "promoted" {
+			return "", fail(409, "promoted", "This change is already in the pinned doctrine.")
 		}
 		if p.ApprovedBy != "" {
 			return "", nil
