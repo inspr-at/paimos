@@ -51,6 +51,14 @@ describe('account catalog contract', () => {
     expect(isAccountCatalog({ hosts: [{ id: 'mac', harnesses: [{ harness: 'codex', installed: true }] }], models: [] })).toBe(false)
   })
 
+  it('accepts percent readings and structured first-run waits without inventing headroom', () => {
+    const waiting = account({ available: false, remaining_fraction: null, windows: [{ ...window(5), unit: 'percent', provisional: true }], wait: { code: 'reading', run_now_allowed: false } })
+    expect(isAccountCatalog(catalog([waiting]))).toBe(true)
+    const view = presented(catalog([waiting])).view
+    expect(view.status.label).toBe('Waiting for the first run’s reading')
+    expect(view.status.detail).toContain('queue')
+  })
+
   it('fails closed when the catalog is missing, forbidden, or the wrong shape', async () => {
     expect(await fetchAccountCatalog('review-gate', '')).toMatchObject({ catalog: null, gap: 'family' })
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'Permission denied' }), { status: 403 })))
@@ -238,6 +246,30 @@ describe('account catalog contract', () => {
     expect(onlyFresh.view.notes.account).toContain('Allowance is unknown.')
     expect(onlyFresh.view.notes.account).not.toContain('most allowance left')
     expect(onlyFresh.view.notes.account).not.toContain('100%')
+    const unread = account({ id: accountA, label: 'Unread', remaining_fraction: null, windows: [{ ...window(5), provisional: true }] })
+    const blocked = account({ id: accountB, available: false, remaining_fraction: null, unavailable_reasons: ['allowance'] })
+    const onlyRunnable: AgentAccountCatalog = {
+      as_of: new Date(NOW).toISOString(),
+      role: 'build',
+      hosts: [{
+        daemon_id: 'workstation',
+        label: 'Work Mac',
+        harnesses: [
+          { harness: 'codex', default_account_id: null, accounts: [blocked] },
+          { harness: 'claude', default_account_id: accountA, accounts: [unread] },
+        ],
+      }],
+    }
+    const picked = presented(onlyRunnable)
+    expect(picked.filled.harness).toBe('claude')
+    expect(picked.filled.accountId).toBe(accountA)
+    const several = structuredClone(onlyRunnable)
+    several.hosts[0].harnesses[0].default_account_id = accountB
+    several.hosts[0].harnesses[0].accounts[0].available = true
+    several.hosts[0].harnesses[0].accounts[0].remaining_fraction = null
+    const unselected = presented(several)
+    expect(unselected.filled.harness).toBe('')
+    expect(unselected.filled.accountId).toBe('')
   })
 
   it('labels the requested snapshot and reports a different or unknown session separately', () => {

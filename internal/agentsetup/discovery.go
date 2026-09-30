@@ -154,6 +154,7 @@ func (c Candidate) Interpreter() harnesslaunch.Node {
 }
 
 type Discovery struct {
+	PiHome        string // Explicit private per-account pi profile; never uploaded.
 	Executor      Executor
 	LookPath      func(string) (string, error)
 	Home          string
@@ -199,6 +200,9 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		return d.detectGrok(ctx, accountContext)
 	case "pi":
 		c.Home = filepath.Join(d.Home, ".pi", "agent")
+		if d.PiHome != "" {
+			c.Home = d.PiHome
+		}
 	default:
 		return c, errors.New("unsupported guided harness")
 	}
@@ -237,6 +241,23 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		versionCommand.Env = piprobe.Environment(c.Home, c.PiNode.Path)
 	}
 	raw, err := d.Executor.Run(ctx, versionCommand)
+	// A shell guard around npm Codex hides its env-node shebang. If the
+	// service PATH cannot start it, retry the same guard with a trusted Node
+	// pin; never bypass the guard or inherit the interactive shell's PATH.
+	var exit *CommandError
+	if harness == "codex" && c.Node.Path == "" && d.NodePath == "" && errors.As(err, &exit) && exit.ExitCode == 127 {
+		if node, lookupErr := d.LookPath("node"); lookupErr == nil {
+			retry := d
+			retry.NodePath = node
+			c.Node, err = retry.ResolveNode(ctx, physical)
+			if err != nil {
+				return c, err
+			}
+			childEnv = harnesslaunch.Environment(os.Environ(), c.Node.Path)
+			versionCommand.Env = childEnv
+			raw, err = d.Executor.Run(ctx, versionCommand)
+		}
+	}
 	if err != nil {
 		return c, annotateProbe(fmt.Errorf("%w; the launcher must also work with the service PATH", harnesslaunch.ErrStart), err, d.Home, d.Workspace)
 	}
@@ -288,6 +309,11 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		identity, err := inspect(ctx, physical, c.Home)
 		if err != nil {
 			return c, errors.New("Codex account identity unavailable; use normal vendor login and resume")
+		}
+		// A confirmed ChatGPT account need not disclose an email. Keep explicit
+		// account-context matching strict: an unnamed account cannot prove it.
+		if identity == "" && accountContext == "" {
+			identity = CodexChatGPTLogin
 		}
 		if !safeLabel.MatchString(identity) || accountContext != "" && !strings.EqualFold(accountContext, identity) {
 			return c, errors.New("Codex signed-in identity differs from the selected account context")
@@ -348,7 +374,10 @@ func (d Discovery) ResolveNode(ctx context.Context, path string) (harnesslaunch.
 		}
 	}
 	physical, err := pinnedRegular(node, d.Workspace, true)
-	if err != nil || filepath.Base(physical) != "node" {
+	if err != nil {
+		return harnesslaunch.Node{}, fmt.Errorf("%w; %w", action, err)
+	}
+	if filepath.Base(physical) != "node" {
 		return harnesslaunch.Node{}, action
 	}
 	raw, err := d.Executor.Run(ctx, Command{Path: physical, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, physical), Dir: commandDir(d.Workspace, d.Home)})

@@ -153,6 +153,82 @@ func TestBuildFromGit(t *testing.T) {
 	}
 }
 
+func TestBuildLightweightReleaseTags(t *testing.T) {
+	const version = "260923150000.0.0"
+	for _, tc := range []struct {
+		name, metadata string
+		reservedAtHead bool
+		published      bool
+	}{
+		{name: "matching", metadata: `{"version":"260923150000.0.0","release_channel":"preview","release_sequence":42}`, published: true},
+		{name: "mismatching", metadata: `{"version":"260923143005.0.0","release_channel":"stable","release_sequence":2}`},
+		{name: "missing"},
+		{name: "malformed", metadata: `{`},
+		{name: "reserved at tag", metadata: `{"version":"260923150000.0.0","unpublished_reservations":["v260923150000.0.0"]}`},
+		{name: "reserved at head", metadata: `{"version":"260923150000.0.0"}`, reservedAtHead: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			run := func(args ...string) string {
+				t.Helper()
+				cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+				cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",
+					"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
+					"GIT_AUTHOR_DATE=2026-09-23T14:00:00Z", "GIT_COMMITTER_DATE=2026-09-23T17:01:02+02:00")
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("git %v: %v\n%s", args, err, out)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			write := func(metadata string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, "version.json"), []byte(metadata), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			run("init", "-q", "-b", "main")
+			if tc.metadata != "" {
+				write(tc.metadata)
+				run("add", "version.json")
+			}
+			// A commit message is not release metadata, even if it looks like an
+			// annotated tag. Neither its sequence nor the author's date may win.
+			run("commit", "--allow-empty", "-qm", "PAIMOS AEON v"+version+" · inspr-calendar-v2 · stable · release_sequence 99 · AEON-367")
+			commit := run("rev-parse", "HEAD")
+			run("tag", "v"+version)
+			head := versionFile{Product: "PAIMOS AEON", Version: version, VersionScheme: SchemeCalVer2}
+			if tc.reservedAtHead {
+				head.UnpublishedReservations = []string{version}
+			}
+			raw, _ := json.Marshal(head)
+			write(string(raw))
+			h, err := Build(context.Background(), Options{Repo: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.published {
+				for _, release := range h.Releases {
+					if release.State == StatePublished || release.Tag != "" {
+						t.Fatalf("accepted unverified lightweight tag: %+v", release)
+					}
+				}
+				return
+			}
+			if len(h.Releases) != 1 {
+				t.Fatalf("releases: %+v", h.Releases)
+			}
+			r := h.Releases[0]
+			if r.Version != version || r.State != StatePublished || r.ReleaseChannel != "preview" || r.ReleaseSequence != 42 || r.Evidence.SourceCommit != commit {
+				t.Fatalf("lightweight release: %+v", r)
+			}
+			if r.TaggedAt == nil || r.TaggedAt.Format(time.RFC3339) != "2026-09-23T15:01:02Z" || len(r.Changes) != 1 || strings.Join(r.Changes[0].Tickets, ",") != "AEON-367" {
+				t.Fatalf("lightweight release time or changes: %+v", r)
+			}
+		})
+	}
+}
+
 func TestBuildWithGitHubEvidence(t *testing.T) {
 	dir := repo(t)
 	calls := 0

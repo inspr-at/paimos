@@ -94,7 +94,14 @@ func TestServeShutdownAndBootstrap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("AEON_DATABASE_URL", fresh.URL)
+	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", filepath.Join(t.TempDir(), "not-provisioned"))
+	loaded, err := config.FromEnv()
+	if err != nil || loaded.DoctrineGuardKey != nil {
+		t.Fatal("missing doctrine guard must not prevent server startup")
+	}
 	cfg := config.Config{
+		DoctrineGuardKey:    loaded.DoctrineGuardKey,
 		DatabaseURL:         fresh.URL,
 		Env:                 "dev",
 		PublicURL:           "http://127.0.0.1",

@@ -2,6 +2,8 @@
 // A release tag is "v" plus one calendar coordinate (YYMMDDhhmmss.0.0) on a real
 // proleptic Gregorian date: inspr-calver-3, or inspr-calendar-v2 for history tagged
 // up to LAST_CALVER2 (both share the coordinate). Writes version (without v) to GITHUB_OUTPUT.
+// Create annotated tags with: git tag -a "$tag" -m "Release $tag".
+// The release workflow separately rejects lightweight tags before publication.
 import { appendFileSync } from "node:fs";
 import { validCalendarVersion } from "./verify-release.mjs";
 

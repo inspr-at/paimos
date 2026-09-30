@@ -113,30 +113,36 @@ type snapshot struct {
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
-	VersionStatus     string       `json:"version_status,omitempty"`
-	AccountingState   string       `json:"accounting_state,omitempty"`
-	Schema            string       `json:"schema"`
-	Stage             string       `json:"stage"`
-	RequestID         string       `json:"request_id,omitempty"`
-	ComputerID        string       `json:"computer_id,omitempty"`
-	UserCode          string       `json:"user_code,omitempty"`
-	VerificationURI   string       `json:"verification_uri,omitempty"`
-	Accounts          []Enrollment `json:"accounts,omitempty"`
-	LocalProcesses    string       `json:"local_processes"`
-	ServerRevocation  string       `json:"server_revocation,omitempty"`
-	Action            string       `json:"action,omitempty"`
-	RetryAfterSeconds int          `json:"retry_after_seconds,omitempty"`
+	BlockedAccounts   []BlockedAccount         `json:"blocked_accounts,omitempty"`
+	HarnessDetails    map[string]HarnessDetail `json:"harness_details,omitempty"`
+	HarnessStatuses   map[string]string        `json:"harness_statuses,omitempty"`
+	VersionStatus     string                   `json:"version_status,omitempty"`
+	AccountingState   string                   `json:"accounting_state,omitempty"`
+	Schema            string                   `json:"schema"`
+	Stage             string                   `json:"stage"`
+	RequestID         string                   `json:"request_id,omitempty"`
+	ComputerID        string                   `json:"computer_id,omitempty"`
+	UserCode          string                   `json:"user_code,omitempty"`
+	VerificationURI   string                   `json:"verification_uri,omitempty"`
+	Accounts          []Enrollment             `json:"accounts,omitempty"`
+	LocalProcesses    string                   `json:"local_processes"`
+	ServerRevocation  string                   `json:"server_revocation,omitempty"`
+	Action            string                   `json:"action,omitempty"`
+	RetryAfterSeconds int                      `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
-	HarnessErrors                          map[string]string
 	ProfilePermissions                     bool
 	HarnessFailed                          bool
+	HarnessDetails                         map[string]HarnessDetail
+	HarnessStatuses                        map[string]string
+	HarnessErrors                          map[string]string
 	LoginRequired                          bool
 	VerificationUnavailable                []string
 	Ready                                  bool
 	DaemonID, State                        string
 	Active, Unconfirmed, SettlementPending []string
 	VerificationResults                    map[string]string
+	BlockedAccounts                        []BlockedAccount
 }
 
 // SavedOptions exposes only noncredential choices to resume the local command.
@@ -677,6 +683,9 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		return p, nil
 	}
 	local, err := e.Local.Status(ctx, "")
+	if err == nil && local.DaemonID == s.View.DaemonID && len(local.BlockedAccounts) > 0 {
+		p.BlockedAccounts = append([]BlockedAccount(nil), local.BlockedAccounts...)
+	}
 	if err != nil || local.DaemonID != s.View.DaemonID || !local.Ready {
 		p.Stage = "provisioning"
 		p.Action = "Daemon connectivity is unconfirmed; resume setup after the approved service starts."
@@ -703,73 +712,38 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 	return c, nil
 }
 
-// ValidateRuntimeDependencies gates execution, never access to recovery metadata
-// or the credential needed to revoke this computer. Removed harnesses do not
-// block the remaining accounts merely because their old dependency pins remain.
-func ValidateRuntimeDependencies(c RuntimeConfig) error {
-	if err := ValidateHarnessRuntimeDependencies(c); err != nil {
-		return err
+// UnpinnedEnrollment reports an older npm Codex, Cursor or pi account whose
+// env-node launcher has no interpreter pin. A native wrapper is not unpinned.
+func UnpinnedEnrollment(a RuntimeAccount) bool {
+	switch a.Harness {
+	case "codex", "cursor", "pi":
+	default:
+		return false
 	}
-	return ValidateClaudeRuntimeDependencies(c)
+	node := a.Node
+	if a.Harness == "pi" {
+		node = a.PiNode
+	}
+	if node != (harnesslaunch.Node{}) {
+		return false
+	}
+	needed, err := harnesslaunch.NeedsNode(a.Path)
+	return err == nil && needed
 }
 
-// ValidateHarnessRuntimeDependencies checks the pinned interpreters of every
-// npm-launched harness except Claude (AEON-334, AEON-341). A failure still
-// stops execution on this computer; Claude's dependencies are checked on their
-// own so that a Claude repin or repair holds only Claude (AEON-342).
-func ValidateHarnessRuntimeDependencies(c RuntimeConfig) error {
+// LaunchableRuntime removes unpinned enrollments so a whole-config check can
+// still see the other accounts. The paired daemon does not use it to ignore
+// partial, drifted, invalid, or unsafe pins; AccountPinBlocks isolates every
+// pin problem to that account.
+func LaunchableRuntime(c RuntimeConfig) RuntimeConfig {
+	kept := make([]RuntimeAccount, 0, len(c.Accounts))
 	for _, a := range c.Accounts {
-		if a.Harness == "grok" || a.Harness == "claude" {
-			continue
-		}
-		node := a.Node
-		if a.Harness == "pi" {
-			node = a.PiNode
-		}
-		if err := validateNode(a.Path, c.Workspace, node); err != nil {
-			return err
-		}
-		if node.Path != "" {
-			raw, err := (OSExecutor{}).Run(context.Background(), Command{Path: node.Path, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, node.Path), Dir: commandDir(c.Workspace, userHome())})
-			match := safeVersion.FindSubmatch(raw)
-			if err != nil || len(match) != 2 || string(match[1]) != node.Version {
-				return piprobe.ErrStart
-			}
+		if !UnpinnedEnrollment(a) {
+			kept = append(kept, a)
 		}
 	}
-	return nil
-}
-
-// ValidateClaudeRuntimeDependencies checks the approved Claude CLI and its
-// pinned Node/SDK links (AEON-342). An npm-launched Claude CLI runs on Claude's
-// own pinned Node (AEON-341), which after a repin is the repinned one, so it is
-// checked against the resolved Claude Node rather than a saved copy.
-func ValidateClaudeRuntimeDependencies(c RuntimeConfig) error {
-	claude := false
-	for _, a := range c.Accounts {
-		if a.Harness != "claude" {
-			continue
-		}
-		claude = true
-		if _, err := ResolveClaudeExecutable(a.Path, c.Workspace); err != nil {
-			return err
-		}
-	}
-	if !claude {
-		return nil
-	}
-	deps, err := ResolveClaudeRuntime(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace)
-	if err != nil {
-		return errors.New("Claude dependencies changed: run aeon-agentd repin --harness claude; runtime dependencies are unavailable or unsafe")
-	}
-	for _, a := range c.Accounts {
-		if a.Harness == "claude" && a.Node != (harnesslaunch.Node{}) {
-			if err := harnesslaunch.Validate(a.Path, deps.NodePath); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	c.Accounts = kept
+	return c
 }
 func ReadRuntime(root string) (RuntimeConfig, secret, error) {
 	c, err := ReadRuntimeConfig(root)
@@ -820,8 +794,14 @@ func within(root, path string) bool {
 	return err == nil && (rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 func repositoryPath(path string) bool {
+	return repositoryPathWithLstat(path, os.Lstat)
+}
+
+// Private state rejects every repository ancestor, including package-manager
+// prefixes. The Homebrew exception belongs only to executable/dependency pins.
+func repositoryPathWithLstat(path string, lstat func(string) (os.FileInfo, error)) bool {
 	for p := path; p != "/" && p != "."; p = filepath.Dir(p) {
-		if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
+		if _, err := lstat(filepath.Join(p, ".git")); err == nil {
 			return true
 		}
 	}

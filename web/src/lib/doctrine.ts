@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The INSPR doctrine as a git-backed, read-only rule layer (AEON-318). Git is
 // the source of truth: Aeon shows each configured repository at its pinned
-// commit and never edits it. Every rule's text is the exact bytes of its lines
-// at that commit and links there; TL;DRs are read from git, never written here.
+// commit. Edits become PRs; the pinned view stays unchanged. Every rule's text
+// is the exact bytes of its lines at that commit and links there; TL;DRs live
+// in git alongside the rule.
 import { api, RequestFailure } from './api.ts'
 import { sessionGone } from './authz.ts'
 
@@ -58,7 +59,7 @@ export interface DoctrineSource {
   files: DoctrineFile[]
   skipped: DoctrineSkip[]
 }
-export interface DoctrineLayer { sources: DoctrineSource[] }
+export interface DoctrineLayer { sources: DoctrineSource[]; proposals_enabled?: boolean; proposals_disabled_reason?: string }
 export interface DoctrineSourceInput {
   repository?: string
   visibility: 'public' | 'private'
@@ -90,7 +91,7 @@ async function send(path: string, method = 'GET', body?: unknown): Promise<Doctr
     throw new DoctrineError(response.status, failure.code ?? '', failure.error || `Request failed (${response.status})`)
   }
   const layer = await response.json() as DoctrineLayer
-  return { sources: layer.sources ?? [] }
+  return { ...layer, sources: layer.sources ?? [] }
 }
 
 export const getDoctrine = () => send('/rules/doctrine')
@@ -179,4 +180,80 @@ const SHA = /^[0-9a-f]{40}$/
 export function pinInput(value: string): Pick<DoctrineSourceInput, 'ref' | 'commit'> {
   const pin = value.trim()
   return SHA.test(pin) ? { commit: pin } : { ref: pin }
+}
+
+export interface DoctrineProposal {
+  id: string; source_id: string; repository: string; path: string; rule_key: string
+  state: 'proposed' | 'in_review' | 'merged' | 'released' | 'pinned' | 'closed'
+  head_sha: string; pr_number: number; pr_url: string; proposed_by: string; approved_by?: string
+  merge_commit?: string; release?: string; release_commit?: string; release_url?: string
+  release_requested?: boolean; gate_ready: boolean; gate_reason?: string; pinned_machines: number; created_at: string
+  branch?: string; orphaned?: boolean
+  draft?: boolean; automatic?: boolean
+}
+export interface DoctrineProposalInput {
+  request_id: string; source_id: string; path: string; rule_key: string; rule_sha256: string
+  source: string; tldr: { en: string; de?: string }; explanation: string
+}
+async function proposalRequest<T>(path: string, method = 'POST', body?: unknown): Promise<T> {
+  const response = await api(`/rules/doctrine/proposals${path}`, {
+    method, headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  if (response.status === 401) sessionGone()
+  if (!response.ok) {
+    const failure = await response.json().catch(() => ({})) as { code?: string; error?: string }
+    throw new DoctrineError(response.status, failure.code ?? '', failure.error || `Request failed (${response.status})`)
+  }
+  return response.json() as Promise<T>
+}
+export const proposeDoctrineChange = (input: DoctrineProposalInput) => proposalRequest<DoctrineProposal>('', 'POST', input)
+export const getDoctrineProposals = async () => (await proposalRequest<{ proposals: DoctrineProposal[] }>('', 'GET')).proposals ?? []
+export const refreshDoctrineProposal = (id: string) => proposalRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/refresh`)
+export const approveDoctrineProposal = (id: string, head: string) => proposalRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/approve`, 'POST', { head_sha: head })
+export function proposalState(p: Pick<DoctrineProposal, 'state' | 'pinned_machines'> & { orphaned?: boolean; pr_number?: number; draft?: boolean }): string {
+  if (p.orphaned && !p.pr_number) return 'Branch left on GitHub'
+  if (p.draft && (p.state === 'proposed' || p.state === 'in_review')) return 'Draft'
+  if (p.state === 'pinned') return `Pinned on ${p.pinned_machines} reported ${p.pinned_machines === 1 ? 'machine' : 'machines'}`
+  return { proposed: 'Proposed', in_review: 'In review', merged: 'Merged', released: 'Released', closed: 'Closed' }[p.state]
+}
+
+export interface DoctrineMetric {
+  name: string; rules_version: string; samples: number; value: number; from: string; until: string
+}
+export interface DoctrineFinding {
+  id: string; pattern: string; title: string; count: number; rules_version: string; harness: string; ticket_kind: string
+  status: 'pending' | 'draft' | 'awaiting_use' | 'internal_note' | 'observed' | 'closed'; reason?: string
+  proposal_id?: string; pr_url?: string; rule_label?: string; created_at: string
+  evidence: { id: string; ticket_id: string; ticket_key: string; href: string; kind: string }[]
+  before: DoctrineMetric; after?: DoctrineMetric; delta?: number; metrics?: DoctrineMetric[]
+}
+export async function getDoctrineFindings(): Promise<DoctrineFinding[]> {
+  const response = await api('/rules/doctrine/analysis')
+  if (response.status === 401) sessionGone()
+  if (response.status === 404) return [] // mixed-version rollout
+  if (!response.ok) throw new DoctrineError(response.status, '', 'Outcome proposals could not be loaded.')
+  return ((await response.json()) as { findings: DoctrineFinding[] }).findings ?? []
+}
+export const findingState = (f: DoctrineFinding) => ({ pending: 'Queued', draft: 'Draft', awaiting_use: 'Awaiting outcomes', internal_note: 'Internal note', observed: 'Measured', closed: 'Closed' })[f.status]
+export function outcomeMetric(m: DoctrineMetric): string {
+  if (m.name === 'fix_rounds' || m.name === 'review_rounds') return `${Number(m.value.toFixed(1))} rounds`
+  if (m.name === 'time_to_done') return `${Number((m.value / 60).toFixed(1))} min`
+  return `${Number((m.value * 100).toFixed(1))}%`
+}
+export function outcomePopulation(m: DoctrineMetric): string {
+  if (m.name.startsWith('gate:')) return 'review verdicts'
+  if (m.name.startsWith('learning:')) return 'learning tickets'
+  if (m.name === 'ci_failures') return 'CI results'
+  return 'tickets'
+}
+const outcomeMetricNames: Record<string, string> = { review_rounds: 'Review rounds', fix_rounds: 'Fix rounds', ci_failures: 'CI failures', reverts: 'Reverted tickets', exception_votes: 'Rework requests', time_to_done: 'Time to done' }
+export const outcomeMetricName = (m: DoctrineMetric): string => outcomeMetricNames[m.name] ?? 'Recorded outcomes'
+export function outcomeDelta(f: DoctrineFinding): string {
+  if (f.delta === undefined) return ''
+  const sign = f.delta > 0 ? '+' : f.delta < 0 ? '−' : ''
+  const amount = Math.abs(f.delta)
+  if (f.before.name === 'fix_rounds') return `${sign}${Number(amount.toFixed(1))} rounds`
+  if (f.before.name === 'time_to_done') return `${sign}${Number((amount / 60).toFixed(1))} min`
+  return `${sign}${Number((amount * 100).toFixed(1))} percentage points`
 }

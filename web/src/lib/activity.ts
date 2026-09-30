@@ -3,7 +3,7 @@
 // chronological timeline: comments stay as they are; field changes by the same
 // person within a few minutes collapse into one line.
 import type { ActivityChange, ActivityItem } from './api.ts'
-import { normaliseState, priorityLabel, statusMeta } from './work.ts'
+import { kindLabel, normaliseState, priorityLabel, statusMeta } from './work.ts'
 
 export const COLLAPSE_MS = 5 * 60_000
 export const EDIT_WINDOW_MS = 15 * 60_000
@@ -49,7 +49,7 @@ export function buildTimeline(items: ActivityItem[], windowMs = COLLAPSE_MS): Ti
   return out
 }
 
-const FIELD_LABEL: Record<ActivityChange['field'], string> = { status: 'status', priority: 'priority', assignee: 'assignee', title: 'title', parent: 'parent', tags: 'labels' }
+const FIELD_LABEL: Record<ActivityChange['field'], string> = { status: 'status', priority: 'priority', assignee: 'assignee', title: 'title', parent: 'parent', tags: 'labels', kind: 'the type' }
 export function changeValue(field: ActivityChange['field'], value: string | null): string {
   if (field === 'status') return value ? statusMeta(value).label : '—'
   if (field === 'priority') return priorityLabel(value)
@@ -59,6 +59,7 @@ export function changeValue(field: ActivityChange['field'], value: string | null
   return value ?? '—'
 }
 export function describeChange(change: ActivityChange): { label: string; from?: string; to?: string } {
+  if (change.field === 'kind') return { label: 'changed the type', from: change.from ? kindLabel(change.from) : '—', to: change.to ? kindLabel(change.to) : '—' }
   if (change.field === 'parent') return { label: 'moved it to another parent' }
   if (change.field === 'assignee' && !change.from) return { label: 'assigned it to', to: changeValue('assignee', change.to) }
   if (change.field === 'assignee' && !change.to) return { label: 'unassigned', from: changeValue('assignee', change.from) }

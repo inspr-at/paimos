@@ -25,6 +25,9 @@ type Event struct {
 	After            json.RawMessage `json:"after"`
 	At               time.Time       `json:"at"`
 	UndoOf           *int64          `json:"undo_of"`
+	// NodeChanges is set when the event is read (history and stream), never
+	// stored: the nodes a node.* event changed, for live views.
+	NodeChanges []NodeChange `json:"node_changes,omitempty"`
 }
 
 // Change describes complete resource snapshots. A nil snapshot is SQL NULL.

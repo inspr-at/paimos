@@ -4,8 +4,7 @@
 // one enrollment. Device, runtime and lifecycle secrets never enter this module.
 // Setup, redemption and tombstone reconciliation stay on the computer.
 
-import { api, APIError, resilientFetch } from './api.ts'
-import { createWindow, listAccounts, type AllowanceWindow, type AllowanceWrite } from './agents.ts'
+import { api, resilientFetch } from './api.ts'
 import { onAccessChange } from './authz.ts'
 import { brand } from './brand.ts'
 
@@ -32,8 +31,8 @@ const CLEANUP_STATES = ['pending', 'confirmed'] as const
 const PROCESS_STATES = ['unconfirmed', 'drained'] as const
 const VERIFICATION_MODES = ['one_per_harness', 'connect_only'] as const
 const DISCONNECT_MODES = ['drain', 'revoke_now'] as const
-const UNITS = ['requests', 'tokens', 'cost_micros'] as const
-const PACES = ['steady', 'frontload', 'unrestricted'] as const
+const HARNESS_STATES = ['ready', 'blocked', 'login_required', 'checking', 'draining'] as const
+export type HarnessStatus = string
 
 export type RequestState = (typeof REQUEST_STATES)[number]
 export type ComputerState = (typeof COMPUTER_STATES)[number]
@@ -41,12 +40,11 @@ export type CleanupState = (typeof CLEANUP_STATES)[number]
 export type ProcessState = (typeof PROCESS_STATES)[number]
 export type VerificationMode = (typeof VERIFICATION_MODES)[number]
 export type DisconnectMode = (typeof DISCONNECT_MODES)[number]
-export type ReviewChoice = VerificationMode | 'ongoing_limits'
+export type ReviewChoice = VerificationMode
 export type SetupState = 'not_started' | 'approved' | 'provisioning' | 'login_required' | 'service_conflict' | 'connected' | 'setup_failed'
 export type VerificationState = 'not_selected' | 'queued' | 'starting' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'ownership_lost' | 'expired' | 'unavailable'
 export type Connectivity = 'online' | 'offline' | 'unknown'
 export type AccountingState = 'settled' | 'unconfirmed'
-export type LimitMatch = 'saved' | 'absent' | 'unknown'
 
 const SETUP_STATES: readonly SetupState[] = ['not_started', 'approved', 'provisioning', 'login_required', 'service_conflict', 'connected', 'setup_failed']
 const VERIFICATION_STATES: readonly VerificationState[] = ['not_selected', 'queued', 'starting', 'running', 'waiting', 'completed', 'failed', 'cancelled', 'ownership_lost', 'expired', 'unavailable']
@@ -103,6 +101,20 @@ export interface PairingEnrollment {
   accounting_state?: AccountingState
 }
 
+export type HarnessReason = string
+export interface HarnessFix { kind: 'repin' | 'add_harness' | 'login' | 'restart'; command: string }
+export interface AccountAttention { account_id: string; reason: string }
+export interface HarnessDetail {
+  state: HarnessStatus
+  reason?: HarnessReason
+  fix?: HarnessFix
+  attention_accounts?: AccountAttention[]
+  /** Full count of enrolled accounts that need a fix, or a lower bound when an older report stopped at five names. */
+  attention_count?: number
+  /** True when the list may omit a blocked account. An omitted account is not ready. */
+  attention_truncated?: boolean
+}
+
 /** Public pairing projection. Secret-bearing keys are not part of this type. */
 export interface PairingView {
   request_id: string
@@ -131,6 +143,9 @@ export interface PairingView {
   interval_seconds?: number
   /** Local setup report. Absent or any value other than connected does not mean the daemon is connected. */
   setup_state?: SetupState
+  /** Status codes only. An absent report does not imply harness readiness. */
+  harness_statuses?: Partial<Record<string, HarnessStatus>>
+  harness_details?: Partial<Record<string, HarnessDetail>>
   setup_error?: string | null
   last_seen_at?: string | null
   /** Recent probe evidence. Unknown and offline do not prove that local work stopped. */
@@ -189,23 +204,14 @@ export interface ApproveBody {
   selected_account_keys: string[]
 }
 
-export interface OngoingLimitDraft {
-  account_key: string
-  starts_at: string
-  ends_at: string
-  unit: AllowanceWrite['unit']
-  allowance: number | null
-  pace_model: AllowanceWrite['pace_model']
-  burst_ratio: number
-}
-
 export interface PairingPermissions {
   canLookup: boolean
   canApprove: boolean
   canDeny: boolean
   canDisconnect: boolean
   canListComputers: boolean
-  canSetOngoingLimits: boolean
+  /** Lets agents use an approved computer's accounts (capacity/approve). */
+  canApproveAccounts: boolean
   /** The runtime daemon never receives person approval or force-stop authority. */
   canForceStop: false
 }
@@ -215,7 +221,7 @@ export class PairingError extends Error {
   readonly code: string
   readonly retryAfterSeconds: number | null
   readonly next: string
-  /** Accounts whose allowance was saved or found already saved before a later account stopped the batch. */
+  /** Accounts approved before a later account stopped the batch. */
   readonly savedAccountIds: readonly string[]
   constructor(status: number, message: string, options: { code?: string; retryAfterSeconds?: number | null; next?: string; savedAccountIds?: readonly string[] } = {}) {
     super(message)
@@ -263,7 +269,7 @@ export function pairingPermissions(input: { permissions: readonly string[]; prin
     canDeny: manage,
     canDisconnect: manage,
     canListComputers: read,
-    canSetOngoingLimits: manage,
+    canApproveAccounts: manage,
     canForceStop: false,
   }
 }
@@ -513,24 +519,6 @@ export function lastActiveLabel(iso: string | null | undefined, now = Date.now()
   return new Date(time).toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
-export function emptyRequestLimit(accountKey: string): OngoingLimitDraft {
-  return { account_key: accountKey, starts_at: '', ends_at: '', unit: 'requests', allowance: null, pace_model: 'unrestricted', burst_ratio: 0 }
-}
-
-/** Requests and a period. Other units are outside this setup flow. */
-export function simpleRequestLimitError(draft: OngoingLimitDraft | null): string | null {
-  if (!draft || draft.unit !== 'requests' || draft.pace_model !== 'unrestricted' || draft.burst_ratio !== 0) {
-    return 'Ongoing limits here are a number of requests for a period.'
-  }
-  const starts = new Date(draft.starts_at)
-  const ends = new Date(draft.ends_at)
-  if (!Number.isFinite(starts.getTime()) || !Number.isFinite(ends.getTime()) || ends <= starts
-    || !Number.isSafeInteger(draft.allowance) || Number(draft.allowance) < 1) {
-    return 'Enter a positive whole number of requests and a period that ends after it starts.'
-  }
-  return null
-}
-
 export function activeRunIds(view: Pick<PairingView, 'enrollments'>): string[] {
   const ids: string[] = []
   for (const enrollment of view.enrollments) {
@@ -589,10 +577,34 @@ export function unsupportedVerification(view: Pick<PairingView, 'verification_ca
   return blocked
 }
 
+/** Keep only explicitly selected, published verifiable accounts; never add an account. */
+export function verifiableAccountKeys(view: Pick<PairingView, 'verification_capabilities' | 'requested_accounts'>, keys: readonly string[]): string[] {
+  return view.requested_accounts
+    .filter(account => keys.includes(account.account_key) && view.verification_capabilities?.[account.harness]?.supported)
+    .map(account => account.account_key)
+}
+
 export interface AddHarnessTargetProblem {
   code: 'missing' | 'mismatch' | 'name'
   message: string
   next: string
+}
+
+/** The button and its adjacent explanation share one source for every disabled state. */
+export function connectDisabledReason(input: {
+  busy: string
+  canApprove: boolean
+  selectedAccountKeys: readonly string[]
+  targetProblem: AddHarnessTargetProblem | null
+}): string | null {
+  if (input.busy === 'approve') return 'Connecting this computer…'
+  if (input.busy === 'deny') return 'Denying this request…'
+  if (input.busy) return 'Wait for the current action to finish.'
+  if (!input.canApprove) return 'Only a signed-in person who can manage accounts can connect this computer.'
+  if (!input.selectedAccountKeys.length) return 'Choose at least one harness.'
+  if (input.targetProblem?.code === 'name') return 'The computer name must match the computer you opened.'
+  if (input.targetProblem) return 'Use the matching code, or review this as a new computer.'
+  return null
 }
 
 /** Connect stays off until the reviewed request is the opened computer, or the person starts a new-computer review. */
@@ -627,42 +639,6 @@ export function addHarnessTargetProblem(input: {
   return null
 }
 
-export interface LimitAccountRow { key: string; id: string; label: string }
-
-/**
- * The save right after approval uses only the accounts selected for this request.
- * A later explicit form may list every connected account on the computer.
- */
-export function ongoingLimitAccounts(input: {
-  pending: boolean
-  selectedKeys: readonly string[]
-  grantedKeys: readonly string[] | null
-  limitsNow: boolean
-  showAll: boolean
-  requested: readonly RequestedAccount[]
-  enrollments: readonly PairingEnrollment[]
-}): LimitAccountRow[] {
-  const row = (key: string): LimitAccountRow | null => {
-    const enrollment = input.enrollments.find(item => item.account_key === key)
-    if (enrollment?.state === 'revoked') return null
-    const requested = input.requested.find(item => item.account_key === key)
-    return {
-      key,
-      id: enrollment?.account_id ?? '',
-      label: enrollment?.label ?? requested?.label ?? key,
-    }
-  }
-  const requestKeys = input.pending ? input.selectedKeys : (input.grantedKeys ?? [])
-  if (input.pending || input.limitsNow || !input.showAll) {
-    return requestKeys.map(row).filter((item): item is LimitAccountRow => item !== null)
-  }
-  return input.enrollments.filter(item => item.state !== 'revoked').map(item => ({
-    key: item.account_key,
-    id: item.account_id,
-    label: item.label,
-  }))
-}
-
 /** A failed refresh keeps the previous list. Silence is not cleanup or a disconnect. */
 export function applyComputerListRefresh(
   previous: readonly PairingView[],
@@ -670,21 +646,6 @@ export function applyComputerListRefresh(
 ): { computers: PairingView[]; failed: boolean } {
   if (!result.ok) return { computers: [...previous], failed: true }
   return { computers: [...result.computers], failed: false }
-}
-
-export function ongoingLimitError(draft: OngoingLimitDraft | null): string | null {
-  if (!draft) return 'Enter the ongoing allowance for each selected account.'
-  const starts = new Date(draft.starts_at)
-  const ends = new Date(draft.ends_at)
-  const unitOk = (UNITS as readonly string[]).includes(draft.unit)
-  const paceOk = (PACES as readonly string[]).includes(draft.pace_model)
-  if (!Number.isFinite(starts.getTime()) || !Number.isFinite(ends.getTime()) || ends <= starts
-    || !Number.isSafeInteger(draft.allowance) || Number(draft.allowance) < 1
-    || !unitOk || !paceOk
-    || !Number.isFinite(draft.burst_ratio) || draft.burst_ratio < 0 || draft.burst_ratio > 1) {
-    return 'Enter valid start and end times, a positive whole allowance, and a burst ratio from 0 to 1.'
-  }
-  return null
 }
 
 export function planLookup(input: {
@@ -730,7 +691,6 @@ export function planApproval(input: {
   selectedAccountKeys: readonly string[]
   permissions: PairingPermissions
   now?: number
-  drafts?: readonly OngoingLimitDraft[]
   requestedComputerId?: string
   targetComputerName?: string | null
 }): { ok: true; body: ApproveBody } | { ok: false; message: string; next: string } {
@@ -780,55 +740,12 @@ export function planApproval(input: {
       }
     }
   }
-  if (input.choice === 'ongoing_limits') {
-    for (const key of selected.keys) {
-      const draft = input.drafts?.find(item => item.account_key === key) ?? null
-      const problem = ongoingLimitError(draft)
-      if (problem) return { ok: false, message: problem, next: 'Ongoing limits are saved separately, by you, after the computer is approved. They are not part of the pairing grant.' }
-    }
-  }
   const body: ApproveBody = {
     request_digest: input.view.request_digest,
     verification,
     selected_account_keys: selected.keys,
   }
   return { ok: true, body }
-}
-
-export function planOngoingLimits(input: {
-  choice: ReviewChoice
-  drafts: readonly OngoingLimitDraft[]
-  selectedAccountKeys: readonly string[]
-  enrollments: readonly PairingEnrollment[]
-  permissions: PairingPermissions
-}): { action: 'skip' } | { action: 'send'; windows: { accountId: string; body: AllowanceWrite }[] } | { action: 'blocked'; message: string; next: string } {
-  if (input.choice !== 'ongoing_limits') return { action: 'skip' }
-  if (!input.permissions.canSetOngoingLimits) {
-    return { action: 'blocked', message: 'Only a signed-in person who can manage accounts can set ongoing limits.', next: 'The paired computer cannot create its own allowance.' }
-  }
-  const windows: { accountId: string; body: AllowanceWrite }[] = []
-  for (const key of input.selectedAccountKeys) {
-    const enrollment = input.enrollments.find(item => item.account_key === key && item.state !== 'revoked')
-    if (!enrollment) {
-      return { action: 'blocked', message: 'The approved account is not available yet.', next: 'Wait until setup finishes, then set the allowance. Do not approve the pairing again.' }
-    }
-    const draft = input.drafts.find(item => item.account_key === key) ?? null
-    const problem = ongoingLimitError(draft)
-    if (problem || !draft || draft.allowance == null) return { action: 'blocked', message: problem ?? 'Enter the ongoing allowance.', next: `Set the allowance you intend. ${product()} does not infer it from the vendor subscription.` }
-    windows.push({
-      accountId: enrollment.account_id,
-      body: {
-        starts_at: new Date(draft.starts_at).toISOString(),
-        ends_at: new Date(draft.ends_at).toISOString(),
-        unit: draft.unit,
-        allowance: draft.allowance,
-        pace_model: draft.pace_model,
-        burst_ratio: draft.burst_ratio,
-      },
-    })
-  }
-  if (!windows.length) return { action: 'blocked', message: 'Choose at least one account before setting limits.', next: 'Ongoing limits apply only to accounts you selected for this pairing.' }
-  return { action: 'send', windows }
 }
 
 export function planPoll(input: {
@@ -911,7 +828,7 @@ function setupProgress(view: PairingView): PairingProgress {
     return { phase: 'verify', title: 'Verification did not succeed', detail: reason || 'The verification run did not succeed.', next: 'The one-time allowance was not refilled. A new verification needs a new pairing approval.', renewsAuthority: false }
   }
   if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state))) {
-    return { phase: 'verify', title: 'Verification is running', detail: 'One short read-only run was approved for each selected harness. A later run on the computer is not a verification.', next: 'Further work needs a separate ongoing allowance. This page will not start another verification.', renewsAuthority: false }
+    return { phase: 'verify', title: 'Verification is running', detail: 'One short read-only run was approved for each selected harness. A later run on the computer is not a verification.', next: 'Ongoing work follows your account approval. This page will not start another verification.', renewsAuthority: false }
   }
   if (progress === 'provisioning' || progress === 'approved' || progress === 'not_started') {
     const consumed = view.state === 'redeemed'
@@ -985,6 +902,143 @@ export interface ComputerStatusCopy {
   claimsProcessStopped: boolean
   detail: string
   next: string
+}
+
+type HarnessView = Pick<PairingView, 'computer_state' | 'connectivity' | 'harness_statuses' | 'harness_details'> & {
+  enrollments?: PairingView['enrollments']
+}
+
+function harnessDetail(view: HarnessView, harness: string): HarnessDetail | undefined {
+  const detail = view.harness_details?.[harness]
+  return detail && (!view.harness_statuses?.[harness] || detail.state === view.harness_statuses[harness]) ? detail : undefined
+}
+
+// Never show a daemon-supplied command. Codes and fixes are the vocabulary of
+// agentsetup.RecoveryFix, pinned for both sides by
+// internal/agentsetup/testdata/harness_recovery.json. Unknown bounded codes
+// from newer daemons stay visible; local paths and diagnostics never arrive.
+function harnessCode(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(value) ? value : undefined
+}
+
+const PIN_REASONS = ['dependency_invalid', 'pin_missing', 'pin_partial', 'pin_drifted', 'pin_invalid', 'pin_unsafe']
+
+function harnessFix(harness: string, reason?: HarnessReason): HarnessFix | undefined {
+  if (!['claude', 'codex', 'cursor', 'grok', 'pi'].includes(harness)) return
+  // repin replaces Claude's shared pins; add-harness renews another harness's blocked pin.
+  if (PIN_REASONS.includes(reason ?? '')) {
+    return harness === 'claude'
+      ? { kind: 'repin', command: 'aeon-agentd repin --harness claude' }
+      : { kind: 'add_harness', command: `aeon-agentd add-harness --harness ${harness}` }
+  }
+  if (['harness_failed', 'cli_unavailable', 'profile_permissions'].includes(reason ?? '')) return { kind: 'restart', command: 'aeon-agentd setup' }
+  if (reason === 'login_required') return { kind: 'login', command: harness === 'claude' ? 'claude auth login' : harness === 'pi' ? 'pi' : `${harness === 'cursor' ? 'cursor-agent' : harness} login` }
+}
+
+/** The repair kind and exact command for one reason; exported for the shared-vocabulary test. */
+export function harnessRecovery(harness: string, reason: string): HarnessFix | undefined {
+  return harnessFix(harness, reason)
+}
+
+interface AttentionReport { accounts: AccountAttention[]; count: number; truncated: boolean }
+
+function attentionItems(detail: HarnessDetail | undefined): AccountAttention[] {
+  return detail?.state === 'ready' ? detail.attention_accounts ?? [] : []
+}
+
+// Parsed details already carry attention_truncated when a five-name list had no count.
+// A matching count without that flag is complete, including a list of five.
+function attentionReport(detail: HarnessDetail | undefined): AttentionReport | undefined {
+  const accounts = attentionItems(detail)
+  if (!accounts.length) return
+  const count = typeof detail?.attention_count === 'number' && detail.attention_count >= accounts.length ? detail.attention_count : accounts.length
+  return { accounts, count, truncated: detail?.attention_truncated === true || count > accounts.length }
+}
+
+function attentionFix(harness: string, items: AccountAttention[]): string {
+  const commands: string[] = []
+  for (const item of items) {
+    const command = harnessFix(harness, item.reason)?.command ?? ''
+    if (command && !commands.includes(command)) commands.push(command)
+  }
+  return commands.join(' · ')
+}
+
+export function describeHarnessFix(view: HarnessView, harness: string): string {
+  if (view.computer_state !== 'connected') return ''
+  const detail = harnessDetail(view, harness)
+  if (!detail) return ''
+  const attention = attentionItems(detail)
+  if (attention.length) return attentionFix(harness, attention)
+  return ['blocked', 'login_required', 'checking'].includes(detail.state) ? harnessFix(harness, detail.reason)?.command ?? '' : ''
+}
+
+const HARNESS_HINTS: Record<string, string> = {
+  repin_pending: 'Retries automatically.',
+  cli_unavailable: 'Restore the approved executable, then retry.',
+  harness_failed: 'Restore the approved installation, then retry.',
+  profile_permissions: 'Make the pi profile private, then retry.',
+}
+
+function enrolledHarnessCount(view: HarnessView, harness: string): number {
+  return (view.enrollments ?? []).filter(item => item.harness === harness && item.state !== 'revoked').length
+}
+
+/** One short sentence that the command alone does not say; empty otherwise. */
+export function describeHarnessHint(view: HarnessView, harness: string): string {
+  const detail = harnessDetail(view, harness)
+  if (view.computer_state !== 'connected' || !detail) return ''
+  const attention = attentionReport(detail)
+  const enrolled = enrolledHarnessCount(view, harness)
+  if (attention && enrolled >= 2 && attention.count < enrolled) {
+    const verb = attention.count === 1 ? 'needs' : 'need'
+    const prefix = attention.truncated && attention.count === attention.accounts.length ? 'At least ' : ''
+    return `${prefix}${attention.count} of ${enrolled} accounts ${verb} attention`
+  }
+  if (!detail.reason || detail.state !== 'blocked') return ''
+  return HARNESS_HINTS[detail.reason] ?? ''
+}
+
+function reasonLabel(status: string, reason?: string): string {
+  const labels: Record<string, string> = { ready: 'Ready', blocked: 'Needs attention', login_required: 'Sign in required', checking: 'Checking', draining: 'Draining' }
+  const reasons: Record<string, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair' }
+  // A code from a newer daemon is shown raw rather than dropped or guessed.
+  if (!HARNESS_STATES.includes(status as typeof HARNESS_STATES[number])) return `Needs attention · ${reason ?? status}`
+  if (reason) return reasons[reason] ?? `Needs attention · ${reason}`
+  return labels[status] ?? ''
+}
+
+function attentionStatusLabel(items: AccountAttention[]): string {
+  const reason = items[0]?.reason
+  if (reason && items.every(item => item.reason === reason)) return reasonLabel('blocked', reason)
+  return 'Needs attention'
+}
+
+function freshLabel(view: HarnessView, label: string): string {
+  if (!label) return ''
+  return view.connectivity === 'online' ? label : `Last reported: ${label.toLowerCase()}`
+}
+
+export function describeHarnessStatus(view: HarnessView, harness: string): string {
+  if (view.computer_state !== 'connected') return ''
+  const detail = harnessDetail(view, harness)
+  const status = view.harness_statuses?.[harness] ?? detail?.state
+  if (!status) return ''
+  const attention = attentionItems(detail)
+  const label = attention.length ? attentionStatusLabel(attention) : reasonLabel(status, detail?.reason)
+  return freshLabel(view, label)
+}
+
+/** Per-enrollment label. A complete attention list names the blocked accounts and leaves the others Ready. An account missing from a truncated list is not Ready. */
+export function describeEnrollmentStatus(view: HarnessView, enrollment: { account_id: string; harness: string }): string {
+  if (view.computer_state !== 'connected') return ''
+  const detail = harnessDetail(view, enrollment.harness)
+  const attention = attentionReport(detail)
+  if (!attention) return describeHarnessStatus(view, enrollment.harness)
+  const hit = attention.accounts.find(item => item.account_id === enrollment.account_id)
+  if (hit) return freshLabel(view, reasonLabel('blocked', hit.reason))
+  if (!attention.truncated && attention.count === attention.accounts.length) return freshLabel(view, 'Ready')
+  return freshLabel(view, 'Needs attention')
 }
 
 export function describeComputerStatus(view: Pick<PairingView, 'computer_state' | 'local_cleanup' | 'local_processes' | 'enrollments' | 'setup_state' | 'connectivity' | 'accounting_state'>, hints: { httpStatus?: number; heartbeatMissing?: boolean } = {}): ComputerStatusCopy {
@@ -1119,7 +1173,6 @@ export async function submitApproval(input: {
   selectedAccountKeys: readonly string[]
   permissions: PairingPermissions
   now?: number
-  drafts?: readonly OngoingLimitDraft[]
   requestedComputerId?: string
   targetComputerName?: string | null
   signal?: AbortSignal
@@ -1128,6 +1181,28 @@ export async function submitApproval(input: {
   if (!plan.ok) throw new PairingError(0, plan.message, { code: 'blocked', next: plan.next })
   const key = `approve:${input.view.request_id}:${JSON.stringify(plan.body)}`
   return oneFlight(key, () => personJson(`/agent-pairing/requests/${pathId(input.view.request_id)}/approve`, 'POST', plan.body, input.signal).then(parseView))
+}
+
+// Separate, idempotent permission grants. The pairing grant itself never
+// creates limits or silently opts in on a later page visit.
+export async function approvePairedAccounts(view: PairingView, keys: readonly string[], permissions: PairingPermissions): Promise<string[]> {
+  if (!permissions.canApproveAccounts) throw new PairingError(403, 'Only a person who can manage accounts can allow agents.', { code: 'forbidden' })
+  const started = readEpoch
+  const saved: string[] = []
+  for (const key of keys) {
+    if (started !== readEpoch) throw sessionResetError()
+    const enrollment = view.enrollments.find(item => item.account_key === key && item.state === 'connected')
+    if (!enrollment) throw new PairingError(409, 'This account is not connected yet.', { code: 'blocked', savedAccountIds: saved, next: 'Retry account approval after setup finishes.' })
+    try {
+      await personJson(`/agent-accounts/${pathId(enrollment.account_id)}/capacity/approve`, 'POST', {})
+      if (started !== readEpoch) throw sessionResetError()
+      saved.push(enrollment.account_id)
+    } catch (error) {
+      if (started !== readEpoch) throw sessionResetError()
+      throw new PairingError(error instanceof PairingError ? error.status : 0, `Agent access for ${enrollment.label} was not confirmed.`, { code: 'approval_failed', savedAccountIds: saved, next: 'Retry account approval; the computer is already approved.' })
+    }
+  }
+  return saved
 }
 
 export async function denyPairing(view: PairingView, permissions: PairingPermissions, signal?: AbortSignal): Promise<PairingView> {
@@ -1162,69 +1237,6 @@ export async function disconnectEnrollment(view: PairingView, accountId: string,
   const body = disconnectBody(view, mode)
   const path = `/agent-pairing/computers/${pathId(view.computer_id)}/enrollments/${pathId(accountId)}/disconnect`
   return oneFlight(`disconnect:${view.computer_id}:${accountId}:${mode}:${body.expected_revision}`, () => personJson(path, 'POST', body, signal).then(parseView))
-}
-
-export async function matchOngoingLimit(accountId: string, body: AllowanceWrite): Promise<LimitMatch> {
-  try {
-    const accounts = await listAccounts()
-    const account = accounts.find(item => item.id === accountId)
-    if (!account) return 'unknown'
-    return (account.windows ?? []).some(window => sameAllowance(window, body)) ? 'saved' : 'absent'
-  } catch {
-    return 'unknown'
-  }
-}
-
-export async function createOngoingLimits(windows: readonly { accountId: string; body: AllowanceWrite }[], permissions: PairingPermissions): Promise<{ created: string[]; reconciled: string[] }> {
-  if (!permissions.canSetOngoingLimits) {
-    throw new PairingError(0, 'Only a signed-in person who can manage accounts can set ongoing limits.', { code: 'forbidden', next: 'The paired computer cannot create its own allowance.' })
-  }
-  const created: string[] = []
-  const reconciled: string[] = []
-  const started = readEpoch
-  for (const item of windows) {
-    if (started !== readEpoch) throw sessionResetError()
-    try {
-      await createWindow(item.accountId, item.body)
-      if (started !== readEpoch) throw sessionResetError()
-      created.push(item.accountId)
-    } catch (error) {
-      if (started !== readEpoch) throw sessionResetError()
-      const saved = [...created, ...reconciled]
-      const match = await matchOngoingLimit(item.accountId, item.body)
-      if (started !== readEpoch) throw sessionResetError()
-      if (match === 'saved') { reconciled.push(item.accountId); continue }
-      const uncertain = match === 'unknown' || allowanceUncertain(error)
-      const reason = error instanceof Error ? error.message : 'The allowance was not saved.'
-      throw new PairingError(error instanceof APIError ? error.status : 0, uncertain ? 'The allowance may already be saved.' : reason, {
-        code: uncertain ? 'allowance_uncertain' : 'allowance_failed',
-        savedAccountIds: saved,
-        next: uncertain
-          ? `${savedPhrase(saved)} Refresh this account before sending the allowance again. A lost response is not the same as an unsaved allowance. Do not approve the pairing again.`
-          : `${savedPhrase(saved)} This account was not saved. You can send its allowance again. Do not approve the pairing again.`,
-      })
-    }
-  }
-  return { created, reconciled }
-}
-
-function savedPhrase(saved: readonly string[]): string {
-  if (!saved.length) return 'No allowance in this batch was confirmed.'
-  return `Confirmed for ${saved.length} account${saved.length === 1 ? '' : 's'}.`
-}
-
-function allowanceUncertain(error: unknown): boolean {
-  if (error instanceof APIError) return error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500
-  return true
-}
-
-function sameAllowance(window: AllowanceWindow, body: AllowanceWrite): boolean {
-  return window.unit === body.unit
-    && window.allowance === body.allowance
-    && window.pace_model === body.pace_model
-    && window.burst_ratio === body.burst_ratio
-    && Math.abs(Date.parse(window.starts_at) - Date.parse(body.starts_at)) < 1000
-    && Math.abs(Date.parse(window.ends_at) - Date.parse(body.ends_at)) < 1000
 }
 
 function disconnectBody(view: PairingView, mode: DisconnectMode): { mode: DisconnectMode; expected_revision: number } {
@@ -1437,6 +1449,39 @@ function parseInstallTarget(value: unknown): InstallTarget {
   }
 }
 
+function attentionTotal(value: unknown, enrolled: number): number | undefined {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value >= enrolled) return
+  return value
+}
+
+function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unknown, declaredTruncated: unknown): { accounts: AccountAttention[]; count: number; truncated: boolean } | undefined {
+  if (!Array.isArray(raw) || enrolled.size < 2) return
+  const seen = new Set<string>()
+  const items: AccountAttention[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const item = entry as Record<string, unknown>
+    const id = typeof item.account_id === 'string' && UUID.test(item.account_id) ? item.account_id : ''
+    const reason = harnessCode(item.reason)
+    if (!id || !reason || !enrolled.has(id) || seen.has(id)) continue
+    seen.add(id)
+    items.push({ account_id: id, reason })
+  }
+  items.sort((a, b) => a.account_id < b.account_id ? -1 : a.account_id > b.account_id ? 1 : 0)
+  if (items.length === 0 || items.length >= enrolled.size) return
+  const declared = attentionTotal(declaredCount, enrolled.size)
+  let count = items.length
+  // Five or more names without a total may be the old cap: absence is not readiness.
+  // A declared total equal to the list, including exactly five, is complete.
+  let truncated = declaredTruncated === true || (declared === undefined && items.length >= 5)
+  if (declared !== undefined && declared > items.length) {
+    count = declared
+    truncated = true
+  }
+  if (count >= enrolled.size) return
+  return { accounts: items, count, truncated }
+}
+
 function parseView(data: unknown): PairingView {
   const record = asRecord(data, 'pairing')
   const view: PairingView = {
@@ -1466,6 +1511,37 @@ function parseView(data: unknown): PairingView {
   if (typeof record.interval_seconds === 'number' && record.interval_seconds > 0) view.interval_seconds = record.interval_seconds
   const setup = optionalEnum(record.setup_state, SETUP_STATES)
   if (setup) view.setup_state = setup
+  if (record.harness_statuses != null) {
+    const statuses = asRecord(record.harness_statuses, 'harness_statuses')
+    view.harness_statuses = {}
+    // Keep future code tokens visible without inventing readiness. Never carry
+    // arbitrary diagnostics into the public computer projection.
+    for (const harness of ['claude', 'codex', 'cursor', 'grok', 'pi']) {
+      const status = harnessCode(statuses[harness])
+      if (status) view.harness_statuses[harness] = status
+    }
+  }
+  if (record.harness_details != null) {
+    const details = asRecord(record.harness_details, 'harness_details')
+    view.harness_details = {}
+    for (const harness of ['claude', 'codex', 'cursor', 'grok', 'pi']) {
+      const raw = details[harness]
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+      const item = raw as Record<string, unknown>
+      const state = harnessCode(item.state)
+      if (!state || view.harness_statuses?.[harness] && view.harness_statuses[harness] !== state) continue
+      const reason = harnessCode(item.reason)
+      if (item.reason && !reason) continue
+      const enrolled = new Set(view.enrollments.filter(entry => entry.harness === harness && entry.state !== 'revoked').map(entry => entry.account_id))
+      const attention = state === 'ready' ? parseAttention(item.attention_accounts, enrolled, item.attention_count, item.attention_truncated) : undefined
+      // A ready or draining detail keeps no top-level reason. Valid attention
+      // still survives a mistaken reason so the partial block stays visible.
+      if (['ready', 'draining'].includes(state) && reason && !attention) continue
+      const storedReason = ['ready', 'draining'].includes(state) ? undefined : reason
+      const fix = ['blocked', 'login_required', 'checking'].includes(state) ? harnessFix(harness, storedReason) : undefined
+      view.harness_details[harness] = { state, ...(storedReason ? { reason: storedReason } : {}), ...(fix ? { fix } : {}), ...(attention ? { attention_accounts: attention.accounts, attention_count: attention.count, ...(attention.truncated ? { attention_truncated: true } : {}) } : {}) }
+    }
+  }
   if (typeof record.setup_error === 'string' && record.setup_error) view.setup_error = record.setup_error.slice(0, 500)
   else if (record.setup_error === null || record.setup_error === '') view.setup_error = null
   if (record.last_seen_at === null) view.last_seen_at = null

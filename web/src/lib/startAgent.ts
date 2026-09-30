@@ -11,14 +11,15 @@
 // The account's daemon is the host. Unknown JSON fields are rejected, so the
 // five choices are not sent as extra properties.
 import { api, APIError, getNode, listNodes, type WorkNode } from './api.ts'
-import { listRuns, type AgentAccount, type AgentRun, type ModelProfile } from './agents.ts'
+import { capacityWaitText } from './capacityWait.ts'
+import { runNowOnce, listRuns, type AgentAccount, type AgentRun, type ModelProfile } from './agents.ts'
 
 export interface WorkOrder {
   node_id: string; status: 'draft' | 'ready' | 'running' | 'blocked' | 'done' | 'cancelled'
   revision: number; assignee_principal_id: string | null
   criteria: { id: string; description: string; checked_at: string | null }[]
 }
-export interface StartSelection { ticket: WorkNode; agentId: string; profileId: string; accountId?: string }
+export interface StartSelection { ticket: WorkNode; agentId: string; profileId: string; accountId?: string; runNow?: boolean }
 export const activeRun = (run: AgentRun) => ['queued', 'starting', 'running', 'waiting'].includes(run.status)
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -60,7 +61,7 @@ export async function startAgent(selection: StartSelection): Promise<{ run: Agen
       if (live.length) {
         const same = live.find(r => r.agent_principal_id === agentId && r.model_profile_id === profileId
           && (!accountId || r.requested_account_id === accountId))
-        if (same) return { run: same, reused: true }
+        if (same) return { run: selection.runNow && same.status === 'queued' ? await runNowOnce(same.id) : same, reused: true }
         throw new Error('This work order already has an active run. Follow it in Agents before starting another.')
       }
       runCursor = page.next_cursor ?? undefined
@@ -81,6 +82,7 @@ export async function startAgent(selection: StartSelection): Promise<{ run: Agen
   }
   const run = await request<AgentRun>(`/work-orders/${encodeURIComponent(order.node_id)}/runs`, 'POST', {
     agent_principal_id: agentId, model_profile_id: profileId, ...(accountId ? { requested_account_id: accountId } : {}),
+    ...(selection.runNow ? { capacity_override: 'now' } : {}),
   })
   return { run, reused: false }
 }
@@ -112,6 +114,7 @@ export function dispatchHint(accounts: AgentAccount[], agentId: string, profile:
 }
 
 export function launchState(run: AgentRun): { label: string; detail: string } {
+  if (run.status === 'queued' && run.wait) return { label: 'Waiting', detail: capacityWaitText(run.wait) }
   if (run.status === 'queued') return { label: 'Queued', detail: 'Waiting for the daemon to reserve an account and claim this run.' }
   if (run.status === 'starting' || run.status === 'running' || run.status === 'waiting') return { label: 'Claimed', detail: 'The daemon claimed the run. Its managed session appears when registration is reported.' }
   return { label: ({ completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', ownership_lost: 'Ownership lost' })[run.status] ?? run.status, detail: 'This run has ended. Its reported outcome is available in Agents.' }

@@ -12,6 +12,9 @@ import (
 	"github.com/inspr-at/paimos/internal/attachwatch"
 )
 
+// Only a kernel-confirmed missing or zombie process yields this sentinel.
+var errAttachExited = errors.New("pinned process exited")
+
 type attachObservation struct {
 	attachwatch.Process
 	Parent  int

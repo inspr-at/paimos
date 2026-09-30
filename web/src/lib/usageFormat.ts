@@ -165,12 +165,6 @@ export const billingLabel: Record<BillingMode, string> = {
   unreported: 'No report',
   mixed: 'Mixed reports',
 }
-export const paceLabel: Record<AllowanceWindow['pace_model'], string> = {
-  steady: 'Steady', frontload: 'Front-loaded', unrestricted: 'Unrestricted',
-}
-export const unitLabel: Record<AllowanceWindow['unit'], string> = {
-  requests: 'requests', tokens: 'tokens', cost_micros: 'cost micros',
-}
 
 const day = 86_400_000
 const usdPattern = /^(0|[1-9]\d*)\.(\d{12})$/

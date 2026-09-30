@@ -165,6 +165,11 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			if err = tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,host_label,allowed_model_profile_ids) VALUES($1,$2,$3,$4,$5,$6,1,$7,ARRAY[$8::uuid]) RETURNING id::text`, p.TenantID, a.AccountKey, a.Harness, daemon, principal, a.Label, rec.Details.ComputerName, a.ProfileID).Scan(&account); err != nil {
 				return err
 			}
+			if a.Harness == "pi" {
+				if _, err = tx.Exec(ctx, `UPDATE agent_accounts a SET provider=split_part(p.model,'/',1), model=substring(p.model from position('/' in p.model)+1), model_data_note=(p.model LIKE 'openrouter/stealth/%' OR p.model LIKE '%:free') FROM model_profiles p WHERE a.id=$1 AND p.id=$2 AND p.tenant_id=a.tenant_id AND position('/' in p.model)>1`, account, a.ProfileID); err != nil {
+					return err
+				}
+			}
 			if _, err = tx.Exec(ctx, `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at) VALUES($1,$2,$3,$4,$5,$6)`, p.TenantID, account, computer, rec.ID, a.ProfileID, rec.VerificationExpiresAt); err != nil {
 				return err
 			}
@@ -310,8 +315,8 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 		return v, err
 	}
 	var keyPrefix string
-	err := tx.QueryRow(ctx, `SELECT c.state,c.principal_id::text,c.daemon_id,c.local_cleanup,c.local_processes,c.revision,k.prefix,c.setup_state,c.setup_error,c.last_seen_at,
- CASE WHEN EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id WHERE e.computer_id=c.id AND e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes') THEN 'online' WHEN c.last_seen_at IS NULL THEN 'unknown' ELSE 'offline' END FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.id=$1`, *rec.ComputerID).Scan(&v.ComputerState, &v.PrincipalID, &v.DaemonID, &v.Cleanup, &v.Processes, &v.Revision, &keyPrefix, &v.SetupState, &v.SetupError, &v.LastSeenAt, &v.Connectivity)
+	err := tx.QueryRow(ctx, `SELECT c.state,c.principal_id::text,c.daemon_id,c.local_cleanup,c.local_processes,c.revision,k.prefix,c.setup_state,c.setup_error,c.harness_statuses,c.harness_details,c.last_seen_at,
+ CASE WHEN EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id WHERE e.computer_id=c.id AND e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes') THEN 'online' WHEN c.last_seen_at IS NULL THEN 'unknown' ELSE 'offline' END FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.id=$1`, *rec.ComputerID).Scan(&v.ComputerState, &v.PrincipalID, &v.DaemonID, &v.Cleanup, &v.Processes, &v.Revision, &keyPrefix, &v.SetupState, &v.SetupError, &v.HarnessStatuses, &v.HarnessDetails, &v.LastSeenAt, &v.Connectivity)
 	if err != nil {
 		return v, err
 	}

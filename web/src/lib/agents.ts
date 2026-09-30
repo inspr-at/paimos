@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import type { CapacityWait } from './capacityWait.ts'
 import type { DeployTarget } from './deployTarget'
 // The agents workspace HTTP surface for a person's session: harness sessions and
 // their typed controls, runs, approvals, accounts with allowance windows, models
@@ -16,6 +17,7 @@ export interface MetadataChange {
 }
 export interface ProcessOwnership { daemon_id: string; generation: string; process_id: string; root_pid: number; group_id: number; started_at: string }
 export interface HarnessSession {
+  vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
   handed_over_to_id?: string; adopted_from_id?: string | null; can_reparent?: boolean
   watch?: import("./attachWatch").AttachStatus
   id: string; project_id: string; agent_principal_id: string
@@ -33,6 +35,8 @@ export interface HarnessSession {
   eta_ready_at?: string | null; eta_live_at?: string | null; progress_pct?: number | null; eta_reported_at?: string | null; eta_stale?: boolean
   // AEON-280: the last inbox pull of this generation; absent until it pulls once.
   inbox_seen_at?: string | null; inbox_seen_via?: 'hook' | 'drain' | 'long_poll' | 'stream' | 'ack' | null
+  // AEON-369: true when a vendor session reference is stored. The reference itself is never returned.
+  has_vendor_session_ref?: boolean
   // The tenant-wide list adds node summaries (B7) and the agent principal's name (U13).
   project?: NodeSummary; ticket?: NodeSummary | null; agent?: { id: string; name: string } | null
 }
@@ -57,8 +61,16 @@ export interface AllowanceWrite {
 export interface AllowanceWindow extends AllowanceWrite {
   id: string; account_id: string; used: number; reserved: number
   provisional?: boolean
+  /** A limit a person set by hand; it caps on top of the readings (AEON-384). */
+  set_by_you?: boolean
 }
 export interface AgentAccount {
+  ongoing_use_approved?: boolean
+  reading_support?: 'every_5_min' | 'first_run' | 'statusline' | 'none'; quota_fingerprint?: string; statusline_enabled?: boolean
+  statusline_opt_in?: 'own' | 'workspace'
+  provider?: string; model?: string; model_status?: 'known' | 'unknown' | 'unchecked'; model_data_note?: boolean
+  openrouter_credits?: { observed_at: string; usage: number | null; limit: number | null; remaining: number | null }
+
   id: string; account_key: string; harness: string; daemon_id: string; label: string
   registered_by_principal_id: string; state: 'available' | 'draining' | 'unavailable'
   max_parallel_runs?: number; last_probe_at?: string | null; last_probe_ok?: boolean | null; created_at: string
@@ -66,10 +78,14 @@ export interface AgentAccount {
   // the legacy tenant catalog; the start dialog does not expand them itself.
   plan?: string
   host_label?: string
+  group_id?: string
+  group_name?: string
   allowed_model_profile_ids?: string[] | null
   windows?: AllowanceWindow[]
 }
 export interface AgentRun {
+  capacity_override?: '' | 'now'
+  wait?: CapacityWait
   id: string; work_order_id: string; agent_principal_id: string; model_profile_id?: string | null
   account_id?: string | null; status: 'queued' | 'starting' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'ownership_lost'
   requested_account_id?: string | null
@@ -108,6 +124,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
     const data = await response.json().catch(() => ({}))
     throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`, data)
   }
+  if (response.status === 204) return undefined as T
   return response.json()
 }
 const enc = encodeURIComponent
@@ -140,13 +157,22 @@ export const requestControl = (projectId: string, sessionId: string, kind: Sessi
 export const requestManagedControl = (session: HarnessSession, kind: SessionControl['kind']) =>
   request<SessionControl>(`${sessionPath(session.project_id, session.id)}/managed-controls`, 'POST', { request_id: crypto.randomUUID(), kind, expected_ownership: { ...session.process_ownership } })
 export const getControl = (projectId: string, sessionId: string, controlId: string) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${enc(controlId)}`)
+export const setPiAccountModel = (id: string, model: string) => request<AgentAccount>(`/agent-accounts/${enc(id)}/model`, 'PUT', { model })
 export const listAccounts = () => request<AgentAccount[]>('/agent-accounts')
+export interface AccountGroup { id: string; harness: string; name: string; exclusive: boolean; account_ids: string[]; project_ids: string[] }
+export const listGroups = () => request<AccountGroup[]>('/agent-accounts/groups')
+export const createGroup = (body: { harness: string; name: string; exclusive: boolean; account_ids: string[]; project_ids: string[] }) => request<AccountGroup>('/agent-accounts/groups', 'POST', body)
+export const deleteGroup = (id: string) => request<void>(`/agent-accounts/groups/${enc(id)}`, 'DELETE')
+export interface TicketPin { ticket_id: string; harness: string; account_id?: string; group_id?: string }
+export const listPins = (ticketId: string) => request<TicketPin[]>(`/agent-accounts/pins?ticket_id=${enc(ticketId)}`)
+export const putPin = (body: { ticket_id: string; harness: string; account_id?: string; group_id?: string }) => request<void>('/agent-accounts/pins', 'PUT', body)
+export const deletePin = (ticketId: string, harness: string) => request<void>(`/agent-accounts/pins?ticket_id=${enc(ticketId)}&harness=${enc(harness)}`, 'DELETE')
+export const setRunTarget = (runId: string, body: { account_id?: string; group_id?: string }) => request<void>(`/agent-accounts/runs/${enc(runId)}/target`, 'POST', body)
 export const setAccountState = (id: string, state: AgentAccount['state']) => request<AgentAccount>(`/agent-accounts/${enc(id)}`, 'PATCH', { state })
 export const getRun = (id: string) => request<AgentRun>(`/runs/${enc(id)}`)
 export const listApprovals = () => request<Approval[]>('/approvals?limit=200')
 export const decideApproval = (id: string, decision: 'approved' | 'denied', reason: string) => request<Approval>(`/approvals/${enc(id)}/decision`, 'POST', { decision, reason })
 export const revokeApproval = (id: string) => request<Approval>(`/approvals/${enc(id)}/revoke`, 'POST')
-export const createWindow = (id: string, body: AllowanceWrite) => request<AllowanceWindow>(`/agent-accounts/${enc(id)}/windows`, 'POST', body)
 export const listModels = () => request<ModelProfile[]>('/models')
 // Task-appropriate profile for a work role on one harness. A miss is "routing did not answer", not a guessed model.
 // The start cascade must not call this to fill models an account did not grant.
@@ -170,12 +196,6 @@ export const messageStatuses = (ids: string[]) => request<{ items: MessageStatus
 
 export const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed. Please retry.'
 
-// The cumulative pacing model from internal/agents/doc.go, bounded by the hard allowance.
-export function paceFraction(model: AllowanceWrite['pace_model'], elapsed: number, burst: number) {
-  const f = Math.min(1, Math.max(0, elapsed))
-  const pace = model === 'steady' ? f : model === 'frontload' ? 1 - (1 - f) ** 2 : 1
-  return Math.min(1, pace + burst)
-}
 
 // Named server events that change what the agents workspace shows. They are wake
 // hints only: the caller re-reads the authorized projections. Heartbeats use the
@@ -193,4 +213,12 @@ export function subscribeAgents(changed: () => void, connection: (live: boolean)
   for (const name of [...HARNESS_EVENTS.map(kind => `harness.${kind}`), ...OTHER_EVENTS]) stream.addEventListener(name, changed)
   for (const name of DELIVERY_EVENTS) stream.addEventListener(name, () => delivery())
   return () => stream.close()
+}
+
+export const approveAccountCapacity = (id: string) => request<void>(`/agent-accounts/${enc(id)}/capacity/approve`, 'POST', {})
+export const runNowOnce = (id: string) => request<AgentRun>(`/runs/${enc(id)}/capacity-override`, 'POST', { capacity_override: 'now' })
+export const setClaudeStatusline = (id: string, enabled: boolean) => request<{ enabled: boolean }>(`/agent-accounts/${enc(id)}/statusline`, 'PUT', { enabled })
+
+export function claudeStatuslineCopy(audience: AgentAccount['statusline_opt_in'], name: string) {
+  return audience === 'workspace' ? `Show ${name} in this Claude account's status line` : `Show ${name} in your Claude status line`
 }

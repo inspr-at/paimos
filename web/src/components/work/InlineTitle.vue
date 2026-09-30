@@ -36,7 +36,7 @@ function keydown(event: KeyboardEvent) {
   else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel() }
 }
 function blur() { if (!saving.value && !conflict.value) { if (dirty.value) void commit(); else editing.value = false } }
-defineExpose({ start, isDirty: () => dirty.value })
+defineExpose({ start, isDirty: () => dirty.value, editing })
 </script>
 
 <template>

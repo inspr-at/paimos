@@ -87,7 +87,7 @@ func fits(w Window, now time.Time, estimate int64) (int64, bool) {
 		if !w.capacityAllowed || w.capacityRetired {
 			return 0, false
 		}
-		if (w.capacityKind == "refresh" || now.Sub(*w.capacityReadAt) > 10*time.Minute) && (w.capacityRefreshRun != nil || w.Reserved > 0 || estimate > 1) {
+		if (w.capacityKind == "refresh" || now.Sub(*w.capacityReadAt) > 10*time.Minute && w.capacitySource != "estimate") && (w.capacityRefreshRun != nil || w.Reserved > 0 || estimate > 1) {
 			return 0, false
 		}
 		if w.capacityBudget != nil && float64(w.Reserved+estimate) > *w.capacityBudget {

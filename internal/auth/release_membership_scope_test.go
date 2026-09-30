@@ -10,10 +10,63 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/releases"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+func TestAgentKeyBuildHistoryReadScope(t *testing.T) {
+	reset(t)
+	m := newMod(t, Config{})
+	tid := insertTenant(t, "history-reader", "History reader")
+	owner := tenant.Principal{TenantID: tid, Kind: tenant.Person, Roles: []string{"super_admin"}}
+	if err := testInTenant(t.Context(), appPool, tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Owner',ARRAY['super_admin']) RETURNING id::text`, tid).Scan(&owner.ID); err != nil {
+			return err
+		}
+		return dbtest.BindLegacyTx(t.Context(), tx, tid, owner.ID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := m.createAgentKey(t.Context(), owner, "history-reader", "", []string{"releases.read"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noScope, err := m.createAgentKey(t.Context(), owner, "history-no-scope", "", []string{"nodes.read"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const version = "260929113854.0.0"
+	mux := http.NewServeMux()
+	releasehistory.NewWith(releasehistory.History{Releases: []releasehistory.Release{{Version: version}}}, version).Mount(mux)
+	secured := m.Middleware(mux)
+	for _, tc := range []struct {
+		method, path, token string
+		want                int
+	}{
+		{"GET", "/api/releases", reader.Token, 200},
+		{"HEAD", "/api/releases", reader.Token, 200},
+		{"GET", "/api/releases/" + version, reader.Token, 200},
+		{"HEAD", "/api/releases/" + version, reader.Token, 200},
+		{"GET", "/api/releases", noScope.Token, 403},
+		{"GET", "/api/releases/" + version, noScope.Token, 403},
+		{"PUT", "/api/releases/" + version + "/presentation", reader.Token, 403},
+		{"DELETE", "/api/releases/" + version + "/presentation", reader.Token, 403},
+		{"GET", "/api/releases", "", 401},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		if tc.token != "" {
+			req.Header.Set("Authorization", "Bearer "+tc.token)
+		}
+		_, req.Pattern = mux.Handler(req)
+		w := httptest.NewRecorder()
+		secured.ServeHTTP(w, req)
+		if w.Code != tc.want {
+			t.Errorf("%s %s: got %d, want %d", tc.method, tc.path, w.Code, tc.want)
+		}
+	}
+}
 
 // Exercise the mounted endpoint through the real bearer authentication and
 // permission middleware. A handler-only principal fixture misses the outer

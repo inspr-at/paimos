@@ -105,8 +105,9 @@ function enrollment(id: string, key: string, harness: string, label: string) {
 
 export interface PairingCall { path: string; method: string; body: unknown }
 
-export async function mockPairing(page: Page, reviewOverrides: Record<string, unknown> = {}) {
+export async function mockPairing(page: Page, reviewOverrides: Record<string, unknown> = {}, computerOverrides: Record<string, unknown> = {}) {
   const calls: PairingCall[] = []
+  await page.route('**/api/agent-accounts/*/capacity/approve', route => { calls.push({ path: new URL(route.request().url()).pathname, method: 'POST', body: route.request().postDataJSON() }); return route.fulfill({ status: 204 }) })
   await page.route('**/api/me/permissions*', route => route.fulfill({
     json: { workspace: { role: { id: 'role-admin', key: 'admin', name: 'Admin' }, permissions: ['account.manage', 'account.read', 'authz.read'] }, project: null },
   }))
@@ -127,7 +128,7 @@ export async function mockPairing(page: Page, reviewOverrides: Record<string, un
       return route.fulfill({ json: base({
         state: 'approved', computer_id: COMPUTER, computer_state: 'connected', revision: 2, setup_state: 'approved',
         verification: verification((body as { verification: string }).verification),
-        enrollments: [enrollment(ACCOUNT_2, 'codex-1', 'codex', 'Codex work')],
+        enrollments: [enrollment(ACCOUNT, 'cursor-1', 'cursor', 'Cursor work'), enrollment(ACCOUNT_2, 'codex-1', 'codex', 'Codex work')].filter(item => ((body as { selected_account_keys: string[] }).selected_account_keys ?? []).includes(item.account_key)),
       }) })
     }
     if (path.endsWith('/deny') && method === 'POST') return route.fulfill({ json: base({ state: 'denied' }) })
@@ -136,6 +137,7 @@ export async function mockPairing(page: Page, reviewOverrides: Record<string, un
         state: 'redeemed', computer_id: COMPUTER, computer_state: 'connected', revision: 4, setup_state: 'connected',
         connectivity: 'online', last_seen_at: new Date().toISOString(), verification: verification('connect_only'),
         enrollments: [enrollment(ACCOUNT, 'cursor-1', 'cursor', 'Cursor work'), enrollment(ACCOUNT_2, 'codex-1', 'codex', 'Codex work')],
+        ...computerOverrides,
       })] } })
     }
     if (path === `/api/agent-pairing/computers/${COMPUTER}` && method === 'GET') {
@@ -143,6 +145,7 @@ export async function mockPairing(page: Page, reviewOverrides: Record<string, un
         state: 'redeemed', computer_id: COMPUTER, computer_state: 'connected', revision: 4, setup_state: 'connected',
         connectivity: 'online', verification: verification('connect_only'),
         enrollments: [enrollment(ACCOUNT, 'cursor-1', 'cursor', 'Cursor work'), enrollment(ACCOUNT_2, 'codex-1', 'codex', 'Codex work')],
+        ...computerOverrides,
       }) })
     }
     if (path.endsWith('/disconnect') && method === 'POST') {

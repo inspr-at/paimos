@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Homebrew tap
+
+# The release coordinator publishes the draft only after live verification.
+# Creating the draft during the tag build must never open a tap pull request.
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: homebrew-tap-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  homebrew-tap:
+    if: >-
+      github.event.release.draft == false &&
+      github.event.release.prerelease == false &&
+      startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    # Release events use refs/tags/<tag>; retain the environment's v* restriction.
+    environment: homebrew-tap
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Validate published release tag
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: node scripts/release-tag.mjs "$RELEASE_TAG"
+      # App secrets are read only here; absent secrets skip the PR and succeed.
+      - name: Open Homebrew tap formula pull request
+        env:
+          HOMEBREW_TAP_APP_ID: ${{ secrets.HOMEBREW_TAP_APP_ID }}
+          HOMEBREW_TAP_APP_KEY: ${{ secrets.HOMEBREW_TAP_APP_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: node scripts/homebrew-tap-pr.mjs

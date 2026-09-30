@@ -17,6 +17,8 @@ export function accountEmail(identity: Identity) {
 import { learnPictures } from './avatar.ts'
 import type { TicketEta } from './eta.ts'
 import type { TicketEstimate } from './estimates.ts'
+import type { TicketPlanning } from './planning.ts'
+import { rowStore } from './rowStore.ts'
 
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
 
@@ -122,7 +124,7 @@ export class APIError extends Error {
   readonly body: Record<string, unknown>
   constructor(status: number, message: string, body: Record<string, unknown> = {}) { super(message); this.status = status; this.body = body }
 }
-async function json<T>(path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}, signal?: AbortSignal): Promise<T> {
+async function json<T>(path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}, signal?: AbortSignal, answered?: (response: Response) => void): Promise<T> {
   const response = await api(path, {
     method,
     ...(signal ? { signal } : {}),
@@ -136,6 +138,7 @@ async function json<T>(path: string, method = 'GET', body?: unknown, headers: Re
     const reason = typeof data?.error === 'string' && data.error ? data.error : typeof data?.message === 'string' && data.message ? data.message : `Request failed (${response.status})`
     throw new APIError(response.status, reason, data && typeof data === 'object' ? data : {})
   }
+  answered?.(response)
   return response.status === 204 ? undefined as T : response.json()
 }
 // The router registers what happens when a request finds the session ended.
@@ -149,16 +152,36 @@ function query(values: object): string {
   return encoded ? `?${encoded}` : ''
 }
 const idPath = (id: string) => encodeURIComponent(id)
-export const getKinds = () => json<{ items: Kind[] }>('/kinds')
+// Node writes of this tab go to the row store with the exact revision the
+// server answered: live views know those events, and only those, as already
+// on screen (AEON-326). sent: when the request left, for causal order.
+function writing<T>(send: () => Promise<T>, record: (result: T, sent: number) => void): Promise<T> {
+  const sent = rowStore.mark()
+  return send().then(result => { record(result, sent); return result })
+}
+const wroteNode = (node: WorkNode, sent: number) => { rowStore.wrote(node, sent) }
+export const getKinds = () => json<{ items: Kind[] }>('/kinds').then(result => { rowStore.learnKinds(result.items); return result })
 export const getNode = (id: string) => json<WorkNode>(`/nodes/${idPath(id)}`)
-export const createNode = (body: NodeCreate) => json<WorkNode>('/nodes', 'POST', body)
+export const createNode = (body: NodeCreate) => writing(() => json<WorkNode>('/nodes', 'POST', body), wroteNode)
 // ifUnmodifiedSince is the node's updated_at as read; a newer server copy answers 412.
 export const updateNode = (id: string, body: NodePatch, options: { ifUnmodifiedSince?: string } = {}) =>
-  json<WorkNode>(`/nodes/${idPath(id)}`, 'PATCH', body, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {})
+  writing(() => json<WorkNode>(`/nodes/${idPath(id)}`, 'PATCH', body, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}), wroteNode)
 // ifUnmodifiedSince: the node's updated_at as read; the move answers 412 with the current node when it changed.
 export const moveNode = (id: string, parent_id: string | null, before_id?: string | null, options: { ifUnmodifiedSince?: string } = {}) =>
-  json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {})
-export const deleteNode = (id: string) => json<void>(`/nodes/${idPath(id)}`, 'DELETE')
+  writing(() => json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}), wroteNode)
+export const convertNode = (id: string, to_kind: string, options: { ifUnmodifiedSince?: string } = {}) =>
+  writing(() => json<WorkNode>(`/nodes/${idPath(id)}/convert`, 'POST', { to_kind }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}), wroteNode)
+// A delete answers the revision of its node.deleted event in the revision
+// header (null from an older server: then nothing proves the event is this
+// tab's). Header names are case-insensitive; this is the wire form.
+const REVISION_HEADER = 'aeon-revision'
+export function deleteNode(id: string): Promise<{ revision: string | null }> {
+  let revision: string | null = null
+  return writing(
+    () => json<void>(`/nodes/${idPath(id)}`, 'DELETE', undefined, {}, undefined, response => { revision = response.headers.get(REVISION_HEADER) || null }).then(() => ({ revision })),
+    (result, sent) => { rowStore.deleted(id, result.revision, sent) },
+  )
+}
 export const searchNodes = (q: string, params: { kind_id?: string; state?: string; cursor?: string; limit?: number } = {}, options: { signal?: AbortSignal } = {}) =>
   json<Page<SearchHit>>(`/search${query({ q, ...params })}`, 'GET', undefined, {}, options.signal)
 // B1 list and project-summary wire types (api/openapi.yaml NodeListItem, listProjects).
@@ -175,6 +198,8 @@ export interface ListItem extends WorkNode {
   eta?: TicketEta
   // The live worker the Assignee cell leads with. Absent when none is bound.
   lead_worker?: LeadWorker | null
+  // Model, tokens and (with harness.read) cost for the planning columns (AEON-329).
+  planning?: TicketPlanning
 }
 export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }
@@ -183,6 +208,8 @@ export interface ListQuery {
   tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]
   date_field?: string; date_from?: string; date_to?: string
   q?: string; hide_closed?: boolean; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
+  // Only these nodes (at most 200), every other filter still applied (AEON-326).
+  ids?: string[]
 }
 // Work (ticket, task, epic) counts. A kind's state category wins when one is set.
 // Otherwise open is every state that is not in progress, done, cancelled or archived
@@ -221,9 +248,11 @@ export const restoreView = (id: string) => json<SavedView>(`/views/${idPath(id)}
 export interface BulkChange {
   ids: string[]; state?: string; priority?: string | null; assignee?: string | null
   tags_add?: (string | { name: string; color?: string })[]; tags_remove?: string[]; parent_id?: string
+  // Per node, the updated_at the list showed: a node changed since is skipped with code conflict.
+  if_unmodified_since?: Record<string, string>
 }
 export interface BulkResult { event_id: number | null; items: WorkNode[]; unchanged: string[]; skipped: { id: string; key?: string; reason: string; code?: string }[] }
-export const bulkChange = (body: BulkChange) => json<BulkResult>('/nodes/bulk', 'POST', body)
+export const bulkChange = (body: BulkChange) => writing(() => json<BulkResult>('/nodes/bulk', 'POST', body), (result, sent) => { for (const node of result.items ?? []) rowStore.wrote(node, sent) })
 export const undoEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 export const getProjects = (includeArchived = false) => json<{ items: ProjectSummary[] }>(`/projects${includeArchived ? '?include_archived=true' : ''}`)
   .then(page => { learnPictures(page.items.flatMap(project => project.people ?? [])); return page })
@@ -238,7 +267,7 @@ export const deleteProjectGroup = (id: string) => json<ProjectGroupWrite>(`/proj
 export const assignProjectGroup = (groupId: string | null, projectIds: string[]) => json<ProjectGroupWrite>('/project-groups/assign', 'POST', { group_id: groupId, project_ids: projectIds })
 export const undoGroupEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 // B2 ticket activity and comments.
-export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent' | 'tags'
+export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent' | 'tags' | 'kind'
 export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }
 export interface ActivityItem {
   id: string; at: string; type: 'comment' | 'change' | 'created'

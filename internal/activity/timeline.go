@@ -83,11 +83,12 @@ func decodeCursor(raw, tenantID, node string) (*cursor, error) {
 
 type record map[string]any
 type activityEvent struct {
-	id            int64
-	at            time.Time
-	typ, actor    string
-	job, reason   string
-	before, after record
+	id               int64
+	at               time.Time
+	typ, actor       string
+	job, reason      string
+	kindFrom, kindTo string
+	before, after    record
 }
 
 func decodeRecord(raw []byte) (record, error) {
@@ -117,7 +118,7 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, limi
 		}
 		rows, err := tx.Query(ctx, `SELECT id,at,type,actor_principal_id::text,before,after,metadata FROM events
 		 WHERE tenant_id=$1 AND node_id=$2 AND ($3::bigint=0 OR id<=$3)
-		 AND type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','comment.created','comment.updated','comment.deleted')
+		 AND type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','node.kind_changed','comment.created','comment.updated','comment.deleted')
 		 ORDER BY id`, p.TenantID, node, watermark)
 		if err != nil {
 			return err
@@ -131,6 +132,7 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, limi
 				return err
 			}
 			e.job, e.reason = jobReason(meta)
+			e.kindFrom, e.kindTo = kindChange(meta)
 			e.before, err = decodeRecord(before)
 			if err == nil {
 				e.after, err = decodeRecord(after)
@@ -252,6 +254,20 @@ func jobReason(raw []byte) (string, string) {
 	return strings.TrimSpace(doc.Job), strings.TrimSpace(doc.Reason)
 }
 
+func kindChange(raw []byte) (string, string) {
+	if len(raw) == 0 {
+		return "", ""
+	}
+	var doc struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if json.Unmarshal(raw, &doc) != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(doc.From), strings.TrimSpace(doc.To)
+}
+
 func sourceOf(e activityEvent) string {
 	if ref, ok := e.after["classic_ref"].(string); ok {
 		source, _, found := strings.Cut(ref, ":"+e.typ+":")
@@ -322,6 +338,14 @@ func project(evs []activityEvent, people map[string]Author) []Item {
 					item.At = at
 				}
 			}
+			items = append(items, item)
+		case "node.kind_changed":
+			if e.kindFrom == "" || e.kindTo == "" || e.kindFrom == e.kindTo {
+				break
+			}
+			from, to := e.kindFrom, e.kindTo
+			item.Type = "change"
+			item.Changes = []FieldChange{{Field: "kind", From: &from, To: &to}}
 			items = append(items, item)
 		case "node.updated", "node.moved":
 			item.Type = "change"

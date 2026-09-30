@@ -2,10 +2,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  agentName, bindingWindow, controlBlocked, cost, decidedApprovals, duration, expiresIn, groupSessions, heldRequests, needsYou,
-  pendingApprovals, riskFor, riskOf, runDuration, scopeLabel, sessionStatus, sessionForest, tokens, windowSummary,
+  agentName, controlBlocked, cost, decidedApprovals, duration, expiresIn, groupSessions, heldRequests, needsYou,
+  pendingApprovals, riskFor, riskOf, runDuration, scopeLabel, sessionStatus, sessionForest, tokens,
 } from '../src/lib/agentState.ts'
-import type { AgentRun, AllowanceWindow, Approval, HarnessSession, ProjectMessage } from '../src/lib/agents.ts'
+import type { AgentRun, Approval, HarnessSession, ProjectMessage } from '../src/lib/agents.ts'
 
 const now = Date.parse('2026-09-24T12:00:00Z')
 const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString()
@@ -185,23 +185,6 @@ test('the server’s risk wins over the local rule; runs use the server duration
   assert.equal(runDuration({ ...run, started_at: null }, now), '')
 })
 
-test('allowance windows: what is left, the pace and which window binds', () => {
-  const window = (fields: Partial<AllowanceWindow>): AllowanceWindow => ({ id: 'w', account_id: 'x', starts_at: ago(60), ends_at: ago(-60), unit: 'tokens', allowance: 1000, used: 0, reserved: 0, pace_model: 'steady', burst_ratio: 0, ...fields })
-  const ahead = windowSummary(window({ used: 700 }), now)!
-  assert.equal(ahead.pace, 'ahead')
-  assert.equal(Math.round(ahead.left * 100), 30)
-  assert.equal(windowSummary(window({ used: 480, reserved: 20 }), now)!.pace, 'on')
-  assert.equal(windowSummary(window({ used: 100 }), now)!.pace, 'under')
-  assert.equal(windowSummary(window({ starts_at: ago(-10), ends_at: ago(-70) }), now), null)
-  assert.equal(windowSummary(window({ allowance: 0 }), now), null)
-  const binding = bindingWindow([window({ id: 'roomy', used: 100 }), window({ id: 'tight', used: 900 })], now)!
-  assert.equal(binding.window.id, 'tight')
-  assert.equal(bindingWindow(undefined, now), null)
-  const fresh = window({ id: 'fresh', used: 0, provisional: true })
-  assert.equal(bindingWindow([fresh, window({ id: 'tight', used: 900 })], now)!.window.id, 'tight')
-  assert.equal(bindingWindow([fresh], now)!.window.provisional, true)
-})
-
 test('numbers read short: durations, tokens and cost', () => {
   assert.deepEqual([duration(45_000), duration(12 * 60_000), duration(134 * 60_000), duration(60 * 60_000), duration(28 * 3_600_000)], ['45s', '12m', '2h 14m', '1h', '1d 4h'])
   assert.deepEqual([tokens(950), tokens(4200), tokens(184_300), tokens(2_500_000)], ['950', '4.2k', '184k', '2.5M'])
@@ -213,9 +196,4 @@ test('fresh session projection cannot be changed by a stale optional run or requ
   for (const status of ['failed', 'ownership_lost', 'waiting'] as const) {
     assert.equal(sessionStatus(current, now, true, undefined, { status } as AgentRun).state, 'working')
   }
-})
-
-test('vendor percentage windows have an explicit unit label', async () => {
- const { UNIT_LABEL } = await import('../src/lib/agentState.ts')
- assert.equal(UNIT_LABEL.percent, 'percent')
 })

@@ -24,12 +24,20 @@ import (
 
 type grokSpec struct{ name, digest string }
 
-func (*GrokAdapter) probeNative(ctx context.Context, b GrokBinding) bool {
+func (a *GrokAdapter) probeNative(ctx context.Context, b GrokBinding) bool {
 	if _, _, err := verifyGrokBinding(b, ""); err != nil {
 		return false
 	}
 	_, bearer, subject, err := readGrokAuth(b.AuthPath, b.PrincipalSHA256)
-	return err == nil && verifyGrokUserInfo(ctx, bearer, subject) == nil
+	if err != nil || verifyGrokUserInfo(ctx, bearer, subject) != nil {
+		return false
+	}
+	for key, binding := range a.Bindings {
+		if binding.PrincipalSHA256 == b.PrincipalSHA256 {
+			a.quotaIDs.Store(key, subject)
+		}
+	}
+	return true
 }
 
 func grokVariant(variant string) (grokSpec, error) {
@@ -165,6 +173,7 @@ func (a *GrokAdapter) startNative(ctx context.Context, r StartRequest, b GrokBin
 	if err != nil {
 		return nil, err
 	}
+	p.limitVendor = Grok
 	gp := &grokProcess{wireProcess: p, proxy: proxy, scratch: scratch, scratchInfo: info, binding: b, authBefore: before, promptDone: make(chan error, 1), model: grokModel, observe: observe}
 	p.setOnEvent(gp.onEvent)
 	fail := func(e error) (Process, error) {

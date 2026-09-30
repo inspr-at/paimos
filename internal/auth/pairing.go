@@ -50,7 +50,13 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 				return nil
 			}
 		case "agent-accounts":
-			if r.Method == "GET" && len(parts) == 4 && parts[3] == "readings" && validRouteUUID(parts[2]) {
+			if r.Method == "GET" && (r.URL.Path == "/api/agent-accounts/capacity/next" || r.URL.Path == "/api/agent-accounts/use") {
+				return nil
+			} // Handler restricts paired principals to their own accounts.
+			// Quota signals, the status-line read, and the tenant quota key are
+			// the registering computer's own account, same as a readings read.
+			// Opting the status line in stays with a person.
+			if len(parts) == 4 && validRouteUUID(parts[2]) && (r.Method == "GET" && (parts[3] == "readings" || parts[3] == "statusline") || r.Method == "PUT" && parts[3] == "signals" || r.Method == "POST" && parts[3] == "quota-key") {
 				var own bool
 				if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.account_id=$1 AND c.principal_id=$2 AND a.registered_by_principal_id=$2 AND e.state<>'revoked')`, parts[2], p.ID).Scan(&own); err != nil {
 					return err

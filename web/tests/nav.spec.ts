@@ -169,13 +169,14 @@ test('on phones the places are round buttons and nothing in the header is cut', 
       const box = (await link.boundingBox())!
       expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44)
     }
-    const cut = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.app-header *, .biz-tabs *')].filter(el => {
+    // The header measures its breadcrumb over animation frames after navigation
+    // and font changes. Check the settled layout, retaining every clipping check.
+    await expect.poll(() => page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.app-header *, .biz-tabs *')].filter(el => {
       const r = el.getBoundingClientRect()
       // Visually hidden text (a 1px box for screen readers) is not clipped content.
       if (r.width <= 1 || r.height <= 1 || getComputedStyle(el).display === 'none') return false
       return r.left < -0.5 || r.right > innerWidth + 0.5 || el.scrollWidth > el.clientWidth + 1
-    }).map(el => el.className || el.tagName))
-    expect(cut, path).toEqual([])
+    }).map(el => el.className || el.tagName)), { message: path }).toEqual([])
   }
 })
 

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -79,17 +80,24 @@ func TestFakeVendorProcess(t *testing.T) {
 		result := any(map[string]any{})
 		switch frame.Method {
 		case "account/rateLimits/read":
-			if vendor == "codex_capacity" {
-				result = map[string]any{"rateLimits": map[string]any{"primary": map[string]any{"usedPercent": 31, "windowDurationMins": 10080, "resetsAt": time.Now().Add(24 * time.Hour).Unix()}}, "ordinaryUsageAllowed": true}
+			if vendor == "codex_capacity" || vendor == "codex_limited" || vendor == "codex_no_email" {
+				result = map[string]any{"rateLimits": map[string]any{"primary": map[string]any{"usedPercent": 31, "windowDurationMins": 10080, "resetsAt": time.Now().Add(24 * time.Hour).Unix()}}, "ordinaryUsageAllowed": vendor != "codex_limited"}
 			}
 		case "account/read":
 			result = map[string]any{"account": map[string]string{"type": "chatgpt", "email": "agent@example.test"}}
+			if vendor == "codex_no_email" {
+				result = map[string]any{"account": map[string]string{"type": "chatgpt"}}
+			}
 		case "thread/start":
 			result = map[string]any{"thread": map[string]string{"id": "thread-1"}}
 			if vendor == "codex_metadata" {
 				result = map[string]any{"thread": map[string]string{"id": "thread-1"}, "model": "model-a", "reasoningEffort": "high"}
 			}
 		case "turn/start":
+			if vendor == "codex_limit_error" {
+				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "id": frame.ID, "error": map[string]any{"code": -32000, "data": map[string]string{"codexErrorInfo": "usageLimitExceeded"}}})
+				continue
+			}
 			if vendor == "codex_metadata" {
 				for _, settings := range []map[string]any{
 					{"model": "unrelated", "effort": "low", "threadId": "other-thread"},
@@ -117,6 +125,30 @@ func TestFakeVendorProcess(t *testing.T) {
 				return
 			}
 		case "turn/steer":
+			if strings.HasPrefix(vendor, "codex_midrun_") {
+				thread, turn := "thread-1", "turn-1"
+				if vendor == "codex_midrun_foreign_thread" {
+					thread = "other-thread"
+				}
+				if vendor == "codex_midrun_foreign_turn" {
+					turn = "other-turn"
+				}
+				// Codex 0.159 sends a mid-run error notification, not a
+				// turn/start RPC rejection. The error-info variant is a string.
+				errInfo := map[string]any{"message": "PRIVATE_LIMIT_FIXTURE", "codexErrorInfo": "usageLimitExceeded", "additionalDetails": nil}
+				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "error", "params": map[string]any{
+					"threadId": thread, "turnId": turn, "willRetry": false, "error": errInfo,
+				}})
+				terminal := map[string]any{"id": "turn-1", "status": "completed", "items": []any{}, "error": nil}
+				if vendor == "codex_midrun_limit" {
+					terminal["status"], terminal["error"] = "failed", errInfo
+				}
+				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "turn/completed", "params": map[string]any{
+					"threadId": "thread-1", "turn": terminal,
+				}})
+				result = map[string]string{"turnId": "turn-1"}
+				break
+			}
 			for _, total := range []int{20, 20, 19} {
 				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "thread/tokenUsage/updated", "params": map[string]any{
 					"threadId": "thread-1", "tokenUsage": map[string]any{"total": map[string]int{"inputTokens": total, "outputTokens": 4}}}})
@@ -219,6 +251,45 @@ func TestCodexAppServerProtocolAndSteer(t *testing.T) {
 	}
 	if err := p.Stop(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCodexUnnamedChatGPTAccountRemainsLaunchable(t *testing.T) {
+	for _, tc := range []struct {
+		name, vendor, identity string
+		ok                     bool
+	}{
+		{"unnamed login", "codex_no_email", agentsetup.CodexChatGPTLogin, true},
+		{"named pin cannot lose email", "codex_no_email", "agent@example.test", false},
+		{"unnamed pin cannot become named", "codex", agentsetup.CodexChatGPTLogin, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := adapterRequest(t)
+			home, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(home, 0700); err != nil {
+				t.Fatal(err)
+			}
+			a := NewCodexAdapter(fakeVendorPath(t, tc.vendor), map[string]string{"account": home})
+			a.SetExpectedEmails(map[string]string{"account": tc.identity})
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			p, err := a.Start(ctx, r, func(AdapterEvent) {})
+			if (err == nil) != tc.ok {
+				t.Fatalf("start accepted=%v, want %v: %v", err == nil, tc.ok, err)
+			}
+			if p != nil {
+				if err := p.Stop(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			readings := a.CaptureCapacity(ctx, "account")
+			if (len(readings) == 1) != tc.ok {
+				t.Fatalf("quota identity check: %d readings", len(readings))
+			}
+		})
 	}
 }
 

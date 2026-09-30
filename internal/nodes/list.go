@@ -64,6 +64,9 @@ type listItem struct {
 	// permission-projected label. Key identifies that session for the client
 	// without carrying a session id the caller cannot already see.
 	LeadWorker *leadWorker `json:"lead_worker,omitempty"`
+	// Planning is the resolved model, tokens and (with harness.read) cost of a
+	// ticket, task or epic (AEON-329). Absent when there is nothing to show.
+	Planning *planningView `json:"planning,omitempty"`
 }
 
 // leadWorker is one bound live session, chosen by the server.
@@ -127,11 +130,15 @@ type listQuery struct {
 	DateField string     `json:"date_field,omitempty"`
 	DateFrom  *time.Time `json:"date_from,omitempty"`
 	DateTo    *time.Time `json:"date_to,omitempty"`
+	// Only these nodes, with every other filter still applied: a live list
+	// refetches the rows that changed through its own query (AEON-326).
+	IDs []string `json:"ids,omitempty"`
 	// seen and the lead thresholds are filled by listNodes. They are not
 	// request input and stay out of the cursor fingerprint (unexported).
 	seen       assigneeSeen
 	leadYellow int
 	leadRed    int
+	planRates  json.RawMessage
 }
 type listCursor struct {
 	Hash string `json:"hash"`
@@ -145,7 +152,10 @@ type treeQuery struct {
 	Cursor   string
 }
 
-var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true}
+// maxListIDs bounds the ids filter: one live refetch covers at most a page.
+const maxListIDs = 200
+
+var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
 var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true}
 
 // dateFieldKeys maps date_field to the fields key of dates kept in node fields.
@@ -303,6 +313,19 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 		out.ParentSet = true
 		out.ParentID = &id
 	}
+	if out.IDs, err = queryList(r, "ids"); err != nil {
+		return out, err
+	}
+	if len(out.IDs) > maxListIDs {
+		return out, badRequest("ids lists at most 200 nodes")
+	}
+	for i, raw := range out.IDs {
+		id, ok := parseUUID(raw)
+		if !ok {
+			return out, badRequest("invalid ids")
+		}
+		out.IDs[i] = id
+	}
 	if out.Descendants, err = queryBool(r, "include_descendants"); err != nil {
 		return out, err
 	}
@@ -453,10 +476,25 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			}
 			q.leadYellow, q.leadRed = yellow, red
 		}
+		if sortsByPlanningValue(q) {
+			if err := preparePlanningSort(ctx, tx, &q); err != nil {
+				return dbErr("planning sort", err)
+			}
+			// Nested loops from the filtered tickets into usage become a
+			// per-row visibility probe once that table holds other tenants.
+			// Hash the usage read instead; later statements want nested loops.
+			if _, err := tx.Exec(ctx, `SET LOCAL enable_nestloop = off`); err != nil {
+				return dbErr("planning sort", err)
+			}
+		}
 		sql, args := listSQL(q, anchor)
 		rows, err := tx.Query(ctx, sql, args...)
 		if err != nil {
 			return dbErr("list nodes", err)
+		}
+		var money map[string]planMicros
+		if sortsByPlanningValue(q) {
+			money = map[string]planMicros{}
 		}
 		for rows.Next() {
 			var item listItem
@@ -464,10 +502,23 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			var assigneeID, assigneeName, parentID, parentKey, parentTitle, parentKind, projectID, projectKey, projectTitle, epicID, epicKey, epicTitle *string
 			var assigneeAvatar bool
 			var leadName, leadKey *string
-			err = rows.Scan(&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &assigneeAvatar, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle, &leadName, &leadKey)
+			var listSpent, listEst, paidSpent, paidEst *string
+			dest := []any{&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &assigneeAvatar, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle, &leadName, &leadKey}
+			if money != nil {
+				dest = append(dest, &listSpent, &listEst, &paidSpent, &paidEst)
+			}
+			err = rows.Scan(dest...)
 			if err != nil {
 				rows.Close()
 				return err
+			}
+			if money != nil {
+				parsed, err := planMicrosFromText(listSpent, listEst, paidSpent, paidEst)
+				if err != nil {
+					rows.Close()
+					return err
+				}
+				money[item.ID] = parsed
 			}
 			if leadName != nil && leadKey != nil {
 				item.LeadWorker = &leadWorker{Name: *leadName, Key: *leadKey}
@@ -492,6 +543,11 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 		rows.Close()
 		if err != nil {
 			return err
+		}
+		if sortsByPlanningValue(q) {
+			if _, err := tx.Exec(ctx, `SET LOCAL enable_nestloop = on`); err != nil {
+				return err
+			}
 		}
 		if len(page.Items) > q.Limit {
 			last := page.Items[q.Limit-1]
@@ -538,6 +594,13 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			}
 			for i := range page.Items {
 				page.Items[i].Estimate = estimates[page.Items[i].ID]
+			}
+			planning, err := loadPlanning(ctx, tx, page.Items, q.seen, money)
+			if err != nil {
+				return dbErr("list planning", err)
+			}
+			for i := range page.Items {
+				page.Items[i].Planning = planning[page.Items[i].ID]
 			}
 			views, err := eta.Load(ctx, tx, ids)
 			if err != nil {
@@ -870,6 +933,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	not := func(match func([]string) string) func([]string) string {
 		return func(values []string) string { return "NOT (" + match(values) + ")" }
 	}
+	add(q.IDs, func(v []string) string { return `n.id=ANY(` + arg(v) + `::uuid[])` })
 	add(q.StatesNot, func(v []string) string { return `NOT (n.state=ANY(` + arg(v) + `::text[]))` })
 	add(q.PrioritiesNot, func(v []string) string {
 		return `NOT (coalesce(nullif(n.fields->>'priority',''),'none')=ANY(` + arg(v) + `::text[]))`
@@ -1048,6 +1112,21 @@ func listOrder(q listQuery) string {
 			parts = append(parts, "est.hours IS NULL ASC", "est.hours "+dir)
 		case "progress":
 			parts = append(parts, "eta.progress_pct IS NULL ASC", "eta.progress_pct "+dir)
+		case "model":
+			// The role's rung on the ladder, then the area; rows without a role last.
+			parts = append(parts, "route.rank IS NULL ASC", "route.rank "+dir, "route.area IS NULL ASC", "route.area "+dir)
+		case "tokens", "list_cost", "paid":
+			// The same integer the cell prints: spent micro-dollars, else the
+			// estimate. Rounded once in the CTE as numeric, then the id tiebreaker.
+			// The amount is a CTE projection, so an expression index cannot
+			// serve it, and rounding inside the usage aggregate does not shrink
+			// the plan: sorting those rows is noise next to building it.
+			value := map[string]string{
+				"tokens":    "plan.tokens",
+				"list_cost": "plan.list_micros",
+				"paid":      "plan.paid_micros",
+			}[key.Name]
+			parts = append(parts, value+" IS NULL ASC", value+" "+dir)
 		default:
 			parts = append(parts, "f."+key.Name+" "+dir)
 		}
@@ -1091,11 +1170,32 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {
 		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta(f.id) eta ON true`
 	}
-	estimateJoin := ""
+	estimateJoin, planningCTE, planningJoin := "", "", ""
+	if sortsBy(q, "model") {
+		planningJoin = ` LEFT JOIN LATERAL (
+            SELECT CASE rn.fields->>'route_role' WHEN 'scout' THEN 0 WHEN 'mechanical' THEN 1 WHEN 'build' THEN 2 WHEN 'build-hard' THEN 3 WHEN 'review-gate' THEN 4 END AS rank,
+                nullif(rn.fields->>'area','') AS area
+            FROM nodes rn WHERE rn.tenant_id=current_setting('aeon.tenant_id')::uuid AND rn.id=f.id
+        ) route ON true`
+	}
+	if sortsByPlanningValue(q) {
+		rates := q.planRates
+		if len(rates) == 0 {
+			rates = json.RawMessage(`[]`)
+		}
+		args = append(args, string(rates))
+		planningCTE = planningSortSQL(fmt.Sprintf("$%d", len(args)), harnessAll, projectArg, false)
+		planningJoin += ` LEFT JOIN planning_values plan ON plan.id=f.id`
+	}
+	moneyJoin, moneyCols := "", ""
+	if sortsByPlanningValue(q) {
+		moneyJoin = ` LEFT JOIN planning_values pm ON pm.id=n.id`
+		moneyCols = `, ` + usdMicrosTextSQL("pm.list_spent_micros") + `, ` + usdMicrosTextSQL("pm.list_est_micros") + `, ` + usdMicrosTextSQL("pm.paid_spent_micros") + `, ` + usdMicrosTextSQL("pm.paid_est_micros")
+	}
 	if sortsBy(q, "estimate") {
 		estimateJoin = ` LEFT JOIN LATERAL (` + estimateSQL(`SELECT n.id,n.fields,f.kind_slug FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=f.id`) + `) est ON true`
 	}
-	sql := prefix + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + `),
+	sql := prefix + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
     selected AS (SELECT * FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
     -- Count visible children for the page once instead of rescanning nodes per row.
     child_counts AS MATERIALIZED (
@@ -1109,7 +1209,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
            par.id::text,par.key,par.title,pk.slug,
            coalesce(cc.child_count,0),
            project.id::text,project.key,project.title,
-           epic.id::text,epic.key,epic.title,` + leadColumns + `
+           epic.id::text,epic.key,epic.title,` + leadColumns + moneyCols + `
     FROM selected s JOIN nodes n ON n.id=s.id JOIN node_kinds k ON k.id=n.kind_id
     LEFT JOIN child_counts cc ON cc.parent_id=n.id
     ` + assigneeJoin + pageWorker + `
@@ -1130,7 +1230,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
                 JOIN nodes a ON a.id=up.parent_id AND a.deleted_at IS NULL
             WHERE up.depth<32
         ) SELECT u.id,u.key,u.title FROM up u JOIN node_kinds ek ON ek.id=u.kind_id WHERE ek.slug='epic' ORDER BY u.depth LIMIT 1
-    ) epic ON true
+    ) epic ON true` + moneyJoin + `
     ORDER BY s.rn`
 	return sql, args
 }

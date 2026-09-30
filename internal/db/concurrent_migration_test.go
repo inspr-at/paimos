@@ -107,7 +107,7 @@ func TestConcurrentMigrationRecovery(t *testing.T) {
 	}
 }
 
-// Exercise the actual AEON-345 SQL, including both crash windows: an INVALID
+// Exercise the actual AEON-345 and AEON-329 SQL, including both crash windows: an INVALID
 // partial build, and a successful build whose migration record was never saved.
 func TestSessionThreadConcurrentMigrationRecovery(t *testing.T) {
 	d, err := dbtest.NewUnmigrated(t.Context())
@@ -149,6 +149,7 @@ func TestSessionThreadConcurrentMigrationRecovery(t *testing.T) {
 	files := map[string]string{
 		"0992_session_thread_lookups.sql": "inbox_compat_sender_session",
 		"0993_session_thread_replies.sql": "inbox_compat_reply",
+		"0996_session_ticket_index.sql":   "harness_sessions_ticket_node",
 	}
 	invalidOIDs := make(map[string]uint32)
 	err = db.MigrateWithHook(t.Context(), runner, func(name string) error {
@@ -165,7 +166,11 @@ func TestSessionThreadConcurrentMigrationRecovery(t *testing.T) {
 			return err
 		}
 		defer writer.Rollback(t.Context())
-		if _, err := writer.Exec(t.Context(), `LOCK TABLE inbox_compat_messages IN ROW EXCLUSIVE MODE`); err != nil {
+		table := "inbox_compat_messages"
+		if name == "0996_session_ticket_index.sql" {
+			table = "harness_sessions"
+		}
+		if _, err := writer.Exec(t.Context(), `LOCK TABLE `+table+` IN ROW EXCLUSIVE MODE`); err != nil {
 			return err
 		}
 		builder, err := d.App.Acquire(t.Context())

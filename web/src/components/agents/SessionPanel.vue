@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { capacityWaitText } from '../../lib/capacityWait'
 import { brand } from '../../lib/brand'
 import { api, getNode } from '../../lib/api'
 import { can } from '../../lib/authz'
@@ -255,8 +256,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 
       <section v-if="run" class="block" aria-labelledby="telemetry-title">
         <h3 id="telemetry-title" class="eyebrow">Current run</h3>
+        <p v-if="run.wait" class="outside-note">{{ capacityWaitText(run.wait, 'Agents', now) }}</p>
         <div class="telemetry">
-          <div class="metric"><span class="metric-label">Status</span><span class="run-chip" :class="RUN_OUTCOME[run.status].tone">{{ RUN_OUTCOME[run.status].label }}</span></div>
+          <div class="metric"><span class="metric-label">Status</span><span class="run-chip" :class="run.wait?.code === 'vendor' ? '' : RUN_OUTCOME[run.status].tone">{{ run.wait?.code === 'vendor' ? 'Throttled' : RUN_OUTCOME[run.status].label }}</span></div>
           <div class="metric"><span class="metric-label">Tokens in</span><b>{{ tokens(run.input_tokens) }}</b></div>
           <div class="metric"><span class="metric-label">Tokens out</span><b>{{ tokens(run.output_tokens) }}</b></div>
           <div class="metric"><span class="metric-label">Cost</span><b>{{ cost(run.cost_micros) }}</b></div>

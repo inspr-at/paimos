@@ -518,3 +518,28 @@ func TestSystemActorMetadataIsNotANameMatch(t *testing.T) {
 		t.Fatalf("lookalike item: %+v", page.Items[0].Author)
 	}
 }
+
+func TestKindChangeAppearsInHistory(t *testing.T) {
+	f := setup(t)
+	at := f.databaseNow()
+	f.tx(func(tx pgx.Tx) error {
+		_, err := events.Append(f.t.Context(), tx, f.p, events.Change{
+			NodeID:   &f.node,
+			Type:     "node.kind_changed",
+			At:       &at,
+			Before:   map[string]any{"title": "Ticket", "state": "new", "kind_id": "before"},
+			After:    map[string]any{"title": "Ticket", "state": "new", "kind_id": "after"},
+			Metadata: json.RawMessage(`{"from":"ticket","to":"epic","by":"` + f.p.ID + `"}`),
+		})
+		return err
+	})
+	page := f.page("")
+	for _, item := range page.Items {
+		for _, change := range item.Changes {
+			if change.Field == "kind" && change.From != nil && *change.From == "ticket" && change.To != nil && *change.To == "epic" {
+				return
+			}
+		}
+	}
+	t.Fatalf("timeline %#v", page.Items)
+}

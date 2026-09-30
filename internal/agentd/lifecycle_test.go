@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -227,3 +228,78 @@ func TestUncertainRestartDoesNotRelaunchVerification(t *testing.T) {
 }
 
 var _ = time.Second
+
+// Readiness describes usable accounts, never cleanup or process ownership.
+func TestLifecycleReadinessIsPerHarness(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "checking" || status.HarnessDetails[Codex].Reason != "starting" {
+		t.Fatalf("unprobed account is ready: %+v", status)
+	}
+	s.probedAccounts["account"] = true
+	if status := s.Lifecycle(""); !status.Ready || status.HarnessStatuses[Codex] != "ready" {
+		t.Fatalf("healthy account not ready: %+v", status)
+	}
+	s.SetHarnessHoldWithReason(Codex, "repin_pending", "waiting for active runs")
+	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "blocked" || status.HarnessDetails[Codex].Reason != "repin_pending" || status.HarnessDetails[Codex].Fix.Command != "" {
+		t.Fatalf("held account is ready: %+v", status)
+	}
+	s.SetHarnessHold(Codex, "")
+	s.loginRequired["account"] = true
+	if status := s.Lifecycle(""); status.Ready || !status.LoginRequired || status.HarnessStatuses[Codex] != "login_required" || status.HarnessDetails[Codex].Fix.Command != "codex login" {
+		t.Fatalf("unsigned account is ready: %+v", status)
+	}
+	s.loginRequired["account"] = false
+	if _, err := s.Drain(DrainRequest{DaemonID: s.daemonID}); err != nil {
+		t.Fatal(err)
+	}
+	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "draining" || !status.AllFenced {
+		t.Fatalf("fenced account is ready: %+v", status)
+	}
+}
+
+func TestReadyAccountDoesNotHideBlockedSibling(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	s.mu.Lock()
+	s.accounts = append(s.accounts, EnrolledAccount{ID: "blocked", Key: "blocked-local", Harness: Codex, DependencyBlocked: true, PinReason: agentsetup.PinDrifted})
+	s.blockedAccounts["blocked"] = true
+	s.probedAccounts["account"] = true
+	s.mu.Unlock()
+	status := s.Lifecycle("")
+	detail := status.HarnessDetails[Codex]
+	if !status.Ready || status.HarnessFailed || status.HarnessStatuses[Codex] != "ready" || detail.State != "ready" || detail.Reason != "" || detail.Fix.Command != "" || len(detail.Attention) != 1 || detail.Attention[0].AccountID != "blocked" || detail.Attention[0].Reason != agentsetup.PinDrifted || detail.AttentionCount != 1 || detail.AttentionTruncated {
+		t.Fatalf("ready sibling erased the block: %+v ready=%v", detail, status.Ready)
+	}
+	if len(status.BlockedAccounts) != 1 || status.BlockedAccounts[0].AccountID != "blocked" || status.BlockedAccounts[0].Reason != agentsetup.PinDrifted {
+		t.Fatalf("local blocked account lost: %+v", status.BlockedAccounts)
+	}
+	for _, item := range detail.Attention {
+		if item.AccountID == "account" {
+			t.Fatal("healthy account listed as needing attention")
+		}
+	}
+}
+
+func TestReadyAccountKeepsSixBlockedSiblings(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	s.mu.Lock()
+	s.probedAccounts["account"] = true
+	for i := 1; i <= 6; i++ {
+		id := "b" + string(rune('0'+i))
+		s.accounts = append(s.accounts, EnrolledAccount{ID: id, Key: id, Harness: Codex, DependencyBlocked: true, PinReason: agentsetup.PinDrifted})
+	}
+	s.mu.Unlock()
+	detail := s.Lifecycle("").HarnessDetails[Codex]
+	if detail.State != "ready" || detail.AttentionCount != 6 || detail.AttentionTruncated || len(detail.Attention) != 6 {
+		t.Fatalf("six blocked siblings: %+v", detail)
+	}
+	seen := map[string]bool{}
+	for _, item := range detail.Attention {
+		if item.AccountID == "account" || item.Reason != agentsetup.PinDrifted {
+			t.Fatalf("blocked set %+v", detail.Attention)
+		}
+		seen[item.AccountID] = true
+	}
+	if len(seen) != 6 {
+		t.Fatalf("blocked set %+v", detail.Attention)
+	}
+}

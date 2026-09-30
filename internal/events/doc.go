@@ -8,6 +8,10 @@
 // dedicated LISTEN connection (outside the query pool); all durable replay runs
 // through db.InTenant. Disconnects release the listener, and clients reconnect
 // with Last-Event-ID. Notifications contain only a tenant and event ID.
+// Live views open the stream with ?after=latest: it starts at the newest
+// event, and each connection first sends stream.ready naming its resume ID.
+// Reading attaches node_changes to node.* events (id, project, changed
+// attribute names, revision); nothing about them is stored.
 //
 // Every resource mutation must call Append(ctx, tx, principal, Change{...})
 // inside its existing db.InTenant callback, after taking resource locks. Append

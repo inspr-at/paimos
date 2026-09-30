@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
@@ -40,6 +41,8 @@ var (
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
+	RetryOfRunID              string `json:"retry_of_run_id"`
+	CapacityHandoff           bool   `json:"capacity_handoff,omitempty"`
 	Purpose                   string `json:"purpose,omitempty"`
 	VerificationTask          string `json:"verification_task,omitempty"`
 	MaxDurationSeconds        *int64 `json:"max_duration_seconds,omitempty"`
@@ -131,6 +134,8 @@ type WorkCriterion struct {
 // Telemetry carries content-free, nonnegative deltas. TurnCountDelta is one
 // accepted user turn; token and cost deltas come from vendor usage reports.
 type Telemetry struct {
+	LimitWindow            string      `json:"limit_window,omitempty"`
+	LimitResetsAt          *time.Time  `json:"limit_resets_at,omitempty"`
 	Sequence               int64       `json:"sequence"`
 	Kind                   string      `json:"kind"`
 	Status                 string      `json:"status,omitempty"`
@@ -230,6 +235,8 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
+	VendorLimit *capacity.LimitHit
+
 	Activity               string // busy or idle, independent of the run process lifetime.
 	Capacity               []capacity.Reading
 	BudgetExhausted        string
@@ -289,8 +296,9 @@ type AccountProber interface {
 // signed out or signed in as someone else; errors, timeouts and unreadable
 // output are ProbeUnavailable. Vendor output never leaves the daemon.
 type ProbeStatus struct {
-	OK      bool
-	Failure string
+	OpenRouterCredits *openrouter.Credits
+	OK                bool
+	Failure           string
 }
 
 const (
@@ -326,6 +334,13 @@ type AccountMetadata struct {
 type EnrolledAccount struct {
 	ID, Key, Harness string
 	Metadata         *AccountMetadata
+	// DependencyBlocked means this enrollment's interpreter pin is missing,
+	// partial, drifted, invalid, or unsafe. It stays enrolled and unlaunchable.
+	// PinReason is the shared reason code and PinFix the fix kind; the exact
+	// command comes from agentsetup.RecoveryFix.
+	DependencyBlocked bool
+	PinReason         string
+	PinFix            string
 }
 
 type ControlRequest struct {

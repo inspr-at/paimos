@@ -107,11 +107,60 @@ func TestHomebrewFormulaTimeoutIsUnknown(t *testing.T) {
 	}
 }
 
-func TestHomebrewFormulaWatchStops(t *testing.T) {
-	var n atomic.Int32
+func TestHomebrewFormulaCancelKeepsKnownFormula(t *testing.T) {
+	entered := make(chan struct{})
+	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n.Add(1)
+		if calls.Add(1) == 1 {
+			_, _ = io.WriteString(w, "version \"260929120000.0.0\"\n")
+			return
+		}
+		close(entered)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+	formula := NewHomebrewFormula(HomebrewFormulaConfig{
+		URL: srv.URL, Client: srv.Client(), Timeout: time.Second,
+		Version: func() string { return "260929120000.0.0" },
+	})
+	formula.Refresh(context.Background())
+	if current, known := formula.Current(); !known || !current {
+		t.Fatal("first read did not match")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		formula.Refresh(ctx)
+		close(done)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("second read did not start")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled read did not return")
+	}
+	if current, known := formula.Current(); !known || !current {
+		t.Fatal("cancelled read wiped a matching formula")
+	}
+}
+
+func TestHomebrewFormulaWatchStops(t *testing.T) {
+	// The handler reports a finished response. The count is taken after the body
+	// is written; the test still waits until that response is stored, because the
+	// client reads it only once the handler returns.
+	completed := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "version \"260929120000.0.0\"\n")
+		// Unblock if the test has stopped listening and the watcher is cancelled.
+		select {
+		case completed <- struct{}{}:
+		case <-r.Context().Done():
+		}
 	}))
 	t.Cleanup(srv.Close)
 	formula := NewHomebrewFormula(HomebrewFormulaConfig{
@@ -124,18 +173,26 @@ func TestHomebrewFormulaWatchStops(t *testing.T) {
 		formula.Watch(ctx)
 		close(done)
 	}()
-	deadline := time.Now().Add(time.Second)
-	for n.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
+	wait, stopWait := context.WithTimeout(context.Background(), time.Second)
+	defer stopWait()
+	n := 0
+	for {
+		if current, known := formula.Current(); known && current && n >= 2 {
+			break
+		}
+		select {
+		case <-completed:
+			n++
+		case <-wait.Done():
+			current, known := formula.Current()
+			t.Fatalf("refreshes %d known %v current %v", n, known, current)
+		}
 	}
 	cancel()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("watch did not stop")
-	}
-	if n.Load() < 2 {
-		t.Fatalf("refreshes %d", n.Load())
 	}
 	if current, known := formula.Current(); !known || !current {
 		t.Fatal("watch lost a matching formula")

@@ -32,3 +32,29 @@ func TestNoRequestStatusAndHeartbeatAreByteIdenticalToV1(t *testing.T) {
 		})
 	}
 }
+
+// The single 1.5 fixture composes watch evidence (352), vendor-reference presence
+// (369) without revealing the vendor reference itself.
+func TestCombinedHarnessSessionV15Fixture(t *testing.T) {
+	body, err := json.Marshal(harness.Session{HasVendorSessionRef: true,
+		Watch: &harness.AttachStatus{RequestID: "39000000-0000-4000-8000-000000000001", OwnerID: "39000000-0000-4000-8000-000000000002", Mode: "lease", ProcessState: "confirmed_exited", State: "detached"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["has_vendor_session_ref"]) != "true" {
+		t.Fatal("vendor reference presence missing")
+	}
+	const watch = `{"request_id":"39000000-0000-4000-8000-000000000001","owner_id":"39000000-0000-4000-8000-000000000002","mode":"lease","process_state":"confirmed_exited","state":"detached","lease_until":null}`
+	if string(fields["watch"]) != watch {
+		t.Fatalf("combined watch fixture = %s", fields["watch"])
+	}
+	for _, name := range []string{"vendor_session_ref", "vendor_ref_digest"} {
+		if _, exists := fields[name]; exists {
+			t.Fatalf("private %s serialized", name)
+		}
+	}
+}

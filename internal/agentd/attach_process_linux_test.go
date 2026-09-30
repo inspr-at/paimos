@@ -4,6 +4,8 @@
 package agentd
 
 import (
+	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -24,5 +26,19 @@ func TestAttachLinuxStatSessionIdentity(t *testing.T) {
 	fields[3], fields[0] = "20", "Z"
 	if _, _, _, _, err := linuxAttachStat(raw()); err == nil {
 		t.Fatal("dead session leader accepted")
+	}
+}
+
+func TestAttachLinuxExitedProcessIsKernelConfirmed(t *testing.T) {
+	cmd := exec.Command("/bin/true")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := cmd.Process.Pid
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := observeAttachProcess(pid); !errors.Is(err, errAttachExited) {
+		t.Fatalf("exited process not distinguished: %v", err)
 	}
 }

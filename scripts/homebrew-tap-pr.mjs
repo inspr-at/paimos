@@ -60,7 +60,26 @@ async function gh(token, method, path, body) {
   return { status: res.status, data };
 }
 
-async function fetchChecksums(version) {
+export async function fetchPublishedChecksums(version) {
+  if (!validCalendarVersion(version)) throw new Error("VERSION is not a calendar coordinate");
+  // Deliberately unauthenticated: consumers must not see draft assets, even if
+  // the caller has a token that could read them. Check before minting a tap token.
+  const release = await fetch(`https://api.github.com/repos/inspr-at/paimos/releases/tags/v${version}`, {
+    redirect: "error",
+    signal: AbortSignal.timeout(30_000),
+    headers: {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "aeon-homebrew-tap",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+  if (!release.ok) throw new Error(`published release lookup failed (HTTP ${release.status})`);
+  const metadata = await release.json();
+  if (metadata?.tag_name !== `v${version}` || metadata.draft !== false ||
+      metadata.prerelease !== false || typeof metadata.published_at !== "string" ||
+      !Number.isFinite(Date.parse(metadata.published_at))) {
+    throw new Error("Homebrew requires the exact published, non-draft, non-prerelease release");
+  }
   const url = `https://github.com/inspr-at/paimos/releases/download/v${version}/SHA256SUMS`;
   let last = "no response";
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -156,7 +175,7 @@ export async function bumpHomebrewTap(env = process.env) {
   if (!/^[0-9]+$/.test(appId)) throw new Error("HOMEBREW_TAP_APP_ID is not numeric");
   const version = String(env.VERSION || "").trim();
   if (!validCalendarVersion(version)) throw new Error("VERSION is not an inspr-calendar-v2 coordinate");
-  const formula = renderFormula(version, await fetchChecksums(version));
+  const formula = renderFormula(version, await fetchPublishedChecksums(version));
   const token = await installationToken(appId, key);
   const repo = await gh(token, "GET", `/repos/${TAP}`);
   if (repo.status !== 200 || typeof repo.data?.default_branch !== "string" || !/^[A-Za-z0-9._/-]+$/.test(repo.data.default_branch)) {

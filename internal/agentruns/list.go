@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -83,6 +84,22 @@ func (m *module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		b, _ := json.Marshal(runCursor{fingerprint, last.CreatedAt, last.ID})
 		next := base64.RawURLEncoding.EncodeToString(b)
 		out.NextCursor = &next
+	}
+	rows.Close()
+	for i := range out.Items {
+		if out.Items[i].Status == "failed" {
+			out.Items[i].Wait, err = vendorWait(r.Context(), tx, out.Items[i])
+			if err != nil {
+				return nil, err
+			}
+		}
+		if out.Items[i].Status != "queued" || out.Items[i].Purpose != "managed" {
+			continue
+		}
+		out.Items[i].Wait, err = agentaccounts.WaitForRun(r.Context(), tx, out.Items[i].ID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }

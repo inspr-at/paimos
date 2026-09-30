@@ -8,6 +8,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
@@ -25,6 +26,29 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 		p.emitCapacity(raw, "update")
 		return
 	}
+	// Account quota notifications above belong to this authenticated connection.
+	// Turn errors must additionally name its owned thread and acknowledged turn.
+	var limitBinding struct {
+		Params struct {
+			ThreadID string `json:"threadId"`
+			TurnID   string `json:"turnId"`
+			Turn     struct {
+				ID string `json:"id"`
+			} `json:"turn"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(raw, &limitBinding) == nil && p.threadID != "" && limitBinding.Params.ThreadID == p.threadID {
+		turn := firstNonempty(limitBinding.Params.TurnID, limitBinding.Params.Turn.ID)
+		if turn != "" {
+			if hit := capacity.CodexLimit(raw, p.lastCapacity, time.Now().UTC(), p.capacityModel); hit != nil {
+				if p.acknowledged && turn == p.turnID {
+					p.emitVendorLimit(hit)
+				} else if !p.acknowledged && p.pendingLimit == nil {
+					p.pendingLimit, p.pendingLimitTurn = hit, turn
+				}
+			}
+		}
+	}
 	if method == "thread/settings/updated" {
 		var frame struct {
 			Params struct {
@@ -36,6 +60,9 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 			} `json:"params"`
 		}
 		if json.Unmarshal(raw, &frame) == nil && p.threadID != "" && frame.Params.ThreadID == p.threadID {
+			if frame.Params.Settings.Model != "" {
+				p.capacityModel = frame.Params.Settings.Model
+			}
 			p.observe(AdapterEvent{HarnessModel: frame.Params.Settings.Model, HarnessEffort: frame.Params.Settings.Effort})
 		}
 	}
@@ -58,6 +85,7 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 				// Only an exact, parser-validated usage model is vendor evidence.
 				// Arbitrary model-like text on other notifications is not metadata.
 				if model != "" && model == report.Model {
+					p.capacityModel = report.Model
 					ev.Kind, ev.EffectiveModel, ev.ModelEvidence = "usage", report.Model, "vendor_reported"
 				}
 				p.observe(ev)
@@ -222,7 +250,12 @@ func (p *codexProcess) awaitCompletion() {
 
 func (p *codexProcess) startTurn(ctx context.Context, r StartRequest) error {
 	// Each request stays on the fresh thread owned by this connection.
+	p.eventMu.Lock()
 	thread := p.threadID
+	// turn/start explicitly selects this model, including after an idle wake.
+	// A previous turn's model switch must not change the new turn's quota scope.
+	p.capacityModel = r.Profile.Model
+	p.eventMu.Unlock()
 	raw, err := p.request(ctx, "jsonrpc", "turn/start", map[string]any{"threadId": thread, "input": []map[string]string{{"type": "text", "text": r.Prompt}}, "model": r.Profile.Model, "effort": r.Profile.Effort})
 	turn, parseErr := sessionusage.CodexStartedTurn(raw)
 	p.eventMu.Lock()
@@ -233,6 +266,10 @@ func (p *codexProcess) startTurn(ctx context.Context, r StartRequest) error {
 		return errors.New("Codex turn start failed")
 	}
 	p.turnID, p.acknowledged = turn, true
+	if p.pendingLimit != nil && p.pendingLimitTurn == turn {
+		p.emitVendorLimit(p.pendingLimit)
+	}
+	p.pendingLimit, p.pendingLimitTurn = nil, ""
 	if p.usage != nil {
 		// Usage with an explicit pre-ack turnId must agree with this result.
 		if err := p.usage.BindTurn(turn); err != nil {

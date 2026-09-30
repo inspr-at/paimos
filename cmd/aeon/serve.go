@@ -241,6 +241,18 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	homebrewFormula := agentpairing.NewHomebrewFormula(agentpairing.HomebrewFormulaConfig{})
 	pairingMod.SetHomebrewFormula(homebrewFormula)
 	go homebrewFormula.Watch(ctx)
+	doctrineMod := doctrine.New(pool, doctrine.Options{
+		CredentialsDir:    cfg.DoctrineCredentialsDir,
+		GuardKey:          cfg.DoctrineGuardKey,
+		BinaryAllowlist:   cfg.DoctrineBinaryAllowlist,
+		AnalysisLearnings: knowledge.AnalysisLearnings,
+		App: doctrine.AppConfig{
+			ID: cfg.DoctrineAppID, InstallationID: cfg.DoctrineInstallationID, KeyRef: cfg.DoctrineAppKeyRef,
+			TenantID: cfg.DoctrineAppTenantID, GateLogin: cfg.DoctrineGateLogin, DCOAcknowledged: cfg.DoctrineDCOAcknowledged,
+		},
+	})
+	go doctrineMod.EnsurePrivateGuards(ctx)
+	go doctrineMod.RunOutcomeAnalysis(ctx)
 	api := &httpapi.Server{
 		Pool:  pool,
 		Brand: &productBrand,
@@ -268,7 +280,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			inbox.New(pool),
 			harness.New(pool),
 			rules.New(pool),
-			doctrine.New(pool, doctrine.Options{CredentialsDir: cfg.DoctrineCredentialsDir}),
+			doctrineMod,
 			ticketwork.New(pool),
 			outcomes.New(pool),
 			deliveryvote.New(pool),

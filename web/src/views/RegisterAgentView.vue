@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
@@ -13,14 +13,14 @@ import { rememberSignInReturn } from '../lib/signInReturn'
 import { useSession } from '../stores/session'
 import {
   DEFAULT_REVIEW_CHOICE, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
-  addHarnessTargetProblem, createOngoingLimits, defaultSelectedAccountKeys, denyPairing, describeProgress,
-  emptyRequestLimit, formatAllowanceMoment, formatVerification, getPairingComputer, getPairingGuide,
-  isAddHarness, lookupPairing, matchOngoingLimit, ongoingLimitAccounts, ongoingLimitError, pairingPermissions,
-  pairingReadGeneration, peekPairingCode, planOngoingLimits, planPoll, platformCaption, presentPublicGuide,
-  chooseInstallMethod, installMethods, readPairingInstallMethod, rememberPairingCode, setHarnessAccount, simpleRequestLimitError, submitApproval, takePairingCode,
-  writePairingInstallMethod,
-  unsupportedVerification, verificationWarning,
-  type OngoingLimitDraft, type PairingGuide, type PairingView, type ReviewChoice,
+  addHarnessTargetProblem, approvePairedAccounts, defaultSelectedAccountKeys, denyPairing, describeProgress,
+  formatAllowanceMoment, formatVerification, getPairingComputer, getPairingGuide,
+  isAddHarness, lookupPairing, pairingPermissions,
+  pairingReadGeneration, peekPairingCode, planPoll, platformCaption, presentPublicGuide,
+  rememberPairingCode, setHarnessAccount, submitApproval, takePairingCode,
+  chooseInstallMethod, installMethods, readPairingInstallMethod, writePairingInstallMethod,
+  connectDisabledReason, unsupportedVerification, verifiableAccountKeys, verificationWarning,
+  type PairingGuide, type PairingView, type ReviewChoice,
 } from '../lib/agentPairing'
 
 const COMPUTER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -35,11 +35,12 @@ const guideError = ref('')
 const code = ref('')
 const current = ref<PairingView | null>(null)
 const verify = ref(true)
-const limitsWhen = ref<'later' | 'now'>('later')
-const limitsOpen = ref(false)
+const verificationChoice = ref(false)
+const connectButton = ref<HTMLButtonElement | null>(null)
+const connectOnlyButton = ref<HTMLButtonElement | null>(null)
+const allowAgents = ref(true)
+const approvalPending = ref(false)
 const selected = ref<string[]>([])
-const drafts = ref<Record<string, OngoingLimitDraft>>({})
-const limitState = ref<Record<string, 'saved' | 'uncertain' | 'failed' | 'absent'>>({})
 const permissionsReady = ref(false)
 const online = ref(typeof navigator === 'undefined' ? true : navigator.onLine)
 const addTarget = ref<PairingView | null>(null)
@@ -85,21 +86,17 @@ const accountGroups = computed(() => {
 })
 const terms = computed(() => verify.value ? current.value?.verification ?? null : null)
 const pendingReview = computed(() => current.value?.state === 'pending')
-const showLimitForm = computed(() => limitsWhen.value === 'now' || limitsOpen.value || Object.values(limitState.value).some(item => item !== 'saved'))
-const limitAccounts = computed(() => current.value ? ongoingLimitAccounts({
-  pending: pendingReview.value,
-  selectedKeys: selected.value,
-  grantedKeys: grantedKeys.value,
-  limitsNow: limitsWhen.value === 'now',
-  showAll: limitsOpen.value && limitsWhen.value !== 'now',
-  requested: current.value.requested_accounts,
-  enrollments: current.value.enrollments,
-}) : [])
 const targetProblem = computed(() => current.value ? addHarnessTargetProblem({
   view: current.value,
   requestedComputerId: requestedComputer.value,
   targetName: addTarget.value?.computer_name ?? null,
 }) : null)
+const connectReason = computed(() => connectDisabledReason({
+  busy: busy.value,
+  canApprove: permissions.value.canApprove,
+  selectedAccountKeys: selected.value,
+  targetProblem: targetProblem.value,
+}))
 const selectedHarnesses = computed(() => {
   const view = current.value
   if (!view) return [] as string[]
@@ -130,10 +127,12 @@ const verifyNote = computed(() => {
     return names ? `${names} can’t be verified.` : 'Verification is unavailable.'
   }
   if (!verify.value || !verifiableLabels.value.length) return ''
-  const will = `${listNames(verifiableLabels.value)} will be verified.`
-  return blockedLabels.value.length ? `${will} Leave out ${listNames(blockedLabels.value)}.` : will
+  return blockedLabels.value.length
+    ? `${listNames(verifiableLabels.value)} can be verified. ${listNames(blockedLabels.value)} can’t be verified.`
+    : `${listNames(verifiableLabels.value)} will be verified.`
 })
 watch(verifyLocked, locked => { if (locked) verify.value = false })
+watch([verify, selected, current], () => { verificationChoice.value = false })
 let pollTimer = 0
 let pollStarted = 0
 
@@ -186,9 +185,8 @@ function clearSignedInPreview() {
   addTarget.value = null
   selected.value = []
   grantedKeys.value = null
-  drafts.value = {}
-  limitState.value = {}
-  limitsOpen.value = false
+  approvalPending.value = false
+  allowAgents.value = true
   message.value = ''
   nextStep.value = ''
   busy.value = ''
@@ -244,9 +242,8 @@ async function lookup() {
     selected.value = defaultSelectedAccountKeys(found.requested_accounts)
     grantedKeys.value = null
     verify.value = verifiableHarnesses(found, selected.value).length > 0
-    limitsWhen.value = 'later'
-    limitsOpen.value = false
-    limitState.value = {}
+    allowAgents.value = true
+    approvalPending.value = false
     armPoll(found)
   } catch (error) {
     if (error instanceof PairingError && error.code === 'session_reset') return
@@ -261,33 +258,29 @@ function choice(): ReviewChoice {
 }
 
 async function connect() {
-  if (!current.value || busy.value) return
+  if (!current.value || connectReason.value) return
+  if (verificationBlocked.value.length) {
+    verificationChoice.value = true
+    await nextTick()
+    connectOnlyButton.value?.focus()
+    return
+  }
   message.value = ''
   nextStep.value = ''
-  if (limitsWhen.value === 'now') {
-    for (const key of selected.value) {
-      const problem = simpleRequestLimitError(draftFor(key))
-      if (problem) {
-        message.value = problem
-        nextStep.value = 'Ongoing limits are saved by you after approval. They are not part of the pairing grant.'
-        return
-      }
-    }
-  }
   busy.value = 'approve'
   const started = pairingReadGeneration()
   const keys = [...selected.value]
   try {
     const approved = await submitApproval({
       view: current.value, choice: choice(), selectedAccountKeys: keys,
-      permissions: permissions.value, drafts: Object.values(drafts.value),
+      permissions: permissions.value,
       requestedComputerId: requestedComputer.value,
       targetComputerName: addTarget.value?.computer_name ?? null,
     })
     if (started !== pairingReadGeneration()) return
     grantedKeys.value = keys
     current.value = approved
-    if (limitsWhen.value === 'now') await saveLimits(approved, keys)
+    if (allowAgents.value) await approveAccounts(approved, keys)
     if (started !== pairingReadGeneration()) return
     armPoll(approved)
   } catch (error) {
@@ -296,94 +289,39 @@ async function connect() {
   } finally { if (started === pairingReadGeneration()) busy.value = '' }
 }
 
-async function saveLimits(pairing: PairingView, keys = grantedKeys.value ?? []) {
+async function connectWithoutVerification() {
+  if (connectReason.value) return
+  verify.value = false
+  verificationChoice.value = false
+  await connect()
+}
+
+async function leaveUnverifiableOut() {
+  if (!current.value || connectReason.value) return
+  selected.value = verifiableAccountKeys(current.value, selected.value)
+  verificationChoice.value = false
+  await nextTick()
+  connectButton.value?.focus()
+}
+
+async function approveAccounts(pairing = current.value, keys = grantedKeys.value ?? []) {
+  if (!pairing || !keys.length) return
   const started = pairingReadGeneration()
-  const plan = planOngoingLimits({
-    choice: 'ongoing_limits', drafts: keys.map(draftFor), selectedAccountKeys: keys,
-    enrollments: pairing.enrollments, permissions: permissions.value,
-  })
-  if (plan.action === 'blocked') { message.value = plan.message; nextStep.value = plan.next; return }
-  if (plan.action !== 'send') return
-  const windows = plan.windows.filter(item => limitState.value[item.accountId] !== 'saved')
-  if (!windows.length) return
+  approvalPending.value = true
   try {
-    const result = await createOngoingLimits(windows, permissions.value)
+    await approvePairedAccounts(pairing, keys, permissions.value)
     if (started !== pairingReadGeneration()) return
-    const next = { ...limitState.value }
-    for (const id of [...result.created, ...result.reconciled]) next[id] = 'saved'
-    limitState.value = next
+    approvalPending.value = false
+    message.value = ''; nextStep.value = ''
   } catch (error) {
-    if (started !== pairingReadGeneration()) return
-    if (error instanceof PairingError) {
-      const next = { ...limitState.value }
-      for (const id of error.savedAccountIds) next[id] = 'saved'
-      const failed = windows.find(item => !error.savedAccountIds.includes(item.accountId))
-      if (failed) next[failed.accountId] = error.code === 'allowance_uncertain' ? 'uncertain' : 'failed'
-      limitState.value = next
-      message.value = error.message
-      nextStep.value = error.next
-      return
-    }
-    assignError(error, 'The allowance was not confirmed.')
+    if (started === pairingReadGeneration()) assignError(error, 'Account approval was not confirmed.')
   }
 }
-
-async function checkLimit(accountId: string, key: string) {
+async function retryAccountApproval() {
+  if (busy.value) return
   const started = pairingReadGeneration()
-  const draft = draftFor(key)
-  if (draft.allowance == null || simpleRequestLimitError(draft)) {
-    message.value = simpleRequestLimitError(draft) ?? 'Enter the requests and the period.'
-    nextStep.value = 'Checking looks for an allowance already saved. It does not send a new one.'
-    return
-  }
-  busy.value = `check:${accountId}`
-  const match = await matchOngoingLimit(accountId, {
-    starts_at: new Date(draft.starts_at).toISOString(), ends_at: new Date(draft.ends_at).toISOString(),
-    unit: 'requests', allowance: draft.allowance, pace_model: 'unrestricted', burst_ratio: 0,
-  })
-  if (started !== pairingReadGeneration()) return
-  limitState.value = { ...limitState.value, [accountId]: match === 'saved' ? 'saved' : match === 'absent' ? 'absent' : 'uncertain' }
-  if (match === 'unknown') {
-    message.value = 'The allowance may already be saved.'
-    nextStep.value = 'Refresh this account before sending the allowance again. Do not approve the pairing again.'
-  } else if (match === 'absent') {
-    message.value = 'No matching allowance is saved for this account.'
-    nextStep.value = 'You can send it for this account. Do not approve the pairing again.'
-  } else {
-    message.value = ''
-    nextStep.value = ''
-  }
-  busy.value = ''
-}
-
-async function saveOne(accountId: string, key: string) {
-  if (!current.value || busy.value) return
-  const started = pairingReadGeneration()
-  const problem = simpleRequestLimitError(draftFor(key))
-  if (problem) { message.value = problem; nextStep.value = 'Send the allowance for this account only. Do not approve the pairing again.'; return }
-  busy.value = `save:${accountId}`
-  message.value = ''
-  nextStep.value = ''
-  const plan = planOngoingLimits({
-    choice: 'ongoing_limits', drafts: [draftFor(key)], selectedAccountKeys: [key],
-    enrollments: current.value.enrollments, permissions: permissions.value,
-  })
-  if (plan.action === 'blocked') { message.value = plan.message; nextStep.value = plan.next; busy.value = ''; return }
-  if (plan.action === 'send') {
-    try {
-      const result = await createOngoingLimits(plan.windows.filter(item => item.accountId === accountId), permissions.value)
-      if (started !== pairingReadGeneration()) return
-      if (result.created.includes(accountId) || result.reconciled.includes(accountId)) limitState.value = { ...limitState.value, [accountId]: 'saved' }
-    } catch (error) {
-      if (started !== pairingReadGeneration()) return
-      if (error instanceof PairingError) {
-        limitState.value = { ...limitState.value, [accountId]: error.code === 'allowance_uncertain' ? 'uncertain' : 'failed' }
-        message.value = error.message
-        nextStep.value = error.next
-      } else assignError(error, 'The allowance was not confirmed.')
-    }
-  }
-  busy.value = ''
+  busy.value = 'accounts'
+  try { await approveAccounts() } finally { if (started === pairingReadGeneration()) busy.value = '' }
 }
 
 async function deny() {
@@ -407,6 +345,7 @@ async function deny() {
 function resetCode() {
   current.value = null
   grantedKeys.value = null
+  approvalPending.value = false
   message.value = ''
   nextStep.value = ''
   pollStarted = 0
@@ -421,11 +360,11 @@ function reviewAsNewComputer() {
 }
 
 function verifiableHarnesses(view: PairingView, keys: readonly string[]) {
-  const blocked = new Set(unsupportedVerification(view, keys).map(item => item.harness))
+  const verifiable = verifiableAccountKeys(view, keys)
   const names: string[] = []
-  for (const key of keys) {
+  for (const key of verifiable) {
     const harness = view.requested_accounts.find(item => item.account_key === key)?.harness
-    if (harness && !blocked.has(harness) && !names.includes(harness)) names.push(harness)
+    if (harness && !names.includes(harness)) names.push(harness)
   }
   return names
 }
@@ -465,14 +404,6 @@ function toggleHarness(harness: string, accounts: PairingView['requested_account
 function chooseAccount(harness: string, accountKey: string) {
   if (!current.value) return
   selected.value = setHarnessAccount(current.value.requested_accounts, selected.value, harness, accountKey || null)
-}
-
-function draftFor(key: string): OngoingLimitDraft {
-  return drafts.value[key] ?? emptyRequestLimit(key)
-}
-
-function setDraft(key: string, patch: Partial<OngoingLimitDraft>) {
-  drafts.value = { ...drafts.value, [key]: { ...draftFor(key), ...patch, account_key: key, unit: 'requests', pace_model: 'unrestricted', burst_ratio: 0 } }
 }
 
 function armPoll(pairing: PairingView) {
@@ -634,6 +565,14 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
       </template>
       <p v-if="guideError" class="problem" role="alert">{{ guideError }} <button type="button" class="btn sm" @click="loadGuide">Try again</button></p>
 
+      <details v-if="presentation" class="manual">
+        <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />pi with OpenRouter</summary>
+        <div class="manual-body">
+          <p class="copy">On a paired computer, enter the key locally; choose the model in Settings, under Accounts.</p>
+          <pre class="command"><code>aeon-agentd add-harness --harness pi --provider openrouter</code></pre>
+          <p class="copy">For a new computer, add <code>--harness pi --provider openrouter</code> to the pairing command above.</p>
+        </div>
+      </details>
       <form class="code-form" @submit.prevent="lookup">
         <label for="pairing-code">Pairing code</label>
         <div class="code-row">
@@ -716,8 +655,8 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 
         <fieldset>
           <legend>After connecting</legend>
-          <label class="radio"><input v-model="limitsWhen" type="radio" value="later" /> <span><strong>Keep ongoing runs paused</strong><span class="sub">You can set request limits later.</span></span></label>
-          <label class="radio"><input v-model="limitsWhen" type="radio" value="now" /> <span><strong>Set ongoing limits</strong><span class="sub">Requests for a period, saved by you after approval.</span></span></label>
+          <label class="radio"><input v-model="allowAgents" type="radio" :value="true" /> <span><strong>Let agents use these accounts</strong><span class="sub">{{ brand.short_name }} reads their limits and follows your plan.</span></span></label>
+          <label class="radio"><input v-model="allowAgents" type="radio" :value="false" /> <span><strong>Keep agents paused</strong><span class="sub">Turn them on later in Settings / Accounts.</span></span></label>
         </fieldset>
       </template>
 
@@ -732,44 +671,21 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
             </div>
           </li>
         </ul>
-        <button v-if="permissions.canSetOngoingLimits && current.enrollments.some(item => item.state === 'connected')" type="button" class="btn sm" @click="limitsOpen = !limitsOpen">{{ limitsOpen ? 'Hide ongoing limits' : 'Set ongoing limits' }}</button>
+        <p v-if="grantedKeys && !approvalPending" class="sub">{{ allowAgents ? 'Agents may use the selected accounts once setup finishes.' : 'Agents stay paused. Turn them on in Settings / Accounts.' }}</p>
+        <button v-if="approvalPending && permissions.canApproveAccounts" type="button" class="btn sm" :disabled="!!busy" @click="retryAccountApproval">Retry account approval</button>
       </div>
 
-      <div v-if="showLimitForm && limitAccounts.length" class="limits">
-        <h3>{{ limitsOpen && limitsWhen !== 'now' && !pendingReview ? 'Ongoing limits for connected accounts' : 'Ongoing limits for this request' }}</h3>
-        <p class="sub">{{ limitsOpen && limitsWhen !== 'now' && !pendingReview ? 'Every connected account on this computer, including ones this request did not select.' : `Requests per period for each selected account, in your local time. An ${brand.short_name} allowance, not the vendor subscription.` }}</p>
-        <div v-for="account in limitAccounts" :key="account.key" class="limit">
-          <h4>{{ account.label }}</h4>
-          <p v-if="account.id && limitState[account.id] === 'saved'">Requests for this period are saved.</p>
-          <template v-else>
-            <div class="limit-fields">
-            <label>Requests
-              <input class="field" type="number" min="1" step="1" :value="draftFor(account.key).allowance ?? ''" @input="setDraft(account.key, { allowance: ($event.target as HTMLInputElement).value === '' ? null : Number(($event.target as HTMLInputElement).value) })" />
-            </label>
-            <label>Starts
-              <input class="field" type="datetime-local" :value="draftFor(account.key).starts_at" @input="setDraft(account.key, { starts_at: ($event.target as HTMLInputElement).value })" />
-            </label>
-            <label>Ends
-              <input class="field" type="datetime-local" :value="draftFor(account.key).ends_at" @input="setDraft(account.key, { ends_at: ($event.target as HTMLInputElement).value })" />
-            </label>
-            </div>
-            <p v-if="ongoingLimitError(draftFor(account.key)) && (draftFor(account.key).allowance || draftFor(account.key).starts_at)" class="problem">{{ simpleRequestLimitError(draftFor(account.key)) }}</p>
-            <p v-if="account.id && limitState[account.id] === 'uncertain'" class="problem">This allowance may already be saved. Check it before sending again.</p>
-            <div v-if="account.id" class="row-actions">
-              <button v-if="limitState[account.id] === 'uncertain'" type="button" class="btn sm" :disabled="!!busy" @click="checkLimit(account.id, account.key)">Check again</button>
-              <button v-else type="button" class="btn sm" :disabled="!!busy" @click="saveOne(account.id, account.key)">Save allowance</button>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <div v-if="pendingReview" class="actions">
-        <button class="btn primary go" type="button" :disabled="!!busy || !permissions.canApprove || !selected.length || !!targetProblem || verificationBlocked.length > 0" @click="connect">{{ busy === 'approve' ? (addRequest ? 'Adding…' : 'Connecting…') : addRequest ? 'Add harness' : 'Connect your machine' }}</button>
+      <div v-if="pendingReview" class="actions" :role="verificationChoice ? 'group' : undefined" :aria-label="verificationChoice ? 'Verification choice' : undefined">
+        <p v-if="connectReason" id="connect-reason" class="connect-reason" role="status">{{ connectReason }}</p>
+        <template v-if="verificationChoice">
+          <p id="verification-choice-note" class="connect-reason" role="status">{{ listNames(blockedLabels) }} can’t be verified — connect without verification, or leave them out.</p>
+          <button ref="connectOnlyButton" class="btn primary go" type="button" :disabled="!!connectReason" :aria-describedby="connectReason ? 'connect-reason' : 'verification-choice-note'" @click="connectWithoutVerification">Connect without verification</button>
+          <button class="btn" type="button" :disabled="!!connectReason" @click="leaveUnverifiableOut">Leave them out</button>
+        </template>
+        <button v-else ref="connectButton" class="btn primary go" type="button" :disabled="!!connectReason" :aria-describedby="connectReason ? 'connect-reason' : undefined" @click="connect">{{ busy === 'approve' ? (addRequest ? 'Adding…' : 'Connecting…') : addRequest ? 'Add harness' : 'Connect your machine' }}</button>
         <button class="btn" type="button" :disabled="!!busy || !permissions.canDeny" @click="deny">Deny</button>
         <p class="keep"><AppIcon name="shield" :size="14" />Vendor sign-ins and project files stay on the computer.</p>
       </div>
-      <p v-if="pendingReview && !selected.length" class="note">Choose at least one harness.</p>
-      <p v-if="session.identity && permissionsReady && !permissions.canApprove" class="note">Only a signed-in person who can manage accounts can connect this computer.</p>
     </section>
 
     <p v-if="message" class="problem" role="alert">{{ message }}</p>
@@ -812,7 +728,6 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .banner, .problem { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 .banner { padding: 10px 12px; border-radius: 12px; background: var(--surface-sunken); color: var(--ink-2); }
 .problem { color: var(--danger); }
-.limit label { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
 /* Public guide commands and optional instance details. */
 .address { min-width: 0; display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 6px 6px 12px; border-radius: 10px; background: var(--surface-sunken); }
 .agent-address { margin-top: 22px; }
@@ -868,6 +783,7 @@ legend { margin-bottom: 4px; color: var(--ink); font-weight: 600; font-size: 14p
 .radio input { margin-top: 2px; }
 .radio .sub { display: block; margin-top: 2px; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.connect-reason { flex-basis: 100%; margin: 0; color: var(--ink-2); font-size: 13px; }
 .go { min-height: 44px; padding: 0 18px; }
 .keep { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 0 auto; color: var(--ink-3); font-size: 12.5px; }
 .review-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -879,11 +795,6 @@ legend { margin-bottom: 4px; color: var(--ink); font-weight: 600; font-size: 14p
 .enrollments li > :first-child { margin-top: 2px; }
 .enrollment-text { min-width: 0; }
 .enrollment-text .sub { margin-top: 2px; }
-.row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
-.limit { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
-.limit h4 { margin-top: 0; }
-.limit-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.4fr); gap: 10px; margin-top: 8px; }
-.limit .problem { margin: 8px 0 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 @media (max-width: 720px) {
   .connect { padding: 18px 16px 32px; }
@@ -900,7 +811,6 @@ legend { margin-bottom: 4px; color: var(--ink); font-weight: 600; font-size: 14p
   .review-head .btn { margin-left: -11px; }
   .code-row .code { flex: 1 1 100%; }
   .code-row .go { flex: 1 1 100%; }
-  .limit-fields { grid-template-columns: 1fr; }
   .actions .go { flex: 1 1 auto; }
   .keep { flex-basis: 100%; margin-left: 0; }
 }
