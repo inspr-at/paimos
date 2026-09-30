@@ -106,7 +106,7 @@ test('pairing keeps accounts paused when selected and does not approve on a late
   await expect(page.getByText('Agents stay paused. Turn them on in Settings / Accounts.')).toBeVisible()
   expect(calls.filter(c => c.path.endsWith('/capacity/approve'))).toHaveLength(0)
   await page.reload()
-  await expect(page.getByRole('heading', { name: 'Connect a computer', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Connect your machine', exact: true })).toBeVisible()
   expect(calls.filter(c => c.path.endsWith('/capacity/approve'))).toHaveLength(0)
 })
 

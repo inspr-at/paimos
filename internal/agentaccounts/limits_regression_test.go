@@ -191,8 +191,9 @@ func TestCostLimitRequiresPricedRunAccounting(t *testing.T) {
 	f.report(t, 10, now, now.Add(48*time.Hour))
 	run, _ := f.route(t, 200)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
-		// Finished without cost telemetry: do not pretend this run was free.
-		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='completed',started_at=clock_timestamp()-interval '1 minute',ended_at=clock_timestamp() WHERE id=$1`, run)
+		// A run spanning midnight finishes without cost telemetry. Its final
+		// period must not treat it as free either.
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='completed',started_at=clock_timestamp()-interval '1 day',ended_at=clock_timestamp() WHERE id=$1`, run)
 		return err
 	})
 	if err != nil {
@@ -208,10 +209,14 @@ func TestRepeatPreservesOriginalAndExistingCaps(t *testing.T) {
 	f.report(t, 10, now.Add(-time.Minute), now.Add(48*time.Hour))
 	var old Window
 	callStatus(t, mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", windowBody(now.Add(-time.Hour), now.Add(48*time.Hour), "requests", 1, "unrestricted"), 201, &old)
-	f.route(t, 200)
+	run, _ := f.route(t, 200)
 	path := "/api/agent-accounts/" + f.account.ID + "/windows/" + old.ID + "/repeat"
 	callStatus(t, mod, &f.admin, "", "POST", path, "", 200, nil)
 	f.route(t, 409)
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error { return ValidateReservedCapacity(t.Context(), tx, run, f.account.ID) })
+	if err != nil {
+		t.Fatalf("repeat stranded its existing reservation: %v", err)
+	}
 	// A second old window cannot silently replace the first repeating cap.
 	var other Window
 	callStatus(t, mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", windowBody(now.Add(49*time.Hour), now.Add(72*time.Hour), "requests", 100, "unrestricted"), 201, &other)

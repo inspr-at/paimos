@@ -304,7 +304,7 @@ func percentUsed(ctx context.Context, tx pgx.Tx, accountID string, start, now ti
 
 // limitUsed includes measured usage and remaining holds. A live run consumes
 // at least its saved estimate (never twice its reported usage). Missing usage
-// after a started run finishes keeps its estimate for that calendar period.
+// after a started run finishes keeps its estimate for each overlapping period.
 // Unstarted cancelled/released runs consume nothing. Existing runs predating
 // the snapshot column use the same conservative estimate as a new admission.
 func limitUsed(ctx context.Context, tx pgx.Tx, accountID string, rule LimitRule, windows []Window, start time.Time, exceptRun string, now time.Time) (float64, error) {
@@ -317,7 +317,7 @@ func limitUsed(ctx context.Context, tx pgx.Tx, accountID string, rule LimitRule,
 		err = tx.QueryRow(ctx, `SELECT COALESCE(sum(COALESCE((r.account_limit_estimates->>'percent')::bigint,1)),0)::float8
  FROM agent_runs r WHERE r.account_id=$1 AND r.id::text<>$2 AND r.purpose='managed' AND (
  r.status IN ('queued','starting','running','waiting') OR
- (r.started_at>=$3 AND r.started_at<=$4 AND EXISTS(SELECT 1 FROM account_reservations ar JOIN account_allowance_windows w
+ (r.started_at<=$4 AND COALESCE(r.ended_at,r.started_at)>=$3 AND EXISTS(SELECT 1 FROM account_reservations ar JOIN account_allowance_windows w
  ON w.tenant_id=ar.tenant_id AND w.id=ar.window_id WHERE ar.run_id=r.id AND w.capacity_kind IN ('refresh','blind'))
  AND NOT EXISTS(SELECT 1 FROM account_capacity_readings c WHERE c.account_id=r.account_id AND c.source<>'estimate' AND c.read_at>=COALESCE(r.ended_at,r.started_at) AND c.read_at<=$4)))`, accountID, exceptRun, start, now).Scan(&held)
 		return measured + held, err
@@ -334,14 +334,14 @@ func limitUsed(ctx context.Context, tx pgx.Tx, accountID string, rule LimitRule,
 	}
 	var n float64
 	err = tx.QueryRow(ctx, `WITH usage AS (
- SELECT r.id,r.status,r.started_at,COALESCE((r.account_limit_estimates->>$2)::bigint,$6) estimate,
+ SELECT r.id,r.status,r.started_at,r.ended_at,COALESCE((r.account_limit_estimates->>$2)::bigint,$6) estimate,
  COALESCE(sum(CASE $2 WHEN 'requests' THEN t.turn_count_delta WHEN 'tokens' THEN t.input_tokens_delta+t.output_tokens_delta ELSE t.cost_micros_delta END),0) total,
  COALESCE(sum(CASE $2 WHEN 'requests' THEN t.turn_count_delta WHEN 'tokens' THEN t.input_tokens_delta+t.output_tokens_delta ELSE t.cost_micros_delta END) FILTER(WHERE t.at>=$3),0) period_use
  FROM agent_runs r LEFT JOIN run_telemetry t ON t.tenant_id=r.tenant_id AND t.run_id=r.id AND t.at<=$4
  WHERE r.account_id=$1 AND r.id::text<>$5 AND r.purpose='managed' GROUP BY r.tenant_id,r.id
  ) SELECT COALESCE(sum(period_use+CASE
  WHEN status IN ('queued','starting','running','waiting') THEN greatest(0,estimate-total)
- WHEN started_at>=$3 AND started_at<=$4 AND total=0 THEN estimate ELSE 0 END),0)::float8 FROM usage`, accountID, rule.Unit, start, now, exceptRun, estimates[rule.Unit]).Scan(&n)
+ WHEN COALESCE(ended_at,started_at)>=$3 AND started_at<=$4 AND total=0 THEN estimate ELSE 0 END),0)::float8 FROM usage`, accountID, rule.Unit, start, now, exceptRun, estimates[rule.Unit]).Scan(&n)
 	return n, err
 }
 
@@ -381,7 +381,11 @@ func limitWait(ctx context.Context, tx pgx.Tx, a Account, active []Window, now t
 				}
 				estimate = estimates[w.Unit]
 			}
-			if _, ok := fits(w, now, estimate); !ok {
+			// Claim already owns its reservation; fits requires a new positive
+			// estimate, so compare the existing ledger directly at this point.
+			projected, ok := addUsage(w.Used, w.Reserved, estimate)
+			fraction := paceFraction(w.PaceModel, elapsedFraction(now, w.StartsAt, w.EndsAt), w.BurstRatio)
+			if !ok || projected > allowedUnits(w.Allowance, fraction) {
 				return &CapacityWait{Code: "allowance", Until: &w.EndsAt, Timezone: s.Timezone}, nil
 			}
 		}

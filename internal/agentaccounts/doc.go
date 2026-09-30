@@ -155,7 +155,7 @@
 // vendor series binds. Refresh grants obey the same limit. Each managed route
 // snapshots per-run estimates with its account reservation under the account
 // lock. Admission counts recorded use plus remaining live holds; a terminal run
-// with missing usage retains its estimate in the start period. Unmeasured
+// with missing usage retains its estimate in each overlapping period. Unmeasured
 // defaults are one request, 100k tokens and one dollar; measured estimates use
 // the largest total from the last twenty finished runs. Dollar limits require
 // positive priced run telemetry (422 unsupported_limit_unit otherwise).
