@@ -13,12 +13,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"golang.org/x/sys/unix"
 )
 
 func socketTestDir(t *testing.T) string {
@@ -36,7 +38,8 @@ func socketTestDir(t *testing.T) string {
 }
 
 // This child holds a real lifetime flock until the parent sends SIGKILL. The
-// legacy mode recreates a crash during the removed quarantine implementation.
+// legacy mode recreates a crash during the removed quarantine implementation;
+// full-queue mode pauses accepts while retaining the verified lifetime lock.
 func TestPairedSocketProcessFixture(t *testing.T) {
 	if os.Getenv("AEON_SOCKET_PROCESS_FIXTURE") != "1" {
 		return
@@ -53,13 +56,14 @@ func TestPairedSocketProcessFixture(t *testing.T) {
 	if _, err := input.ReadString('\n'); err != nil {
 		t.Fatal(err)
 	}
-	if args[3] == "legacy" {
+	var paused *net.UnixListener
+	if args[3] == "legacy" || args[3] == "full-queue" {
 		sockets, err := agentsetup.OpenStore(filepath.Dir(args[2]), false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer sockets.Close()
-		lock, err := sockets.LockNamed(filepath.Base(args[2]) + ".lock")
+		lock, err := sockets.LockSocket(filepath.Base(args[2]))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,8 +80,25 @@ func TestPairedSocketProcessFixture(t *testing.T) {
 		if err := os.WriteFile(args[2]+".token", []byte("legacy fixture"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Rename(args[2], filepath.Join(sockets.Path(), ".s01234567")); err != nil {
-			t.Fatal(err)
+		if args[3] == "legacy" {
+			if err := os.Rename(args[2], filepath.Join(sockets.Path(), ".s01234567")); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			// Keep the queue small so saturation is deterministic and does not
+			// depend on the runner's SOMAXCONN or descriptor limit.
+			raw, err := listener.SyscallConn()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var listenErr error
+			if err := raw.Control(func(fd uintptr) { listenErr = unix.Listen(int(fd), 1) }); err != nil {
+				t.Fatal(err)
+			}
+			if listenErr != nil {
+				t.Fatal(listenErr)
+			}
+			paused = listener
 		}
 	} else {
 		local, err := ServePairedLocal(s, args[2])
@@ -96,6 +117,18 @@ func TestPairedSocketProcessFixture(t *testing.T) {
 	}
 	fmt.Println("ready")
 	_, _ = input.ReadString('\n')
+	if paused != nil {
+		if err := paused.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		conn, err := paused.AcceptUnix()
+		if err != nil {
+			t.Fatal(err)
+		}
+		conn.Close()
+		fmt.Println("accepted")
+		_, _ = input.ReadString('\n')
+	}
 }
 
 type socketProcess struct {
@@ -147,7 +180,7 @@ func startSocketProcess(t *testing.T, s *Supervisor, socket, mode string) *socke
 			p.mu.Lock()
 			p.output.WriteString(line + "\n")
 			p.mu.Unlock()
-			if line == "waiting" || line == "ready" || line == "busy" {
+			if line == "waiting" || line == "ready" || line == "busy" || line == "accepted" {
 				lines <- line
 			}
 		}
@@ -313,55 +346,52 @@ func testPairedSocketConcurrentProcesses(t *testing.T) {
 	assertSocketConnects(t, socket)
 }
 
-func TestPairedSocketLiveListenerSurvivesLostLockPath(t *testing.T) {
-	for _, mutation := range []string{"unlink", "replace"} {
-		t.Run(mutation, func(t *testing.T) {
-			s, _, _ := testSupervisor(t)
-			defer s.Close(context.Background())
-			socket := filepath.Join(socketTestDir(t), "agentd.sock")
-			child := startSocketProcess(t, s, socket, "normal")
-			child.start(t)
-			if got := child.line(t); got != "ready" {
-				t.Fatalf("fixture startup: %q", got)
-			}
-			if mutation == "unlink" {
-				if err := os.Remove(socket + ".lock"); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				if err := os.WriteFile(socket+".replacement", nil, 0600); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Rename(socket+".replacement", socket+".lock"); err != nil {
-					t.Fatal(err)
-				}
-			}
-			before := socketArtifacts(t, filepath.Dir(socket))
-			contender := startSocketProcess(t, s, socket, "normal")
-			contender.start(t)
-			if got := contender.line(t); got != "busy" {
-				t.Fatalf("lost-lock live listener accepted another start: %q", got)
-			}
-			if mutation == "unlink" {
-				// A replacement lock may be created, but the socket and token
-				// must retain their exact inode, mode, size and timestamps.
-				info, err := os.Lstat(socket + ".lock")
-				if err != nil {
-					t.Fatal(err)
-				}
-				before["agentd.sock.lock"] = info
-			}
-			assertSocketArtifacts(t, filepath.Dir(socket), before)
-			assertSocketConnects(t, socket)
-			child.kill(t)
-			local, err := ServePairedLocal(s, socket)
-			if err != nil {
-				t.Fatalf("lost-lock SIGKILL recovery: %v", err)
-			}
-			defer local.Close()
-			assertSocketConnects(t, socket)
-		})
+func TestPairedSocketFullAcceptQueueKeepsLiveLock(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	defer s.Close(context.Background())
+	socket := filepath.Join(socketTestDir(t), "agentd.sock")
+	child := startSocketProcess(t, s, socket, "full-queue")
+	child.start(t)
+	if got := child.line(t); got != "ready" {
+		t.Fatalf("fixture startup: %q", got)
 	}
+	queued := 0
+	var fullErr error
+	for attempt := 0; attempt < 16; attempt++ {
+		conn, err := net.DialTimeout("unix", socket, 100*time.Millisecond)
+		if err != nil {
+			fullErr = err
+			break
+		}
+		defer conn.Close()
+		queued++
+	}
+	if queued == 0 || fullErr == nil {
+		t.Fatalf("did not fill accept queue: queued=%d err=%v", queued, fullErr)
+	}
+	if runtime.GOOS == "darwin" && !errors.Is(fullErr, unix.ECONNREFUSED) {
+		t.Fatalf("full Darwin queue did not refuse the connection: %v", fullErr)
+	}
+	t.Logf("live listener queue full after %d connections: %v", queued, fullErr)
+	before := socketArtifacts(t, filepath.Dir(socket))
+	for _, start := range []func(*Supervisor, string, ...*AttachManager) (*LocalServer, error){ServePairedLocal, ServeLocal} {
+		if local, err := start(s, socket); !errors.Is(err, agentsetup.ErrBusy) || !strings.Contains(err.Error(), "agentd is already running for this state root") {
+			if local != nil {
+				local.Close()
+			}
+			t.Fatalf("full-queue listener not protected: %v", err)
+		}
+		assertSocketArtifacts(t, filepath.Dir(socket), before)
+	}
+	// The listener is still alive and can accept a queued connection after
+	// both refused starts, despite the earlier ECONNREFUSED on Darwin.
+	if _, err := io.WriteString(child.input, "accept\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := child.line(t); got != "accepted" {
+		t.Fatalf("listener could not accept after contention: %q", got)
+	}
+	assertSocketArtifacts(t, filepath.Dir(socket), before)
 }
 
 func TestPairedSocketShutdownRequiresVerifiedLock(t *testing.T) {
@@ -384,37 +414,6 @@ func TestPairedSocketShutdownRequiresVerifiedLock(t *testing.T) {
 	next, err := ServePairedLocal(s, socket)
 	if err != nil {
 		t.Fatalf("shutdown residue recovery: %v", err)
-	}
-	defer next.Close()
-	assertSocketConnects(t, socket)
-}
-
-func TestPairedSocketShutdownPreservesStillLiveSocket(t *testing.T) {
-	s, _, _ := testSupervisor(t)
-	defer s.Close(context.Background())
-	socket := filepath.Join(socketTestDir(t), "agentd.sock")
-	local, err := ServePairedLocal(s, socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer local.Close()
-	// A duplicated listener descriptor can outlive http.Server.Close. Even
-	// shutdown with the right lock must preserve a socket that still accepts.
-	duplicate, err := local.Listener.(*net.UnixListener).File()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer duplicate.Close()
-	before := socketArtifacts(t, filepath.Dir(socket))
-	if err := local.Close(); !errors.Is(err, agentsetup.ErrBusy) {
-		t.Fatalf("shutdown removed a still-live listener: %v", err)
-	}
-	assertSocketArtifacts(t, filepath.Dir(socket), before)
-	assertSocketConnects(t, socket)
-	duplicate.Close()
-	next, err := ServePairedLocal(s, socket)
-	if err != nil {
-		t.Fatalf("duplicate listener residue recovery: %v", err)
 	}
 	defer next.Close()
 	assertSocketConnects(t, socket)

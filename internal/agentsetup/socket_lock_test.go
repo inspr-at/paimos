@@ -160,3 +160,163 @@ func TestSocketArtifactsRejectAnotherUID(t *testing.T) {
 		}
 	}
 }
+
+func TestSocketCleanupStaysRelativeToPinnedDirectory(t *testing.T) {
+	for _, phase := range []string{"startup", "shutdown"} {
+		t.Run(phase, func(t *testing.T) {
+			dir := filepath.Join(shortSocketHome(t), "state")
+			s, err := OpenStore(dir, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			lock, err := s.LockSocket("agentd.sock")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lock.Close()
+			lockInfo, err := lock.Stat()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if phase == "startup" {
+				lock.Close()
+				staleSocket(t, filepath.Join(dir, ".s01234567"))
+				for _, name := range []string{"agentd.sock.owner.json", ".s89abcdef"} {
+					if err := s.Write(name, []byte("legacy fixture"), true); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			staleSocket(t, filepath.Join(dir, "agentd.sock"))
+			if err := s.Write("agentd.sock.token", []byte("fixture"), true); err != nil {
+				t.Fatal(err)
+			}
+			socketInfo, err := os.Lstat(filepath.Join(dir, "agentd.sock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tokenInfo, err := os.Lstat(filepath.Join(dir, "agentd.sock.token"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			moved := dir + "-moved"
+			if err := os.Rename(dir, moved); err != nil {
+				t.Fatal(err)
+			}
+			shadow, err := OpenStore(dir, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer shadow.Close()
+			shadowLock, err := shadow.LockSocket("agentd.sock")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer shadowLock.Close()
+			listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(dir, "agentd.sock"), Net: "unix"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			if err := os.Chmod(listener.Addr().String(), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := shadow.Write("agentd.sock.token", []byte("shadow fixture"), true); err != nil {
+				t.Fatal(err)
+			}
+			before := make(map[string]os.FileInfo)
+			for _, name := range []string{"agentd.sock", "agentd.sock.token", "agentd.sock.lock"} {
+				info, err := os.Lstat(filepath.Join(dir, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				before[name] = info
+			}
+			if phase == "startup" {
+				lock, err = s.LockSocket("agentd.sock")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer lock.Close()
+			} else if err := s.CleanupSocket("agentd.sock", lock, socketInfo, tokenInfo); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := os.ReadDir(moved)
+			if err != nil || len(entries) != 1 || entries[0].Name() != "agentd.sock.lock" {
+				t.Fatalf("pinned directory not cleaned: %v: %v", entries, err)
+			}
+			if info, err := os.Lstat(filepath.Join(moved, "agentd.sock.lock")); err != nil || !os.SameFile(lockInfo, info) {
+				t.Fatalf("permanent lock changed: %v", err)
+			}
+			for name, info := range before {
+				got, err := os.Lstat(filepath.Join(dir, name))
+				if err != nil || !os.SameFile(info, got) || info.Mode() != got.Mode() || info.Size() != got.Size() || info.ModTime() != got.ModTime() {
+					t.Fatalf("replacement directory artifact changed: %s: %v", name, err)
+				}
+			}
+			// Cleanup must retain the lifetime lock, including after shutdown.
+			contender, err := OpenStore(moved, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer contender.Close()
+			if other, err := contender.LockSocket("agentd.sock"); !errors.Is(err, ErrBusy) {
+				if other != nil {
+					other.Close()
+				}
+				t.Fatalf("cleanup released lifetime lock: %v", err)
+			}
+		})
+	}
+}
+
+func TestSocketShutdownRefusesReplacedArtifacts(t *testing.T) {
+	for _, replaced := range []string{"agentd.sock", "agentd.sock.token"} {
+		t.Run(replaced, func(t *testing.T) {
+			s := socketLockStore(t, false)
+			lock, err := s.LockSocket("agentd.sock")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lock.Close()
+			staleSocket(t, filepath.Join(s.Path(), "agentd.sock"))
+			if err := s.Write("agentd.sock.token", []byte("fixture"), true); err != nil {
+				t.Fatal(err)
+			}
+			owned := make(map[string]os.FileInfo)
+			for _, name := range []string{"agentd.sock", "agentd.sock.token"} {
+				info, err := os.Lstat(filepath.Join(s.Path(), name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				owned[name] = info
+			}
+			path := filepath.Join(s.Path(), replaced)
+			if err := os.Rename(path, path+".original"); err != nil {
+				t.Fatal(err)
+			}
+			if replaced == "agentd.sock" {
+				staleSocket(t, path)
+			} else if err := s.Write(replaced, []byte("replacement fixture"), true); err != nil {
+				t.Fatal(err)
+			}
+			replacement, err := os.Lstat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.CleanupSocket("agentd.sock", lock, owned["agentd.sock"], owned["agentd.sock.token"]); !errors.Is(err, ErrCollision) {
+				t.Fatalf("shutdown accepted replacement: %v", err)
+			}
+			for name, original := range owned {
+				want := original
+				if name == replaced {
+					want = replacement
+				}
+				if got, err := os.Lstat(filepath.Join(s.Path(), name)); err != nil || !os.SameFile(want, got) {
+					t.Fatalf("refused shutdown changed %s: %v", name, err)
+				}
+			}
+		})
+	}
+}

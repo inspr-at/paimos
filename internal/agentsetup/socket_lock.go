@@ -5,11 +5,9 @@ package agentsetup
 import (
 	"errors"
 	"fmt"
-	"net"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -67,11 +65,12 @@ func legacySocketAside(name string) bool {
 	return len(name) == 10 && strings.HasPrefix(name, ".s") && strings.Trim(name[2:], "0123456789abcdef") == ""
 }
 
-// cleanSocketArtifacts runs only with a verified lifetime lock. Never remove a
-// socket that accepts a connection, even if somebody replaced the lock file.
-// Only ECONNREFUSED proves a socket stale; ambiguous dial errors fail closed.
-// Cooperating daemons never replace lock files. Hostile same-uid mutation of
-// paths between validation and unlink is outside this advisory-lock boundary.
+// cleanSocketArtifacts uses only the verified lifetime lock as cleanup authority.
+// Connection refusal cannot prove staleness: Darwin also refuses connections
+// when a live listener's accept queue is full. All checks and removals use the
+// pinned directory fd. A same-uid process can disrupt a daemon by deleting or
+// replacing its lock file or directory; this is outside the protection boundary
+// (that process can already signal or kill the daemon).
 func (s *Store) cleanSocketArtifacts(name string, lock *os.File, owned map[string]os.FileInfo) error {
 	if err := s.verifyLock(name+".lock", lock); err != nil {
 		return err
@@ -121,22 +120,13 @@ func (s *Store) cleanSocketArtifacts(name string, lock *os.File, owned map[strin
 			return ErrUnsafePath
 		}
 		if owned != nil {
-			info, err := os.Lstat(filepath.Join(s.path, item.name))
-			if err != nil || !os.SameFile(owned[item.name], info) {
+			original, ok := owned[item.name].Sys().(*syscall.Stat_t)
+			if !ok || uint64(original.Dev) != uint64(st.Dev) || uint64(original.Ino) != uint64(st.Ino) {
 				return ErrCollision
 			}
 		}
 		item.dev, item.ino = uint64(st.Dev), uint64(st.Ino)
 		present = append(present, item)
-	}
-	// Check every socket before deleting any artifact, including stranded legacy
-	// sockets. A successful connect preserves the socket AND its token unchanged.
-	for _, item := range present {
-		if item.kind == unix.S_IFSOCK {
-			if err := socketInactive(filepath.Join(s.path, item.name)); err != nil {
-				return err
-			}
-		}
 	}
 	for _, item := range present {
 		if err := s.verifyLock(name+".lock", lock); err != nil {
@@ -152,16 +142,4 @@ func (s *Store) cleanSocketArtifacts(name string, lock *os.File, owned map[strin
 		}
 	}
 	return unix.Fsync(int(s.root.Fd()))
-}
-
-func socketInactive(path string) error {
-	conn, err := net.DialTimeout("unix", path, time.Second)
-	if err == nil {
-		conn.Close()
-		return fmt.Errorf("agentd is already running for this state root: %w", ErrBusy)
-	}
-	if errors.Is(err, unix.ECONNREFUSED) {
-		return nil
-	}
-	return fmt.Errorf("cannot establish stale socket %s: %w", path, err)
 }
