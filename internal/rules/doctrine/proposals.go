@@ -54,6 +54,7 @@ type Proposal struct {
 	Inbox          bool   `json:"inbox,omitempty"`
 	BaseRuleSHA    string `json:"base_rule_sha256,omitempty"`
 	ProposedSHA    string `json:"proposed_rule_sha256,omitempty"`
+	ProposedTLDR   string `json:"proposed_tldr_sha256,omitempty"`
 	Ticket         string `json:"ticket,omitempty"`
 	TicketID       string `json:"ticket_id,omitempty"`
 	SubmittedBy    string `json:"submitted_by,omitempty"`
@@ -194,6 +195,11 @@ func (m *Module) listProposals(r *http.Request, actor tenant.Principal) (any, er
 const missingGuardReason = "Propose PR is disabled: the server quotation guard key is not provisioned. Ask the server administrator to provision AEON_DOCTRINE_GUARD_KEY_FILE."
 
 func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
+	// Only a person opens a PR; an agent proposes through the doctrine inbox
+	// and waits for one (AEON-444).
+	if !humanActor(actor) {
+		return nil, fail(403, "forbidden", "A person sends a doctrine change to git. Agents propose through the doctrine inbox.")
+	}
 	if err := m.proposalAccess(actor); err != nil {
 		return nil, err
 	}
@@ -331,12 +337,15 @@ func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, i
 
 // preparePublication runs the identical edit, private guard, main and
 // authority checks for every path that publishes a rule change: the editor,
-// the outcome job and a promoted inbox proposal (AEON-444). The caller
-// revokes the returned client.
+// the outcome job and a promoted inbox proposal (AEON-444). Locked rules
+// change only through a person. The caller revokes the returned client.
 func (m *Module) preparePublication(ctx context.Context, actor tenant.Principal, source Source, files []File, guard *guardCorpus, in ProposalInput) (map[string]string, string, *GitHub, error) {
-	changed, err := editRule(source, files, in)
+	changed, old, next, err := editRuleViews(source, files, in)
 	if err != nil {
 		return nil, "", nil, err
+	}
+	if !humanActor(actor) && (old.Strength == "locked" || next.Strength == "locked") {
+		return nil, "", nil, fail(403, "locked_rule", "Locked rules change only through a person. Ask one to edit it under Doctrine.")
 	}
 	quoteTexts := []string{in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation}
 	exemptMain, err := m.checkPrivateQuotes(ctx, actor, source, files, guard, quoteTexts...)
@@ -492,7 +501,10 @@ func (m *Module) runProposal(ctx context.Context, actor tenant.Principal, permis
 				event = ""
 			}
 			p.OperationID, p.OperationUntil = "", time.Time{}
-			return saveProposal(ctx, tx, actor, &p, event)
+			if err := saveProposal(ctx, tx, actor, &p, event); err != nil {
+				return err
+			}
+			return retireDraft(ctx, tx, p)
 		})
 	}
 	// A GitHub write that already landed must stay visible when authority is
@@ -530,7 +542,10 @@ func (m *Module) recordObservation(ctx context.Context, actor tenant.Principal, 
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	return db.InTenant(saveCtx, m.pool, actor.TenantID, func(tx pgx.Tx) error {
-		return saveProposal(saveCtx, tx, actor, p, event)
+		if err := saveProposal(saveCtx, tx, actor, p, event); err != nil {
+			return err
+		}
+		return retireDraft(saveCtx, tx, *p)
 	})
 }
 

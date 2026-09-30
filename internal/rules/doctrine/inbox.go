@@ -7,14 +7,20 @@ package doctrine
 // AEON-319 path), edits it first, or dismisses it with a reason. Nothing
 // reaches GitHub before a person acts. The waiting text is the one piece of
 // doctrine prose held outside the pinned cache: doctrine_proposal_drafts keeps
-// it, bounded, until the proposal leaves the inbox, and then deletes it. Git
-// remains the source of truth; the proposal row keeps references only.
+// it, bounded, until the proposal leaves the inbox. The transaction that
+// records the PR, the dismissal or the promotion deletes it, and a sweep on
+// every inbox read and each hour deletes any text left behind and expires
+// proposals that waited longer than inboxDraftTTL. Git remains the source of
+// truth; the proposal row keeps references only.
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -35,6 +41,9 @@ const (
 	maxInboxPending       = 50
 	maxInboxPerProposer   = 10
 	maxDismissReasonBytes = 500
+	// A proposal no person acted on for this long is dismissed as expired.
+	inboxDraftTTL = 30 * 24 * time.Hour
+	inboxExpired  = "expired"
 )
 
 var ticketKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,15}-[1-9][0-9]{0,8}$`)
@@ -121,6 +130,88 @@ func loadDraft(ctx context.Context, tx pgx.Tx, id string) (draft, error) {
 func deleteDraft(ctx context.Context, tx pgx.Tx, id string) error {
 	_, err := tx.Exec(ctx, `DELETE FROM doctrine_proposal_drafts WHERE proposal_id=$1`, id)
 	return err
+}
+
+// retireDraft deletes the text of an inbox proposal that left the inbox, in
+// the transaction that records why it left.
+func retireDraft(ctx context.Context, tx pgx.Tx, p Proposal) error {
+	if !p.Inbox || p.State == "pending" && p.PRNumber == 0 {
+		return nil
+	}
+	return deleteDraft(ctx, tx, p.ID)
+}
+
+// tldrDigest names a proposed TL;DR without keeping its text, so promotion
+// can check that the sidecar landed too.
+func tldrDigest(en, de string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(en) + "\x00" + strings.TrimSpace(de)))
+	return hex.EncodeToString(sum[:])
+}
+
+// sweepInbox bounds draft retention. It deletes the text of every proposal
+// that left the inbox, and dismisses as expired, through the system actor,
+// any proposal that waited longer than inboxDraftTTL.
+func sweepInbox(ctx context.Context, tx pgx.Tx, tenantID string, now time.Time) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM doctrine_proposal_drafts d USING doctrine_proposals p
+		WHERE p.tenant_id=d.tenant_id AND p.id=d.proposal_id
+		AND (COALESCE(p.data->>'state','proposed')<>'pending' OR COALESCE((p.data->>'pr_number')::int,0)>0)`); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `SELECT `+proposalColumns+` FROM doctrine_proposals
+		WHERE data->>'inbox'='true' AND data->>'state'='pending' AND created_at<$1
+		ORDER BY id LIMIT 50 FOR UPDATE SKIP LOCKED`, now.Add(-inboxDraftTTL))
+	if err != nil {
+		return err
+	}
+	var stale []Proposal
+	for rows.Next() {
+		p, err := scanProposal(rows)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		stale = append(stale, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(stale) == 0 {
+		return err
+	}
+	system, err := systemactor.Ensure(ctx, tx, tenantID)
+	if err != nil {
+		return err
+	}
+	for _, p := range stale {
+		if p.PRNumber > 0 || p.OperationID != "" && now.Before(p.OperationUntil) {
+			continue
+		}
+		p.State, p.DismissedBy, p.DismissReason = "dismissed", system.ID, inboxExpired
+		if err := saveProposal(ctx, tx, system, &p, "doctrine.inbox_dismissed"); err != nil {
+			return err
+		}
+		if err := deleteDraft(ctx, tx, p.ID); err != nil {
+			return err
+		}
+		body := fmt.Sprintf("Doctrine proposal expired: no person acted on it within %d days.\n\nRule `%s` in %s/%s.", int(inboxDraftTTL.Hours()/24), p.RuleKey, p.Repository, p.Path)
+		if err := ticketComment(ctx, tx, system, p.TicketID, body); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sweepInboxOnce runs sweepInbox in a savepoint; a failure is logged and never
+// costs the surrounding read.
+func sweepInboxOnce(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	if err := sweepInbox(ctx, sp, tenantID, time.Now()); err != nil {
+		_ = sp.Rollback(ctx)
+		slog.Error("doctrine inbox sweep", "err", err)
+		return nil
+	}
+	return sp.Commit(ctx)
 }
 
 // inboxSource resolves the source an agent names by id or repository.
@@ -297,7 +388,8 @@ func (m *Module) proposeToInbox(r *http.Request, actor tenant.Principal) (any, e
 	if !humanActor(actor) && (old.Strength == "locked" || next.Strength == "locked") {
 		return nil, fail(403, "locked_rule", "Locked rules change only through a person. Ask one to edit it under Doctrine.")
 	}
-	if next.SHA256 == old.SHA256 && (rule.TLDR == nil || rule.TLDR.EN == strings.TrimSpace(pin.TLDR.EN) && rule.TLDR.DE == strings.TrimSpace(pin.TLDR.DE)) {
+	// A TL;DR alone is a change; adding one to a rule without one is too.
+	if next.SHA256 == old.SHA256 && rule.TLDR != nil && tldrDigest(rule.TLDR.EN, rule.TLDR.DE) == tldrDigest(pin.TLDR.EN, pin.TLDR.DE) {
 		return nil, fail(400, "no_change", "The proposal matches the pinned rule.")
 	}
 	if _, err := m.checkPrivateQuotes(ctx, actor, source, files, guard, pin.Source, pin.TLDR.EN, pin.TLDR.DE, pin.Explanation); err != nil {
@@ -306,7 +398,7 @@ func (m *Module) proposeToInbox(r *http.Request, actor tenant.Principal) (any, e
 	p := Proposal{
 		ID: in.RequestID, SourceID: source.ID, Repository: source.Repository, Path: in.Path, RuleKey: in.RuleKey,
 		State: "pending", ProposedBy: actor.ID, Inbox: true, BaseRuleSHA: old.SHA256, ProposedSHA: next.SHA256, Ticket: in.Ticket,
-		RuleSet: rule.Set, RuleIndex: index,
+		ProposedTLDR: tldrDigest(pin.TLDR.EN, pin.TLDR.DE), RuleSet: rule.Set, RuleIndex: index,
 	}
 	err = m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
 		current, err := getSource(ctx, tx, source.ID, true)
@@ -423,6 +515,9 @@ func (m *Module) inboxItems(ctx context.Context, actor tenant.Principal, full bo
 		denied bool
 	}
 	err := m.tx(ctx, actor, "rules.read", func(tx pgx.Tx) error {
+		if err := sweepInboxOnce(ctx, tx, actor.TenantID); err != nil {
+			return err
+		}
 		query := `SELECT ` + prefixed("p", proposalColumns) + `,d.source,d.tldr_en,d.tldr_de,d.why,COALESCE(pr.name,''),COALESCE(pr.kind,'')
 			FROM doctrine_proposals p
 			LEFT JOIN doctrine_proposal_drafts d ON d.tenant_id=p.tenant_id AND d.proposal_id=p.id
@@ -677,14 +772,24 @@ func (m *Module) submitInbox(r *http.Request, actor tenant.Principal) (any, erro
 			current.EditedBy = actor.ID
 		}
 		current.SubmittedBy, current.BaseRuleSHA, current.ProposedSHA = actor.ID, old.SHA256, next.SHA256
+		current.ProposedTLDR = tldrDigest(in.TLDR.EN, in.TLDR.DE)
 		return saveProposal(ctx, tx, actor, &current, "doctrine.inbox_submitted")
 	})
 	if err != nil {
 		return nil, err
 	}
-	result, err := m.runProposal(ctx, actor, "rules.write", id, func(ctx context.Context, p *Proposal) (string, error) {
+	if m.beforeInboxLease != nil {
+		m.beforeInboxLease(id)
+	}
+	// runProposal records the PR and deletes the draft in one transaction.
+	return m.runProposal(ctx, actor, "rules.write", id, func(ctx context.Context, p *Proposal) (string, error) {
 		if p.PRNumber > 0 {
 			return "", nil
+		}
+		// A dismissal, expiry or promotion that won the race before the lease
+		// stands; nothing reaches GitHub.
+		if p.State != "pending" {
+			return "", fail(409, "not_pending", "This proposal is no longer waiting in the inbox.")
 		}
 		if p.InputDigest != digest || p.BaseCommit != main {
 			return "", fail(409, "request_conflict", "This proposal changed during the request. Reload it.")
@@ -695,12 +800,6 @@ func (m *Module) submitInbox(r *http.Request, actor tenant.Principal) (any, erro
 		p.State = "proposed"
 		return "doctrine.proposed", nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	// Git holds the text now. A failed delete is retried by the next submit.
-	_ = m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error { return deleteDraft(ctx, tx, id) })
-	return result, nil
 }
 
 // dismissInbox closes a waiting proposal with a reason. The reason goes back
@@ -776,12 +875,13 @@ func ticketComment(ctx context.Context, tx pgx.Tx, actor tenant.Principal, ticke
 }
 
 // promoteLanded closes inbox proposals whose change the new pin contains, by
-// any route: the proposed rule's exact bytes are indexed at this commit. The
-// linked ticket gets a comment. It runs inside the index transaction.
+// any route: the proposed rule's exact bytes and its proposed TL;DR are both
+// indexed at this commit. The linked ticket gets a comment. It runs inside the
+// index transaction.
 func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Source, files []File) error {
 	rows, err := tx.Query(ctx, `SELECT `+proposalColumns+` FROM doctrine_proposals
 		WHERE source_id=$1 AND data->>'inbox'='true' AND COALESCE(data->>'state','proposed') NOT IN ('dismissed','promoted')
-		AND COALESCE(data->>'proposed_rule_sha256','')<>'' ORDER BY created_at LIMIT 200`, s.ID)
+		AND COALESCE(data->>'proposed_rule_sha256','')<>'' AND COALESCE(data->>'proposed_tldr_sha256','')<>'' ORDER BY created_at LIMIT 200`, s.ID)
 	if err != nil {
 		return err
 	}
@@ -804,12 +904,14 @@ func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Sou
 	landed := map[string]bool{}
 	for _, v := range Render(s.Repository, s.Commit, s.Visibility == "private", files) {
 		for _, r := range v.Rules {
-			landed[v.Path+"\x00"+r.SHA256] = true
+			if r.TLDR != nil {
+				landed[v.Path+"\x00"+r.SHA256+"\x00"+tldrDigest(r.TLDR.EN, r.TLDR.DE)] = true
+			}
 		}
 	}
 	var system *tenant.Principal
 	for _, p := range open {
-		if !landed[p.Path+"\x00"+p.ProposedSHA] || p.OperationID != "" && time.Now().Before(p.OperationUntil) {
+		if !landed[p.Path+"\x00"+p.ProposedSHA+"\x00"+p.ProposedTLDR] || p.OperationID != "" && time.Now().Before(p.OperationUntil) {
 			continue
 		}
 		p.State, p.PromotedCommit = "promoted", s.Commit

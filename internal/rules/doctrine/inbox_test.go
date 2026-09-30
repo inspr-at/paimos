@@ -4,6 +4,7 @@ package doctrine
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -340,6 +341,9 @@ func TestDoctrineInboxOutdatedAndLandedElsewhere(t *testing.T) {
 	next := fixtureFiles()
 	next[file.Path] = strings.Replace(next[file.Path], "Small commits.", "Small commits, one topic each.", 1)
 	next["docs/AGENTS-DOMAIN-DEV.md"] = strings.Replace(next["docs/AGENTS-DOMAIN-DEV.md"], "Tests are part of done.", "Tests are always part of done.", 1)
+	// Promotion needs the TL;DR at the pin too, whichever route it took.
+	landed := Render(publicRepository, promotedCommit, false, []File{{Path: "docs/AGENTS-DOMAIN-DEV.md", Content: []byte(next["docs/AGENTS-DOMAIN-DEV.md"])}})
+	next[SidecarPath("docs/AGENTS-DOMAIN-DEV.md")] = "rules:\n  " + landed[0].Rules[0].Key + ": {en: A short line.}\n"
 	f.fake.commit(publicRepository, promotedCommit, next, "v26.10.2")
 	f.layer(owner, "PUT", "/api/rules/doctrine/sources/"+src.ID, SourceInput{Visibility: "public", Ref: "v26.10.2"})
 
@@ -378,4 +382,194 @@ func rulePath(src *SourceView, rule RuleView) string {
 		}
 	}
 	return ""
+}
+
+// Promotion needs the whole proposed content at the pin: the rule and its
+// TL;DR. A TL;DR-only proposal stays waiting while the doctrine is unchanged.
+func TestDoctrineInboxPromotionNeedsTheTLDR(t *testing.T) {
+	f, forge, m := newProposalFixture(t)
+	tid := f.tenant("inbox-c")
+	m.app.TenantID = tid
+	allowCredential(t, m.credentials.Dir, "app-key", tid, publicRepository)
+	owner := f.principal(tid, "person", "owner", "admin", nil, "")
+	agent := f.principal(tid, "agent", "builder", "admin", []string{"rules.read", "rules.write"}, owner.ID)
+	src := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: publicRepository, Visibility: "public", Ref: "main"}), publicRepository)
+	seedPrivateGuard(t, f, m, owner)
+	file, small := ruleWith(t, src, "Small commits.")
+	const path = "/api/rules/doctrine/inbox"
+	in := InboxInput{RequestID: "44400000-0000-4000-8000-000000000021", SourceID: src.ID, Path: file.Path, RuleKey: small.Key, Source: small.Source, TLDR: &inboxTLDR{EN: "Keep commits small."}, Why: "The rule has no TL;DR."}
+	var a Proposal
+	_ = json.Unmarshal(f.call(agent, "POST", path, in, 200), &a)
+	if a.State != "pending" || a.ProposedSHA != small.SHA256 || a.ProposedTLDR == "" {
+		t.Fatalf("TL;DR-only proposal %+v", a)
+	}
+
+	// The pin moves, the doctrine does not: the TL;DR has not landed.
+	f.fake.commit(publicRepository, promotedCommit, fixtureFiles(), "v26.10.3")
+	f.layer(owner, "PUT", "/api/rules/doctrine/sources/"+src.ID, SourceInput{Visibility: "public", Ref: "v26.10.3"})
+	var list inboxList
+	_ = json.Unmarshal(f.call(owner, "GET", path, nil, 200), &list)
+	if list.Pending != 1 || len(list.Items) != 1 || list.Items[0].ID != a.ID || list.Items[0].TLDR == nil || list.Items[0].TLDR.EN != "Keep commits small." {
+		t.Fatalf("a TL;DR-only proposal must keep waiting with its draft: %+v", list)
+	}
+
+	// Sent and released with the sidecar: now it is promoted.
+	forge.mainSHA = promotedCommit
+	f.call(owner, "POST", path+"/"+a.ID+"/pull-request", map[string]any{}, 200)
+	const released = "5555555555555555555555555555555555555555"
+	f.fake.commit(publicRepository, released, forge.treeFiles, "v26.10.4")
+	f.layer(owner, "PUT", "/api/rules/doctrine/sources/"+src.ID, SourceInput{Visibility: "public", Ref: "v26.10.4"})
+	var mine inboxList
+	_ = json.Unmarshal(f.call(agent, "GET", path, nil, 200), &mine)
+	if len(mine.Items) != 1 || mine.Items[0].State != "promoted" || mine.Items[0].PromotedCommit != released {
+		t.Fatalf("rule and TL;DR at the pin promote: %+v", mine.Items)
+	}
+}
+
+// A dismissal that commits between the submission's checks and its lease
+// wins: no PR is created and the proposal stays dismissed.
+func TestDoctrineInboxDismissalBeatsARacingSubmission(t *testing.T) {
+	f, forge, m := newProposalFixture(t)
+	tid := f.tenant("inbox-d")
+	m.app.TenantID = tid
+	allowCredential(t, m.credentials.Dir, "app-key", tid, publicRepository)
+	owner := f.principal(tid, "person", "owner", "admin", nil, "")
+	agent := f.principal(tid, "agent", "builder", "admin", []string{"rules.read", "rules.write"}, owner.ID)
+	src := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: publicRepository, Visibility: "public", Ref: "main"}), publicRepository)
+	seedPrivateGuard(t, f, m, owner)
+	file, small := ruleWith(t, src, "Small commits.")
+	const path = "/api/rules/doctrine/inbox"
+	in := InboxInput{RequestID: "44400000-0000-4000-8000-000000000031", SourceID: src.ID, Path: file.Path, RuleKey: small.Key, Source: strings.Replace(small.Source, "Small commits.", "Small, reviewed commits.", 1), TLDR: &inboxTLDR{EN: "Small, reviewed commits."}, Why: "Reviews."}
+	var a Proposal
+	_ = json.Unmarshal(f.call(agent, "POST", path, in, 200), &a)
+	m.beforeInboxLease = func(id string) {
+		m.beforeInboxLease = nil
+		f.call(owner, "POST", path+"/"+id+"/dismiss", map[string]string{"reason": "Not now."}, 200)
+	}
+	writes := forge.writes
+	if got := f.call(owner, "POST", path+"/"+a.ID+"/pull-request", map[string]any{}, 409); !strings.Contains(string(got), "not_pending") {
+		t.Fatalf("a racing submission must lose to the dismissal: %s", got)
+	}
+	if forge.writes != writes || len(forge.pulls) != 0 {
+		t.Fatal("a dismissed proposal reached GitHub")
+	}
+	var state, reason, pr string
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT data->>'state', COALESCE(data->>'dismiss_reason',''), COALESCE(data->>'pr_number','0') FROM doctrine_proposals WHERE id=$1`, a.ID).Scan(&state, &reason, &pr); err != nil || state != "dismissed" || reason != "Not now." || pr != "0" {
+		t.Fatalf("the dismissal must stand: state=%s reason=%s pr=%s err=%v", state, reason, pr, err)
+	}
+	if n := draftCount(t, f, tid); n != 0 {
+		t.Fatalf("dismissed draft left behind: %d", n)
+	}
+}
+
+// Draft text is bounded: text a proposal left behind is swept on the next
+// read, and a proposal nobody acted on expires after inboxDraftTTL, on read
+// or by the hourly sweep, with the reason going back to the proposer.
+func TestDoctrineInboxDraftRetentionIsBounded(t *testing.T) {
+	f, _, m := newProposalFixture(t)
+	tid := f.tenant("inbox-e")
+	m.app.TenantID = tid
+	allowCredential(t, m.credentials.Dir, "app-key", tid, publicRepository)
+	owner := f.principal(tid, "person", "owner", "admin", nil, "")
+	agent := f.principal(tid, "agent", "builder", "admin", []string{"rules.read", "rules.write", "nodes.read"}, owner.ID)
+	src := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: publicRepository, Visibility: "public", Ref: "main"}), publicRepository)
+	seedPrivateGuard(t, f, m, owner)
+	ticket := inboxTicket(t, f, owner)
+	_, small := ruleWith(t, src, "Small commits.")
+	_, tests := ruleWith(t, src, "Tests are part of done.")
+	const path = "/api/rules/doctrine/inbox"
+	proposal := func(id string, rule RuleView, from, to string) Proposal {
+		t.Helper()
+		in := InboxInput{RequestID: id, SourceID: src.ID, Path: rulePath(src, rule), RuleKey: rule.Key, Source: strings.Replace(rule.Source, from, to, 1), TLDR: &inboxTLDR{EN: "A short line."}, Why: "Because.", Ticket: "INB-2"}
+		var p Proposal
+		_ = json.Unmarshal(f.call(agent, "POST", path, in, 200), &p)
+		return p
+	}
+	a := proposal("44400000-0000-4000-8000-000000000041", small, "Small commits.", "Small, reviewed commits.")
+	b := proposal("44400000-0000-4000-8000-000000000042", tests, "Tests are part of done.", "Tests are always part of done.")
+
+	// Text left behind by a proposal that already left the inbox is swept.
+	f.call(owner, "POST", path+"/"+b.ID+"/dismiss", map[string]string{"reason": "No."}, 200)
+	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO doctrine_proposal_drafts(tenant_id,proposal_id,source,tldr_en,why) VALUES($1,$2,'- Left behind.','Left.','Left.')`, tid, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.call(agent, "GET", path+"/summary", nil, 200)
+	if n := draftCount(t, f, tid); n != 1 {
+		t.Fatalf("only the waiting draft may remain, %d left", n)
+	}
+
+	// A proposal waiting longer than the TTL expires on read.
+	backdate := func(id string) {
+		t.Helper()
+		if _, err := f.d.Admin.Exec(t.Context(), `UPDATE doctrine_proposals SET created_at=now()-interval '31 days' WHERE id=$1`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backdate(a.ID)
+	var summary struct {
+		Pending int `json:"pending"`
+	}
+	_ = json.Unmarshal(f.call(owner, "GET", path+"/summary", nil, 200), &summary)
+	if summary.Pending != 0 || draftCount(t, f, tid) != 0 {
+		t.Fatalf("an expired proposal must leave the inbox with its text: pending=%d", summary.Pending)
+	}
+	var mine inboxList
+	_ = json.Unmarshal(f.call(agent, "GET", path, nil, 200), &mine)
+	for _, it := range mine.Items {
+		if it.ID == a.ID && (it.State != "dismissed" || it.DismissReason != inboxExpired || it.Proposed != "") {
+			t.Fatalf("the proposer learns it expired: %+v", it)
+		}
+	}
+	if comments := ticketComments(t, f, owner, ticket); len(comments) != 2 || !strings.Contains(comments[1], "expired") {
+		t.Fatalf("the linked ticket learns of the expiry: %v", comments)
+	}
+
+	// The hourly sweep expires one even when nobody reads the inbox.
+	c := proposal("44400000-0000-4000-8000-000000000043", small, "Small commits.", "Tiny commits.")
+	backdate(c.ID)
+	m.sweepInboxHourly(t.Context())
+	var state, reason string
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT data->>'state', COALESCE(data->>'dismiss_reason','') FROM doctrine_proposals WHERE id=$1`, c.ID).Scan(&state, &reason); err != nil || state != "dismissed" || reason != inboxExpired {
+		t.Fatalf("hourly expiry state=%s reason=%s err=%v", state, reason, err)
+	}
+	if n := draftCount(t, f, tid); n != 0 {
+		t.Fatalf("expired draft left behind: %d", n)
+	}
+}
+
+// Every publication path refuses a locked rule without a person, before any
+// GitHub call; the outcome job goes through the same check.
+func TestPublicationRefusesLockedRulesWithoutAPerson(t *testing.T) {
+	f, forge, m := newProposalFixture(t)
+	tid := f.tenant("inbox-f")
+	m.app.TenantID = tid
+	allowCredential(t, m.credentials.Dir, "app-key", tid, publicRepository)
+	owner := f.principal(tid, "person", "owner", "admin", nil, "")
+	agent := f.principal(tid, "agent", "builder", "admin", []string{"rules.read", "rules.write"}, owner.ID)
+	src := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: publicRepository, Visibility: "public", Ref: "main"}), publicRepository)
+	kernel, locked := ruleWith(t, src, "NEVER")
+	var source Source
+	var files []File
+	err := m.tx(t.Context(), owner, "rules.read", func(tx pgx.Tx) error {
+		var err error
+		if source, err = getSource(t.Context(), tx, src.ID, false); err != nil {
+			return err
+		}
+		files, err = cachedFiles(t.Context(), tx, source)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := ProposalInput{RequestID: "44400000-0000-4000-8000-000000000051", SourceID: src.ID, Path: kernel.Path, RuleKey: locked.Key, RuleSHA: locked.SHA256, Source: strings.Replace(locked.Source, "run `env`", "run `env` or `printenv`", 1), Explanation: "Name the other command too."}
+	in.TLDR.EN = "Never print the environment."
+	calls := forge.calls
+	_, _, _, err = m.preparePublication(t.Context(), agent, source, files, nil, in)
+	var refused *failure
+	if !errors.As(err, &refused) || refused.Code != "locked_rule" || forge.calls != calls {
+		t.Fatalf("a locked rule must refuse an agent before GitHub: %v", err)
+	}
+	if got := f.call(agent, "POST", "/api/rules/doctrine/proposals", in, 403); !strings.Contains(string(got), "doctrine inbox") {
+		t.Fatalf("the PR endpoint is person-only: %s", got)
+	}
 }

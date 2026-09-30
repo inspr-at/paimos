@@ -56,6 +56,9 @@ type Module struct {
 	binaryAllowlist   map[string]string
 	analysis          AnalysisPolicy
 	analysisLearnings AnalysisLearnings
+	// beforeInboxLease runs between an inbox submission's checks and its
+	// publication lease. Tests only; nil in production.
+	beforeInboxLease func(id string)
 }
 
 var _ httpapi.Module = (*Module)(nil)

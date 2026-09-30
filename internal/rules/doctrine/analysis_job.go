@@ -45,12 +45,29 @@ func (m *Module) RunOutcomeAnalysis(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
+		m.sweepInboxHourly(ctx)
 		if err := m.analyzeOnce(ctx, time.Now().UTC()); err != nil && ctx.Err() == nil {
 			// Errors can originate in externally supplied records. Log a fixed line,
 			// never summaries, instruction prose or an upstream response body.
 			slog.Error("doctrine outcome analysis incomplete; reserved drafts will retry on the next UTC day")
 		}
 		timer.Reset(time.Hour)
+	}
+}
+
+// sweepInboxHourly bounds doctrine inbox drafts even when nobody reads the
+// inbox (AEON-444).
+func (m *Module) sweepInboxHourly(parent context.Context) {
+	ctx, cancel := context.WithTimeout(db.AllProjects(parent, "doctrine inbox sweep"), time.Minute)
+	defer cancel()
+	err := db.InTenant(ctx, m.pool, m.app.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','3s',true)`); err != nil {
+			return err
+		}
+		return sweepInbox(ctx, tx, m.app.TenantID, time.Now())
+	})
+	if err != nil && ctx.Err() == nil {
+		slog.Error("doctrine inbox sweep incomplete; it retries within the hour")
 	}
 }
 
@@ -282,7 +299,7 @@ func (m *Module) attemptFinding(ctx context.Context, actor tenant.Principal, f *
 	result, err := m.proposeChange(ctx, actor, in)
 	if err != nil {
 		var failure *failure
-		if errors.As(err, &failure) && (failure.Code == "private_doctrine" || failure.Code == "private_index_unavailable" || failure.Code == "public_identity" || failure.Code == "credential_text" || failure.Code == "non_latin") {
+		if errors.As(err, &failure) && (failure.Code == "private_doctrine" || failure.Code == "private_index_unavailable" || failure.Code == "public_identity" || failure.Code == "credential_text" || failure.Code == "non_latin" || failure.Code == "locked_rule") {
 			reason := "Kept internal to protect private instruction text."
 			if failure.Code == "private_index_unavailable" {
 				// Startup may still be rebuilding the guard. Preserve the slot
@@ -295,6 +312,9 @@ func (m *Module) attemptFinding(ctx context.Context, actor tenant.Principal, f *
 			}
 			if failure.Code == "non_latin" {
 				reason = "The proposed text needs a person to review its public wording."
+			}
+			if failure.Code == "locked_rule" {
+				reason = "The rule is locked; only a person changes it."
 			}
 			return m.noteFinding(ctx, actor, f, reason)
 		}

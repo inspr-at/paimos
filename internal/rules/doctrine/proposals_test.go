@@ -440,20 +440,29 @@ func TestProposalRoundTripAndSafety(t *testing.T) {
 	if forge.writes != before {
 		t.Fatal("bad scope reached mutation")
 	}
+	// Only a person opens a PR; an agent proposes through the inbox (AEON-444).
+	beforeCalls := forge.calls
+	if got := f.call(agent, "POST", path, input, 403); !strings.Contains(string(got), "doctrine inbox") || forge.calls != beforeCalls || forge.writes != before {
+		t.Fatal("an agent reached GitHub through the PR endpoint")
+	}
+	var reserved int
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM doctrine_proposals WHERE id=$1`, input.RequestID).Scan(&reserved); err != nil || reserved != 0 {
+		t.Fatalf("agent refusal left a reservation %d %v", reserved, err)
+	}
 	// A lost create-PR response leaves a reservation and recovers the same PR.
 	forge.dropPR = true
-	f.call(agent, "POST", path, input, 422)
-	decode(f.call(agent, "POST", path, input, 200))
+	f.call(owner, "POST", path, input, 422)
+	decode(f.call(owner, "POST", path, input, 200))
 	if p.PRNumber != 1 || len(forge.pulls) != 1 || p.State != "proposed" {
 		t.Fatalf("proposal %+v", p)
 	}
-	decode(f.call(agent, "POST", path, input, 200))
+	decode(f.call(owner, "POST", path, input, 200))
 	if len(forge.pulls) != 1 {
 		t.Fatal("retry duplicated PR")
 	}
 	bad = input
 	bad.Explanation = "Different"
-	f.call(agent, "POST", path, bad, 409)
+	f.call(owner, "POST", path, bad, 409)
 	if !strings.Contains(forge.treeFiles[input.Path], "can expose credentials") || !strings.Contains(forge.treeFiles[SidecarPath(input.Path)], input.TLDR.EN) {
 		t.Fatal("rule and TLDR did not reach git")
 	}
@@ -462,7 +471,7 @@ func TestProposalRoundTripAndSafety(t *testing.T) {
 	approve := map[string]string{"head_sha": p.HeadSHA}
 	// Existing proposals cannot refresh, merge or dispatch after revocation.
 	allowCredential(t, m.credentials.Dir, "app-key", otherID, publicRepository)
-	beforeCalls := forge.calls
+	beforeCalls = forge.calls
 	f.call(owner, "POST", item+"/refresh", nil, 422)
 	f.call(owner, "POST", item+"/approve", approve, 422)
 	if forge.calls != beforeCalls {
