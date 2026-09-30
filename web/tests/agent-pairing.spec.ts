@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
-import { HOMEBREW_COMMAND, NIX_PAIR_COMMAND, SETUP_COMMAND, mockAnonymousGuide, mockFormulaGuide, mockPairing, pairingGuide } from './agent-pairing-fixtures'
+import { HOMEBREW_COMMAND, NIX_PAIR_COMMAND, SETUP_COMMAND, mockAnonymousGuide, mockFormulaGuide, mockPairing, pairingEnrollment, pairingGuide, pairingView } from './agent-pairing-fixtures'
 
 test('Homebrew offers two commands and removal after draining', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
@@ -315,6 +315,61 @@ test('an unknown formula check shows the direct download without claiming the ta
   await expect(page.getByLabel('Install on this computer')).toHaveValue('manual')
   await expect(page.locator('option', { hasText: 'direct download' })).toHaveCount(1)
   await expect(page.getByRole('button', { name: 'Copy checksum installer' })).toBeVisible()
+})
+
+test('a daemon connect updates the review to Connected without a reload', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-27T20:00:00.000Z') })
+  await page.addInitScript(() => {
+    class Stream extends EventTarget {
+      onopen: ((event: Event) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      constructor() {
+        super()
+        window.addEventListener('test:pairing-event', event => {
+          const name = (event as CustomEvent<string>).detail
+          this.dispatchEvent(new MessageEvent(name, { data: '{}' }))
+        })
+      }
+      close() {}
+    }
+    Object.assign(window, { EventSource: Stream })
+  })
+  await mockWork(page, fixtures())
+  await mockPairing(page)
+  const computer = '33333333-3333-4333-8333-333333333333'
+  let reported = false
+  const enrollments = [
+    pairingEnrollment('44444444-4444-4444-8444-444444444444', 'cursor-1', 'cursor', 'Cursor work'),
+    pairingEnrollment('55555555-5555-4555-8555-555555555555', 'codex-1', 'codex', 'Codex work'),
+  ]
+  const settingUp = pairingView({
+    state: 'approved', computer_id: computer, computer_state: 'connected', revision: 2, setup_state: 'approved', connectivity: 'unknown', enrollments,
+  })
+  const connected = pairingView({
+    state: 'redeemed', computer_id: computer, computer_state: 'connected', revision: 4, setup_state: 'connected', connectivity: 'online',
+    last_seen_at: '2026-09-27T20:00:30.000Z', harness_statuses: { codex: 'ready' }, harness_details: { codex: { state: 'ready' } }, enrollments,
+  })
+  await page.route('**/api/agent-pairing/computers**', route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/agent-pairing/computers') return route.fulfill({ json: { computers: reported ? [connected] : [] } })
+    return route.fulfill({ json: reported ? connected : settingUp })
+  })
+  await page.goto('/agents/register-agent')
+  await page.getByLabel('Pairing code').fill('123-456-789')
+  await page.getByRole('button', { name: 'Look up code' }).click()
+  await page.getByRole('radio', { name: /Keep agents paused/ }).check()
+  await page.getByRole('button', { name: 'Connect your machine', exact: true }).click()
+  const review = page.getByRole('region', { name: 'Pairing review' })
+  await expect(review.getByRole('heading', { name: 'Setting up', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Connected', exact: true })).toHaveCount(0)
+  await expect(page.getByText('No computers are connected in this workspace yet.')).toBeVisible()
+  reported = true
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:pairing-event', { detail: 'agent_pairing.reported' })))
+  await expect(review.getByRole('heading', { name: 'Connected', exact: true })).toBeVisible()
+  await expect(review.getByText('Ready', { exact: true })).toBeVisible()
+  await expect(review.getByText('Add another harness from this computer, or set an ongoing allowance when you want more work.')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Connected computers' }).locator('.status')).toHaveText('Connected')
 })
 
 test('Agents links to Connect your machine', async ({ page }) => {

@@ -1200,6 +1200,32 @@ func TestPairingHarnessStatusesStayScopedAndRecover(t *testing.T) {
 	f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": other.id, "lifecycle_secret": other.lifecycle, "progress": agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "ready"}}}, false, "", 200)
 }
 
+func TestPairingProgressPublishesOneEventPerChange(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	f.redeem(p)
+	if f.events("agent_pairing.reported") != 0 {
+		t.Fatal("approval published a setup report")
+	}
+	report := func(state string, statuses map[string]string) {
+		t.Helper()
+		f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": agentpairing.SetupProgress{State: state, HarnessStatuses: statuses}}, false, "", 200)
+	}
+	report("connected", nil)
+	if f.events("agent_pairing.reported") != 1 {
+		t.Fatal("daemon connect did not publish agent_pairing.reported")
+	}
+	report("connected", nil)
+	if f.events("agent_pairing.reported") != 1 {
+		t.Fatal("unchanged heartbeat published another report")
+	}
+	report("connected", map[string]string{"claude": "ready"})
+	if f.events("agent_pairing.reported") != 2 {
+		t.Fatal("harness report did not publish")
+	}
+}
+
 func TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup(t *testing.T) {
 	f := newFixture(t)
 	p := f.propose("claude", "codex")

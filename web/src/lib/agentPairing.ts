@@ -767,7 +767,9 @@ export function planPoll(input: {
   retryAfterSeconds?: number | null
   state?: string | null
   rateLimited?: boolean
-}): { action: 'wait' | 'stop'; delayMs: number; reason: 'interval' | 'retry_after' | 'lifetime' | 'terminal' } {
+  /** Transient read failures since the last success. The wait doubles, and stays capped. */
+  failures?: number
+}): { action: 'wait' | 'stop'; delayMs: number; reason: 'interval' | 'backoff' | 'retry_after' | 'lifetime' | 'terminal' } {
   if (input.state === 'denied' || input.state === 'expired' || input.state === 'revoked') {
     return { action: 'stop', delayMs: 0, reason: 'terminal' }
   }
@@ -777,7 +779,29 @@ export function planPoll(input: {
     return { action: 'wait', delayMs: Math.max(MIN_POLL_INTERVAL_MS, seconds * 1000), reason: 'retry_after' }
   }
   const seconds = input.intervalSeconds ?? MIN_POLL_INTERVAL_MS / 1000
-  return { action: 'wait', delayMs: Math.max(MIN_POLL_INTERVAL_MS, seconds * 1000), reason: 'interval' }
+  const base = Math.max(MIN_POLL_INTERVAL_MS, seconds * 1000)
+  const steps = Math.min(Math.max(0, input.failures ?? 0), 3)
+  return { action: 'wait', delayMs: Math.min(base * 2 ** steps, 30_000), reason: steps > 0 ? 'backoff' : 'interval' }
+}
+
+// Wake hints on the existing tenant event stream. The page refetches the
+// computer; the payload is not a substitute for that read.
+export const PAIRING_LIVE_EVENTS = [
+  'agent_pairing.approved',
+  'agent_pairing.denied',
+  'agent_pairing.reported',
+  'agent_pairing.disconnected',
+  'agent_pairing.removed',
+  'agent_pairing.cleanup_acknowledged',
+  'agent_pairing.verification_created',
+  'agent_pairing.verification_withdrawn',
+] as const
+
+export function subscribePairingEvents(wake: () => void): () => void {
+  if (typeof EventSource === 'undefined') return () => {}
+  const stream = new EventSource('/api/events/stream')
+  for (const name of PAIRING_LIVE_EVENTS) stream.addEventListener(name, () => wake())
+  return () => stream.close()
 }
 
 export interface PairingProgress {
@@ -1115,6 +1139,32 @@ export function describeComputerStatus(view: Pick<PairingView, 'computer_state' 
     next = 'Cleanup and revocation do not settle run accounting. Local processes stay unconfirmed until the computer says otherwise.'
   }
   return { stateLabel, cleanupLabel, processLabel, claimsProcessStopped, detail, next }
+}
+
+/** Keep reading until the daemon is connected and verification is no longer moving, or the request is closed. */
+export function pairingStillLive(view: PairingView): boolean {
+  if (!view.computer_id) return false
+  const phase = describeProgress(view).phase
+  if (phase === 'denied' || phase === 'expired' || phase === 'revoked') return false
+  const connected = describeComputerStatus(view).stateLabel === 'Connected'
+  const moving = view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state))
+  return !(connected && !moving)
+}
+
+/**
+ * What the register page shows after approval. A daemon that has finished
+ * setup and answered a recent probe is Connected, including while a
+ * verification run is still in progress. describeProgress keeps verification
+ * as its own phase; this copy is the page title.
+ */
+export function pairingLiveCopy(view: PairingView): { title: string; detail: string; next: string } {
+  const progress = describeProgress(view)
+  if (describeComputerStatus(view).stateLabel !== 'Connected') return { title: progress.title, detail: progress.detail, next: progress.next }
+  return {
+    title: 'Connected',
+    detail: progress.phase === 'verify' ? progress.detail : 'The computer reported that setup finished, and a recent probe succeeded.',
+    next: progress.next,
+  }
 }
 
 function accountingUnconfirmed(view: Pick<PairingView, 'accounting_state' | 'enrollments'>): boolean {

@@ -8,7 +8,7 @@ import {
   agentRouteKind, canonicalUserCode, clearPairingClientState, denyPairing,
   describeComputerStatus, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, describeProgress, harnessRecovery, disconnectComputer, disconnectConfirm, disconnectEnrollment,
   formatVerification, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
-  pairingPermissions, planApproval, planLookup, planPoll,
+  pairingLiveCopy, pairingPermissions, pairingStillLive, planApproval, planLookup, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
   peekPairingCode, presentPublicGuide, publicGuideSections, rememberPairingCode, takePairingCode,
   chooseInstallMethod, homebrewPendingNote, installMethods, readPairingInstallMethod, writePairingInstallMethod,
@@ -399,6 +399,36 @@ test('polling honours the minimum interval, Retry-After and terminal states', ()
   assert.equal(planPoll({ startedAt: started, now: 1_000, state: 'expired' }).action, 'stop')
   assert.equal(planPoll({ startedAt: started, now: 1_000, state: 'denied' }).reason, 'terminal')
   assert.equal(planPoll({ startedAt: started, now: 10 * 60 * 1000, state: 'pending' }).reason, 'lifetime')
+  assert.equal(planPoll({ startedAt: 0, now: 1_000, intervalSeconds: 5, state: 'approved', failures: 1 }).reason, 'backoff')
+  assert.equal(planPoll({ startedAt: 0, now: 1_000, intervalSeconds: 5, state: 'approved', failures: 1 }).delayMs, 10_000)
+  assert.equal(planPoll({ startedAt: 0, now: 1_000, intervalSeconds: 5, state: 'approved', failures: 6 }).delayMs, 30_000)
+})
+
+test('a daemon connect reads as Connected while verification is still running', () => {
+  const running = view({
+    state: 'redeemed', computer_id: COMPUTER, computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    verification: { ...view().verification!, mode: 'one_per_harness' },
+    enrollments: [enrollment({ verification_state: 'running' })],
+    harness_statuses: { cursor: 'ready' },
+  })
+  assert.equal(describeProgress(running).phase, 'verify')
+  assert.equal(pairingLiveCopy(running).title, 'Connected')
+  assert.match(pairingLiveCopy(running).detail, /read-only run/)
+  assert.match(pairingLiveCopy(running).next, /will not start another verification/)
+  assert.equal(describeHarnessStatus(running, 'cursor'), 'Ready')
+  assert.equal(pairingStillLive(running), true)
+  const settled = view({
+    state: 'redeemed', computer_id: COMPUTER, computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    verification: { ...view().verification!, mode: 'connect_only' },
+    enrollments: [enrollment({ verification_state: 'not_selected' })],
+  })
+  assert.equal(pairingLiveCopy(settled).title, 'Connected')
+  assert.match(pairingLiveCopy(settled).next, /Add another harness/)
+  assert.equal(pairingStillLive(settled), false)
+  assert.equal(pairingStillLive(view()), false)
+  const waiting = view({ state: 'approved', computer_id: COMPUTER, computer_state: 'connected', setup_state: 'approved', connectivity: 'unknown' })
+  assert.equal(pairingLiveCopy(waiting).title, 'Setting up')
+  assert.equal(pairingStillLive(waiting), true)
 })
 
 test('a response secret is refused and computer lists stay on the person projection', async () => {

@@ -3,6 +3,7 @@ package agentpairing
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -270,8 +271,35 @@ func (m *Module) cleanup(ctx context.Context, tx pgx.Tx, computer string, in pro
 			return err
 		}
 		// A legacy daemon omits reports. Clear stale state after a downgrade.
-		if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET setup_state=$2,setup_error=$3,harness_statuses=$4,harness_details=$5,last_seen_at=clock_timestamp() WHERE id=$1 AND state='connected'`, computer, in.Progress.State, in.Progress.ErrorCode, statuses, details); err != nil {
+		// Last-seen moves on every report; the event fires only when setup or a
+		// harness report actually changes, so a heartbeat does not flood the stream.
+		var progressChanged bool
+		err = tx.QueryRow(ctx, `
+WITH prev AS (
+  SELECT id, setup_state, setup_error, harness_statuses, harness_details
+  FROM agent_pairing_computers WHERE id=$1 AND state='connected'
+)
+UPDATE agent_pairing_computers c
+SET setup_state=$2, setup_error=$3, harness_statuses=$4, harness_details=$5, last_seen_at=clock_timestamp()
+FROM prev WHERE c.id=prev.id
+RETURNING prev.setup_state IS DISTINCT FROM c.setup_state
+  OR prev.setup_error IS DISTINCT FROM c.setup_error
+  OR prev.harness_statuses IS DISTINCT FROM c.harness_statuses
+  OR prev.harness_details IS DISTINCT FROM c.harness_details`, computer, in.Progress.State, in.Progress.ErrorCode, statuses, details).Scan(&progressChanged)
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = nil
+		}
+		if err != nil {
 			return err
+		}
+		if progressChanged {
+			var principal, tenantID string
+			if err = tx.QueryRow(ctx, `SELECT principal_id::text, tenant_id::text FROM agent_pairing_computers WHERE id=$1`, computer).Scan(&principal, &tenantID); err != nil {
+				return err
+			}
+			if err = audit(ctx, tx, tenant.Principal{ID: principal, TenantID: tenantID, Kind: tenant.Agent}, "agent_pairing.reported", map[string]any{"computer_id": computer, "setup_state": in.Progress.State}); err != nil {
+				return err
+			}
 		}
 	}
 
