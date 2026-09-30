@@ -15,9 +15,18 @@ import (
 // dropping it. Active watches are sessions and are listed there.
 const attachRecentWindow = "15 minutes"
 
+// Two bounded parts, live first. A request that still waits is always listed,
+// however many newer ones ended after it: only its own expiry removes it. The
+// ended tail is recent and short, so a burst of cancellations cannot crowd it out.
+const (
+	pendingLiveMax  = "32"
+	pendingEndedMax = "4"
+	pendingColumns  = `id::text,digest,snapshot,state,expires_at,consent_mode,expires_at<=clock_timestamp()`
+)
+
 // attachPending lists the signed-in owner's attach requests that have not become
-// a session yet: waiting for approval, approved and connecting, and recently
-// expired or cancelled. It grants nothing the nine-digit lookup does not: the
+// a session yet: waiting for approval, approved and connecting (all of them, until
+// they expire), and recently expired or cancelled. It grants nothing the nine-digit lookup does not: the
 // same owner filter, the same immutable snapshot and digests, and approval still
 // needs the same-origin POST with both digests. It never returns the code or the
 // Touch ID challenge, and it never changes a row (expiry is reported, not applied;
@@ -26,11 +35,17 @@ const attachRecentWindow = "15 minutes"
 func (m *Module) attachPending(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
 	out := []attachwatch.View{}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(r.Context(), `SELECT id::text,digest,snapshot,state,expires_at,consent_mode,expires_at<=clock_timestamp()
+		rows, err := tx.Query(r.Context(), `(SELECT `+pendingColumns+`
+ FROM harness_attach_requests
+ WHERE owner_id=$1 AND session_id IS NULL AND state IN ('pending','approved') AND expires_at>clock_timestamp()
+ ORDER BY created_at DESC, id LIMIT `+pendingLiveMax+`)
+ UNION ALL
+ (SELECT `+pendingColumns+`
  FROM harness_attach_requests
  WHERE owner_id=$1 AND session_id IS NULL AND state IN ('pending','approved','detached','unreachable')
+ AND NOT (state IN ('pending','approved') AND expires_at>clock_timestamp())
  AND created_at>clock_timestamp()-interval '`+attachRecentWindow+`'
- ORDER BY created_at DESC, id LIMIT 8`, p.ID)
+ ORDER BY created_at DESC, id LIMIT `+pendingEndedMax+`)`, p.ID)
 		if err != nil {
 			return err
 		}
