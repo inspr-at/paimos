@@ -334,6 +334,15 @@ func (rt *runtime) createIssue(in issueInput) error {
 	if err := rt.do(http.MethodPost, "/api/nodes", body, &created); err != nil {
 		return err
 	}
+	if (kindName == "ticket" || kindName == "task") && in.Estimate == "" && !validEstimate(fieldMap(created.Fields)["estimate_hours"]) {
+		found := false
+		for _, warning := range created.Warnings {
+			found = found || strings.Contains(warning, "fields.estimate_hours")
+		}
+		if !found {
+			created.Warnings = append(created.Warnings, "add an agent-hours estimate in fields.estimate_hours")
+		}
+	}
 	created.Warnings = withEstimateHints(created.Warnings)
 	kinds, err := rt.loadKinds()
 	if err != nil {

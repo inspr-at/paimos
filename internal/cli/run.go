@@ -145,6 +145,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdRulesTLDR(),
 		rt.cmdRulesCompare(),
 		rt.cmdRules(),
+		rt.cmdDoctrine(),
 		rt.cmdTag(),
 		rt.cmdAttach(),
 		rt.cmdExternalStage(),

@@ -579,7 +579,7 @@ paths:
   /rules/doctrine/analysis:
     get:
       operationId: listDoctrineOutcomeAnalysis
-      description: "Person-only, workspace rules.read, outcome.read and knowledge.read. Up to 100 deterministic outcome findings, including internal notes refused by the public leak guard. Evidence stays inside the workspace. Daily analysis defaults to a 14-day window, 3 occurrences, 5 open drafts and 5 draft attempts per UTC day. No LLM calls or token consumption. Metrics are descriptive, not causal; after measurements require instruction provenance matching the changed file, in the same harness and ticket kind. Missing provenance leaves the comparison pending. Drafts never publish automatically."
+      description: "Person-only, workspace rules.read, outcome.read and knowledge.read. Up to 100 deterministic outcome findings, including internal notes refused by the public leak guard. Evidence stays inside the workspace. Daily analysis defaults to a 14-day window, 3 occurrences, 5 open drafts and 5 draft attempts per UTC day. No LLM calls or token consumption. Metrics are descriptive, not causal; after measurements require instruction provenance matching the changed file, in the same harness and ticket kind. Missing provenance leaves the comparison pending. The job never publishes (AEON-444): each proposal waits in the doctrine inbox, proposed by the System principal, until a person sends it to git or dismisses it; a dismissal closes the finding, a promotion or a merge starts the after measurement."
       responses:
         "200":
           description: Findings and proposal measurements
@@ -607,7 +607,7 @@ paths:
                   proposals: {type: array, items: {"$ref": "#/components/schemas/DoctrineProposal"}}
     post:
       operationId: proposeDoctrineChange
-      description: "Workspace rules.write. Requires a server-configured GitHub App, operator-acknowledged DCO contribution policy and its designated tenant. The App key reference requires an operator-owned tenant/exact-repository allowlist grant, checked before key use for each proposal, refresh or approval. Tokens are narrowed to the owning repository; all GitHub requests use https://api.github.com with redirects disabled. Commit authorship and sign-off use the verified App bot identity. The source determines the owning repository; only inspr-at/inspr-modules and inspr-at/inspr-doctrine-private are writable. Before any token mint or GitHub call, the changed rule, its TLDR entry and explanation are normalized with the versioned Unicode default-ignorable/NFKD/casefold/confusables pipeline and checked for identity patterns and quotations from the indexed private doctrine. Ambiguous Unicode compatibility/visual forms are refused (422 ambiguous_text). Public proposal letters must be Latin, including German umlauts and ß, and digits must be ASCII (422 non_latin). Quotation exemptions use only blobs identical to the independently resolved main tree cached during public source indexing, never the configured pin, a proposal branch or an unmerged SHA. The cache expires after five minutes; a private match with a missing or stale cache returns 422 public_main_unavailable without fetching. Reindex the public source to refresh it. Proposals without a private match need no guard network reads. Normal PR preparation still checks main and refuses stale exemptions with 409 stale_source. The private guard is an HMAC keyed by the server secret AEON_DOCTRINE_GUARD_KEY_FILE; a missing guard or mismatched normalizer/table/binary-policy version returns 422 private_index_unavailable until reindex or the startup rebuild. Every non-UTF-8 or control-bearing private file blocks the guard unless its exact path and SHA-256 are in the reviewed host binary allowlist (empty by default). Public proposals require an available, authorized private index; unchanged file content is not scanned. GitHub I/O holds no database locks: short authorized transactions reserve a per-proposal lease and compare the saved version before applying results. Source, main-file blob and rule digest must match. Reuse request_id with identical input to recover a timeout; another input returns 409. No draft prose is retained in Aeon. A ref that lands after authority is revoked is stored as branch with orphaned true and a doctrine.branch_observed event."
+      description: "Workspace rules.write, by a person only (AEON-444): agents and person-created API keys get 403 forbidden and propose through POST /rules/doctrine/inbox, where a person sends the change to git. Locked rules change only through a person (403 locked_rule). Requires a server-configured GitHub App, operator-acknowledged DCO contribution policy and its designated tenant. The App key reference requires an operator-owned tenant/exact-repository allowlist grant, checked before key use for each proposal, refresh or approval. Tokens are narrowed to the owning repository; all GitHub requests use https://api.github.com with redirects disabled. Commit authorship and sign-off use the verified App bot identity. The source determines the owning repository; only inspr-at/inspr-modules and inspr-at/inspr-doctrine-private are writable. Before any token mint or GitHub call, the changed rule, its TLDR entry and explanation are normalized with the versioned Unicode default-ignorable/NFKD/casefold/confusables pipeline and checked for identity patterns and quotations from the indexed private doctrine. Ambiguous Unicode compatibility/visual forms are refused (422 ambiguous_text). Public proposal letters must be Latin, including German umlauts and ß, and digits must be ASCII (422 non_latin). Quotation exemptions use only blobs identical to the independently resolved main tree cached during public source indexing, never the configured pin, a proposal branch or an unmerged SHA. The cache expires after five minutes; a private match with a missing or stale cache returns 422 public_main_unavailable without fetching. Reindex the public source to refresh it. Proposals without a private match need no guard network reads. Normal PR preparation still checks main and refuses stale exemptions with 409 stale_source. The private guard is an HMAC keyed by the server secret AEON_DOCTRINE_GUARD_KEY_FILE; a missing guard or mismatched normalizer/table/binary-policy version returns 422 private_index_unavailable until reindex or the startup rebuild. Every non-UTF-8 or control-bearing private file blocks the guard unless its exact path and SHA-256 are in the reviewed host binary allowlist (empty by default). Public proposals require an available, authorized private index; unchanged file content is not scanned. GitHub I/O holds no database locks: short authorized transactions reserve a per-proposal lease and compare the saved version before applying results. Source, main-file blob and rule digest must match. Reuse request_id with identical input to recover a timeout; another input returns 409. No draft prose is retained in Aeon. A ref that lands after authority is revoked is stored as branch with orphaned true and a doctrine.branch_observed event."
       requestBody:
         required: true
         content:
@@ -620,7 +620,7 @@ paths:
             application/json:
               schema: {"$ref": "#/components/schemas/DoctrineProposal"}
         "400": {description: Invalid edit}
-        "403": {description: Permission or tenant denied}
+        "403": {description: "Permission or tenant denied; an agent or API key (forbidden); a locked rule changed without a person (locked_rule)"}
         "409": {description: Stale source or request id conflict}
         "422": {description: "Credential, non-Latin public text (non_latin), ambiguous Unicode text (ambiguous_text), private quotation (private_doctrine), a missing or incompatible private guard (private_index_unavailable), or a missing or stale public main cache (public_main_unavailable) refused the proposal"}
         "503": {description: App not configured or outcome uncertain; retry the same request id}
@@ -683,6 +683,141 @@ paths:
           content:
             application/json:
               schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+  /rules/doctrine/inbox:
+    get:
+      operationId: listDoctrineInbox
+      description: "rules.read. The doctrine inbox (AEON-444). A person (not a key) sees every waiting proposal; an agent or key sees its own proposals in any state, with the dismissal reason. Each item carries the rule heading, the waiting text, a word diff against the rule at the current pin, the proposer's name and kind, the linked ticket and the why. outdated means the pinned rule changed since the proposal; Propose PR then needs Edit then propose. A private source whose credential grant is unavailable shows neither text nor diff. Each read also sweeps: waiting text of a proposal that left the inbox is deleted, and a proposal waiting longer than 30 days is dismissed with the reason expired (an hourly sweep does the same)."
+      responses:
+        "200":
+          description: The inbox
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pending, items]
+                properties:
+                  pending: {type: integer, minimum: 0}
+                  items: {type: array, items: {"$ref": "#/components/schemas/DoctrineInboxItem"}}
+    post:
+      operationId: proposeDoctrineInboxChange
+      description: "Workspace rules.write (person or agent key). Records a waiting doctrine proposal against the rule at the pinned commit; nothing is written to GitHub. The editor's checks apply before anything is stored: exactly one rule in the same section with its marker, a valid TL;DR sidecar, the size budget (rule 8000 bytes, why 2000, TL;DR 300 per language), credential and public-identity text, Unicode and Latin-only rules for the public repository, and the private quotation guard. Locked rules (before or after the change) are person-only (403 locked_rule). Without tldr the rule keeps its current TL;DR. The ticket must be readable by the caller. One waiting proposal per proposer and rule (409 rule_proposal_open; the identical proposal is returned), at most 10 waiting per proposer and 50 per workspace (409 inbox_full). The same request_id replays its proposal. The waiting text is held in Aeon until a person sends it to git or dismisses it, then deleted; the proposal row keeps references only."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/DoctrineInboxInput"}
+      responses:
+        "200":
+          description: The waiting proposal
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+        "400": {description: "Invalid edit, no change, or a rule without a TL;DR"}
+        "403": {description: "Permission denied, or a locked rule (locked_rule)"}
+        "404": {description: Unknown source or ticket}
+        "409": {description: "Stale rule or pin, request id conflict, an open proposal for this rule (rule_proposal_open), or a full inbox (inbox_full)"}
+        "422": {description: "Credential, identity, non-Latin, ambiguous Unicode or private-quotation text refused the proposal"}
+        "503": {description: App or quotation guard not configured}
+  /rules/doctrine/inbox/summary:
+    get:
+      operationId: getDoctrineInboxSummary
+      description: "rules.read. The waiting count and headlines (id, label, created_at, notified) for the Settings dot and the proposal toast; no rule text. Same visibility as the inbox. notified is true once the caller claimed the proposal's toast (claimDoctrineInboxNotice)."
+      responses:
+        "200":
+          description: Waiting proposals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pending, items]
+                properties:
+                  pending: {type: integer, minimum: 0}
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, label, created_at, notified]
+                      properties:
+                        id: {type: string, format: uuid}
+                        label: {type: string, description: "The proposed English TL;DR, else the rule heading"}
+                        created_at: {type: string, format: date-time}
+                        notified: {type: boolean, description: "The caller already claimed this proposal's toast"}
+  /rules/doctrine/inbox/{proposalId}/notified:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: claimDoctrineInboxNotice
+      description: "Person-only (not a key) workspace rules.read. Claims the toast for a waiting proposal: claimed is true only for the first call per person and proposal, across tabs, devices and reloads, so a proposal toasts once. The claim is atomic and idempotent; every later call, and a call for a proposal that is no longer waiting (dismissed, expired, sent to git or promoted), returns claimed false. A claim racing a dismissal waits for it. Claims are deleted once the proposal leaves the inbox."
+      responses:
+        "200":
+          description: Whether this call claimed the toast
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [claimed]
+                properties:
+                  claimed: {type: boolean}
+        "403": {description: Agents and keys are not notified}
+        "400": {description: Not a proposal UUID}
+  /rules/doctrine/inbox/{proposalId}/pull-request:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: submitDoctrineInboxProposal
+      description: "Person-only workspace rules.write (Propose PR). Sends a waiting proposal to git through the AEON-319 path with every check of proposeDoctrineChange, run as the submitting person; the proposer stays recorded. Any of source, tldr and why make it Edit then propose: the person's text replaces the waiting text, and rule_sha256 names the pinned rule they edited against. An outdated proposal without edits is 409 stale_rule. A proposal dismissed, expired or promoted before publication starts is 409 not_pending and nothing reaches GitHub. The transaction that records the PR deletes the waiting text. Repeating the request recovers an interrupted PR; a branch left by an attempt with other text or another base is 409 request_conflict."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                source: {type: string, maxLength: 8000}
+                tldr:
+                  type: object
+                  additionalProperties: false
+                  required: [en]
+                  properties:
+                    en: {type: string, maxLength: 300}
+                    de: {type: string, maxLength: 300}
+                why: {type: string, maxLength: 2000}
+                rule_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+      responses:
+        "200":
+          description: The proposal with its pull request
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+        "403": {description: A person with workspace rules.write sends proposals to git}
+        "409": {description: "Not waiting, busy, stale rule or source, or a conflicting earlier attempt"}
+        "422": {description: "Refused text, as for proposeDoctrineChange"}
+        "503": {description: App not configured or outcome uncertain; repeat the request}
+  /rules/doctrine/inbox/{proposalId}/dismiss:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: dismissDoctrineInboxProposal
+      description: "Person-only workspace rules.write. Closes a waiting proposal as dismissed with a reason (1 to 500 bytes, no credential-shaped text). The reason goes back to the proposer: on the proposal they list and as a comment on the linked ticket. The waiting text is deleted. Repeating it is a no-op."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, minLength: 1, maxLength: 500}
+      responses:
+        "200":
+          description: The dismissed proposal
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+        "403": {description: A person with workspace rules.write dismisses proposals}
+        "409": {description: The proposal is not waiting}
   /rules/doctrine/sources:
     post:
       operationId: addDoctrineSource
@@ -903,7 +1038,13 @@ paths:
       summary: Read the signed-in person's session watching consent and reported computers
       responses:
         '200':
-          description: Per-person setting, defaulting to Aeon approval, plus advisory capability for connected computers this person approved
+          description: >-
+            Per-person setting plus advisory capability for connected computers this person approved.
+            With no saved choice, consent_mode is local_auth when any connected computer reports available,
+            and a pending approval on a Mac that reports available uses it. Linux, a Mac without a graphical
+            login, and computers that cannot confirm stay on aeon until a choice is saved. consent_saved is
+            false for that default. A saved local_auth applies to every computer and fails closed where
+            confirmation cannot run. The capability report is advisory and never authorizes a watch.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SessionWatchingSecurityView'}
@@ -919,7 +1060,7 @@ paths:
             schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
       responses:
         '200':
-          description: Saved per-person setting and advisory computer capability
+          description: Saved per-person setting and advisory computer capability. consent_saved is true.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SessionWatchingSecurityView'}
@@ -3899,7 +4040,7 @@ paths:
                 eta_live_at: {type: [string, 'null'], format: date-time, description: "Coordinator only. RFC3339 instant the bound ticket is live, from 30 days ago through 365 days ahead. Omission preserves; null clears. The ticket's current project is checked on every write."}
                 progress_pct: {type: [integer, 'null'], minimum: 0, maximum: 100, description: "Worker only. Percent done for the bound ticket, 0 through 100. Omission preserves; null clears."}
       responses:
-        '200': {description: Updated session, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '200': {description: Updated session with non-blocking estimate guidance, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
@@ -6601,7 +6742,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.5']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.6']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
@@ -6617,9 +6758,15 @@ components:
       type: object
       additionalProperties: false
       required: [consent_mode, local_auth_computers]
-      description: Saved consent plus the advisory capability last reported by each connected computer this person approved. The report never authorizes a watch.
+      description: >-
+        Consent plus the advisory capability last reported by each connected computer this person approved.
+        The report never authorizes a watch. consent_saved is false when consent_mode is the unsaved default:
+        local_auth if any connected computer reports available, otherwise aeon. Pending approvals use
+        local_auth only for a darwin computer that reports available. Other computers keep aeon until a
+        choice is saved. A saved local_auth applies everywhere and fails closed where confirmation cannot run.
       properties:
-        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon}
+        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon, description: "aeon is the fallback when nothing is saved and no connected Mac reports available."}
+        consent_saved: {type: boolean, description: "False when consent_mode is the unsaved default. True after this person saves a choice."}
         local_auth_computers:
           type: array
           items:
@@ -7298,7 +7445,7 @@ components:
         repository: {type: string}
         path: {type: string}
         rule_key: {type: string}
-        state: {type: string, enum: [proposed, in_review, merged, released, pinned, closed]}
+        state: {type: string, enum: [proposed, in_review, merged, released, pinned, closed, pending, dismissed, promoted], description: "pending, dismissed and promoted belong to the doctrine inbox (AEON-444). promoted is final: the pinned doctrine contains the proposed rule."}
         head_sha: {type: string}
         pr_number: {type: integer}
         pr_url: {type: string}
@@ -7317,6 +7464,70 @@ components:
         created_at: {type: string, format: date-time}
         draft: {type: boolean, description: "Automatic outcome proposals are created as GitHub drafts; only a person may make them ready on GitHub."}
         automatic: {type: boolean, description: Generated by the deterministic outcome analysis}
+        inbox: {type: boolean, description: "Proposed through the doctrine inbox (AEON-444)"}
+        base_rule_sha256: {type: string, description: SHA-256 of the pinned rule the proposal changes}
+        proposed_rule_sha256: {type: string, description: "SHA-256 of the proposed rule bytes; a pin whose index holds them and the proposed TL;DR closes the proposal as promoted"}
+        proposed_tldr_sha256: {type: string, description: "SHA-256 of the proposed TL;DR (English, NUL, German, each trimmed); promotion needs it at the pin too"}
+        ticket: {type: string, description: Linked ticket key}
+        ticket_id: {type: string, format: uuid}
+        submitted_by: {type: string, format: uuid, description: The person who sent it to git}
+        edited_by: {type: string, format: uuid, description: The person who edited it before sending}
+        dismissed_by: {type: string, format: uuid}
+        dismiss_reason: {type: string, maxLength: 500}
+        promoted_commit: {type: string, description: The pinned commit that contains the change}
+        approved_file_sha256: {type: string, description: "SHA-256 of the rule file as a person sent it to git, then as the promoting pin holds it; outcome measurement follows these bytes"}
+    DoctrineInboxInput:
+      type: object
+      additionalProperties: false
+      required: [request_id, path, rule_key, source, why]
+      properties:
+        request_id: {type: string, format: uuid}
+        source_id: {type: string, format: uuid, description: "The doctrine source; or name it by repository"}
+        repository: {type: string, description: "inspr-modules, inspr-doctrine-private, or the full owner/name"}
+        path: {type: string, maxLength: 300}
+        rule_key: {type: string, maxLength: 200}
+        rule_sha256: {type: string, pattern: "^[0-9a-f]{64}$", description: "The pinned rule the change is against; defaults to the current pin"}
+        source: {type: string, maxLength: 8000, description: "Replacement rule source, including its explicit marker if present"}
+        tldr:
+          type: object
+          additionalProperties: false
+          required: [en]
+          properties:
+            en: {type: string, maxLength: 300}
+            de: {type: string, maxLength: 300}
+        why: {type: string, maxLength: 2000, description: Why this change; it becomes the PR description}
+        ticket: {type: string, pattern: "^[A-Z][A-Z0-9]{0,15}-[1-9][0-9]{0,8}$"}
+    DoctrineInboxItem:
+      allOf:
+        - {"$ref": "#/components/schemas/DoctrineProposal"}
+        - type: object
+          required: [heading, label, base, diff, proposer, proposer_kind]
+          properties:
+            heading: {type: string, description: The rule's heading at the pin}
+            strength: {type: string, enum: [normal, locked]}
+            label: {type: string, description: "The proposed English TL;DR, else the heading"}
+            base: {type: string, description: The rule at the current pin; empty when it is gone}
+            base_sha256: {type: string}
+            proposed: {type: string}
+            tldr:
+              type: object
+              properties:
+                en: {type: string}
+                de: {type: string}
+            why: {type: string}
+            diff:
+              type: array
+              description: "Word diff from base to proposed; the eq and del runs restore base, the eq and ins runs restore proposed"
+              items:
+                type: object
+                required: [op, text]
+                properties:
+                  op: {type: string, enum: [eq, del, ins]}
+                  text: {type: string}
+            outdated: {type: boolean, description: The pinned rule changed since the proposal}
+            proposer: {type: string, description: The proposer's name}
+            proposer_kind: {type: string, enum: [person, agent]}
+            ticket_href: {type: string}
     DoctrineFinding:
       type: object
       required: [id, pattern, title, count, rules_version, harness, ticket_kind, status, evidence, before, created_at]
@@ -7328,7 +7539,7 @@ components:
         rules_version: {type: string}
         harness: {type: string}
         ticket_kind: {type: string}
-        status: {type: string, enum: [pending, draft, awaiting_use, internal_note, observed, closed]}
+        status: {type: string, enum: [pending, draft, awaiting_use, internal_note, observed, closed], description: "draft: the proposal waits in the doctrine inbox or as a person's PR"}
         reason: {type: string, description: Value-free reason for an internal note or pending retry}
         proposal_id: {type: string, format: uuid}
         pr_url: {type: string}
@@ -8092,6 +8303,22 @@ components:
         release_revision: {type: integer}
         hidden: {type: integer, minimum: 0}
         written_after_release: {type: boolean, description: "True when the captured snapshot was labelled backfilled. The release sheet says the notes were written after the release."}
+        corrections:
+          type: array
+          description: Reviewed public-note corrections applied over the frozen original. The original snapshot digest is preserved; each correction records its reason and exact version binding. Hidden or absent tickets cannot be added.
+          items:
+            type: object
+            required: [version, key, snapshot_sha256, reason]
+            properties:
+              version: {type: string}
+              key: {type: string}
+              snapshot_sha256: {type: string}
+              reason: {type: string}
+              group: {type: string, enum: [features, fixes, other]}
+              pill_en: {type: string}
+              pill_de: {type: string}
+              benefit_en: {type: string}
+              benefit_de: {type: string}
         gaps: {type: array, items: {type: string}}
         public_items:
           type: array
@@ -10298,6 +10525,10 @@ components:
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
       properties:
+        warnings:
+          type: array
+          description: Non-blocking guidance returned on heartbeats, including an empty array when satisfied or guidance cannot be computed; absent on other session responses. Working workers get missing_progress after three consecutive accepted beats without a non-null progress_pct, even if an older value is stored. Working sessions with a bound ticket_node_id get missing_eta for their role's absent ETA (ready for workers, live for coordinators); unbound sessions do not. A visible bound ticket/task without valid hours gets ticket_without_estimate. Clients print each code at most once per ten minutes. Status-file diagnostics such as stale_progress are local CLI warnings, not response codes.
+          items: {$ref: '#/components/schemas/HarnessEstimateWarning'}
         vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
         limit_window: {type: string, enum: [5h, weekly, monthly, other]}
         limit_resets_at: {type: string, format: date-time}
@@ -10426,6 +10657,7 @@ components:
       type: object
       description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent.
       properties:
+        has_working_session: {type: boolean, description: True when a visible working session is bound to this ticket in its current project. Omitted when false; enables a quiet no ETA hint even before the first estimate.}
         eta_ready_at: {type: string, format: date-time}
         eta_live_at: {type: string, format: date-time}
         progress_pct: {type: integer, minimum: 0, maximum: 100}
@@ -10436,6 +10668,12 @@ components:
         ready_stale: {type: boolean}
         live_stale: {type: boolean}
         eta_stale: {type: boolean, description: True when the ready or live estimate is older than two reporting intervals. Omitted when fresh or absent.}
+    HarnessEstimateWarning:
+      type: object
+      required: [code, hint]
+      properties:
+        code: {type: string, enum: [missing_progress, missing_eta, ticket_without_estimate]}
+        hint: {type: string}
     HarnessActivityNote:
       type: object
       required: [note, at]
@@ -12022,6 +12260,11 @@ components:
       type: object
       minProperties: 1
       properties:
+        estimate_hours:
+          type: [number, 'null']
+          exclusiveMinimum: 0
+          maximum: 200
+          description: Atomically sets only fields.estimate_hours, preserving other fields and stamping caller provenance. Null clears the estimate and its provenance. Cannot be combined with fields. Existing node write permissions and revision preconditions apply.
         title:
           type: string
           minLength: 1

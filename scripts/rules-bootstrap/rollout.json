@@ -1,7 +1,7 @@
 {
   "schema": "aeon.rules.rollout.v1",
   "state": "prepared",
-  "existing_agents_sha256": "e11ed1779b7964c83e1e99025b2bf889f4b5145b29ce15350793a92f2a31e21b",
+  "existing_agents_sha256": "9b8e275e5b34ebf52c7983c53408acb805f01878aadfb71a2056cdbf3cbd1d5f",
   "expected_claude_absent": true,
   "targets": [
     {

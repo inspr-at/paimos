@@ -58,6 +58,12 @@ func attachUnsignedIdentityError() error {
 func attachUnsupportedIdentityError() error {
 	return &AttachLocalError{Code: "harness_identity_unsupported", Hint: "Cursor attach is unavailable on macOS until a signed cursor-agent CLI is available. Cursor.app cannot identify a Cursor harness."}
 }
+func attachBunOptionsError() error {
+	return &AttachLocalError{Code: "harness_identity_unsupported", Hint: "This Claude process was started with a BUN_* assignment other than BUN_INSTALL. The signed runtime can use those variables to run other JavaScript. Unset them, then attach again."}
+}
+func attachBunOptionsUnobservableError() error {
+	return &AttachLocalError{Code: "harness_identity_unsupported", Hint: "This Claude process cannot be attached because macOS hid its environment, and the signed executable can run JavaScript from a BUN_* variable."}
+}
 func attachUnsafeImageError() error {
 	return &AttachLocalError{Code: "harness_executable_unsafe", Hint: "The running executable or an ancestor is untrusted. Use an installation outside the workspace, owned by you or root, without group or world write access (macOS admin directories are allowed)."}
 }
@@ -110,6 +116,12 @@ func (m *AttachManager) validateHarnessImage(ctx context.Context, observed attac
 			if errors.Is(err, errAttachSignatureUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				return nil, attachIdentityUnavailableError()
 			}
+			if errors.Is(err, errAttachRuntimeDenied) {
+				return nil, attachBunOptionsError()
+			}
+			if errors.Is(err, errAttachRuntimeUnobservable) {
+				return nil, attachBunOptionsUnobservableError()
+			}
 			return nil, attachIdentityError()
 		}
 		if signature.Signed {
@@ -148,6 +160,8 @@ func (m *AttachManager) validateLinuxAttachFallback(harness, physical string, in
 
 var errAttachSignature = errors.New("vendor signature unavailable or invalid")
 var errAttachSignatureUnavailable = errors.New("vendor signature verification unavailable")
+var errAttachRuntimeDenied = errors.New("signed runtime accepted an injected environment")
+var errAttachRuntimeUnobservable = errors.New("signed runtime environment is not visible")
 
 // AttachConfig is immutable for a manager's lifetime. Session mutations remain
 // locked, but slow external verification must not block unrelated watches.

@@ -17,11 +17,12 @@ const HistoricNotesSchema = "aeon.historic-ticket-export.v1"
 // HistoricTicketExport is local input, never embedded. Membership comes from
 // the same manifest as the history view, not today's journey membership.
 type HistoricTicketExport struct {
-	Schema     string           `json:"schema"`
-	TenantID   string           `json:"tenant_id"`
-	ProjectID  string           `json:"project_node_id"`
-	CapturedAt time.Time        `json:"captured_at"`
-	Tickets    []HistoricTicket `json:"tickets"`
+	Schema      string           `json:"schema"`
+	TenantID    string           `json:"tenant_id"`
+	ProjectID   string           `json:"project_node_id"`
+	CapturedAt  time.Time        `json:"captured_at"`
+	Tickets     []HistoricTicket `json:"tickets"`
+	Reservation *NoteReservation `json:"reservation,omitempty"`
 }
 
 type HistoricTicket struct {
@@ -71,38 +72,12 @@ func (bundle *ProductNotes) AddHistoric(h History, raw []byte, tenantID, project
 	if h.Schema != Schema || !sameProductNotes(h, *bundle) {
 		return report, fmt.Errorf("historic history must identify PAIMOS AEON")
 	}
-	var export HistoricTicketExport
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	if len(raw) > 16<<20 || d.Decode(&export) != nil || d.Decode(new(any)) != io.EOF || export.Schema != HistoricNotesSchema || export.CapturedAt.IsZero() || export.Tickets == nil {
-		return report, fmt.Errorf("invalid historic ticket export")
-	}
-	if err := HistoryBindingError(export.TenantID, export.ProjectID, tenantID, projectID); err != nil {
+	export, tickets, meta, hidden, err := readTicketExport(raw, tenantID, projectID)
+	if err != nil {
 		return report, err
 	}
-	tickets := map[string]HistoricTicket{}
-	meta := map[string]TicketMeta{}
-	hidden := map[string]bool{}
-	for _, ticket := range export.Tickets {
-		if ticketKey.FindString(ticket.Key) != ticket.Key || !strings.HasPrefix(ticket.Key, "AEON-") || ticket.Kind == "" {
-			return report, fmt.Errorf("invalid historic ticket identity")
-		}
-		if _, exists := tickets[ticket.Key]; exists {
-			return report, fmt.Errorf("duplicate historic ticket %s", ticket.Key)
-		}
-		var fields map[string]json.RawMessage
-		if json.Unmarshal(ticket.Fields, &fields) != nil || fields == nil {
-			return report, fmt.Errorf("invalid historic ticket fields")
-		}
-		if flag, present := fields["hide_from_release_notes"]; present {
-			var value bool
-			if bytes.Equal(bytes.TrimSpace(flag), []byte("null")) || json.Unmarshal(flag, &value) != nil {
-				return report, fmt.Errorf("invalid historic hide flag")
-			}
-			hidden[ticket.Key] = value
-		}
-		tickets[ticket.Key] = ticket
-		meta[ticket.Key] = ParseTicketMeta(ticket.Kind, ticket.Fields)
+	if export.Reservation != nil {
+		return report, fmt.Errorf("reservation exports require the explicit -reserve step")
 	}
 	// Stage the whole import so a late missing key/conflict cannot partly apply it.
 	candidate := *bundle
@@ -136,7 +111,7 @@ func (bundle *ProductNotes) AddHistoric(h History, raw []byte, tenantID, project
 			Version          string               `json:"version"`
 			MembershipSource string               `json:"membership_source"`
 			Export           HistoricTicketExport `json:"export"`
-		}{rel.Version, ManifestMembershipSource, HistoricTicketExport{export.Schema, export.TenantID, export.ProjectID, export.CapturedAt, selected}})
+		}{rel.Version, ManifestMembershipSource, HistoricTicketExport{Schema: export.Schema, TenantID: export.TenantID, ProjectID: export.ProjectID, CapturedAt: export.CapturedAt, Tickets: selected}})
 		sum := sha256.Sum256(capture)
 		items := linkedNotes(keys, meta)
 		if items == nil {
@@ -150,4 +125,41 @@ func (bundle *ProductNotes) AddHistoric(h History, raw []byte, tenantID, project
 	}
 	*bundle = candidate
 	return report, nil
+}
+
+func readTicketExport(raw []byte, tenantID, projectID string) (HistoricTicketExport, map[string]HistoricTicket, map[string]TicketMeta, map[string]bool, error) {
+	var export HistoricTicketExport
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if len(raw) > 16<<20 || d.Decode(&export) != nil || d.Decode(new(any)) != io.EOF || export.Schema != HistoricNotesSchema || export.CapturedAt.IsZero() || export.Tickets == nil {
+		return export, nil, nil, nil, fmt.Errorf("invalid historic ticket export")
+	}
+	if err := HistoryBindingError(export.TenantID, export.ProjectID, tenantID, projectID); err != nil {
+		return export, nil, nil, nil, err
+	}
+	tickets := map[string]HistoricTicket{}
+	meta := map[string]TicketMeta{}
+	hidden := map[string]bool{}
+	for _, ticket := range export.Tickets {
+		if ticketKey.FindString(ticket.Key) != ticket.Key || !strings.HasPrefix(ticket.Key, "AEON-") || ticket.Kind == "" {
+			return export, nil, nil, nil, fmt.Errorf("invalid historic ticket identity")
+		}
+		if _, exists := tickets[ticket.Key]; exists {
+			return export, nil, nil, nil, fmt.Errorf("duplicate historic ticket %s", ticket.Key)
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(ticket.Fields, &fields) != nil || fields == nil {
+			return export, nil, nil, nil, fmt.Errorf("invalid historic ticket fields")
+		}
+		if flag, present := fields["hide_from_release_notes"]; present {
+			var value bool
+			if bytes.Equal(bytes.TrimSpace(flag), []byte("null")) || json.Unmarshal(flag, &value) != nil {
+				return export, nil, nil, nil, fmt.Errorf("invalid historic hide flag")
+			}
+			hidden[ticket.Key] = value
+		}
+		tickets[ticket.Key] = ticket
+		meta[ticket.Key] = ParseTicketMeta(ticket.Kind, ticket.Fields)
+	}
+	return export, tickets, meta, hidden, nil
 }

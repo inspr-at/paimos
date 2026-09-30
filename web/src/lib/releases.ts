@@ -14,7 +14,8 @@ export interface ReleaseEvidence {
   ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; unavailable: string[]
 }
 export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string; group?: ChangeGroup }
-export interface ReleaseNotes { source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; public_items?: Omit<ReleaseNoteItem, 'id'>[]; gaps: string[]; hidden: number; written_after_release?: boolean }
+export interface ReleaseNoteCorrection { version: string; key: string; snapshot_sha256: string; reason: string; group?: string; pill_en?: string; pill_de?: string; benefit_en?: string; benefit_de?: string }
+export interface ReleaseNotes { corrections?: ReleaseNoteCorrection[]; source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; public_items?: Omit<ReleaseNoteItem, 'id'>[]; gaps: string[]; hidden: number; written_after_release?: boolean }
 // How a release introduces itself (AEON-305): the theme is the kicker, the
 // headline one sentence, the intro two or three. German may be empty.
 export interface ReleasePresentation { theme_en: string; theme_de: string; headline_en: string; headline_de: string; intro_en: string; intro_de: string; revision: number; updated_at: string }
@@ -532,7 +533,7 @@ export function evidenceSearch(r: Release): { texts: string[]; ids: string[] } {
   const ev = r.evidence
   const runs = [ev?.ci, ev?.release_run].flatMap(run => run ? [run.name, runWord(run)] : [])
   return {
-    texts: [r.headline, r.tag, r.notes?.source ?? '', ...runs, ev?.image?.reference ?? '', ...(ev?.unavailable ?? [])].filter(Boolean),
+    texts: [r.headline, r.tag, r.notes?.source ?? '', ...(r.notes?.corrections ?? []).flatMap(c => [c.key, c.reason]), ...runs, ev?.image?.reference ?? '', ...(ev?.unavailable ?? [])].filter(Boolean),
     ids: [r.notes?.snapshot_sha256 ?? '', ev?.source_commit ?? '', ev?.image?.digest ?? ''].filter(Boolean),
   }
 }

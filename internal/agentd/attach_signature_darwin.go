@@ -16,7 +16,7 @@ import (
 // Use Apple's fixed system utility with a minimal environment, bounded output
 // and an Apple certificate-chain requirement, not just a self-reported Team ID.
 func inspectAttachSignature(ctx context.Context, pid string) (attachSignature, error) {
-	return inspectAttachSignatureWith(ctx, pid, runAttachCodesign)
+	return inspectAttachSignatureWith(ctx, pid, runAttachCodesign, readAttachProcargs)
 }
 func runAttachCodesign(ctx context.Context, args ...string) (string, error) {
 	op, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -54,7 +54,7 @@ func (b *attachCodesignOutput) Write(p []byte) (int, error) {
 	_, _ = b.text.Write(p)
 	return len(p), nil
 }
-func inspectAttachSignatureWith(ctx context.Context, pid string, run func(context.Context, ...string) (string, error)) (attachSignature, error) {
+func inspectAttachSignatureWith(ctx context.Context, pid string, run func(context.Context, ...string) (string, error), readEnv func(string) (claudeRuntimeDecision, error)) (attachSignature, error) {
 	n, err := strconv.Atoi(pid)
 	if err != nil || n < 1 || strconv.Itoa(n) != pid {
 		return attachSignature{}, errAttachSignature
@@ -89,7 +89,9 @@ func inspectAttachSignatureWith(ctx context.Context, pid string, run func(contex
 		return attachSignature{}, errAttachSignature
 	}
 	// Display text selects a fixed built-in requirement; it is never authority.
-	// Both certificate OU and CLI identifier are enforced by verification itself.
+	// Team, CLI identifier and Developer ID markers are enforced by verification.
+	// The leaf OID is Developer ID Application; certificate 1 is its intermediate.
+	// A same-team Apple Development certificate does not carry those markers.
 	matched := false
 	for _, harness := range []string{Claude, Codex} {
 		matched = matched || team == attachVendorTeam(harness) && identifier == attachVendorIdentifier(harness)
@@ -97,7 +99,7 @@ func inspectAttachSignatureWith(ctx context.Context, pid string, run func(contex
 	if !matched {
 		return attachSignature{}, errAttachSignature
 	}
-	requirement := fmt.Sprintf("-R=anchor apple generic and certificate leaf[subject.OU] = %q and identifier %q", team, identifier)
+	requirement := fmt.Sprintf("-R=anchor apple generic and certificate leaf[subject.OU] = %q and identifier %q and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate 1[field.1.2.840.113635.100.6.2.6] exists", team, identifier)
 	// Verbosity adds the full static check to dynamic PID verification, including
 	// the check that the code on disk matches what is actually running.
 	if _, err := run(ctx, "--verify", "--strict", "-v", requirement, pid); err != nil {
@@ -105,6 +107,20 @@ func inspectAttachSignatureWith(ctx context.Context, pid string, run func(contex
 			return attachSignature{}, errAttachSignatureUnavailable
 		}
 		return attachSignature{}, errAttachSignature
+	}
+	// Codex keeps its signature decision with its procargs unread. Claude's scan
+	// decides during the walk and does not retain the strings.
+	if identifier == attachVendorIdentifier(Claude) {
+		decision, envErr := readEnv(pid)
+		if envErr != nil {
+			return attachSignature{}, errAttachSignatureUnavailable
+		}
+		switch decision {
+		case claudeRuntimeInjected:
+			return attachSignature{}, errAttachRuntimeDenied
+		case claudeRuntimeUnobservable:
+			return attachSignature{}, errAttachRuntimeUnobservable
+		}
 	}
 	return attachSignature{TeamID: team, Identifier: identifier, Signed: true}, nil
 }

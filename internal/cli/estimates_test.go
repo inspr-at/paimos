@@ -94,7 +94,7 @@ func TestEstimateCLIFlagsAndPlan(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/api/kinds":
-			json.NewEncoder(w).Encode(map[string]any{"items": []apiKind{{ID: "project-kind", Slug: "project"}, {ID: "ticket-kind", Slug: "ticket"}}})
+			json.NewEncoder(w).Encode(map[string]any{"items": []apiKind{{ID: "project-kind", Slug: "project"}, {ID: "ticket-kind", Slug: "ticket"}, {ID: "task-kind", Slug: "task"}}})
 		case r.Method == "GET" && r.URL.Path == "/api/nodes":
 			if r.URL.Query().Get("kind_id") == "project-kind" {
 				json.NewEncoder(w).Encode(map[string]any{"items": []apiNode{{ID: transcriptProjectID, Key: "PRJ-1", KindID: "project-kind", Fields: json.RawMessage(`{"project_key":"AEON"}`)}}})
@@ -131,7 +131,7 @@ func TestEstimateCLIFlagsAndPlan(t *testing.T) {
 	run := func(args []string, stdin string) (int, string, string) {
 		return runCLI(append([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing")}, args...), stdin)
 	}
-	for _, args := range [][]string{{"issue", "create", "--project", "AEON", "--title", "Work", "--estimate", "90m"}, {"issue", "update", "AEON-1", "--estimate", "1.5"}, {"issue", "estimate", "AEON-1", "--hours", "1.5", "--source", "agent"}} {
+	for _, args := range [][]string{{"issue", "create", "--project", "AEON", "--title", "Work", "--estimate", "90m"}, {"issue", "create", "--project", "AEON", "--title", "Work", "--priority", "high", "--estimate-hours", "1.5"}, {"issue", "update", "AEON-1", "--estimate", "1.5"}, {"issue", "update", "AEON-1", "--estimate-hours", "1.5"}, {"issue", "estimate", "AEON-1", "--hours", "1.5", "--source", "agent"}} {
 		code, out, err := run(args, "")
 		if code != 0 {
 			t.Fatalf("%v: %d %s %s", args, code, out, err)
@@ -143,6 +143,14 @@ func TestEstimateCLIFlagsAndPlan(t *testing.T) {
 		if fields["estimate_by"] != nil || fields["estimate_at"] != nil {
 			t.Fatal("client forged provenance")
 		}
+	}
+	code, out, stderr := run([]string{"issue", "create", "--project", "AEON", "--title", "Unestimated", "--type", "task"}, "")
+	if code != 0 || !strings.Contains(stderr, "--estimate-hours") {
+		t.Fatalf("missing create hint: %d %s %s", code, out, stderr)
+	}
+	code, _, stderr = run([]string{"issue", "create", "--project", "AEON", "--title", "Estimated", "--estimate-hours", "1.5"}, "")
+	if code != 0 || strings.Contains(stderr, "--estimate-hours") {
+		t.Fatalf("estimated create warned: %d %s", code, stderr)
 	}
 	base := []string{"issue", "estimate", "--missing", "--project", "AEON", "--from-file", "-"}
 	plan := `[{"key":"AEON-1","hours":2},{"key":"AEON-2","hours":3}]`

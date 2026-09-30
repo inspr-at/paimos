@@ -37,9 +37,9 @@ func TestReleaseBuildsSplitDarwinCGO(t *testing.T) {
 func TestReleaseSignsDarwinAgentdBeforeChecksums(t *testing.T) {
 	workflow := readRepo(t, ".github/workflows/release.yml")
 	script := readRepo(t, "scripts/build-release-binaries.sh")
-	darwin, rest, ok := strings.Cut(workflow, "\n  release:\n")
+	darwin, rest, ok := strings.Cut(workflow, "\n  image:\n")
 	if !ok {
-		t.Fatal("release workflow has no release job after agentd-darwin")
+		t.Fatal("release workflow has no image job after agentd-darwin")
 	}
 	for _, needle := range []string{"environment: release-signing", "AEON_DEVELOPER_ID_TEAM: P66J39QV6V", "bash scripts/sign-notarize.sh", "secrets.APPLE_CERTIFICATE"} {
 		if !strings.Contains(darwin, needle) {
@@ -56,7 +56,7 @@ func TestReleaseSignsDarwinAgentdBeforeChecksums(t *testing.T) {
 		t.Fatal("signing secrets leak beyond the agentd-darwin job")
 	}
 	if !strings.Contains(rest, "SHA256SUMS") {
-		t.Fatal("checksums must be computed in the release job, after signing")
+		t.Fatal("checksums must be computed in the assets job, after signing")
 	}
 	var wf releaseWorkflow
 	if err := yaml.Unmarshal([]byte(workflow), &wf); err != nil {
@@ -188,7 +188,7 @@ func TestReleaseExistingDraftGuardFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	var guard string
-	for _, step := range wf.Jobs["release"].Steps {
+	for _, step := range wf.Jobs["assets"].Steps {
 		if step.Name == "Reject an existing GitHub release" {
 			guard = step.Run
 		}
