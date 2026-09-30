@@ -114,6 +114,10 @@ func TestAgentIdentityDeactivateAndReactivate(t *testing.T) {
 		if a.ConnectedComputer != (id == connected) {
 			t.Fatalf("%s connected_computer=%v", a.Name, a.ConnectedComputer)
 		}
+		// Retired computers stay marked: the directory must never offer them a key.
+		if a.PairedComputer != (id == connected || id == retired) {
+			t.Fatalf("%s paired_computer=%v", a.Name, a.PairedComputer)
+		}
 	}
 	if before[worker].KeyCount != 1 {
 		t.Fatalf("worker-a has %d non-revoked keys, want 1", before[worker].KeyCount)

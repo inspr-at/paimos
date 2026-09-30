@@ -26,8 +26,10 @@ export type AgentPreviewReason = 'not_key_creator' | 'key_revoked' | 'key_expire
 // Whether this caller may preview the agent's session file. creator_name is sent only to workspace owners and admins.
 export interface AgentPreview { allowed: boolean; reason?: AgentPreviewReason; creator_name?: string }
 // status is absent on older servers, which only know active agents; connected_computer marks the
-// runtime identity of a computer that is still paired (it is retired by disconnecting the computer).
-export interface Agent { description?: string; project_roles?: ProjectRole[]; principal_id: string; name: string; has_avatar: boolean; workspace_role: RoleRef | null; key_count: number; last_seen_at: string | null; service: boolean; status?: Status; connected_computer?: boolean; preview?: AgentPreview }
+// runtime identity of a computer that is still paired (it is retired by disconnecting the computer);
+// paired_computer marks any computer's identity, retired ones too: it never takes a key, a computer
+// is connected by pairing it afresh.
+export interface Agent { description?: string; project_roles?: ProjectRole[]; principal_id: string; name: string; has_avatar: boolean; workspace_role: RoleRef | null; key_count: number; last_seen_at: string | null; service: boolean; status?: Status; connected_computer?: boolean; paired_computer?: boolean; preview?: AgentPreview }
 // What deactivating an agent does: the keys go with it, the history stays.
 export function agentDeactivatePoints(keys: number): string[] {
   return [

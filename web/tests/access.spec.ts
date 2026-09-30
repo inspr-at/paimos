@@ -343,8 +343,8 @@ const LAPTOP_OLD = '99999999-9999-4999-8999-999999999993'
 async function withRetirable(page: Page, world: AccessWorld) {
   world.agents.push(
     { principal_id: RELIC, name: 'relic', workspace_role: null, last_seen_at: new Date(Date.parse('2026-09-20T12:00:00Z')).toISOString(), service: false },
-    { principal_id: LAPTOP, name: 'mbp2607', workspace_role: null, last_seen_at: new Date(Date.parse('2026-09-23T11:30:00Z')).toISOString(), service: false, connected_computer: true },
-    { principal_id: LAPTOP_OLD, name: 'mbp2607 old', workspace_role: null, last_seen_at: new Date(Date.parse('2026-09-21T12:00:00Z')).toISOString(), service: false, status: 'deactivated' },
+    { principal_id: LAPTOP, name: 'mbp2607', workspace_role: null, last_seen_at: new Date(Date.parse('2026-09-23T11:30:00Z')).toISOString(), service: false, connected_computer: true, paired_computer: true },
+    { principal_id: LAPTOP_OLD, name: 'mbp2607 old', workspace_role: null, last_seen_at: new Date(Date.parse('2026-09-21T12:00:00Z')).toISOString(), service: false, status: 'deactivated', paired_computer: true },
   )
   world.keys.push(
     { id: 'k-relic', principal_id: RELIC, name: 'relic', prefix: 'r3lc', scopes: ['nodes.read'], created_at: '2026-09-01T00:00:00Z', expires_at: null, last_used_at: null, revoked_at: null },
@@ -367,22 +367,40 @@ test('agents: a person deactivates an agent (its keys go with it), it rests in a
 
   const relic = agents.getByRole('listitem').filter({ hasText: 'relic' })
   await expect(relic).toContainText('1 active key')
-  await relic.getByRole('button', { name: 'Actions for relic' }).click()
-  await page.getByRole('menuitem', { name: 'Deactivate…' }).click()
+  const trigger = relic.getByRole('button', { name: 'Actions for relic' })
+  const item = page.getByRole('menuitem', { name: 'Deactivate…' })
+  // Keyboard: Escape closes the menu and hands focus back to its trigger.
+  await trigger.click()
+  await expect(item).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menu')).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+  // The trigger opens it again from the keyboard; the dialog's Escape returns to the trigger, not to the page.
+  await page.keyboard.press('Enter')
+  await expect(item).toBeFocused()
+  await page.keyboard.press('Enter')
   const dialog = page.getByRole('dialog', { name: 'Deactivate relic?' })
   await expect(dialog).toContainText('Its active key is revoked now; anything using it is refused.')
   await expect(dialog).toContainText('revoked keys stay revoked')
-  // Cancelling changes nothing.
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+  // Cancelling with the button changes nothing either, and lands on the trigger too.
+  await trigger.click()
+  await item.click()
   await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(trigger).toBeFocused()
   expect(calls(world, 'POST', /\/deactivate$/)).toHaveLength(0)
-  await relic.getByRole('button', { name: 'Actions for relic' }).click()
-  await page.getByRole('menuitem', { name: 'Deactivate…' }).click()
-  await page.getByRole('dialog', { name: 'Deactivate relic?' }).getByRole('button', { name: 'Revoke keys and deactivate' }).click()
+  await trigger.click()
+  await item.click()
+  await dialog.getByRole('button', { name: 'Revoke keys and deactivate' }).click()
   expect(calls(world, 'POST', new RegExp(`/members/${RELIC}/deactivate$`))).toHaveLength(1)
   await expect(agents.getByRole('listitem').filter({ hasText: 'relic' })).toHaveCount(0)
   await expect(page.getByText('relic is deactivated')).toBeVisible()
   expect(world.keys.find(k => k.id === 'k-relic')?.revoked_at).toBeTruthy()
   await expect(fold).toContainText('2')
+  // The row that held focus is gone: focus moves to a surviving agent's actions, never to the page.
+  await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? '')).toMatch(/^Actions for (?!relic)/)
 
   // Folded until asked for; there the agent can come back, with no key until a new one is made.
   await fold.click()
@@ -405,6 +423,7 @@ test('agents: a connected computer is not deactivated here; a refusal from the s
   await expect(item).toHaveAttribute('aria-disabled', 'true')
   await expect(item).toContainText('Disconnect it on the Agents page first')
   await page.keyboard.press('Escape')
+  await expect(agents.getByRole('button', { name: 'Actions for mbp2607' })).toBeFocused()
   expect(calls(world, 'POST', /\/deactivate$/)).toHaveLength(0)
   // The server decides: an agent that became a connected computer meanwhile stays active, with the reason.
   world.agents.find(a => a.principal_id === RELIC)!.connected_computer = true
@@ -413,6 +432,37 @@ test('agents: a connected computer is not deactivated here; a refusal from the s
   await page.getByRole('dialog', { name: 'Deactivate relic?' }).getByRole('button', { name: 'Revoke keys and deactivate' }).click()
   await expect(page.getByText('relic stays active: This is a connected computer.')).toBeVisible()
   await expect(agents.getByRole('listitem').filter({ hasText: 'relic' })).toContainText('1 active key')
+})
+
+test('agents: reactivating a retired computer points to pairing afresh; no key is offered for it', async ({ page }) => {
+  const world = await open(page, '/settings/access/agents')
+  await withRetirable(page, world)
+  // The retired computer's only key is already revoked and gone from the list: it has none at all.
+  world.keys = world.keys.filter(k => k.principal_id !== LAPTOP_OLD)
+  await page.reload()
+  const agents = page.getByRole('list', { name: 'Agents' })
+  await page.getByRole('button', { name: /^Deactivated/ }).click()
+  await page.getByRole('list', { name: 'Deactivated agents' }).getByRole('button', { name: 'Reactivate mbp2607 old' }).click()
+  expect(calls(world, 'POST', new RegExp(`/members/${LAPTOP_OLD}/reactivate$`))).toHaveLength(1)
+  const toast = page.getByText('mbp2607 old is active again; connect the computer afresh to use it')
+  await expect(toast).toBeVisible()
+  await expect(page.getByText(/add a new key/)).toHaveCount(0)
+  // The reactivated identity has no keys and cannot get one: its panel offers pairing, not a key.
+  const old = agents.getByRole('listitem').filter({ hasText: 'mbp2607 old' })
+  await expect(old).toContainText('0 active keys')
+  await old.getByRole('button', { name: '0 active keys' }).click()
+  await expect(old.getByRole('button', { name: /Create first key|New key/ })).toHaveCount(0)
+  await expect(old).toContainText('No key: a computer connects by pairing.')
+  await expect(old.getByRole('link', { name: 'Connect a computer' })).toHaveAttribute('href', '/agents/register-agent')
+  // A connected computer never offers a key either, and nothing was issued.
+  const laptop = agents.getByRole('listitem').filter({ has: page.getByRole('button', { name: 'Actions for mbp2607', exact: true }) })
+  await laptop.getByRole('button', { name: '1 active key' }).click()
+  await expect(laptop.getByRole('button', { name: /Create first key|New key/ })).toHaveCount(0)
+  await expect(laptop.getByRole('link', { name: 'Connect a computer' })).toHaveCount(0)
+  expect(calls(world, 'POST', /\/agent-keys/)).toHaveLength(0)
+  // The toast's action goes to pairing.
+  await page.locator('.toast').filter({ has: toast }).getByRole('button', { name: 'Connect a computer' }).click()
+  await expect(page).toHaveURL(/\/agents\/register-agent/)
 })
 
 test('agents: deactivating is person-only with Manage members: internal identities and viewers get no action', async ({ page }) => {

@@ -8182,6 +8182,7 @@ components:
         service: {type: boolean}
         status: {type: string, enum: [active, deactivated], description: 'Deactivated agents hold no usable key and leave the working list; POST /members/{principal_id}/reactivate brings the identity back (its revoked keys stay revoked).'}
         connected_computer: {type: boolean, description: 'Present and true for the runtime identity of a paired computer that is still connected; disconnect the computer before deactivating it.'}
+        paired_computer: {type: boolean, description: 'Present and true for the runtime identity of any paired computer, connected or retired. It never takes an agent key; a computer is connected by pairing it afresh.'}
         preview:
           description: Whether this caller may preview the agent's session file (members directory). creator_name is present only for workspace owners and admins, and only when another person holds a current key.
           type: object

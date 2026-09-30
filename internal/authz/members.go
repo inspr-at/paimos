@@ -55,8 +55,11 @@ type AgentMember struct {
 	Status        string        `json:"status"`
 	// ConnectedComputer marks the runtime identity of a paired computer that
 	// is still connected: it is retired by disconnecting the computer, not here.
-	ConnectedComputer bool         `json:"connected_computer,omitempty"`
-	Preview           AgentPreview `json:"preview,omitzero"`
+	ConnectedComputer bool `json:"connected_computer,omitempty"`
+	// PairedComputer marks any paired computer's runtime identity, connected or
+	// retired. It never takes a key: a computer is connected by pairing afresh.
+	PairedComputer bool         `json:"paired_computer,omitempty"`
+	Preview        AgentPreview `json:"preview,omitzero"`
 }
 type ImportedMember struct {
 	PrincipalID string  `json:"principal_id"`
@@ -88,6 +91,7 @@ func (m *Module) members(w http.ResponseWriter, r *http.Request) {
           (SELECT count(*) FROM agent_keys k WHERE k.tenant_id=p.tenant_id AND k.principal_id=p.id AND k.revoked_at IS NULL),
           (SELECT max(k.last_used_at) FROM agent_keys k WHERE k.tenant_id=p.tenant_id AND k.principal_id=p.id),
           EXISTS (SELECT 1 FROM agent_pairing_computers c WHERE c.tenant_id=p.tenant_id AND c.principal_id=p.id AND c.state<>'revoked'),
+          EXISTS (SELECT 1 FROM agent_pairing_computers c WHERE c.tenant_id=p.tenant_id AND c.principal_id=p.id),
           EXISTS (SELECT 1 FROM personal_profiles avatar WHERE avatar.tenant_id=p.tenant_id AND avatar.principal_id=p.id AND avatar.avatar_hashes <> '{}'::jsonb)
           FROM principals p
           LEFT JOIN identities i ON i.id=p.identity_id
@@ -104,8 +108,8 @@ func (m *Module) members(w http.ResponseWriter, r *http.Request) {
 			var legacy []string
 			var lastActive, lastSeen *time.Time
 			var keyCount int
-			var hasAvatar, connectedComputer bool
-			if err := rows.Scan(&id, &kind, &name, &description, &email, &status, &legacy, &issuer, &avatarHash, &roleID, &roleKey, &roleName, &lastActive, &keyCount, &lastSeen, &connectedComputer, &hasAvatar); err != nil {
+			var hasAvatar, connectedComputer, pairedComputer bool
+			if err := rows.Scan(&id, &kind, &name, &description, &email, &status, &legacy, &issuer, &avatarHash, &roleID, &roleKey, &roleName, &lastActive, &keyCount, &lastSeen, &connectedComputer, &pairedComputer, &hasAvatar); err != nil {
 				rows.Close()
 				return err
 			}
@@ -115,7 +119,7 @@ func (m *Module) members(w http.ResponseWriter, r *http.Request) {
 			}
 			if kind == "agent" {
 				service := IsServiceIdentity(legacy)
-				out.Agents = append(out.Agents, AgentMember{PrincipalID: id, Name: name, Description: description, ProjectRoles: []ProjectRole{}, HasAvatar: hasAvatar, WorkspaceRole: role, KeyCount: keyCount, LastSeenAt: lastSeen, Service: service, Status: status, ConnectedComputer: connectedComputer})
+				out.Agents = append(out.Agents, AgentMember{PrincipalID: id, Name: name, Description: description, ProjectRoles: []ProjectRole{}, HasAvatar: hasAvatar, WorkspaceRole: role, KeyCount: keyCount, LastSeenAt: lastSeen, Service: service, Status: status, ConnectedComputer: connectedComputer, PairedComputer: pairedComputer})
 				continue
 			}
 			var classic *string

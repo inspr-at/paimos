@@ -71,7 +71,7 @@ export interface AccessWorld {
   me: string
   roles: MockRole[]
   people: { principal_id: string; name: string; avatar_url: string | null; email: string | null; status: 'active' | 'deactivated'; identity: 'inspr_id' | null; workspace_role: string | null; aliases: { principal_id: string; name: string; source: 'classic' }[]; classic_role: string | null; last_active_at: string | null }[]
-  agents: { description?: string; principal_id: string; name: string; workspace_role: string | null; last_seen_at: string | null; service: boolean; status?: 'active' | 'deactivated'; connected_computer?: boolean }[]
+  agents: { description?: string; principal_id: string; name: string; workspace_role: string | null; last_seen_at: string | null; service: boolean; status?: 'active' | 'deactivated'; connected_computer?: boolean; paired_computer?: boolean }[]
   imported: { principal_id: string; name: string; classic_role: string | null }[]
   bindings: { principal_id: string; project_id: string; role_id: string }[]
   invites: { id: string; email: string; workspace_role: string | null; project_roles: { project_id: string; role_id: string }[]; status: 'pending' | 'expired' | 'revoked' | 'accepted'; created_by: string; created_at: string; expires_at: string }[]
