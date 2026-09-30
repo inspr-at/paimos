@@ -1,0 +1,132 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package events
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strconv"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenant"
+)
+
+// PositionHeader carries the tenant event-log position a response stands for
+// (AEON-449). A client that holds several reads of one collection, or a read
+// and a write of its own, keeps the newest position per entity: an older
+// position never overwrites a newer one, whatever order the answers arrive in.
+//
+//   - A read names the newest committed event before its own statements ran, so
+//     everything it returns includes every event up to that position. Events
+//     that commit while it runs may or may not be in it; the position is a floor.
+//   - An accepted write names the newest committed event after the handler's
+//     transaction ended, so it is at or above the write's own event. A read whose
+//     position is below it may predate the write.
+//
+// Every resource mutation appends an event (see Append), so the position
+// advances with every change a person can make. The header is additive: a
+// client that does not know it ignores it, and an answer without it is merged
+// the way it was before.
+const PositionHeader = "Aeon-Event-Position"
+
+// positionReads are the reads the agents workspace merges by position: the
+// lists and details that /agents holds side by side and that its own writes
+// change. A read outside the set carries no header, so it costs nothing.
+var positionReads = map[string]bool{
+	"GET /api/harness-sessions":                                  true,
+	"GET /api/projects/{projectId}/harness-sessions":             true,
+	"GET /api/projects/{projectId}/harness-sessions/{sessionId}": true,
+	"GET /api/runs":                                              true,
+	"GET /api/runs/{runId}":                                      true,
+	"GET /api/agent-accounts":                                    true,
+	"GET /api/approvals":                                         true,
+	"GET /api/models":                                            true,
+	"GET /api/projects/{projectId}/messages":                     true,
+	"GET /api/projects/{projectId}/message-targets":              true,
+}
+
+// PositionMiddleware sets PositionHeader on those reads and on every accepted
+// (2xx) mutation of an authenticated request. Mount it after the auth
+// middleware, so a request that auth refused never reaches it.
+func PositionMiddleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p, ok := tenant.PrincipalFrom(r.Context())
+			if !ok || p.TenantID == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			switch r.Method {
+			case http.MethodGet:
+				if positionReads[r.Pattern] {
+					// Before the handler: its reads then include everything up to here.
+					if position, err := newestEvent(r.Context(), pool, p.TenantID); err == nil {
+						w.Header().Set(PositionHeader, strconv.FormatInt(position, 10))
+					}
+				}
+			case http.MethodHead, http.MethodOptions:
+			default:
+				w = &positionWriter{ResponseWriter: w, r: r, pool: pool, tenantID: p.TenantID}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// newestEvent is the tenant's latest committed event ID (0 before the first).
+func newestEvent(ctx context.Context, pool *pgxpool.Pool, tenantID string) (int64, error) {
+	var id int64
+	err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT last_id FROM event_counters WHERE tenant_id=$1`, tenantID).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	})
+	return id, err
+}
+
+// positionWriter stamps an accepted mutation when its status line goes out. By
+// then the handler's transaction has ended: handlers answer after db.InTenant.
+type positionWriter struct {
+	http.ResponseWriter
+	r        *http.Request
+	pool     *pgxpool.Pool
+	tenantID string
+	started  bool
+}
+
+func (w *positionWriter) WriteHeader(status int) {
+	if !w.started {
+		w.started = true
+		if status >= 200 && status < 300 {
+			if position, err := newestEvent(w.r.Context(), w.pool, w.tenantID); err == nil {
+				w.Header().Set(PositionHeader, strconv.FormatInt(position, 10))
+			}
+		}
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *positionWriter) Write(b []byte) (int, error) {
+	if !w.started {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *positionWriter) Flush() {
+	if !w.started {
+		w.WriteHeader(http.StatusOK)
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (w *positionWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
