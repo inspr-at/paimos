@@ -945,11 +945,17 @@ td.c-title { position: relative; overflow: hidden; }
 /* The parent chip steps out entirely while row actions show, so it is never clipped. */
 @media (hover: hover) { .ticket-row:hover .parent-chip { opacity: 0; } }
 .ticket-row.cursor .parent-chip, td.c-title:focus-within .parent-chip { opacity: 0; }
-/* Rows with epic progress keep the numbers readable: room is made for the actions. */
-@media (hover: hover) { .ticket-row:hover .title-cell:has(.epic-progress) { -webkit-mask-image: none !important; mask-image: none !important; padding-right: 58px; } }
-.ticket-row.cursor .title-cell:has(.epic-progress), td.c-title:focus-within .title-cell:has(.epic-progress) { -webkit-mask-image: none !important; mask-image: none !important; padding-right: 58px; }
-.ticket-row:hover .title-cell, .ticket-row.cursor .title-cell, td.c-title:focus-within .title-cell {
-  -webkit-mask-image: linear-gradient(to left, transparent 56px, #000 84px); mask-image: linear-gradient(to left, transparent 56px, #000 84px);
+/* Hover actions float at the end of the title. Reserve their width (two 24px
+   buttons, the 2px gap, and the 8px inset). With the cell's 12px padding that
+   leaves the cue 12px clear of Copy. Phones hide the actions. */
+@media (min-width: 721px) {
+  .ticket-row:hover .title-cell,
+  .ticket-row.cursor .title-cell,
+  td.c-title:focus-within .title-cell {
+    padding-right: 58px;
+    -webkit-mask-image: none !important;
+    mask-image: none !important;
+  }
 }
 .ticket-row:hover .row-actions, .ticket-row.cursor .row-actions, .row-actions:focus-within { visibility: visible; }
 .row-actions .icon-btn { width: 24px; height: 24px; color: var(--ink-3); }
@@ -972,8 +978,8 @@ td.c-title { position: relative; overflow: hidden; }
 .owner.with-workers { flex: 0 0 auto; }
 .owner.with-workers .person-name { display: none; }
 .c-assignee .cell:has(.owner) .ticket-workers { flex: 0 1 auto; }
-/* The worker cue never shrinks to a letter or two; the title gives way first. */
-.title-workers { flex: 0 0 auto; min-width: 0; max-width: 132px; }
+/* The title ellipsizes. The cue keeps its full name and does not shrink. */
+.title-workers { flex: 0 0 auto; min-width: max-content; max-width: none; }
 .empty { color: var(--ink-3); }
 .c-updated time, .c-created time { color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .c-estimate .mono.estimate-draft { color: var(--ink-3); }

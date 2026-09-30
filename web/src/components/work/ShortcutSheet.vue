@@ -115,6 +115,7 @@ const dialog = ref<HTMLDialogElement>()
 const closeButton = ref<HTMLButtonElement>()
 let opener: HTMLElement | null = null
 async function open() {
+  if (dialog.value?.open) return
   opener = document.activeElement as HTMLElement
   dialog.value?.showModal()
   await nextTick()

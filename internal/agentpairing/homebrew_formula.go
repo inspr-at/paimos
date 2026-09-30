@@ -102,12 +102,19 @@ func (f *HomebrewFormula) Watch(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// Both channels can be ready in one select. A tick must not start
+			// another read after the watcher was told to stop.
+			if ctx.Err() != nil {
+				return
+			}
 			f.Refresh(ctx)
 		}
 	}
 }
 
 // Refresh replaces the cache. A failed read becomes unknown, including after an earlier success.
+// Stopping the watcher cancels the read in flight. That is not a failed fetch, and it must not
+// wipe a formula we already know. A timeout of the read itself still marks the formula unknown.
 func (f *HomebrewFormula) Refresh(ctx context.Context) {
 	if f == nil {
 		return
@@ -116,6 +123,9 @@ func (f *HomebrewFormula) Refresh(ctx context.Context) {
 		ctx = context.Background()
 	}
 	current, known := f.fetch(ctx)
+	if !known && ctx.Err() != nil {
+		return
+	}
 	f.mu.Lock()
 	changed := f.known != known || f.current != current
 	f.known = known
