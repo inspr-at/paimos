@@ -19,7 +19,11 @@ permissions:
   contents: read
 
 jobs:
-  go:
+  go-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -39,16 +43,49 @@ jobs:
       # Maintenance database only. This user is the image superuser, so tests may CREATE DATABASE.
       AEON_TEST_DATABASE_URL: postgres://aeon:aeon@127.0.0.1:5432/aeon?sslmode=disable
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: "1.26"
-      - name: Install the shells the pairing command tests run in
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+      - name: Install shells when this shard runs pairing path-proof tests
+        run: |
+          set -euo pipefail
+          pkgs="$(go run ./scripts/ci-go-shards packages -shard "${{ matrix.shard }}")"
+          if printf '%s\n' "$pkgs" | grep -qx 'github.com/inspr-at/paimos/internal/agentpairing'; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+          fi
+      - name: Test this shard
+        run: go run ./scripts/ci-go-shards test -shard "${{ matrix.shard }}"
+
+  go-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.26"
       - run: go vet ./...
-      - run: go test ./...
       - name: Check prepared rules bootstrap drift
         run: go run ./scripts/rules-bootstrap check
+      - name: Check the shard list covers go test ./...
+        run: go run ./scripts/ci-go-shards check
+
+  # Job id go is the required check. It stays red when a shard or the static
+  # job fails because if: always() still runs this gate.
+  go:
+    if: always()
+    needs: [go-test, go-static]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Go shard and the static checks
+        env:
+          GO_TEST: ${{ needs.go-test.result }}
+          GO_STATIC: ${{ needs.go-static.result }}
+        run: |
+          set -euo pipefail
+          echo "go-test=${GO_TEST} go-static=${GO_STATIC}"
+          test "${GO_TEST}" = success
+          test "${GO_STATIC}" = success
 
   web:
     runs-on: ubuntu-latest
