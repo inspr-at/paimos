@@ -14,15 +14,19 @@ import (
 )
 
 type boundedReviewBuffer struct {
-	bytes.Buffer
-	limit int
+	// Embedding would promote ReadFrom and let io.Copy bypass capped Write.
+	buffer bytes.Buffer
+	limit  int
 }
+
+func (b *boundedReviewBuffer) Len() int       { return b.buffer.Len() }
+func (b *boundedReviewBuffer) String() string { return b.buffer.String() }
 
 func (b *boundedReviewBuffer) Write(p []byte) (int, error) {
 	if len(p) > b.limit-b.Len() {
 		return 0, errReviewContext
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }
 
 // reviewGit runs only in a helper-owned bare repository. In particular, neither
@@ -237,11 +241,20 @@ func reviewWorkspaceHEAD(gitDir, commonDir string) (string, error) {
 			if e != nil {
 				break
 			}
+			var resolved string
 			for _, line := range strings.Split(packed, "\n") {
 				sha, name, ok := strings.Cut(line, " ")
-				if ok && name == ref && reviewgate.ValidSHA(sha) {
-					return sha, nil
+				if ok && name == ref {
+					// Duplicate records have no unambiguous binding. Never
+					// attest one based on our own first/last-record choice.
+					if resolved != "" || !reviewgate.ValidSHA(sha) {
+						return "", errReviewContext
+					}
+					resolved = sha
 				}
+			}
+			if resolved != "" {
+				return resolved, nil
 			}
 		}
 	}

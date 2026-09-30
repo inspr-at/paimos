@@ -154,9 +154,11 @@ grafts and replacement refs are excluded. Ancestry follows raw commit parent
 headers, and the diff compares the two sealed trees (`base..head`) with renames,
 external diff commands and text conversion disabled. Submodules show gitlink
 hashes only; sensitive paths are refused before reading the patch. Missing or
-invalid objects, incomplete ancestry, a walk beyond 4096 commits or a context
-build beyond 30 seconds fail closed. Scratch repositories are removed on success
-and error.
+invalid objects, incomplete ancestry, ambiguous duplicate packed HEAD records,
+a walk beyond 4096 commits or a context build beyond 30 seconds fail closed.
+Git output is capped at 192 KiB while the subprocess output is copied; an
+oversized patch fails before it can grow the daemon's buffer past that cap.
+Scratch repositories are removed on success and error.
 
 Each finding uses `FINDING: <critical|high|medium|low> <relative-file>:<line> <message>`. The final line must be exactly `VERDICT: ok` or `VERDICT: changes`. Only a completed run with vendor-reported model evidence and a valid, independent `ok` opens the gate. Missing output, malformed verdicts, cancellation and unavailable routes leave it closed. Findings, elapsed time and vendor-reported cost appear on the ticket; unreported cost is omitted. Repeated request IDs safely replay the same binding; a changed range requires a new request.
 

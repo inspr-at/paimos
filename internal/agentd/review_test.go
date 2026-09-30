@@ -4,6 +4,8 @@ package agentd
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -326,6 +328,98 @@ func TestReviewPromptUsesLinkedWorktreeAndPackedHEAD(t *testing.T) {
 			t.Fatal("raw packed or detached HEAD lost the completed range")
 		}
 	}
+}
+
+func TestReviewCompletedRangeRefusesDuplicatePackedHEAD(t *testing.T) {
+	r, order, _ := reviewPromptFixture(t)
+	r.run("commit", "--allow-empty", "-m", "ancestor")
+	ancestor := workspaceHEAD(t.Context(), r.dir)
+	r.run("commit", "--allow-empty", "-m", "tip requiring review")
+	tip := workspaceHEAD(t.Context(), r.dir)
+	r.run("pack-refs", "--all")
+	for _, records := range []struct {
+		name, first, second string
+	}{
+		{"ancestor-first-tip-second", ancestor, tip},
+		{"tip-first-ancestor-second", tip, ancestor},
+		{"identical-records", tip, tip},
+	} {
+		t.Run(records.name, func(t *testing.T) {
+			packed := "# pack-refs with: peeled fully-peeled sorted\n" + records.first + " refs/heads/main\n" + records.second + " refs/heads/main\n"
+			if err := os.WriteFile(filepath.Join(r.dir, ".git", "packed-refs"), []byte(packed), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if gitHead := workspaceHEAD(t.Context(), r.dir); !reviewgate.ValidSHA(gitHead) {
+				t.Fatal("fixture must have a HEAD that Git resolves")
+			}
+			if got := completedReviewRange(t.Context(), r.dir, order.Review.BaseSHA); got != nil {
+				t.Fatalf("duplicate packed HEAD attested a range: %+v", got)
+			}
+		})
+	}
+}
+
+func TestReviewBufferCapsCopy(t *testing.T) {
+	const limit = 192 << 10
+	for _, size := range []int{limit - 1, limit, limit + 1, 2 * limit} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			out := &boundedReviewBuffer{limit: limit}
+			// Hide WriterTo so io.Copy exercises the destination's ReadFrom,
+			// if present, just as os/exec's stdout pipe does.
+			reader := struct{ io.Reader }{strings.NewReader(strings.Repeat("x", size))}
+			n, err := io.Copy(out, reader)
+			if out.Len() > limit || n > int64(limit) {
+				t.Fatalf("copy exceeded cap: buffered=%d copied=%d limit=%d", out.Len(), n, limit)
+			}
+			if size <= limit {
+				if err != nil || out.Len() != size || n != int64(size) {
+					t.Fatal("bounded output did not copy completely")
+				}
+			} else if !errors.Is(err, errReviewContext) {
+				t.Fatal("oversized copy did not return the cap error")
+			}
+		})
+	}
+}
+
+func TestReviewGitRefusesOversizedDiffDuringCopy(t *testing.T) {
+	r, order, profile := reviewPromptFixture(t)
+	if err := os.WriteFile(filepath.Join(r.dir, "large.txt"), []byte(strings.Repeat("OVERSIZED_DIFF_FIXTURE\n", 20000)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r.run("add", "large.txt")
+	r.run("commit", "-m", "oversized change")
+	order.Review.HeadSHA = workspaceHEAD(t.Context(), r.dir)
+	repo, err := newSealedReviewRepo(t.Context(), r.dir, order.Review.BaseSHA, order.Review.HeadSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.close()
+	args := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--submodule=short", repo.base + ".." + repo.head, "--"}
+	t.Run("subprocess-copy", func(t *testing.T) {
+		out := &boundedReviewBuffer{limit: 192 << 10}
+		cmd := exec.CommandContext(t.Context(), "git", append([]string{"--git-dir=" + repo.dir}, args...)...)
+		cmd.Stdout = out
+		err := cmd.Run()
+		if out.Len() > out.limit {
+			t.Fatalf("daemon buffer exceeded diff cap: %d > %d", out.Len(), out.limit)
+		}
+		// The cap can close the pipe before Git exits, so Run may report
+		// SIGPIPE instead of the copy error. Either must fail closed.
+		if err == nil {
+			t.Fatal("Run accepted oversized subprocess output")
+		}
+	})
+	t.Run("review-git", func(t *testing.T) {
+		if diff, err := reviewGit(t.Context(), repo.dir, args...); !errors.Is(err, errReviewContext) || diff != "" {
+			t.Fatal("oversized Git output did not fail closed")
+		}
+	})
+	t.Run("review-prompt", func(t *testing.T) {
+		if prompt, err := reviewPrompt(t.Context(), r.dir, order, profile); !errors.Is(err, errReviewContext) || prompt != "" {
+			t.Fatal("oversized diff entered the review prompt")
+		}
+	})
 }
 
 func TestReviewGitIgnoresInheritedObjectAndRefOverrides(t *testing.T) {
