@@ -3,6 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { APIError, api } from '../../lib/api'
 import { messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
+import { sessionResource } from '../../lib/agentRows'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
@@ -57,8 +58,7 @@ function markRead(event: number, id: string) {
   // A repeated look at the same post must not postpone a flush that is already waiting.
   if (flushTimer === undefined || (pending?.event ?? -1) > before) arm()
 }
-const readPath = (projectId: string, sessionId: string) =>
-  `/projects/${encodeURIComponent(projectId)}/harness-sessions/${encodeURIComponent(sessionId)}/read-marker`
+const readPath = (projectId: string, sessionId: string) => sessionResource(projectId, sessionId, 'read-marker')
 // One trailing timer. Hide and unmount flush immediately. A failed send stays
 // in `pending` and leaves on the next flush, with no toast.
 let pending: ReadMark | null = null

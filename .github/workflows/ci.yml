@@ -154,6 +154,9 @@ jobs:
         run: npm ci
       - working-directory: web
         run: npm run typecheck
+      # The session and run ledger fences (AEON-449): endpoints only in lib/agentRows.ts, wire rows only through the ledger.
+      - working-directory: web
+        run: npm run lint
       - working-directory: web
         run: npm run build
 

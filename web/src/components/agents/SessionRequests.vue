@@ -7,6 +7,7 @@ import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import { fetchAccountCatalog, effortLabel, type AgentAccountCatalog } from '../../lib/accountCascade'
 import type { HarnessSession, SessionChangeRequest } from '../../lib/agents'
+import { readSessionRequests, sessionResource } from '../../lib/agentRows'
 import AppIcon from '../AppIcon.vue'
 
 const props = defineProps<{ session: HarnessSession; now: number }>()
@@ -29,7 +30,7 @@ const recent = computed(() => {
   const sorted = [...controls.value].sort((a, b) => b.sequence - a.sequence)
   return [...sorted.filter(c => c.state !== 'completed'), ...sorted.filter(c => c.state === 'completed').slice(0, 3)]
 })
-const path = `/projects/${encodeURIComponent(props.session.project_id)}/harness-sessions/${encodeURIComponent(props.session.id)}`
+const path = sessionResource(props.session.project_id, props.session.id, 'requests')
 let revision = 0
 let disposed = false, timer: ReturnType<typeof setTimeout> | undefined
 let retry: { signature: string; id: string } | undefined
@@ -44,8 +45,8 @@ async function json<T>(url: string, body?: unknown): Promise<T> {
 async function refresh() {
   const observedRevision = revision
   try {
-    const detail = await json<{ controls?: SessionChangeRequest[] }>(path)
-    if (!disposed && observedRevision === revision) { controls.value = (detail.controls ?? []).filter(c => c.kind === 'rename_request' || c.kind === 'model_request'); statusError.value = '' }
+    const requests = await readSessionRequests(props.session.project_id, props.session.id, abort.signal)
+    if (!disposed && observedRevision === revision) { controls.value = requests.filter(c => c.kind === 'rename_request' || c.kind === 'model_request'); statusError.value = '' }
   } catch { if (!disposed) statusError.value = 'Request status could not be refreshed.' }
   finally { if (!disposed) timer = setTimeout(refresh, 5000) }
 }
@@ -79,7 +80,7 @@ async function submit() {
   if (retry?.signature !== signature) retry = { signature, id: crypto.randomUUID() }
   busy.value = true; revision++; error.value = ''
   try {
-    const control = await json<SessionChangeRequest>(`${path}/requests`, { ...body, request_id: retry.id })
+    const control = await json<SessionChangeRequest>(path, { ...body, request_id: retry.id })
     void agents.afterWrite()
     if (!disposed) {
       revision++

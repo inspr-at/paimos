@@ -12,6 +12,7 @@
 import { api, APIError } from './api.ts'
 import type { CapacityWait } from './capacityWait.ts'
 import type { AttentionReason } from './agentSignals.ts'
+import type { SessionChangeRequest } from './agents.ts'
 import type { LivePage } from './liveAgents.ts'
 import { parsePosition, stampAt, tick } from './position.ts'
 import { wrapRow, type Wire } from './wire.ts'
@@ -89,6 +90,8 @@ const query = (params: Record<string, string | number | boolean | undefined>) =>
 // The path of a session's own sub-resources (controls, recovery, requests, read marker,
 // watch, provenance). A session row itself is read only through this module.
 export const sessionResource = (projectId: string, sessionId: string, rest: string) => `/projects/${enc(projectId)}/harness-sessions/${enc(sessionId)}/${rest}`
+// The same for the sub-resources that hang off a session by its id alone (its delivery rating).
+export const sessionResourceById = (sessionId: string, rest: string) => `/harness-sessions/${enc(sessionId)}/${rest}`
 
 // What one answer knows: the tick its request started at and, for a read, the position
 // of the snapshot it returned. A write's position is the write floor (api() raises it)
@@ -131,6 +134,9 @@ export const getRun = async (id: string) => {
   const at = await call<AgentRunRow>(`/runs/${enc(id)}`)
   return rowOf(at.body, at)
 }
+// The change requests (rename, model) a session's detail carries. Not a row: the session itself is not read here.
+export const readSessionRequests = async (projectId: string, sessionId: string, signal?: AbortSignal): Promise<SessionChangeRequest[]> =>
+  (await call<{ controls?: SessionChangeRequest[] }>(`/projects/${enc(projectId)}/harness-sessions/${enc(sessionId)}`, 'GET', undefined, signal)).body.controls ?? []
 // Agents working right now in every visible project, in one read (AEON-184). A
 // privacy-filtered projection for the Projects page, never merged with session rows.
 export const getLiveAgents = async () => (await call<LivePage>('/harness-sessions/live?include_inactive=true')).body

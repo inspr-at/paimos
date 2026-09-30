@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api } from './api.ts'
+import { sessionResourceById } from './agentRows.ts'
 
 export interface DeliverySignals {
   review_rounds: number
@@ -86,13 +87,13 @@ export async function loadNodeRatings(nodeId: string, signal?: AbortSignal): Pro
 }
 
 export async function loadSessionRating(sessionId: string, signal?: AbortSignal): Promise<SessionRating | null> {
-  const response = await api(`/harness-sessions/${encodeURIComponent(sessionId)}/delivery-rating`, { signal })
+  const response = await api(sessionResourceById(sessionId, 'delivery-rating'), { signal })
   if (!response.ok) return null
   return parseRating(await response.json().catch(() => null))
 }
 
 export async function saveSessionRating(sessionId: string, body: { score: number | null; tags: string[]; comment: string }): Promise<SessionRating> {
-  return readRating(await api(`/harness-sessions/${encodeURIComponent(sessionId)}/delivery-rating`, {
+  return readRating(await api(sessionResourceById(sessionId, 'delivery-rating'), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -100,7 +101,7 @@ export async function saveSessionRating(sessionId: string, body: { score: number
 }
 
 export async function clearSessionRating(sessionId: string): Promise<SessionRating> {
-  return readRating(await api(`/harness-sessions/${encodeURIComponent(sessionId)}/delivery-rating`, { method: 'DELETE' }))
+  return readRating(await api(sessionResourceById(sessionId, 'delivery-rating'), { method: 'DELETE' }))
 }
 
 async function readRating(response: Response): Promise<SessionRating> {

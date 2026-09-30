@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { api } from '../../lib/api'
+import { sessionResource } from '../../lib/agentRows'
 import { absoluteTime, relativeTime } from '../../lib/work'
 
 // Instruction versions recorded for one session: logical names, digests and
@@ -53,7 +54,7 @@ watch(() => [props.projectId, props.sessionId], async () => {
   state.value = 'loading'
   page.value = { revisions: [], truncated: false }
   try {
-    const response = await api(`/projects/${encodeURIComponent(projectId)}/harness-sessions/${encodeURIComponent(sessionId)}/provenance`)
+    const response = await api(sessionResource(projectId, sessionId, 'provenance'))
     if (!response.ok) throw new Error('unavailable')
     const body = await response.json() as ProvenancePage
     if (props.projectId !== projectId || props.sessionId !== sessionId) return

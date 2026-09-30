@@ -18,7 +18,7 @@ test:
 
 # Web typecheck and build
 web-check:
-    cd web && npm run typecheck && npm run build
+    cd web && npm run typecheck && npm run lint && npm run build
 
 # Playwright smoke against a running server (BASE_URL defaults to http://127.0.0.1:8080)
 e2e:

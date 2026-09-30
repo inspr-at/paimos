@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { HarnessSession } from '../../lib/agents'
+import { sessionResource } from '../../lib/agentRows'
 import { appendWatchText, attachAction, metadataOnlyAttach, watchText } from '../../lib/attachWatch'
 import { can, onAccessChange } from '../../lib/authz'
 import { useAgents } from '../../stores/agents'
@@ -34,7 +35,7 @@ function start() {
   stop()
   if (!allowed.value || !available.value) return
   error.value = ''; state.value = 'connecting'; lastFrame = Date.now()
-  const current = new EventSource(`/api/projects/${encodeURIComponent(props.session.project_id)}/harness-sessions/${encodeURIComponent(props.session.id)}/watch`)
+  const current = new EventSource(`/api${sessionResource(props.session.project_id, props.session.id, 'watch')}`)
   stream = current
   const fresh = () => stream === current && allowed.value && available.value
   current.addEventListener('keepalive', () => { if (!fresh()) return; lastFrame = Date.now(); state.value = 'live' })
