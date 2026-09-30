@@ -42,6 +42,9 @@ func renderLlms(slug string, doc portalDocument, releases []publicRelease) strin
 	if doc.ReleaseHistory {
 		footer += fmt.Sprintf("- [Release history](%s)\n- [Release history JSON](%s)\n", history, historyJSON)
 	}
+	if doc.Roadmap {
+		footer += fmt.Sprintf("- [Roadmap](/portal/%s/roadmap)\n- [Roadmap JSON](/portal/%s/roadmap.json)\n", slug, slug)
+	}
 	if len(body)+len(footer) > llmsTextLimit {
 		room := llmsTextLimit - len(footer)
 		if room < 1 {

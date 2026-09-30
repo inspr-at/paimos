@@ -8,8 +8,9 @@ import (
 	"strings"
 )
 
-// PublicRoute marks an explicitly public API route. Unknown routes have no
-// declaration and must be denied by the authorization boundary.
+// PublicRoute marks a matched route that is public. Unknown routes have no
+// declaration and must be denied by the authorization boundary. Session
+// refresh uses the same marker, so it cannot disagree with authorization.
 const PublicRoute = "public"
 
 // RoutePermissions declares the permission for each registered API pattern.
@@ -227,6 +228,13 @@ var RoutePermissions = map[string]string{
 	"GET /api/public/portal/{tenantSlug}/catalog.json":                                "public",
 	"GET /api/public/portal/{tenantSlug}/llms.txt":                                    "public",
 	"GET /api/public/portal/{tenantSlug}/releases":                                    "public",
+	"GET /api/public/portal/{tenantSlug}/roadmap":                                     "public",
+	"GET /api/public/portal/{tenantSlug}/roadmap.json":                                "public",
+	"GET /portal/{tenantSlug}":                                                        "public",
+	"GET /portal/{tenantSlug}/catalog.json":                                           "public",
+	"GET /portal/{tenantSlug}/llms.txt":                                               "public",
+	"GET /portal/{tenantSlug}/roadmap":                                                "public",
+	"GET /portal/{tenantSlug}/roadmap.json":                                           "public",
 	"GET /api/public/quotes/{publicTenant}/{token}":                                   "public",
 	"GET /api/public/quotes/{publicTenant}/{token}/pdf":                               "public",
 	"GET /api/quote-profiles":                                                         "quotes.read",
@@ -463,6 +471,14 @@ var RoutePermissions = map[string]string{
 func PermissionForPattern(pattern string) (string, bool) {
 	permission, ok := RoutePermissions[pattern]
 	return permission, ok
+}
+
+// PatternIsPublic reports whether the router's matched pattern is a public
+// declaration. Session refresh and the authentication gate use this and not
+// the request URL: the router accepts other spellings of the same pattern.
+func PatternIsPublic(pattern string) bool {
+	declaration, ok := PermissionForPattern(pattern)
+	return ok && declaration == PublicRoute
 }
 
 // RequirePattern denies missing declarations. A public declaration leaves the

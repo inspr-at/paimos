@@ -250,6 +250,9 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			fields, err = canonicalRouteFields(p, kind.Slug, fields, nil)
 		}
 		if err == nil {
+			fields, err = canonicalRoadmapPublication(p, kind.Slug, fields, nil)
+		}
+		if err == nil {
 			fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields, nil)
 		}
 		if err != nil {
@@ -435,6 +438,9 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			}
 			if err == nil {
 				fields, err = canonicalRouteFields(p, kind.Slug, fields, current.Fields)
+			}
+			if err == nil {
+				fields, err = canonicalRoadmapPublication(p, kind.Slug, fields, current.Fields)
 			}
 			if err == nil {
 				fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields, current.Fields)

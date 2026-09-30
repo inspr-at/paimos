@@ -57,13 +57,25 @@ func TestTicketRouteMigrationPreservesCustomSchema(t *testing.T) {
 		if err := json.Unmarshal(schema, &parsed); err != nil {
 			return err
 		}
-		if parsed.Additional == nil || *parsed.Additional || len(parsed.Properties) != 9 {
+		if parsed.Additional == nil || *parsed.Additional || len(parsed.Properties) != 13 {
 			t.Fatalf("custom schema: %s", schema)
 		}
-		for _, key := range []string{"custom", "route_role", "area", "route_role_by", "area_at"} {
+		for _, key := range []string{
+			"custom", "route_role", "area", "route_role_by", "area_at",
+			"roadmap_public", "roadmap_public_source", "roadmap_public_by", "roadmap_public_at",
+		} {
 			if _, ok := parsed.Properties[key]; !ok {
 				t.Fatalf("missing %s in %s", key, schema)
 			}
+		}
+		var custom struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(parsed.Properties["custom"], &custom); err != nil {
+			return err
+		}
+		if custom.Type != "string" {
+			t.Fatalf("custom property changed: %s", parsed.Properties["custom"])
 		}
 		return nil
 	})
