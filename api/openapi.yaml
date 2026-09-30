@@ -6776,7 +6776,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.6']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.7']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
@@ -10782,9 +10782,9 @@ components:
       description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent.
       properties:
         has_working_session: {type: boolean, description: True when a visible working session is bound to this ticket in its current project. Omitted when false; enables a quiet no ETA hint even before the first estimate.}
-        finished: {type: boolean, description: True when no session is open on the ticket and the last worker to leave reported 100% and recorded a clean exit. The only evidence that reads as Done; progress_pct is then 100 and the estimate is not kept. Omitted when false (AEON-437).}
-        finished_at: {type: string, format: date-time, description: When that worker stopped. Present with finished.}
-        finished_by: {type: string, description: Name of that worker, when known. Present with finished.}
+        finished: {type: boolean, description: 'True when no session is open on the ticket and the last worker to leave reported 100% and recorded a clean exit. The only evidence that reads as Done; progress_pct is then 100 and the estimate is not kept. Omitted when false (AEON-437).'}
+        finished_at: {type: string, format: date-time, description: 'When that worker stopped. Present with finished.'}
+        finished_by: {type: string, description: 'Name of that worker, when known. Present with finished.'}
         eta_ready_at: {type: string, format: date-time}
         eta_live_at: {type: string, format: date-time}
         progress_pct: {type: integer, minimum: 0, maximum: 100}

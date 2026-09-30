@@ -689,8 +689,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/1.6",
-    "sha256": "c39230fe9d2eebb0c77412978a367e6da76a851605291cadc441a40e0f27adab",
+    "version": "harness-session/1.7",
+    "sha256": "011c8158861d6e62d7a3ac27dbcd45cab77cbcd326f4aed9877a08307124e059",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -999,6 +999,9 @@
             "type": "string"
           },
           "eta_stale": {
+            "type": "boolean"
+          },
+          "finished": {
             "type": "boolean"
           },
           "harness": {
@@ -1661,6 +1664,9 @@
             "type": "string"
           },
           "eta_stale": {
+            "type": "boolean"
+          },
+          "finished": {
             "type": "boolean"
           },
           "harness": {
