@@ -1046,11 +1046,28 @@ on macOS to verify that the negative ancestry regressions catch removed guards.
 
 Claude and Codex are identified from the kernel-observed running image,
 so an exec wrapper or a vendor auto-update does not require re-pairing. On macOS,
-the daemon verifies the running PID against Apple's certificate chain and the
-built-in vendor Team ID and CLI signing identifier on preview, confirmation and
-every poll. A vendor file renamed over a foreign running binary cannot confer
-that identity. Cursor attach is refused on macOS until a signed cursor-agent
-CLI exists; Cursor.app's signature is not a harness identity.
+the daemon verifies the running PID against Apple's certificate chain, the
+Developer ID Application markers, and the built-in vendor Team ID and CLI
+signing identifier on preview, confirmation and every poll. A vendor file
+renamed over a foreign running binary cannot confer that identity. A Claude
+process is refused (`harness_identity_unsupported`) when any NUL-terminated
+string after the executable path — an argument, an environment entry, or an
+apple-vector string — is a non-blank `BUN_*` assignment other than
+`BUN_INSTALL`. The signed executable can run other JavaScript from those
+variables and still keep the vendor signature. Unset them and attach again.
+`NODE_*` assignments stay allowed. When the kernel omits the environment, or
+the string area cannot be parsed, Claude is refused or reported unavailable,
+because a missing or unreadable environment is not evidence that every `BUN_*`
+variable is unset. Codex is identified from its signature alone, and the daemon
+leaves its procargs unread. This environment check is a best-effort deterrent.
+`KERN_PROCARGS2` copies the process's own rewritable string area; only the
+argument count comes from the kernel. Code running in the process can rewrite
+that area before attach, including a NUL that ends the string list early.
+Reading the environment as it was at exec needs Endpoint Security, which
+requires root and an entitlement, and is out of scope. The person's approval
+remains the real gate. Cursor
+attach is refused on macOS until a signed cursor-agent CLI exists;
+Cursor.app's signature is not a harness identity.
 Legacy Claude and Codex wrapper pairings work after upgrading and
 restarting agentd. Unsigned Claude and Codex images are refused on macOS,
 including when run through Rosetta. Linux uses a local installation
