@@ -14,6 +14,12 @@ const PROVIDER_LABEL: Record<ModelProvider, string> = {
   unknown: 'Unknown provider',
 }
 
+// ETA guidance is actionable only while a session speaks for a bound ticket.
+// Both the list and detail panel use the same eligibility rule.
+export function sessionEtaEligible(view: SessionView): boolean {
+  return !!view.ticket && view.session.phase !== 'stopped' && !view.session.stopped_at && !view.session.archived_at
+}
+
 // A phrase is an explicit outcome. A ticket key or file token is not.
 export function explicitOutcome(brief: string | null | undefined) {
   const text = brief?.trim() ?? ''

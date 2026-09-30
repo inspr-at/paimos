@@ -122,7 +122,13 @@ and shared-inbox obligations stay outside the session thread.
 ### Agent work estimates
 
 Estimates are expected **agent hours until ready for review**, separate from a live ETA.
-Set them with `aeon issue create ... --estimate 2h`, `aeon issue update AEON-317 --estimate 90m`, or `aeon issue estimate AEON-317 --hours 1.5 --source agent`. Decimal hours and minutes are accepted; values must be greater than zero and at most 200 hours. The optional source asserts the authenticated principal kind; the server stamps the principal and time. Creating a ticket or task as an agent without an estimate returns a warning.
+Set them with `aeon issue create ... --estimate-hours 2`, `aeon issue update AEON-317 --estimate-hours 1.5`, or `aeon issue estimate AEON-317 --hours 1.5 --source agent`. `--estimate 90m` remains an alias. Decimal hours and minutes are accepted; values must be greater than zero and at most 200 hours. The optional source asserts the authenticated principal kind; the server stamps the principal and time. Creating a ticket or task without an estimate prints a non-blocking warning. API callers can PATCH `/api/nodes/{id}` with `{"estimate_hours":2}` to change just the hours, or null to clear them; other fields survive. Do not combine this property with a replacement `fields` document.
+
+`aeon harness run-heartbeat --status-file .agent-status.json` reads `pct`, `remaining_min` and `note` on every beat. Bound workers send the percent and a ready ETA anchored to the file's modification time plus the remaining minutes, including zero. An unchanged file's ETA can become overdue; after 30 minutes without an update, the CLI warns `stale_progress`. Minutes must be finite numbers from 0 to 524160 (364 days); ETAs outside the server's allowed window are omitted. Workers with `--worktree` default to that worktree's `.agent-status.json`; coordinators read a file only with an explicit `--status-file` and retain their separate live-ETA reporting. Missing, malformed or refused status files never stop the loop. If the server rejects status-file estimates, the CLI retries the heartbeat without those fields. Status reads retain the credential, symlink and hard-link fence.
+
+Heartbeat responses carry non-blocking `warnings`: a working worker gets `missing_progress` after three accepted beats without a fresh percent, a working session with a bound `ticket_node_id` gets `missing_eta` for its role's absent ETA, and a visible bound ticket/task without valid hours gets `ticket_without_estimate`. Unbound workers and coordinators have no missing-ETA warning or UI hint. Warning-query failures are logged and return an empty array without rolling back the heartbeat. Both heartbeat commands print each code to stderr at most once per ten minutes, with receipts retained across reporter restarts. Run-heartbeat uses its private state directory; one-shot heartbeats use private 0700 directories under `~/.aeon`, including when the lease comes from stdin.
+
+Harness status and heartbeat declare `Aeon-Contract: harness-session/1.6`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing fields and required payloads are unchanged.
 
 Agent drafts show `est.` until a person or a working agent bound to the ticket confirms or changes them. Resubmitting the hours through the estimate command confirms them; provenance is recorded again. The ticket's Estimate control also edits or clears the value. Epics show the sum of direct, visible, open ticket/task children, with estimated-child coverage in the tooltip; nested tasks are not counted twice. The Estimate sort keeps empty values last in either direction. Imported points remain visible as points, not converted to hours.
 
@@ -1041,16 +1047,43 @@ a TTY and belong to the target's user. Neither process may be an ancestor of
 the other, and ancestor UIDs must be that user or root. The complete process
 graph is rechecked for PID reuse and reparenting on confirmation and polls.
 The target still requires its full physical folder and image validation.
+On Linux, ancestry uses the same metadata-only read: `/proc/<pid>/stat` and
+the uid of the `/proc/<pid>` directory. Root-owned `sshd`, `su` and `sudo`
+ancestors are acceptable. The selected target still requires its executable
+and working directory.
+Those checks are defence in depth. A program running as the same user can open
+another terminal and request the review. On a Mac that can use Touch ID, attach
+approval asks for it by default until the person saves a choice. People without
+Touch ID, Linux, and a Mac with no graphical login keep approval in Aeon.
+Saving Mac confirmation turns watches off where Touch ID cannot run. SSH to a
+Mac that can show Touch ID prompts on that Mac's screen.
 Run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-ancestry-mutations.py`
 on macOS to verify that the negative ancestry regressions catch removed guards.
 
 Claude and Codex are identified from the kernel-observed running image,
 so an exec wrapper or a vendor auto-update does not require re-pairing. On macOS,
-the daemon verifies the running PID against Apple's certificate chain and the
-built-in vendor Team ID and CLI signing identifier on preview, confirmation and
-every poll. A vendor file renamed over a foreign running binary cannot confer
-that identity. Cursor attach is refused on macOS until a signed cursor-agent
-CLI exists; Cursor.app's signature is not a harness identity.
+the daemon verifies the running PID against Apple's certificate chain, the
+Developer ID Application markers, and the built-in vendor Team ID and CLI
+signing identifier on preview, confirmation and every poll. A vendor file
+renamed over a foreign running binary cannot confer that identity. A Claude
+process is refused (`harness_identity_unsupported`) when any NUL-terminated
+string after the executable path — an argument, an environment entry, or an
+apple-vector string — is a non-blank `BUN_*` assignment other than
+`BUN_INSTALL`. The signed executable can run other JavaScript from those
+variables and still keep the vendor signature. Unset them and attach again.
+`NODE_*` assignments stay allowed. When the kernel omits the environment, or
+the string area cannot be parsed, Claude is refused or reported unavailable,
+because a missing or unreadable environment is not evidence that every `BUN_*`
+variable is unset. Codex is identified from its signature alone, and the daemon
+leaves its procargs unread. This environment check is a best-effort deterrent.
+`KERN_PROCARGS2` copies the process's own rewritable string area; only the
+argument count comes from the kernel. Code running in the process can rewrite
+that area before attach, including a NUL that ends the string list early.
+Reading the environment as it was at exec needs Endpoint Security, which
+requires root and an entitlement, and is out of scope. The person's approval
+remains the real gate. Cursor
+attach is refused on macOS until a signed cursor-agent CLI exists;
+Cursor.app's signature is not a harness identity.
 Legacy Claude and Codex wrapper pairings work after upgrading and
 restarting agentd. Unsigned Claude and Codex images are refused on macOS,
 including when run through Rosetta. Linux uses a local installation
@@ -1131,7 +1164,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/1.5`:
+The reporter contract is `harness-session/1.6`:
 existing state values stay intact; optional `watch.process_state` carries a
 confirmed exit. The existing default-off permission and code-attempt-cap tests
 remain in `internal/agentpairing/watch_test.go`.

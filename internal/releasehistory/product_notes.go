@@ -48,6 +48,8 @@ type ProductNotes struct {
 }
 
 type PublicNotes struct {
+	ReleaseChannel      string       `json:"release_channel,omitempty"`
+	ReleaseSequence     int          `json:"release_sequence,omitempty"`
 	SHA256              string       `json:"snapshot_sha256"`
 	CapturedAt          *time.Time   `json:"captured_at"`
 	Revision            int64        `json:"release_revision"`
