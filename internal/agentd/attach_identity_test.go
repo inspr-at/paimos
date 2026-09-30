@@ -167,6 +167,9 @@ func TestAttachIdentitySecurityChecks(t *testing.T) {
 	}
 }
 func TestAttachUnsignedRecordedRootAndUpdate(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("recorded-root fallback is Linux-only; macOS unsigned refusal has dedicated regressions")
+	}
 	m, peer, target, req, image := attachIdentityFixture(t, Claude)
 	identity := agentsetup.RecordAttachIdentity(Claude, image, m.cfg.Workspace)
 	if identity == nil {
@@ -285,6 +288,12 @@ func TestAttachCursorHasNoMacOSVendorIdentity(t *testing.T) {
 	_, err := m.handle(t.Context(), peer, req)
 	if (err != nil) != (runtime.GOOS == "darwin") || attachVendorTeam(Cursor) != "" {
 		t.Fatal("Cursor app identity enabled or Linux exact fallback lost", err)
+	}
+	if runtime.GOOS == "darwin" {
+		var diagnostic *AttachLocalError
+		if !errors.As(err, &diagnostic) || diagnostic.Code != "harness_identity_unsupported" || diagnostic.Hint != "Cursor attach is unavailable on macOS until a signed cursor-agent CLI is available. Cursor.app cannot identify a Cursor harness." {
+			t.Fatal("unsupported Cursor identity lost its fixed diagnostic", err)
+		}
 	}
 }
 
@@ -439,6 +448,9 @@ func TestAttachGrokRetainsExactPin(t *testing.T) {
 func TestAttachExactPinCannotBypassVendorOrRecordedOwner(t *testing.T) {
 	for _, attack := range []string{"foreign-signature", "invalid-signature", "wrong-recorded-owner"} {
 		t.Run(attack, func(t *testing.T) {
+			if attack == "wrong-recorded-owner" && runtime.GOOS != "linux" {
+				t.Skip("recorded owner applies to the Linux fallback")
+			}
 			m, peer, _, req, image := attachIdentityFixture(t, Claude)
 			m.cfg.Executables[Claude] = image
 			switch attack {
@@ -461,5 +473,27 @@ func TestAttachExactPinCannotBypassVendorOrRecordedOwner(t *testing.T) {
 				t.Fatal("exact path bypassed identity", attack)
 			}
 		})
+	}
+}
+
+func TestAttachLinuxFallbackRejectsWrongOwnerAtExactPin(t *testing.T) {
+	m, _, _, _, image := attachIdentityFixture(t, Claude)
+	m.cfg.Executables[Claude] = image
+	identity := agentsetup.RecordAttachIdentity(Claude, image, m.cfg.Workspace)
+	if identity == nil {
+		t.Fatal("missing identity")
+	}
+	m.cfg.Identities = map[string]agentsetup.AttachIdentity{Claude: *identity}
+	info, err := os.Stat(image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.validateLinuxAttachFallback(Claude, image, info); err != nil {
+		t.Fatal("valid fallback rejected", err)
+	}
+	identity.Owner = os.Getuid() + 10000
+	m.cfg.Identities[Claude] = *identity
+	if err := m.validateLinuxAttachFallback(Claude, image, info); err == nil {
+		t.Fatal("exact path bypassed the recorded owner")
 	}
 }

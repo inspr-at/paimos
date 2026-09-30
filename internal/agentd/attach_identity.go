@@ -52,6 +52,12 @@ func (e *AttachLocalError) Error() string { return e.Code + ": " + e.Hint }
 func attachIdentityError() error {
 	return &AttachLocalError{Code: "harness_identity_mismatch", Hint: "The running image does not match the paired harness vendor or recorded installation. Update the vendor installation, or repair its local pin with repin/add-harness, then restart agentd."}
 }
+func attachUnsignedIdentityError() error {
+	return &AttachLocalError{Code: "harness_identity_mismatch", Hint: "Unsigned Claude and Codex images cannot be attached on macOS. Install the vendor-signed CLI, then restart agentd."}
+}
+func attachUnsupportedIdentityError() error {
+	return &AttachLocalError{Code: "harness_identity_unsupported", Hint: "Cursor attach is unavailable on macOS until a signed cursor-agent CLI is available. Cursor.app cannot identify a Cursor harness."}
+}
 func attachUnsafeImageError() error {
 	return &AttachLocalError{Code: "harness_executable_unsafe", Hint: "The running executable or an ancestor is untrusted. Use an installation outside the workspace, owned by you or root, without group or world write access (macOS admin directories are allowed)."}
 }
@@ -77,8 +83,11 @@ func (m *AttachManager) unchangedHarnessImage(observed attachObservation, before
 
 func (m *AttachManager) validateHarnessImage(ctx context.Context, observed attachObservation, harness string) (os.FileInfo, error) {
 	approved := m.cfg.Executables[harness]
-	if approved == "" || harness != Claude && harness != Codex && harness != Cursor && harness != Grok || harness == Cursor && runtime.GOOS == "darwin" {
+	if approved == "" || harness != Claude && harness != Codex && harness != Cursor && harness != Grok {
 		return nil, attachIdentityError()
+	}
+	if harness == Cursor && runtime.GOOS == "darwin" {
+		return nil, attachUnsupportedIdentityError()
 	}
 	physical, info, err := agentsetup.TrustedAttachExecutable(observed.Executable, m.cfg.Workspace)
 	if err != nil || physical != observed.Executable {
@@ -92,7 +101,8 @@ func (m *AttachManager) validateHarnessImage(ctx context.Context, observed attac
 		}
 	} else {
 		// The vendor check always applies to signed images, including exact pins.
-		// An unsigned legacy exact-file pin remains the narrow fallback it was.
+		// Only Linux may use a recorded install root or legacy exact-file pin.
+		// Unsigned macOS images, including Rosetta processes, have no vendor identity.
 		// A path may name a different inode after a rename over a running image.
 		// On Darwin codesign must validate the dynamic code identified by PID.
 		signature, err := m.signature(ctx, strconv.Itoa(observed.PID))
@@ -107,10 +117,11 @@ func (m *AttachManager) validateHarnessImage(ctx context.Context, observed attac
 				return nil, attachIdentityError()
 			}
 		} else {
-			identity, exists := m.cfg.Identities[harness]
-			pinned, pinErr := filepath.EvalSymlinks(approved)
-			if exists && !identity.Matches(physical, info) || !exists && (pinErr != nil || pinned != physical) {
-				return nil, attachIdentityError()
+			if runtime.GOOS != "linux" {
+				return nil, attachUnsignedIdentityError()
+			}
+			if err := m.validateLinuxAttachFallback(harness, physical, info); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -121,6 +132,18 @@ func (m *AttachManager) validateHarnessImage(ctx context.Context, observed attac
 		return nil, attachImageChangedError()
 	}
 	return info, nil
+}
+
+// Kept separate so the Linux-only fallback boundaries can be tested on macOS
+// too; the running-image validator never calls this for an unsigned Mac image.
+func (m *AttachManager) validateLinuxAttachFallback(harness, physical string, info os.FileInfo) error {
+	approved := m.cfg.Executables[harness]
+	identity, exists := m.cfg.Identities[harness]
+	pinned, pinErr := filepath.EvalSymlinks(approved)
+	if exists && !identity.Matches(physical, info) || !exists && (pinErr != nil || pinned != physical) {
+		return attachIdentityError()
+	}
+	return nil
 }
 
 var errAttachSignature = errors.New("vendor signature unavailable or invalid")

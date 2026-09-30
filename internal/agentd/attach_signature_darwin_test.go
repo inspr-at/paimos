@@ -10,10 +10,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentsetup"
 )
 
 func TestAttachCodesignRequiresValidAppleSignature(t *testing.T) {
@@ -74,7 +77,7 @@ func TestAttachCodesignRequiresValidAppleSignature(t *testing.T) {
 				}
 			case "unsigned":
 				if err != nil || signature.Signed || calls != 1 {
-					t.Fatal("unsigned fallback unavailable", err)
+					t.Fatal("unsigned image misidentified", err)
 				}
 			case "display-timeout", "verify-timeout":
 				if !errors.Is(err, errAttachSignatureUnavailable) {
@@ -238,10 +241,143 @@ func TestAttachRealRenameOverRunningImage(t *testing.T) {
 		}
 		return fixtureObserve(pid)
 	}
+	useRealAttachAncestry(m, peer)
 	m.signature = inspectAttachSignature
 	_, err = m.handle(t.Context(), peer, req)
 	var diagnostic *AttachLocalError
 	if !errors.As(err, &diagnostic) || diagnostic.Code != "harness_identity_mismatch" || len(m.sessions) != 0 {
 		t.Fatal("rename-over attack accepted by real attach manager", err)
+	}
+}
+
+// Keep the independent helper and its leader as fixtures, but read the real
+// target and every ancestor from kernel metadata rather than inventing a chain.
+func useRealAttachAncestry(m *AttachManager, peer attachObservation) {
+	fixture := m.ancestry
+	m.ancestry = func(pid int) (attachObservation, error) {
+		if pid == peer.PID || pid == peer.Session {
+			return fixture(pid)
+		}
+		return observeAttachProcessIdentity(pid)
+	}
+}
+
+func TestAttachMacOSRefusesUnsignedImages(t *testing.T) {
+	for _, harness := range []string{Claude, Codex} {
+		for _, pin := range []string{"exact", "recorded-root"} {
+			t.Run(harness+"/"+pin, func(t *testing.T) {
+				m, peer, _, req, image := attachIdentityFixture(t, harness)
+				m.cfg.Executables[harness] = image
+				if pin == "recorded-root" {
+					identity := agentsetup.RecordAttachIdentity(harness, image, m.cfg.Workspace)
+					if identity == nil {
+						t.Fatal("missing recorded-root fixture")
+					}
+					m.cfg.Identities = map[string]agentsetup.AttachIdentity{harness: *identity}
+				}
+				m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, nil }
+				_, err := m.handle(t.Context(), peer, req)
+				var diagnostic *AttachLocalError
+				if !errors.As(err, &diagnostic) || diagnostic.Code != "harness_identity_mismatch" || !strings.Contains(diagnostic.Hint, "Unsigned Claude and Codex") || len(m.sessions) != 0 {
+					t.Fatal("unsigned macOS image accepted or lost its refusal diagnostic", err)
+				}
+			})
+		}
+	}
+}
+
+func TestAttachRealUnsignedRosettaImage(t *testing.T) {
+	if runtime.GOARCH == "arm64" {
+		output, err := exec.CommandContext(t.Context(), "/usr/bin/arch", "-x86_64", "/usr/bin/true").CombinedOutput()
+		if err != nil {
+			if strings.Contains(string(output), "Bad CPU type in executable") {
+				t.Skip("Rosetta is not installed")
+			}
+			t.Fatal("Rosetta availability probe failed", err)
+		}
+	}
+	source := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(source, []byte("// SPDX-License-Identifier: AGPL-3.0-only\npackage main\nimport \"time\"\nfunc main() { time.Sleep(time.Minute) }\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	unsigned := filepath.Join(t.TempDir(), "unsigned-amd64")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", unsigned, source)
+	build.Env = append(os.Environ(), "GOARCH=amd64", "CGO_ENABLED=0", "GOMAXPROCS=2")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("amd64 fixture build failed: %v\n%s", err, output)
+	}
+	// Sign first so removing the signature is explicit even if the linker emits
+	// an unsigned amd64 executable on this Go version.
+	if _, err := runAttachCodesign(t.Context(), "--force", "--sign", "-", unsigned); err != nil {
+		t.Fatal("could not prepare fixture signature", err)
+	}
+	if _, err := runAttachCodesign(t.Context(), "--remove-signature", unsigned); err != nil {
+		t.Fatal("could not remove fixture signature", err)
+	}
+	binary, err := os.ReadFile(unsigned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, harness := range []string{Claude, Codex} {
+		t.Run(harness, func(t *testing.T) {
+			m, peer, target, req, image := attachIdentityFixture(t, harness)
+			if harness == Codex {
+				image = strings.Replace(image, "@anthropic-ai/claude-code", "@openai/codex", 1)
+			}
+			writeAttachImage(t, image)
+			identity := agentsetup.RecordAttachIdentity(harness, image, m.cfg.Workspace)
+			if identity == nil || identity.Exact {
+				t.Fatal("missing updater-root identity")
+			}
+			m.cfg.Executables[harness] = image
+			m.cfg.Identities = map[string]agentsetup.AttachIdentity{harness: *identity}
+			attacker := strings.Replace(image, "package-v1", "package-attacker", 1)
+			writeAttachImage(t, attacker)
+			if err := os.WriteFile(attacker, binary, 0755); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(attacker)
+			if err != nil || !identity.Matches(attacker, info) {
+				t.Fatal("attacker fixture does not reach the old install-root fallback", err)
+			}
+			cmd := exec.CommandContext(t.Context(), attacker)
+			cmd.Dir = m.cfg.Workspace
+			if err := cmd.Start(); err != nil {
+				t.Fatal("unsigned amd64 fixture did not run", err)
+			}
+			t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+			var running attachObservation
+			deadline := time.Now().Add(10 * time.Second)
+			for time.Now().Before(deadline) {
+				running, err = observeAttachProcess(cmd.Process.Pid)
+				if err == nil && running.Executable == attacker {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if err != nil || running.Executable != attacker {
+				t.Fatal("unsigned amd64 running image unavailable", err)
+			}
+			signature, err := inspectAttachSignature(t.Context(), strconv.Itoa(running.PID))
+			if err != nil || signature.Signed {
+				t.Fatal("real running fixture was not explicitly unsigned", err)
+			}
+			*target = running
+			req.PID = running.PID
+			fixtureObserve := m.observe
+			m.observe = func(pid int) (attachObservation, error) {
+				if pid == running.PID {
+					return observeAttachProcess(pid)
+				}
+				return fixtureObserve(pid)
+			}
+			useRealAttachAncestry(m, peer)
+			m.signature = inspectAttachSignature
+			_, err = m.handle(t.Context(), peer, req)
+			var diagnostic *AttachLocalError
+			if !errors.As(err, &diagnostic) || diagnostic.Code != "harness_identity_mismatch" || !strings.Contains(diagnostic.Hint, "Unsigned Claude and Codex") || len(m.sessions) != 0 {
+				t.Fatal("real unsigned updater-path attack accepted or refused before identity validation", err)
+			}
+		})
 	}
 }

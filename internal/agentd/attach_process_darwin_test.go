@@ -263,6 +263,12 @@ func TestAttachDarwinAncestryRecheckedBeforeUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 	appendAttach(t, req.Transcript, "must never upload\n")
+	signatureCalls := 0
+	fixtureSignature := m.signature
+	m.signature = func(ctx context.Context, pid string) (attachSignature, error) {
+		signatureCalls++
+		return fixtureSignature(ctx, pid)
+	}
 	reads := 0
 	m.observe = func(pid int) (attachObservation, error) {
 		if pid != target.PID {
@@ -279,8 +285,8 @@ func TestAttachDarwinAncestryRecheckedBeforeUpload(t *testing.T) {
 	}
 	sent = nil
 	m.sessions[preview.ID].touched = time.Now().Add(-2 * time.Second)
-	if _, err = m.handle(t.Context(), peer, poll); err == nil || len(m.sessions) != 0 {
-		t.Fatal("late ancestry change retained watch")
+	if _, err = m.handle(t.Context(), peer, poll); err == nil || len(m.sessions) != 0 || signatureCalls != 0 {
+		t.Fatal("late ancestry change retained watch or reached signature verification")
 	}
 	for _, request := range sent {
 		if request.Operation != "detach" || request.Text != "" {

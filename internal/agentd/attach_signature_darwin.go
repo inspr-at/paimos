@@ -64,7 +64,7 @@ func inspectAttachSignatureWith(ctx context.Context, pid string, run func(contex
 		if errors.Is(err, errAttachSignatureUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return attachSignature{}, errAttachSignatureUnavailable
 		}
-		// Only the explicit unsigned diagnostic enables the local fallback.
+		// Report an explicitly unsigned image; macOS attach refuses it.
 		if strings.TrimSpace(output) == pid+": code object is not signed at all" {
 			return attachSignature{}, nil
 		}

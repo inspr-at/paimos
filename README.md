@@ -1042,24 +1042,29 @@ every poll. A vendor file renamed over a foreign running binary cannot confer
 that identity. Cursor attach is refused on macOS until a signed cursor-agent
 CLI exists; Cursor.app's signature is not a harness identity.
 Legacy Claude and Codex wrapper pairings work after upgrading and
-restarting agentd. Unsigned installations and Linux use a local installation
+restarting agentd. Unsigned Claude and Codex images are refused on macOS,
+including when run through Rosetta. Linux uses a local installation
 root plus owner recorded at pairing or by `repin --harness claude`,
 `add-harness --harness codex` or `add-harness --harness cursor`; restart agentd
 after recording a fallback identity. Unknown layouts retain only the approved
-exact-file pin. Recorded roots survive removal of an old version and stay bound
-to the same pairing and account. A recorded owner and root must match even
+exact-file pin. Pairing retains recorded roots after removal of an old version,
+bound to the same pairing and account. A recorded owner and root must match even
 when the running image still has the old exact path.
 The daemon does not interpret or execute wrappers to discover an install root.
 Every image and ancestor must satisfy the existing ownership and permission
 rules, and confirmation and polls recheck the image. Local HTTP 409 diagnostics
 include `harness_identity_mismatch`, `harness_executable_unsafe`,
-`harness_image_changed` or `harness_identity_unavailable` with a repair or retry
+`harness_image_changed`, `harness_identity_unavailable` or
+`harness_identity_unsupported` with a fixed repair, retry or unsupported-harness
 hint; the attach client displays them. Signature checks run outside the manager
-lock, and recorded fallback identities are validated at startup and refresh.
+lock. Startup drops only fallback identities that cannot be re-derived from
+the approved installation; signed images and other harnesses remain available.
+Refresh validates new fallback identities against their approved installations.
 
 Identity regressions cover release-13 wrapper pairing upgrades, native exec
-chains, vendor updates, unsigned root fallback and its repair, signature
-failures, writable installations, real running-process rename-over attacks,
+chains, vendor updates, Linux root fallback and its repair, unsigned Rosetta
+image refusals, signature failures, writable installations, real
+running-process rename-over attacks,
 verification timeouts and concurrent detach, and local 409 diagnostics.
 On macOS, run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-identity-mutations.py`
 to remove each guard temporarily and require a failing regression; the script

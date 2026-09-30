@@ -64,7 +64,11 @@ func TestAttachModesIdentityAndLease(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer m.Close(t.Context())
-				m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, nil }
+				signatureCalls := 0
+				m.signature = func(ctx context.Context, pid string) (attachSignature, error) {
+					signatureCalls++
+					return attachCodexSignatureFixture(ctx, pid)
+				}
 				m.observe = func(pid int) (attachObservation, error) {
 					if pid == target.PID {
 						return target, observeErr
@@ -84,10 +88,11 @@ func TestAttachModesIdentityAndLease(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				// Injected commands and folders outside the exact root cannot even preview.
+				// Reject injected helpers before any external signature verification,
+				// even though a second ancestry check also protects the unlocked gap.
 				peer.Parent = target.PID
-				if _, err = m.handle(t.Context(), peer, req); err == nil {
-					t.Fatal("injected join accepted")
+				if _, err = m.handle(t.Context(), peer, req); err == nil || signatureCalls != 0 {
+					t.Fatal("injected join accepted or reached signature verification")
 				}
 				peer.Parent = leader.PID
 				target.CWD = root + "-other"

@@ -141,6 +141,13 @@ func TestAttachTailRefusesLinksReplacementAndNonregular(t *testing.T) {
 		t.Fatal("replacement reopened")
 	}
 }
+
+// Consent, lease and ancestry fixtures model a verified Codex CLI image.
+// Unsigned macOS images are covered by the identity refusal regressions.
+func attachCodexSignatureFixture(context.Context, string) (attachSignature, error) {
+	return attachSignature{TeamID: attachVendorTeam(Codex), Identifier: attachVendorIdentifier(Codex), Signed: true}, nil
+}
+
 func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 	t.Setenv("AEON_URL", "https://unpaired.invalid")
 	path := attachFixtureFile(t, "old turns\n")
@@ -177,7 +184,7 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.Close(t.Context())
-	m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, nil }
+	m.signature = attachCodexSignatureFixture
 	m.observe = func(pid int) (attachObservation, error) {
 		if pid == target.PID {
 			return target, nil
@@ -354,7 +361,7 @@ func TestAttachRechecksAncestryAndSessionOnConfirmAndEveryPoll(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer m.Close(t.Context())
-				m.signature = func(context.Context, string) (attachSignature, error) { return attachSignature{}, nil }
+				m.signature = attachCodexSignatureFixture
 				m.observe = func(pid int) (attachObservation, error) {
 					for _, p := range []attachObservation{peer, target, leader} {
 						if pid == p.PID && !(dead && pid == leader.PID) {
@@ -393,9 +400,14 @@ func TestAttachRechecksAncestryAndSessionOnConfirmAndEveryPoll(t *testing.T) {
 				case "leader becomes target child":
 					peer.Parent, leader.Parent = 1, target.PID
 				}
+				signatureCalls := 0
+				m.signature = func(ctx context.Context, pid string) (attachSignature, error) {
+					signatureCalls++
+					return attachCodexSignatureFixture(ctx, pid)
+				}
 				m.sessions[v.ID].touched = time.Now().Add(-2 * time.Second)
-				if _, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: op, ID: v.ID, Digest: v.Digest}); err == nil || len(m.sessions) != 0 {
-					t.Fatal("changed helper ancestry retained watch")
+				if _, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: op, ID: v.ID, Digest: v.Digest}); err == nil || len(m.sessions) != 0 || signatureCalls != 0 {
+					t.Fatal("changed helper ancestry retained watch or reached signature verification")
 				}
 				for _, request := range sent {
 					if request.Operation != "detach" || request.Text != "" {
