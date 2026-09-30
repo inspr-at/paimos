@@ -2,8 +2,9 @@
 import { mkdirSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors, type Call } from './work-fixtures'
+import { reviewShots } from './review-shots'
 
-const shots = '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-303/iter1'
+const shots = reviewShots('aeon-303')
 const benefits = {
   pill_en: 'Clear release notes',
   pill_de: 'Verständliche Release Notes',

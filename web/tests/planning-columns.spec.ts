@@ -5,8 +5,9 @@ import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork, type Fixtures } from './work-fixtures'
 import type { TicketPlanning } from '../src/lib/planning'
+import { reviewShots } from './review-shots'
 
-const shots = process.env.PLANNING_SHOTS ?? '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-370-planning-followups'
+const shots = reviewShots('aeon-370-planning-followups', process.env.PLANNING_SHOTS)
 const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const keys = (page: Page) => page.locator('tr.ticket-row:not(.ghost) .key').allTextContents()
 const astra = { label: 'Codex astra · xhigh', profile: 'codex-astra-xhigh', harness: 'codex', model: 'gpt-6-astra', effort: 'xhigh', revision: '3f9a1c2b' }

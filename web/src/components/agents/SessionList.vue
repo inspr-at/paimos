@@ -555,16 +555,16 @@ function rowClick(event: MouseEvent, id: string) {
 .sk-row { display: flex; align-items: center; gap: 18px; height: 40px; }
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
-/* Estimates need a ticket track wide enough for "overdue 5 min". */
-.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(112px, .48fr) minmax(128px, .82fr) 80px 68px 76px; }
+/* Estimates need a ticket track wide enough for "overdue 5 min" in a wide system font. */
+.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(144px, .48fr) minmax(128px, .82fr) 80px 68px 76px; }
 @container sessions (max-width: 980px) {
   .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 72px 76px; }
-  .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(104px, .42fr) minmax(116px, .75fr) 72px 76px; }
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(136px, .42fr) minmax(116px, .75fr) 72px 76px; }
   .c-elapsed { display: none; }
 }
 @container sessions (max-width: 760px) {
   .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 68px; }
-  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(100px, auto) minmax(108px, .7fr) 68px; }
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(132px, auto) minmax(108px, .7fr) 68px; }
   .c-beat, .c-elapsed { display: none; }
   .act { display: none; }
 }

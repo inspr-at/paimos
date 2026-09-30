@@ -8,10 +8,11 @@ import { defineConfig } from '@playwright/test'
 const derived = 5200 + (parseInt(createHash('sha256').update(process.cwd()).digest('hex').slice(0, 4), 16) % 700)
 const port = process.env.PLAYWRIGHT_PORT ?? String(derived)
 
-// Four workers is the default for a targeted run and for each CI shard. Specs mock
-// the API inside the page, and fixture factories return fresh objects (AEON-373).
-// scripts/check-fixture-mutation.mjs rejects a spec that mutates an imported fixture,
-// which is what leaked across files that shared one worker.
+// Four workers is the default for a targeted local run. CI shards pass --workers=2:
+// four browsers plus the Vite dev server saturated a 4-vCPU runner (AEON-410).
+// Specs mock the API inside the page, and fixture factories return fresh objects
+// (AEON-373). scripts/check-fixture-mutation.mjs rejects a spec that mutates an
+// imported fixture, which is what leaked across files that shared one worker.
 const nightly = process.env.PW_NIGHTLY === '1'
 
 export default defineConfig({
@@ -33,7 +34,10 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
-    { name: 'ui', grepInvert: /@quarantine/, retries: 0 },
+    // The route audit is its own project so a shard does not also carry that
+    // serial-sized file. CI runs it as one job with several workers.
+    { name: 'ui', grepInvert: /@quarantine/, testIgnore: '**/ui-audit.spec.ts', retries: 0 },
+    { name: 'audit', testMatch: '**/ui-audit.spec.ts', retries: 0 },
     {
       // Known flakes only. Review weekly. Nightly sets PW_NIGHTLY=1 (and passes
       // --retries=0) so these tests fail instead of hiding behind a retry.

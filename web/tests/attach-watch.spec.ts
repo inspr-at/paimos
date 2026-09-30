@@ -5,8 +5,9 @@ import { expect, test, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { reviewShots } from './review-shots'
 
-const shots = process.env.ATTACH_SHOTS ?? '/private/tmp/aeon-258-shots'
+const shots = reviewShots('aeon-258', process.env.ATTACH_SHOTS)
 async function setup(page: Page, grant = true, theme: 'light' | 'dark' = 'light') {
   const work = fixtures()
   work.preferences.theme = { choice: theme }

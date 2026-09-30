@@ -5,8 +5,9 @@ import { mkdirSync } from 'node:fs'
 import { expect, test, type Locator } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { journeyWorld, mockJourney } from './journey-fixtures'
+import { reviewShots } from './review-shots'
 
-const OUT = '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-308/iter2'
+const OUT = reviewShots('aeon-308')
 
 function overlaps(a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) {
   const x = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)

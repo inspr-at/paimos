@@ -4,8 +4,9 @@ import { mkdirSync } from 'node:fs'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { usageDashboard } from './usage-data'
+import { reviewShots } from './review-shots'
 
-const shots = '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-218'
+const shots = reviewShots('aeon-218')
 const sessionId = '5e000000-0000-4000-8000-000000000001'
 
 const world: AgentWorld = {

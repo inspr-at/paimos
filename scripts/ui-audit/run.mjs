@@ -11,8 +11,8 @@ import { dirname, resolve } from 'node:path'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const web = resolve(root, 'web')
 const playwright = resolve(web, 'node_modules/.bin/playwright')
-const result = spawnSync(playwright, ['test', '-c', 'playwright.ui.config.ts', 'tests/ui-audit.spec.ts', '--workers=1', '--reporter=line'], {
-  cwd: web, stdio: 'inherit', env: { ...process.env, PLAYWRIGHT_PORT: process.env.PLAYWRIGHT_PORT ?? '5187' },
+const result = spawnSync(playwright, ['test', '-c', 'playwright.ui.config.ts', '--project=audit', '--workers=1', '--reporter=line'], {
+  cwd: web, stdio: 'inherit', env: { ...process.env, UI_AUDIT_AGGREGATE: '1', PLAYWRIGHT_PORT: process.env.PLAYWRIGHT_PORT ?? '5187' },
 })
 if (result.error) { console.error(result.error.message); process.exitCode = 1 }
 else process.exitCode = result.status ?? 1

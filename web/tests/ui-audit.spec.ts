@@ -211,69 +211,80 @@ async function focusAudit(page: Page): Promise<Raw[]> {
   return result
 }
 
-test('offline route and state audit', async ({ browser }) => {
-  test.setTimeout(3_600_000)
-  mkdirSync(shotDir, { recursive: true })
-  const filtered = scenarios.filter(s => !process.env.AUDIT_FILTER || s.state.includes(process.env.AUDIT_FILTER))
-  if (!filtered.length) throw new Error('AUDIT_FILTER matched no states')
-  const save = () => writeFileSync(output, `${JSON.stringify([...findings.values()], null, 2)}\n`)
-  save()
-  for (const theme of themes) for (const width of widths) for (const scenario of filtered) {
-    const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: theme, reducedMotion: 'reduce' })
-    const page = await context.newPage()
-    page.setDefaultTimeout(7000)
-    const errors: Raw[] = []
-    page.on('console', message => {
-      const detail = `${message.text()} ${message.location().url}`.slice(0, 300)
-      if (message.type() === 'error' && !expectedMockConsole(scenario.state, detail)) errors.push({ kind: 'console', severity: 'serious', selector: 'window.console', detail })
-    })
-    page.on('pageerror', error => errors.push({ kind: 'unhandled-rejection', severity: 'serious', selector: 'window', detail: error.message.slice(0, 300) }))
-    await page.addInitScript(installLayoutShiftAudit)
-    await page.addInitScript(() => {
-      window.addEventListener('unhandledrejection', event => { (window as unknown as { auditRejections: string[] }).auditRejections ??= []; (window as unknown as { auditRejections: string[] }).auditRejections.push(String(event.reason)) })
-    })
-    let raw: Raw[] = []
-    try {
-      await installMocks(page, scenario.setup ?? 'default')
-      await page.goto(scenario.route)
-      // Initial hydration is part of navigation, not a late content shift.
-      // Start measuring when the document has loaded and route rendering begins.
-      await page.evaluate(armLayoutShiftAudit)
-      if (scenario.act) await scenario.act(page)
-      await page.waitForTimeout(200)
-      raw.push(...await page.evaluate(domAudit))
-      const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
-      for (const v of axe.violations.filter(v => v.impact === 'serious' || v.impact === 'critical')) for (const node of v.nodes.slice(0, 10)) {
-        const target = node.target.join(' ')
-        const labelledVersion = v.id === 'color-contrast' && await page.locator(target).evaluate(el => !!el.closest('.calendar-version[aria-label], .version-coordinate[aria-label]')).catch(() => false)
-        if (decorativeVersionContrast(target, v.id, labelledVersion)) continue
-        raw.push({ kind: 'axe', severity: v.impact as Raw['severity'], selector: target, detail: `${v.id}: ${v.help}; ${node.failureSummary?.slice(0, 250) ?? ''}` })
+// One test per screen so CI shards and workers run the audit in parallel. The
+// serial loop was about 26 minutes on one runner. UI_AUDIT_AGGREGATE=1 (the
+// local npm run audit:ui, workers=1) still writes the combined findings file.
+const aggregate = process.env.UI_AUDIT_AGGREGATE === '1'
+const save = () => { if (aggregate) writeFileSync(output, `${JSON.stringify([...findings.values()], null, 2)}\n`) }
+const selected = scenarios.filter(s => !process.env.AUDIT_FILTER || s.state.includes(process.env.AUDIT_FILTER))
+if (!selected.length) {
+  test('audit filter matched nothing', () => { throw new Error('AUDIT_FILTER matched no states') })
+}
+if (aggregate) { mkdirSync(shotDir, { recursive: true }); save() }
+
+for (const scenario of selected) {
+  test(`offline route and state audit: ${scenario.state}`, async ({ browser }) => {
+    test.setTimeout(180_000)
+    const unreachable: string[] = []
+    for (const theme of themes) for (const width of widths) {
+      const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: theme, reducedMotion: 'reduce' })
+      const page = await context.newPage()
+      page.setDefaultTimeout(7000)
+      const errors: Raw[] = []
+      page.on('console', message => {
+        const detail = `${message.text()} ${message.location().url}`.slice(0, 300)
+        if (message.type() === 'error' && !expectedMockConsole(scenario.state, detail)) errors.push({ kind: 'console', severity: 'serious', selector: 'window.console', detail })
+      })
+      page.on('pageerror', error => errors.push({ kind: 'unhandled-rejection', severity: 'serious', selector: 'window', detail: error.message.slice(0, 300) }))
+      await page.addInitScript(installLayoutShiftAudit)
+      await page.addInitScript(() => {
+        window.addEventListener('unhandledrejection', event => { (window as unknown as { auditRejections: string[] }).auditRejections ??= []; (window as unknown as { auditRejections: string[] }).auditRejections.push(String(event.reason)) })
+      })
+      let raw: Raw[] = []
+      try {
+        await installMocks(page, scenario.setup ?? 'default')
+        await page.goto(scenario.route)
+        // Initial hydration is part of navigation, not a late content shift.
+        // Start measuring when the document has loaded and route rendering begins.
+        await page.evaluate(armLayoutShiftAudit)
+        if (scenario.act) await scenario.act(page)
+        await page.waitForTimeout(200)
+        raw.push(...await page.evaluate(domAudit))
+        const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+        for (const v of axe.violations.filter(v => v.impact === 'serious' || v.impact === 'critical')) for (const node of v.nodes.slice(0, 10)) {
+          const target = node.target.join(' ')
+          const labelledVersion = v.id === 'color-contrast' && await page.locator(target).evaluate(el => !!el.closest('.calendar-version[aria-label], .version-coordinate[aria-label]')).catch(() => false)
+          if (decorativeVersionContrast(target, v.id, labelledVersion)) continue
+          raw.push({ kind: 'axe', severity: v.impact as Raw['severity'], selector: target, detail: `${v.id}: ${v.help}; ${node.failureSummary?.slice(0, 250) ?? ''}` })
+        }
+        const shift = await page.evaluate(readLayoutShiftAudit)
+        if (shift.score > 0.02) raw.push({ kind: 'layout-shift', severity: 'moderate', selector: 'document', detail: `CLS after load: ${shift.score.toFixed(4)}; ${shift.sources.slice(0, 5).join('; ')}` })
+        const rejections = await page.evaluate(() => (window as unknown as { auditRejections?: string[] }).auditRejections ?? [])
+        for (const rejection of rejections) raw.push({ kind: 'unhandled-rejection', severity: 'serious', selector: 'window', detail: rejection.slice(0, 300) })
+        // Tabbing is a deliberate interaction and can scroll long pages. Measure
+        // load stability first so focus exploration cannot inflate CLS.
+        raw.push(...await focusAudit(page))
+      } catch (error) { raw.push({ kind: 'scenario-error', severity: 'serious', selector: 'document', detail: String(error).slice(0, 500) }) }
+      raw.push(...errors)
+      for (const row of raw) if (row.kind === 'scenario-error') unreachable.push(`${width} ${theme}: ${row.detail}`)
+      if (aggregate) {
+        const newRows = raw.filter(row => !findings.has(`${row.kind}|${scenario.route}|${scenario.state}|${theme}|${row.selector}|${row.detail.replace(/\d+(?:\.\d+)?/g, '#')}`))
+        let shot = ''
+        if (newRows.length) {
+          shot = join(shotDir, `${scenario.state.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${width}-${theme}.png`)
+          try { await page.screenshot({ path: shot, fullPage: true, animations: 'disabled' }) } catch { shot = '' }
+        }
+        for (const row of raw) {
+          const key = `${row.kind}|${scenario.route}|${scenario.state}|${theme}|${row.selector}|${row.detail.replace(/\d+(?:\.\d+)?/g, '#')}`
+          const old = findings.get(key)
+          if (old) { if (!old.viewport.split(',').includes(String(width))) old.viewport += `,${width}`; continue }
+          findings.set(key, { ...row, id: `${row.kind}-${createHash('sha1').update(key).digest('hex').slice(0, 10)}`, route: scenario.route, state: scenario.state, viewport: String(width), theme, screenshot: shot })
+        }
+        save()
       }
-      const shift = await page.evaluate(readLayoutShiftAudit)
-      if (shift.score > 0.02) raw.push({ kind: 'layout-shift', severity: 'moderate', selector: 'document', detail: `CLS after load: ${shift.score.toFixed(4)}; ${shift.sources.slice(0, 5).join('; ')}` })
-      const rejections = await page.evaluate(() => (window as unknown as { auditRejections?: string[] }).auditRejections ?? [])
-      for (const rejection of rejections) raw.push({ kind: 'unhandled-rejection', severity: 'serious', selector: 'window', detail: rejection.slice(0, 300) })
-      // Tabbing is a deliberate interaction and can scroll long pages. Measure
-      // load stability first so focus exploration cannot inflate CLS.
-      raw.push(...await focusAudit(page))
-    } catch (error) { raw.push({ kind: 'scenario-error', severity: 'serious', selector: 'document', detail: String(error).slice(0, 500) }) }
-    raw.push(...errors)
-    const newRows = raw.filter(row => !findings.has(`${row.kind}|${scenario.route}|${scenario.state}|${theme}|${row.selector}|${row.detail.replace(/\d+(?:\.\d+)?/g, '#')}`))
-    let shot = ''
-    if (newRows.length) {
-      shot = join(shotDir, `${scenario.state.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${width}-${theme}.png`)
-      try { await page.screenshot({ path: shot, fullPage: true, animations: 'disabled' }) } catch { shot = '' }
+      console.log(`audited ${scenario.state} ${width} ${theme}: ${raw.length} observations`)
+      await context.close()
     }
-    for (const row of raw) {
-      const key = `${row.kind}|${scenario.route}|${scenario.state}|${theme}|${row.selector}|${row.detail.replace(/\d+(?:\.\d+)?/g, '#')}`
-      const old = findings.get(key)
-      if (old) { if (!old.viewport.split(',').includes(String(width))) old.viewport += `,${width}`; continue }
-      findings.set(key, { ...row, id: `${row.kind}-${createHash('sha1').update(key).digest('hex').slice(0, 10)}`, route: scenario.route, state: scenario.state, viewport: String(width), theme, screenshot: shot })
-    }
-    save()
-    console.log(`audited ${scenario.state} ${width} ${theme}: ${raw.length} observations`)
-    await context.close()
-  }
-  console.log(`UI audit: ${findings.size} deduplicated findings in ${output}`)
-  expect([...findings.values()].filter(f => f.kind === 'scenario-error').map(f => `${f.state}: ${f.detail}`), 'every audit state must be reachable').toEqual([])
-})
+    expect(unreachable, 'every audit state must be reachable').toEqual([])
+  })
+}

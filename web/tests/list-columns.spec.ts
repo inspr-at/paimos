@@ -3,8 +3,9 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, liveAgent, mockWork, type Fixtures } from './work-fixtures'
+import { reviewShots } from './review-shots'
 
-const shots = '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-316-list-columns'
+const shots = reviewShots('aeon-316-list-columns')
 const at = (minutes: number) => new Date(Date.parse('2026-09-23T12:00:00Z') + minutes * 60_000).toISOString()
 const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const ticket = (id: string, key: string, title: string) => ({ id, key, title, project_id: 'p-pharos' })

@@ -39,7 +39,7 @@ const kind = computed(() => view.value?.text && (props.labelled || view.value.ki
 .eta-cell.end { justify-content: flex-end; }
 .main { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
 .kind { flex: none; font-size: 11.5px; color: var(--ink-3); }
-.when { display: inline-grid; min-width: 0; }
+.when { display: inline-grid; min-width: max-content; }
 .when > span { grid-area: 1 / 1; overflow: hidden; text-overflow: ellipsis; }
 .eta-cell.end .when > span { text-align: right; }
 .hover { visibility: hidden; }

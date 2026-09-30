@@ -631,8 +631,16 @@ test('at 390 the meta line wraps without a separator at the start or end of a li
   await page.goto(`/business/customers/${HOFER}`)
   const line = page.locator('.summary .dot-list')
   await expect(line.locator('> *')).toHaveCount(3)
-  // The website wraps to a second line, which starts at the clipped edge: no dot leads it.
-  expect(await line.evaluate(list => new Set([...list.children].map(el => Math.round(el.getBoundingClientRect().top))).size)).toBe(2)
+  // The website wraps below the first item. A wider system font can put each
+  // item on its own line; either way a wrapped line starts at the clipped edge.
+  const rows = await line.evaluate(list => {
+    const tops = [...list.children].map(el => Math.round(el.getBoundingClientRect().top))
+    const site = Math.round(list.querySelector('a')!.getBoundingClientRect().top)
+    return { lines: new Set(tops).size, siteWraps: site > tops[0] }
+  })
+  expect(rows.lines).toBeGreaterThanOrEqual(2)
+  expect(rows.lines).toBeLessThanOrEqual(3)
+  expect(rows.siteWraps).toBe(true)
   await expect(page.getByRole('region', { name: 'Projects, quotes and hours' }).getByText('Framework agreement')).toBeVisible()
   await dotsNeverLead(page)
   await expect(page.getByRole('region', { name: 'About' })).not.toContainText('ORG-1')

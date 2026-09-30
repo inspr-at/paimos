@@ -3,6 +3,9 @@
 // work in the open count, at a phone width and on a wide screen.
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, type MockNode } from './work-fixtures'
+import { reviewShots } from './review-shots'
+
+const shots = reviewShots('aeon-302-status-buckets')
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
 
@@ -51,7 +54,7 @@ test('card and header count open, blocked and unknown work at 390 and 1600', asy
     expect(cardBox.x).toBeGreaterThanOrEqual(0)
     expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(width + 1)
     await noHorizontalScroll(page)
-    await page.screenshot({ path: `/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-302-status-buckets/card-${width}.png`, fullPage: false })
+    await page.screenshot({ path: `${shots}/card-${width}.png`, fullPage: false })
 
     await page.goto('/p/BUCKET')
     const stats = page.locator('.head-stats')
@@ -66,6 +69,6 @@ test('card and header count open, blocked and unknown work at 390 and 1600', asy
     expect(statsBox.x).toBeGreaterThanOrEqual(0)
     expect(statsBox.x + statsBox.width).toBeLessThanOrEqual(width + 1)
     await expect(stats.locator('.stat').first()).toBeInViewport()
-    await page.screenshot({ path: `/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-302-status-buckets/header-${width}.png`, fullPage: false })
+    await page.screenshot({ path: `${shots}/header-${width}.png`, fullPage: false })
   }
 })

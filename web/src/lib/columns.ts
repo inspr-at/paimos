@@ -37,8 +37,9 @@ export const COLUMNS: ColumnDef[] = [
   { id: 'created', label: 'Created', sort: 'created_at', width: 104, min: 80, max: 200, end: true },
   { id: 'updated', label: 'Updated', sort: 'updated_at', width: 104, min: 80, max: 200, end: true },
   { id: 'progress', label: 'Progress', sort: 'progress', width: 100, min: 84, max: 140, end: true },
-  // 112px fits "overdue 5 min" at the cell's 12.5px type; 96px ellipsizes it.
-  { id: 'eta', label: 'ETA', sort: 'eta_ready', width: 112, min: 88, max: 160, end: true },
+  // 144px fits "overdue 5 min" at 12.5px in a wide system font (Ubuntu CI).
+  // 112px fits SF Pro and ellipsizes that string once the cell padding is subtracted.
+  { id: 'eta', label: 'ETA', sort: 'eta_ready', width: 144, min: 128, max: 200, end: true },
 ]
 export const COLUMN_BY_ID = new Map(COLUMNS.map(column => [column.id, column]))
 // Key and Title always lead; the rest can be hidden and reordered.

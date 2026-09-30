@@ -5,8 +5,9 @@ import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { reviewShots } from './review-shots'
 
-const shots = process.env.ATTACH_SHOTS ?? '/private/tmp/aeon-258-shots'
+const shots = reviewShots('aeon-258', process.env.ATTACH_SHOTS)
 type Computer = { computer_id: string; name: string; capability: string }
 const computer = (capability: string, name = 'Studio Mac', id = '22222222-2222-4222-8222-222222222222'): Computer => ({ computer_id: id, name, capability })
 const limitation: Record<string, string> = {

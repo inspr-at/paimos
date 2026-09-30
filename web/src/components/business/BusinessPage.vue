@@ -107,7 +107,7 @@ onMounted(() => { void business.loadPlugins() })
 }
 @container biz-head (max-width: 560px) {
   .biz-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; width: auto; overflow: visible; border-radius: 16px; }
-  .biz-tab { flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 2px; border-radius: 13px; font-size: 11px; }
+  .biz-tab { flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 1px; border-radius: 13px; font-size: 10px; }
   .biz-tab span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 }
 @media (max-width: 720px) {
@@ -120,7 +120,7 @@ onMounted(() => { void business.loadPlugins() })
 /* Phones: every tab in one row, icon over label; nothing scrolls sideways or is cut. */
 @media (max-width: 600px) {
   .biz-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; width: auto; overflow: visible; border-radius: 16px; }
-  .biz-tab { flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 2px; border-radius: 13px; font-size: 11px; }
+  .biz-tab { flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 1px; border-radius: 13px; font-size: 10px; }
   .biz-tab span { max-width: 100%; }
 }
 </style>
