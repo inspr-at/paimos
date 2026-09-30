@@ -86,6 +86,23 @@ const agentsWorld: AgentWorld = {
 }
 const sessionRow = (page: Page, n: number) => page.locator(`[data-row="s:5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}"]`)
 
+for (const role of ['worker', 'coordinator'] as const) {
+  test(`an unbound ${role} has no missing-ETA hint in its row or panel`, async ({ page }) => {
+    await mockWork(page, fixtures(), { admin: true })
+    const data = agentData({ ...agentsWorld })
+    const session = data.sessions[0]!
+    Object.assign(session, { role, ticket_node_id: null, ticket: null, work_order_id: null, run_id: null, eta_ready_at: null, eta_live_at: null, progress_pct: 0, phase: 'working', stopped_at: null })
+    await mockAgents(page, data)
+    await page.goto('/agents')
+    await expect(sessionRow(page, 1)).toBeVisible()
+    await expect(sessionRow(page, 1).locator('.eta-cell')).toHaveCount(0)
+    await page.goto(`/agents/${session.id}`)
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    await expect(panel).toBeVisible()
+    await expect(panel.locator('.now-eta')).toHaveCount(0)
+  })
+}
+
 for (const width of [1600, 1100, 390]) {
   test(`the sessions table carries the bound ticket's estimate without overflowing its columns at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })

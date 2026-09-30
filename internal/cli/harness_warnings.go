@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -30,9 +31,15 @@ func (rt *runtime) printEstimateWarnings(warnings []harness.EstimateWarning, at 
 	}
 }
 
-// One-shot invocations share a value-free private warning receipt next to the
-// worker lease. It carries no lease, local path, response or ticket content.
-func (rt *runtime) printHeartbeatWarnings(out any, session, leaseFile string) {
+// One-shot invocations share a value-free private warning receipt under
+// ~/.aeon, independent of whether the worker lease came from a file or stdin.
+// Run-heartbeat keeps its receipts in its existing private state directory.
+func (rt *runtime) printHeartbeatWarnings(out any, session, _ string) {
+	home, _ := os.UserHomeDir()
+	rt.printHeartbeatWarningsHome(out, session, home)
+}
+
+func (rt *runtime) printHeartbeatWarningsHome(out any, session, home string) {
 	raw, err := json.Marshal(out)
 	if err != nil {
 		return
@@ -43,7 +50,7 @@ func (rt *runtime) printHeartbeatWarnings(out any, session, leaseFile string) {
 	if json.Unmarshal(raw, &response) != nil || len(response.Warnings) == 0 {
 		return
 	}
-	hold, err := openHeartbeatHold(filepath.Join(filepath.Dir(leaseFile), ".heartbeat-warnings-"+session))
+	hold, err := openHeartbeatWarningHold(home, session)
 	if errors.Is(err, errHeartbeatBusy) {
 		return
 	}
@@ -59,4 +66,16 @@ func (rt *runtime) printHeartbeatWarnings(out any, session, leaseFile string) {
 		raw, _ := json.Marshal(disk)
 		_ = hold.writeFile("state.json", raw)
 	}
+}
+
+func openHeartbeatWarningHold(home, session string) (heartbeatHold, error) {
+	if !filepath.IsAbs(home) || !validUUID(session) {
+		return heartbeatHold{}, errHeartbeatState
+	}
+	dir, err := openPrivateHeartbeatDir(filepath.Join(home, ".aeon"))
+	if err != nil {
+		return heartbeatHold{}, err
+	}
+	defer dir.Close()
+	return openHeartbeatHold(filepath.Join(dir.Name(), ".heartbeat-warnings-"+session))
 }

@@ -41,6 +41,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -1115,7 +1116,8 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	warnings, err := heartbeatEstimateWarnings(ctx, tx, s, in.ProgressPct)
 	if err != nil {
-		return nil, err
+		slog.Warn("harness heartbeat guidance failed", "session_id", s.ID, "error", err)
+		warnings = []EstimateWarning{}
 	}
 	return heartbeatResponse{reporterSession(s), warnings}, nil
 }

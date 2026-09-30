@@ -19,7 +19,7 @@ const { appearance } = useAgentAppearance()
 import AgentGlyph from './AgentGlyph.vue'
 import HarnessBadge from './HarnessBadge.vue'
 import ProviderMark from './ProviderMark.vue'
-import { intendedResult, sessionContext, sessionExecution } from './sessionRow'
+import { intendedResult, sessionContext, sessionExecution, sessionEtaEligible } from './sessionRow'
 import EtaCell from '../work/EtaCell.vue'
 import { etaFromSession } from '../../lib/eta'
 import { brand } from '../../lib/brand'
@@ -144,8 +144,8 @@ const bin = (view: SessionView) => removal.canRemove(view.session) && quickRemov
 const hasMenu = (view: SessionView) => { const m = menuOf(view); return m.control.length > 0 || m.other.length > 0 || !!m.note || (m.remove && !bin(view)) }
 // The bound ticket's estimate sits under its key while the session runs; an ended
 // session no longer speaks for the ticket.
-const etaOf = (view: SessionView) => view.ticket && live(view) ? etaFromSession(view.session) : null
-const working = (view: SessionView) => live(view) && !view.session.stopped_at && view.session.phase === 'working'
+const etaOf = (view: SessionView) => sessionEtaEligible(view) ? etaFromSession(view.session) : null
+const working = (view: SessionView) => sessionEtaEligible(view) && view.session.phase === 'working'
 const hasEta = computed(() => current.value.some(view => !!etaOf(view) || working(view)))
 // The hover shortcut exists only where Interrupt works right now.
 const inline = (view: SessionView, kind: SessionControl['kind']) => menuOf(view).control.includes(kind)

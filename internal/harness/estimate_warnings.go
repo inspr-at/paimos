@@ -22,6 +22,14 @@ type heartbeatResponse struct {
 // Keep the grace period in the generation, so reporter restarts do not hide a
 // missing report. A stored percent does not count as progress on this beat.
 func heartbeatEstimateWarnings(ctx context.Context, tx pgx.Tx, s Session, progress json.RawMessage) ([]EstimateWarning, error) {
+	// Guidance is optional. Isolate its SQL so a failure cannot leave the
+	// heartbeat's transaction aborted after the caller ignores the error.
+	warningTx, err := tx.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = warningTx.Rollback(ctx) }()
+	tx = warningTx
 	working := s.Phase == "working" && s.StoppedAt == nil && s.ArchivedAt == nil
 	_, reported, err := parseProgress(progress)
 	if err != nil {
@@ -38,9 +46,9 @@ func heartbeatEstimateWarnings(ctx context.Context, tx pgx.Tx, s Session, progre
 	if missing && beats >= 3 {
 		warnings = append(warnings, EstimateWarning{"missing_progress", "Report progress_pct (0–100) on each heartbeat; run-heartbeat can read pct from --status-file."})
 	}
-	if working && s.Role == "worker" && s.EtaReadyAt == nil {
+	if working && s.TicketNodeID != nil && s.Role == "worker" && s.EtaReadyAt == nil {
 		warnings = append(warnings, EstimateWarning{"missing_eta", "Report eta_ready_at for the bound ticket; run-heartbeat can read remaining_min from --status-file."})
-	} else if working && s.Role == "coordinator" && s.EtaLiveAt == nil {
+	} else if working && s.TicketNodeID != nil && s.Role == "coordinator" && s.EtaLiveAt == nil {
 		warnings = append(warnings, EstimateWarning{"missing_eta", "Report eta_live_at for the bound ticket (harness heartbeat --eta-live +25m)."})
 	}
 	if s.TicketNodeID != nil {
@@ -60,5 +68,5 @@ func heartbeatEstimateWarnings(ctx context.Context, tx pgx.Tx, s Session, progre
 			}
 		}
 	}
-	return warnings, nil
+	return warnings, warningTx.Commit(ctx)
 }

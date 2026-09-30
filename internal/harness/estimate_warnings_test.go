@@ -69,7 +69,44 @@ func TestHeartbeatEstimateWarningMatrix(t *testing.T) {
 
 	bareLease := "guidance-unbound-lease-0000000000001"
 	bare := f.registerSession(t, f.agent.ID, "worker", "", "guidance-unbound-ref-00000001", bareLease)
-	warningCodes(t, f.beat(t, bare, bareLease, 1, nil), "missing_eta")
+	for seq := 1; seq <= 2; seq++ {
+		warningCodes(t, f.beat(t, bare, bareLease, seq, nil))
+	}
+	warningCodes(t, f.beat(t, bare, bareLease, 3, nil), "missing_progress")
+	bareCoordLease := "guidance-unbound-coordinator-lease-01"
+	bareCoord := f.registerSession(t, f.agent.ID, "coordinator", "", "guidance-unbound-coord-ref-001", bareCoordLease)
+	for seq := 1; seq <= 4; seq++ {
+		warningCodes(t, f.beat(t, bareCoord, bareCoordLease, seq, nil))
+	}
+}
+
+func TestHeartbeatWarningSQLFailureDoesNotRollbackAcceptedBeat(t *testing.T) {
+	f := fixture(t)
+	lease := "guidance-sql-failure-lease-00000001"
+	session := f.registerSession(t, f.agent.ID, "worker", f.ticket, "guidance-sql-failure-ref-00001", lease)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `CREATE FUNCTION reject_estimate_warnings() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN RAISE EXCEPTION 'guidance unavailable'; END $$;
+			CREATE TRIGGER reject_estimate_warnings BEFORE UPDATE OF missing_progress_beats ON harness_sessions
+			FOR EACH ROW EXECUTE FUNCTION reject_estimate_warnings()`)
+		return err
+	})
+	for seq := 1; seq <= 2; seq++ {
+		body := f.beat(t, session, lease, seq, map[string]any{"activity_note": "Still working"})
+		warningCodes(t, body)
+		if body["activity_sequence"] != float64(seq) || body["activity_note"] != "Still working" || body["heartbeat_at"] == nil {
+			t.Fatal("guidance failure lost accepted heartbeat fields", body)
+		}
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var sequence int
+		var note string
+		err := tx.QueryRow(t.Context(), `SELECT activity_sequence,activity_note FROM harness_sessions WHERE id=$1`, session).Scan(&sequence, &note)
+		if err == nil && (sequence != 2 || note != "Still working") {
+			t.Fatalf("heartbeat did not commit: %d %q", sequence, note)
+		}
+		return err
+	})
 }
 
 func TestTicketEtaRetainsWorkingHintWithoutReport(t *testing.T) {
