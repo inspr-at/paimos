@@ -28,3 +28,19 @@ func WithCodenames(h History) History {
 	}
 	return out
 }
+
+// CodenameOf is the codename of the published or reserved release with this
+// version in the served history, or "" when the build does not know it.
+func (m *Module) CodenameOf(version string) string {
+	return CodenameOf(m.history, version)
+}
+
+// CodenameOf is the codename of the release with this version in h, or "".
+func CodenameOf(h History, version string) string {
+	for _, r := range WithCodenames(h).Releases {
+		if r.Version == version {
+			return r.Codename
+		}
+	}
+	return ""
+}

@@ -1515,6 +1515,7 @@ paths:
                   version: {type: string, description: "YYMMDDhhmmss.0.0 or dev"}
                   scheme: {type: string, enum: [inspr-calendar-v2, inspr-calver-3], description: "inspr-calver-3 for builds from AEON-309 on; inspr-calendar-v2 for earlier builds"}
                   brand: {$ref: '#/components/schemas/Brand'}
+                  codename: {type: string, description: "AEON-430. Marketing name of the running release (for example Fresh Flyby), shown in the footer instead of the version. Absent for a build whose release history does not know its version, such as dev."}
   /projects/{projectId}/releases/{releaseId}/note-snapshot:
     get:
       operationId: releaseNoteSnapshot
@@ -9577,6 +9578,7 @@ components:
       properties:
         released_at: {type: string, format: date-time}
         version: {type: string, description: Present only when the frozen version is a calendar coordinate (inspr-calver-3 or inspr-calendar-v2)}
+        codename: {type: string, description: "AEON-430. The release's marketing name, present only when this build's release history knows the version. The portal shows it in front of the date and reveals the version on hover."}
         notes:
           type: array
           items:

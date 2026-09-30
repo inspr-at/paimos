@@ -159,8 +159,8 @@ watch(() => releases.available, async version => {
   if (version !== releases.available) return
   const title = release ? releaseTitle(release, profile.profile?.locale) : ''
   const about = title ? `: ${title}` : ''
-  const named = release?.codename ? ` (${release.codename})` : ''
-  toast(`${brand.value.wordmark} was updated to ${version}${named}${about}`, {
+  // The marketing name leads; the calendar version is the fallback, never both.
+  toast(`${brand.value.wordmark} was updated to ${release?.codename || version}${about}`, {
     sticky: true, key: 'update',
     actions: [{ label: 'What’s new', run: () => openReleases(version) }, { label: 'Reload', run: () => window.location.reload() }],
   })

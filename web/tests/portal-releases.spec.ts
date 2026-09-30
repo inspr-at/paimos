@@ -45,7 +45,13 @@ const catalog = {
   release_history: true,
 }
 
-async function install(page: Page, body: 'releases' | 'empty' | 'missing') {
+// AEON-430: a release this build's history knows carries its marketing name.
+const named = {
+  product: releases.product,
+  releases: [{ ...releases.releases[0], released_at: '2026-09-30T07:49:21Z', version: '260930074921.0.0', codename: 'Fresh Flyby' }, releases.releases[1]],
+}
+
+async function install(page: Page, body: 'releases' | 'named' | 'empty' | 'missing') {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url())
     if (url.pathname === '/api/me') {
@@ -58,7 +64,7 @@ async function install(page: Page, body: 'releases' | 'empty' | 'missing') {
         return
       }
       if (url.pathname.endsWith('/releases')) {
-        const payload = body === 'empty' ? { product: releases.product, releases: [] } : releases
+        const payload = body === 'empty' ? { product: releases.product, releases: [] } : body === 'named' ? named : releases
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) })
         return
       }
@@ -94,6 +100,26 @@ async function expectFits(page: Page) {
 }
 
 for (const width of [1600, 390]) {
+  test(`public release history leads with the marketing name at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await install(page, 'named')
+    await page.goto('/portal/harbour/releases')
+    const heading = page.getByRole('heading', { level: 2, name: /Fresh Flyby/ })
+    await expect(heading.locator('.rn-name')).toHaveText('Fresh Flyby')
+    // The date is a quiet line below; no version text, no release number at rest.
+    await expect(page.locator('time[datetime="2026-09-30T07:49:21Z"]')).toHaveText(/30 Sept? 2026/)
+    await expect(heading.locator('.rn-stamp')).toHaveCSS('opacity', '0')
+    await expect(page.locator('.portal')).not.toContainText(/260930074921|Release \d/)
+    // Hover (or focus) reveals the calendar version as the Pretty stamp.
+    await heading.locator('.release-name').focus()
+    await expect(heading.locator('.rn-stamp')).toHaveCSS('opacity', '1')
+    await expect(heading.locator('.rn-stamp .calendar-version')).toHaveAttribute('aria-label', /^260930074921\.0\.0 · 2026-09-30 07:49:21 UTC$/)
+    await expectFits(page)
+    await capture(page, `public-releases-named-${width}.png`)
+    // A release without a name keeps its dated heading.
+    await expect(page.getByRole('heading', { level: 2, name: /10 Sept? 2026/ })).toBeVisible()
+  })
+
   test(`public release history at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await install(page, 'releases')

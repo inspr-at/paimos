@@ -191,7 +191,7 @@ test.describe('gear menu', () => {
     const items = await names(page, 'App and workspace')
     expect(items.slice(0, 7)).toEqual(['Workspace settings', 'Connect your machine', 'Agent keys', 'Inbox hooks', expect.stringMatching(/^Release history/), 'Keyboard shortcuts', 'Help & feedback'])
     await expect(menu.getByRole('group', { name: 'Agents' }).getByRole('menuitem')).toHaveCount(3)
-    expect(items[7]).toMatch(/^System status, Operational, version \d{12}\.\d+\.\d+, deployed 50 min ago$/)
+    expect(items[7]).toMatch(/^System status, Operational, (?:[A-Z][a-z]+ [A-Z][a-z]+, )?version \d{12}\.\d+\.\d+, deployed 50 min ago$/)
     await expect(menu.getByRole('menuitem', { name: 'Workspace settings' })).toBeFocused()
     await menu.getByRole('menuitem', { name: 'Workspace settings' }).click()
     await expect(page).toHaveURL('/settings/workspace')

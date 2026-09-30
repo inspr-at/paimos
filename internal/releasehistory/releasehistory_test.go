@@ -362,6 +362,32 @@ func TestWithCodenames(t *testing.T) {
 	}
 }
 
+// CodenameOf names a version by its sequence for /api/version and the portal
+// (AEON-430): the published names, nothing for an unknown version or sequence.
+func TestCodenameOf(t *testing.T) {
+	h := History{Releases: []Release{
+		{Version: "260930074921.0.0", ReleaseSequence: 111, State: StatePublished},
+		{Version: "260930094206.0.0", ReleaseSequence: 112, State: StatePublished},
+		{Version: "260930115354.0.0", ReleaseSequence: 113, State: StatePublished},
+		{Version: "260923140000.0.0", State: StateReserved},
+	}}
+	for version, want := range map[string]string{
+		"260930074921.0.0": "Fresh Flyby",
+		"260930094206.0.0": "Glossy Glint",
+		"260930115354.0.0": "Hinged Hangar",
+		"260923140000.0.0": "", // no sequence, no name
+		"260101000000.0.0": "", // not in this history
+		"dev":              "",
+	} {
+		if got := CodenameOf(h, version); got != want {
+			t.Errorf("CodenameOf(%q) = %q, want %q", version, got, want)
+		}
+	}
+	if got := NewWith(h, "260930115354.0.0").CodenameOf("260930115354.0.0"); got != "Hinged Hangar" {
+		t.Errorf("module CodenameOf = %q", got)
+	}
+}
+
 // Build refuses a history whose version.json recorded a codename the lists no
 // longer give its sequence, so `just release-history` fails before a rename.
 func TestBuildRefusesRenamedCodename(t *testing.T) {

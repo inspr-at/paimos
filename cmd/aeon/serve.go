@@ -256,7 +256,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	api := &httpapi.Server{
 		Pool:  pool,
 		Brand: &productBrand,
-		Web:   webFS,
+		// AEON-430: the footer names the running release from /api/version.
+		Codename: historyMod.CodenameOf,
+		Web:      webFS,
 		Modules: []httpapi.Module{
 			authMod,
 			// ADR-003: permissions, roles, members, project members, invites and

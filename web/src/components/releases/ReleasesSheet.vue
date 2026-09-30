@@ -13,6 +13,7 @@ import { useReleases } from '../../stores/releases'
 import { useVersion } from '../../stores/version'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
+import ReleaseName from '../ReleaseName.vue'
 import LangBadge from './LangBadge.vue'
 import ReleaseCompare from './ReleaseCompare.vue'
 import ReleaseDetail from './ReleaseDetail.vue'
@@ -156,11 +157,6 @@ const compareTo = computed(() => mode.value === 'compare' && cursor.value && cur
 const server = computed(() => liveServer(current.value, store.available))
 const notice = computed(() => releaseNotice(pageRuns.value, server.value, missing.value))
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
-// A row with a brief (or a reservation, titled by its state) keeps the codename
-// as a quiet line beside its version; without one the codename is the title.
-const titled = (r: Release) => r.state === 'reserved' || !!rails.value.get(r.version)?.text
-// The newer server's codename, when this build's history already knows it.
-const serverName = computed(() => byVersion.value.get(server.value)?.codename ?? '')
 
 // ---------- Selection ----------
 // `releases=all` (the header) stays on the list with nothing selected. `releases=current`
@@ -422,7 +418,7 @@ const KINDS = [
         </div>
         <p v-if="notice === 'update'" class="notice" role="status">
           <AppIcon name="info" :size="14" />
-          <span>A newer version is live: this page still runs <CalendarVersion v-if="pageRuns" :value="pageRuns" class="notice-version" />, and the server runs <CalendarVersion v-if="server" :value="server" class="notice-version" /><template v-if="serverName">, {{ serverName }}</template>.</span>
+          <span>A newer release is live: this page still runs <ReleaseName v-if="pageRuns" :version="pageRuns" class="notice-version" />, and the server runs <ReleaseName v-if="server" :version="server" class="notice-version" />.</span>
           <button type="button" class="btn sm" @click="reload"><AppIcon name="refresh" :size="12" />Reload</button>
         </p>
         <p v-else-if="notice === 'missing'" class="notice" role="status">
@@ -451,7 +447,7 @@ const KINDS = [
           </div>
 
           <p v-if="mode === 'compare'" class="compare-hint" role="status">
-            <span :lang="lang">{{ copyText.comparingFrom }}</span><CalendarVersion v-if="compareFrom" :value="compareFrom" class="hint-version" />
+            <span :lang="lang">{{ copyText.comparingFrom }}</span><ReleaseName v-if="compareFrom" :version="compareFrom" :name="byVersion.get(compareFrom)?.codename" class="hint-version" />
             <span v-if="phone" :lang="lang">{{ copyText.compareTap }}</span>
             <span v-else :lang="lang">{{ copyText.compareOther[0] }} <kbd class="keycap">j</kbd> <kbd class="keycap">k</kbd> {{ copyText.compareOther[1] }}</span>
           </p>
@@ -494,8 +490,7 @@ const KINDS = [
                 </span>
                 <span class="main">
                   <span class="line1">
-                    <CalendarVersion :value="r.version" class="row-version" />
-                    <span v-if="r.codename && titled(r)" class="row-codename" :title="r.codename"><template v-for="(p, i) in marked(r.codename)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
+                    <ReleaseName :version="r.version" :name="r.codename" class="row-name"><template v-for="(p, i) in marked(r.codename ?? '')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName>
                     <span v-if="r.version === current" class="tag current-tag"><span class="live-dot" aria-hidden="true" />Current</span>
                     <span v-if="store.highlight.has(r.version)" class="tag new-tag">New</span>
                     <span v-if="r.version === rollbackTarget" class="tag">Rollback target</span>
@@ -505,8 +500,6 @@ const KINDS = [
                   <span v-if="r.state === 'reserved'" class="headline">Reserved, never published</span>
                   <template v-else>
                     <span v-if="rails.get(r.version)?.text" class="rail-name"><span class="headline" :class="{ theme: rails.get(r.version)!.themed }" :lang="rails.get(r.version)!.lang"><template v-for="(p, i) in marked(rails.get(r.version)!.text)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span><LangBadge v-if="rails.get(r.version)!.lang !== lang" :lang="rails.get(r.version)!.lang" /></span>
-                    <!-- No brief: the codename is the row's title (AEON-430). It reads the same in both languages. -->
-                    <span v-else-if="r.codename" class="rail-name"><span class="headline codename-title" lang="en"><template v-for="(p, i) in marked(r.codename)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span></span>
                     <span v-if="view === 'details' && technicalLine(r)" class="subjects" :title="technicalLine(r)"><template v-for="(p, i) in marked(technicalLine(r))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                   </template>
                   <span v-if="r.state === 'published'" class="counts">
@@ -594,7 +587,7 @@ const KINDS = [
 .icon-btn { width: 36px; height: 36px; }
 .notice { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; border-radius: 12px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 1px var(--line); color: var(--ink); font-size: 13px; }
 .notice > span { flex: 1; min-width: 0; line-height: 1.45; }
-.notice-version { font-size: inherit; vertical-align: baseline; }
+.notice-version { font-size: inherit; font-weight: 600; vertical-align: baseline; }
 .notice .btn, .notice .icon-btn { flex: none; }
 .notice svg { color: var(--teal-ink); }
 .stats-placeholder { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; height: 110px; }
@@ -619,7 +612,7 @@ const KINDS = [
 .toggle:focus-visible { box-shadow: var(--focus-ring); }
 .result-count { font: 500 11px/1.4 var(--mono); color: var(--ink-3); white-space: nowrap; }
 .compare-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 12px; border-radius: 10px; background: var(--surface-2); color: var(--ink); font-size: 12.5px; }
-.hint-version { font-size: 12px; }
+.hint-version { font-size: 12px; font-weight: 600; }
 
 .listbox { display: grid; gap: 14px; border-radius: 14px; outline: none; }
 .listbox:focus-visible { box-shadow: none; }
@@ -640,7 +633,7 @@ const KINDS = [
 /* Reserved, never published: a dashed hairline in the row's shape, not faded text. */
 .row.reserved { outline: 1px dashed var(--line-2); }
 .row.reserved .clock { color: var(--ink-2); font-weight: 500; }
-.row.reserved .row-version { color: var(--ink-2); }
+.row.reserved .row-name { color: var(--ink-2); }
 /* Selected (and both ends of a comparison): an outline ring in the row's shape; focus makes it the focus ring. */
 .row[aria-selected="true"], .row.from { outline: 2px solid var(--chip-teal-line); }
 .listbox:focus-visible .row[aria-selected="true"] { outline-color: var(--teal); }
@@ -649,9 +642,8 @@ const KINDS = [
 .age { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 .main { display: grid; gap: 3px; min-width: 0; }
 .line1 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-.row-version { font-size: 12.5px; color: var(--ink); }
-/* The codename beside the version: a quiet name, never louder than the brief. */
-.row-codename { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-3); }
+.row-name { font-size: 14px; font-weight: 600; letter-spacing: .005em; color: var(--ink); }
+.row-name.calendar-version { font-size: 12.5px; font-weight: 400; }
 .tag { display: inline-flex; align-items: center; gap: 5px; height: 19px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
 .current-tag { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .new-tag { background: var(--gold-2); color: #3a2804; }
@@ -665,7 +657,6 @@ const KINDS = [
 .rail-name > .lang-badge { flex: none; margin-top: 2px; color: var(--ink-2); }
 .headline:not(.theme) { color: var(--ink-2); }
 .headline.theme { font-weight: 600; }
-.headline.codename-title { color: var(--ink); font-weight: 500; letter-spacing: .005em; }
 .reserved .headline { color: var(--ink-2); font-style: italic; }
 .counts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 11.5px; color: var(--ink-3); }
 .count { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }

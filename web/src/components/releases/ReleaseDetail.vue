@@ -4,7 +4,7 @@ import { computed, ref } from 'vue'
 import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releaseCopy, releasedAt, runWord, shortCommit, span, ticketsOf, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
-import CalendarVersion from '../CalendarVersion.vue'
+import ReleaseName from '../ReleaseName.vue'
 import LangBadge from './LangBadge.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
 import TicketChips from './TicketChips.vue'
@@ -77,11 +77,10 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 <template>
   <article class="detail" :class="{ reserved }" aria-labelledby="release-detail-title">
     <p class="eyebrow top">
-      <span>{{ reserved ? 'Reserved version' : `Release ${release.release_sequence}` }}</span>
-      <span v-if="release.codename" class="dot-sep codename" lang="en"><template v-for="(p, i) in parts(release.codename)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
+      <span>{{ reserved ? 'Reserved version' : 'Release' }}</span>
       <span v-if="!reserved && release.release_channel" class="dot-sep">{{ release.release_channel }}</span>
     </p>
-    <h2 id="release-detail-title" ref="heading" class="version" tabindex="-1"><CalendarVersion :value="release.version" /></h2>
+    <h2 id="release-detail-title" ref="heading" class="version" :class="{ named: !!release.codename }" tabindex="-1"><ReleaseName :version="release.version" :name="release.codename"><template v-for="(p, i) in parts(release.codename ?? '')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName></h2>
     <div class="badges">
       <span v-if="current && !live" class="chip teal"><span class="live-dot" aria-hidden="true" />Current</span>
       <span v-if="fresh" class="chip new">New since your last visit</span>
@@ -109,6 +108,8 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       </template>
       <p v-if="release.changes_omitted" class="none" :lang="lang">{{ copyText.omitted(release.changes_omitted) }}</p>
       <p v-if="writtenAfterRelease(release)" class="none written-after">{{ writtenAfterLine(locale) }}</p>
+      <!-- The numbers stay here, quiet, for whoever needs them (AEON-430). -->
+      <p v-if="release.codename" class="tech mono">{{ release.release_sequence > 0 ? `Release ${release.release_sequence} · ` : '' }}{{ release.version }}</p>
     </section>
 
     <!-- A reservation that was tagged still has evidence: often why it never published. -->
@@ -183,9 +184,10 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 .detail { display: grid; align-content: start; gap: 10px; max-width: 820px; }
 .top { display: flex; flex-wrap: wrap; gap: 2px 8px; margin: 0; }
 .dot-sep::before { content: '·'; margin-right: 8px; }
-/* The codename (AEON-430) reads as part of the release's name, a step above the label. */
-.codename { color: var(--ink-2); }
+/* The marketing name (AEON-430) is the heading; its version chip replaces it on hover. */
 .version { font: 500 clamp(24px, 2.2vw, 30px)/1.25 var(--mono); letter-spacing: 0; color: var(--ink); outline: none; }
+.version.named { font: 650 clamp(26px, 2.4vw, 34px)/1.2 var(--font); letter-spacing: -.015em; }
+.tech { margin: 6px 0 0; font-size: 11.5px; color: var(--ink-3); overflow-wrap: anywhere; }
 .version:focus-visible { box-shadow: var(--focus-ring); border-radius: 8px; }
 .badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .badges:empty { display: none; }
