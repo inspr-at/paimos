@@ -30,9 +30,11 @@ import RelationList from './RelationList.vue'
 import RelationPicker from './RelationPicker.vue'
 import TicketAgentWork from './TicketAgentWork.vue'
 import TicketOutcomes from './TicketOutcomes.vue'
+import TicketReviews from './TicketReviews.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 import TicketBenefits from './TicketBenefits.vue'
+import TicketExtensions from './TicketExtensions.vue'
 import { needsBenefitPrompt } from '../../lib/doneGate'
 import { benefitDraft, benefitTextKeys, completedTicketState, firstBenefitGap } from '../../lib/ticketBenefits'
 import { can } from '../../lib/authz'
@@ -576,6 +578,7 @@ defineExpose({
 
           <div class="sections">
             <MarkdownSection ref="descSection" :class="{ 'live-tint': liveTint.body }" title="Description" :value="item.body" :editable="editable" :save="ticket.setBody" :attachment-id="attachable ? attachmentId : undefined" empty-text="Add a description" @open-attachment="openAttachment" />
+            <TicketExtensions :project-id="project.id" :node-id="item.id" />
             <MarkdownSection v-if="acceptance.trim() || showAcceptance" ref="acSection" :class="{ 'live-tint': liveTint.acceptance }" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="value => ticket.setField('acceptance_criteria', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
             <MarkdownSection v-if="notes.trim() || showNotes" ref="notesSection" :class="{ 'live-tint': liveTint.notes }" title="Notes" :value="notes" :editable="editable" :save="value => ticket.setField('notes', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
             <div v-if="editable && (!(acceptance.trim() || showAcceptance) || !(notes.trim() || showNotes))" class="add-sections">
@@ -587,6 +590,7 @@ defineExpose({
 
           <TicketAgentWork v-if="item.kind_slug === 'ticket' || item.kind_slug === 'epic' || item.kind_slug === 'task'" class="ws-block" :node-id="item.id" :kind="item.kind_slug" />
           <TicketOutcomes v-if="item.kind_slug === 'ticket'" class="ws-block" :node-id="item.id" />
+          <TicketReviews v-if="item.kind_slug === 'ticket' || item.kind_slug === 'task'" :key="item.id" class="ws-block" :node-id="item.id" :project-id="project.id" />
           <ChildList
             v-if="hasChildren" class="ws-block" :children="ticket.children.value" :loading="ticket.childrenLoading.value" :editable="editable"
             :child-label="item.kind_slug === 'epic' ? 'ticket' : 'task'" :progress="ticket.childProgress()" :add="title => ticket.addChild(title, project.routeKey)"

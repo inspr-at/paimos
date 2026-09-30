@@ -271,6 +271,9 @@ func (rt *runtime) harnessTicket(projectID, key string, classicID int) (*string,
 		if err != nil {
 			return nil, err
 		}
+		if err := rt.rejectEpicTicket(n); err != nil {
+			return nil, err
+		}
 		return &n.ID, nil
 	}
 	if classicID == 0 {
@@ -283,13 +286,36 @@ func (rt *runtime) harnessTicket(projectID, key string, classicID int) (*string,
 	for _, n := range nodes {
 		classic, _ := fieldMap(n.Fields)["classic"].(map[string]any)
 		if id, ok := classic["id"].(float64); ok && id == float64(classicID) {
+			if err := rt.rejectEpicTicket(n); err != nil {
+				return nil, err
+			}
 			return &n.ID, nil
 		}
 		if id, ok := classic["id"].(string); ok && id == strconv.Itoa(classicID) {
+			if err := rt.rejectEpicTicket(n); err != nil {
+				return nil, err
+			}
 			return &n.ID, nil
 		}
 	}
 	return nil, rt.fail(fmt.Errorf("classic ticket id %d not found in project", classicID), "")
+}
+
+// rejectEpicTicket tells the caller to bind a ticket when the node is an epic.
+// Epics stay excluded; the message names the key instead of a generic 400.
+func (rt *runtime) rejectEpicTicket(n apiNode) error {
+	kinds, err := rt.loadKinds()
+	if err != nil {
+		return err
+	}
+	if kinds.slug(n.KindID) != "epic" {
+		return nil
+	}
+	label := strings.TrimSpace(n.Key)
+	if label == "" {
+		label = "that node"
+	}
+	return usagef("%s is an epic; bind the session to one of its tickets", label)
 }
 
 func (rt *runtime) harnessRegister() *Command {
@@ -318,7 +344,7 @@ func (rt *runtime) harnessRegister() *Command {
 		fs.string(&succeeds, "succeeds", 0, "stopped or heartbeat-lost predecessor coordinator UUID")
 		fs.string(&ticket, "ticket", 0, "ticket node key")
 		fs.int(&ticketIDFlag, "ticket-id", "classic numeric ticket id")
-		fs.string(&shape, "work-shape", 0, "ship or scout")
+		fs.string(&shape, "work-shape", 0, "required with --ticket; one of: ship, scout")
 		fs.string(&runID, "run-id", 0, "Aeon agent run UUID")
 		fs.string(&orderID, "work-order-id", 0, "Aeon work order UUID")
 		fs.strings(&caps, "capability", "comma-separated advertised capabilities")

@@ -32,6 +32,22 @@ then request a new deployment. Journey contract `journey/1.2` adds the optional
 `next_action.renewal_action`; clients must use it when present. Existing action
 keys and reporter major versions remain unchanged.
 
+Native intake drafts accept an optional Aithema `extensions` map and the
+original review snapshot as `document_bytes` alongside the required native
+projection fields. Aeon extracts extensions from the single confirmed,
+unbound item and stores both fields as immutable text, preserving evidence and
+JSON spelling; idempotent retries must keep the bytes unchanged. Aithema owns
+registry/schema validation and its canonical 16 KiB instance / 64 KiB map
+limits. Aeon's intake request cap remains 1 MiB, including JSON escaping and
+projection overhead. Drafts, accepted briefs, requirements and their generated
+tickets show each namespace/version in a neutral Extension data disclosure.
+`GET /api/projects/{projectId}/intake?node_id=UUID` returns only the accepted
+drafts for that node or the requirement that generated its ticket, with empty
+sources/turns and the same `intake.read` permission. This additive native API
+does not implement Aithema's snapshot-only plugin protocol or change Aithema's
+separate `pending_op.payload` limit (AIT-89); the adapter integration remains
+tracked by AEON-360.
+
 Wide project headers can show an ambient ticket graph (Display → Graph in
 project header). It uses a tilted 3D cloud with an optional elliptic force bias,
 fits the densest 85% of nodes by height, and fades out inside the empty space
@@ -140,6 +156,29 @@ aeon issue estimate --missing --project AEON --from-file plan.json --apply
 ```
 
 Both modes validate every plan entry and project membership before any write. Apply uses the agent identity, skips work already estimated and checks each node's revision. A concurrent change stops the plan; earlier successful writes remain applied and a rerun skips them. There are no server-side model calls.
+
+## Independent commit reviews
+
+The ticket panel's **Cross-family review** section requests a review of a repository and two full commit hashes. A completed managed builder run also requests one automatically when its daemon reports a produced commit range and its key already permits `work_orders.write` and `run.create`. The reviewer receives the ticket snapshot, acceptance criteria and exact bounded diff through the existing managed-run queue. This slice never merges.
+
+Review work orders have immutable author, reviewer, repository and range bindings. The registry's `review-gate` profiles provide model/version pins; eligible strong or frontier profiles require `xhigh`, exclude the author family, and follow Codex → Grok → Claude. Only qualified adapters with tools, hooks, plugins and inherited settings disabled can launch a review. Today that means the Claude bridge or a qualified native Grok enrollment on arm64 macOS; unsupported adapters, unavailable accounts, exhausted capacity and missing approvals remain visible fallback reasons. Legacy daemons cannot receive or claim review runs. The daemon uses scratch space outside the repository and supplies a bounded text diff without credential paths or known credential forms. Binary or oversized changes require another review path; they cannot pass this gate.
+
+Review context is built in a private, temporary bare Git repository. Only the
+sealed base and head objects are fetched from the workspace through a transport
+view with helper-owned metadata; workspace configuration, hooks, attributes,
+grafts and replacement refs are excluded. Ancestry follows raw commit parent
+headers, and the diff compares the two sealed trees (`base..head`) with renames,
+external diff commands and text conversion disabled. Submodules show gitlink
+hashes only; sensitive paths are refused before reading the patch. Missing or
+invalid objects, incomplete ancestry, ambiguous duplicate packed HEAD records,
+a walk beyond 4096 commits or a context build beyond 30 seconds fail closed.
+Git output is capped at 192 KiB while the subprocess output is copied; an
+oversized patch fails before it can grow the daemon's buffer past that cap.
+Scratch repositories are removed on success and error.
+
+Each finding uses `FINDING: <critical|high|medium|low> <relative-file>:<line> <message>`. The final line must be exactly `VERDICT: ok` or `VERDICT: changes`. Only a completed run with vendor-reported model evidence and a valid, independent `ok` opens the gate. Missing output, malformed verdicts, cancellation and unavailable routes leave it closed. Findings, elapsed time and vendor-reported cost appear on the ticket; unreported cost is omitted. Repeated request IDs safely replay the same binding; a changed range requires a new request.
+
+Optional GitHub status reporting is host-owned. Configure all of `AEON_REVIEW_APP_ID`, `AEON_REVIEW_INSTALLATION_ID`, `AEON_REVIEW_APP_KEY_FILE` (absolute physical path to a private RSA file, mode 0600), `AEON_REVIEW_APP_TENANT_ID` and `AEON_REVIEW_APP_REPOSITORY` (`owner/repo`). The installation token is narrowed to that single repository, with `statuses:write` and `pull_requests:read` only. Specify the PR number when requesting a review. Reporting checks its exact base and head before posting `aeon/review`, retries failures and revokes temporary tokens. A moved PR cannot receive an approval for its new head from an old review. The repository owner must separately make `aeon/review` a required branch-protection status and restrict its source to this App; Aeon does not change protection rules. Without configuration, local reviews continue normally. See [GitHub commit statuses](https://docs.github.com/en/rest/commits/statuses) for repository-side enforcement.
 
 ## Lead handover and short review/fix jobs
 

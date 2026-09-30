@@ -25,6 +25,10 @@ func openPrivateHeartbeatDir(string) (*os.File, error) {
 	return nil, errors.New("heartbeat state requires a unix host")
 }
 
+func acceptHeartbeatConfigDir(string) error {
+	return errors.New("heartbeat state requires a unix host")
+}
+
 func (h *heartbeatHold) release() {
 	if h == nil {
 		return

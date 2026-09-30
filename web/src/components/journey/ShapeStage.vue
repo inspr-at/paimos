@@ -12,6 +12,7 @@ import GateCard from './GateCard.vue'
 import HistoryFold from './HistoryFold.vue'
 import ImportedOrigin from './ImportedOrigin.vue'
 import LaterCard from './LaterCard.vue'
+import ExtensionData from './ExtensionData.vue'
 
 // Shape: the brief Aithema drafted and the person accepted, the profile, and the
 // decision: go, reduce scope, park or drop. The decision needs the shape gate.
@@ -87,6 +88,7 @@ const imported = computed(() => isImported(journey.value) && past.value && !brie
         <template v-if="brief">
           <h3>{{ brief.title }}</h3>
           <MarkdownBody :body="brief.body" />
+          <ExtensionData :extensions="brief.extensions" />
         </template>
         <div v-else class="j-empty"><strong>No brief yet</strong><span>Aithema drafts the brief from the conversation and sources; accept it on Inspire.</span>
           <button type="button" class="btn sm" @click="ctx.view('inspire')"><AppIcon name="arrow" :size="13" />Inspire</button>
