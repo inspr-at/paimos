@@ -269,7 +269,20 @@ is serialized with exchanges and cannot transfer an earlier approval to a new ke
 The pairing fence permits exactly this additional route.
 The nine-digit code identifies a ten-minute request;
 owner lookup accepts at most ten attempts per tenant in ten minutes. Codes and
-proofs never go in URLs.
+proofs never go in request URLs or query strings. The one exception is the link
+the attach helper prints on the person's own terminal, `/agents#attach=<code>`:
+a fragment is never sent to a server or a referrer, the page uses it only to fill
+the lookup field (exactly nine digits, else ignored), removes it from the address
+bar, and opening it looks up and approves nothing.
+
+`GET /api/agent-pairing/attach/pending` lets the signed-in computer owner list
+their requests that are not a session yet (newest first, at most eight, created in
+the last fifteen minutes): pending, approved, detached (declined or cancelled) and
+unreachable (expired; an unpolled request past its expiry is reported so without
+changing the row). Each item is the immutable snapshot and digests lookup returns,
+so the owner can review and approve it without typing a code, with every
+existing approval check. It never returns the code, the Touch ID challenge or a
+session, changes no row and needs no origin header; /agents polls it while visible.
 
 The person's **Settings → Personal → Security → Session watching** setting is
 stored server-side in `person_watch_security`, scoped to that person and tenant.
