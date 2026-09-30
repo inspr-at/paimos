@@ -3,13 +3,14 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { brand } from '../lib/brand'
+import { releaseAria } from '../lib/codenames'
 import { flowNameBudget, placeFlowPill } from '../lib/flowPill'
 import { flowPillContext } from '../lib/flowPillContext'
 import { useReleases } from '../stores/releases'
 import { useSession } from '../stores/session'
 import { useVersion } from '../stores/version'
 import AppIcon from './AppIcon.vue'
-import CalendarVersion from './CalendarVersion.vue'
+import ReleaseName from './ReleaseName.vue'
 import JourneyChip from './journey/JourneyChip.vue'
 
 // The footer bar: the product's name and the running version, which opens the
@@ -121,7 +122,7 @@ void version.load()
 const value = computed(() => version.value?.version ?? '')
 const count = computed(() => session.identity ? releases.newCount : 0)
 const label = computed(() => {
-  const running = value.value ? `, version ${value.value}` : ''
+  const running = value.value ? `, ${releaseAria(version.value?.codename ?? '', value.value)}` : ''
   const fresh = count.value === null ? ', new releases since your last visit' : count.value ? `, ${count.value} new since your last visit` : ''
   return `Release history${running}${fresh}`
 })
@@ -138,12 +139,12 @@ const label = computed(() => {
       <span class="pill-face">
         <AppIcon name="history" :size="13" />
         <span v-if="version.failed" class="fallback">Version unavailable</span>
-        <CalendarVersion v-else-if="value" :value="value" class="pill-version" />
+        <ReleaseName v-else-if="value" :version="value" :name="version.value?.codename" class="pill-version" />
         <span v-else class="skeleton pill-skeleton" />
         <span v-if="count !== 0" class="new-badge" aria-hidden="true">{{ count === null ? 'New' : `${count} new` }}</span>
       </span>
     </button>
-    <span v-else class="version-plain"><CalendarVersion v-if="value" :value="value" /></span>
+    <span v-else class="version-plain"><ReleaseName v-if="value" :version="value" :name="version.value?.codename" /></span>
   </footer>
 </template>
 
@@ -180,6 +181,8 @@ const label = computed(() => {
 .version-pill:active .pill-face { background: var(--row-selected); }
 .version-pill:focus-visible .pill-face { box-shadow: var(--focus-ring); }
 .pill-version { color: var(--ink); font-size: 12px; line-height: 1; }
+/* The marketing name, front and centre; the version chip (mono) replaces it on hover. */
+.pill-version :deep(.rn-name) { font: 600 12.5px/1 var(--font); letter-spacing: .005em; }
 /* As wide as a calendar version in the pill, so the pill keeps its size when the version lands. */
 .pill-skeleton { width: 94px; height: 8px; }
 .fallback { font-family: var(--font); font-size: 11.5px; }

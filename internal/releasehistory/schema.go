@@ -35,13 +35,16 @@ type Release struct {
 	Tag             string        `json:"tag"`
 	ReleaseChannel  string        `json:"release_channel"`
 	ReleaseSequence int           `json:"release_sequence"`
-	State           string        `json:"state"`
-	ReservedAt      *time.Time    `json:"reserved_at"`
-	TaggedAt        *time.Time    `json:"tagged_at"`
-	PublishedAt     *time.Time    `json:"published_at"`
-	Headline        string        `json:"headline"`
-	Tickets         []string      `json:"tickets"`
-	Changes         []Change      `json:"changes"`
+	// Codename is the release's sci-fi name from its sequence (AEON-430),
+	// presentation only. See WithCodenames.
+	Codename    string     `json:"codename,omitempty"`
+	State       string     `json:"state"`
+	ReservedAt  *time.Time `json:"reserved_at"`
+	TaggedAt    *time.Time `json:"tagged_at"`
+	PublishedAt *time.Time `json:"published_at"`
+	Headline    string     `json:"headline"`
+	Tickets     []string   `json:"tickets"`
+	Changes     []Change   `json:"changes"`
 	// ChangesOmitted counts changes beyond MaxChanges that are not listed.
 	ChangesOmitted int      `json:"changes_omitted"`
 	Evidence       Evidence `json:"evidence"`

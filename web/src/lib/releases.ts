@@ -22,6 +22,9 @@ export interface ReleasePresentation { theme_en: string; theme_de: string; headl
 export interface Release {
   notes?: ReleaseNotes
   presentation?: ReleasePresentation
+  // The release's sci-fi codename from its sequence (AEON-430), English in
+  // both languages. Absent on a reservation whose sequence another release took.
+  codename?: string
   version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved'
   reserved_at: string | null; tagged_at: string | null; published_at: string | null; headline: string
   tickets: string[]; changes: ReleaseChange[]; changes_omitted: number; evidence: ReleaseEvidence
@@ -495,9 +498,9 @@ export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; t
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
 // The filters follow the blocks the detail and the row counts show. Search
 // looks at the text the chosen language and view show (AEON-323): both views
-// show the name, pills, ticket keys, commit subjects and SHAs (Highlights opens
-// a folded list on a hit); Highlights adds the benefits, Details the evidence
-// it shows open.
+// show the codename (AEON-430), the name, pills, ticket keys, commit subjects
+// and SHAs (Highlights opens a folded list on a hit); Highlights adds the
+// benefits, Details the evidence it shows open.
 export function matches(r: Release, f: ReleaseFilter, locale?: string | null, view: ReleaseView = 'highlights') {
   const presented = presentRelease(r, locale)
   if (f.features && !presented.features.length) return false
@@ -509,7 +512,7 @@ export function matches(r: Release, f: ReleaseFilter, locale?: string | null, vi
   const named = localizedPresentation(r, locale)
   const commits = [...lines.flatMap(line => line.commits), ...presented.other]
   const texts = [
-    r.version, ...ticketsOf(r), ...r.tickets,
+    r.version, r.codename ?? '', ...ticketsOf(r), ...r.tickets,
     ...(named ? [named.theme, named.headline, named.intro] : []),
     ...lines.map(line => line.pill || line.benefit),
     ...(view === 'highlights' ? lines.map(line => line.benefit) : evidenceSearch(r).texts),
