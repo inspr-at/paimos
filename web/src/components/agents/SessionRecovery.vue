@@ -105,6 +105,8 @@ async function submit() {
   const turn = epoch
   try {
     const result = await json<ForceControl>(`${path()}/${action.value === 'force' ? 'controls/force-stop' : 'archive'}`, { expected_revision: preview.value.observed_revision, confirmation: confirmation.value, request_id: requestId, reason: reason.value.trim() })
+    // Accepted: a force stop is now a control for the daemon, an archive is done. Either changes the lists.
+    void agents.afterWrite()
     if (turn !== epoch) return
     if (action.value === 'force') {
       forceControl.value = result

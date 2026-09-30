@@ -6,6 +6,7 @@ import { can } from '../../lib/authz'
 import type { HarnessSession } from '../../lib/agents'
 import { useVisualViewport } from '../../lib/visualViewport'
 import { managedControlSession, managedControlUnavailable } from '../../lib/managedControl'
+import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
@@ -18,7 +19,7 @@ interface SettingModel { model: string; efforts: string[] }
 interface Control { id: string; session_id: string; kind: Kind; state: 'pending' | 'claimed' | 'completed'; outcome: 'applied' | 'rejected' | null; reason: string | null; expires_at: string }
 // runStatus: the bound run's status when the session read does not carry it.
 const props = defineProps<{ session: ManagedSession; now: number; runStatus?: string | null }>()
-const auth = useSession(), uid = useId()
+const auth = useSession(), agents = useAgents(), uid = useId()
 const draft = ref(''), error = ref(''), busy = ref(false), composing = ref(false), confirmStop = ref(false)
 // The session panel is a full-height sheet below 720px. Keep one action row
 // there; Steer, Stop and setting edits open a bottom sheet instead of growing it.
@@ -131,6 +132,8 @@ async function sendRequest() {
   busy.value = true; error.value = ''; confirmStop.value = false
   try {
     const value = await json<Control>(`${path()}/managed-controls`, payload)
+    // The server accepted it, whichever session this panel shows by now: the lists re-read.
+    void agents.afterWrite()
     if (turn !== epoch) return
     if (value.session_id !== props.session.id || value.id !== payload.request_id) throw new Error('The control response did not match this session.')
     result.value = value; request = null; uncertain.value = false; draft.value = ''; composing.value = false; editing.value = null

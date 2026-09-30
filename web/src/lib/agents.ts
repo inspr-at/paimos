@@ -5,6 +5,7 @@ import type { DeployTarget } from './deployTarget'
 // their typed controls, runs, approvals, accounts with allowance windows, models
 // and project messages. Worker-only endpoints (heartbeat, drain, claim) are absent.
 import { api, APIError } from './api.ts'
+import { stamp } from './position.ts'
 import type { AttentionReason } from './agentSignals.ts'
 import type { LivePage } from './liveAgents.ts'
 
@@ -125,7 +126,8 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
     throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`, data)
   }
   if (response.status === 204) return undefined as T
-  return response.json()
+  // The body keeps the event-log position it answers for, to merge by (AEON-449).
+  return stamp(await response.json() as T, response)
 }
 const enc = encodeURIComponent
 const sessionPath = (projectId: string, sessionId = '') => `/projects/${enc(projectId)}/harness-sessions${sessionId ? `/${enc(sessionId)}` : ''}`

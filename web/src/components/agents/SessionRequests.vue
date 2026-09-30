@@ -3,6 +3,7 @@
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { api, APIError } from '../../lib/api'
 import { can } from '../../lib/authz'
+import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import { fetchAccountCatalog, effortLabel, type AgentAccountCatalog } from '../../lib/accountCascade'
 import type { HarnessSession, SessionChangeRequest } from '../../lib/agents'
@@ -10,6 +11,7 @@ import AppIcon from '../AppIcon.vue'
 
 const props = defineProps<{ session: HarnessSession; now: number }>()
 const identity = useSession()
+const agents = useAgents()
 const uid = useId()
 const disclosure = ref<HTMLDetailsElement>()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('harness.control', props.session.project_id))
@@ -78,6 +80,7 @@ async function submit() {
   busy.value = true; revision++; error.value = ''
   try {
     const control = await json<SessionChangeRequest>(`${path}/requests`, { ...body, request_id: retry.id })
+    void agents.afterWrite()
     if (!disposed) {
       revision++
       controls.value = [...controls.value.filter(c => c.id !== control.id), control]

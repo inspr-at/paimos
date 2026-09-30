@@ -4,11 +4,13 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { HarnessSession } from '../../lib/agents'
 import { appendWatchText, attachAction, metadataOnlyAttach, watchText } from '../../lib/attachWatch'
 import { can, onAccessChange } from '../../lib/authz'
+import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 
 const props = defineProps<{ session: HarnessSession }>()
 const identity = useSession()
+const agents = useAgents()
 const person = computed(() => identity.identity?.principal.kind === 'person')
 const metadataOnly = computed(() => !!props.session.watch && metadataOnlyAttach(props.session.watch))
 const allowed = computed(() => !metadataOnly.value && person.value && can('harness.watch', props.session.project_id))
@@ -50,7 +52,7 @@ async function revoke() {
   if (!owner.value || !props.session.watch) return
   const requestID = props.session.watch.request_id
   revoking.value = true; error.value = ''
-  try { await attachAction(`/${encodeURIComponent(requestID)}/revoke`); if (props.session.watch?.request_id === requestID) { revoked.value = true; stop(true) } }
+  try { await attachAction(`/${encodeURIComponent(requestID)}/revoke`); void agents.afterWrite(); if (props.session.watch?.request_id === requestID) { revoked.value = true; stop(true) } }
   catch { if (props.session.watch?.request_id === requestID) error.value = 'Could not revoke the watch. Try again.' }
   finally { revoking.value = false }
 }

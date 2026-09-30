@@ -9,6 +9,7 @@ import {
   AUTHOR_FAMILIES, authorFamilyFor, chooseStep, emptyChoice, emptyTouch, familyLabel, fetchAccountCatalog, fillDefaults, presentCascade, sessionReport, workRoleFor,
   type AgentAccountCatalog, type AuthorFamily, type CascadeChoice, type CascadeStep, type CascadeTouch, type CatalogGap, type RequestedRun,
 } from '../../lib/accountCascade'
+import { wroteSince, writeMark } from '../../lib/position'
 import { launchState, staleGrantRejection, startAgent } from '../../lib/startAgent'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
@@ -183,6 +184,7 @@ async function submit(runNow = false) {
   if (!canSubmit.value || !ticket.value) return
   busy.value = true; error.value = ''
   const pinned = { ...view.value.requested }
+  const mark = writeMark()
   try {
     if (choice.value.accountId && remember.value) await putPin({ ticket_id: ticket.value.id, harness: choice.value.harness, account_id: choice.value.accountId })
     else if (remembered.value && !remember.value) await deletePin(ticket.value.id, choice.value.harness)
@@ -192,6 +194,8 @@ async function submit(runNow = false) {
     await refresh()
     await nextTick(); dialog.value?.querySelector<HTMLElement>('[data-result]')?.focus()
   } catch (e) {
+    // A pin or a work order may already be written when a later step fails: the lists re-read either way.
+    if (wroteSince(mark)) void agents.afterWrite()
     if (staleGrantRejection(e)) {
       const next = chooseStep(choice.value, touch.value, 'model', '')
       const pinned = { ...next.touch, account: true }

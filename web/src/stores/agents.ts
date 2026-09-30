@@ -14,6 +14,7 @@ import { managedControlSession } from '../lib/managedControl'
 import { usePolledData } from '../lib/usePolledData'
 import { useProjects } from './projects'
 import { useAgentAppearance } from '../lib/agentAppearance'
+import { createReadOrder, lowestPosition, positionOf, readOrdered, stampAt, writeFloor } from '../lib/position'
 
 // forbidden: not for this person; error: the read failed (any other status).
 export type Availability = 'idle' | 'ready' | 'forbidden' | 'error'
@@ -36,30 +37,30 @@ export const useAgents = defineStore('agents', () => {
   const projects = useProjects()
   const { choice: statePreferences, ready: preferencesReady } = useAgentAppearance()
   const now = ref(Date.now())
-  let sessionReadOrder = 0
-  let appliedSessionRead = 0
+  // The session list and the ticket-scoped reads share one order: a newer answer
+  // wins by its server position, and a tie goes to the read that started later.
+  const sessionsOrder = createReadOrder()
   const sessionsRead = usePolledData<HarnessSession[]>(async (): Promise<HarnessSession[]> => {
-    const order = ++sessionReadOrder
     await preferencesReady
     const out = new Map<string, HarnessSession>()
     const cursors = new Set<string>()
+    const positions: (number | undefined)[] = []
     let cursor: string | undefined
     do {
       const result = await listAllSessions({ cursor, view: 'current' })
+      positions.push(positionOf(result))
       for (const item of result.items) out.set(item.id, item)
       cursor = result.next_cursor ?? undefined
       if (cursor && cursors.has(cursor)) throw new Error('Session pagination did not advance. Please retry.')
       if (cursor) cursors.add(cursor)
     } while (cursor)
-    // A newer ticket-scoped read may have completed while pagination was open.
     const previous = new Map(sessions.value.map(item => [item.id, item]))
-    if (order < appliedSessionRead) return sessions.value
-    appliedSessionRead = order
-    return [...out.values()].map(item => mergeSessionEvidence(previous.get(item.id), item))
+    // The pages were read one after another: the list includes what the oldest page did.
+    return stampAt([...out.values()].map(item => mergeSessionEvidence(previous.get(item.id), item)), lowestPosition(positions))
   }, [] as HarnessSession[], items => {
     activityEvidence.value = new Map(items.map(item => [item.id, advanceActivity(activityEvidence.value.get(item.id), item)]))
     now.value = Math.max(now.value, Date.now())
-  })
+  }, { order: sessionsOrder })
   const sessions = sessionsRead.data
   const activityEvidence = ref(new Map<string, ActivityEvidence>())
   const eventPulseFor = (sessionId: string) => activityEvidence.value.get(sessionId)?.pulse ?? 0
@@ -68,12 +69,12 @@ export const useAgents = defineStore('agents', () => {
   const sessionsUpdatedAt = computed(() => sessionsRead.status.value.updatedAt)
   const sessionsStale = sessionsRead.stale
   let loadFlight: Promise<void> | undefined
-  const approvalsRead = usePolledData(listApprovals, [] as Approval[])
+  const approvalsRead = usePolledData(listApprovals, [] as Approval[], undefined, { order: createReadOrder() })
   const approvals = approvalsRead.data
   const approvalsState = computed(() => approvalsRead.status.value.state)
   const approvalsError = computed(() => approvalsRead.status.value.error)
   const approvalsHardError = computed(() => approvalsRead.status.value.state === 'error')
-  const accountsRead = usePolledData(listAccounts, [] as AgentAccount[])
+  const accountsRead = usePolledData(listAccounts, [] as AgentAccount[], undefined, { order: createReadOrder() })
   const accounts = accountsRead.data
   const accountsState = computed(() => accountsRead.status.value.state)
   const accountsUpdatedAt = computed(() => accountsRead.status.value.updatedAt)
@@ -84,7 +85,7 @@ export const useAgents = defineStore('agents', () => {
   const runs = ref<Record<string, AgentRun>>({})
   const agentRuns = ref<Record<string, string[]>>({})
   const nodes = ref<Record<string, NodeRef>>({})
-  const modelsRead = usePolledData(listModels, [] as ModelProfile[])
+  const modelsRead = usePolledData(listModels, [] as ModelProfile[], undefined, { order: createReadOrder() })
   const models = modelsRead.data
   const controls = ref<Record<string, SessionControl>>({})
   const loading = ref(false)
@@ -101,12 +102,26 @@ export const useAgents = defineStore('agents', () => {
     for (const item of items) if (item.to && !names[item.recipient_principal_id]) { names[item.recipient_principal_id] = item.to; changed = true }
     if (changed) addresses.value = names
   }
-  // Bumped by every accepted write; a per-agent read started before one is dropped.
-  let runWrites = 0
-  function mergeRuns(list: AgentRun[]) {
-    if (list.length) runs.value = { ...runs.value, ...Object.fromEntries(list.map(run => [run.id, run])) }
+  // The global run list and every per-agent list overlap: each run keeps the
+  // position of the answer it came from, and only a newer one replaces it, so no
+  // older answer rewinds a run another read already moved forward.
+  const runPositions = new Map<string, number>()
+  function mergeRuns(list: AgentRun[], position?: number) {
+    const next = { ...runs.value }
+    let changed = false
+    for (const run of list) {
+      const held = runPositions.get(run.id)
+      if (position !== undefined && held !== undefined && held > position) continue
+      next[run.id] = run
+      changed = true
+      if (position !== undefined) runPositions.set(run.id, position)
+    }
+    if (changed) runs.value = next
   }
-  const runsRead = usePolledData(() => listRuns({ limit: 200 }), { items: [] as AgentRun[], next_cursor: null as string | null }, page => mergeRuns(page.items))
+  // A run the server just answered keeps its own position; one without (a double, an older
+  // server) stands at the newest position this tab has seen written.
+  const positionFor = (run: AgentRun) => positionOf(run) ?? (writeFloor() || undefined)
+  const runsRead = usePolledData(() => listRuns({ limit: 200 }), { items: [] as AgentRun[], next_cursor: null as string | null }, page => mergeRuns(page.items, positionOf(page)), { order: createReadOrder() })
   const refreshStale = computed(() => sessionsRead.stale.value || approvalsRead.stale.value || accountsRead.stale.value || modelsRead.stale.value || runsRead.stale.value)
 
   // ---------- Reads ----------
@@ -118,24 +133,29 @@ export const useAgents = defineStore('agents', () => {
   // The newest runs cover the rows' account, model and telemetry in one read.
   const refreshRuns = runsRead.refresh
   // Held action requests still waiting on a person, and message addresses for names.
-  let messagingTurn = 0
-  async function refreshMessaging(force = false) {
+  const messagingOrder = createReadOrder()
+  async function refreshMessaging(force = false, retried = false): Promise<void> {
     if (!force && Date.now() - messagingAt < 30_000) return
     messagingAt = Date.now()
-    const turn = ++messagingTurn
+    const ticket = messagingOrder.begin()
     const ids = sessionProjects()
     if (!ids.length) { pendingHeld.value = {}; if (messagingState.value === 'idle') messagingState.value = 'ready'; return }
     const held: Record<string, ProjectMessage[]> = {}
     const names: Record<string, string> = { ...addresses.value }
+    const positions: (number | undefined)[] = []
     let failure: unknown = null
     await all(ids, async id => {
       try {
         const [page, targets] = await Promise.all([listMessages(id, { pending: true }), listTargets(id).catch(() => [])])
         held[id] = page.items
+        positions.push(positionOf(page))
         for (const target of targets) if (target.enabled && target.role !== 'simple_fallback') names[target.principal_id] = target.address
       } catch (e) { failure ??= e }
     })
-    if (turn !== messagingTurn) return
+    // A project that did not answer leaves no position to judge the rest by.
+    const verdict = messagingOrder.land(ticket, failure ? undefined : lowestPosition(positions))
+    if (verdict === 'older') return
+    if (verdict === 'stale') return retried ? undefined : refreshMessaging(true, true)
     if (failure && !Object.keys(held).length) { messagingState.value = availability(failure); return }
     messagingState.value = 'ready'
     pendingHeld.value = held
@@ -173,36 +193,44 @@ export const useAgents = defineStore('agents', () => {
   async function ensureTicket(nodeId: string) {
     if (Date.now() - (ticketLoadedAt.get(nodeId) ?? 0) < 20_000) return
     ticketLoadedAt.set(nodeId, Date.now())
-    const order = ++sessionReadOrder
+    const ticket = sessionsOrder.begin()
     try {
-      const { items } = await listAllSessions({ ticket: nodeId, limit: 50 })
-      if (order < appliedSessionRead) return
-      appliedSessionRead = order
+      const page = await listAllSessions({ ticket: nodeId, limit: 50 })
+      const verdict = sessionsOrder.land(ticket, positionOf(page))
+      // A read that predates a write is not the ticket's answer: read again next time.
+      if (verdict === 'stale') ticketLoadedAt.delete(nodeId)
+      if (verdict !== 'apply') return
+      const { items } = page
       const ids = new Set(items.map(s => s.id))
       const previous = new Map(sessions.value.map(item => [item.id, item]))
       sessions.value = [...sessions.value.filter(s => !ids.has(s.id)), ...items.map(item => mergeSessionEvidence(previous.get(item.id), item))]
     } catch { /* the ticket panel simply shows no sessions */ }
   }
   // Scope before limiting: a busy project must not crowd a session's replies out.
-  const threadReads = new Map<string, number>()
+  // One order per thread and per agent: an older answer never replaces a newer one,
+  // and one that predates a write of this tab is read again.
+  const threadOrders = new Map<string, ReturnType<typeof createReadOrder>>()
+  const agentRunOrders = new Map<string, ReturnType<typeof createReadOrder>>()
+  const orderFor = (orders: Map<string, ReturnType<typeof createReadOrder>>, key: string) => {
+    let order = orders.get(key)
+    if (!order) orders.set(key, order = createReadOrder())
+    return order
+  }
   async function refreshThread(projectId: string, sessionId: string) {
-    const read = (threadReads.get(sessionId) ?? 0) + 1
-    threadReads.set(sessionId, read)
     try {
-      const page = await listMessages(projectId, { session: sessionId, limit: 200 })
-      if (threadReads.get(sessionId) !== read) return
-      threads.value = { ...threads.value, [sessionId]: page.items }
-      learnAddresses(page.items)
-      if (messagingState.value !== 'ready') messagingState.value = 'ready'
+      await readOrdered(orderFor(threadOrders, sessionId), () => listMessages(projectId, { session: sessionId, limit: 200 }), page => {
+        threads.value = { ...threads.value, [sessionId]: page.items }
+        learnAddresses(page.items)
+        if (messagingState.value !== 'ready') messagingState.value = 'ready'
+      })
     } catch (e) { if (messagingState.value !== 'ready') messagingState.value = availability(e) }
   }
   async function refreshAgentRuns(principalId: string) {
-    const started = runWrites
     try {
-      const { items } = await listRuns({ agent: principalId, limit: 10 })
-      if (started !== runWrites) return
-      mergeRuns(items)
-      agentRuns.value = { ...agentRuns.value, [principalId]: items.map(run => run.id) }
+      await readOrdered(orderFor(agentRunOrders, principalId), () => listRuns({ agent: principalId, limit: 10 }), page => {
+        mergeRuns(page.items, positionOf(page))
+        agentRuns.value = { ...agentRuns.value, [principalId]: page.items.map(run => run.id) }
+      })
     } catch { /* the panel says no runs were reported */ }
   }
 
@@ -235,6 +263,7 @@ export const useAgents = defineStore('agents', () => {
   // continues until the server has no more.
   const historyCursor = ref<string | null>(null)
   let historyFlight: Promise<void> | undefined
+  const historyOrder = createReadOrder()
   function loadHistory(force = false) {
     if (historyFlight) return historyFlight
     if (historyState.value === 'ready' && !force) return Promise.resolve()
@@ -249,14 +278,16 @@ export const useAgents = defineStore('agents', () => {
     historyState.value = 'loading'
     historyFlight = (async () => {
       try {
-        const result = await listAllSessions({ cursor, view: 'all' })
-        const page = result.items.filter(item => item.stopped_at || item.archived_at)
-        if (cursor) {
-          const seen = new Set(historySessions.value.map(item => item.id))
-          historySessions.value = [...historySessions.value, ...page.filter(item => !seen.has(item.id))]
-        } else historySessions.value = page
-        historyCursor.value = result.next_cursor ?? null
-        historyState.value = 'ready'
+        // A read held across a write of this tab (a removal, its undo) is read again, never applied.
+        const applied = await readOrdered(historyOrder, () => listAllSessions({ cursor, view: 'all' }), result => {
+          const page = result.items.filter(item => item.stopped_at || item.archived_at)
+          if (cursor) {
+            const seen = new Set(historySessions.value.map(item => item.id))
+            historySessions.value = [...historySessions.value, ...page.filter(item => !seen.has(item.id))]
+          } else historySessions.value = page
+          historyCursor.value = result.next_cursor ?? null
+        })
+        historyState.value = applied ? 'ready' : 'error'
       } catch { historyState.value = 'error' } finally { historyFlight = undefined }
     })()
     return historyFlight
@@ -306,11 +337,12 @@ export const useAgents = defineStore('agents', () => {
   }
   function invalidatePolls() { sessionsRead.invalidate(); approvalsRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate() }
   let rereadAfterWrite: Promise<void> | undefined
+  // Every write raises the floor in api(), so a read the server ordered by position
+  // that started before it is read again or dropped by its data. Superseding is for
+  // an answer without a position (an older server), which only the order it started in can judge.
   function afterWrite(apply?: () => void): Promise<void> {
     invalidatePolls()
-    appliedSessionRead = ++sessionReadOrder
-    runWrites++
-    messagingTurn++
+    for (const order of [sessionsOrder, messagingOrder, ...threadOrders.values(), ...agentRunOrders.values()]) order.supersede()
     for (const reader of writeReaders) reader.invalidate()
     apply?.()
     // Writes in one burst (a bulk removal) share one re-read.
@@ -374,6 +406,8 @@ export const useAgents = defineStore('agents', () => {
   // recipient_session_id is always the open generation and is never dropped.
   async function send(session: HarnessSession, to: string, body: string, level: 'simple' | 'steer', replyTo?: string) {
     await sendMessage(session.project_id, { to, body, recipient_session_id: session.id, idempotency_key: crypto.randomUUID(), expects_reply: false, is_action_request: false, delivery_level: level, ...(replyTo ? { reply_to: replyTo } : {}) })
+    // A message can change what the lists show (held requests, reply obligations); the open thread is read first.
+    void afterWrite()
     await refreshThread(session.project_id, session.id)
   }
   async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
@@ -387,7 +421,7 @@ export const useAgents = defineStore('agents', () => {
   }
   async function cancelQueuedRun(run: Pick<AgentRun, 'id'>) {
     const cancelled = await cancelRun(run.id)
-    void afterWrite(() => mergeRuns([cancelled]))
+    void afterWrite(() => mergeRuns([cancelled], positionFor(cancelled)))
   }
   function tick() { now.value = Math.max(now.value, Date.now()) }
   // Bumped by delivery events (AEON-280); an open chat re-reads its message status.
@@ -400,6 +434,6 @@ export const useAgents = defineStore('agents', () => {
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshAccounts, refreshSessions, refreshThread, refreshAgentRuns, tick, deliveryPulse, deliveryChanged,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount, removeAccount, cancelQueuedRun,
     invalidatePolls, afterWrite, onWrite,
-    recordRun: (run: AgentRun) => mergeRuns([run]),
+    recordRun: (run: AgentRun) => mergeRuns([run], positionFor(run)),
   }
 })
