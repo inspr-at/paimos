@@ -13,6 +13,19 @@ just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
 
+UI CI runs eight duration-balanced jobs with one Playwright worker each, including
+the route audit. To reproduce a job, run
+`node scripts/playwright-ui-shards.mjs --shard=1/8`; `--plan` prints the balance
+and `--check` verifies that Playwright selects every test exactly once across all
+eight jobs. Ordinary spec files stay together; audit states each create their own
+browser contexts. New specs are discovered from Playwright's full list and run
+even before they have a saved timing in `web/playwright.ui.weights.json`.
+Each job logs `AEON_UI_TIMINGS` with milliseconds per file or audit state for
+rebalancing. The test server uses Vite dev to serve test-only HTML and TypeScript
+harnesses. Stable tests have no retries; the three tagged quarantine tests get
+two retries, and `PW_NIGHTLY=1` disables those retries. The web gate also rejects
+mutations of imported fixtures.
+
 Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 `/p/KEY/knowledge`. A ticket uses `/p/KEY/TICKET`; `?section=journey` or
 `?section=knowledge` retains its background section. Tickets is the default,

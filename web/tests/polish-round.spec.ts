@@ -116,8 +116,7 @@ for (const scenario of scenarios) for (const theme of ['light', 'dark'] as const
       const queue = (await page.locator('.queue').boundingBox())!
       for (const button of await page.locator('.item.held .row-actions button').all()) {
         const box = (await button.boundingBox())!
-        // Subpixel borders land a fraction past the queue; a whole pixel still fails.
-        expect(Math.floor(box.x + box.width)).toBeLessThanOrEqual(Math.ceil(queue.x + queue.width))
+        expect(box.x + box.width).toBeLessThanOrEqual(queue.x + queue.width)
       }
       const contrast = await new AxeBuilder({ page }).include('.cap').withRules(['color-contrast']).analyze()
       expect(contrast.violations).toEqual([])

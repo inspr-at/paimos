@@ -69,6 +69,8 @@ jobs:
         run: npm ci
       - name: Reject mutations of imported fixtures
         run: node --test scripts/check-fixture-mutation.test.mjs
+      - name: Check duration shard selection
+        run: node --test scripts/playwright-ui-shards.test.mjs
       - working-directory: web
         run: npm run typecheck
       - working-directory: web
@@ -147,20 +149,19 @@ jobs:
           fi
           npm run e2e --prefix web
 
-  # UI suite. Six count-balanced file shards at --workers=2, plus the route audit
-  # as two shards: eight Playwright jobs, under the 20-job budget once Go is five
-  # shards plus its gate. Quarantine rides in the file shards. A CLI --retries
-  # would replace the quarantine project's retries, so only the nightly run passes
-  # --retries=0. The audit is one spec, so it keeps Playwright's --shard.
+  # Eight jobs, one worker each. Files and independent audit states are packed
+  # by measured duration. With four Go shards, vet and the Go gate, plus web,
+  # e2e, release-check and the Playwright gate, this is 18 jobs (limit: 19).
+  # Quarantine retries stay project-local; nightly explicitly sets retries=0.
   playwright-shard:
-    name: playwright (${{ matrix.shard }}/6)
+    name: playwright (${{ matrix.shard }}/8)
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -173,58 +174,22 @@ jobs:
       - working-directory: web
         run: npx playwright install --with-deps chromium
       - name: UI shard
-        working-directory: web
         env:
           PW_NIGHTLY: ${{ github.event_name == 'schedule' && '1' || '0' }}
-          PW_FILE_SHARD: ${{ matrix.shard }}/6
-        shell: bash
-        run: |
-          set -euo pipefail
-          args=(--project=ui --project=quarantine --workers=2)
-          if [ "$PW_NIGHTLY" = "1" ]; then
-            args+=(--retries=0)
-          fi
-          npx playwright test -c playwright.ui.config.ts "${args[@]}"
-
-  playwright-audit:
-    name: playwright (audit ${{ matrix.shard }}/2)
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - working-directory: web
-        run: npm ci
-      - working-directory: web
-        run: npx playwright install --with-deps chromium
-      - name: Route audit
-        working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts --project=audit --shard=${{ matrix.shard }}/2 --workers=4 --retries=0
+        run: node scripts/playwright-ui-shards.mjs --shard=${{ matrix.shard }}/8
 
   playwright:
     name: playwright
-    needs: [playwright-shard, playwright-audit]
+    needs: [playwright-shard]
     if: ${{ always() && !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every shard and the route audit
+      - name: Require every UI and audit shard
         shell: bash
         env:
           SHARD: ${{ needs.playwright-shard.result }}
-          AUDIT: ${{ needs.playwright-audit.result }}
         run: |
           set -euo pipefail
           echo "playwright-shard: ${SHARD}"
-          echo "playwright-audit: ${AUDIT}"
           test "${SHARD}" = "success"
-          test "${AUDIT}" = "success"

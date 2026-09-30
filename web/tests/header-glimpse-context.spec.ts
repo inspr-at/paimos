@@ -26,7 +26,7 @@ test('Hide closed and status use the Tickets context and Open graph retains it',
   await page.locator('.project-head').hover()
   await page.getByRole('button', { name: 'Open graph', exact: true }).click()
   await expect(page).toHaveURL(/status=in_progress/)
-  await expect(page.locator('.ticket-graph-canvas')).toHaveAttribute('aria-label', /20 tickets/, { timeout: 20_000 })
+  await expect(page.locator('.ticket-graph-canvas')).toHaveAttribute('aria-label', /20 tickets/)
 })
 
 test('saved views, assignee, type, priority and server search determine the glimpse', async ({ page }) => {

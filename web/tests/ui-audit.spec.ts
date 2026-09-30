@@ -211,7 +211,7 @@ async function focusAudit(page: Page): Promise<Raw[]> {
   return result
 }
 
-// One test per screen so CI shards and workers run the audit in parallel. The
+// One test per state so CI jobs can distribute the isolated audit contexts. The
 // serial loop was about 26 minutes on one runner. UI_AUDIT_AGGREGATE=1 (the
 // local npm run audit:ui, workers=1) still writes the combined findings file.
 const aggregate = process.env.UI_AUDIT_AGGREGATE === '1'

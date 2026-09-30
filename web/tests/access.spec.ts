@@ -131,7 +131,6 @@ test('deactivating says what happens, then shows the status; reactivating brings
 })
 
 test('linking a classic identity to a person, with undo', async ({ page }) => {
-  test.setTimeout(60_000)
   const world = await open(page)
   await page.getByRole('button', { name: /Imported from classic, no sign-in/ }).click()
   await page.getByRole('button', { name: 'Link jw (classic) to a person' }).click()
