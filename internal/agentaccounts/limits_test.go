@@ -2,12 +2,15 @@
 package agentaccounts
 
 import (
+	"context"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -17,12 +20,33 @@ type limitFixture struct {
 	token         string
 	profile       string
 	account       Account
+	mod           httpapi.Module
+}
+
+// fixedClockModule injects the same instant into every account request, including
+// probes, reading validation, projections and routing. No global clock is changed.
+type fixedClockModule struct {
+	httpapi.Module
+	at time.Time
+}
+
+func (m fixedClockModule) Mount(mux *http.ServeMux) {
+	inner := http.NewServeMux()
+	m.Module.Mount(inner)
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), clockKey{}, m.at)
+		inner.ServeHTTP(w, r.WithContext(ctx))
+	}))
 }
 
 // limitWorld is one Codex account with a fresh probe and an always-on
-// account schedule without Keep for you, so routing does not depend on the
-// clock the test runs at.
+// account schedule without Keep for you.
 func limitWorld(t *testing.T, slug string, parallel int) limitFixture {
+	t.Helper()
+	return limitWorldAt(t, slug, parallel, time.Time{})
+}
+
+func limitWorldAt(t *testing.T, slug string, parallel int, at time.Time) limitFixture {
 	t.Helper()
 	reset(t)
 	f := limitFixture{admin: makePrincipal(t, slug, "person", "Ada", []string{"admin"})}
@@ -30,6 +54,10 @@ func limitWorld(t *testing.T, slug string, parallel int) limitFixture {
 	f.token = issueKey(t, f.runner, []string{"account.manage", "account.probe"})
 	f.profile = codexProfile(t, f.admin)
 	mod := accountsMod()
+	if !at.IsZero() {
+		mod = fixedClockModule{Module: mod, at: at}
+	}
+	f.mod = mod
 	callStatus(t, mod, &f.runner, f.token, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": "main", "harness": "codex", "daemon_id": "daemon-a", "label": "Main", "max_parallel_runs": parallel}), 201, &f.account)
 	callStatus(t, mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	s := capacity.DefaultSchedule("Europe/Vienna")
@@ -44,21 +72,21 @@ func limitWorld(t *testing.T, slug string, parallel int) limitFixture {
 func (f limitFixture) report(t *testing.T, used float64, readAt, resets time.Time) {
 	t.Helper()
 	r := capacity.Reading{WindowKind: "weekly", WindowMinutes: 7 * 24 * 60, UsedPercent: used, ResetsAt: resets, ReadAt: readAt, Source: "harness"}
-	callStatus(t, accountsMod(), &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{r}}), 204, nil)
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{r}}), 204, nil)
 }
 
 func (f limitFixture) route(t *testing.T, status int) (string, RouteResult) {
 	t.Helper()
 	run := insertRun(t, f.admin, f.runner, f.profile)
 	var out RouteResult
-	callStatus(t, accountsMod(), &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, run, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}), status, &out)
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, run, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}), status, &out)
 	return run, out
 }
 
 func (f limitFixture) capacity(t *testing.T) accountCapacity {
 	t.Helper()
 	var out []accountCapacity
-	callStatus(t, accountsMod(), &f.admin, "", "GET", "/api/agent-accounts/capacity", "", 200, &out)
+	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/capacity", "", 200, &out)
 	if len(out) != 1 {
 		t.Fatalf("capacity: %+v", out)
 	}
@@ -68,7 +96,7 @@ func (f limitFixture) capacity(t *testing.T) accountCapacity {
 func (f limitFixture) setByYou(t *testing.T) []Window {
 	t.Helper()
 	var accounts []Account
-	callStatus(t, accountsMod(), &f.admin, "", "GET", "/api/agent-accounts", "", 200, &accounts)
+	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts", "", 200, &accounts)
 	out := []Window{}
 	for _, w := range accounts[0].Windows {
 		if w.SetByYou {
@@ -82,9 +110,27 @@ func (f limitFixture) setByYou(t *testing.T) []Window {
 // readings keep updating next to it, and nothing about it is lost; Remove
 // keeps the row.
 func TestOldManualWindowCapsOnTopOfReadings(t *testing.T) {
-	f := limitWorld(t, "manual-caps", 4)
-	mod := accountsMod()
-	now := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
+	loc, err := time.LoadLocation("Europe/Vienna")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, at := range []time.Time{
+		time.Date(2026, 9, 29, 9, 0, 0, 0, loc),
+		time.Date(2026, 9, 29, 18, 0, 0, 0, loc),
+		time.Date(2026, 9, 29, 23, 30, 0, 0, loc),
+		time.Date(2026, 9, 30, 23, 30, 0, 0, loc),
+	} {
+		t.Run(at.Format("2006-01-02_15:04"), func(t *testing.T) {
+			testOldManualWindowCapsOnTopOfReadings(t, at)
+		})
+	}
+}
+
+func testOldManualWindowCapsOnTopOfReadings(t *testing.T, at time.Time) {
+	t.Helper()
+	f := limitWorldAt(t, "manual-caps", 4, at)
+	mod := f.mod
+	now := at.Add(-time.Second)
 	resets := now.Add(48 * time.Hour)
 	// The window as pairing or the old Settings form left it: two requests,
 	// with a burst the UI no longer shows.
@@ -96,7 +142,7 @@ func TestOldManualWindowCapsOnTopOfReadings(t *testing.T) {
 	f.report(t, 10, now.Add(-time.Minute), resets)
 
 	// Both bind: every route reserves on the manual window and the reading.
-	_, first := f.route(t, 200)
+	firstRun, first := f.route(t, 200)
 	units := map[string]bool{}
 	for _, r := range first.Reservations {
 		units[r.Unit] = true
@@ -112,7 +158,18 @@ func TestOldManualWindowCapsOnTopOfReadings(t *testing.T) {
 	}
 	f.route(t, 409)
 	f.report(t, 20, now.Add(100*time.Millisecond), resets)
-	f.route(t, 200)
+	if c := f.capacity(t); len(c.Windows) != 1 || c.Windows[0].UsageTodayKnown || c.Windows[0].Pacing.UsedTodayPercent != 10 || c.Windows[0].Pacing.AvailableNowPercent <= 2 {
+		t.Fatalf("late readings must keep a daily share and their observed usage: %+v", c.Windows)
+	}
+	secondRun, _ := f.route(t, 200)
+	ctx := context.WithValue(dbtest.Seed(t.Context()), clockKey{}, at)
+	for _, run := range []string{firstRun, secondRun} {
+		if err := db.InTenant(ctx, appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+			return ValidateReservedCapacity(ctx, tx, run, f.account.ID)
+		}); err != nil {
+			t.Fatalf("claim after the fresh reading: %v", err)
+		}
+	}
 	// The manual window caps the plan: two requests are held, the readings
 	// have plenty left, and the third run waits.
 	f.route(t, 409)
@@ -122,9 +179,8 @@ func TestOldManualWindowCapsOnTopOfReadings(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		clock := time.Now()
-		a.LastProbeAt = &clock
-		_, wait, err = admission(t.Context(), tx, a, a.Windows, clock, 2, runRow{Purpose: "managed", CapacityOverride: "now"}, false)
+		a.LastProbeAt = &at
+		_, wait, err = admission(t.Context(), tx, a, a.Windows, at, 2, runRow{Purpose: "managed", CapacityOverride: "now"}, false)
 		return err
 	})
 	if err != nil {
@@ -159,6 +215,58 @@ func TestOldManualWindowCapsOnTopOfReadings(t *testing.T) {
 		t.Fatal(err)
 	}
 	callStatus(t, mod, &f.admin, "", "DELETE", "/api/agent-accounts/"+f.account.ID+"/windows/"+derived, "", 404, nil)
+}
+
+// AEON-464: late observations receive a daily share, but later consumption
+// still spends it. Repeated projections must not replace the usage baseline.
+func TestLateReadingDailyShareStillCapsObservedUsage(t *testing.T) {
+	loc, err := time.LoadLocation("Europe/Vienna")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 9, 30, 23, 30, 0, 0, loc)
+	resets := time.Date(2026, 10, 3, 0, 0, 0, 0, loc)
+	f := limitWorldAt(t, "late-daily-share", 4, at)
+	f.report(t, 10, at.Add(-30*time.Minute), resets)
+	f.report(t, 20, at.Add(-2*time.Minute), resets)
+	for i := 0; i < 2; i++ {
+		c := f.capacity(t)
+		p := c.Windows[0].Pacing
+		// Three full scheduled days until reset: today's share is 90/3,
+		// of which the observed 10 points have already been consumed.
+		if c.Windows[0].UsageTodayKnown || p.BudgetPercent != 30 || p.UsedTodayPercent != 10 || p.AvailableNowPercent != 20 {
+			t.Fatalf("daily share with an unknown boundary reading: %+v", c.Windows[0])
+		}
+	}
+	f.route(t, 200)
+	f.report(t, 60, at.Add(-time.Minute), resets)
+	c := f.capacity(t)
+	if p := c.Windows[0].Pacing; p.BudgetPercent != 30 || p.UsedTodayPercent != 50 || p.AvailableNowPercent != 0 {
+		t.Fatalf("later usage must spend the original daily share: %+v", p)
+	}
+	f.route(t, 409)
+	// At midnight the old period's observations no longer supply a baseline.
+	// Its usage stays unknown, and the new day's share starts at the boundary.
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		s := capacity.DefaultSchedule("Europe/Vienna")
+		for i := range s.Week {
+			s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+		}
+		s.Reserve = capacity.ReserveOff
+		midnight := time.Date(2026, 10, 1, 0, 0, 0, 0, loc)
+		v := capacity.Reading{WindowKind: "weekly", WindowMinutes: 7 * 24 * 60, UsedPercent: 60, ReadAt: midnight, ResetsAt: resets, Source: "harness"}
+		p, known, err := readingPacing(t.Context(), tx, f.account.ID, v, midnight, s)
+		if err != nil {
+			return err
+		}
+		if known || p.UsedTodayPercent != 0 || p.BudgetPercent != 20 || p.AvailableNowPercent != 20 {
+			t.Fatalf("new month/day inherited the previous period's usage: known=%v pacing=%+v", known, p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // AEON-384 acceptance: the Advanced sentence round-trips, and it caps.

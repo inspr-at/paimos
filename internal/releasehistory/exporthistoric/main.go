@@ -31,16 +31,28 @@ func main() {
 	}
 }
 
+type options struct{ repo, client, tenant, project, out, reserve, tickets string }
+
 func run() error {
 	repo := flag.String("repo", ".", "Aeon checkout with release tags")
 	client := flag.String("client", "paimos", "configured PPM agent client executable (or wrapper)")
 	tenant := flag.String("tenant", "", "expected PPM tenant UUID")
 	project := flag.String("project", "", "expected AEON project UUID")
 	out := flag.String("out", "", "new ignored local JSON file; never overwritten")
+	reserve := flag.String("reserve", "", "version.json coordinate to capture before the release PR")
+	tickets := flag.String("tickets", "", "reviewed JSON array of the reserved release ticket keys (required with -reserve)")
 	flag.Parse()
 	if flag.NArg() != 0 || *out == "" || releasehistory.HistoryBindingError(*tenant, *project, *tenant, *project) != nil {
 		return fmt.Errorf("require -out FILE -tenant UUID -project UUID")
 	}
+	if (*reserve == "") != (*tickets == "") {
+		return fmt.Errorf("-reserve VERSION requires -tickets FILE")
+	}
+	return runExport(options{*repo, *client, *tenant, *project, *out, *reserve, *tickets})
+}
+
+func runExport(o options) error {
+	repo, client, tenant, project, out := &o.repo, &o.client, &o.tenant, &o.project, &o.out
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	root, err := filepath.Abs(*repo)
@@ -123,7 +135,24 @@ func run() error {
 		return err
 	}
 	export := releasehistory.HistoricTicketExport{Schema: releasehistory.HistoricNotesSchema, TenantID: *tenant, ProjectID: *project, CapturedAt: time.Now().UTC().Truncate(time.Second), Tickets: []releasehistory.HistoricTicket{}}
-	for _, key := range releasehistory.HistoricTicketKeys(history) {
+	keys := releasehistory.HistoricTicketKeys(history)
+	if o.reserve != "" {
+		raw, err := os.ReadFile(o.tickets)
+		if err != nil {
+			return err
+		}
+		var scope []string
+		if json.Unmarshal(raw, &scope) != nil {
+			return fmt.Errorf("ticket scope must be a JSON array")
+		}
+		reservation, err := releasehistory.ReadNoteReservation(root, o.reserve, scope)
+		if err != nil {
+			return err
+		}
+		export.Reservation = &reservation
+		keys = reservation.Tickets
+	}
+	for _, key := range keys {
 		var n node
 		if err := read("/api/node-keys/"+key, &n); err != nil {
 			return err

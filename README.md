@@ -1031,6 +1031,16 @@ a TTY and belong to the target's user. Neither process may be an ancestor of
 the other, and ancestor UIDs must be that user or root. The complete process
 graph is rechecked for PID reuse and reparenting on confirmation and polls.
 The target still requires its full physical folder and image validation.
+On Linux, ancestry uses the same metadata-only read: `/proc/<pid>/stat` and
+the uid of the `/proc/<pid>` directory. Root-owned `sshd`, `su` and `sudo`
+ancestors are acceptable. The selected target still requires its executable
+and working directory.
+Those checks are defence in depth. A program running as the same user can open
+another terminal and request the review. On a Mac that can use Touch ID, attach
+approval asks for it by default until the person saves a choice. People without
+Touch ID, Linux, and a Mac with no graphical login keep approval in Aeon.
+Saving Mac confirmation turns watches off where Touch ID cannot run. SSH to a
+Mac that can show Touch ID prompts on that Mac's screen.
 Run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-ancestry-mutations.py`
 on macOS to verify that the negative ancestry regressions catch removed guards.
 
