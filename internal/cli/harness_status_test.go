@@ -182,6 +182,93 @@ func TestHeartbeatRestartWithoutTicketKeepsEstimates(t *testing.T) {
 	}
 }
 
+func TestHeartbeatLegacyStateBackfillsBoundTicket(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "progress.json")
+	if err := os.WriteFile(path, []byte(`{"pct":40,"remaining_min":25,"note":"Current step"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(home, "state")
+	if err := os.MkdirAll(stateDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	lease := strings.Repeat("ab", 32)
+	if err := os.WriteFile(filepath.Join(stateDir, "lease.key"), []byte(lease+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "session.id"), []byte(transcriptSessionID+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"schema":"` + heartbeatSchema + `","session_id":"` + transcriptSessionID + `","project_id":"` + transcriptProjectID + `","sequence":4}`
+	if strings.Contains(legacy, "bound_ticket") {
+		t.Fatal("fixture accidentally included a bound ticket")
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "state.json"), []byte(legacy+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	sessionGets := 0
+	var calls []hbCall
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/projects/"+transcriptProjectID+"/harness-sessions/"+transcriptSessionID {
+			sessionGets++
+			body := map[string]any{"id": transcriptSessionID, "activity_sequence": 4}
+			if sessionGets == 1 {
+				body["ticket_node_id"] = transcriptEntryID
+			}
+			_ = json.NewEncoder(w).Encode(body)
+			return true
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/nodes/"+transcriptEntryID {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": transcriptEntryID, "key": "AEON-465", "kind_id": "ticket-kind", "title": "ETA",
+			})
+			return true
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, _ := heartbeatRuntime(t, srv)
+	o := heartbeatTestOptions(home)
+	o.StateDir = stateDir
+	o.StatusFile = path
+	deps := heartbeatDeps{alive: func(int) bool { return true }}
+	session, created, err := rt.openHeartbeatSession(t.Context(), o, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created || session.disk.BoundTicket != "AEON-465" {
+		session.hold.release()
+		t.Fatalf("legacy state was not backfilled: created=%t ticket=%q", created, session.disk.BoundTicket)
+	}
+	raw, err := session.hold.readFile("state.json", 1<<20)
+	session.hold.release()
+	if err != nil || !strings.Contains(string(raw), `"bound_ticket":"AEON-465"`) {
+		t.Fatalf("bound ticket was not persisted: %s %v", raw, err)
+	}
+	resumed, created, err := rt.openHeartbeatSession(t.Context(), o, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resumed.hold.release()
+	if created || resumed.disk.BoundTicket != "AEON-465" || sessionGets != 1 {
+		t.Fatalf("persisted ticket was not reused: created=%t ticket=%q gets=%d", created, resumed.disk.BoundTicket, sessionGets)
+	}
+	if err := rt.heartbeatBeat(t.Context(), o, deps, &resumed); err != nil {
+		t.Fatal(err)
+	}
+	beats := hbWhere(calls, http.MethodPost, "/heartbeat")
+	if len(beats) != 1 || beats[0].body["progress_pct"] != float64(40) {
+		t.Fatalf("legacy restart dropped progress: %#v", beats)
+	}
+	ready, err := time.Parse(time.RFC3339Nano, beats[0].body["eta_ready_at"].(string))
+	if err != nil || ready.IsZero() {
+		t.Fatalf("legacy restart dropped ETA: %#v %v", beats[0].body["eta_ready_at"], err)
+	}
+}
+
 func TestHeartbeatStatusFileSentOnEachBeatAndMissingDoesNotFail(t *testing.T) {
 	home, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -307,6 +394,98 @@ func TestHeartbeatWarningReceiptsOnceWhenAeonIs0755(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(aeon, ".heartbeat-warnings-"+transcriptSessionID)); !os.IsNotExist(err) {
 		t.Fatal("receipt was written directly into the 0755 directory", err)
+	}
+}
+
+func TestHeartbeatWarningReceiptMigratesLegacyTimestamps(t *testing.T) {
+	home := t.TempDir()
+	now := time.Now().UTC()
+	recent := now.Add(-2 * time.Minute)
+	stale := now.Add(-11 * time.Minute)
+	writeLegacyWarningReceipt(t, home, map[string]time.Time{
+		"missing_eta":      recent,
+		"stale_code":       stale,
+		"missing_progress": now.Add(time.Minute),
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	warnings := []harness.EstimateWarning{
+		{Code: "missing_eta", Hint: "Report ready ETA"},
+		{Code: "missing_progress", Hint: "Report percent"},
+		{Code: "stale_code", Hint: "Old warning"},
+	}
+	response := map[string]any{"warnings": warnings}
+	rt.printHeartbeatWarningsHome(response, transcriptSessionID, home)
+	if strings.Count(stderr.String(), "missing_eta") != 0 {
+		t.Fatal("upgrade repeated a warning still inside the interval", stderr.String())
+	}
+	if strings.Count(stderr.String(), "missing_progress") != 1 || strings.Count(stderr.String(), "stale_code") != 1 {
+		t.Fatal("stale or future legacy stamps suppressed a warning", stderr.String())
+	}
+	stderr.Reset()
+	rt.printHeartbeatWarningsHome(response, transcriptSessionID, home)
+	if stderr.Len() != 0 {
+		t.Fatal("migrated receipts did not throttle the next invocation", stderr.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(home, ".aeon", "heartbeat-warnings", transcriptSessionID, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var disk heartbeatDisk
+	if err := json.Unmarshal(raw, &disk); err != nil {
+		t.Fatal(err)
+	}
+	if !disk.WarningAt["missing_eta"].Equal(recent) {
+		t.Fatalf("migrated stamp %s, want %s", disk.WarningAt["missing_eta"], recent)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".aeon", ".heartbeat-warnings-"+transcriptSessionID, "state.json")); err != nil {
+		t.Fatal("legacy receipt was removed", err)
+	}
+
+	linkedHome := t.TempDir()
+	aeon := filepath.Join(linkedHome, ".aeon")
+	if err := os.Mkdir(aeon, 0700); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	writeLegacyWarningReceipt(t, outside, map[string]time.Time{"missing_eta": recent})
+	if err := os.Symlink(filepath.Join(outside, ".aeon", ".heartbeat-warnings-"+transcriptSessionID), filepath.Join(aeon, ".heartbeat-warnings-"+transcriptSessionID)); err != nil {
+		t.Fatal(err)
+	}
+	stderr.Reset()
+	rt.printHeartbeatWarningsHome(response, transcriptSessionID, linkedHome)
+	if strings.Count(stderr.String(), "missing_eta") != 1 {
+		t.Fatal("followed a legacy receipt symlink", stderr.String())
+	}
+}
+
+func writeLegacyWarningReceipt(t *testing.T, home string, at map[string]time.Time) {
+	t.Helper()
+	aeon := filepath.Join(home, ".aeon")
+	if err := os.MkdirAll(aeon, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(aeon, 0700); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(aeon, ".heartbeat-warnings-"+transcriptSessionID)
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(heartbeatDisk{WarningAt: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
 	}
 }
 

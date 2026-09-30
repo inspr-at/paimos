@@ -761,6 +761,10 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 			existing.disk.StartRev, _ = gitHEAD(ctx, o.Worktree)
 		}
 		existing.hold = session.hold
+		// State written before BoundTicket has no local binding. A restart
+		// without --ticket would then omit progress and ETA. The server's
+		// session binding is copied in and persisted.
+		rt.backfillBoundTicket(ctx, o, &existing)
 		return existing, false, nil
 	}
 	// Prove the owner before registration. A dead owner must not create a
@@ -985,6 +989,52 @@ func (rt *runtime) finishBoundedStop(ctx context.Context, o heartbeatOptions, st
 	fmt.Fprintf(rt.stderr, "heartbeat: stop will not be retried\n")
 	releaseSessionIndex(&heartbeatSession{hold: hold})
 	return errHeartbeatStopRejected
+}
+
+// backfillBoundTicket copies the server's ticket binding into state that
+// predates BoundTicket. A missing or unbound session is left unchanged so
+// resume still heartbeats. A closed generation is skipped: it does not
+// report estimates, and a status read would be a new request on every open.
+func (rt *runtime) backfillBoundTicket(ctx context.Context, o heartbeatOptions, session *heartbeatSession) {
+	if session == nil || session.disk.Terminal || session.disk.Closed || strings.TrimSpace(session.disk.BoundTicket) != "" {
+		return
+	}
+	projectID := session.disk.ProjectID
+	if !validUUID(projectID) {
+		var err error
+		projectID, err = rt.harnessProjectCtx(ctx, o.Project)
+		if err != nil || !validUUID(projectID) {
+			return
+		}
+	}
+	var status struct {
+		ID           string  `json:"id"`
+		TicketNodeID *string `json:"ticket_node_id"`
+	}
+	if err := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id), "", nil, &status); err != nil {
+		return
+	}
+	if status.ID != "" && !strings.EqualFold(status.ID, session.id) {
+		return
+	}
+	if status.TicketNodeID == nil || !validUUID(*status.TicketNodeID) {
+		return
+	}
+	var node apiNode
+	if err := rt.doCtx(ctx, http.MethodGet, "/api/nodes/"+url.PathEscape(*status.TicketNodeID), nil, &node); err != nil {
+		return
+	}
+	if !strings.EqualFold(node.ID, *status.TicketNodeID) {
+		return
+	}
+	key := heartbeatText(node.Key, 200)
+	if key == "" {
+		return
+	}
+	session.disk.BoundTicket = key
+	if err := saveHeartbeatSession(session); err != nil {
+		fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
+	}
 }
 
 func bindHeartbeatWorktree(ctx context.Context, o heartbeatOptions, disk *heartbeatDisk) {

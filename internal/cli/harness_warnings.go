@@ -62,7 +62,16 @@ func (rt *runtime) printHeartbeatWarningsHome(out any, session, home string) {
 			_ = json.Unmarshal(raw, &disk)
 		}
 	}
-	rt.printEstimateWarnings(response.Warnings, &disk.WarningAt, time.Now())
+	// A receipt written at ~/.aeon/.heartbeat-warnings-SESSION still throttles
+	// until the new directory has its own timestamps. Only stamps inside the
+	// ten-minute window are copied, so an upgrade does not repeat them.
+	now := time.Now()
+	if len(disk.WarningAt) == 0 {
+		if migrated := legacyHeartbeatWarnings(home, session, now); len(migrated) > 0 {
+			disk.WarningAt = migrated
+		}
+	}
+	rt.printEstimateWarnings(response.Warnings, &disk.WarningAt, now)
 	if err == nil {
 		raw, _ := json.Marshal(disk)
 		_ = hold.writeFile("state.json", raw)
@@ -83,4 +92,58 @@ func openHeartbeatWarningHold(home, session string) (heartbeatHold, error) {
 	}
 	defer receipts.Close()
 	return openHeartbeatHold(filepath.Join(receipts.Name(), session))
+}
+
+// legacyHeartbeatWarnings reads a receipt from before warnings moved under
+// heartbeat-warnings/. The directory is opened with the same ownership and
+// final-symlink checks as live state. Stamps outside the throttle window,
+// or in the future, are dropped.
+func legacyHeartbeatWarnings(home, session string, now time.Time) map[string]time.Time {
+	if !filepath.IsAbs(home) || !validUUID(session) {
+		return nil
+	}
+	// Missing receipts stay missing. openHeartbeatHold would create the
+	// directory, and that would put a legacy path back into ~/.aeon.
+	root := filepath.Join(home, ".aeon")
+	rootInfo, err := os.Lstat(root)
+	if err != nil || rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
+		return nil
+	}
+	path := filepath.Join(root, ".heartbeat-warnings-"+session)
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return nil
+	}
+	hold, err := openHeartbeatHold(path)
+	if err != nil {
+		return nil
+	}
+	defer hold.release()
+	raw, err := hold.readFile("state.json", 65536)
+	if err != nil {
+		return nil
+	}
+	var disk heartbeatDisk
+	if json.Unmarshal(raw, &disk) != nil {
+		return nil
+	}
+	return recentWarningTimes(disk.WarningAt, now)
+}
+
+func recentWarningTimes(at map[string]time.Time, now time.Time) map[string]time.Time {
+	if len(at) == 0 {
+		return nil
+	}
+	out := make(map[string]time.Time, len(at))
+	for code, last := range at {
+		code = heartbeatText(code, 80)
+		if code == "" || last.IsZero() || last.After(now) || now.Sub(last) >= heartbeatWarningInterval {
+			continue
+		}
+		out[code] = last.UTC()
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
