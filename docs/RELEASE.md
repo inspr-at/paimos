@@ -22,13 +22,15 @@ with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `C
 
 ### Test runner routing (AEON-438)
 
-CI's hosted `runner-route` job calls `test-runner-route.yml`; test jobs consume
-its JSON `runs_on` output behind independent event, ref and rerun-attempt guards.
+CI's hosted `runner-route` job calls `test-runner-route.yml`; routed test jobs
+consume its JSON `runs_on` output behind independent event, ref and rerun-attempt
+guards.
 Only `push` and `workflow_dispatch` on `refs/heads/main` may select `[self-hosted,
 Linux, ARM64, mbp2606]`. The reviewed workflows route PRs to `ubuntu-latest`;
 a PR can modify those workflows or the guard, so runner-side admission is the
 enforcement boundary. The manual `Test runner smoke` workflow exercises the same
-router and small Go/Node checks. Normal PR and main CI retain the full Go suite.
+router and small Go/Node checks. Normal PR and main CI retain the full Go suite
+on seven hosted shards; Mac shard integration remains pending below.
 
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** Publishing
@@ -63,8 +65,9 @@ those labels, including a fork job racing the verified job.
    On missing, malformed or mismatched metadata, the hook must kill both
    `Runner.Listener` and `Runner.Worker` and power the VM off (`poweroff -ff`)
    **before it returns**; the controller then discards the VM. A non-zero exit
-   alone is insufficient. Attach the slot cache disk **only after the hook
-   admits the job**, never at VM boot. NIX-600's smoke acceptance must prove
+   alone is insufficient. Keep the slot cache disk **LUKS2-locked at boot**;
+   the controller unlocks and mounts it only after API attribution of this
+   `runner_name` and hook admission. NIX-600's smoke acceptance must prove
    that a rejected job containing an `if: always()` step and an action with a
    `pre:` step produces **no workflow-step output and no cache write**.
 
@@ -88,6 +91,11 @@ those labels, including a fork job racing the verified job.
    unverifiable evidence also fails closed. This check runs outside the VM;
    cleanup and verification must not depend on a job-controlled completion hook.
 
+**Deny recording:** write a deny line in the GitHub job log. The VM cannot reach
+the host to report a deny, so the controller treats **any VM power-off during a
+job** as a deny (including pause or cancellation), pauses mode B and taints the
+slot. Attribute the actual job/run/attempt and `runner_name` through the API.
+
 The controller, hook and `ci.yml` router use the same smaller allowlist:
 **`push`, `workflow_dispatch` at `refs/heads/main` only**. `schedule` and
 `merge_group` are excluded; no tags are routed. Expanding events or refs requires
@@ -108,20 +116,25 @@ that protection remains intact.
 sealed base image containing rootful Docker, actions-runner and the baked hook,
 with **no host mounts**. The JIT runner executes inside that VM. The job has
 root inside its VM, so the VM is the isolation boundary; the controller deletes
-it after completion or rejection. Persistent caches use one Lima disk per slot,
-**unattached at boot and attached only after hook admission**, mounted read-write
-**only for verified main pushes**; dispatches use read-only trusted caches plus
-disposable scratch/overlays.
+it after completion or rejection. Persistent caches use one **LUKS2-locked disk
+per slot**, unlocked and mounted by the controller only after API attribution
+and hook admission, read-write **only for verified main pushes**. Lima 2.2
+`format:true` repartitions on every boot: attach slot disks with `format:false`
+and require an explicit `--init` on first use. After **any deny, pause or
+mismatch**, restore the tainted slot disk from its last known-good APFS
+clone, captured after the previous verified main push. Promote a new known-good
+clone only after the external post-job check passes for a main push. Dispatches
+get a throwaway clone of known-good, with disposable scratch/overlays. A cache
+tarball over the controller's SSH is the fallback after admission; write-back
+is allowed only for verified main pushes.
 
 **Network precondition:** a host `pf` anchor for user `ci` blocks private ranges
-and host loopback. Restrict the Lima SSH exception to hostagent traffic, or use
-per-instance keys, so guests cannot reach another VM's SSH over loopback.
-User `ci` has **no port-53 egress to private ranges**. VM DNS uses the Lima
-hostagent forwarder and the system resolver. If a direct resolver fallback is
-required, allow DNS only to a `pf` table of the current system resolvers
-(`scutil --dns`), refreshed when enabling the pool, on every re-prove and on
-network change; fail closed when empty and retain the private-range deny for
-user `ci`. Port 53 to arbitrary LAN hosts is never allowed.
+and host loopback, except the Lima SSH loopback ports **60019–60023**. This
+stateless, public-key-only exception, with per-instance keys and **no private
+key in any guest**, is an **accepted residual risk**. User `ci` has **no port-53
+egress at all**. VM DNS resolves through the Lima hostagent → `mDNSResponder`;
+router **TCP 53/80/443 and UDP 53** are blocked from the VM. Direct resolver
+fallback and port 53 to arbitrary LAN hosts are not allowed in this contract.
 The controller verifies that the host anchor is installed and active before
 publishing availability and before every mint; a missing, inactive or
 unverifiable anchor keeps mode B off. An in-VM firewall does not satisfy this
@@ -191,9 +204,10 @@ not a lease that expires after initial job scheduling; the controller's draining
 duties cover already queued jobs. See GitHub's
 [rerun behavior](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
 
-**TODO (AEON-408):** the seven-shard Go layout is not on this change's main base
-(`f8fe3bbd`). On integration, use **4 Go shards on mbp2606, 7 on hosted**, driven
-by the router's runner class; require 4 idle slots for the mbp2606 batch. Retain
+**TODO (AEON-408):** main now includes the seven-shard Go layout; this branch
+keeps those shards and the static/aggregate gates hosted. On Mac integration,
+use **4 Go shards on mbp2606, 7 on hosted**, driven by the router's runner class;
+require 4 idle slots for the mbp2606 batch. Retain
 the shard commands and hosted aggregate/static gates, add `runner-route` to
 `needs`, and copy the Go job's guarded `runs-on` and actual runner-class evidence.
 The shard inventory must include `scripts/ci-runner-guard`. Insufficient capacity
