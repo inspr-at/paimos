@@ -2,6 +2,7 @@
 // AEON-434: the register page follows one computer. A reset, a sign-out or a
 // different computer retires every outstanding read; one deadline bounds the
 // polling; the live stream is followed in live mode, filtered and coalesced.
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import {
   MAX_REQUEST_POLL_MS, PAIRING_EVENT_COALESCE_MS, PairingError, pairingEventScope, subscribePairingEvents, type PairingView,
@@ -144,6 +145,74 @@ it('a live wake during a read waits for it and then reads once more', async () =
   reads[1].call.resolve(view({ state: 'redeemed', setup_state: 'connected', connectivity: 'online' }))
   await vi.advanceTimersByTimeAsync(MAX_REQUEST_POLL_MS)
   expect(reads).toHaveLength(2)
+})
+
+const enrollmentWith = (verification_state: string) => [{ ...settingUp().enrollments[0], verification_state }]
+const terminalViews: [string, PairingView][] = [
+  ['setup_failed', view({ state: 'redeemed', setup_state: 'setup_failed', setup_error: 'installation_failed', connectivity: 'offline' })],
+  ['failed', view({ state: 'redeemed', setup_state: 'connected', connectivity: 'offline', enrollments: enrollmentWith('failed') })],
+  ['cancelled', view({ state: 'redeemed', setup_state: 'connected', connectivity: 'online', enrollments: enrollmentWith('cancelled') })],
+  ['expired', view({ state: 'redeemed', setup_state: 'connected', connectivity: 'online', enrollments: enrollmentWith('expired') })],
+  ['ownership_lost', view({ state: 'redeemed', setup_state: 'connected', connectivity: 'online', enrollments: enrollmentWith('ownership_lost') })],
+  ['request expired', view({ state: 'expired' })],
+]
+
+for (const [name, terminal] of terminalViews) {
+  it(`on a ${name} view, a live wake and a failed read arm no timer and read no more`, async () => {
+    for (const failure of [
+      new PairingError(503, 'unavailable', { code: 'unavailable' }),
+      new PairingError(429, 'slow down', { code: 'rate_limited', retryAfterSeconds: 10 }),
+    ]) {
+      const { follow, reads, failures } = harness()
+      follow.follow(terminal)
+      await vi.advanceTimersByTimeAsync(10_000) // well inside the polling lifetime
+      expect(reads).toHaveLength(0)
+      follow.poke() // the stream named this pairing
+      expect(reads).toHaveLength(1)
+      reads[0].call.reject(failure)
+      await vi.advanceTimersByTimeAsync(MAX_REQUEST_POLL_MS * 2)
+      expect(reads).toHaveLength(1)
+      expect(vi.getTimerCount()).toBe(0)
+      // A rate limit is not a failure; a refused retry of an ordinary failure is reported once.
+      expect(failures).toHaveLength(failure.code === 'rate_limited' ? 0 : 1)
+    }
+  })
+}
+
+it('a terminal view read on a live wake that comes back moving resumes polling', async () => {
+  const { follow, reads, views } = harness()
+  follow.follow(terminalViews[0][1])
+  follow.poke()
+  reads[0].call.resolve(settingUp())
+  await vi.advanceTimersByTimeAsync(0)
+  expect(views).toHaveLength(1)
+  await vi.advanceTimersByTimeAsync(5_000)
+  expect(reads).toHaveLength(2)
+})
+
+it('a wake that finds the pairing finished stops polling, and a failure after it does not restart it', async () => {
+  const { follow, reads } = harness()
+  follow.follow(settingUp())
+  await vi.advanceTimersByTimeAsync(5_000)
+  reads[0].call.resolve(terminalViews[0][1])
+  await vi.advanceTimersByTimeAsync(10_000)
+  expect(reads).toHaveLength(1)
+  follow.poke()
+  reads[1].call.reject(new PairingError(503, 'unavailable', { code: 'unavailable' }))
+  await vi.advanceTimersByTimeAsync(MAX_REQUEST_POLL_MS)
+  expect(reads).toHaveLength(2)
+  expect(vi.getTimerCount()).toBe(0)
+})
+
+it('only schedule() arms a timer and only run() reads, so a new path cannot skip the checks', () => {
+  const source = readFileSync(new URL('../src/lib/pairingFollow.ts', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  expect(source.match(/setTimeout\(/g)).toHaveLength(1)
+  expect(source.match(/this\.read\(/g)).toHaveLength(1)
+  expect(source.match(/pairingStillLive\(/g)!.length).toBeGreaterThanOrEqual(2)
+  const scheduleBody = source.slice(source.indexOf('private schedule('), source.indexOf('private async run('))
+  expect(scheduleBody).toContain('setTimeout(')
+  expect(scheduleBody).toContain('pairingStillLive(last)')
 })
 
 class FakeStream {

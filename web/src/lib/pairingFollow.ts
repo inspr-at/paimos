@@ -3,7 +3,9 @@
 // with backoff as the fallback, a read on demand when the live stream names the
 // pairing. One fixed deadline per followed computer; a reset, a sign-out or a
 // different computer retires every read and timer that was outstanding, so a
-// late answer or failure never restarts polling.
+// late answer or failure never restarts polling. Every later read (poll,
+// backoff, rate-limit wait) is armed by schedule() alone, and schedule() refuses
+// once the follow is retired or the last view is finished or failed.
 import { PairingError, getPairingComputer, pairingReadGeneration, pairingStillLive, planPoll, type PairingView } from './agentPairing'
 
 export interface PairingFollowDeps {
@@ -55,7 +57,7 @@ export class PairingFollow {
       this.following = { computerId: view.computer_id, startedAt: Date.now() }
     }
     this.last = view
-    this.arm(view)
+    this.schedule()
   }
 
   /** Read now, because the stream named this pairing. A read in flight is followed by one more, never a second at once. */
@@ -82,14 +84,29 @@ export class PairingFollow {
     this.timer = undefined
   }
 
-  private arm(view: PairingView) {
+  /**
+   * The only authority for a read that happens later: no other code arms a
+   * timer. It refuses when the follow is retired, a read is in flight (it arms
+   * the next one when it lands), the last view is finished or failed, or the
+   * polling lifetime is used up. A live wake reads once through poke() and arms
+   * nothing by itself. Returns whether a read was scheduled.
+   */
+  private schedule(wait: { rateLimited?: boolean; retryAfterSeconds?: number | null } = {}): boolean {
     this.clearTimer()
     const following = this.following
-    // A read in flight arms the next one when it lands.
-    if (!following || this.reading || !pairingStillLive(view)) return
-    const plan = planPoll({ startedAt: following.startedAt, now: Date.now(), intervalSeconds: view.interval_seconds, state: view.state, failures: this.failures })
-    if (plan.action === 'stop') return
-    this.timer = setTimeout(() => { this.timer = undefined; void this.run() }, plan.delayMs)
+    const last = this.last
+    if (!following || !last || this.reading || !pairingStillLive(last)) return false
+    const plan = planPoll({
+      startedAt: following.startedAt, now: Date.now(), intervalSeconds: last.interval_seconds, state: last.state,
+      failures: this.failures, rateLimited: wait.rateLimited, retryAfterSeconds: wait.retryAfterSeconds,
+    })
+    if (plan.action === 'stop') return false
+    this.timer = setTimeout(() => {
+      this.timer = undefined
+      // Asked again at the moment of reading: the view may have settled or the follow been retired.
+      if (this.following === following && this.last && pairingStillLive(this.last)) void this.run()
+    }, plan.delayMs)
+    return true
   }
 
   private async run(): Promise<void> {
@@ -110,23 +127,19 @@ export class PairingFollow {
       this.onView(view)
       if (!current()) return
       if (this.again) { this.again = false; void this.run(); return }
-      this.arm(view)
+      this.schedule()
     } catch (error) {
       if (!current()) return
       this.reading = false
       this.again = false
       if (error instanceof PairingError && error.code === 'session_reset') return
-      const state = this.last?.state
-      const interval = this.last?.interval_seconds
       if (error instanceof PairingError && error.code === 'rate_limited') {
-        const plan = planPoll({ startedAt: following.startedAt, now: Date.now(), rateLimited: true, retryAfterSeconds: error.retryAfterSeconds, state })
-        if (plan.action === 'wait') this.timer = setTimeout(() => { this.timer = undefined; void this.run() }, plan.delayMs)
+        this.schedule({ rateLimited: true, retryAfterSeconds: error.retryAfterSeconds })
         return
       }
       this.failures += 1
-      const plan = planPoll({ startedAt: following.startedAt, now: Date.now(), intervalSeconds: interval, state, failures: this.failures })
-      if (plan.action === 'wait') { this.timer = setTimeout(() => { this.timer = undefined; void this.run() }, plan.delayMs); return }
-      this.onFailure(error)
+      // Refused: the lifetime is used up or the view is settled. Nothing retries, so say so.
+      if (!this.schedule()) this.onFailure(error)
     }
   }
 }
