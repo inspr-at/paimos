@@ -34,6 +34,7 @@ const mine = computed(() => setByYou(props.account.windows, props.now))
 const poolBusy = ref(false)
 const poolError = ref('')
 const poolCandidates = computed(() => (props.accounts ?? []).filter(a => a.id !== props.account.id && a.harness === props.account.harness && !!props.account.quota_fingerprint && a.quota_fingerprint === props.account.quota_fingerprint && (!props.account.quota_pool_fingerprint || a.quota_pool_fingerprint !== props.account.quota_pool_fingerprint)))
+const poolMembers = computed(() => (props.accounts ?? []).filter(a => a.id !== props.account.id && a.harness === props.account.harness && !!props.account.quota_pool_fingerprint && a.quota_pool_fingerprint === props.account.quota_pool_fingerprint))
 const loginName = (a: AgentAccount) => `${accountName(a)}${a.host_label ? ` · ${a.host_label}` : ''}`
 async function shareQuota(other?: AgentAccount) {
   if (!props.mayManage || poolBusy.value) return
@@ -192,6 +193,7 @@ async function drop(w: AllowanceWindow) {
       <div v-if="mayManage && (poolCandidates.length || account.quota_pool_fingerprint)" class="fact">
         <dt>Shared login</dt>
         <dd>
+          <p v-if="poolMembers.length" class="quiet">Shared with {{ poolMembers.map(loginName).join(', ') }}</p>
           <button v-for="other in poolCandidates" :key="other.id" type="button" class="btn sm ghost" :disabled="poolBusy" @click="shareQuota(other)">Pool with {{ loginName(other) }}</button>
           <button v-if="account.quota_pool_fingerprint" type="button" class="btn sm ghost" :disabled="poolBusy" @click="shareQuota()">Stop sharing quota</button>
           <p v-if="poolError" class="problem" role="alert">{{ poolError }}</p>

@@ -69,6 +69,7 @@ test('matching login hints need a person to confirm the selected pair', async ({
   await expect.poll(() => writes.length).toBe(1)
   expect(writes[0]).toEqual({ account_ids: [ACCOUNTS.main, ACCOUNTS.spare], quota_fingerprint: fingerprint, confirmed: true })
   await expect(detail.getByRole('button', { name: 'Stop sharing quota' })).toBeVisible()
+  await expect(detail).toContainText('Shared with Spare · mbp2607')
   await expect(detail.getByRole('button', { name: 'Pool with Studio · studio' })).toBeVisible()
   await expect(pool).toHaveCount(0)
   const shots = process.env.AEON397_SHOTS
