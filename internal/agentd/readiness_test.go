@@ -162,6 +162,96 @@ func TestPollDiagnosticsContainOnlyBoundedCauses(t *testing.T) {
 	}
 }
 
+func TestPollDiagnosticsSuppressUnchangedPolls(t *testing.T) {
+	s, api, _ := testSupervisor(t)
+	queue := &readinessQueueAPI{fakeAPI: api, queueErr: errors.New("queue unavailable")}
+	s.api = queue
+	// Keep readiness stable while exercising the real polling path.
+	s.probedAccounts["account"] = true
+	var reasons []string
+	s.pollDiagnostic = func(reason string) { reasons = append(reasons, reason) }
+	for i := 0; i < 1000; i++ {
+		if err := s.PollOnce(t.Context()); !errors.Is(err, queue.queueErr) {
+			t.Fatal("queue outage not reported", err)
+		}
+	}
+	if !slices.Equal(reasons, []string{"queue_unavailable"}) {
+		t.Fatal("unchanged polls repeated the diagnostic", reasons)
+	}
+	queue.queueErr = nil
+	s.api = &readinessProbeErrorAPI{queue}
+	_ = s.PollOnce(t.Context())
+	if !slices.Equal(reasons, []string{"queue_unavailable", "probe_failed"}) {
+		t.Fatal("changed poll reason was not logged immediately", reasons)
+	}
+	_ = s.PollOnce(t.Context())
+	if len(reasons) != 2 {
+		t.Fatal("unchanged failure repeated the diagnostic", reasons)
+	}
+}
+
+func TestPollDiagnosticRemindersEveryFifteenMinutes(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	s.probedAccounts["account"] = true
+	var reasons []string
+	s.pollDiagnostic = func(reason string) { reasons = append(reasons, reason) }
+	now := time.Now()
+	s.reportPollDiagnosticAt("queue_unavailable", now)
+	for _, tc := range []struct {
+		elapsed time.Duration
+		lines   int
+	}{
+		{15*time.Minute - time.Nanosecond, 1},
+		{15 * time.Minute, 2},
+		{15*time.Minute + time.Nanosecond, 2},
+		{30*time.Minute - time.Nanosecond, 2},
+		{30 * time.Minute, 3},
+	} {
+		s.reportPollDiagnosticAt("queue_unavailable", now.Add(tc.elapsed))
+		if len(reasons) != tc.lines {
+			t.Fatalf("after %v: got %d lines, want %d", tc.elapsed, len(reasons), tc.lines)
+		}
+	}
+}
+
+func TestPollDiagnosticsLogReasonSetChangesAndRecurrence(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	s.probedAccounts["account"] = true
+	var reasons []string
+	s.pollDiagnostic = func(reason string) { reasons = append(reasons, reason) }
+	now := time.Now()
+	s.reportPollDiagnosticAt("queue_unavailable", now)
+	// Add a readiness cause without changing the top-level polling reason.
+	s.probedAccounts["account"] = false
+	s.probePendingSince["account"] = now.Add(-time.Minute)
+	s.reportPollDiagnosticAt("queue_unavailable", now.Add(time.Second))
+	want := []string{"queue_unavailable", "queue_unavailable", "probe_timeout"}
+	if !slices.Equal(reasons, want) {
+		t.Fatal("additional reason did not log the changed set", reasons)
+	}
+	s.reportPollDiagnosticAt("queue_unavailable", now.Add(2*time.Second))
+	if !slices.Equal(reasons, want) {
+		t.Fatal("unchanged multi-reason set was logged again", reasons)
+	}
+	// Removing one reason is also a set change.
+	s.probedAccounts["account"] = true
+	s.reportPollDiagnosticAt("queue_unavailable", now.Add(3*time.Second))
+	want = append(want, "queue_unavailable")
+	if !slices.Equal(reasons, want) {
+		t.Fatal("removed reason did not log the changed set", reasons)
+	}
+	// A healthy poll clears the set, so a recurrence logs without waiting.
+	s.reportPollDiagnosticAt("", now.Add(4*time.Second))
+	if !slices.Equal(reasons, want) {
+		t.Fatal("healthy poll emitted a diagnostic", reasons)
+	}
+	s.reportPollDiagnosticAt("queue_unavailable", now.Add(5*time.Second))
+	want = append(want, "queue_unavailable")
+	if !slices.Equal(reasons, want) {
+		t.Fatal("recurring reason was not logged immediately", reasons)
+	}
+}
+
 func TestHarnessHoldReleaseRestartsProbeClockOnlyOnce(t *testing.T) {
 	s, _, _ := testSupervisor(t)
 	s.startedAt = time.Now().Add(-2 * time.Minute)

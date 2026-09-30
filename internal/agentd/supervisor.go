@@ -41,7 +41,8 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	MaxRunDuration    time.Duration
 	CapacityInterval  time.Duration
-	// PollDiagnostic receives bounded cause codes only, never raw errors or bindings.
+	// PollDiagnostic receives bounded cause codes on changes and 15-minute
+	// reminders only, never raw errors or bindings.
 	PollDiagnostic func(string)
 }
 
@@ -149,6 +150,8 @@ type Supervisor struct {
 	probedAccounts      map[string]bool
 	probePendingSince   map[string]time.Time // Protected by mu; reset only for a new probe lifecycle.
 	pollDiagnostic      func(string)
+	pollDiagnosticMu    sync.Mutex
+	pollDiagnosticLast  map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
 	loginRequired       map[string]bool
 	harnessHoldReasons  map[string]string
 	dependencyReasons   map[string]string
@@ -579,23 +582,51 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 }
 
 func (s *Supervisor) reportPollDiagnostic(reason string) {
+	s.reportPollDiagnosticAt(reason, time.Now())
+}
+
+func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 	if s.pollDiagnostic == nil {
 		return
 	}
+	reasons := make([]string, 0, 3)
 	if reason != "" {
-		s.pollDiagnostic(reason)
+		reasons = append(reasons, reason)
 	}
 	// Multiple accounts produce at most one line per readiness cause per poll.
 	failed, timedOut := false, false
-	for _, detail := range s.Lifecycle("").AccountStatuses {
+	for _, detail := range s.lifecycleAt("", now).AccountStatuses {
 		failed = failed || detail.Reason == "probe_failed"
 		timedOut = timedOut || detail.Reason == "probe_timeout"
 	}
 	if failed {
-		s.pollDiagnostic("probe_failed")
+		reasons = append(reasons, "probe_failed")
 	}
 	if timedOut {
-		s.pollDiagnostic("probe_timeout")
+		reasons = append(reasons, "probe_timeout")
+	}
+	s.pollDiagnosticMu.Lock()
+	changed := len(reasons) != len(s.pollDiagnosticLast)
+	for _, reason := range reasons {
+		if _, ok := s.pollDiagnosticLast[reason]; !ok {
+			changed = true
+		}
+	}
+	next := make(map[string]time.Time, len(reasons))
+	var emit []string
+	for _, reason := range reasons {
+		last := s.pollDiagnosticLast[reason]
+		if changed || now.Sub(last) >= 15*time.Minute {
+			emit = append(emit, reason)
+			last = now
+		}
+		next[reason] = last
+	}
+	// Dropping cleared reasons makes their next occurrence an immediate change.
+	s.pollDiagnosticLast = next
+	s.pollDiagnosticMu.Unlock()
+	for _, reason := range emit {
+		s.pollDiagnostic(reason)
 	}
 }
 
