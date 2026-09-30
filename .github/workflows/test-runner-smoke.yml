@@ -13,8 +13,8 @@ jobs:
 
   smoke:
     needs: runner-route
-    # Event guard is independent of the router output, including in PR workflows.
-    runs-on: ${{ fromJSON(contains(fromJSON('["push","merge_group","workflow_dispatch"]'), github.event_name) && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}
+    # Event/ref/attempt guards are independent of the router's runner selection.
+    runs-on: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -23,15 +23,20 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
+          cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
       - name: Routing and guard smoke
         run: |
           node --test scripts/ci-runner-route.test.mjs
-          go test ./scripts/ci-runner-guard
+          test_args=()
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            test_args=(-count=1)
+          fi
+          go test "${test_args[@]}" ./scripts/ci-runner-guard
           go run ./scripts/ci-runner-guard
-          go test ./internal/version
+          go test "${test_args[@]}" ./internal/version
       - name: Record successful test evidence
         run: |
           case "$RUNNER_ENVIRONMENT" in

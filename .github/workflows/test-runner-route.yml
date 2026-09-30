@@ -12,6 +12,8 @@ on:
         value: ${{ jobs.route.outputs.runs_on }}
       runner_class:
         value: ${{ jobs.route.outputs.runner_class }}
+      run_attempt:
+        value: ${{ jobs.route.outputs.run_attempt }}
 
 permissions:
   contents: read
@@ -23,6 +25,7 @@ jobs:
     outputs:
       runs_on: ${{ steps.route.outputs.runs_on }}
       runner_class: ${{ steps.route.outputs.runner_class }}
+      run_attempt: ${{ steps.route.outputs.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

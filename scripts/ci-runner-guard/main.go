@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// ci-runner-guard proves that workflow runner selection cannot send PR code or
-// release evidence to mbp2606. Unknown dynamic selections fail closed.
+// ci-runner-guard checks the reviewed workflows' runner selections. The NIX-600
+// runner-side boundary enforces admission even when a PR edits this guard.
+// Unknown dynamic selections fail closed.
 package main
 
 import (
@@ -14,10 +15,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const routedRunner = `${{ fromJSON(contains(fromJSON('["push","merge_group","workflow_dispatch"]'), github.event_name) && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
+const routedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
 
 var matrixRunner = regexp.MustCompile(`^\$\{\{\s*matrix\.([a-zA-Z_][a-zA-Z0-9_-]*)\s*\}\}$`)
-var hostedRunner = regexp.MustCompile(`^(ubuntu|macos|windows)-(latest|[0-9][a-zA-Z0-9.-]*)$`)
+
+// Exact labels used by this repository; changes require an explicit review.
+var hostedRunners = map[string]bool{
+	"ubuntu-latest": true, "ubuntu-24.04": true, "ubuntu-24.04-arm": true,
+	"macos-15": true, "macos-15-intel": true,
+}
 var secretContext = regexp.MustCompile(`(?i)\bsecrets\b`)
 
 func main() {
@@ -39,7 +45,7 @@ func main() {
 	if len(problems) != 0 {
 		os.Exit(1)
 	}
-	fmt.Println("runner guard: PRs and release/image/attestation/pin jobs stay GitHub-hosted")
+	fmt.Println("runner guard: reviewed workflows keep PRs and release/image/attestation/pin jobs GitHub-hosted")
 }
 
 func checkDirectory(dir string) ([]string, error) {
@@ -50,7 +56,8 @@ func checkDirectory(dir string) ([]string, error) {
 	var problems []string
 	count := 0
 	for _, entry := range entries {
-		if entry.IsDir() || (filepath.Ext(entry.Name()) != ".yml" && filepath.Ext(entry.Name()) != ".yaml") {
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if entry.IsDir() || (ext != ".yml" && ext != ".yaml") {
 			continue
 		}
 		count++
@@ -163,7 +170,7 @@ func hasNeed(needs any, name string) bool {
 
 func allHosted(v any) bool {
 	if s, ok := v.(string); ok {
-		return hostedRunner.MatchString(s)
+		return hostedRunners[s]
 	}
 	if values, ok := v.([]any); ok && len(values) > 0 {
 		for _, value := range values {
@@ -204,6 +211,7 @@ func matrixLabels(job map[string]any, axis string) ([]any, bool) {
 }
 
 func protectedJob(file, id string, job map[string]any) bool {
+	file = strings.ToLower(file)
 	if file == "release.yml" || file == "release.yaml" || file == "test-runner-route.yml" {
 		return true
 	}

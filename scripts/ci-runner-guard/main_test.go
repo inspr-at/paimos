@@ -21,6 +21,7 @@ func TestRepositoryWorkflows(t *testing.T) {
 func TestUntrustedRunnerSelections(t *testing.T) {
 	for _, selection := range []string{
 		"mbp2606", "[self-hosted, Linux, ARM64, mbp2606]", "[ubuntu-latest, mbp2606]",
+		"ubuntu-2mbp2606", "macos-15-mbp2606", "windows-2025-mbp2606",
 		"${{ needs.runner-route.outputs.runs_on }}", "${{ fromJSON(vars.RUNNER) }}",
 		"${{ github.event_name != 'pull_request' && 'mbp2606' || 'ubuntu-latest' }}",
 		"${{ github.event_name == 'pull_request' && 'mbp2606' || 'ubuntu-latest' }}",
@@ -42,7 +43,8 @@ func routedWorkflow(id, extra string) string {
 func TestProtectedJobsAndSecrets(t *testing.T) {
 	for _, tc := range []struct{ file, id, extra string }{
 		{"release.yml", "tests", ""}, {"release.yaml", "tests", ""},
-		{"test-runner-route.yml", "tests", ""},
+		{"RELEASE.YML", "tests", ""}, {"release.YaMl", "tests", ""},
+		{"test-runner-route.yml", "tests", ""}, {"test-runner-route.YML", "tests", ""},
 		{"ci.yml", "image", ""}, {"ci.yml", "attestation", ""}, {"ci.yml", "pin-gate", ""},
 		{"ci.yml", "tests", "    environment: release-signing\n"},
 		{"ci.yml", "tests", "    environment: homebrew-tap\n"},
@@ -72,6 +74,10 @@ func TestCanonicalEventGuard(t *testing.T) {
 	}
 	for _, replacement := range []string{
 		strings.Replace(body, `"workflow_dispatch"`, `"pull_request"`, 1),
+		strings.Replace(body, `"workflow_dispatch"`, `"merge_group"`, 1),
+		strings.Replace(body, "github.ref == 'refs/heads/main' && ", "", 1),
+		strings.Replace(body, "needs.runner-route.outputs.run_attempt == github.run_attempt && ", "", 1),
+		strings.Replace(body, "outputs.run_attempt == github.run_attempt", "outputs.run_attempt != github.run_attempt", 1),
 		strings.Replace(body, "needs: runner-route", "needs: wrong-route", 1),
 		strings.Replace(body, "test-runner-route.yml", "wrong-route.yml", 1),
 		strings.Replace(body, "contains(fromJSON", "!contains(fromJSON", 1),
@@ -92,6 +98,7 @@ func TestMatrixRunnerLabels(t *testing.T) {
 		{"{runner: [ubuntu-latest, macos-15, macos-15-intel, ubuntu-24.04-arm]}", true},
 		{"{include: [{runner: ubuntu-latest}, {runner: macos-15}]}", true},
 		{"{runner: [ubuntu-latest, mbp2606]}", false},
+		{"{runner: [ubuntu-latest, ubuntu-2mbp2606]}", false},
 		{"{runner: [ubuntu-latest], include: [{runner: mbp2606}]}", false},
 		{"{include: [{runner: [self-hosted, mbp2606]}]}", false},
 		{"${{ fromJSON(needs.matrix.outputs.runners) }}", false},
@@ -101,6 +108,39 @@ func TestMatrixRunnerLabels(t *testing.T) {
 		if err != nil || (len(problems) == 0) != tc.safe {
 			t.Fatalf("matrix %s: %v %v", tc.matrix, problems, err)
 		}
+	}
+}
+
+func TestHostedLabelAllowlist(t *testing.T) {
+	for _, label := range []string{"ubuntu-latest", "ubuntu-24.04", "ubuntu-24.04-arm", "macos-15", "macos-15-intel"} {
+		body := "on: pull_request\njobs:\n  test:\n    runs-on: " + label + "\n"
+		problems, err := checkWorkflow("ci.yml", []byte(body))
+		if err != nil || len(problems) != 0 {
+			t.Fatalf("hosted label %s rejected: %v %v", label, problems, err)
+		}
+	}
+}
+
+func TestGuardScansCaseInsensitiveWorkflowExtensions(t *testing.T) {
+	for _, extension := range []string{".yml", ".yaml", ".YML", ".YAML", ".YmL", ".YaMl"} {
+		t.Run(extension, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "new"+extension)
+			// Include a valid workflow so skipping the unsafe file cannot be
+			// mistaken for a successful rejection of an empty directory.
+			if err := os.WriteFile(filepath.Join(dir, "safe.yml"), []byte("jobs:\n  test:\n    runs-on: ubuntu-latest\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			for _, label := range []string{"mbp2606", "ubuntu-2mbp2606"} {
+				if err := os.WriteFile(path, []byte("on: pull_request\njobs:\n  test:\n    runs-on: "+label+"\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				problems, err := checkDirectory(dir)
+				if err != nil || len(problems) != 1 || !strings.Contains(problems[0], "new"+extension) {
+					t.Fatalf("unsafe workflow missed: %v %v", problems, err)
+				}
+			}
+		})
 	}
 }
 

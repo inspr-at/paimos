@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { routeRunner, trustedEvents } from "./ci-runner-route.mjs";
+import { routeRunner, trustedEvents, writeRoute } from "./ci-runner-route.mjs";
 
 const now = Date.parse("2026-09-30T10:00:00Z");
 const repository = "inspr-at/paimos";
@@ -14,10 +14,11 @@ const available = {
   observed_at: new Date(now - 1000).toISOString(), idle_runners: 4,
 };
 function route(event = "push", changes = {}, options = {}) {
-  return routeRunner({ event, repository, availability: JSON.stringify({ ...available, ...changes }), now, ...options });
+  return routeRunner({ event, repository, ref: "refs/heads/main", availability: JSON.stringify({ ...available, ...changes }), now, ...options });
 }
 
 test("trusted events can use an online idle Linux ARM64 pool", () => {
+  assert.deepEqual(trustedEvents, ["push", "workflow_dispatch"]);
   for (const event of trustedEvents) {
     assert.deepEqual(route(event).runs_on, ["self-hosted", "Linux", "ARM64", "mbp2606"]);
     assert.equal(route(event).runner_class, "mbp2606");
@@ -25,10 +26,18 @@ test("trusted events can use an online idle Linux ARM64 pool", () => {
 });
 
 test("PRs, privileged PR events, other events and other repositories stay hosted", () => {
-  for (const event of ["pull_request", "pull_request_target", "workflow_call", "workflow_run", "schedule", "release", "", undefined]) {
+  for (const event of ["pull_request", "pull_request_target", "merge_group", "workflow_call", "workflow_run", "schedule", "release", "", undefined]) {
     assert.equal(route(event, {}, { event }).runner_class, "hosted");
   }
   assert.equal(route("push", {}, { repository: "fork/paimos" }).runner_class, "hosted");
+});
+
+test("pushes and dispatches outside main stay hosted even with a fresh lease", () => {
+  for (const event of trustedEvents) {
+    for (const ref of [undefined, "", "refs/heads/work/aeon-438", "refs/tags/v1", "refs/pull/34/merge", "refs/heads/gh-readonly-queue/main/pr-34"]) {
+      assert.equal(route(event, {}, { ref }).reason, "untrusted-ref");
+    }
+  }
 });
 
 test("absent, offline, busy and malformed records fall back without waiting", () => {
@@ -57,7 +66,7 @@ test("a shard fan-out requires enough idle runners for the whole batch", () => {
   }
 });
 
-test("CLI writes JSON runs-on and value-free evidence even for invalid availability", () => {
+test("CLI writes JSON runs-on, rerun attempt and value-free evidence", () => {
   const dir = mkdtempSync(join(tmpdir(), "aeon-runner-route-"));
   const output = join(dir, "output");
   const summary = join(dir, "summary");
@@ -65,12 +74,22 @@ test("CLI writes JSON runs-on and value-free evidence even for invalid availabil
     encoding: "utf8",
     env: {
       GITHUB_EVENT_NAME: "push", GITHUB_REPOSITORY: repository,
+      GITHUB_REF: "refs/heads/main", GITHUB_RUN_ATTEMPT: "2",
       AEON_MBP2606_AVAILABILITY: "invalid value must not be echoed",
       GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary,
     },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(readFileSync(output, "utf8"), 'runs_on=["ubuntu-latest"]\nrunner_class=hosted\nreason=invalid-availability\n');
+  assert.equal(readFileSync(output, "utf8"), 'runs_on=["ubuntu-latest"]\nrunner_class=hosted\nreason=invalid-availability\nrun_attempt=2\n');
   assert.match(readFileSync(summary, "utf8"), /hosted.*invalid-availability/);
   assert.doesNotMatch(result.stdout, /must not be echoed/);
+});
+
+test("router outputs bind each attempt and refuse a missing or invalid attempt", () => {
+  for (const attempt of [1, 2, 3]) {
+    assert.match(writeRoute(route(), undefined, undefined, attempt), new RegExp(`run_attempt=${attempt}\\n$`));
+  }
+  for (const attempt of [undefined, 0, -1, NaN, 1.5, "2"]) {
+    assert.throws(() => writeRoute(route(), undefined, undefined, attempt), /invalid run attempt/);
+  }
 });

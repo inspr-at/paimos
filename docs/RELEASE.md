@@ -23,11 +23,40 @@ with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `C
 ### Test runner routing (AEON-438)
 
 CI's hosted `runner-route` job calls `test-runner-route.yml`; test jobs consume
-its JSON `runs_on` output behind an independent event allowlist. Only `push`,
-`merge_group` and `workflow_dispatch` may select `[self-hosted, Linux, ARM64,
-mbp2606]`. Every PR uses `ubuntu-latest`, even with a fresh runner lease or a
-modified router. The manual `Test runner smoke` workflow exercises the same
+its JSON `runs_on` output behind independent event, ref and rerun-attempt guards.
+Only `push` and `workflow_dispatch` on `refs/heads/main` may select `[self-hosted,
+Linux, ARM64, mbp2606]`. The reviewed workflows route PRs to `ubuntu-latest`;
+a PR can modify those workflows or the guard, so runner-side admission is the
+enforcement boundary. The manual `Test runner smoke` workflow exercises the same
 router and small Go/Node checks. Normal PR and main CI retain the full Go suite.
+
+**Active admission contract: mode B (Free plan), the default as of 2026-09-30.**
+Publishing `AEON_MBP2606_AVAILABILITY` **requires** one of these runner-side
+boundaries to be implemented and verified first; a workflow guard is insufficient:
+
+- **A — Team plan:** an organization runner group restricted to `inspr-at/paimos`
+  and selected workflows `inspr-at/paimos/.github/workflows/ci.yml@refs/heads/main`
+  and `inspr-at/paimos/.github/workflows/test-runner-smoke.yml@refs/heads/main`.
+  A repo-level runner alone cannot provide this restriction. The current Free
+  plan does not provide this boundary; switching to A requires recording the
+  active mode here and verifying the group before publishing availability.
+- **B — Free plan:** no idle pre-registered runners. NIX-600 mints a JIT runner
+  only for an API-verified queued job: the run event is `push` or
+  `workflow_dispatch`, its head repository is `inspr-at/paimos`, its workflow
+  path is one of the two paths above at `refs/heads/main`, and its head SHA is
+  reachable from `main`. Missing or unverifiable metadata rejects admission.
+  The controller cancels every `pull_request` run targeting the mbp2606 labels,
+  including directly edited `runs-on`, before registering capacity. It must not
+  leave spare registrations available to unverified jobs.
+
+Fork-PR approval is `all_external_contributors` (set by the lead, 2026-09-30).
+That is defence in depth, not the runner admission boundary. A `merge_group` run
+executes PR code, so queueing a PR is a decision to run it on the Mac if routing
+is ever enabled for that event. **It is excluded from the mbp2606 allowlist in
+both modes today**: GitHub documents exact pinned workflow refs; matching
+`gh-readonly-queue/…` refs to the selected `main` workflows is unverified.
+Merge-queue CI continues on hosted runners. See GitHub's
+[runner-group workflow restrictions](https://docs.github.com/en/enterprise-cloud%40latest/actions/how-tos/manage-runners/self-hosted-runners/manage-access).
 
 Routing is disabled until NIX-600's controller publishes the repository variable
 `AEON_MBP2606_AVAILABILITY` on `inspr-at/paimos` with this value-free shape:
@@ -36,10 +65,13 @@ Routing is disabled until NIX-600's controller publishes the repository variable
 {"schema":1,"repository":"inspr-at/paimos","os":"linux","arch":"arm64","online":true,"busy":false,"observed_at":"2026-09-30T10:00:00Z","idle_runners":4}
 ```
 
-The controller must observe the registered JIT runners, publish only when online
-and idle, refresh at least every 10 seconds, and clear the variable before
-draining/stopping the pool. Records expire after **30 seconds**. An absent,
-invalid, expired, future-dated, offline or busy record selects hosted immediately;
+The schema remains **version 1**; mode and rerun-attempt metadata require no new
+availability fields. In mode B, `idle_runners` counts available VM execution
+slots, not idle registered runners. The controller observes live capacity,
+publishes only when online and idle, refreshes at least every 10 seconds, and
+clears the variable before draining/stopping the pool. Records expire after
+**30 seconds**. An absent, invalid, expired, future-dated, offline or busy record
+selects hosted immediately;
 there is no network wait and no runner administration credential in CI. GitHub's
 [runner-list API](https://docs.github.com/en/rest/actions/self-hosted-runners#list-self-hosted-runners-for-a-repository)
 requires repository Administration read access; that belongs to the host
@@ -47,19 +79,45 @@ controller, not the workflow token. Neither token permissions nor environment
 secrets are added here. The Linux ARM64 pool must provide Docker service-container
 support, Ubuntu-compatible `apt`/`sudo`, Go 1.26 and the shells used by the tests.
 
-For sharded tests, retain the job's existing matrix and commands, add
-`runner-route` to `needs`, copy the Go job's guarded `runs-on`, and set the
-reusable router's `required-idle-runners` input to the whole simultaneous fan-out.
-Insufficient capacity sends the entire batch to hosted. This is an admission
-check, not an atomic reservation: concurrent admissions or a host failure after
-selection remain a queue risk. Before enabling the variable, NIX-600 must keep
-the admitted capacity alive while draining and replenish JIT registrations for
-the accepted batch; never publish a simple persistent `on` flag. Offline/busy
-smoke and full-suite timing must be recorded when the host becomes available.
+**Off/drain:** after clearing availability, NIX-600 keeps minting JIT runners for
+API-verified queued jobs that still carry the mbp2606 label, until that queue
+empties, and lets running jobs finish. **Hard stop:** cancel those queued and
+running runs before stopping capacity; do not leave them stranded waiting for
+a runner. A lease is an admission check, not an atomic reservation: concurrent
+admissions or host failure after selection remain a queue risk. Never publish
+a simple persistent `on` flag. Offline/busy smoke and full-suite timing must be
+recorded when the host becomes available.
 
-`go run ./scripts/ci-runner-guard` scans **all** workflow YAML. Its fixture tests
-reject direct labels, unsafe expressions, matrix labels, unguarded router
-outputs, routed jobs with secrets/environments/write permissions, and routed
+For routed workflows, use **Re-run all jobs** (`gh run rerun RUN_ID` without
+`--failed`) so the hosted router refreshes the lease. It emits `run_attempt`;
+consumers compare it with `github.run_attempt` and select hosted if a failed-job
+or individual-job rerun retains an older output. This rejects stale attempts,
+not a lease that expires after initial job scheduling; the controller's draining
+duties cover already queued jobs. See GitHub's
+[rerun behavior](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
+
+**TODO (AEON-408):** the seven-shard Go layout is not on this change's main base
+(`f8fe3bbd`). On integration, use **4 Go shards on mbp2606, 7 on hosted**, driven
+by the router's runner class; require 4 idle slots for the mbp2606 batch. Retain
+the shard commands and hosted aggregate/static gates, add `runner-route` to
+`needs`, and copy the Go job's guarded `runs-on` and actual runner-class evidence.
+The shard inventory must include `scripts/ci-runner-guard`. Insufficient capacity
+sends the entire batch to hosted; broader routed fan-outs must request their
+whole simultaneous capacity through `required-idle-runners`.
+
+Every evidence-producing Go test on mbp2606 uses **`go test -count=1`** to bypass
+cached test results. Routed action caches and the controller's persistent Go,
+npm and Playwright cache volumes are written **only by pushes to main**.
+Dispatch jobs may read trusted caches but write only disposable per-job scratch
+or overlays; NIX-600 must enforce that isolation. The routed workflows disable
+`setup-go` caching outside main pushes. A test cache hit is not fresh evidence.
+
+`go run ./scripts/ci-runner-guard` scans **all** workflow YAML, including `.yml`
+and `.yaml` in any letter case. Hosted labels are exactly `ubuntu-latest`,
+`ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15` and `macos-15-intel`; the controller
+must not assign these labels to self-hosted runners. Its fixture tests reject
+direct labels, hosted-looking impostors, unsafe expressions, matrix labels,
+unguarded router outputs, routed jobs with secrets/environments/write permissions, and routed
 release/image/attestation/pin jobs. Unknown dynamic expressions fail closed.
 The hosted `release-check` runs both guard and router tests. Release workflows,
 image build/relink, attestation and pin gates always stay hosted; attestation
