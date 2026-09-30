@@ -12,6 +12,7 @@ const port = process.env.PLAYWRIGHT_PORT ?? String(derived)
 // and teardown behavior within a shard. The fixture-mutation guard still rejects
 // imported objects changed by a spec (AEON-373).
 const nightly = process.env.PW_NIGHTLY === '1'
+const compiled = process.env.PW_COMPILED_UI === '1'
 
 export default defineConfig({
   testDir: './tests',
@@ -47,9 +48,11 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // Browser-imported TypeScript helpers and gallery HTML are test inputs too.
-    // Vite dev serves those inputs; static preview only serves production assets.
-    command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort --mode test`,
+    // Both servers preserve browser-imported TypeScript and test-only galleries.
+    // CI serves the compiled app to avoid dev module requests in every context.
+    command: compiled
+      ? `npx vite build --mode test && node playwright.ui.server.mjs ${port}`
+      : `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort --mode test`,
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: process.env.PLAYWRIGHT_REUSE === '1',
     timeout: 180_000,

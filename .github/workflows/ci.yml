@@ -176,6 +176,7 @@ jobs:
       - name: UI shard
         env:
           PW_NIGHTLY: ${{ github.event_name == 'schedule' && '1' || '0' }}
+          PW_COMPILED_UI: '1'
         run: node scripts/playwright-ui-shards.mjs --shard=${{ matrix.shard }}/8
 
   playwright:

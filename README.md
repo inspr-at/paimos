@@ -15,14 +15,15 @@ just dev          # run the server (API on :8080); `cd web && npm run dev` for t
 
 UI CI runs eight duration-balanced jobs with one Playwright worker each, including
 the route audit. To reproduce a job, run
-`node scripts/playwright-ui-shards.mjs --shard=1/8`; `--plan` prints the balance
+`PW_COMPILED_UI=1 node scripts/playwright-ui-shards.mjs --shard=1/8`; `--plan` prints the balance
 and `--check` verifies that Playwright selects every test exactly once across all
 eight jobs. Ordinary spec files stay together; audit states each create their own
 browser contexts. New specs are discovered from Playwright's full list and run
 even before they have a saved timing in `web/playwright.ui.weights.json`.
 Each job logs `AEON_UI_TIMINGS` with milliseconds per file or audit state for
-rebalancing. The test server uses Vite dev to serve test-only HTML and TypeScript
-harnesses. Stable tests have no retries; the three tagged quarantine tests get
+rebalancing. CI serves the compiled test-mode app and uses Vite dev middleware
+for test-only HTML and browser-imported TypeScript harnesses. Local targeted
+runs default to the dev server. Stable tests have no retries; the three tagged quarantine tests get
 two retries, and `PW_NIGHTLY=1` disables those retries. The web gate also rejects
 mutations of imported fixtures.
 
