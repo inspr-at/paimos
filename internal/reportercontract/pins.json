@@ -689,8 +689,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/1.6",
-    "sha256": "c39230fe9d2eebb0c77412978a367e6da76a851605291cadc441a40e0f27adab",
+    "version": "harness-session/1.7",
+    "sha256": "afb2e6c0bf350ede4885c245a4920311494bcc20f3225c3850e1f14e173ab910",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1217,6 +1217,11 @@
               "coordinator"
             ],
             "type": "string"
+          },
+          "row_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
           },
           "run_id": {
             "format": "uuid",
@@ -1879,6 +1884,11 @@
               "coordinator"
             ],
             "type": "string"
+          },
+          "row_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
           },
           "run_id": {
             "format": "uuid",
