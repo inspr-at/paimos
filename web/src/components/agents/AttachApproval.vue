@@ -87,7 +87,7 @@ onBeforeUnmount(() => { close(); stopAccess() })
         <p v-else class="consent">New turns will be visible to people explicitly granted conversation access in this project, until you revoke.</p>
         <p v-if="!metadataOnly" class="limits">Only approve a single trust context; redaction is best effort.</p>
         <p v-if="localUnavailable" class="consent" role="status">Local confirmation is unavailable on this computer; this setting requires an updated paired Mac daemon.</p>
-        <p v-else-if="strict && review.state === 'pending'" class="local-step">Next, confirm on {{ review.snapshot.host }} with Touch ID or your Mac password.</p>
+        <p v-else-if="strict && review.state === 'pending'" class="local-step">Next, confirm on {{ review.snapshot.host }} with Touch ID.</p>
         <p v-if="strict && review.state === 'approved'" role="status">Waiting for confirmation on {{ review.snapshot.host }}. Nothing is shared until you confirm there.</p>
         <p v-else-if="review.state === 'approved' || review.state === 'active'" role="status">{{ metadataOnly ? 'Approved. Keep the attach terminal open to report session status.' : 'Approved. Keep the attach terminal open to share new turns.' }}</p>
         <p v-else-if="review.state !== 'pending'" role="status">This watch ended. Start a new attach in your terminal to resume.</p>

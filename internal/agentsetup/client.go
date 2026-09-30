@@ -22,6 +22,7 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 var hashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type Details struct {
+	LocalAuthPublicKey string      `json:"local_auth_public_key,omitempty"`
 	ComputerName       string      `json:"computer_name"`
 	Platform           string      `json:"platform"`
 	Arch               string      `json:"arch"`

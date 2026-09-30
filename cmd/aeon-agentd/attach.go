@@ -20,6 +20,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentdwire"
+	"github.com/inspr-at/paimos/internal/agentsecurity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"golang.org/x/term"
@@ -66,6 +67,12 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 		return nil, errors.New("paired instance refused attach registration; update agentd and Aeon")
 	}
 	return agentd.NewAttachManager(agentd.AttachConfig{Origin: c.Origin, ComputerID: c.ComputerID, Host: host, Workspace: c.Workspace, Executables: paths, Identities: c.AttachIdentities,
+		LocalSigner: func(ctx context.Context, consent, nonce, reason string) (string, error) {
+			if c.LocalAuthKeyID == "" {
+				return "", agentsecurity.ErrUnavailable
+			}
+			return agentsecurity.DefaultSigner().Sign(ctx, c.LocalAuthKeyID, attachwatch.LocalConsentHash(consent, nonce), reason)
+		},
 		Exchange: func(ctx context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 			in.PollKey = pollKey
 			var out attachwatch.View

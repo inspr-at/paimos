@@ -911,7 +911,7 @@ paths:
     put:
       operationId: setSessionWatchingSecurity
       summary: Change consent for future approvals without changing active watches
-      description: Same-origin person only. Saving local_auth is allowed when no computer can confirm; approval then fails closed. The response lists advisory daemon capability and never treats that report as confirmation.
+      description: Same-origin person only. Legacy pairings use Aeon approval until re-paired. Saving local_auth is allowed when no computer can confirm; upgraded pairings then fail closed, while older pairings keep Aeon approval. The response lists advisory daemon capability and never treats that report as confirmation.
       requestBody:
         required: true
         content:
@@ -942,7 +942,10 @@ paths:
         repeat the immutable kernel-observed snapshot. Lease is 60 seconds and cannot
         be resurrected. The server pins the owner's consent_mode at person approval.
         local_auth remains approved (no session or lease) until the registered daemon
-        echoes consent_digest and local_confirmed after in-process macOS authentication.
+        echoes consent_digest, the server-issued local_auth_nonce and a P-256 ASN.1 DER
+        local_auth_signature from its pairing-pinned Secure Enclave key. A bare
+        local_confirmed boolean is refused. Nonces are single-use and expire with
+        the request. Legacy pairings use Aeon approval until re-paired.
         Missing confirmation never activates; request-supplied policy overrides are refused.
         Registration may report local_auth_capability. Omission is stored as unreported.
         That report is advisory and never satisfies local confirmation. A later poll cannot change it.
@@ -6607,6 +6610,7 @@ components:
             properties:
               computer_id: {type: string, format: uuid}
               name: {type: string, maxLength: 128}
+              pairing_upgraded: {type: boolean, description: A browser-approved pairing has pinned the local confirmation public key; older pairings use Aeon approval}
               capability: {type: string, enum: [available, unsupported, unsigned, no_gui, policy, unreported]}
     AttachProcess:
       type: object
@@ -6664,7 +6668,9 @@ components:
         snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
         request_digest: {type: string, description: 'Required with the snapshot for request, activation, poll and detachment'}
         consent_digest: {type: string, description: Echo of the server-selected consent binding; required for activation and every active poll in both modes}
-        local_confirmed: {type: boolean, description: Set only by the daemon after in-process LocalAuthentication; never accepted on the local socket}
+        local_confirmed: {type: boolean, deprecated: true, description: 'Retained for wire compatibility; true is refused. Supply signed local confirmation instead.'}
+        local_auth_nonce: {type: string, pattern: '^[0-9a-f]{64}$', description: Server-issued single-use challenge for the approved request}
+        local_auth_signature: {type: string, maxLength: 144, description: 'Base64 ASN.1 DER ECDSA P-256 signature over SHA-256("aeon.attach.local-consent.v1\0" + consent_digest + "\0" + local_auth_nonce). Never accepted on the local socket.'}
         local_auth_capability:
           type: string
           enum: [available, unsupported, unsigned, no_gui, policy]
@@ -6683,6 +6689,7 @@ components:
         lease_until: {type: [string, 'null'], format: date-time}
         session_id: {type: [string, 'null'], format: uuid}
         user_code: {type: string, description: 'Nine digits, daemon response only'}
+        local_auth_nonce: {type: string, description: 'Present only for an approved local_auth request; consumed at activation'}
         consent_mode: {type: string, enum: [aeon, local_auth]}
         consent_digest: {type: string, description: 'SHA-256 binding of request ID, snapshot digest and server-selected mode; immutable after approval'}
 
@@ -7526,7 +7533,7 @@ components:
               checksums_url: {type: string, format: uri}
               command: {type: string}
     PairingAccountChoice: {"type": "object", "additionalProperties": false, "required": ["account_key", "harness", "label"], "properties": {"account_key": {"type": "string", "minLength": 1, "maxLength": 128}, "harness": {"type": "string", "enum": ["claude", "codex", "cursor", "grok", "pi"]}, "provider": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$", "description": "Optional pi configured-provider binding; restricts the selected model profile, never a person identity or credential."}, "label": {"type": "string", "minLength": 1, "maxLength": 128}, "model_profile_id": {"type": "string", "format": "uuid"}}}
-    PairingDeviceRequest: {"type": "object", "additionalProperties": false, "required": ["request_id", "device_hash", "runtime_hash", "lifecycle_hash", "computer_name", "platform", "arch", "workspace_path", "capabilities", "accounts"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "tenant_slug": {"type": "string"}, "device_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "runtime_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "computer_name": {"type": "string", "minLength": 1, "maxLength": 128}, "platform": {"type": "string", "enum": ["darwin", "linux"]}, "arch": {"type": "string", "enum": ["arm64", "amd64"]}, "workspace_path": {"type": "string", "maxLength": 1024}, "capabilities": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "managed_runs"}}, "accounts": {"type": "array", "minItems": 1, "maxItems": 5, "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "existing_computer_id": {"type": "string", "format": "uuid"}, "existing_lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "oneOf": [{"required": ["tenant_id"], "not": {"required": ["tenant_slug"]}}, {"required": ["tenant_slug"], "not": {"required": ["tenant_id"]}}], "dependentRequired": {"existing_computer_id": ["existing_lifecycle_secret"], "existing_lifecycle_secret": ["existing_computer_id"]}}
+    PairingDeviceRequest: {"type": "object", "additionalProperties": false, "required": ["request_id", "device_hash", "runtime_hash", "lifecycle_hash", "computer_name", "platform", "arch", "workspace_path", "capabilities", "accounts"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "tenant_slug": {"type": "string"}, "device_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "runtime_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "computer_name": {"type": "string", "minLength": 1, "maxLength": 128}, "platform": {"type": "string", "enum": ["darwin", "linux"]}, "arch": {"type": "string", "enum": ["arm64", "amd64"]}, "workspace_path": {"type": "string", "maxLength": 1024}, "capabilities": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "managed_runs"}}, "accounts": {"type": "array", "minItems": 1, "maxItems": 5, "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "existing_computer_id": {"type": "string", "format": "uuid"}, "existing_lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "local_auth_public_key": {"type": "string", "maxLength": 88, "description": "Optional base64 X9.63 uncompressed P-256 public key from the Secure Enclave; immutable for the computer and included in browser-reviewed pairing details. Darwin only."}}, "oneOf": [{"required": ["tenant_id"], "not": {"required": ["tenant_slug"]}}, {"required": ["tenant_slug"], "not": {"required": ["tenant_id"]}}], "dependentRequired": {"existing_computer_id": ["existing_lifecycle_secret"], "existing_lifecycle_secret": ["existing_computer_id"]}}
     PairingRedeemRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "device_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "device_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
     PairingHarnessStatuses: {"type": "object", "description": "Latest daemon-reported readiness by enrolled harness, independent of setup and process ownership. Missing entries are unreported; connectivity determines freshness. Contains status codes only, never local diagnostics. The computer stays ready while any harness is ready. Unknown, unenrolled or revoked harnesses are ignored during reconciliation so lifecycle fences and cleanup still succeed; a newer state token appears only in harness_details.", "additionalProperties": {"type": "string", "enum": ["ready", "blocked", "login_required", "checking", "draining"]}}
     PairingHarnessFix: {"type": "object", "required": ["kind", "command"], "properties": {"kind": {"type": "string", "enum": ["repin", "add_harness", "login", "restart"]}, "command": {"type": "string", "description": "Exact CLI line, for example `aeon-agentd repin --harness claude` or `aeon-agentd add-harness --harness codex`."}}, "description": "One fix form for harness_details and local blocked_accounts: the repair kind and the exact CLI line, derived by the server from the harness and reason code, never taken from daemon text. repin: Claude pin or dependency problems (replaces the shared Node/SDK pins). add_harness: the same problems for other harnesses; for a connected account it renews only that account's blocked interpreter pin. login: the vendor's normal sign-in. restart: resume setup after restoring the approved launcher, executable or profile permissions."}

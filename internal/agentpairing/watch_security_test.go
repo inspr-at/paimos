@@ -93,7 +93,7 @@ func TestWatchSecurityIsPersonOnlySameOriginAndTenantScoped(t *testing.T) {
 	}
 }
 func TestStrictWatchRequiresBoundDaemonConfirmation(t *testing.T) {
-	f, key, in := watchFixture(t)
+	f, key, in, signer := upgradedWatchFixture(t)
 	setWatchMode(f, attachwatch.ConsentLocalAuth)
 	in.Snapshot.Platform = "darwin"
 	in.Digest = in.Snapshot.Digest()
@@ -115,6 +115,10 @@ func TestStrictWatchRequiresBoundDaemonConfirmation(t *testing.T) {
 	}
 	in.LocalConfirmed = true
 	in.ConsentDigest = v.ConsentDigest
+	f.call("POST", "/api/agent-pairing/attach", in, false, key, 403)
+	in.LocalConfirmed = false
+	in.LocalAuthNonce = waiting.LocalAuthNonce
+	in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, waiting.LocalAuthNonce)
 	stolen := in
 	stolen.PollKey = ""
 	f.call("POST", "/api/agent-pairing/attach", stolen, false, key, 403)
@@ -130,7 +134,7 @@ func TestStrictWatchRequiresBoundDaemonConfirmation(t *testing.T) {
 	}
 }
 func TestWatchSecurityCannotBeDowngradedByRequestOrStaleReview(t *testing.T) {
-	f, key, in := watchFixture(t)
+	f, key, in, _ := upgradedWatchFixture(t)
 	in.Snapshot.Platform = "darwin"
 	in.Digest = in.Snapshot.Digest()
 	in.ConsentDigest = attachwatch.ConsentDigest(in.RequestID, in.Digest, attachwatch.ConsentAeon)
@@ -151,7 +155,7 @@ func TestWatchSecurityCannotBeDowngradedByRequestOrStaleReview(t *testing.T) {
 func TestStrictWatchUnavailableOnLinuxAndLegacyDaemon(t *testing.T) {
 	for _, platform := range []string{"linux", ""} {
 		t.Run(platform, func(t *testing.T) {
-			f, key, in := watchFixture(t)
+			f, key, in, _ := upgradedWatchFixture(t)
 			setWatchMode(f, attachwatch.ConsentLocalAuth)
 			in.Snapshot.Platform = platform
 			in.Digest = in.Snapshot.Digest()
