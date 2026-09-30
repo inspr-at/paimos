@@ -81,3 +81,7 @@ func observeAttachProcess(pid int) (attachObservation, error) {
 	}
 	return attachObservation{Process: attachwatch.Process{PID: pid, UID: int(st.Uid), Started: start, Executable: exe, CWD: cwd}, Parent: parent, Session: session, TTY: tty}, nil
 }
+
+func observeAttachProcessIdentity(pid int) (attachObservation, error) {
+	return observeAttachProcess(pid)
+}

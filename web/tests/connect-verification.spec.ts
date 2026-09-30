@@ -118,7 +118,7 @@ for (const kind of ['agent', 'reader']) test(`${kind} sees the permission reason
     workspace: { role: { id: 'reader', key: 'reader', name: 'Reader' }, permissions: ['account.read'] }, project: null,
   } }))
   await openReview(page)
-  const reason = 'Only a signed-in person who can manage accounts can connect this computer.'
+  const reason = 'Only a signed-in person who can manage accounts can connect or deny this computer.'
   const connect = page.getByRole('button', { name: 'Connect your machine', exact: true })
   await expect(connect).toBeDisabled()
   await expect(connect).toHaveAccessibleDescription(reason)

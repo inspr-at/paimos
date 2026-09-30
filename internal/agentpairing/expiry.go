@@ -50,8 +50,19 @@ func ExpireUnclaimedVerifications(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
+// CancelQueuedRun cancels one queued run and releases its capacity holds. It
+// reports whether the run was queued; any other state is left untouched.
+func CancelQueuedRun(ctx context.Context, tx pgx.Tx, id string) (bool, error) {
+	tag, err := tx.Exec(ctx, `SELECT 1 FROM agent_runs WHERE id=$1 AND status='queued' FOR UPDATE`, id)
+	if err != nil || tag.RowsAffected() == 0 {
+		return false, err
+	}
+	return true, cancelQueuedRun(ctx, tx, id)
+}
+
 // The run transition and reservation release are one transaction. Repeated
 // sweeps/disconnects release nothing twice; active work keeps all its holds.
+// A hold on a shared login's ledger is released like one on its own.
 func cancelQueuedRun(ctx context.Context, tx pgx.Tx, id string) error {
 	tag, err := tx.Exec(ctx, `UPDATE agent_runs SET status='cancelled',ended_at=clock_timestamp() WHERE id=$1 AND status='queued'`, id)
 	if err != nil || tag.RowsAffected() == 0 {
@@ -59,9 +70,8 @@ func cancelQueuedRun(ctx context.Context, tx pgx.Tx, id string) error {
 	}
 	_, err = tx.Exec(ctx, `WITH released AS (
  UPDATE account_reservations res SET state='released',settled_at=clock_timestamp()
- FROM agent_runs r,account_allowance_windows w
- WHERE res.run_id=$1 AND res.state='active' AND r.id=res.run_id AND r.tenant_id=res.tenant_id
- AND w.id=res.window_id AND w.tenant_id=res.tenant_id AND w.account_id=r.account_id
+ FROM account_allowance_windows w
+ WHERE res.run_id=$1 AND res.state='active' AND w.id=res.window_id AND w.tenant_id=res.tenant_id
  RETURNING res.window_id,res.reserved_units
  ), totals AS (SELECT window_id,sum(reserved_units)::bigint AS units FROM released GROUP BY window_id)
  UPDATE account_allowance_windows w SET reserved=w.reserved-t.units FROM totals t WHERE w.id=t.window_id`, id)

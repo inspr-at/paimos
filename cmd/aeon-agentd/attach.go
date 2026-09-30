@@ -26,6 +26,9 @@ import (
 )
 
 func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote) (*agentd.AttachManager, error) {
+	// Startup cannot grandfather a fallback whose provenance is unavailable.
+	// Drop it without disabling signed images or other healthy installations.
+	c.AttachIdentities = startupAttachIdentities(c)
 	// Freeze the paired origin even if a caller supplied a differently configured
 	// remote; never follow a redirect carrying registration or poll authority.
 	if remote == nil || remote.Client == nil || remote.Client.HTTP == nil {
@@ -70,6 +73,24 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 			return out, err
 		}})
 }
+
+func startupAttachIdentities(c agentsetup.RuntimeConfig) map[string]agentsetup.AttachIdentity {
+	identities := make(map[string]agentsetup.AttachIdentity, len(c.AttachIdentities))
+	for harness, identity := range c.AttachIdentities {
+		for _, account := range c.Accounts {
+			if account.Harness != harness {
+				continue
+			}
+			derived := agentsetup.RecordAttachIdentity(harness, account.Path, c.Workspace)
+			if derived != nil && *derived == identity {
+				identities[harness] = identity
+				break
+			}
+		}
+	}
+	return identities
+}
+
 func attachCommand(args []string, out io.Writer) error {
 	f := flag.NewFlagSet("attach", flag.ContinueOnError)
 	f.SetOutput(io.Discard)

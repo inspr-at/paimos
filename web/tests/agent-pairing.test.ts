@@ -644,7 +644,7 @@ test('every disabled Connect state gives an actionable reason; mixed verificatio
   const ready = { busy: '', canApprove: true, selectedAccountKeys: ['claude-1', 'codex-1'], targetProblem: null }
   assert.equal(connectDisabledReason(ready), null)
   assert.equal(connectDisabledReason({ ...ready, selectedAccountKeys: [] }), 'Choose at least one harness.')
-  assert.equal(connectDisabledReason({ ...ready, canApprove: false }), 'Only a signed-in person who can manage accounts can connect this computer.')
+  assert.equal(connectDisabledReason({ ...ready, canApprove: false }), 'Only a signed-in person who can manage accounts can connect or deny this computer.')
   assert.equal(connectDisabledReason({ ...ready, busy: 'approve' }), 'Connecting this computer…')
   assert.equal(connectDisabledReason({ ...ready, busy: 'deny' }), 'Denying this request…')
   assert.equal(connectDisabledReason({ ...ready, busy: 'lookup' }), 'Wait for the current action to finish.')

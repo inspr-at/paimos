@@ -19,7 +19,13 @@ permissions:
   contents: read
 
 jobs:
-  go:
+  go-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Seven shards. Five peaked at 232s. Six, splitting every package over 90s,
+        # started one process per package and peaked at 254s. Only packages over 140s are split.
+        shard: [1, 2, 3, 4, 5, 6, 7]
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -39,16 +45,54 @@ jobs:
       # Maintenance database only. This user is the image superuser, so tests may CREATE DATABASE.
       AEON_TEST_DATABASE_URL: postgres://aeon:aeon@127.0.0.1:5432/aeon?sslmode=disable
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: "1.26"
-      - name: Install the shells the pairing command tests run in
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+      - name: Install shells when this shard runs pairing path-proof tests
+        run: |
+          set -euo pipefail
+          need="$(go run ./scripts/ci-go-shards needs-shell -shard "${{ matrix.shard }}")"
+          if [ "$need" = yes ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+          fi
+      - name: Test this shard
+        run: go run ./scripts/ci-go-shards test -shard "${{ matrix.shard }}"
+      # Run 36704871290 wall clock: shards 1..7 finished in 199s, 195s, 194s, 165s, 177s, 196s, 175s.
+      # Shard 4 is the shortest, so the serial timing step is appended there.
+      - name: Timing budgets, alone
+        if: success() && matrix.shard == 4
+        run: go run ./scripts/ci-go-shards test-timing
+
+  go-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.26"
       - run: go vet ./...
-      - run: go test ./...
       - name: Check prepared rules bootstrap drift
         run: go run ./scripts/rules-bootstrap check
+      - name: Check the shard list covers go test ./...
+        run: go run ./scripts/ci-go-shards check
+
+  # Job id go is the required check. It stays red when a shard or the static
+  # job fails because if: always() still runs this gate.
+  go:
+    if: always()
+    needs: [go-test, go-static]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Go shard and the static checks
+        env:
+          GO_TEST: ${{ needs.go-test.result }}
+          GO_STATIC: ${{ needs.go-static.result }}
+        run: |
+          set -euo pipefail
+          echo "go-test=${GO_TEST} go-static=${GO_STATIC}"
+          test "${GO_TEST}" = success
+          test "${GO_STATIC}" = success
 
   web:
     runs-on: ubuntu-latest

@@ -19,7 +19,7 @@ import {
   pairingReadGeneration, peekPairingCode, planPoll, platformCaption, presentPublicGuide,
   rememberPairingCode, setHarnessAccount, submitApproval, takePairingCode,
   chooseInstallMethod, installMethods, readPairingInstallMethod, writePairingInstallMethod,
-  connectDisabledReason, unsupportedVerification, verifiableAccountKeys, verificationWarning,
+  connectDisabledReason, denyDisabledReason, unsupportedVerification, verifiableAccountKeys, verificationWarning,
   type PairingGuide, type PairingView, type ReviewChoice,
 } from '../lib/agentPairing'
 
@@ -38,6 +38,7 @@ const verify = ref(true)
 const verificationChoice = ref(false)
 const connectButton = ref<HTMLButtonElement | null>(null)
 const connectOnlyButton = ref<HTMLButtonElement | null>(null)
+const reviewTitle = ref<HTMLElement | null>(null)
 const allowAgents = ref(true)
 const approvalPending = ref(false)
 const selected = ref<string[]>([])
@@ -97,6 +98,12 @@ const connectReason = computed(() => connectDisabledReason({
   selectedAccountKeys: selected.value,
   targetProblem: targetProblem.value,
 }))
+const denyReason = computed(() => denyDisabledReason({ busy: busy.value, canDeny: permissions.value.canDeny }))
+// One live region at the buttons, rendered before it has text, so a reason or
+// the verification choice is announced when it appears (AEON-402).
+const actionNote = computed(() => connectReason.value
+  || (verificationChoice.value ? `${listNames(blockedLabels.value)} can’t be verified — ${addRequest.value ? 'add' : 'connect'} without verification, or leave them out.` : '')
+  || denyReason.value || '')
 const selectedHarnesses = computed(() => {
   const view = current.value
   if (!view) return [] as string[]
@@ -287,12 +294,20 @@ async function connect() {
     if (error instanceof PairingError && error.code === 'session_reset') return
     if (started === pairingReadGeneration()) assignError(error, 'The computer was not connected.')
   } finally { if (started === pairingReadGeneration()) busy.value = '' }
+  // Not connected: focus returns to Connect, enabled again, for a retry.
+  if (started === pairingReadGeneration() && pendingReview.value && document.activeElement === reviewTitle.value) {
+    await nextTick()
+    connectButton.value?.focus()
+  }
 }
 
 async function connectWithoutVerification() {
   if (connectReason.value) return
   verify.value = false
   verificationChoice.value = false
+  // The choice buttons are gone: focus the review title, which stays through the result.
+  await nextTick()
+  reviewTitle.value?.focus()
   await connect()
 }
 
@@ -608,7 +623,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
     <section v-else-if="progress" class="card" aria-live="polite" aria-label="Pairing review">
       <header class="review-head">
         <div>
-          <h2>{{ adding && pendingReview ? 'Add a harness' : pendingReview ? 'Review this computer' : progress.title }}</h2>
+          <h2 ref="reviewTitle" tabindex="-1">{{ adding && pendingReview ? 'Add a harness' : pendingReview ? 'Review this computer' : progress.title }}</h2>
           <p>{{ pendingReview ? 'Confirm the details and choose which harnesses to connect.' : progress.detail }}</p>
         </div>
         <button type="button" class="btn sm ghost" :disabled="!!busy" @click="resetCode">Use a different code</button>
@@ -676,14 +691,13 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
       </div>
 
       <div v-if="pendingReview" class="actions" :role="verificationChoice ? 'group' : undefined" :aria-label="verificationChoice ? 'Verification choice' : undefined">
-        <p v-if="connectReason" id="connect-reason" class="connect-reason" role="status">{{ connectReason }}</p>
+        <p id="connect-reason" class="connect-reason" :class="{ quiet: !actionNote }" role="status">{{ actionNote }}</p>
         <template v-if="verificationChoice">
-          <p id="verification-choice-note" class="connect-reason" role="status">{{ listNames(blockedLabels) }} can’t be verified — connect without verification, or leave them out.</p>
-          <button ref="connectOnlyButton" class="btn primary go" type="button" :disabled="!!connectReason" :aria-describedby="connectReason ? 'connect-reason' : 'verification-choice-note'" @click="connectWithoutVerification">Connect without verification</button>
+          <button ref="connectOnlyButton" class="btn primary go" type="button" :disabled="!!connectReason" aria-describedby="connect-reason" @click="connectWithoutVerification">{{ addRequest ? 'Add without verification' : 'Connect without verification' }}</button>
           <button class="btn" type="button" :disabled="!!connectReason" @click="leaveUnverifiableOut">Leave them out</button>
         </template>
         <button v-else ref="connectButton" class="btn primary go" type="button" :disabled="!!connectReason" :aria-describedby="connectReason ? 'connect-reason' : undefined" @click="connect">{{ busy === 'approve' ? (addRequest ? 'Adding…' : 'Connecting…') : addRequest ? 'Add harness' : 'Connect your machine' }}</button>
-        <button class="btn" type="button" :disabled="!!busy || !permissions.canDeny" @click="deny">Deny</button>
+        <button class="btn" type="button" :disabled="!!denyReason" :aria-describedby="denyReason ? 'connect-reason' : undefined" @click="deny">Deny</button>
         <p class="keep"><AppIcon name="shield" :size="14" />Vendor sign-ins and project files stay on the computer.</p>
       </div>
     </section>
@@ -784,10 +798,13 @@ legend { margin-bottom: 4px; color: var(--ink); font-weight: 600; font-size: 14p
 .radio .sub { display: block; margin-top: 2px; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
 .connect-reason { flex-basis: 100%; margin: 0; color: var(--ink-2); font-size: 13px; }
+/* Empty, the live region stays in the page for screen readers but takes no room. */
+.connect-reason.quiet { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .go { min-height: 44px; padding: 0 18px; }
 .keep { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 0 auto; color: var(--ink-3); font-size: 12.5px; }
 .review-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .review-head p { margin-top: 4px; color: var(--ink-2); font-size: 13.5px; }
+.review-head h2:focus { outline: none; }
 .review-head .btn { flex-shrink: 0; }
 .progress-copy > p { margin-top: 16px; font-size: 13.5px; color: var(--ink-2); }
 .enrollments { display: grid; gap: 8px; margin: 12px 0; padding: 0; list-style: none; }

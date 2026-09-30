@@ -1023,31 +1023,54 @@ text)** at the local prompt, or pass `--status-only` (no transcript needed), to
 report status without reading or sharing conversation text. Missing or unsafe
 transcripts never silently select status-only.
 
-Claude, Codex and Cursor are identified from the kernel-observed running image,
+On macOS, normal Terminal and Ghostty tabs and SSH terminals work with a
+root-owned `login` or `sshd-session` leader; tmux also remains supported.
+Ancestry and session-leader checks use kernel PID, parent, UID, start time,
+session and TTY metadata without reading ancestor paths. The helper must have
+a TTY and belong to the target's user. Neither process may be an ancestor of
+the other, and ancestor UIDs must be that user or root. The complete process
+graph is rechecked for PID reuse and reparenting on confirmation and polls.
+The target still requires its full physical folder and image validation.
+Run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-ancestry-mutations.py`
+on macOS to verify that the negative ancestry regressions catch removed guards.
+
+Claude and Codex are identified from the kernel-observed running image,
 so an exec wrapper or a vendor auto-update does not require re-pairing. On macOS,
-the daemon verifies the signature against Apple's certificate chain and the
-built-in vendor Team ID; legacy wrapper pairings work after upgrading and
-restarting agentd. Unsigned installations and Linux use a local installation
+the daemon verifies the running PID against Apple's certificate chain and the
+built-in vendor Team ID and CLI signing identifier on preview, confirmation and
+every poll. A vendor file renamed over a foreign running binary cannot confer
+that identity. Cursor attach is refused on macOS until a signed cursor-agent
+CLI exists; Cursor.app's signature is not a harness identity.
+Legacy Claude and Codex wrapper pairings work after upgrading and
+restarting agentd. Unsigned Claude and Codex images are refused on macOS,
+including when run through Rosetta. Linux uses a local installation
 root plus owner recorded at pairing or by `repin --harness claude`,
 `add-harness --harness codex` or `add-harness --harness cursor`; restart agentd
 after recording a fallback identity. Unknown layouts retain only the approved
-exact-file pin. Recorded roots survive removal of an old version and stay bound
-to the same pairing and account. A recorded owner and root must match even
+exact-file pin. Pairing retains recorded roots after removal of an old version,
+bound to the same pairing and account. A recorded owner and root must match even
 when the running image still has the old exact path.
 The daemon does not interpret or execute wrappers to discover an install root.
 Every image and ancestor must satisfy the existing ownership and permission
 rules, and confirmation and polls recheck the image. Local HTTP 409 diagnostics
-include `harness_identity_mismatch`, `harness_executable_unsafe` or
-`harness_image_changed` with a repair hint; the attach client displays them.
+include `harness_identity_mismatch`, `harness_executable_unsafe`,
+`harness_image_changed`, `harness_identity_unavailable` or
+`harness_identity_unsupported` with a fixed repair, retry or unsupported-harness
+hint; the attach client displays them. Signature checks run outside the manager
+lock. Startup drops only fallback identities that cannot be re-derived from
+the approved installation; signed images and other harnesses remain available.
+Refresh validates new fallback identities against their approved installations.
 
 Identity regressions cover release-13 wrapper pairing upgrades, native exec
-chains, vendor updates, unsigned root fallback and its repair, signature
-failures, writable installations, file replacement and local 409 diagnostics.
+chains, vendor updates, Linux root fallback and its repair, unsigned Rosetta
+image refusals, signature failures, writable installations, real
+running-process rename-over attacks,
+verification timeouts and concurrent detach, and local 409 diagnostics.
 On macOS, run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-identity-mutations.py`
 to remove each guard temporarily and require a failing regression; the script
 rejects build failures as evidence and restores each source file. Real codesign
-checks also probe installed vendor binaries; an absent harness is reported as
-skipped, while fixture signature checks still run.
+checks also probe running installed vendor binaries; a harness with no running
+process is reported as skipped, while fixture signature checks still run.
 
 Review the kernel-observed process, physical folder and chosen mode, type `WATCH`
 or `ATTACH` as shown, then enter its nine-digit code under **Agents → Attach

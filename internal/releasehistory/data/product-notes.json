@@ -3384,6 +3384,38 @@
           "group": "features"
         }
       ]
+    },
+    "260930094206.0.0": {
+      "snapshot_sha256": "ac6a53b384d63d55a8b7e77b21372fb375a8f883493f7d54c60967c3e7320934",
+      "captured_at": "2026-09-30T11:53:24Z",
+      "release_revision": 1,
+      "written_after_release": true,
+      "items": [
+        {
+          "key": "AEON-435",
+          "pill_en": "Verified agent attach",
+          "pill_de": "Geprüfter Agent Anschluss",
+          "benefit_en": "Claude, Codex and Cursor attach only when their vendor signature is verified against the expected Team ID, so a look-alike program cannot pose as an agent.",
+          "benefit_de": "Claude, Codex und Cursor werden nur angebunden, wenn ihre Herstellersignatur gegen die erwartete Team-ID geprüft ist, so kann sich kein Imitat als Agent ausgeben.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-401",
+          "pill_en": "Pairing says why",
+          "pill_de": "Kopplung nennt den Grund",
+          "benefit_en": "Pairing no longer waits silently: it names the approved harness that is not yet bound, and checking status never changes anything.",
+          "benefit_de": "Die Kopplung wartet nicht mehr stumm: Sie nennt das freigegebene Harness, das noch nicht gebunden ist, und die Statusabfrage ändert nichts.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-398",
+          "pill_en": "Complete release history",
+          "pill_de": "Vollständige Release-Historie",
+          "benefit_en": "Every earlier release now shows its features and fixes on all instances, not only the newest ones.",
+          "benefit_de": "Jedes frühere Release zeigt jetzt auf allen Instanzen seine Features und Fixes, nicht nur die neuesten.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
