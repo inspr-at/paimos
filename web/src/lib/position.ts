@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Merge by server revision (AEON-449). The server names the tenant event-log
 // position every read and every accepted write stands for (Aeon-Event-Position).
-// A client that holds several reads of one collection, or a read and a write of
-// its own, keeps the newest position per entity: an older answer never
-// overwrites a newer one, whatever order the answers arrive in.
+// A client that holds several reads of one collection, or a read and a write of its
+// own, keeps the newest answer per entity: an older one never overwrites a newer
+// one, whatever order the answers arrive in.
 //
-//   - A read's position is a floor: it includes every event up to it.
+//   - A read's position names the exact snapshot it returns: no event committed
+//     while it ran. A read an event interrupted carries no position.
 //   - A write's position is at or above the write's own event. A read below the
 //     newest write this tab made may predate it, and is asked again.
 //
-// An answer without a position (an older server, a test double) is merged the
-// way it was before: by the order its read started in.
+// Rows are judged by ledger.ts, one authority per entity. This file holds what
+// it and the collection readers share: the clock, the stamps, the write floor and
+// the order of the reads of one collection. An answer without a position (an older
+// server, an interrupted read, a test double) is merged by the order it started in.
 
 export const POSITION_HEADER = 'aeon-event-position'
 
@@ -19,16 +22,33 @@ export function parsePosition(response: Response): number | undefined {
   return raw !== null && /^\d{1,15}$/.test(raw) ? Number(raw) : undefined
 }
 
-// A body is stamped with the position of the read that answered it. The stamp
-// lives beside the body, never in it, so spreading or serialising it is unchanged.
-const stamps = new WeakMap<object, number>()
-export function stampAt<T>(body: T, position: number | undefined): T {
-  if (position !== undefined && typeof body === 'object' && body !== null) stamps.set(body, position)
+// One clock for the page. A request takes a tick when it starts, an answer takes
+// one when it is merged: a read that started after an answer landed cannot be
+// older than it, unless the server's log went backwards.
+let clock = 0
+export const tick = () => ++clock
+
+// What an answer knows about itself: the position the server named (none when it
+// named none) and the tick its request started at.
+export interface Stamp { position?: number; start?: number }
+
+// A stamp lives beside the data, never in it, so spreading or serialising the data
+// is unchanged. Every object of a response body keeps the stamp of the response it
+// came from, so a row knows its own answer wherever it is merged.
+const stamps = new WeakMap<object, Stamp>()
+const STAMP_DEPTH = 3
+export function stampAt<T>(body: T, stamp: Stamp | undefined, depth = 0): T {
+  if (!stamp || typeof body !== 'object' || body === null) return body
+  stamps.set(body, stamp)
+  if (depth > 0) for (const value of Array.isArray(body) ? body : Object.values(body)) stampAt(value, stamp, depth - 1)
   return body
 }
-export const stamp = <T>(body: T, response: Response): T => stampAt(body, parsePosition(response))
-export function positionOf(body: unknown): number | undefined {
-  return typeof body === 'object' && body !== null ? stamps.get(body) : undefined
+export const stamp = <T>(body: T, response: Response, start?: number): T => stampAt(body, { position: parsePosition(response), start }, STAMP_DEPTH)
+export const stampOf = (body: unknown): Stamp | undefined => typeof body === 'object' && body !== null ? stamps.get(body) : undefined
+export const positionOf = (body: unknown): number | undefined => stampOf(body)?.position
+// A copy made by spreading is a new object: it keeps the stamp of the one it copies.
+export function carry<T>(copy: T, from: unknown): T {
+  return stampAt(copy, stampOf(from))
 }
 // The lowest position of several answers: what a read assembled from all of them includes.
 export function lowestPosition(positions: (number | undefined)[]): number | undefined {
@@ -49,8 +69,17 @@ export const writeFloor = () => floor
 // Accepted writes so far; a caller compares two marks to learn whether one landed between.
 export const writeMark = () => accepted
 export const wroteSince = (mark: number) => accepted !== mark
+
 // Positions belong to one workspace: a different person or workspace starts at zero.
-export function resetPositions() { floor = 0 }
+const resets = new Set<() => void>()
+export function onReset(reset: () => void) {
+  resets.add(reset)
+  return () => { resets.delete(reset) }
+}
+export function resetPositions() {
+  floor = 0
+  for (const reset of resets) reset()
+}
 
 export type ReadVerdict = 'apply' | 'stale' | 'older'
 export interface ReadTicket { turn: number; bar: number }
@@ -60,30 +89,31 @@ export interface ReadTicket { turn: number; bar: number }
 //   apply  the answer is the newest this collection has seen;
 //   stale  it predates a write of this tab, so ask again (it cannot predate that write);
 //   older  a newer answer has landed, drop it.
-// A read that started after a write, or after a newer answer landed, cannot
-// answer below it. If one does, the server's log went backwards (a restored
-// database): its answer is applied and the ledger follows it, so nothing freezes.
+// The server's position decides first; the order the reads started in only breaks
+// a tie and judges an answer with no position. A read that started after a write,
+// or after a newer answer landed, cannot answer below it. If one does, the
+// server's log went backwards (a restored database): its answer is applied and the
+// order follows it, so nothing freezes.
 export function createReadOrder() {
-  let started = 0
-  let landed = 0
-  let applied = 0
+  let applied: number | undefined
+  let appliedTurn = 0
   let superseded = 0
   return {
-    begin: (): ReadTicket => ({ turn: ++started, bar: Math.max(floor, applied) }),
+    begin: (): ReadTicket => ({ turn: tick(), bar: Math.max(floor, applied ?? 0) }),
     land(ticket: ReadTicket, position?: number): ReadVerdict {
-      if (ticket.turn < landed) return 'older'
       if (position === undefined) {
-        if (ticket.turn <= superseded) return 'older'
+        if (ticket.turn < appliedTurn || ticket.turn <= superseded) return 'older'
       } else if (position < ticket.bar) { applied = position; floor = Math.min(floor, position) }
-      else if (position < applied) return 'older'
+      else if (applied !== undefined && position < applied) return 'older'
       else if (position < floor) return 'stale'
+      else if (position === applied && ticket.turn < appliedTurn) return 'older'
       else applied = position
-      landed = ticket.turn
+      appliedTurn = ticket.turn
       return 'apply'
     },
     // An answer without a position cannot be judged by its data. Drops the ones
     // from reads begun so far; a positioned answer never needs the call.
-    supersede() { superseded = started },
+    supersede() { superseded = tick() },
   }
 }
 export type ReadOrder = ReturnType<typeof createReadOrder>

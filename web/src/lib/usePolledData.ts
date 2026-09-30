@@ -19,8 +19,10 @@ export function refreshStatus(previous: RefreshStatus, result: { ok: true; at: n
 // This also prevents an old response from overwriting a newer refresh. With an
 // order (AEON-449), the answer's server position decides too: an answer below a
 // write of this tab is asked for again once, one below a newer answer is dropped.
-export function usePolledData<T>(read: () => Promise<T>, initial: T, onSuccess?: (value: T) => void, options: { order?: ReadOrder } = {}) {
-  const { order } = options
+// adopt turns the answer into the value to keep at the moment it is applied, so a
+// ledger judges its rows with nothing between that and the assignment.
+export function usePolledData<T>(read: () => Promise<T>, initial: T, onSuccess?: (value: T) => void, options: { order?: ReadOrder; adopt?: (value: T) => T } = {}) {
+  const { order, adopt } = options
   const data = shallowRef<T>(initial) as Ref<T>
   const status = shallowRef(initialRefreshStatus())
   const stale = computed(() => status.value.failures > 0 && status.value.updatedAt !== null)
@@ -45,8 +47,9 @@ export function usePolledData<T>(read: () => Promise<T>, initial: T, onSuccess?:
           const verdict = order && ticket ? order.land(ticket, positionOf(value)) : 'apply'
           if (verdict === 'stale') continue
           if (verdict === 'older') return
-          data.value = value
-          onSuccess?.(value)
+          const adopted = adopt ? adopt(value) : value
+          data.value = adopted
+          onSuccess?.(adopted)
           status.value = refreshStatus(status.value, { ok: true, at: Date.now() })
           return
         } catch (error) {

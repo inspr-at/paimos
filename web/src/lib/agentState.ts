@@ -34,10 +34,10 @@ export function sessionStatus(session: HarnessSession, now: number, needsYou = f
 
 // Mutation/snapshot responses may omit the separately projected state evidence.
 // Preserve known evidence for the same binding, while allowing a new run or stop
-// reason to establish its own state. Older revisions cannot rewind the session.
+// reason to establish its own state. The ledger decides which answer is newer
+// (ledger.ts), so this only ever receives the newer one.
 export function mergeSessionEvidence(previous: HarnessSession | undefined, incoming: HarnessSession): HarnessSession {
   if (!previous) return incoming
-  if (incoming.revision < previous.revision) return previous
   if (incoming.run_id !== previous.run_id || incoming.stop_reason !== previous.stop_reason) return incoming
   return {
     ...incoming,

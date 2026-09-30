@@ -2,7 +2,7 @@
 // AEON-449: reads and writes are ordered by the server's event-log position, not by
 // the order their answers arrive in.
 import { beforeEach, expect, it } from 'vitest'
-import { createReadOrder, lowestPosition, noteWrite, parsePosition, positionOf, POSITION_HEADER, readOrdered, resetPositions, stamp, stampAt, writeFloor, writeMark, wroteSince } from '../src/lib/position'
+import { carry, createReadOrder, lowestPosition, noteWrite, onReset, parsePosition, positionOf, POSITION_HEADER, readOrdered, resetPositions, stamp, stampAt, stampOf, writeFloor, writeMark, wroteSince } from '../src/lib/position'
 import { usePolledData } from '../src/lib/usePolledData'
 
 const answer = (position?: number, status = 200) => new Response('{}', { status, headers: position === undefined ? {} : { [POSITION_HEADER]: String(position) } })
@@ -18,14 +18,36 @@ it('reads a position only from a plain non-negative integer', () => {
 })
 
 it('stamps a body beside it: the position never enters the data', () => {
-  const body = stamp({ items: [1] }, answer(7))
-  expect(positionOf(body)).toBe(7)
+  const body = stamp({ items: [1] }, answer(7), 4)
+  expect(stampOf(body)).toEqual({ position: 7, start: 4 })
   expect(JSON.stringify(body)).toBe('{"items":[1]}')
   expect(positionOf({ ...body })).toBeUndefined()
   expect(positionOf(stamp([1, 2], answer(3)))).toBe(3)
-  expect(positionOf(stamp({ items: [] }, answer()))).toBeUndefined()
+  // An answer without a position still says when its request started.
+  expect(stampOf(stamp({ items: [] }, answer(), 9))).toEqual({ position: undefined, start: 9 })
   expect(positionOf(stamp(null, answer(3)))).toBeUndefined()
-  expect(positionOf(stampAt('text', 9))).toBeUndefined()
+  expect(positionOf(stampAt('text', { position: 9 }))).toBeUndefined()
+})
+
+it('every row of a body keeps the stamp of its answer, and a copy made by spreading can carry it', () => {
+  const body = stamp({ items: [{ id: 'a', project: { id: 'p' } }], session: { id: 'b' } }, answer(12), 5)
+  for (const row of [body, body.items, body.items[0]!, body.items[0]!.project, body.session]) expect(stampOf(row)).toEqual({ position: 12, start: 5 })
+  const copy = { ...body.session, extra: true }
+  expect(stampOf(copy)).toBeUndefined()
+  expect(stampOf(carry(copy, body.session))).toEqual({ position: 12, start: 5 })
+  expect(stampOf(carry({ id: 'c' }, { id: 'unstamped' }))).toBeUndefined()
+})
+
+it('resets what belongs to one workspace together', () => {
+  let cleared = 0
+  const stop = onReset(() => { cleared++ })
+  noteWrite(answer(9))
+  resetPositions()
+  expect(cleared).toBe(1)
+  expect(writeFloor()).toBe(0)
+  stop()
+  resetPositions()
+  expect(cleared).toBe(1)
 })
 
 it('takes the lowest position of several answers, and none when one has none', () => {
@@ -54,6 +76,23 @@ it('applies the newest answer and drops an older one that arrives after it, what
   expect(order.land(slow, 10)).toBe('older')
   const later = order.begin()
   expect(order.land(later, 12)).toBe('apply')
+})
+
+it('the server position decides before the order the reads started in', () => {
+  // The review case: a later-started read answers 10 and applies, then an earlier-started read answers 11.
+  const order = createReadOrder()
+  const early = order.begin(), late = order.begin()
+  expect(order.land(late, 10)).toBe('apply')
+  expect(order.land(early, 11)).toBe('apply')
+  // Only a tie goes to the read that started later.
+  const first = order.begin(), second = order.begin()
+  expect(order.land(second, 12)).toBe('apply')
+  expect(order.land(first, 12)).toBe('older')
+  // A read that started earlier but answers higher still beats one that started later and answered lower.
+  const slow = order.begin(), quick = order.begin()
+  expect(order.land(quick, 13)).toBe('apply')
+  expect(order.land(slow, 14)).toBe('apply')
+  expect(order.land(order.begin(), 13)).toBe('apply') // began after 14 landed: the log went backwards, follow it
 })
 
 it('an answer below a write of this tab is stale, at or above it is current', () => {
@@ -100,7 +139,7 @@ it('readOrdered asks again once when the answer predates a write, and gives up a
   const answers: number[] = [10, 25]
   const seen: number[] = []
   let reads = 0
-  const read = async () => { reads++; if (reads === 1) noteWrite(answer(20)); return stampAt({ at: answers[reads - 1] }, answers[reads - 1]) }
+  const read = async () => { reads++; if (reads === 1) noteWrite(answer(20)); return stampAt({ at: answers[reads - 1] }, { position: answers[reads - 1] }) }
   expect(await readOrdered(order, read, value => seen.push(value.at))).toBe(true)
   expect(seen).toEqual([25])
   expect(reads).toBe(2)
@@ -109,7 +148,7 @@ it('readOrdered asks again once when the answer predates a write, and gives up a
   const busy = createReadOrder()
   const floors = [101, 150], positions = [50, 120]
   let attempts = 0
-  const churn = async () => { const n = attempts++; noteWrite(answer(floors[n])); return stampAt({}, positions[n]) }
+  const churn = async () => { const n = attempts++; noteWrite(answer(floors[n])); return stampAt({}, { position: positions[n] }) }
   expect(await readOrdered(busy, churn, () => { throw new Error('applied') })).toBe(false)
   expect(attempts).toBe(2)
 })
@@ -117,7 +156,7 @@ it('readOrdered asks again once when the answer predates a write, and gives up a
 it('a polled collection drops an answer below a newer one and re-reads one that predates a write', async () => {
   const answers: { value: string; position: number }[] = []
   const gates: (() => void)[] = []
-  const read = () => new Promise<string[]>(resolve => { const next = answers.shift()!; gates.push(() => resolve(stampAt([next.value], next.position))) })
+  const read = () => new Promise<string[]>(resolve => { const next = answers.shift()!; gates.push(() => resolve(stampAt([next.value], { position: next.position }))) })
   const list = usePolledData(read, [] as string[], undefined, { order: createReadOrder() })
 
   // Two reads in flight across an invalidation: the newer lands first, the older must not rewind it.

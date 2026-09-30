@@ -5,7 +5,7 @@ import type { DeployTarget } from './deployTarget'
 // their typed controls, runs, approvals, accounts with allowance windows, models
 // and project messages. Worker-only endpoints (heartbeat, drain, claim) are absent.
 import { api, APIError } from './api.ts'
-import { stamp } from './position.ts'
+import { stamp, tick } from './position.ts'
 import type { AttentionReason } from './agentSignals.ts'
 import type { LivePage } from './liveAgents.ts'
 
@@ -118,6 +118,7 @@ export interface MessagePage { items: ProjectMessage[]; next_after: number; prea
 export interface MessageSend { recipient_session_id?: string; sender_session_id?: string; to: string; body: string; idempotency_key: string; reply_to?: string; expects_reply: boolean; is_action_request: boolean; delivery_level: 'simple' | 'steer' }
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  const start = tick()
   const response = await api(path, { method, ...(body === undefined ? {} : {
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }) })
@@ -126,8 +127,9 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
     throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`, data)
   }
   if (response.status === 204) return undefined as T
-  // The body keeps the event-log position it answers for, to merge by (AEON-449).
-  return stamp(await response.json() as T, response)
+  // Every object of the body keeps the position it answers for and the tick its request
+  // started at, so a row is merged by them wherever it ends up (AEON-449).
+  return stamp(await response.json() as T, response, start)
 }
 const enc = encodeURIComponent
 const sessionPath = (projectId: string, sessionId = '') => `/projects/${enc(projectId)}/harness-sessions${sessionId ? `/${enc(sessionId)}` : ''}`
