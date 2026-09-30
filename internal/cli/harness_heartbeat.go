@@ -154,7 +154,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.Succeeds, "succeeds", 0, "stopped or heartbeat-lost predecessor coordinator UUID")
 			fs.string(&o.Parent, "parent-session", 0, "parent public session UUID")
 			fs.string(&o.Ticket, "ticket", 0, "ticket node key")
-			fs.string(&o.Shape, "work-shape", 0, "ship or scout")
+			fs.string(&o.Shape, "work-shape", 0, "required with --ticket; one of: ship, scout")
 			fs.string(&o.Management, "management", 0, "managed or unmanaged")
 			fs.string(&o.Role, "role", 0, "worker or coordinator")
 			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source and inbox index")
