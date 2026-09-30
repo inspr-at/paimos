@@ -173,7 +173,7 @@ func TestHomebrewFormulaWatchStops(t *testing.T) {
 		formula.Watch(ctx)
 		close(done)
 	}()
-	wait, stopWait := context.WithTimeout(context.Background(), 2*time.Second)
+	wait, stopWait := context.WithTimeout(context.Background(), time.Second)
 	defer stopWait()
 	n := 0
 	for {
