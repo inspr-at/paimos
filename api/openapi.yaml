@@ -4040,7 +4040,7 @@ paths:
                 eta_live_at: {type: [string, 'null'], format: date-time, description: "Coordinator only. RFC3339 instant the bound ticket is live, from 30 days ago through 365 days ahead. Omission preserves; null clears. The ticket's current project is checked on every write."}
                 progress_pct: {type: [integer, 'null'], minimum: 0, maximum: 100, description: "Worker only. Percent done for the bound ticket, 0 through 100. Omission preserves; null clears."}
       responses:
-        '200': {description: Updated session, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '200': {description: Updated session with non-blocking estimate guidance, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
@@ -6720,7 +6720,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.5']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.6']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
@@ -10483,6 +10483,10 @@ components:
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
       properties:
+        warnings:
+          type: array
+          description: Non-blocking guidance returned on heartbeats, including an empty array when satisfied or guidance cannot be computed; absent on other session responses. Working workers get missing_progress after three consecutive accepted beats without a non-null progress_pct, even if an older value is stored. Working sessions with a bound ticket_node_id get missing_eta for their role's absent ETA (ready for workers, live for coordinators); unbound sessions do not. A visible bound ticket/task without valid hours gets ticket_without_estimate. Clients print each code at most once per ten minutes. Status-file diagnostics such as stale_progress are local CLI warnings, not response codes.
+          items: {$ref: '#/components/schemas/HarnessEstimateWarning'}
         vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
         limit_window: {type: string, enum: [5h, weekly, monthly, other]}
         limit_resets_at: {type: string, format: date-time}
@@ -10611,6 +10615,7 @@ components:
       type: object
       description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent.
       properties:
+        has_working_session: {type: boolean, description: True when a visible working session is bound to this ticket in its current project. Omitted when false; enables a quiet no ETA hint even before the first estimate.}
         eta_ready_at: {type: string, format: date-time}
         eta_live_at: {type: string, format: date-time}
         progress_pct: {type: integer, minimum: 0, maximum: 100}
@@ -10621,6 +10626,12 @@ components:
         ready_stale: {type: boolean}
         live_stale: {type: boolean}
         eta_stale: {type: boolean, description: True when the ready or live estimate is older than two reporting intervals. Omitted when fresh or absent.}
+    HarnessEstimateWarning:
+      type: object
+      required: [code, hint]
+      properties:
+        code: {type: string, enum: [missing_progress, missing_eta, ticket_without_estimate]}
+        hint: {type: string}
     HarnessActivityNote:
       type: object
       required: [note, at]
@@ -12203,6 +12214,11 @@ components:
       type: object
       minProperties: 1
       properties:
+        estimate_hours:
+          type: [number, 'null']
+          exclusiveMinimum: 0
+          maximum: 200
+          description: Atomically sets only fields.estimate_hours, preserving other fields and stamping caller provenance. Null clears the estimate and its provenance. Cannot be combined with fields. Existing node write permissions and revision preconditions apply.
         title:
           type: string
           minLength: 1
