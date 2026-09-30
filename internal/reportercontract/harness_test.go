@@ -64,6 +64,10 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 			t.Fatalf("%s attention kinds = %#v", op, kind["enum"])
 		}
 		required, _ := body["required"].([]any)
+		finished, _ := props["finished"].(map[string]any)
+		if finished["type"] != "boolean" || !isRequired(required, "finished") {
+			t.Fatalf("%s finished must be a required response boolean", op)
+		}
 		for _, field := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale", "controls", "has_vendor_session_ref", "warnings"} {
 			if _, exists := props[field]; !exists {
 				t.Fatalf("%s missing optional %s", op, field)
@@ -72,5 +76,46 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 				t.Fatalf("%s requires %s", op, field)
 			}
 		}
+	}
+}
+
+// Compare the real response pin to its pre-finished shape, rather than only
+// checking a regenerated pin against itself. Both operations must stay additive.
+func TestHarnessFinishedResponseAdditionIsMinor(t *testing.T) {
+	openAPI, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Current(openAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := current["harness-session"]
+	var beforeShape map[string]any
+	if err := json.Unmarshal(now.Shape, &beforeShape); err != nil {
+		t.Fatal(err)
+	}
+	for op, value := range beforeShape {
+		body := value.(map[string]any)
+		props := body["properties"].(map[string]any)
+		if _, exists := props["finished"]; !exists || !isRequired(body["required"], "finished") {
+			t.Fatalf("%s must include required finished before comparing", op)
+		}
+		delete(props, "finished")
+		var required []any
+		for _, field := range body["required"].([]any) {
+			if field != "finished" {
+				required = append(required, field)
+			}
+		}
+		body["required"] = required
+	}
+	before, err := json.Marshal(beforeShape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bump, err := RequiredBump(Pin{Version: "harness-session/1.6", SHA256: "before-finished", Shape: before}, now)
+	if err != nil || bump != "minor" {
+		t.Fatalf("finished response addition: got %q, %v; want minor", bump, err)
 	}
 }

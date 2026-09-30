@@ -74,6 +74,40 @@ func TestRequiredBump(t *testing.T) {
 	}
 }
 
+func TestRequiredBumpRequiredPropertyDirection(t *testing.T) {
+	const base = `{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`
+	const finished = `{"type":"object","properties":{"id":{"type":"string"},"finished":{"type":"boolean"}},"required":["id","finished"]}`
+	for _, tc := range []struct {
+		name, before, after, responseBump string
+	}{
+		{"new required property", base, finished, "minor"},
+		{"first required property", `{"type":"object","properties":{}}`, `{"type":"object","properties":{"finished":{"type":"boolean"}},"required":["finished"]}`, "minor"},
+		{"nested required property", `{"type":"array","items":` + base + `}`, `{"type":"array","items":` + finished + `}`, "minor"},
+		{"previously optional property", `{"type":"object","properties":{"id":{"type":"string"},"finished":{"type":"boolean"}},"required":["id"]}`, finished, "major"},
+		{"required property removed", finished, base, "major"},
+		{"existing type changed", base, `{"type":"object","properties":{"id":{"type":"integer"},"finished":{"type":"boolean"}},"required":["id","finished"]}`, "major"},
+		{"closed response", strings.TrimSuffix(base, "}") + `,"additionalProperties":false}`, strings.TrimSuffix(finished, "}") + `,"additionalProperties":false}`, "major"},
+	} {
+		for _, direction := range []struct {
+			operation, want string
+		}{
+			{"GET /sessions/{id} 200", tc.responseBump},
+			{"POST /sessions/{id}/heartbeat 200", tc.responseBump},
+			{"POST /sessions request", "major"},
+			{"a", "major"}, // Unlabelled schemas must not inherit the response exception.
+		} {
+			t.Run(tc.name+"/"+direction.operation, func(t *testing.T) {
+				before := Pin{SHA256: "old", Shape: json.RawMessage(fmt.Sprintf(`{%q:%s}`, direction.operation, tc.before))}
+				after := Pin{SHA256: "new", Shape: json.RawMessage(fmt.Sprintf(`{%q:%s}`, direction.operation, tc.after))}
+				got, err := RequiredBump(before, after)
+				if err != nil || got != direction.want {
+					t.Fatalf("got %q, %v; want %q", got, err, direction.want)
+				}
+			})
+		}
+	}
+}
+
 // TestPinnedShapeKeys rejects parse artifacts that landed in a pin as schema
 // keys. Operation labels are the shape's outer keys. Inside a schema, a key is
 // a JSON Schema keyword; names under properties, patternProperties,

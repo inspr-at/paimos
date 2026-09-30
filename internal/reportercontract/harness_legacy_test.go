@@ -5,11 +5,38 @@ package reportercontract_test
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/reportercontract"
 )
+
+// The shared API client (including agentd) accepts the minor response addition
+// when decoding into an older consumer type that has no finished property.
+func TestHarnessLegacyClientIgnoresFinished(t *testing.T) {
+	for _, finished := range []bool{false, true} {
+		t.Run(map[bool]string{false: "false", true: "true"}[finished], func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set(reportercontract.Header, reportercontract.HarnessSession)
+				_ = json.NewEncoder(w).Encode(harness.Session{ID: "session", Finished: finished})
+			}))
+			defer server.Close()
+			var legacy struct {
+				ID string `json:"id"`
+			}
+			if err := client.New(server.URL, "").Do(t.Context(), http.MethodGet, "/api/projects/project/harness-sessions/session", nil, &legacy); err != nil {
+				t.Fatal(err)
+			}
+			if legacy.ID != "session" {
+				t.Fatalf("existing response field lost: %q", legacy.ID)
+			}
+		})
+	}
+}
 
 // Frozen harness-session/1.0 serialization at 4fbcd22, before AEON-225.
 // Status populates an empty controls slice; heartbeat leaves it nil. Both must

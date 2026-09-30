@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package reportercontract declares reporter-facing response headers and pins.
-// Each surface emits Aeon-Contract: name/major.minor. An added optional field
-// or operation requires a minor bump; a removed field, changed type, or newly
-// required field requires a major bump. Versions never enter JSON bodies.
+// Each surface emits Aeon-Contract: name/major.minor. A new response field
+// (optional or required) or operation requires a minor bump when existing readers
+// tolerate extra fields. Removed fields, changed types and newly requiring an
+// existing optional field require a major bump, as do new required request
+// fields. Versions never enter JSON bodies.
 // The coordinator can run `go run scripts/reporter-contract.go since <git-ref>`
 // to announce changed reporter response schemas to Pharos and Janus.
 package reportercontract
