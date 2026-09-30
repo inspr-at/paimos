@@ -70,7 +70,7 @@ func TestRoutingAdviceMatchesReservationsAndScope(t *testing.T) {
 		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{reading}}), 204, nil)
 		s := capacity.DefaultSchedule()
 		s.Override = "sprint"
-		callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+		callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false, ""}), 204, nil)
 		accounts = append(accounts, a)
 	}
 	path := "/api/agent-accounts/capacity/next?harness=codex&model_profile_id=" + profile

@@ -42,7 +42,7 @@ func listAccounts(ctx context.Context, tx pgx.Tx) ([]Account, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,'')
 		FROM agent_accounts
 		ORDER BY created_at, id`)
 	if err != nil {
@@ -67,7 +67,7 @@ func getAccount(ctx context.Context, tx pgx.Tx, id string) (Account, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,'')
 		FROM agent_accounts WHERE id = $1::uuid`, id)
 	account, err := scanAccount(row)
 	if err != nil {
@@ -86,7 +86,7 @@ func scanAccount(row scanner) (Account, error) {
 	var account Account
 	err := row.Scan(&account.ID, &account.AccountKey, &account.Harness, &account.DaemonID, &account.Label,
 		&account.MaxParallel, &account.RegisteredBy, &account.State, &account.LastProbeAt, &account.LastProbeOK,
-		&account.daemonGeneration, &account.CreatedAt, &account.Plan, &account.HostLabel, &account.AllowedProfileIDs, &account.ReadingSupport, &account.QuotaFingerprint, &account.StatuslineEnabled, &account.Provider, &account.Model, &account.ModelStatus, &account.ModelDataNote, &account.OpenRouterCredits)
+		&account.daemonGeneration, &account.CreatedAt, &account.Plan, &account.HostLabel, &account.AllowedProfileIDs, &account.ReadingSupport, &account.QuotaFingerprint, &account.StatuslineEnabled, &account.Provider, &account.Model, &account.ModelStatus, &account.ModelDataNote, &account.OpenRouterCredits, &account.GroupID)
 	account.Windows = []Window{}
 	return account, err
 }
@@ -105,7 +105,7 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		           SELECT 1 FROM account_reservations r
 		           WHERE r.tenant_id = w.tenant_id AND r.window_id = w.id
 		             AND r.state = 'settled' AND r.actual_units = 0
-		       ) AS provisional, w.capacity_read_at, w.capacity_allowed, COALESCE(w.capacity_kind,''), w.capacity_bucket, w.capacity_retired, w.capacity_refresh_run::text
+		       ) AS provisional, w.capacity_read_at, w.capacity_allowed, COALESCE(w.capacity_kind,''), w.capacity_bucket, w.capacity_retired, w.capacity_refresh_run::text, COALESCE(w.capacity_source,'')
 		FROM account_allowance_windows w
 		WHERE NOT w.pairing_verification AND NOT w.capacity_retired AND w.removed_at IS NULL
 		ORDER BY w.account_id, w.starts_at, w.id`)
@@ -116,7 +116,7 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 	byAccount := map[string][]Window{}
 	for rows.Next() {
 		var w Window
-		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun); err != nil {
+		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun, &w.capacitySource); err != nil {
 			return nil, err
 		}
 		if w.capacityReadAt != nil {
@@ -138,6 +138,9 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		} else {
 			accounts[i].Windows = []Window{}
 		}
+	}
+	if err := fillGroupNames(ctx, tx, accounts); err != nil {
+		return nil, err
 	}
 	return accounts, nil
 }
@@ -238,7 +241,7 @@ func findAccount(ctx context.Context, tx pgx.Tx, daemonID, harness, key string) 
 	row := tx.QueryRow(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,'')
 		FROM agent_accounts
 		WHERE daemon_id = $1 AND harness = $2 AND account_key = $3`, daemonID, harness, key)
 	account, err := scanAccount(row)
@@ -325,6 +328,11 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if err != nil {
 		return Account{}, err
 	}
+	if after.LastProbeAt != nil {
+		if err := learnOnline(ctx, tx, after, *after.LastProbeAt); err != nil {
+			return Account{}, err
+		}
+	}
 	if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
 		return Account{}, err
 	}
@@ -335,7 +343,7 @@ func lockAccount(ctx context.Context, tx pgx.Tx, id string) (Account, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,'')
 		FROM agent_accounts WHERE id = $1::uuid FOR UPDATE`, id)
 	account, err := scanAccount(row)
 	if isNoRows(err) {

@@ -14,7 +14,7 @@ const accountId = 'ac000000-0000-4000-8000-000000000001'
 const spareAccountId = 'ac000000-0000-4000-8000-000000000002'
 const laptopAccountId = 'ac000000-0000-4000-8000-000000000003'
 
-export async function mockStartAgent(page: Page, options: { wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional' } = {}) {
+export async function mockStartAgent(page: Page, options: { wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
   const work = fixtures()
   if (options.theme) work.preferences.theme = { choice: options.theme }
   await mockWork(page, work, { admin: true })
@@ -72,6 +72,7 @@ export async function mockStartAgent(page: Page, options: { wait?: CapacityWait;
   }
   if (options.catalog === 'pi-openrouter') Object.assign(account, { harness: 'pi', provider: 'openrouter', model: 'stealth/space-bunny-alpha', model_status: 'known' })
   const state = { orders: [] as WorkOrder[], runs: [] as AgentRun[], sessions: [] as HarnessSession[], failQueue: !!options.failQueue, revoked: false, catalogMisses: options.catalog === 'retry' ? 1 : 0 }
+  const pins = options.pin ? [{ ...options.pin }] : [] as { ticket_id: string; harness: string; account_id?: string; group_id?: string }[]
   const calls: { method: string; path: string; body: Record<string, unknown> | null }[] = []
   await page.route('**/api/**', async route => {
     const req = route.request(), url = new URL(req.url()), path = url.pathname, method = req.method()
@@ -107,6 +108,22 @@ export async function mockStartAgent(page: Page, options: { wait?: CapacityWait;
     if (path === '/api/agent-accounts/capacity') return json([{ account_id: account.id, schedule: defaultSchedule(), windows: [] }])
     if (path === '/api/agent-accounts/capacity/schedule') return json([])
     if (path === '/api/agent-pairing/computers') return json({ computers: [] })
+    if (path === '/api/agent-accounts/pins') {
+      if (method === 'GET') return json(pins.filter(pin => pin.ticket_id === url.searchParams.get('ticket_id')))
+      if (method === 'PUT' && body) {
+        const input = body as (typeof pins)[number]
+        const index = pins.findIndex(pin => pin.ticket_id === input.ticket_id && pin.harness === input.harness)
+        if (index >= 0) pins[index] = input
+        else pins.push(input)
+        return route.fulfill({ status: 204, body: '' })
+      }
+      if (method === 'DELETE') {
+        const index = pins.findIndex(pin => pin.ticket_id === url.searchParams.get('ticket_id') && pin.harness === url.searchParams.get('harness'))
+        if (index >= 0) pins.splice(index, 1)
+        return route.fulfill({ status: 204, body: '' })
+      }
+    }
+    if (path === '/api/agent-accounts/groups' && method === 'GET') return json([])
     if (path === '/api/harness-sessions') return json({ items: state.sessions, next_cursor: null })
     if (path === '/api/approvals') return json([])
     if (path.endsWith('/message-targets')) return json([])
@@ -156,5 +173,5 @@ export async function mockStartAgent(page: Page, options: { wait?: CapacityWait;
       project: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' }, ticket: { id: 'n-1', key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning' }, agent: { id: agentId, name: 'Studio builder' },
     })
   }
-  return { state, calls, claim, account, profile, agentId, spareProfileId }
+  return { state, calls, claim, account, profile, agentId, spareProfileId, spareAccountId, pins }
 }

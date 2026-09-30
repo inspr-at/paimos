@@ -50,7 +50,7 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 				return nil
 			}
 		case "agent-accounts":
-			if r.Method == "GET" && r.URL.Path == "/api/agent-accounts/capacity/next" {
+			if r.Method == "GET" && (r.URL.Path == "/api/agent-accounts/capacity/next" || r.URL.Path == "/api/agent-accounts/use") {
 				return nil
 			} // Handler restricts paired principals to their own accounts.
 			// Quota signals, the status-line read, and the tenant quota key are

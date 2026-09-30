@@ -48,10 +48,11 @@ function stepKeys(event: KeyboardEvent) {
 }
 const personLabel = computed(() => reserveLabel(mode.value === 'fixed' ? { reserve: 'fixed', reserve_percent: percent.value } : { reserve: mode.value }))
 const BLIND = new Set(['grok', 'cursor', 'pi'])
-const vendorRows = computed(() => props.pools.map(p => {
+const vendorRows = computed(() => props.pools.filter(p => !p.id.startsWith('group:')).map(p => {
   const measured = p.rows.some(r => r.primary)
-  const note = measured ? '' : BLIND.has(p.id) ? `${p.name} doesn't show its limit · one run at a time by day` : 'No reading yet'
-  return { id: p.id, name: p.name, measured, note }
+  const note = measured ? '' : BLIND.has(p.mark || p.id) ? `${p.name} doesn't show its limit · one run at a time by day` : 'No reading yet'
+  const learned = p.rows.some(r => r.learning?.windows.some(w => w.auto_reserve_percent))
+  return { id: p.id, mark: p.mark || p.id, name: p.name, measured, note, auto: learned ? 'Auto · learned per account' : `Auto · ~${AUTO_RESERVE}%` }
 }))
 
 // ---------- Away ----------
@@ -92,7 +93,7 @@ const draftSchedule = computed<CapacitySchedule>(() => {
   return awayUntil.value ? { ...s, override: 'away', override_until: awayUntil.value } : s
 })
 const draftPools = computed(() => vendorRows.value.filter(v => v.measured).map(v => previewPool(v.id as Pool, perPool.value[v.id] ?? '')))
-const currentSentences = computed(() => props.pools.map(p => ({ id: p.id, sentence: poolSentence(p, props.now) })))
+const currentSentences = computed(() => props.pools.filter(p => !p.id.startsWith('group:')).map(p => ({ id: p.id, mark: p.mark || p.id, sentence: poolSentence(p, props.now) })))
 const previewPools = ref<PoolView[] | null>(null)
 const previewFailed = ref(false)
 let previewTimer: ReturnType<typeof setTimeout> | undefined
@@ -109,10 +110,10 @@ watch([draftSchedule, draftPools], () => {
     } catch { if (turn === previewTurn) previewFailed.value = true }
   }, 220)
 }, { deep: true })
-const preview = computed(() => currentSentences.value.map(({ id, sentence }) => {
+const preview = computed(() => currentSentences.value.map(({ id, mark, sentence }) => {
   const pool = previewPools.value?.find(p => p.id === id)
   const next: Sentence = pool && dirty.value ? poolSentence(pool, props.now) : sentence
-  return { id, sentence: next, changed: plainText(next) !== plainText(sentence) }
+  return { id, mark, sentence: next, changed: plainText(next) !== plainText(sentence) }
 }))
 
 // ---------- Save, close, focus ----------
@@ -186,11 +187,11 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
         </button>
         <ul v-show="vendorsOpen" id="keep-vendors" class="vrows">
           <li v-for="v in vendorRows" :key="v.id">
-            <HarnessMark :harness="v.id" :size="14" />
+            <HarnessMark :harness="v.mark" :size="14" />
             <span class="vn">{{ v.name }}</span>
             <select v-if="v.measured" v-model="perPool[v.id]" class="sel" :aria-label="`${v.name}: keep for you`">
               <option value="">Same as above · {{ personLabel }}</option>
-              <option value="auto">Auto · ~{{ AUTO_RESERVE }}%</option>
+              <option value="auto">{{ v.auto }}</option>
               <option v-for="n in SHARES" :key="n" :value="String(n)">{{ n }}%</option>
               <option value="off">Nothing</option>
             </select>
@@ -215,7 +216,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
         <p class="eyebrow">Today with these settings</p>
         <ul>
           <li v-for="item in preview" :key="item.id" :class="{ changed: item.changed }">
-            <HarnessMark :harness="item.id" :size="13" />
+            <HarnessMark :harness="item.mark" :size="13" />
             <span><PlanSentence :sentence="item.sentence" /><span v-if="item.changed" class="sr-only"> (changed)</span></span>
           </li>
           <li v-if="!preview.length" class="none">No accounts to plan yet.</li>

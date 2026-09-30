@@ -53,9 +53,29 @@ paimos mcp
 `aeon capacity next codex` shows the server's next eligible account and parallel
 capacity; `--json` returns the ordered advice. It never reserves quota. The
 Accounts plan uses that same order: soonest weekly/monthly reset, then larger
-available cap, then account ID. Short windows still constrain every admission.
+available cap, then account ID. Recent own use moves an account behind other
+eligible accounts, without changing its budget. Short windows still constrain
+every admission.
 Workspace readers can request advice across their accounts; paired agents and
 keys with only `account.probe` see only accounts registered by that agent.
+
+Capacity learning uses tenant-local readings and usage only (AEON-388,
+migration 1020). Three matching run samples enable a decaying p75 hold; five
+observed work days enable an Auto reserve normalized to the window's usable
+work hours. Managed overlap is excluded from own-use learning. Blind accounts
+show consumption until a vendor stop and a known or observed cycle support an
+estimate. Estimates carry uncertainty and evidence, never replace a fresh
+measurement, and never lift a vendor denial. Aging readings include observed
+burn; off-day pacing uses learned throughput to spend what would otherwise
+expire. The Accounts disclosure shows evidence and hours/Away/sleep suggestions;
+only an explicit save changes a schedule. Learning state is bounded and
+contains no local paths or credentials.
+
+The learning regression fixtures cover twelve-run p75 holds, five-day Auto
+reserves, blind-limit calibration and replay, exact-model token conversion,
+fresh-measurement precedence, tenant isolation, and weekend throughput. Browser
+coverage exercises the shared Agents/Usage evidence and explicit hours action
+at 1600/390 pixels in light and dark themes.
 
 `aeon capacity next codex --env` prints a shell-quoted config-home export only
 when the selected account belongs to the authenticated local agentd. Use
@@ -213,6 +233,12 @@ stop only the matching model; account-wide denials still apply. Known denied
 windows are reported at 100%; missing bounds remain unknown. Accounts publish
 `reading_support` and a tenant-keyed HMAC of a verified vendor account ID, never an
 email, token or local path. Missing verified IDs leave the fingerprint empty.
+Doors with the same fingerprint share allowance windows, outstanding reservations
+and vendor denials within the tenant; group membership and schedules stay on each
+door. Reservations and launch validation recheck project fences and ticket pins.
+Settings displays `aeon use <harness> <account-id>` so labels containing spaces or
+shell metacharacters remain plain display text. The CLI still accepts labels;
+only the local owner-only agentd resolves the selected account's environment.
 Claude idle `get_usage` and Grok billing captures remain disabled until the coordinator verifies a
 quota-neutral exchange and adds an exact-version, exact-binary capability; this
 fixture implementation does not approve a production vendor capture.

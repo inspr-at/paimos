@@ -4498,12 +4498,98 @@ paths:
     put:
       operationId: putCapacitySchedule
       summary: Set current person's default, pool or account schedule
-      description: Person account.manage permission required. Pacing is enforced for measured windows using the pairing owner schedule (for unpaired accounts, the first person to save an account schedule establishes its schedule owner). Account override wins over pool (harness), then user default, then built-in default. Keep for you (reserve) resolves separately - the most specific explicit reserve wins, Auto when none is set - so a pool or account entry without one follows the person's. Away is set on the user scope only (400 elsewhere), must end within a year and reaches every pool without an override of its own in force. Hold may carry override_until within 31 days (until tomorrow's hours, for 2 hours); without it Hold lasts until resumed. Times are local to the explicit IANA timezone; week is Monday first. Shifts and hourly blocks replace work hours while nights is enabled. Null schedule removes an override.
+      description: Person account.manage permission required. Pacing is enforced for measured windows using the pairing owner schedule (for unpaired accounts, the first person to save an account schedule establishes its schedule owner). Account override wins over the account's group, then pool (harness), then user default, then built-in default. Keep for you (reserve) resolves separately - the most specific explicit reserve wins, Auto when none is set - so a pool, group or account entry without one follows the person's. Away is set on the user scope only (400 elsewhere), must end within a year and reaches every pool without an override of its own in force. Hold may carry override_until within 31 days (until tomorrow's hours, for 2 hours); without it Hold lasts until resumed. Times are local to the explicit IANA timezone; week is Monday first. Shifts and hourly blocks replace work hours while nights is enabled. Null schedule removes an override. A group scope names group_id and leaves account_id empty.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CapacityScheduleOverride'}}}}
       responses:
         '204': {description: Schedule saved}
         '400': {description: Invalid schedule}
         '403': {description: Person account.manage permission required}
+  /agent-accounts/groups:
+    get:
+      operationId: listAccountGroups
+      summary: Groups that split a vendor pool
+      description: Person account.read. A group is one vendor, its member accounts, and an optional project fence.
+      responses:
+        '200': {description: Groups, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountGroup'}}}}}
+    post:
+      operationId: createAccountGroup
+      summary: Keep selected accounts separate
+      description: Person account.manage. Exclusive requires at least one project. A fenced project routes only inside the group. An exclusive group's other work waits rather than using its members.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroupWrite'}}}}
+      responses:
+        '201': {description: Group, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroup'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /agent-accounts/groups/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    patch:
+      operationId: updateAccountGroup
+      description: Person account.manage. account_ids and project_ids, when present, replace the membership. Omit a list to leave it.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroupWrite'}}}}
+      responses:
+        '200': {description: Group, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroup'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteAccountGroup
+      summary: Return the group's accounts to the vendor pool
+      description: Person account.manage. Members lose the group. The group's schedule rows are removed.
+      responses:
+        '204': {description: Group removed}
+        '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/pins:
+    get:
+      operationId: listAccountPins
+      description: Person account.read. Pins for one ticket.
+      parameters: [{name: ticket_id, in: query, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Pins, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountTicketPin'}}}}}
+    put:
+      operationId: putAccountPin
+      summary: Remember an account or a group for this ticket
+      description: Person run.create. Exactly one of account_id or group_id. A pin narrows routing and never crosses a project fence.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountTicketPin'}}}}
+      responses:
+        '204': {description: Pin saved}
+        '400': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteAccountPin
+      parameters:
+        - {name: ticket_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+      responses:
+        '204': {description: Pin removed}
+  /agent-accounts/use:
+    get:
+      operationId: useAccount
+      summary: Resolve a harness label or account id to door ids for the local agent
+      description: Specify exactly one of label or account_id. Person account.read, or the same agent authority as capacity next. Returns ids, labels and the quota fingerprint only. No path, home, socket or credential. The shell export is printed by aeon use from the local agentd.
+      parameters:
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+        - {name: label, in: query, schema: {type: string, maxLength: 128}}
+        - {name: account_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Doors of one quota, content: {application/json: {schema: {$ref: '#/components/schemas/AccountUse'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Several distinct quotas share that label}
+  /agent-accounts/runs/{runId}/target:
+    post:
+      operationId: setRunAccountTarget
+      summary: Move a queued run to an account or a group
+      description: Person run.create, and the caller can edit the work order. Only while the run is queued and has no account yet. account_id sets the existing requested-account pin. group_id clears that pin and stores a group target. Exactly one of the two.
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                account_id: {type: string, format: uuid}
+                group_id: {type: string, format: uuid}
+      responses:
+        '204': {description: Target saved}
+        '409': {description: Run is not awaiting an account}
   /agent-accounts/catalog:
     get:
       operationId: getAgentAccountCatalog
@@ -10596,6 +10682,54 @@ components:
         command_template: {type: string}
         owner_required: {type: boolean}
         source: {type: string, enum: [aeon]}
+    CapacityEvidence:
+      type: object
+      additionalProperties: false
+      required: [kind, samples]
+      properties:
+        kind: {type: string, enum: [runs, tokens, limit_hits, drift]}
+        samples: {type: integer, minimum: 1}
+    CapacityLearning:
+      type: object
+      description: Tenant-local observations only. Suggestions never change a schedule without a person saving it. No paths or vendor text.
+      required: [windows, tokens, cost_micros, runs, limit_hits]
+      properties:
+        tokens: {type: integer, minimum: 0, description: "Observed managed and token-only session consumption in the current known cycle, or since observation began."}
+        cost_micros: {type: integer, minimum: 0}
+        runs: {type: integer, minimum: 0}
+        limit_hits: {type: integer, minimum: 0}
+        presence_until: {type: string, format: date-time}
+        away_suggested: {type: boolean}
+        sleeps_at_night: {type: boolean}
+        suggested_hours:
+          type: object
+          required: [start, end, days]
+          properties:
+            start: {type: number, minimum: 0, maximum: 23.5}
+            end: {type: number, minimum: 0.5, maximum: 24}
+            days: {type: integer, minimum: 5}
+        correction:
+          type: object
+          required: [points, at]
+          properties:
+            points: {type: number, description: Positive means the estimate was too optimistic.}
+            at: {type: string, format: date-time}
+        windows:
+          type: array
+          items:
+            type: object
+            required: [window_kind, bucket, run_count, work_days]
+            properties:
+              window_kind: {type: string, enum: [5h, weekly, monthly, other]}
+              bucket: {type: string}
+              run_count: {type: integer, minimum: 0}
+              run_percent: {type: number, minimum: 0, maximum: 100}
+              hold_percent: {type: number, minimum: 1, maximum: 25}
+              plus_minus: {type: number, minimum: 0}
+              percent_per_million_tokens: {type: number, minimum: 0}
+              percent_per_hour: {type: number, minimum: 0}
+              auto_reserve_percent: {type: number, minimum: 10, maximum: 60}
+              work_days: {type: integer, minimum: 0}
     CapacityReading:
       type: object
       additionalProperties: false
@@ -10612,6 +10746,8 @@ components:
         ordinary_usage_allowed: {type: boolean, description: Vendor authority; false forbids dispatch even when percent remains}
         run_id: {type: string, format: uuid}
         phase: {type: string, enum: [start, update, end]}
+        plus_minus: {type: number, minimum: 0, maximum: 100, description: Uncertainty in percentage points; display only at three points or more.}
+        evidence: {$ref: '#/components/schemas/CapacityEvidence'}
     CapacitySchedule:
       type: object
       additionalProperties: false
@@ -10666,9 +10802,10 @@ components:
       additionalProperties: false
       required: [scope, schedule]
       properties:
-        scope: {type: string, enum: [user, pool, account]}
+        scope: {type: string, enum: [user, pool, account, group]}
         pool: {type: string, enum: [codex, claude, pi, cursor, grok]}
         account_id: {type: string, format: uuid}
+        group_id: {type: string, format: uuid, description: Set when scope is group. The schedule sits between the account and the vendor pool.}
         schedule:
           anyOf:
             - {$ref: '#/components/schemas/CapacitySchedule'}
@@ -10693,6 +10830,8 @@ components:
         ahead: {type: boolean}
         reserve_percent: {type: number, description: 'Keep for you level R for this window: auto (30 until learned), the fixed share, or 0 when off.'}
         reserve_effective_percent: {type: number, description: 'R_eff now: what agents leave the person of this window. 0 under Sprint, Away and Run now once, and when no work hours remain before the reset.'}
+        drift_percent: {type: number, minimum: 0, description: Pessimistic usage since an aging reading; already subtracted from available_now_percent.}
+        would_expire_percent: {type: number, minimum: 0, description: Remaining capacity the learned throughput cannot consume in scheduled hours.}
         reserve_until: {type: string, format: date-time, description: 'End of the person''s last work band before the reset, after which the reserve is gone. Absent when reserve_effective_percent is 0.'}
     CapacityRouting:
       type: object
@@ -10702,6 +10841,7 @@ components:
         available_slots: {type: integer, minimum: 0, description: Additional runs that fit all windows and the concurrency limit right now.}
         resets_at: {type: string, format: date-time, description: Soonest current weekly or monthly reset; falls back to a shorter window only when no long window exists.}
         cap_percent: {type: number, minimum: 0, description: Smallest normalized available cap across all binding windows.}
+        same_quota_as: {type: string, format: uuid, description: Set on an extra door of a quota whose slots are already counted on another account.}
         wait: {$ref: '#/components/schemas/CapacityWait'}
     CapacityNext:
       type: object
@@ -10728,11 +10868,18 @@ components:
       properties:
         account_id: {type: string, format: uuid}
         routing: {$ref: '#/components/schemas/CapacityRouting'}
+        learning: {$ref: '#/components/schemas/CapacityLearning'}
         ongoing_use_approved: {type: boolean, description: True for unpaired accounts or a separately approved connected pairing; readings never change this approval}
         probe_failure: {type: string, enum: [auth_failed, unavailable], description: 'Why the last probe failed; absent after a successful probe. Only auth_failed means the account needs a new sign-in.'}
         limiting_reset: {type: string, format: date-time, description: 'Earliest reset of the account''s current measured windows (including 5-hour windows); a Sprint in scope ends at the earliest of these.'}
         awaiting_reading: {type: boolean, description: 'True after a recovery run cleared a denial and no later reading has arrived. Current windows are omitted until the next run measures capacity.'}
         schedule: {$ref: '#/components/schemas/CapacitySchedule'}
+        quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
+        group_id: {type: string, format: uuid}
+        group_name: {type: string}
+        host_label: {type: string}
+        hosts: {type: array, items: {type: string}, description: Host chips when several doors share one quota. Slots are not summed across those doors.}
+        same_quota_as: {type: string, format: uuid, description: The freshest door of this quota. Windows for the single gauge come from that door.}
         windows:
           type: array
           items:
@@ -10757,6 +10904,51 @@ components:
                 period_end: {type: string, format: date-time, description: When the period ends and the count starts again.}
         cost_limit_supported: {type: boolean, description: True only when this account reports priced run usage; only then may cost_micros limits be set.}
         spend_month_usd: {type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: 'List-price spend this local month, in dollars, for an account whose usage is billed by API key. Absent for subscriptions. An estimate, not a billed charge.'}
+    AccountGroup:
+      type: object
+      required: [id, harness, name, exclusive, account_ids, project_ids]
+      properties:
+        id: {type: string, format: uuid}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        exclusive: {type: boolean}
+        account_ids: {type: array, items: {type: string, format: uuid}}
+        project_ids: {type: array, items: {type: string, format: uuid}}
+    AccountGroupWrite:
+      type: object
+      additionalProperties: false
+      properties:
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        exclusive: {type: boolean}
+        account_ids: {type: array, items: {type: string, format: uuid}}
+        project_ids: {type: array, items: {type: string, format: uuid}}
+    AccountTicketPin:
+      type: object
+      additionalProperties: false
+      required: [ticket_id, harness]
+      properties:
+        ticket_id: {type: string, format: uuid}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        account_id: {type: string, format: uuid}
+        group_id: {type: string, format: uuid}
+    AccountUse:
+      type: object
+      required: [accounts]
+      properties:
+        accounts:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [account_id, daemon_id, harness, label, host_label, quota_fingerprint]
+            properties:
+              account_id: {type: string, format: uuid}
+              daemon_id: {type: string}
+              harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+              label: {type: string}
+              host_label: {type: string}
+              quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
     AgentAccountWrite:
       type: object
       required: [account_key, harness, daemon_id, label]
@@ -10790,6 +10982,8 @@ components:
             model_status: {type: string, enum: [known, unknown, unchecked]}
             model_data_note: {type: boolean, description: Stealth or free OpenRouter model; may log prompts and outputs.}
             openrouter_credits: {$ref: '#/components/schemas/OpenRouterCredits'}
+            group_id: {type: string, format: uuid}
+            group_name: {type: string}
             allowed_model_profile_ids:
               type: [array, 'null']
               description: Null preserves legacy tenant-harness catalog policy. Explicit arrays restrict model/effort pins; empty blocks new reservations.

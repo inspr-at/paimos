@@ -29,7 +29,16 @@ export interface CapacitySchedule {
   shifts: { early: number; late: number; night: number; k: number[] }
   blocks: number[]
 }
+export interface CapacityLearning {
+  windows: { window_kind: string; bucket: string; run_count: number; run_percent?: number; hold_percent?: number; plus_minus?: number; auto_reserve_percent?: number; work_days: number }[]
+  tokens: number; cost_micros: number; runs: number; limit_hits: number
+  presence_until?: string; away_suggested?: boolean; sleeps_at_night?: boolean
+  suggested_hours?: { start: number; end: number; days: number }
+  correction?: { points: number; at: string }
+}
 export interface CapacityReading {
+  plus_minus?: number
+  evidence?: { kind: 'runs' | 'tokens' | 'limit_hits' | 'drift'; samples: number }
   window_kind: '5h' | 'weekly' | 'monthly' | 'other'
   bucket?: string
   window_minutes: number
@@ -41,6 +50,7 @@ export interface CapacityReading {
   ordinary_usage_allowed?: boolean
 }
 export interface CapacityPacing {
+  drift_percent?: number; would_expire_percent?: number
   usable_hours: number; percent_per_hour: number; suggested_today_percent: number
   available_now_percent?: number; budget_percent?: number; used_today_percent?: number; tonight_percent?: number
   period_start?: string; period_end?: string; finish?: string | null
@@ -52,8 +62,9 @@ export interface CapacityWindow {
   reading: CapacityReading; starts_at: string; allowance: number; remaining_percent: number
   freshness: 'fresh' | 'aging' | 'stale' | 'expired'; usage_today_known?: boolean; pacing: CapacityPacing
 }
-export interface CapacityRouting { rank: number; available_slots: number; resets_at?: string; cap_percent?: number; wait?: CapacityWait }
+export interface CapacityRouting { rank: number; available_slots: number; resets_at?: string; cap_percent?: number; wait?: CapacityWait; same_quota_as?: string }
 export interface AccountCapacity {
+  learning?: CapacityLearning
   routing?: CapacityRouting
   account_id: string; ongoing_use_approved?: boolean; schedule: CapacitySchedule; windows: CapacityWindow[]
   /** Why the last probe failed; only auth_failed is a confirmed sign-out. */
@@ -67,8 +78,14 @@ export interface AccountCapacity {
   /** List-price spend this month, in dollars, for an account billed by API key. */
   cost_limit_supported?: boolean
   spend_month_usd?: string
+  quota_fingerprint?: string
+  group_id?: string
+  group_name?: string
+  host_label?: string
+  hosts?: string[]
+  same_quota_as?: string
 }
-export interface ScheduleOverride { scope: 'user' | 'pool' | 'account'; pool?: Pool; account_id?: string; schedule: CapacitySchedule | null; carry_overrides?: boolean }
+export interface ScheduleOverride { scope: 'user' | 'pool' | 'account' | 'group'; pool?: Pool; account_id?: string; group_id?: string; schedule: CapacitySchedule | null; carry_overrides?: boolean }
 
 // ---------- HTTP ----------
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -319,16 +336,31 @@ export interface AccountInput {
   connectivity?: 'online' | 'offline' | 'unknown'
   /** From the capacity projection: why this account's last probe failed. */
   probeFailure?: 'auth_failed' | 'unavailable'
+  fingerprint?: string
+  groupId?: string
+  groupName?: string
 }
 export interface AccountRow {
+  learning?: CapacityLearning
   id: string; name: string; host: string; harness: string; state: AccountState
   primary: CapacityWindow | null; five: CapacityWindow | null; schedule: CapacitySchedule | null; plan: string
   limitingReset: string
   awaitingReading: boolean
   routing?: CapacityRouting
+  fingerprint: string
+  groupId: string
+  groupName: string
+  hosts: string[]
+  sameQuotaAs: string
+  sharedQuotaName?: string
 }
 export const HARNESS_NAME: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi' }
 export const POOL_ORDER = ['codex', 'claude', 'grok', 'cursor', 'pi']
+/** Stable IDs remain one shell word in fish, zsh and bash, regardless of the display label. */
+export function accountUseCommand(account: { id: string; harness: string }): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(account.id) || !POOL_ORDER.includes(account.harness)) return ''
+  return `aeon use ${account.harness} ${account.id}`
+}
 /** The vendor's own sign-in command, shown to copy. Aeon never takes the password. */
 export const LOGIN_COMMAND: Record<string, string> = { codex: 'codex login', claude: 'claude /login', cursor: 'cursor-agent login' }
 
@@ -357,11 +389,18 @@ export function buildRows(accounts: AccountInput[], capacity: AccountCapacity[])
     const cap = byId.get(a.id)
     const { primary, five } = pickWindows(cap?.windows ?? [])
     const state = accountState({ ...a, probeFailure: cap?.probe_failure ?? a.probeFailure }, !!primary)
-    return { id: a.id, name: a.label, host: a.host, harness: a.harness, state, primary, five, schedule: cap?.schedule ?? null, plan: primary?.reading.plan || a.plan || '', limitingReset: cap?.limiting_reset ?? '', awaitingReading: !!cap?.awaiting_reading && !primary, routing: cap?.routing }
+    return {
+      id: a.id, name: a.label, host: a.host, harness: a.harness, state, primary, five, schedule: cap?.schedule ?? null, plan: primary?.reading.plan || a.plan || '', limitingReset: cap?.limiting_reset ?? '', awaitingReading: !!cap?.awaiting_reading && !primary, routing: cap?.routing, learning: cap?.learning,
+      fingerprint: cap?.quota_fingerprint || a.fingerprint || '',
+      groupId: cap?.group_id || a.groupId || '',
+      groupName: cap?.group_name || a.groupName || '',
+      hosts: cap?.hosts?.length ? cap.hosts : (a.host ? [a.host] : []),
+      sameQuotaAs: cap?.same_quota_as || cap?.routing?.same_quota_as || '',
+    }
   })
 }
 export interface PoolView {
-  id: string; name: string; plan: string; rows: AccountRow[]; override: Override; overrideUntil: string
+  id: string; name: string; mark: string; plan: string; rows: AccountRow[]; override: Override; overrideUntil: string
   /** Where a Sprint on this pool would end: the server's earliest limiting reset in the pool. */
   sprintEnd: string
   parallelRuns: number
@@ -378,21 +417,99 @@ function windowWords(rows: AccountRow[]): string {
   if (kinds.has('5h') && long) return `5-hour + ${long}`
   return long || (kinds.has('5h') ? '5-hour' : '')
 }
+function hostList(row: AccountRow): string[] {
+  const hosts = row.hosts?.length ? row.hosts : row.host ? [row.host] : []
+  return hosts.filter(Boolean)
+}
+function uniqueHosts(hosts: string[]): string[] {
+  const out: string[] = []
+  for (const host of hosts) if (host && !out.includes(host)) out.push(host)
+  return out
+}
+/** Two doors of one login: "Same account on mbp2607 and studio". */
+export function sameAccountCopy(hosts: string[]): string {
+  const list = uniqueHosts(hosts)
+  if (list.length < 2) return ''
+  if (list.length === 2) return `Same account on ${list[0]} and ${list[1]}`
+  return `Same account on ${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`
+}
+/** One gauge per quota. The door without sameQuotaAs keeps the windows; slots are not added twice. */
+function mergeQuotas(rows: AccountRow[]): AccountRow[] {
+  const out: AccountRow[] = []
+  const byFp = new Map<string, AccountRow>()
+  for (const row of rows) {
+    if (!row.fingerprint) { out.push(row); continue }
+    const prev = byFp.get(row.fingerprint)
+    if (!prev) {
+      const copy: AccountRow = { ...row, hosts: hostList(row), routing: row.routing ? { ...row.routing } : undefined }
+      byFp.set(row.fingerprint, copy)
+      out.push(copy)
+      continue
+    }
+    const hosts = uniqueHosts([...(prev.hosts ?? []), ...hostList(row)])
+    const preferRow = !row.sameQuotaAs && !!prev.sameQuotaAs
+    const base = preferRow ? row : prev
+    const other = preferRow ? prev : row
+    const routing = base.routing ? { ...base.routing } : other.routing ? { ...other.routing } : undefined
+    if (routing) {
+      routing.available_slots = Math.max(prev.routing?.available_slots ?? 0, row.routing?.available_slots ?? 0)
+      delete routing.same_quota_as
+    }
+    Object.assign(prev, base, { hosts, routing, sameQuotaAs: '' })
+  }
+  return out
+}
+function poolView(id: string, name: string, mark: string, list: AccountRow[], now: number): PoolView {
+  // Only the server knows which accounts fit. Missing advice is no claim
+  // about routing; retain the incoming order during a rolling upgrade.
+  const rank = (r: AccountRow) => r.routing?.rank || Infinity
+  const sorted = [...list].sort((x, y) => rank(x) - rank(y))
+  const plans = [...new Set(sorted.map(r => r.plan).filter(Boolean))]
+  const plan = [plans.length === 1 ? plans[0] : '', windowWords(sorted)].filter(Boolean).join(' · ')
+  const schedule = sorted.find(r => r.schedule)?.schedule ?? null
+  const limits = sorted.map(r => r.limitingReset).filter(Boolean).sort((x, y) => Date.parse(x) - Date.parse(y))
+  return { id, name, mark, plan, rows: sorted, override: activeOverride(schedule, now), overrideUntil: schedule?.override_until ?? '', sprintEnd: limits[0] ?? '', parallelRuns: sorted.reduce((n, r) => n + (r.routing?.available_slots ?? 0), 0) }
+}
 export function buildPools(rows: AccountRow[], now: number): PoolView[] {
-  const groups = new Map<string, AccountRow[]>()
-  for (const row of rows) groups.set(row.harness, [...(groups.get(row.harness) ?? []), row])
+  const quotas = new Map(mergeQuotas(rows).filter(r => r.fingerprint).map(r => [r.fingerprint, r]))
+  const harness = new Map<string, AccountRow[]>()
+  const groups = new Map<string, { mark: string; name: string; rows: AccountRow[] }>()
+  for (const row of rows) {
+    if (row.groupId) {
+      const id = `group:${row.groupId}`
+      const cur = groups.get(id) ?? { mark: row.harness, name: `${row.groupName || 'Group'} · ${HARNESS_NAME[row.harness] ?? row.harness}`, rows: [] }
+      cur.rows.push(row)
+      groups.set(id, cur)
+    } else {
+      harness.set(row.harness, [...(harness.get(row.harness) ?? []), row])
+    }
+  }
   const order = (h: string) => { const i = POOL_ORDER.indexOf(h); return i < 0 ? 99 : i }
-  return [...groups.entries()].sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b)).map(([id, list]) => {
-    // Only the server knows which accounts fit. Missing advice is no claim
-    // about routing; retain the incoming order during a rolling upgrade.
-    const rank = (r: AccountRow) => r.routing?.rank || Infinity
-    const sorted = [...list].sort((x, y) => rank(x) - rank(y))
-    const plans = [...new Set(sorted.map(r => r.plan).filter(Boolean))]
-    const plan = [plans.length === 1 ? plans[0] : '', windowWords(sorted)].filter(Boolean).join(' · ')
-    const schedule = sorted.find(r => r.schedule)?.schedule ?? null
-    const limits = sorted.map(r => r.limitingReset).filter(Boolean).sort((x, y) => Date.parse(x) - Date.parse(y))
-    return { id, name: HARNESS_NAME[id] ?? id, plan, rows: sorted, override: activeOverride(schedule, now), overrideUntil: schedule?.override_until ?? '', sprintEnd: limits[0] ?? '', parallelRuns: sorted.reduce((n, r) => n + (r.routing?.available_slots ?? 0), 0) }
-  })
+  const marks = [...new Set([...harness.keys(), ...[...groups.values()].map(g => g.mark)])].sort((a, b) => order(a) - order(b) || a.localeCompare(b))
+  const pools: PoolView[] = []
+  for (const mark of marks) {
+    const list = harness.get(mark)
+    if (list?.length) pools.push(poolView(mark, HARNESS_NAME[mark] ?? mark, mark, list, now))
+    const owned = [...groups.entries()].filter(([, g]) => g.mark === mark).sort((a, b) => a[1].name.localeCompare(b[1].name))
+    for (const [id, g] of owned) pools.push(poolView(id, g.name, mark, g.rows, now))
+  }
+  const gauged = new Map<string, AccountRow>()
+  for (const pool of pools) {
+    pool.rows = mergeQuotas(pool.rows).map(row => {
+      const quota = quotas.get(row.fingerprint)
+      if (!quota) return row
+      // Membership and schedule belong to this door. Only observations and
+      // host chips merge; another pool keeps a named reference to the gauge.
+      const alias = gauged.has(row.fingerprint)
+      if (!alias) gauged.set(row.fingerprint, row)
+      return { ...row, primary: alias ? null : quota.primary, five: alias ? null : quota.five,
+        hosts: quota.hosts, plan: quota.plan, sameQuotaAs: alias ? gauged.get(row.fingerprint)!.id : '',
+        sharedQuotaName: alias ? gauged.get(row.fingerprint)!.name : undefined,
+        routing: row.routing ? { ...row.routing, available_slots: alias ? 0 : quota.routing?.available_slots ?? 0 } : undefined }
+    })
+    pool.parallelRuns = pool.rows.reduce((n, r) => n + (r.routing?.available_slots ?? 0), 0)
+  }
+  return pools
 }
 
 // ---------- The plan per account ----------
@@ -453,7 +570,8 @@ export function todayCell(row: AccountRow, plan: AccountPlan | null): TodayCell 
   if (row.state === 'signin') return { kind: 'signin', command: LOGIN_COMMAND[row.harness] ?? '' }
   if (row.state === 'paused') return { kind: 'quiet', text: 'paused' }
   if (row.state === 'unavailable') return { kind: 'quiet', text: 'reading unavailable' }
-  if (!plan) return { kind: 'quiet', text: 'no reading yet' }
+  if (row.sharedQuotaName) return { kind: 'quiet', text: '' }
+  if (!plan) return { kind: 'quiet', text: row.learning ? consumptionLine(row.learning) : 'no reading yet' }
   if (plan.override === 'hold') return { kind: 'quiet', text: 'on hold' }
   if (plan.override === 'sprint' || plan.override === 'away') return { kind: 'sprint', text: `all ${pct(plan.left)}` }
   if (plan.dayOff && !plan.expiring) return { kind: 'quiet', text: 'day off' }
@@ -465,16 +583,32 @@ export function todayCell(row: AccountRow, plan: AccountPlan | null): TodayCell 
 /** Who measured it, and how old it is. Empty when there is no reading yet. */
 export function sourceLine(row: AccountRow, now: number): string {
   const w = row.primary
+  if (row.sharedQuotaName) return `Shares quota with ${row.sharedQuotaName}`
   if (row.state === 'signin') return w ? `Sign-in expired · last read ${ago(w.reading.read_at, now)}` : 'Sign-in expired'
-  // The pool sentence already says there is no reading, and there is no source yet.
-  if (!w) return ''
+  if (!w) return row.learning && ['grok', 'cursor', 'pi'].includes(row.harness) ? (row.learning.limit_hits ? `${row.learning.limit_hits} limit hits · learning the window` : 'No limit seen yet') : ''
   const r = w.reading
   const base = r.source === 'harness' ? `${HARNESS_NAME[row.harness] ?? row.harness} reported · ${ago(r.read_at, now)}`
-    : r.source === 'agentd' ? `Read on ${row.host} · ${ago(r.read_at, now)}` : 'Estimated'
+    : r.source === 'agentd' ? `Read on ${row.host} · ${ago(r.read_at, now)}` : estimateLabel(r)
   if (row.state === 'offline') return `${base} · offline`
   if (w.freshness === 'stale' || w.freshness === 'expired') return `${base} · stale`
-  return base
+  return `${base}${(w.pacing.drift_percent ?? 0) >= 3 ? ` · ~${pct(w.pacing.drift_percent!)} drift` : ''}`
 }
+
+/** Numeric evidence only; uncertainty below three points stays in the detail. */
+export function estimateLabel(r: CapacityReading): string {
+  const parts = ['Estimated']
+  if ((r.plus_minus ?? 0) >= 3) parts.push(`±${Math.round(r.plus_minus!)}%`)
+  if (r.evidence) {
+    const noun = r.evidence.kind === 'limit_hits' ? 'limit hit' : r.evidence.kind === 'drift' ? 'observation' : 'run'
+    parts.push(`${r.evidence.samples} ${noun}${r.evidence.samples === 1 ? '' : 's'}`)
+  }
+  return parts.join(' · ')
+}
+export function consumptionLine(l: CapacityLearning): string {
+  const tokens = new Intl.NumberFormat('en-GB', { notation: 'compact', maximumSignificantDigits: 3 }).format(l.tokens).replace('K', 'k')
+  return [l.runs ? `${l.runs} ${l.runs === 1 ? 'run' : 'runs'}` : '', l.cost_micros > 0 ? `$${(l.cost_micros / 1e6).toFixed(2)}` : l.tokens > 0 ? `${tokens} tokens` : ''].filter(Boolean).join(' · ') || 'Learning'
+}
+export const usingNow = (row: AccountRow, now: number) => !!row.learning?.presence_until && Date.parse(row.learning.presence_until) > now
 
 // ---------- The plan sentence per pool ----------
 /** A run of sentence text: `strong` is the lead, `num` a figure. */
@@ -519,6 +653,7 @@ function reserveClause(live: { r: AccountRow; p: AccountPlan }[], at: (iso: stri
   return [t(' Keeps '), ...joinList(kept.map(x => [n(`~${pct(x.p.reserve)}`), t(` of ${x.r.name}`)])), t(' for you.')]
 }
 export function poolSentence(pool: PoolView, now: number, timezone?: string): Sentence {
+  if (pool.rows.length && pool.rows.every(r => r.sharedQuotaName)) return { segs: [t(`Shares quota with ${[...new Set(pool.rows.map(r => r.sharedQuotaName))].join(', ')}.`)] }
   const advised = pool.rows.length > 0 && pool.rows.every(r => r.routing)
   const ready = pool.rows.filter(r => (r.routing?.rank ?? 0) > 0)
   const paused = pool.rows.filter(r => r.routing?.rank === 0 && r.routing.wait)
@@ -529,6 +664,8 @@ export function poolSentence(pool: PoolView, now: number, timezone?: string): Se
   if (advised && ready.length) for (const row of paused) {
     if (row.state === 'live') sentence.segs.push(t(` ${row.name}: ${capacityWaitText(row.routing!.wait!, 'Agents', now)}.`))
   }
+  const yours = pool.rows.find(row => usingNow(row, now))
+  if (yours && ready.length && ready[0].id !== yours.id) sentence.segs.push(t(` You're on ${yours.name}, so agents take ${ready[0].name} first.`))
   if (pool.parallelRuns > 1) sentence.segs.push(t(` ${pool.parallelRuns} agents can run in parallel on ${pool.name} right now.`))
   return sentence
 }
@@ -546,6 +683,7 @@ function planSentence(pool: PoolView, now: number, timezone?: string): Sentence 
     if (first.state === 'unavailable') return { segs: [b(`Reading unavailable on ${first.host}.`), t(' Agents skip it until the next check succeeds.')] }
     if (first.state === 'paused') return { segs: [b('Paused.'), t(' Agents leave it alone until you resume it in Settings.')] }
     if (first.awaitingReading) return { segs: [b('No reading yet'), t(' — starts with the next run.')] }
+    if (first.learning && ['grok', 'cursor', 'pi'].includes(first.harness)) return { segs: [b(`${pool.name} doesn't show its limit.`), t(' One run at a time by day.')] }
     return { segs: [b('No reading yet'), t(' — starts with the first run.')] }
   }
   if (pool.override === 'hold') {

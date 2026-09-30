@@ -143,14 +143,19 @@ func scheduleWithDraft(entries []scheduleEntry, a Account, previous, next capaci
 }
 
 // resolveSchedule is the schedule an account follows: the most specific entry
-// (account, pool, then the person's own) as release 11 chose it, with the most
-// specific explicit Keep for you (Auto when none is set). Away on the person's
+// (account, group, pool, then the person's own), with the most specific
+// explicit Keep for you (Auto when none is set). Away on the person's
 // schedule reaches every pool that has no override of its own in force; a
 // pool's Hold or Sprint wins over it.
 func resolveSchedule(entries []scheduleEntry, a Account, fallback capacity.Schedule, now time.Time) capacity.Schedule {
 	chain := []capacity.Schedule{}
 	var user *capacity.Schedule
-	for _, want := range [...]scheduleEntry{{Scope: "account", Key: a.ID}, {Scope: "pool", Key: a.Harness}, {Scope: "user"}} {
+	wants := []scheduleEntry{{Scope: "account", Key: a.ID}}
+	if a.GroupID != "" {
+		wants = append(wants, scheduleEntry{Scope: "group", Key: a.GroupID})
+	}
+	wants = append(wants, scheduleEntry{Scope: "pool", Key: a.Harness}, scheduleEntry{Scope: "user"})
+	for _, want := range wants {
 		for _, e := range entries {
 			if e.Scope == want.Scope && e.Key == want.Key {
 				chain = append(chain, e.Schedule)

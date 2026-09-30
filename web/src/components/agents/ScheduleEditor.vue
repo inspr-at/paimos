@@ -130,7 +130,7 @@ function radioKeys(event: KeyboardEvent, options: string[], current: string, set
 }
 
 // ---------- Preview: the server paces the draft ----------
-const currentSentences = computed(() => props.pools.map(p => ({ id: p.id, sentence: poolSentence(p, props.now) })))
+const currentSentences = computed(() => props.pools.map(p => ({ id: p.id, mark: p.mark || p.id, sentence: poolSentence(p, props.now) })))
 const previewPools = ref<PoolView[] | null>(null)
 const previewFailed = ref(false)
 let previewTimer: ReturnType<typeof setTimeout> | undefined
@@ -148,10 +148,10 @@ watch(draft, () => {
     } catch { if (turn === previewTurn) previewFailed.value = true }
   }, 220)
 }, { deep: true })
-const preview = computed(() => currentSentences.value.map(({ id, sentence }) => {
+const preview = computed(() => currentSentences.value.map(({ id, mark, sentence }) => {
   const pool = previewPools.value?.find(p => p.id === id)
   const next: Sentence = pool && dirty.value && !problem.value ? poolSentence(pool, props.now) : sentence
-  return { id, sentence: next, changed: plainText(next) !== plainText(sentence) }
+  return { id, mark, sentence: next, changed: plainText(next) !== plainText(sentence) }
 }))
 
 // ---------- Save, close, focus ----------
@@ -325,7 +325,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
         <p class="eyebrow">Today with these settings</p>
         <ul>
           <li v-for="item in preview" :key="item.id" :class="{ changed: item.changed }">
-            <HarnessMark :harness="item.id" :size="13" />
+            <HarnessMark :harness="item.mark" :size="13" />
             <span><PlanSentence :sentence="item.sentence" /><span v-if="item.changed" class="sr-only"> (changed)</span></span>
           </li>
           <li v-if="!preview.length" class="none">No accounts to plan yet.</li>

@@ -94,6 +94,8 @@ export function agentData(world: AgentWorld) {
 }
 export type AgentData = ReturnType<typeof agentData>
 
+export interface MockAccountGroup { id: string; harness: string; name: string; exclusive: boolean; account_ids: string[]; project_ids: string[] }
+export interface MockTicketPin { ticket_id: string; harness: string; account_id?: string; group_id?: string }
 export interface AgentMockOptions {
   sessionsMissing?: boolean
   messagesMissing?: boolean
@@ -104,11 +106,15 @@ export interface AgentMockOptions {
   failReadMarks?: number
   capacity?: CapacityWorld
   capacityForbidden?: boolean
+  groups?: MockAccountGroup[]
+  pins?: MockTicketPin[]
 }
 // Routes only the agents surfaces; everything else falls through to earlier routes
 // or the real server.
 export async function mockAgents(page: Page, data: AgentData, options: AgentMockOptions = {}) {
   const calls: { path: string; method: string; body: unknown; query?: URLSearchParams }[] = []
+  const groups: MockAccountGroup[] = options.groups ? options.groups.map(group => ({ ...group, account_ids: [...group.account_ids], project_ids: [...group.project_ids] })) : []
+  const pins: MockTicketPin[] = options.pins ? options.pins.map(pin => ({ ...pin })) : []
   const readMarkers = new Map<string, { last_read_message_id: string; last_read_event_id: number; read_at: string }>()
   if (options.readMark) {
     readMarkers.set(options.readMark.sessionId, { last_read_message_id: options.readMark.id, last_read_event_id: options.readMark.event, read_at: '2026-09-29T05:00:00.000Z' })
@@ -242,6 +248,55 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       if (answer) return answer.status === 204 ? route.fulfill({ status: 204, body: '' }) : route.fulfill({ status: answer.status ?? 200, json: answer.json })
     }
     if (path === '/api/agent-accounts') return options.accountsForbidden ? route.fulfill({ status: 403, json: { error: 'admin session required' } }) : route.fulfill({ json: data.accounts })
+    if (path === '/api/agent-accounts/groups' && method === 'GET') return route.fulfill({ json: groups })
+    if (path === '/api/agent-accounts/groups' && method === 'POST') {
+      const input = body as { harness?: string; name?: string; exclusive?: boolean; account_ids?: string[]; project_ids?: string[] }
+      const group: MockAccountGroup = {
+        id: `g1000000-0000-4000-8000-${String(groups.length + 1).padStart(12, '0')}`,
+        harness: input.harness ?? '', name: input.name ?? '', exclusive: !!input.exclusive,
+        account_ids: input.account_ids ?? [], project_ids: input.project_ids ?? [],
+      }
+      groups.push(group)
+      for (const accountId of group.account_ids) {
+        const found = data.accounts.find(account => account.id === accountId)
+        if (found) Object.assign(found, { group_id: group.id, group_name: group.name })
+      }
+      return route.fulfill({ status: 201, json: group })
+    }
+    const groupPath = /^\/api\/agent-accounts\/groups\/([^/]+)$/.exec(path)
+    if (groupPath && method === 'DELETE') {
+      const index = groups.findIndex(group => group.id === groupPath[1])
+      if (index >= 0) groups.splice(index, 1)
+      for (const account of data.accounts) {
+        const grouped = account as typeof account & { group_id?: string; group_name?: string }
+        if (grouped.group_id === groupPath[1]) { delete grouped.group_id; delete grouped.group_name }
+      }
+      return route.fulfill({ status: 204, body: '' })
+    }
+    if (path === '/api/agent-accounts/pins' && method === 'GET') {
+      const ticket = q.get('ticket_id')
+      return route.fulfill({ json: pins.filter(pin => !ticket || pin.ticket_id === ticket) })
+    }
+    if (path === '/api/agent-accounts/pins' && method === 'PUT') {
+      const input = body as MockTicketPin
+      const index = pins.findIndex(pin => pin.ticket_id === input.ticket_id && pin.harness === input.harness)
+      if (index >= 0) pins[index] = input
+      else pins.push(input)
+      return route.fulfill({ status: 204, body: '' })
+    }
+    if (path === '/api/agent-accounts/pins' && method === 'DELETE') {
+      const index = pins.findIndex(pin => pin.ticket_id === q.get('ticket_id') && pin.harness === q.get('harness'))
+      if (index >= 0) pins.splice(index, 1)
+      return route.fulfill({ status: 204, body: '' })
+    }
+    const target = /^\/api\/agent-accounts\/runs\/([^/]+)\/target$/.exec(path)
+    if (target && method === 'POST') {
+      const found = data.runs.find(run => run.id === target[1]) as (typeof data.runs)[number] & { requested_account_id?: string; requested_group_id?: string }
+      const input = body as { account_id?: string; group_id?: string }
+      if (found && input.account_id) found.requested_account_id = input.account_id
+      if (found && input.group_id) found.requested_group_id = input.group_id
+      return route.fulfill({ status: 204, body: '' })
+    }
     const account = /^\/api\/agent-accounts\/([^/]+)$/.exec(path)
     if (account && method === 'PATCH') {
       const found = data.accounts.find(a => a.id === account[1])!

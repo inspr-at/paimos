@@ -37,7 +37,7 @@ func limitWorld(t *testing.T, slug string, parallel int) limitFixture {
 		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 	}
 	s.Reserve = capacity.ReserveOff
-	callStatus(t, mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", f.account.ID, &s, false}), 204, nil)
+	callStatus(t, mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: f.account.ID, Schedule: &s}), 204, nil)
 	return f
 }
 

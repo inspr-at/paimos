@@ -72,7 +72,7 @@ func TestCapacityIngestRouteResetAndRLS(t *testing.T) {
 	}
 	schedule := capacity.DefaultSchedule()
 	schedule.Override = "sprint"
-	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, &schedule, false}), 204, nil)
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, &schedule, false, ""}), 204, nil)
 	run := insertRun(t, admin, runner, profile)
 	route := mustRoute(t, mod, runner, token, run, "daemon-a", []Account{account}, map[string]int64{"requests": 1})
 	if len(route.Reservations) != 1 || route.Reservations[0].Unit != "percent" {
@@ -184,7 +184,7 @@ func TestCapacityStaleManualOverrideAndSchedules(t *testing.T) {
 	for i := range always.Week {
 		always.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 	}
-	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &always, false}), 204, nil)
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &always, false, ""}), 204, nil)
 	health := func() HarnessHealth {
 		t.Helper()
 		var out map[string]HarnessHealth
@@ -205,7 +205,7 @@ func TestCapacityStaleManualOverrideAndSchedules(t *testing.T) {
 	s.Week = capacity.Preset(3)
 	save := func(p tenant.Principal, scope, pool, id string, s *capacity.Schedule, status int) {
 		t.Helper()
-		callStatus(t, mod, &p, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{scope, pool, id, s, false}), status, nil)
+		callStatus(t, mod, &p, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{scope, pool, id, s, false, ""}), status, nil)
 	}
 	save(admin, "user", "", "", &s, 204)
 	s.Week = capacity.Preset(4)
@@ -402,7 +402,7 @@ func TestCapacityEnforcesSchedulesSnapshotsAndSingleRefresh(t *testing.T) {
 		if scope == "pool" {
 			pool, id = "codex", ""
 		}
-		callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{scope, pool, id, &schedule, false}), 204, nil)
+		callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{scope, pool, id, &schedule, false, ""}), 204, nil)
 	}
 	route := func(status int) string {
 		t.Helper()
@@ -432,7 +432,7 @@ func TestCapacityEnforcesSchedulesSnapshotsAndSingleRefresh(t *testing.T) {
 	route(409)
 	// Pool overrides survive removal of the account override and use the same owner.
 	save("pool", "sprint")
-	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, nil, false}), 204, nil)
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, nil, false, ""}), 204, nil)
 	run = route(200)
 	release(run)
 	save("pool", "hold")
@@ -533,10 +533,10 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	check("Pacific/Auckland", "")
 	user := capacity.DefaultSchedule("Europe/Vienna")
 	user.Override = "hold"
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"user", "", "", &user, false}), 204, nil)
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"user", "", "", &user, false, ""}), 204, nil)
 	check("Europe/Vienna", "hold")
 	pool := capacity.DefaultSchedule("America/New_York")
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", &pool, false}), 204, nil)
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", &pool, false, ""}), 204, nil)
 	check("America/New_York", "")
 	if n := scalar(t, person, `SELECT count(*) FROM account_capacity_schedules WHERE scope='account'`); n != 0 {
 		t.Fatal("test must not establish an account override")
@@ -553,8 +553,8 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	}
 	check("UTC", "")
 	// An explicitly saved owner remains authoritative even with multiple creators.
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, &user, false}), 204, nil)
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, nil, false}), 204, nil)
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, &user, false, ""}), 204, nil)
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, nil, false, ""}), 204, nil)
 	check("America/New_York", "")
 }
 
@@ -573,7 +573,7 @@ func TestExpiredCapacityGetsOneProvisionalRefresh(t *testing.T) {
 	for i := range s.Week {
 		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 	}
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false, ""}), 204, nil)
 	now := time.Now().UTC()
 	reading := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 100, ReadAt: now.Add(-6 * time.Hour), ResetsAt: now.Add(-2 * time.Hour), Source: "harness"}
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{reading}}), 204, nil)
@@ -608,10 +608,10 @@ func TestCapacityPreviewPacesDraftWithoutSaving(t *testing.T) {
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{r}}), 204, nil)
 	saved := capacity.DefaultSchedule("Europe/Vienna")
 	saved.Week = capacity.Preset(3)
-	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"user", "", "", &saved, false}), 204, nil)
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"user", "", "", &saved, false, ""}), 204, nil)
 	hold := saved
 	hold.Override = "hold"
-	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", &hold, false}), 204, nil)
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", &hold, false, ""}), 204, nil)
 
 	draft := capacity.DefaultSchedule("Europe/Vienna")
 	for i := range draft.Week {
@@ -626,7 +626,7 @@ func TestCapacityPreviewPacesDraftWithoutSaving(t *testing.T) {
 	if p := out[0].Windows[0].Pacing; p.SuggestedTodayPercent != 0 {
 		t.Fatal("hold ignored in preview", p)
 	}
-	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", nil, false}), 204, nil)
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", nil, false, ""}), 204, nil)
 	callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/capacity/preview", encoded(t, map[string]any{"schedule": draft}), 200, &out)
 	if p := out[0].Windows[0].Pacing; p.UsableHours <= 0 || p.BudgetPercent <= 0 {
 		t.Fatal("preview did not pace a round-the-clock draft", p)

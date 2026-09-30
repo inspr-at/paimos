@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { can } from '../../lib/authz'
 import {
-  accountPlan, daysLabel, daysSummary, gauge as gaugeOf, gaugeModeFor, nightLabel, pct, poolSentence, reserveLabel, reserveLevel, setGlobalMode, sourceLine, timeLabel, todayCell, toggleAccountMode, when, whenFull, workStart,
+  accountPlan, daysLabel, daysSummary, gauge as gaugeOf, gaugeModeFor, nightLabel, pct, poolSentence, reserveLabel, reserveLevel, sameAccountCopy, usingNow, clone, putSchedule, setGlobalMode, sourceLine, timeLabel, todayCell, toggleAccountMode, when, whenFull, workStart,
   type AccountRow, type CapacitySchedule, type CapacityWindow, type GaugeMode, type Override, type PoolView,
 } from '../../lib/capacity'
 import { toast } from '../../lib/toast'
@@ -12,6 +12,7 @@ import { useCapacity } from '../../stores/capacity'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import CapacityGauge from './CapacityGauge.vue'
+import CapacityLearning from './CapacityLearning.vue'
 import CapacityLegend from './CapacityLegend.vue'
 import HarnessMark from './HarnessMark.vue'
 import KeepEditor, { type KeepDraft } from './KeepEditor.vue'
@@ -140,7 +141,18 @@ async function saveEditor(next: CapacitySchedule) {
 }
 
 // ---------- Keep for you ----------
-const keepLabel = computed(() => reserveLabel(schedule.value))
+const keepLabel = computed(() => {
+  const auto = !schedule.value.reserve || schedule.value.reserve === 'auto'
+  const levels = capacity.rows.flatMap(row => row.learning?.windows.map(w => w.auto_reserve_percent).filter((n): n is number => !!n) ?? [])
+  return auto && levels.length ? 'Auto · learned' : reserveLabel(schedule.value)
+})
+async function useHours(row: AccountRow) {
+  const hours = row.learning?.suggested_hours
+  if (!mayManage.value || !hours || !row.schedule) return
+  const next = clone(row.schedule)
+  next.week = next.week.map(d => d.on ? { ...d, start: hours.start, end: hours.end } : d)
+  await run(async () => { await putSchedule({ scope: 'account', account_id: row.id, schedule: next }); await capacity.load() }, `Saved ${row.name}'s work hours.`)
+}
 async function saveKeep(draft: KeepDraft) {
   saving.value = true
   try {
@@ -329,7 +341,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
     <div v-for="pool in pools" :key="pool.id" class="pool" :data-pool="pool.id">
       <div class="pool-info">
         <div class="pool-head">
-          <span class="vendor"><HarnessMark :harness="pool.id" :size="16" /></span>
+          <span class="vendor"><HarnessMark :harness="pool.mark || pool.id" :size="16" /></span>
           <span class="pool-name">{{ pool.name }}</span>
           <span v-if="pool.plan" class="pool-plan" :title="pool.plan">{{ pool.plan }}</span>
           <span v-if="ownOverride(pool)" class="override" :class="{ hold: pool.override === 'hold' }">
@@ -349,12 +361,14 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
             <span class="dot" :class="row.state" :data-tip="DOT_TIP[row.state](row)"><span class="sr-only">{{ DOT_TIP[row.state](row) }}</span></span>
             <span class="nm" :title="row.name">{{ row.name }}</span>
             <span v-if="piModelOf(row.id)" class="pi-model-caption" :title="piModelOf(row.id)">{{ piModelOf(row.id) }}</span>
-            <span v-if="row.host" class="chip host" :title="row.host">{{ row.host }}</span>
+            <span v-if="usingNow(row, now)" class="presence" title="You're using this account" aria-label="You're using this account"><AppIcon name="user" :size="13" /></span>
+            <span v-for="host in (row.hosts.length ? row.hosts : row.host ? [row.host] : [])" :key="host" class="chip host">{{ host }}</span>
+            <p v-if="sameAccountCopy(row.hosts)" class="same-quota">{{ sameAccountCopy(row.hosts) }}</p>
           </div>
           <div class="gauge-cell">
-            <CapacityGauge
+            <CapacityGauge v-if="!row.sharedQuotaName && (row.primary || !row.learning)"
               :gauge="row.primary ? gaugeOf(row, planOf(row)) : null" :left="row.primary?.remaining_percent" :value="figure(row)" :used="modeOf(row) === 'used'"
-              :label="gaugeLabel(row)" :ahead="!!planOf(row)?.ahead" :dim="row.state !== 'live' && row.state !== 'unread'"
+              :estimated="row.primary?.reading.source === 'estimate'" :label="gaugeLabel(row)" :ahead="!!planOf(row)?.ahead" :dim="row.state !== 'live' && row.state !== 'unread'"
             />
             <div v-if="row.five" class="win5" :data-tip="fiveLine(row)">5-hour window <b>{{ Math.round(modeOf(row) === 'used' ? 100 - row.five.remaining_percent : row.five.remaining_percent) }}% {{ modeOf(row) }}</b><template v-if="fiveKept(row.five)"> · keeps <b>{{ fiveKept(row.five) }}</b> for you</template> · resets {{ when(row.five.reading.resets_at, now) }}</div>
           </div>
@@ -376,7 +390,8 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
             <span v-else class="today quiet" :data-tip="cell.text">{{ cell.text }}</span>
           </template>
           <span class="resets" :data-tip="row.primary ? whenFull(row.primary.reading.resets_at) : undefined">{{ row.primary ? `resets ${when(row.primary.reading.resets_at, now)}` : '' }}</span>
-          <span class="source" :title="sourceLine(row, now)">{{ sourceLine(row, now) }}</span>
+          <span v-if="!row.sharedQuotaName" class="source" :title="sourceLine(row, now)">{{ sourceLine(row, now) }}</span>
+          <CapacityLearning class="row-learning" :learning="row.learning" :host="row.host" :now="now" :may-manage="mayManage" :saving="busy" @hours="useHours(row)" @away="openEditor('keep', $event)" />
         </li>
       </ul>
     </div>
@@ -513,12 +528,16 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .plan :deep(.n) { color: var(--teal-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
 .plan.ahead :deep(.n) { color: var(--gold-ink); }
 
+.presence { display: inline-grid; place-items: center; color: var(--ink-2); flex: none; }
+.row-learning { grid-column: 1 / -1; }
 .accts { display: grid; gap: 2px; align-self: start; min-width: 0; margin: -6px 0 0; padding: 0; list-style: none; }
 .acct { display: grid; grid-template-columns: minmax(0, 180px) minmax(140px, 1fr) 72px minmax(0, 120px) 150px minmax(0, 180px); align-items: center; gap: 16px; min-height: 44px; min-width: 0; padding: 6px 10px; border-radius: var(--radius-row); }
 @media (hover: hover) { .acct:hover { background: var(--row-hover); } }
-.acct-name { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.acct-name { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 9px; min-width: 0; }
 .acct-name .nm { min-width: 0; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13.5px; font-weight: 600; }
 .host { display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; line-height: 22px; text-overflow: ellipsis; }
+
+.same-quota { flex-basis: 100%; margin: 0; font-size: 12px; line-height: 1.35; color: var(--ink-3); text-wrap: pretty; }
 .dot { position: relative; flex: none; width: 8px; height: 8px; border-radius: 50%; }
 .dot.live, .dot.unread { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
 .dot.offline, .dot.paused, .dot.unavailable { background: transparent; box-shadow: inset 0 0 0 1.6px var(--ink-3); }
@@ -615,7 +634,7 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .pool { gap: 8px; padding: 14px 14px 12px; }
   .plan { padding-left: 0; }
   .pool-head .more { width: 44px; height: 44px; margin-right: -8px; }
-  .acct { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name left" "gauge gauge" "today resets" "source source"; gap: 4px 10px; padding: 10px 0; border-radius: 0; }
+  .acct { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name left" "gauge gauge" "today resets" "source source" "learned learned"; gap: 4px 10px; padding: 10px 0; border-radius: 0; }
   .acct + .acct { box-shadow: 0 -1px 0 var(--line); }
   .acct:hover { background: transparent; }
   .acct-name { grid-area: name; }
@@ -623,6 +642,7 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .left { grid-area: left; }
   .today { grid-area: today; }
   .resets { grid-area: resets; text-align: right; color: var(--ink-3); font-size: 12.5px; }
+  .row-learning { grid-area: learned; }
   .source { grid-area: source; display: block; text-align: left; font-size: 11.5px; }
   .source:empty { display: none; }
   .today .btn { min-height: 36px; }

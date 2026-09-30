@@ -4,11 +4,14 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { accountName, accountPlan } from '../../lib/accountCascade'
 import { limitSummary, nameClashes, readingSupport, setByYou } from '../../lib/accountLimits'
-import type { AgentAccount } from '../../lib/agents'
+import { createGroup, deleteGroup, type AgentAccount } from '../../lib/agents'
 import { can } from '../../lib/authz'
-import { HARNESS_NAME, POOL_ORDER, type AccountState } from '../../lib/capacity'
+import { HARNESS_NAME, POOL_ORDER, accountUseCommand, type AccountState } from '../../lib/capacity'
 import { useAgents, type Availability } from '../../stores/agents'
 import { useCapacity } from '../../stores/capacity'
+import { getProjects } from '../../lib/api'
+import { confirmAction } from '../../lib/confirm'
+import CapacityLearning from './CapacityLearning.vue'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import AccountDetail from './AccountDetail.vue'
@@ -75,6 +78,71 @@ async function toggleUse(account: AgentAccount) {
 }
 async function changed() { await Promise.all([agents.refreshAccounts(), capacity.refreshCapacity()]) }
 watch(() => props.accounts.map(a => a.id).join(), () => { if (open.value && !props.accounts.some(a => a.id === open.value)) open.value = '' })
+watch(mayManage, allowed => { if (!allowed) closeSeparate() })
+
+const separate = ref<AgentAccount | null>(null)
+const separateName = ref('')
+const projectChoices = ref<{ id: string; label: string }[]>([])
+const pickedProjects = ref<string[]>([])
+const exclusive = ref(false)
+const separateBusy = ref(false)
+const separateError = ref('')
+const separateDialog = ref<HTMLDialogElement>()
+const useLine = accountUseCommand
+async function openSeparate(account: AgentAccount) {
+  separate.value = account
+  separateName.value = account.label
+  exclusive.value = false
+  pickedProjects.value = []
+  separateError.value = ''
+  projectChoices.value = []
+  separateDialog.value?.showModal()
+  try {
+    const page = await getProjects()
+    if (separate.value?.id !== account.id) return
+    projectChoices.value = page.items.map(project => ({ id: project.id, label: project.key ? `${project.key} · ${project.title}` : project.title }))
+  } catch (e) {
+    if (separate.value?.id === account.id) separateError.value = e instanceof Error ? e.message : 'Projects could not be loaded.'
+  }
+}
+function toggleProject(id: string, on: boolean) {
+  pickedProjects.value = on ? [...pickedProjects.value, id] : pickedProjects.value.filter(item => item !== id)
+  if (!pickedProjects.value.length) exclusive.value = false
+}
+function closeSeparate() {
+  if (separateBusy.value) return
+  separateDialog.value?.close()
+  separate.value = null
+}
+async function saveSeparate() {
+  const account = separate.value
+  const name = separateName.value.trim()
+  if (!account || separateBusy.value) return
+  if (!name || name.length > 80) { separateError.value = 'Name the group in 80 characters or fewer.'; return }
+  separateBusy.value = true
+  separateError.value = ''
+  try {
+    await createGroup({ harness: account.harness, name, exclusive: exclusive.value && pickedProjects.value.length > 0, account_ids: [account.id], project_ids: pickedProjects.value })
+    separateDialog.value?.close()
+    separate.value = null
+    await changed()
+  } catch (e) {
+    separateError.value = e instanceof Error ? e.message : 'The group was not saved.'
+  } finally { separateBusy.value = false }
+}
+async function backInPool(account: AgentAccount) {
+  if (!account.group_id || busy.value) return
+  const ok = await confirmAction({ title: 'Back in the pool?', body: 'Other work can use these accounts again.', confirmLabel: 'Back in the pool' })
+  if (!ok) return
+  busy.value = account.id
+  error.value = ''
+  try {
+    await deleteGroup(account.group_id)
+    await changed()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'The group was not removed.'
+  } finally { busy.value = '' }
+}
 </script>
 
 <template>
@@ -102,6 +170,9 @@ watch(() => props.accounts.map(a => a.id).join(), () => { if (open.value && !pro
                 <span class="name" :title="accountName(a)">{{ accountName(a) }}</span>
                 <button v-if="clashes.has(a.id) && mayManage" type="button" class="name-it" :aria-label="`Name it: another ${group.name} account is also called ${accountName(a)}`" :data-tip="`Another ${group.name} account is also called ${accountName(a)}`" @click="nameIt(a.id, $event)">Name it</button>
                 <span v-if="host(a)" class="chip host" :title="host(a)">{{ host(a) }}</span>
+                <span v-if="a.group_name" class="chip">{{ a.group_name }}</span>
+                <button v-if="mayManage && a.group_id" type="button" class="btn sm quiet-act" :disabled="busy === a.id" @click="backInPool(a)">Back in the pool</button>
+                <button v-else-if="mayManage" type="button" class="btn sm quiet-act" :disabled="busy === a.id" @click="openSeparate(a)">Keep separate…</button>
                 <span v-if="limitChip(a)" class="chip mine">{{ limitChip(a) }}</span>
                 <span class="meta">
                   <template v-if="STATE_TEXT[stateOf(a)]"><span class="state">{{ STATE_TEXT[stateOf(a)] }}</span><span class="sep"> · </span></template>
@@ -115,6 +186,8 @@ watch(() => props.accounts.map(a => a.id).join(), () => { if (open.value && !pro
               ><span class="track" aria-hidden="true"><span class="thumb" /></span></button>
               <button type="button" class="icon-btn flat more" :aria-expanded="open === a.id" :aria-controls="`account-detail-${a.id}`" :aria-label="`Details for ${accountName(a)}`" @click="toggleOpen(a.id)"><AppIcon name="chevron" :size="16" /></button>
             </div>
+            <p v-if="useLine(a)" class="use-line">{{ useLine(a) }}</p>
+            <CapacityLearning :learning="rowOf.get(a.id)?.learning" :host="a.host_label" :now="now" />
             <AccountDetail
               v-if="open === a.id" :id="`account-detail-${a.id}`" :account="a" :row="rowOf.get(a.id)" :cap="capacity.byAccount.get(a.id)" :now="now"
               :timezone="capacity.timezone" :may-manage="mayManage" :rename="renameAt === a.id ? renameActivation : 0" :rename-trigger="renameTrigger" @changed="changed"
@@ -123,6 +196,26 @@ watch(() => props.accounts.map(a => a.id).join(), () => { if (open.value && !pro
         </ul>
       </section>
     </template>
+    <dialog ref="separateDialog" class="separate" aria-labelledby="separate-title" @close="separate = null">
+      <form @submit.prevent="saveSeparate">
+        <h3 id="separate-title">Keep separate</h3>
+        <label class="sep-label" for="separate-name">Name</label>
+        <input id="separate-name" v-model="separateName" class="sep-input" maxlength="80" autocomplete="off" required>
+        <p id="separate-projects" class="sep-label">Only for these projects</p>
+        <ul class="projects" aria-labelledby="separate-projects">
+          <li v-for="project in projectChoices" :key="project.id">
+            <label><input type="checkbox" :checked="pickedProjects.includes(project.id)" @change="toggleProject(project.id, ($event.target as HTMLInputElement).checked)"> {{ project.label }}</label>
+          </li>
+          <li v-if="!projectChoices.length" class="muted">No projects yet.</li>
+        </ul>
+        <label class="excl"><input v-model="exclusive" type="checkbox" :disabled="!pickedProjects.length"> Other work waits rather than using this group.</label>
+        <p v-if="separateError" class="note error" role="alert">{{ separateError }}</p>
+        <div class="sep-foot">
+          <button type="button" class="btn" :disabled="separateBusy" @click="closeSeparate">Cancel</button>
+          <button type="submit" class="btn primary" :disabled="separateBusy">{{ separateBusy ? 'Saving…' : 'Save' }}</button>
+        </div>
+      </form>
+    </dialog>
     <p v-if="error" class="note error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>
   </div>
 </template>
@@ -186,4 +279,17 @@ watch(() => props.accounts.map(a => a.id).join(), () => { if (open.value && !pro
   .name { max-width: 100%; }
   .use-head { position: static; justify-self: end; margin: 0 60px -12px 0; }
 }
+.quiet-act { height: 24px; padding: 0 8px; border-color: transparent; background: transparent; color: var(--ink-2); font-size: 12px; }
+.use-line { margin: 6px 0 0; color: var(--ink-3); font: 12px/1.4 var(--mono); overflow-wrap: anywhere; }
+dialog.separate { width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 32px); margin: auto; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-raised); color: var(--ink); }
+dialog.separate::backdrop { background: var(--scrim); }
+dialog.separate form { display: grid; gap: 10px; padding: 16px 18px 14px; }
+dialog.separate h3 { margin: 0; font-size: 16px; font-weight: 650; }
+.sep-label { margin: 0; color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.sep-input { width: 100%; min-height: 36px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
+.projects { max-height: 220px; margin: 0; padding: 0; overflow: auto; list-style: none; display: grid; gap: 6px; }
+.projects label, .excl { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.4; }
+.projects .muted { color: var(--ink-3); font-size: 13px; }
+.sep-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.sep-foot .btn { min-height: 36px; }
 </style>

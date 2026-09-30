@@ -41,6 +41,8 @@ type Account struct {
 	Label             string     `json:"label"`
 	Plan              string     `json:"plan"`
 	HostLabel         string     `json:"host_label"`
+	GroupID           string     `json:"group_id,omitempty"`
+	GroupName         string     `json:"group_name,omitempty"`
 	AllowedProfileIDs []string   `json:"allowed_model_profile_ids"`
 	MaxParallel       int        `json:"max_parallel_runs"`
 	RegisteredBy      string     `json:"registered_by_principal_id"`
@@ -59,6 +61,9 @@ type Window struct {
 	capacityReadAt      *time.Time
 	capacityAllowed     bool
 	capacityKind        string
+	capacitySource      string
+	capacityHold        int64
+	capacityPresence    bool
 	capacityBucket      string
 	capacityRetired     bool
 	capacityRefreshRun  *string

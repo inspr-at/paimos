@@ -17,12 +17,13 @@ withDefaults(defineProps<{
   label?: string
   ahead?: boolean
   dim?: boolean
+  estimated?: boolean
 }>(), { left: 0, value: 0, used: false, label: '', ahead: false, dim: false })
 </script>
 
 <template>
   <div
-    v-if="gauge" class="gauge" :class="{ frozen: gauge.frozen, used, ahead, dim }" role="meter" aria-valuemin="0" aria-valuemax="100"
+    v-if="gauge" class="gauge" :class="{ frozen: gauge.frozen, used, ahead, dim, estimated }" role="meter" aria-valuemin="0" aria-valuemax="100"
     :aria-valuenow="Math.round(value)" :aria-label="label" :data-tip="label || undefined"
   >
     <div class="track">
@@ -49,5 +50,6 @@ withDefaults(defineProps<{
 .g-tick { position: absolute; top: 0; width: 2px; height: 14px; margin-left: -1px; border-radius: 2px; background: var(--ink); box-shadow: 0 0 0 1.5px var(--surface-raised); }
 .ahead .g-tick { background: var(--gold-ink); }
 .dim .g-later, .frozen .g-later { background: color-mix(in srgb, var(--ink-3) 30%, transparent); }
+.estimated .g-later, .estimated .g-today { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--teal) 65%, transparent) 0 2px, color-mix(in srgb, var(--teal) 18%, transparent) 2px 5px); }
 .gauge.frozen { opacity: .6; }
 </style>

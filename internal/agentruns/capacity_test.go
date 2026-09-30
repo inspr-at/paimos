@@ -69,3 +69,29 @@ func TestCapacityClaimAllowsOnlyItsRecordedRefresh(t *testing.T) {
 	})
 	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, nil)
 }
+
+func TestClaimSharedQuotaWindowKeepsDoorOwnership(t *testing.T) {
+	f := setup(t)
+	run := f.run(t, f.order(t, nil))
+	ids := f.reserve(t, run)
+	sibling := uuid()
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,quota_fingerprint) VALUES($1,$2::uuid,$2::text,'codex','other-daemon',$3,'Sibling',repeat('ab',32))`, f.agent.TenantID, sibling, f.other.ID); err != nil {
+			return err
+		}
+		// The ledger may be on a different daemon, but only the run's own daemon
+		// may claim. An unrelated quota is never accepted even with the exact IDs.
+		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET account_id=$2 WHERE id=(SELECT window_id FROM account_reservations WHERE run_id=$1)`, run.ID, sibling)
+		return err
+	})
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 409, nil)
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=repeat('ab',32) WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1)`, run.ID)
+		return err
+	})
+	wrong := claimBody(ids)
+	wrong["daemon_id"] = "other-daemon"
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", wrong, 403, nil)
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, nil)
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, nil)
+}

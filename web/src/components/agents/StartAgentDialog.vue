@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { listNodes, type WorkNode } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { useSession } from '../../stores/session'
-import { getRun, runNowOnce, listAllSessions, message, type AgentRun, type HarnessSession } from '../../lib/agents'
+import { deletePin, getRun, listPins, putPin, runNowOnce, listAllSessions, message, type AgentRun, type HarnessSession } from '../../lib/agents'
 import {
   AUTHOR_FAMILIES, authorFamilyFor, chooseStep, emptyChoice, emptyTouch, familyLabel, fetchAccountCatalog, fillDefaults, presentCascade, sessionReport, workRoleFor,
   type AgentAccountCatalog, type AuthorFamily, type CascadeChoice, type CascadeStep, type CascadeTouch, type CatalogGap, type RequestedRun,
@@ -44,6 +44,8 @@ const reused = ref(false)
 const grantStale = ref(false)
 const checking = ref(false)
 const checkError = ref('')
+const remember = ref(false)
+const remembered = ref('')
 const now = ref(Date.now())
 const visible = ref(false)
 let opener: HTMLElement | null = null
@@ -121,8 +123,26 @@ function selectTicket(item: WorkNode) {
   authorFamily.value = authorFamilyFor(item)
   touch.value = emptyTouch()
   choice.value = emptyChoice()
+  remember.value = false
+  remembered.value = ''
   void loadCatalog()
 }
+let pinGeneration = 0
+watch([() => ticket.value?.id, () => choice.value.harness, catalog], async () => {
+  const id = ticket.value?.id
+  const harness = choice.value.harness
+  const turn = ++pinGeneration
+  if (!visible.value || !id || !harness) return
+  try {
+    const pins = await listPins(id)
+    if (turn !== pinGeneration || !visible.value || ticket.value?.id !== id || choice.value.harness !== harness) return
+    const pin = pins.find(item => item.harness === harness && item.account_id)
+    if (!pin?.account_id || touch.value.account || !view.value.accounts.some(account => account.value === pin.account_id)) return
+    remembered.value = pin.account_id
+    pick('account', pin.account_id)
+    remember.value = true
+  } catch { /* A missing pin leaves the checkbox clear. */ }
+})
 async function open(initial?: WorkNode) {
   if (busy.value) return
   opener = document.activeElement as HTMLElement
@@ -131,6 +151,7 @@ async function open(initial?: WorkNode) {
   authorFamily.value = authorFamilyFor(initial ?? null)
   catalog.value = null; catalogGap.value = null; catalogMessage.value = ''
   choice.value = emptyChoice(); touch.value = emptyTouch()
+  remember.value = false; remembered.value = ''
   run.value = null; requested.value = null; managed.value = null; reused.value = false
   error.value = ''; checkError.value = ''; searchError.value = ''; grantStale.value = false
   dialog.value?.showModal()
@@ -152,6 +173,8 @@ function changeTicket() {
   authorFamily.value = ''
   touch.value = emptyTouch()
   choice.value = emptyChoice()
+  remember.value = false
+  remembered.value = ''
   void loadCatalog()
   void search()
   void nextTick(() => searchInput.value?.focus())
@@ -161,6 +184,8 @@ async function submit(runNow = false) {
   busy.value = true; error.value = ''
   const pinned = { ...view.value.requested }
   try {
+    if (choice.value.accountId && remember.value) await putPin({ ticket_id: ticket.value.id, harness: choice.value.harness, account_id: choice.value.accountId })
+    else if (remembered.value && !remember.value) await deletePin(ticket.value.id, choice.value.harness)
     const result = await startAgent({ ticket: ticket.value, agentId: view.value.agentId, profileId: view.value.profileId, accountId: choice.value.accountId, runNow })
     run.value = result.run; reused.value = result.reused; requested.value = pinned
     agents.recordRun(result.run)
@@ -270,6 +295,7 @@ defineExpose({ open })
               <option v-for="account in view.accounts" :key="account.value" :value="account.value">{{ accountLabel(account.label) }}</option>
             </select>
             <p v-if="notes.account" :id="`${uid}-account-note`" class="note">{{ notes.account }}</p>
+            <label v-if="choice.accountId" class="remember"><input v-model="remember" type="checkbox"> Remember for this ticket</label>
           </div>
           <div class="pair" :class="{ 'pi-bound': piModelBound }">
           <div class="select-field">
@@ -364,6 +390,8 @@ label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; c
 .ticket-results > .note { padding: 12px; }
 .more { margin: 8px 12px; }
 .note { font-size: 12px; line-height: 1.5; color: var(--ink-2); margin-top: 6px; }
+.remember { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.remember input { margin: 0; }
 .role-note { margin-top: 0; }
 .dispatch-status { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.5; }
 .dispatch-status > svg { margin-top: 2px; flex-shrink: 0; }

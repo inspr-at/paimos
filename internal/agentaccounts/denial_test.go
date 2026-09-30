@@ -232,7 +232,7 @@ func newDenialFixture(t *testing.T) *denialFixture {
 	for i := range s.Week {
 		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 	}
-	callStatus(t, accountsMod(), &f.person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", f.account.ID, &s, false}), 204, nil)
+	callStatus(t, accountsMod(), &f.person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: f.account.ID, Schedule: &s}), 204, nil)
 	return f
 }
 

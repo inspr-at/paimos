@@ -21,6 +21,7 @@ type CapacityRouting struct {
 	AvailableSlots int           `json:"available_slots"`
 	ResetsAt       *time.Time    `json:"resets_at,omitempty"`
 	CapPercent     float64       `json:"cap_percent"`
+	SameQuotaAs    string        `json:"same_quota_as,omitempty"`
 	Wait           *CapacityWait `json:"wait,omitempty"`
 }
 type CapacityChoice struct {
@@ -45,6 +46,9 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 	p := ranked{account: a, windows: windows, cap: 100, slots: a.MaxParallel - slots}
 	var short, long *time.Time
 	for _, w := range windows {
+		if w.capacityPresence {
+			p.presence = true
+		}
 		if !synthetic(w) {
 			end := w.EndsAt
 			dest := &short
@@ -68,7 +72,7 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 			continue
 		}
 		p.slots = min(p.slots, int(math.Floor(available/float64(hold))))
-		if w.capacityReadAt != nil && (synthetic(w) || now.Sub(*w.capacityReadAt) > 10*time.Minute) {
+		if w.capacityReadAt != nil && (synthetic(w) || now.Sub(*w.capacityReadAt) > 10*time.Minute && w.capacitySource != "estimate") {
 			p.slots = min(p.slots, 1)
 		}
 	}
@@ -80,9 +84,28 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 	p.slots = max(0, p.slots)
 	return p
 }
+
+// fingerprintPrimary is the ordered door that keeps the quota's slots.
+// A later door wins only when the earlier one has none left.
+func fingerprintPrimary(picks []ranked) map[string]int {
+	primary := map[string]int{}
+	for i, p := range picks {
+		fp := p.account.QuotaFingerprint
+		if fp == "" {
+			continue
+		}
+		if prev, ok := primary[fp]; !ok || picks[prev].slots == 0 && p.slots > 0 {
+			primary[fp] = i
+		}
+	}
+	return primary
+}
 func orderPicks(picks []ranked) {
 	sort.Slice(picks, func(i, j int) bool {
 		a, b := picks[i], picks[j]
+		if a.presence != b.presence {
+			return !a.presence
+		}
 		if a.reset == nil && b.reset != nil {
 			return false
 		}
@@ -104,7 +127,14 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 	if err != nil {
 		return nil, err
 	}
+	quotaUsed, err := quotaOccupancy(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	out := map[string]CapacityRouting{}
+	if profile != "" {
+		run.ProfileID = &profile
+	}
 	pools := map[string][]ranked{}
 	// Manual budgets have no learned unit conversion: advisory uses one unit;
 	// reservation always checks the daemon's real estimates again.
@@ -119,7 +149,8 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 			out[a.ID] = CapacityRouting{Wait: waitFor("models")}
 			continue
 		}
-		windows, wait, err := admission(ctx, tx, a, a.Windows, now, used[a.ID], run, false)
+		slots := slotCount(a, used, quotaUsed)
+		windows, wait, err := admission(ctx, tx, a, a.Windows, now, slots, run, false)
 		if err != nil {
 			return nil, err
 		}
@@ -130,13 +161,19 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 			out[a.ID] = CapacityRouting{Wait: wait}
 			continue
 		}
-		p := routeRank(a, windows, used[a.ID], estimates, now)
+		p := routeRank(a, windows, slots, estimates, now)
 		pools[a.Harness] = append(pools[a.Harness], p)
 	}
 	for _, picks := range pools {
 		orderPicks(picks)
+		primary := fingerprintPrimary(picks)
 		for i, p := range picks {
-			out[p.account.ID] = CapacityRouting{Rank: i + 1, AvailableSlots: p.slots, ResetsAt: p.reset, CapPercent: p.cap}
+			routing := CapacityRouting{Rank: i + 1, AvailableSlots: p.slots, ResetsAt: p.reset, CapPercent: p.cap}
+			if fp := p.account.QuotaFingerprint; fp != "" && primary[fp] != i {
+				routing.AvailableSlots = 0
+				routing.SameQuotaAs = picks[primary[fp]].account.ID
+			}
+			out[p.account.ID] = routing
 		}
 	}
 	return out, nil
@@ -166,10 +203,14 @@ func NextForRun(ctx context.Context, tx pgx.Tx, runID, daemonID, only, exclude s
 	}
 	kept := []Account{}
 	for _, a := range accounts {
-		if a.RegisteredBy != run.AgentID || a.DaemonID != daemonID || a.Harness != harness || a.ID == exclude || only != "" && a.ID != only || run.RequestedAccountID != nil && a.ID != *run.RequestedAccountID {
+		if a.RegisteredBy != run.AgentID || a.DaemonID != daemonID || a.Harness != harness || a.ID == exclude || only != "" && a.ID != only {
 			continue
 		}
 		kept = append(kept, a)
+	}
+	kept, err = narrowCandidates(ctx, tx, run, harness, kept)
+	if err != nil {
+		return CapacityNext{}, err
 	}
 	// Run now once belongs to the original attempt, never to automatic retries.
 	advice, err := routingAdvice(ctx, tx, kept, *run.ProfileID, runRow{Purpose: "managed"}, now)
@@ -267,7 +308,7 @@ func VendorRetryAt(ctx context.Context, tx pgx.Tx, accountID, runID string, now 
 	// A stop without a reading from this run retains its bounded backoff;
 	// another run's older reading is not evidence for this stop's reset.
 	var until *time.Time
-	err := tx.QueryRow(ctx, `SELECT max(resets_at) FROM (SELECT DISTINCT ON(window_kind,bucket) resets_at,used_percent,ordinary_usage_allowed FROM account_capacity_readings WHERE account_id=$1 AND run_id=$3 AND source<>'estimate' ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r WHERE (ordinary_usage_allowed=false OR used_percent>=100) AND resets_at>$2`, accountID, now, runID).Scan(&until)
+	err := tx.QueryRow(ctx, `SELECT max(resets_at) FROM (SELECT DISTINCT ON(window_kind,bucket) resets_at,used_percent,ordinary_usage_allowed FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`) AND run_id=$3 AND source<>'estimate' ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r WHERE (ordinary_usage_allowed=false OR used_percent>=100) AND resets_at>$2`, accountID, now, runID).Scan(&until)
 	if err != nil {
 		return time.Time{}, false, err
 	}

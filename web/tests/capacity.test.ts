@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { APIError, RequestFailure, StaleRequestError } from '../src/lib/api.ts'
 import {
-  accountPlan, confirmsSave, uncertainFailure, accountState, buildPools, buildRows, clampRate, dayProfile, daysLabel, defaultSchedule, fullPaceHours, gauge, gaugeModeFor,
+  accountUseCommand, accountPlan, confirmsSave, uncertainFailure, accountState, buildPools, buildRows, clampRate, dayProfile, daysLabel, defaultSchedule, fullPaceHours, gauge, gaugeModeFor, sameAccountCopy,
   nightLabel, pickWindows, plainText, poolSentence, presetWeek, rateAt, sameShape, scheduleProblem, setGlobalMode, sourceLine, todayCell,
-  toggleAccountMode, when, reserveLabel, reserveLevel, withReserve, workStart, zonedInstant, activeOverride, stripOverride,
+  estimateLabel, consumptionLine, usingNow, toggleAccountMode, when, reserveLabel, reserveLevel, withReserve, workStart, zonedInstant, activeOverride, stripOverride,
   type AccountCapacity, type AccountInput, type CapacitySchedule, type CapacityWindow,
 } from '../src/lib/capacity.ts'
 
@@ -127,6 +128,35 @@ test('two Codex accounts: soonest reset first, one plan sentence, gauges from se
   assert.equal(sourceLine(studio, now), 'Read on studio · 3 h ago · offline')
   assert.deepEqual(todayCell(studio, accountPlan(studio, now)), { kind: 'quiet', text: 'waits for studio' })
   assert.equal(gauge(studio, accountPlan(studio, now)).tick, null)
+})
+
+test('one quota is one gauge, and a group is its own pool', () => {
+  const fp = 'ab'.repeat(32)
+  const group = '11111111-1111-4111-8111-111111111111'
+  const built = pools(
+    [
+      acct('a', 'Spare', 'codex', { host: 'mbp2607', fingerprint: fp }),
+      acct('b', 'Spare', 'codex', { host: 'studio', fingerprint: fp }),
+      acct('c', 'Client door', 'codex', { host: 'studio', groupId: group, groupName: 'Client' }),
+    ],
+    [
+      { ...cap('a', [win({ used: 10, budget: 10, reset: '2026-10-02T07:14:00Z' })]), quota_fingerprint: fp, hosts: ['mbp2607'], routing: { rank: 1, available_slots: 1 } },
+      { ...cap('b', [win({ used: 10, budget: 10, reset: '2026-10-02T07:14:00Z' })]), quota_fingerprint: fp, hosts: ['studio'], same_quota_as: 'a', routing: { rank: 2, available_slots: 0, same_quota_as: 'a' } },
+      { ...cap('c', [win({ used: 20, budget: 10, reset: '2026-10-03T07:14:00Z' })]), group_id: group, group_name: 'Client', routing: { rank: 1, available_slots: 1 } },
+    ],
+  )
+  assert.equal(built[0].id, 'codex')
+  assert.equal(built[0].name, 'Codex')
+  assert.equal(built[0].mark, 'codex')
+  assert.equal(built[0].rows.length, 1)
+  assert.deepEqual(built[0].rows[0].hosts, ['mbp2607', 'studio'])
+  assert.equal(built[0].parallelRuns, 1)
+  assert.equal(sameAccountCopy(built[0].rows[0].hosts), 'Same account on mbp2607 and studio')
+  assert.equal(sameAccountCopy(['mbp2607', 'studio', 'desk']), 'Same account on mbp2607, studio and desk')
+  assert.equal(built[1].id, `group:${group}`)
+  assert.equal(built[1].name, 'Client · Codex')
+  assert.equal(built[1].mark, 'codex')
+  assert.equal(built[1].rows[0].id, 'c')
 })
 
 test('one account: by day and tonight, finish before reset, fresh week', () => {
@@ -333,4 +363,56 @@ test('server-ineligible accounts stay out of the actionable plan', () => {
   assert.match(sentence, /of Spare/)
   assert.doesNotMatch(sentence, /then .*Main|20% of Main|can run in parallel/)
   assert.match(sentence, /Main: Waiting for the vendor/)
+})
+
+
+test('learned capacity stays honest about uncertainty and blind consumption', () => {
+  const reading = win({ used: 50, budget: 12, reset: '2026-10-04T09:00:00Z', source: 'estimate' }).reading
+  assert.equal(estimateLabel({ ...reading, plus_minus: 20, evidence: { kind: 'limit_hits', samples: 2 } }), 'Estimated · ±20% · 2 limit hits')
+  assert.equal(estimateLabel({ ...reading, plus_minus: 2, evidence: { kind: 'runs', samples: 12 } }), 'Estimated · 12 runs')
+  const learning = { windows: [], tokens: 24000, cost_micros: 0, runs: 3, limit_hits: 0, presence_until: new Date(now + 60000).toISOString() }
+  const c = { ...cap('a', []), learning }
+  const [row] = buildRows([acct('a', 'Blind', 'grok')], [c])
+  assert.equal(row.primary, null)
+  assert.equal(sourceLine(row, now), 'No limit seen yet')
+  assert.deepEqual(todayCell(row, null), { kind: 'quiet', text: '3 runs · 24k tokens' })
+  assert.equal(consumptionLine({ ...learning, cost_micros: 1500000 }), '3 runs · $1.50')
+  assert.equal(usingNow(row, now), true)
+  assert.equal(usingNow(row, now + 60000), false)
+})
+
+
+test('shared quota preserves grouped and ungrouped doors in either input order', () => {
+  const fp = 'ef'.repeat(32)
+  for (const reverse of [false, true]) for (const primary of ['a', 'b']) {
+    const accounts = [acct('a', 'Client door', 'codex', { fingerprint: fp, groupId: 'client', groupName: 'Client' }), acct('b', 'Studio', 'codex', { fingerprint: fp, host: 'studio' })]
+    const capacity = accounts.map(a => ({ ...cap(a.id, [win({ used: 15, budget: 10, reset: '2026-10-03T07:14:00Z' })]), quota_fingerprint: fp,
+      same_quota_as: a.id === primary ? '' : primary, routing: { rank: 1, available_slots: a.id === primary ? 1 : 0 } }))
+    const built = pools(reverse ? accounts.reverse() : accounts, capacity)
+    assert.deepEqual(built.map(p => p.id), ['codex', 'group:client'])
+    assert.equal(built[1].rows[0].groupId, 'client')
+    assert.equal(built[1].rows[0].id, 'a')
+    assert.equal(built[0].rows[0].id, 'b')
+    assert.equal(built.flatMap(p => p.rows).filter(r => r.primary).length, 1)
+    assert.equal(built.reduce((n, p) => n + p.parallelRuns, 0), 1)
+    assert.equal(sourceLine(built[1].rows[0], now), 'Shares quota with Studio')
+  }
+})
+
+test('displayed account command round trips in fish, zsh and bash with arbitrary labels', () => {
+  const id = '11111111-1111-4111-8111-111111111111'
+  for (const label of ['Claude Max', "Spare's account", '$(false); (false) & | `false` * $HOME', 'semi;colon "quoted"']) {
+    const account = { id, harness: 'claude', label }
+    const command = accountUseCommand(account)
+    for (const shell of ['fish', 'zsh', 'bash']) {
+      const script = shell === 'fish'
+        ? `function aeon; printf '%s\n' $argv; end; ${command}`
+        : `aeon() { printf '%s\n' "$@"; }; ${command}`
+      const flags = shell === 'fish' ? ['-N'] : shell === 'zsh' ? ['-f'] : ['--noprofile', '--norc']
+      const output = execFileSync(shell, [...flags, '-c', script], { encoding: 'utf8' })
+      assert.deepEqual(output.trim().split('\n'), ['use', 'claude', id], `${shell}: ${label}`)
+    }
+  }
+  assert.equal(accountUseCommand({ id: '$(false)', harness: 'claude' }), '')
+  assert.equal(accountUseCommand({ id, harness: 'claude;false' }), '')
 })

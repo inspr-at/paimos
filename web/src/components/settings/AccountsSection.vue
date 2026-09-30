@@ -10,6 +10,7 @@ import { can } from '../../lib/authz'
 import { brand } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
 import { usePoller } from '../../lib/usePolledData'
+import { useCapacity } from '../../stores/capacity'
 import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
@@ -21,6 +22,7 @@ import SettingsCard from './SettingsCard.vue'
 // Pausing an account and limits set by hand live here; sign-ins happen on the
 // computer itself, and credentials never reach Aeon.
 const agents = useAgents()
+const capacity = useCapacity()
 const session = useSession()
 const route = useRoute()
 const router = useRouter()
@@ -56,6 +58,7 @@ function onFocus() { void refresh() }
 const poller = usePoller(() => refresh(), 20_000)
 
 onMounted(() => {
+  void capacity.load()
   poller.start(true)
   window.addEventListener('focus', onFocus)
 })

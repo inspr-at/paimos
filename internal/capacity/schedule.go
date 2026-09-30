@@ -235,6 +235,8 @@ func (s Schedule) Period(now time.Time) (time.Time, time.Time) {
 }
 
 type Pacing struct {
+	DriftPercent          float64    `json:"drift_percent,omitempty"`
+	WouldExpirePercent    float64    `json:"would_expire_percent,omitempty"`
 	AvailableNowPercent   float64    `json:"available_now_percent"`
 	UsableHours           float64    `json:"usable_hours"`
 	PercentPerHour        float64    `json:"percent_per_hour"`
@@ -276,6 +278,8 @@ type PlanInput struct {
 	WindowLength time.Duration
 	// AutoReserve is the learned Auto level; zero means not learned yet (30%).
 	AutoReserve float64
+	// Observed throughput (percent/hour across available slots); zero disables learning.
+	Throughput float64
 }
 
 // Plan implements the approved schedule formula. UsedToday must be supplied
@@ -303,6 +307,17 @@ func Plan(in PlanInput, s Schedule) (Pacing, error) {
 	}
 	p := Pacing{PeriodStart: a, PeriodEnd: b, UsedTodayPercent: in.UsedToday}
 	total, _ := s.weight(start, in.Reset, false)
+	// Use off-day hours for the excess that scheduled hours cannot consume.
+	// An explicit rest day remains a rest day; no learned throughput means the
+	// original pacing formula, including its reserve-off golden corpus.
+	if s.OffDays == "expire" && in.Throughput > 0 && !math.IsInf(in.Throughput, 0) {
+		scheduled, _ := s.weight(in.Now, in.Reset, false)
+		p.WouldExpirePercent = math.Max(0, in.Remaining-in.Throughput*scheduled)
+		if p.WouldExpirePercent > 0 {
+			p.AllowOff = true
+			total, _ = s.weight(start, in.Reset, true)
+		}
+	}
 	if total == 0 && s.OffDays == "expire" {
 		total, _ = s.weight(start, in.Reset, true)
 		p.AllowOff = total > 0

@@ -3,6 +3,7 @@ package agentaccounts
 
 import (
 	"context"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -66,6 +67,10 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	}
 	if !approved {
 		return nil, waitFor("approval"), nil
+	}
+	all, err = sharedQuotaWindows(ctx, tx, a, all, now)
+	if err != nil {
+		return nil, nil, err
 	}
 	s, err := routingSchedule(ctx, tx, a)
 	if err != nil {
@@ -134,8 +139,8 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	}
 	if len(active) == 0 && (a.Harness == "codex" || a.Harness == "claude") {
 		var observed, granted bool
-		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id=$1),
- EXISTS(SELECT 1 FROM account_allowance_windows WHERE account_id=$1 AND capacity_kind='refresh' AND capacity_bucket=$2)`, a.ID, bootstrapBucket(a)).Scan(&observed, &granted)
+		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`)),
+ EXISTS(SELECT 1 FROM account_allowance_windows WHERE account_id IN (`+quotaAccounts+`) AND capacity_kind='refresh' AND capacity_bucket=$2)`, a.ID, bootstrapBucket(a)).Scan(&observed, &granted)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -172,8 +177,11 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	}
 	blind := false
 	if blindHarness {
+		if blindDayPolicy(s, now) && slots > 0 {
+			return nil, waitFor("capacity"), nil
+		}
 		var observed bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id=$1)`, a.ID).Scan(&observed); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`) AND source<>'estimate')`, a.ID).Scan(&observed); err != nil {
 			return nil, nil, err
 		}
 		// The recovery grant is the next real queued run. It is not a paced
@@ -208,7 +216,7 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	}
 	stale := false
 	for _, w := range active {
-		if w.capacityReadAt != nil && (w.capacityKind == "refresh" || now.Sub(*w.capacityReadAt) > 10*time.Minute) {
+		if w.capacityReadAt != nil && (w.capacityKind == "refresh" || now.Sub(*w.capacityReadAt) > 10*time.Minute && w.capacitySource != "estimate") {
 			stale = true
 		}
 		if w.capacityReadAt != nil && !w.capacityAllowed {
@@ -249,10 +257,47 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
+	learned, err := loadLearning(ctx, tx, a.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	profile := ""
+	if run.ProfileID != nil {
+		profile = *run.ProfileID
+	}
+	for i := range active {
+		w := &active[i]
+		if w.capacityReadAt == nil || synthetic(*w) {
+			continue
+		}
+		v := capacity.Reading{WindowKind: w.capacityKind, Bucket: w.capacityBucket, WindowMinutes: int(w.EndsAt.Sub(w.StartsAt) / time.Minute)}
+		windowLearning := learned
+		if w.AccountID != a.ID {
+			windowLearning, err = loadLearning(ctx, tx, w.AccountID)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		metric := windowLearning.metric(v, now, s, profile)
+		// Stale measured windows retain their one-run refresh fence.
+		if now.Sub(*w.capacityReadAt) <= 10*time.Minute || w.capacitySource == "estimate" {
+			w.capacityHold = int64(math.Ceil(metric.HoldPercent))
+		}
+		w.capacityPresence = learned.PresenceUntil != nil && learned.PresenceUntil.After(now)
+	}
+	// Re-sort after attaching learning so the advice and reservation agree.
+	for i := range ordered {
+		for _, w := range active {
+			if w.ID == ordered[i].ID {
+				ordered[i] = w
+				break
+			}
+		}
+	}
 	need := boolInt(!claiming)
 	var hardUntil *time.Time
 	for _, w := range ordered {
-		if w.Allowance-w.Used-w.Reserved >= need {
+		if w.Allowance-w.Used-w.Reserved >= max(need, w.capacityHold*need) {
 			continue
 		}
 		end := w.EndsAt
@@ -274,10 +319,10 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	// that window's reset).
 	var reserve *CapacityWait
 	for _, w := range ordered {
-		if w.capacityBudget == nil || *w.capacityBudget >= float64(w.Reserved+need) {
+		if w.capacityBudget == nil || *w.capacityBudget >= float64(w.Reserved+max(need, w.capacityHold*need)) {
 			continue
 		}
-		if w.capacityShare != nil && *w.capacityShare >= float64(w.Reserved+need) {
+		if w.capacityShare != nil && *w.capacityShare >= float64(w.Reserved+max(need, w.capacityHold*need)) {
 			if reserve == nil || w.capacityReserveUntil != nil && (reserve.Until == nil || w.capacityReserveUntil.After(*reserve.Until)) {
 				reserve = &CapacityWait{Code: "reserve", Until: w.capacityReserveUntil, Timezone: s.Timezone, RunNowAllowed: true}
 			}
@@ -389,8 +434,8 @@ func readingDenials(ctx context.Context, tx pgx.Tx, accountID string) ([]denial,
 	rows, err := tx.Query(ctx, `SELECT resets_at, read_at FROM (
  SELECT DISTINCT ON (window_kind, bucket) window_kind, bucket, resets_at, read_at, ordinary_usage_allowed
  FROM account_capacity_readings
- WHERE account_id=$1 AND source<>'estimate' AND ordinary_usage_allowed IS NOT NULL
- ORDER BY window_kind, bucket, read_at DESC, CASE source WHEN 'harness' THEN 0 ELSE 1 END
+ WHERE account_id IN (`+quotaAccounts+`) AND source<>'estimate' AND ordinary_usage_allowed IS NOT NULL
+ ORDER BY window_kind, bucket, read_at DESC, CASE source WHEN 'harness' THEN 0 ELSE 1 END, ordinary_usage_allowed ASC
 ) latest
  WHERE ordinary_usage_allowed=false
  ORDER BY resets_at DESC, read_at DESC, window_kind, bucket`, accountID)
@@ -417,11 +462,11 @@ func blindDenials(ctx context.Context, tx pgx.Tx, accountID string) ([]denial, e
 	// run's named denial must not shorten a newer unnamed stop's backoff.
 	err := tx.QueryRow(ctx, `SELECT t.at,
  (SELECT max(r.resets_at) FROM account_capacity_readings r
-  WHERE r.account_id=$1 AND r.run_id=t.run_id AND r.source<>'estimate'
+  WHERE r.account_id IN (`+quotaAccounts+`) AND r.run_id=t.run_id AND r.source<>'estimate'
   AND (r.ordinary_usage_allowed=false OR r.used_percent>=100) AND r.resets_at>t.at)
  FROM run_telemetry t JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
- WHERE ar.account_id=$1 AND t.error_code='vendor_limit' AND NOT EXISTS(
-  SELECT 1 FROM account_capacity_readings r WHERE r.account_id=$1 AND r.source<>'estimate'
+ WHERE ar.account_id IN (`+quotaAccounts+`) AND t.error_code='vendor_limit' AND NOT EXISTS(
+  SELECT 1 FROM account_capacity_readings r WHERE r.account_id IN (`+quotaAccounts+`) AND r.source<>'estimate'
   AND r.ordinary_usage_allowed=true AND r.read_at>t.at)
  ORDER BY t.at DESC LIMIT 1`, accountID).Scan(&at, &reset)
 	if isNoRows(err) {
@@ -443,7 +488,7 @@ func blindDenials(ctx context.Context, tx pgx.Tx, accountID string) ([]denial, e
 func denialClearedByRun(ctx context.Context, tx pgx.Tx, accountID string, epoch time.Time) (bool, error) {
 	var cleared bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(
- SELECT 1 FROM agent_runs ar WHERE ar.account_id=$1 AND ar.status='completed' AND ar.started_at > $2
+ SELECT 1 FROM agent_runs ar WHERE ar.account_id IN (`+quotaAccounts+`) AND ar.status='completed' AND ar.started_at > $2
  AND NOT EXISTS(SELECT 1 FROM run_telemetry t WHERE t.tenant_id=ar.tenant_id AND t.run_id=ar.id AND t.error_code='vendor_limit'))`, accountID, epoch).Scan(&cleared)
 	return cleared, err
 }
@@ -542,7 +587,7 @@ func recoveryGrant(ctx context.Context, tx pgx.Tx, a Account, s capacity.Schedul
 	}
 	bucket := recoveryBucket(a, block.epoch)
 	var granted bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_allowance_windows WHERE account_id=$1 AND capacity_kind='refresh' AND capacity_bucket=$2)`, a.ID, bucket).Scan(&granted); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_allowance_windows WHERE account_id IN (`+quotaAccounts+`) AND capacity_kind='refresh' AND capacity_bucket=$2)`, a.ID, bucket).Scan(&granted); err != nil {
 		return nil, nil, err
 	}
 	if granted {
@@ -568,7 +613,7 @@ func countBlindDayRuns(ctx context.Context, tx pgx.Tx, accountID, exceptRun stri
 	next := time.Date(local.Year(), local.Month(), local.Day()+1, 0, 0, 0, 0, loc)
 	rows, err := tx.Query(ctx, `SELECT DISTINCT w.starts_at
  FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
- WHERE w.account_id=$1 AND w.capacity_kind='blind' AND w.starts_at >= $2 AND w.starts_at < $3 AND r.run_id::text <> $4`, accountID, day, next, exceptRun)
+ WHERE w.account_id IN (`+quotaAccounts+`) AND w.capacity_kind='blind' AND w.starts_at >= $2 AND w.starts_at < $3 AND r.run_id::text <> $4`, accountID, day, next, exceptRun)
 	if err != nil {
 		return 0, err
 	}
@@ -607,8 +652,8 @@ func lastRead(windows []Window) *time.Time {
 
 func windowWait(windows []Window, now time.Time) *CapacityWait {
 	for _, w := range windows {
-		if _, ok := fits(w, now, 1); !ok {
-			if w.capacityReadAt != nil && (synthetic(w) || now.Sub(*w.capacityReadAt) > 10*time.Minute) {
+		if _, ok := fits(w, now, max(1, windowEstimate(w, nil))); !ok {
+			if w.capacityReadAt != nil && (synthetic(w) || now.Sub(*w.capacityReadAt) > 10*time.Minute && w.capacitySource != "estimate") {
 				return &CapacityWait{Code: "reading", ReadAt: w.capacityReadAt}
 			}
 			return &CapacityWait{Code: "allowance", Until: &w.EndsAt}
@@ -632,6 +677,10 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 	if err != nil {
 		return nil, err
 	}
+	quotaUsed, err := quotaOccupancy(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	now, err := dbNow(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -642,9 +691,19 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 	} else if err != nil {
 		return nil, err
 	}
-	best := waitFor("offline")
+	same := []Account{}
 	for _, a := range accounts {
-		if a.RegisteredBy != run.AgentID || a.Harness != harness || run.RequestedAccountID != nil && a.ID != *run.RequestedAccountID || run.AccountID != nil && a.ID != *run.AccountID {
+		if a.RegisteredBy == run.AgentID && a.Harness == harness && (run.AccountID == nil || a.ID == *run.AccountID) {
+			same = append(same, a)
+		}
+	}
+	same, err = narrowCandidates(ctx, tx, run, harness, same)
+	if err != nil {
+		return nil, err
+	}
+	best := waitFor("offline")
+	for _, a := range same {
+		if run.RequestedAccountID != nil && a.ID != *run.RequestedAccountID || run.AccountID != nil && a.ID != *run.AccountID {
 			continue
 		}
 		if a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID) {
@@ -652,8 +711,8 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 			continue
 		}
 		claiming := run.AccountID != nil
-		slots := used[a.ID]
-		if claiming {
+		slots := slotCount(a, used, quotaUsed)
+		if claiming && slots > 0 {
 			slots--
 		}
 		windows, wait, err := admission(ctx, tx, a, a.Windows, now, slots, run, claiming)
