@@ -292,17 +292,17 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :can-resolve="canResolve" :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
           @focus-row="id => cursor = id" @open-agent="openAgent"
         />
-        <section v-if="showSetup" class="setup" :class="{ folded }" aria-labelledby="setup-title">
+        <div v-if="showSetup" class="setup" :class="{ folded }">
           <button type="button" class="setup-toggle" :aria-expanded="!folded" :aria-controls="folded ? undefined : 'setup-body'" @click="toggleSetup">
             <AppIcon name="chevron-right" :size="14" class="chev" />
-            <span id="setup-title" class="setup-title">Accounts and computers</span>
-            <span v-if="folded && setupLine" class="setup-line">{{ setupLine }}</span>
+            <span class="setup-title">Accounts and computers</span>
+            <span v-if="folded && setupLine" class="setup-line" :title="setupLine">{{ setupLine }}</span>
           </button>
           <div v-if="!folded" id="setup-body" class="setup-body">
             <CapacityCard v-if="showCapacity" />
             <ConnectedComputers :permissions="pairingAccess" compact-empty embedded @removed="computerRemoved" />
           </div>
-        </section>
+        </div>
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
         <SessionList
           v-if="agents.loaded"

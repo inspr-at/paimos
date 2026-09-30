@@ -75,7 +75,9 @@ test('offline and revoked computers do not present prior harness reports as live
   await expect(computers).toContainText('Last reported: ready')
   report.computer_state = 'revoked'
   await page.getByRole('button', { name: 'Refresh computers' }).click()
-  await expect(computers.locator('.status')).toHaveText('Revoked')
+  // A revoked computer folds into the Revoked disclosure (AEON-402), with no harness reports.
+  await expect(computers.locator('.status')).toHaveCount(0)
+  await expect(computers.getByRole('button', { name: 'Revoked (1)' })).toBeVisible()
   await expect(computers.locator('.harness-report')).toHaveCount(0)
 })
 

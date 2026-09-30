@@ -221,6 +221,8 @@ async function remove(computer: PairingView) {
     computers.value = computers.value.filter(item => keyOf(item) !== key)
     toast(`Removed ${computer.computer_name}. Its history stays in the audit log.`)
     emit('removed', computer)
+    // A disabled button takes no focus: settle busy before moving focus.
+    busy.value = ''
     await nextTick()
     // Focus the next Remove in the same group, else the disclosure or the title.
     const buttons = [...(root.value?.querySelectorAll<HTMLElement>(computer.computer_state === 'revoked' ? '.revoked-list .remove-computer' : '.list .remove-computer') ?? [])]

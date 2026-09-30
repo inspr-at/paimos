@@ -390,7 +390,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
         </div>
         <p class="plan" :class="{ ahead: sentence(pool).ahead }"><PlanSentence :sentence="sentence(pool)" /></p>
       </div>
-      <ul class="accts" :class="{ manage: mayManage }">
+      <ul class="accts" :class="{ removable: mayManage }">
         <li v-for="row in pool.rows" :key="row.id" class="acct" :class="{ dim: row.state !== 'live' && row.state !== 'unread', ahead: planOf(row)?.ahead }" :data-account="row.id">
           <div class="acct-name" :class="{ 'has-pi-model': piModelOf(row.id) }">
             <span class="dot" :class="row.state" :data-tip="DOT_TIP[row.state](row)"><span class="sr-only">{{ DOT_TIP[row.state](row) }}</span></span>
@@ -599,7 +599,7 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
 .source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; text-align: right; }
 .acct.dim .gauge, .acct.dim .left, .acct.dim .resets { opacity: .6; }
 /* Remove: a quiet trailing icon on rows a person may manage (AEON-402). */
-.accts.manage .acct { grid-template-columns: minmax(0, 180px) minmax(140px, 1fr) 72px minmax(0, 120px) 150px minmax(0, 180px) 28px; }
+.accts.removable .acct { grid-template-columns: minmax(0, 180px) minmax(140px, 1fr) 72px minmax(0, 120px) 150px minmax(0, 180px) 28px; }
 .acct-remove { width: 28px; height: 28px; color: var(--ink-3); }
 @media (hover: hover) { .acct-remove { opacity: .55; } .acct:hover .acct-remove, .acct-remove:focus-visible { opacity: 1; } }
 .win5 { margin-top: 5px; color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -632,11 +632,11 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
 @container cap (min-width: 1265px) {
   .pool { grid-template-columns: 330px minmax(0, 1fr); gap: 28px; }
   .acct { grid-template-columns: minmax(0, 170px) minmax(160px, 1fr) 74px minmax(0, 124px) 150px minmax(0, 204px); }
-  .accts.manage .acct { grid-template-columns: minmax(0, 170px) minmax(160px, 1fr) 74px minmax(0, 124px) 150px minmax(0, 204px) 28px; }
+  .accts.removable .acct { grid-template-columns: minmax(0, 170px) minmax(160px, 1fr) 74px minmax(0, 124px) 150px minmax(0, 204px) 28px; }
 }
 @container cap (max-width: 1044px) {
   .acct { grid-template-columns: minmax(0, 150px) minmax(120px, 1fr) 68px minmax(0, 110px) 150px; }
-  .accts.manage .acct { grid-template-columns: minmax(0, 150px) minmax(120px, 1fr) 68px minmax(0, 110px) 150px 28px; }
+  .accts.removable .acct { grid-template-columns: minmax(0, 150px) minmax(120px, 1fr) 68px minmax(0, 110px) 150px 28px; }
   .source { display: none; }
 }
 @container cap (max-width: 1000px) {
@@ -690,7 +690,7 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .row-learning { grid-area: learned; }
   .source { grid-area: source; display: block; text-align: left; font-size: 11.5px; }
   .source:empty { display: none; }
-  .accts.manage .acct { grid-template-columns: minmax(0, 1fr) auto 40px; grid-template-areas: "name left rm" "gauge gauge gauge" "today resets resets" "source source source" "learned learned learned"; }
+  .accts.removable .acct { grid-template-columns: minmax(0, 1fr) auto 40px; grid-template-areas: "name left rm" "gauge gauge gauge" "today resets resets" "source source source" "learned learned learned"; }
   .acct-remove { grid-area: rm; justify-self: end; width: 40px; height: 40px; margin-right: -8px; opacity: 1; }
   .today .btn { min-height: 36px; }
   .cap-foot { gap: 8px 14px; padding: 12px 14px; }
