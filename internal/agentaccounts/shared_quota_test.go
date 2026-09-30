@@ -226,7 +226,7 @@ func TestSharedQuotaRetryUsesSiblingsResetWithoutAuthorityBit(t *testing.T) {
 	admin, runner, profile, token, mod, doors, now := sharedFixture(t)
 	run := insertRun(t, admin, runner, profile)
 	mustRoute(t, mod, runner, token, run, doors[0].DaemonID, doors[:1], map[string]int64{"requests": 1})
-	reading := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 100, ReadAt: now.Add(time.Second), ResetsAt: now.Add(3 * time.Hour), Source: "harness", RunID: run, Phase: "after"}
+	reading := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 100, ReadAt: now.Add(time.Second), ResetsAt: now.Add(3 * time.Hour), Source: "harness", RunID: run, Phase: "end"}
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+doors[0].ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{reading}}), 204, nil)
 	unrelated := insertRun(t, admin, runner, profile)
 	seed(t, admin, func(tx pgx.Tx) error {
