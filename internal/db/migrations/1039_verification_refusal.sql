@@ -6,3 +6,9 @@ ALTER TABLE agent_runs ADD CONSTRAINT agent_runs_verification_refusal_no_launch 
   verification_unavailable_reason='' OR
   (purpose='pairing_verification' AND status='failed' AND started_at IS NULL AND daemon_id IS NULL AND daemon_generation IS NULL)
 );
+-- Refusal terminates optional verification without inventing a process start.
+ALTER TABLE agent_runs DROP CONSTRAINT agent_runs_end_has_start;
+ALTER TABLE agent_runs ADD CONSTRAINT agent_runs_end_has_start CHECK (
+  ended_at IS NULL OR started_at IS NOT NULL OR status='cancelled' OR
+  (purpose='pairing_verification' AND status='failed' AND verification_unavailable_reason<>'')
+);

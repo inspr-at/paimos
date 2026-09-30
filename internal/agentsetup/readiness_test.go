@@ -135,3 +135,22 @@ func TestStatusReadsAtomicSnapshotsDuringPairWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPairCompletesWithNamedVerificationRefusal(t *testing.T) {
+	e, api, local, opts, _ := engineFixture(t)
+	approveFixture(t, e, api, opts)
+	api.view.Enrollments[0].VerificationRunID = otherAccount
+	api.view.Enrollments[0].VerificationState = "failed"
+	api.view.Enrollments[0].VerificationError = "verification_unavailable"
+	api.view.Enrollments[0].VerificationReason = "adapter_unsupported"
+	local.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", Ready: true, VerificationReasons: map[string]string{otherAccount: "adapter_unsupported"}, AccountStatuses: map[string]HarnessDetail{testAccount: {State: "ready"}}}
+	p, err := e.Step(t.Context())
+	if err != nil || p.Stage != "verification_unavailable" || !strings.Contains(p.Action, "Codex verification couldn't run") || !strings.Contains(p.Action, "computer is paired") {
+		t.Fatal("pair did not complete with named cause", p.Stage, err)
+	}
+	local.offline = true
+	p, err = e.Status(t.Context())
+	if err != nil || !strings.Contains(p.Action, "no heartbeat") {
+		t.Fatal("connectivity gap lost heartbeat reason", p.Stage, err)
+	}
+}

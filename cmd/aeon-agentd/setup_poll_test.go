@@ -212,3 +212,10 @@ func TestStatusCommandDuringPairLockIsReadOnly(t *testing.T) {
 		t.Fatal("status released or aborted pair lock", err)
 	}
 }
+
+func TestVerificationRefusalCompletesPairPolling(t *testing.T) {
+	p := agentsetup.Progress{Stage: "verification_unavailable"}
+	if setupNeedsPoll("setup", p) || setupNeedsPoll("add-harness", p) {
+		t.Fatal("paired computer waits forever on unavailable verification")
+	}
+}
