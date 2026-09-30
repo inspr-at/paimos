@@ -59,12 +59,15 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var registered attachwatch.View
-	registration := map[string]any{"attach_protocol": attachwatch.Protocol, "operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey, "local_auth_capability": agentd.CurrentLocalAuthCapability()}
+	registration := map[string]any{"attach_protocol": attachwatch.Protocol, "local_consent_proof_version": attachwatch.LocalConsentProofVersion, "operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey, "local_auth_capability": agentd.CurrentLocalAuthCapability()}
 	if err = pairedClient.Do(ctx, "POST", "/api/agent-pairing/attach", registration, &registered); err != nil {
 		return nil, fmt.Errorf("paired instance refused attach registration: %w", err)
 	}
 	if registered.State != "registered" {
 		return nil, errors.New("paired instance refused attach registration; update agentd and Aeon")
+	}
+	if registered.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
+		return nil, errors.New("paired instance lacks local consent proof v2; upgrade Aeon and paimos-agentd, then restart; existing pairing keys remain valid")
 	}
 	return agentd.NewAttachManager(agentd.AttachConfig{Origin: c.Origin, ComputerID: c.ComputerID, Host: host, Workspace: c.Workspace, Executables: paths, Identities: c.AttachIdentities,
 		LocalSigner: func(ctx context.Context, consent, nonce, reason string) (string, error) {

@@ -1077,8 +1077,14 @@ paths:
         paired bearer, computer lifecycle proof and a fresh memory-only poll_key.
         Protocol-less registrations are acknowledged as registered with protocol 1 so older
         daemons keep serving; every other attach operation from those keys returns 409
-        update_agentd. Only keys registered with attach_protocol=2 can attach. Registration
-        invalidates all earlier watches on that computer, requiring new owner approval.
+        update_agentd. Only keys registered with attach_protocol=2 and
+        local_consent_proof_version=2 can attach. Omitted proof versions mean v1;
+        protocol-2 registrations with an unsupported proof version return 409 update_agentd
+        with guidance to upgrade paimos-agentd before any approval or Touch ID prompt.
+        Successful registration advertises the server's required proof version.
+        Upgrading the daemon preserves existing pairing keys; re-pairing is unnecessary.
+        Successful registration invalidates all earlier watches on that computer,
+        requiring new owner approval.
         All other operations require the paired bearer and registered poll_key; lifecycle
         proof alone is rejected. Neither daemon nor server persists the poll key. Codes never
         appear in URLs. Requests, activation and every poll
@@ -1119,6 +1125,7 @@ paths:
                     additionalProperties: false
                     properties:
                       state: {type: string, const: registered}
+                      local_consent_proof_version: {type: integer, const: 2, description: Required consent signature version; independent of attach_protocol}
         '400': {description: Invalid attach request; conversation text on status-only or pre-activation polls detaches the attach}
         '403': {description: Registered memory-only poll key required; lifecycle proof only authorizes registration}
         '409': {description: 'Snapshot or consent mismatch, poll sequence rejected, or update agentd required'}
@@ -6839,6 +6846,7 @@ components:
         request_id: {type: string, format: uuid}
         computer_id: {type: string, format: uuid}
         attach_protocol: {type: integer, enum: [1, 2], description: 'Registration only. Omission registers protocol 1; all later attach operations return 409 update_agentd. Protocol 2 declares paired-origin pinning, redirect refusal and kernel checks in both modes. A later request cannot upgrade a registered key.'}
+        local_consent_proof_version: {type: integer, minimum: 1, description: 'Registration-bound signature format. Omission means v1. Attach protocol 2 requires v2, which binds the canonical Touch ID reason; unsupported versions return 409 update_agentd with upgrade paimos-agentd guidance. A later request cannot upgrade a registered key. Existing pairing keys remain valid after upgrading the daemon.'}
         device_proof: {type: string, writeOnly: true, description: 'Existing computer lifecycle proof; registration only, never watch authority'}
         poll_key: {type: string, pattern: '^[a-f0-9]{64}$', writeOnly: true, description: Fresh daemon-start random key held only in memory; required for every operation}
         snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
@@ -6866,6 +6874,7 @@ components:
         session_id: {type: [string, 'null'], format: uuid}
         user_code: {type: string, description: 'Nine digits, daemon response only'}
         local_auth_nonce: {type: string, description: 'Present only for an approved local_auth request; consumed at activation'}
+        local_consent_proof_version: {type: integer, const: 2, description: Required local consent signature format}
         consent_mode: {type: string, enum: [aeon, local_auth]}
         consent_digest: {type: string, description: 'SHA-256 binding of request ID, snapshot digest and server-selected mode; immutable after approval'}
 

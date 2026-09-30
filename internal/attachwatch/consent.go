@@ -11,6 +11,10 @@ import (
 	"strings"
 )
 
+// LocalConsentProofVersion is negotiated independently of the attach transport.
+// Version 2 binds the canonical Touch ID reason. Pairing keys are unchanged.
+const LocalConsentProofVersion = 2
+
 // LocalConsentReason is the Touch ID prompt and part of the signed payload.
 // The server recomputes it from the approved snapshot. A different reason
 // does not verify. The Secure Enclave does not bind the text a different

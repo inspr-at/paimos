@@ -43,7 +43,7 @@ func watchFixtureWithKey(t *testing.T, publicKey string) (*fixture, string, atta
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	in.PollKey = nonce()
 	in.Digest = in.Snapshot.Digest()
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
 	return f, key, in
 }
 func requestWatch(t *testing.T, f *fixture, key string, in attachwatch.DeviceRequest) attachwatch.View {
@@ -346,7 +346,7 @@ func TestAttachDaemonRestartInvalidatesEveryApproval(t *testing.T) {
 			}
 			newKey := nonce()
 			// A registration with a wrong lifecycle proof must not evict the daemon.
-			registration := attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, Operation: "register", ComputerID: in.ComputerID, DeviceProof: nonce(), PollKey: newKey}
+			registration := attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: "register", ComputerID: in.ComputerID, DeviceProof: nonce(), PollKey: newKey}
 			f.call("POST", "/api/agent-pairing/attach", registration, false, key, 403)
 			registration.DeviceProof = in.DeviceProof
 			f.call("POST", "/api/agent-pairing/attach", registration, false, key, 200)

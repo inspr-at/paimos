@@ -130,6 +130,9 @@ func TestAttachStrictConsentActivation(t *testing.T) {
 					return "fixture-signature", nil
 				}, Exchange: func(_ context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 					sent = append(sent, in)
+					if in.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
+						t.Error("daemon did not advertise its consent proof version")
+					}
 					if in.LocalConfirmed {
 						t.Error("daemon sent a forgeable confirmation boolean")
 					}

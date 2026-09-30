@@ -431,6 +431,7 @@ func TestLegacyAttachRegistrationKeepsDaemonIdentityButGrantsNoAttach(t *testing
 				// A fresh protocol-2 registration is understood by this server and
 				// still needs the complete approval flow before it activates.
 				registration.AttachProtocol, registration.PollKey = attachwatch.Protocol, nonce()
+				registration.LocalConsentProofVersion = attachwatch.LocalConsentProofVersion
 				f.call("POST", "/api/agent-pairing/attach", registration, false, key, 200)
 				in.PollKey, in.Operation = registration.PollKey, "request"
 				activateWatch(t, f, key, &in)

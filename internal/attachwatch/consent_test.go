@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -26,6 +27,14 @@ func TestLocalConsentProofBindsKeyDigestAndNonce(t *testing.T) {
 	sig := base64.StdEncoding.EncodeToString(raw)
 	if !VerifyLocalConsent(pub, digest, nonce, reason, sig) {
 		t.Fatal("valid proof rejected")
+	}
+	legacyHash := sha256.Sum256([]byte("aeon.attach.local-consent.v1\x00" + digest + "\x00" + nonce))
+	legacyProof, err := ecdsa.SignASN1(rand.Reader, key, legacyHash[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if VerifyLocalConsent(pub, digest, nonce, reason, base64.StdEncoding.EncodeToString(legacyProof)) {
+		t.Fatal("v1 proof accepted by the v2 verifier")
 	}
 	otherReason := LocalConsentReason(Snapshot{Host: "Other Mac", Harness: "codex", Process: Process{PID: 40}})
 	if otherReason == reason || VerifyLocalConsent(pub, digest, nonce, otherReason, sig) {

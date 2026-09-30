@@ -47,15 +47,6 @@ int aeon_enclave_capability(void) {
  }
 }
 
-// Generic passwords stay on this device and are not iCloud-synchronizable.
-// The enclave key already uses WhenUnlockedThisDeviceOnly. Apple's default
-// for synchronizable is false; set it explicitly so a pre-created item is
-// not the template for a new password.
-static void vault_device_only(NSMutableDictionary *query) {
- query[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly;
- query[(__bridge id)kSecAttrSynchronizable] = @NO;
-}
-
 static NSMutableDictionary *vault_query(const char *keyID) {
  if (!keyID || strlen(keyID) > 256) return nil;
  NSString *account = [NSString stringWithUTF8String:keyID];
@@ -64,6 +55,20 @@ static NSMutableDictionary *vault_query(const char *keyID) {
   (__bridge id)kSecAttrService:@"cm.paimos.aeon.agentd.pairing.v1",
   (__bridge id)kSecAttrAccount:account,
   (__bridge id)kSecUseAuthenticationUI:(__bridge id)kSecUseAuthenticationUIFail} mutableCopy];
+}
+
+// The legacy file Keychain retains the signed-daemon ACL and is device-local,
+// not iCloud-synced. Its bridge strips accessibility and synchronizable
+// attributes; no accessibility-class or device-bound backup guarantee is made.
+// The injected add operation lets fixtures exercise storage without Keychain I/O.
+OSStatus aeon_vault_add_item(const char *keyID, SecAccessRef access, NSData *data,
+ OSStatus (^add)(CFDictionaryRef, CFTypeRef *)) {
+ NSMutableDictionary *query = vault_query(keyID);
+ if (!query || !access || !data || !add) return errSecParam;
+ query[(__bridge id)kSecAttrSynchronizable] = @NO;
+ query[(__bridge id)kSecAttrAccess] = (__bridge id)access;
+ query[(__bridge id)kSecValueData] = data;
+ return add((__bridge CFDictionaryRef)query, NULL);
 }
 
 static int copy_data(NSData *data, void **raw, int *size) {
@@ -171,10 +176,9 @@ int aeon_vault_write(const char *keyID, const void *raw, int size, int first) {
    if (status != errSecItemNotFound) return status;
   }
   SecAccessRef access = daemon_access(); if (!access) return errSecAuthFailed;
-  vault_device_only(query);
-  query[(__bridge id)kSecAttrAccess] = (__bridge id)access;
-  query[(__bridge id)kSecValueData] = data;
-  OSStatus status = SecItemAdd((__bridge CFDictionaryRef)query, NULL);
+  OSStatus status = aeon_vault_add_item(keyID, access, data, ^OSStatus(CFDictionaryRef attrs, CFTypeRef *result) {
+   return SecItemAdd(attrs, result);
+  });
   CFRelease(access); return status;
  }
 }
@@ -197,19 +201,6 @@ int aeon_enclave_create_disposition(int copyStatus) {
  if (copyStatus == errSecItemNotFound) return errSecItemNotFound;
  if (copyStatus == errSecSuccess) return errSecDuplicateItem;
  return copyStatus;
-}
-
-// Reports whether a new generic-password add would pin ThisDeviceOnly and
-// synchronizable=false. Does not call SecItemAdd or read an existing item.
-int aeon_vault_add_is_device_only(const char *keyID) {
- @autoreleasepool {
-  NSMutableDictionary *query = vault_query(keyID);
-  if (!query) return 0;
-  vault_device_only(query);
-  id accessible = query[(__bridge id)kSecAttrAccessible];
-  NSNumber *sync = query[(__bridge id)kSecAttrSynchronizable];
-  return accessible && CFEqual((__bridge CFTypeRef)accessible, kSecAttrAccessibleWhenUnlockedThisDeviceOnly) && sync != nil && !sync.boolValue;
- }
 }
 
 static NSMutableDictionary *key_query(const char *keyID, LAContext *context) {

@@ -327,6 +327,25 @@ Settings says “upgrade this computer’s pairing to enable Touch ID”. Migrat
 fresh consent. Daemon registration cannot install or replace a public key, and
 Add harness preserves both the public key and the original local key identity.
 
+AEON-467 rollout: attach transport remains protocol 2; startup registration also
+declares `local_consent_proof_version: 2`, and the server advertises that required
+version in registration and attach responses. An omitted version means v1.
+Protocol-2 registrations with v1 or an unknown version fail closed with HTTP 409
+`update_agentd` and an actionable “upgrade paimos-agentd” error, before browser
+approval or Touch ID. Protocol-1 registrations still allow ordinary daemon work
+while attachment remains disabled. The version is bound to the memory-only poll
+key at registration; a later claim cannot upgrade it. V1 signatures never verify.
+
+Roll out the server and updated signed `paimos-agentd` together, then restart
+the daemon and request fresh attach approval. Deploying the server first disables
+attachment for AEON-460 daemons until that upgrade; ordinary work continues.
+Upgrading the daemon first against a server with strict older request decoding
+also leaves attachment disabled until the server is upgraded. The updated daemon
+requires the server's v2 acknowledgement. Existing pairing capabilities, pinned
+public keys and local Enclave key identities remain valid; this proof-format
+upgrade does not require re-pairing or key rotation. Pairings without a pinned
+key still require their separate pairing upgrade to enable Touch ID.
+
 Release Darwin builds enable `-tags aeon_enclave` with `CGO_ENABLED=1` and link
 Apple's Security, Foundation and LocalAuthentication frameworks. The native
 boundary validates the running hardened Developer ID daemon, team `P66J39QV6V`,
@@ -340,10 +359,14 @@ this path. Linux remains CGO-free and uses Aeon approval.
 
 In the same release build, private pairing state (including device, runtime and
 lifecycle capabilities) and the runtime bearer live in Keychain generic-password
-items. New items set `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` and
-`kSecAttrSynchronizable=false`. Their ACL trusts the validated daemon's
-designated requirement, with root as ACL owner rather than the user's UID. Existing items must have the same
-code signing requirement and restrictive ACL; permissive pre-created items are
+items in the device-local legacy file Keychain, which is not iCloud-synced.
+New items explicitly request `kSecAttrSynchronizable=false` and retain
+`kSecAttrAccess` for the signed-daemon ACL. The legacy backend strips
+accessibility and synchronization attributes from stored items; it provides no
+accessibility-class or device-bound backup guarantee. Their ACL trusts the
+validated daemon's designated requirement, with root as ACL owner rather than
+the user's UID. Existing items must have the same code signing requirement and
+restrictive ACL; permissive pre-created items are
 refused. Requirement introspection is weak-linked and fails closed if macOS
 cannot provide it. Reads suppress authorization prompts and an ACL denial never
 falls back to disk. First access imports existing
@@ -360,6 +383,9 @@ The server verifies possession of the browser-pinned key; this is not remote
 hardware attestation. A new pairing still needs the person to trust the installed
 daemon and review the requested computer. Automated tests use an injectable
 signer and cover server proof verification, migration and unsigned native denial.
+A memory-only SecItem fixture mirrors legacy attribute pruning and checks stored
+item readback, including preservation of the supplied ACL identity; it never
+accesses a real Keychain and does not qualify the native ACL.
 A signed interactive Mac qualification must additionally prove actual enclave
 creation, Touch ID success/cancel, changed-biometry invalidation and Keychain ACL
 refusal to a separate unsigned process before release. Local unsigned checks do

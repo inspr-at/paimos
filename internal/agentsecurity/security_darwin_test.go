@@ -43,11 +43,22 @@ func TestEnclaveCreateRefusesAnExistingTag(t *testing.T) {
 	}
 }
 
-func TestVaultAddPinsDeviceOnlyAndNotSynchronizable(t *testing.T) {
-	if !vaultAddIsDeviceOnly("fixture-account") {
-		t.Fatal("generic password add omitted ThisDeviceOnly or synchronizable=false")
+func TestVaultStoredAttributesOnLegacySecItemPath(t *testing.T) {
+	for _, inject := range []bool{false, true} {
+		// The second case checks that the fake discards accessibility even when
+		// injected, matching Apple's legacy backend rather than the add dictionary.
+		got := vaultLegacyStoredAttributes("fixture-account", inject)
+		for bit, claim := range map[int]string{
+			1: "generic password", 2: "pairing service", 4: "retained ACL",
+			8: "password data", 16: "no accessibility class", 32: "no sync attribute",
+			64: "legacy backend attributes", 128: "add selects legacy non-sync storage without accessibility",
+		} {
+			if got&bit == 0 {
+				t.Errorf("inject=%t: stored item missing %s", inject, claim)
+			}
+		}
 	}
-	if vaultAddIsDeviceOnly("") {
-		t.Fatal("missing account looked like a protected add")
+	if vaultLegacyStoredAttributes("", false) != 0 {
+		t.Fatal("missing account looked like a stored item")
 	}
 }

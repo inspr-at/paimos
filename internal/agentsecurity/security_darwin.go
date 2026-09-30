@@ -13,7 +13,7 @@ int aeon_vault_delete(const char *);
 int aeon_enclave_create(const char *, void **, int *);
 int aeon_enclave_capability(void);
 int aeon_enclave_create_disposition(int);
-int aeon_vault_add_is_device_only(const char *);
+int aeon_vault_legacy_stored_attributes(const char *, int);
 void *aeon_enclave_sign_start(const char *, const void *, int, const char *);
 int aeon_enclave_sign_result(void *, void **, int *);
 void aeon_enclave_sign_close(void *);
@@ -32,20 +32,24 @@ import (
 // Referenced so the enclave build keeps these Keychain-free policy checks.
 var (
 	_ = enclaveCreateDisposition
-	_ = vaultAddIsDeviceOnly
+	_ = vaultLegacyStoredAttributes
 )
 
 func enclaveCreateDisposition(copyStatus int) int {
 	return int(C.aeon_enclave_create_disposition(C.int(copyStatus)))
 }
 
-func vaultAddIsDeviceOnly(account string) bool {
+func vaultLegacyStoredAttributes(account string, injectAccessibility bool) int {
+	var inject C.int
+	if injectAccessibility {
+		inject = 1
+	}
 	if account == "" {
-		return C.aeon_vault_add_is_device_only(nil) == 1
+		return int(C.aeon_vault_legacy_stored_attributes(nil, inject))
 	}
 	key := C.CString(account)
 	defer C.free(unsafe.Pointer(key))
-	return C.aeon_vault_add_is_device_only(key) == 1
+	return int(C.aeon_vault_legacy_stored_attributes(key, inject))
 }
 
 type keychainVault struct{}
