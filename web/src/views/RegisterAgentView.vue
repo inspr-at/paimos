@@ -11,12 +11,13 @@ import { harnessLabel } from '../lib/agentState'
 import { myPermissions, onAccessChange, refreshPermissions } from '../lib/authz'
 import { rememberSignInReturn } from '../lib/signInReturn'
 import { useSession } from '../stores/session'
+import { PairingFollow } from '../lib/pairingFollow'
 import {
   DEFAULT_REVIEW_CHOICE, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
   addHarnessTargetProblem, approvePairedAccounts, defaultSelectedAccountKeys, denyPairing, describeHarnessStatus, describeProgress,
   formatAllowanceMoment, formatVerification, getPairingComputer, getPairingGuide,
-  isAddHarness, lookupPairing, pairingLiveCopy, pairingPermissions, pairingStillLive,
-  pairingReadGeneration, peekPairingCode, planPoll, platformCaption, presentPublicGuide, subscribePairingEvents,
+  isAddHarness, lookupPairing, pairingLiveCopy, pairingPermissions,
+  pairingEventScope, pairingReadGeneration, peekPairingCode, platformCaption, presentPublicGuide, subscribePairingEvents,
   rememberPairingCode, setHarnessAccount, submitApproval, takePairingCode,
   chooseInstallMethod, installMethods, readPairingInstallMethod, writePairingInstallMethod,
   connectDisabledReason, denyDisabledReason, unsupportedVerification, verifiableAccountKeys, verificationWarning,
@@ -142,10 +143,11 @@ const verifyNote = computed(() => {
 })
 watch(verifyLocked, locked => { if (locked) verify.value = false })
 watch([verify, selected, current], () => { verificationChoice.value = false })
-let pollTimer = 0
-let pollStarted = 0
-let pollFailures = 0
-let refreshTurn = 0
+// Follows the approved computer: polling with backoff, and a read when the live stream names it.
+const follower = new PairingFollow({
+  onView: view => { current.value = view; computersRefresh.value += 1 },
+  onFailure: error => assignError(error, 'The computer status could not be refreshed.'),
+})
 let stopLive = () => {}
 
 watch(guide, value => {
@@ -165,7 +167,7 @@ const stopAccess = onAccessChange(change => { if (change === 'reset') clearSigne
 watch(() => session.requiresSignIn, ended => { if (ended) clearSignedInPreview() })
 
 onMounted(async () => {
-  stopLive = subscribePairingEvents(() => { void onPairingEvent() })
+  stopLive = subscribePairingEvents(() => pairingEventScope(current.value), () => follower.poke())
   window.addEventListener('online', onLine)
   window.addEventListener('offline', onLine)
   await loadGuide()
@@ -189,7 +191,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   stopAccess()
   stopLive()
-  if (pollTimer) window.clearTimeout(pollTimer)
+  follower.stop()
   window.removeEventListener('online', onLine)
   window.removeEventListener('offline', onLine)
 })
@@ -204,10 +206,8 @@ function clearSignedInPreview() {
   message.value = ''
   nextStep.value = ''
   busy.value = ''
-  pollStarted = 0
-  pollFailures = 0
+  follower.stop()
   permissionsReady.value = false
-  if (pollTimer) window.clearTimeout(pollTimer)
 }
 
 function onLine() { online.value = navigator.onLine }
@@ -259,7 +259,7 @@ async function lookup() {
     verify.value = verifiableHarnesses(found, selected.value).length > 0
     allowAgents.value = true
     approvalPending.value = false
-    armPoll(found)
+    follower.follow(found)
   } catch (error) {
     if (error instanceof PairingError && error.code === 'session_reset') return
     if (started !== pairingReadGeneration()) return
@@ -296,9 +296,7 @@ async function connect() {
     grantedKeys.value = keys
     current.value = approved
     // The daemon reports after this click. Follow it now; account approval must not hold the first read.
-    pollStarted = Date.now()
-    pollFailures = 0
-    armPoll(approved)
+    follower.follow(approved)
     computersRefresh.value += 1
     if (allowAgents.value) await approveAccounts(approved, keys)
     if (started !== pairingReadGeneration()) return
@@ -375,9 +373,7 @@ function resetCode() {
   approvalPending.value = false
   message.value = ''
   nextStep.value = ''
-  pollStarted = 0
-  pollFailures = 0
-  if (pollTimer) window.clearTimeout(pollTimer)
+  follower.stop()
 }
 
 function reviewAsNewComputer() {
@@ -432,51 +428,6 @@ function toggleHarness(harness: string, accounts: PairingView['requested_account
 function chooseAccount(harness: string, accountKey: string) {
   if (!current.value) return
   selected.value = setHarnessAccount(current.value.requested_accounts, selected.value, harness, accountKey || null)
-}
-
-function onPairingEvent() {
-  const computerId = current.value?.computer_id
-  if (!computerId) { computersRefresh.value += 1; return }
-  void refreshComputer(computerId)
-}
-
-function armPoll(pairing: PairingView) {
-  if (pollTimer) window.clearTimeout(pollTimer)
-  pollTimer = 0
-  if (!pairingStillLive(pairing) || !pairing.computer_id) return
-  if (!pollStarted) pollStarted = Date.now()
-  const plan = planPoll({ startedAt: pollStarted, now: Date.now(), intervalSeconds: pairing.interval_seconds, state: pairing.state, failures: pollFailures })
-  if (plan.action === 'stop') return
-  pollTimer = window.setTimeout(() => void refreshComputer(pairing.computer_id!), plan.delayMs)
-}
-
-async function refreshComputer(computerId: string) {
-  const turn = ++refreshTurn
-  const started = pairingReadGeneration()
-  try {
-    const pairing = await getPairingComputer(computerId)
-    if (turn !== refreshTurn || started !== pairingReadGeneration() || current.value?.computer_id !== computerId) return
-    pollFailures = 0
-    current.value = pairing
-    computersRefresh.value += 1
-    armPoll(pairing)
-  } catch (error) {
-    if (turn !== refreshTurn || started !== pairingReadGeneration()) return
-    if (error instanceof PairingError && error.code === 'session_reset') return
-    computersRefresh.value += 1
-    if (error instanceof PairingError && error.code === 'rate_limited') {
-      const plan = planPoll({ startedAt: pollStarted || Date.now(), now: Date.now(), rateLimited: true, retryAfterSeconds: error.retryAfterSeconds, state: current.value?.state })
-      if (plan.action === 'wait') pollTimer = window.setTimeout(() => void refreshComputer(computerId), plan.delayMs)
-      return
-    }
-    pollFailures += 1
-    const plan = planPoll({ startedAt: pollStarted || Date.now(), now: Date.now(), intervalSeconds: current.value?.interval_seconds, state: current.value?.state, failures: pollFailures })
-    if (plan.action === 'wait') {
-      pollTimer = window.setTimeout(() => void refreshComputer(computerId), plan.delayMs)
-      return
-    }
-    assignError(error, 'The computer status could not be refreshed.')
-  }
 }
 
 function harnessState(enrollment: PairingView['enrollments'][number]) {

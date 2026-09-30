@@ -797,11 +797,77 @@ export const PAIRING_LIVE_EVENTS = [
   'agent_pairing.verification_withdrawn',
 ] as const
 
-export function subscribePairingEvents(wake: () => void): () => void {
-  if (typeof EventSource === 'undefined') return () => {}
-  const stream = new EventSource('/api/events/stream')
-  for (const name of PAIRING_LIVE_EVENTS) stream.addEventListener(name, () => wake())
-  return () => stream.close()
+/** What the page follows: the events that name one of these belong to this pairing. */
+export interface PairingEventScope {
+  requestId: string | null
+  computerId: string | null
+  accountIds: readonly string[]
+}
+
+export function pairingEventScope(view: PairingView | null): PairingEventScope {
+  return {
+    requestId: view?.request_id || null,
+    computerId: view?.computer_id ?? null,
+    accountIds: view?.enrollments.map(item => item.account_id) ?? [],
+  }
+}
+
+/** Does this stream event name the pairing in scope? Events of other pairings, and anything unreadable, do not. */
+export function pairingEventMatches(data: string, scope: PairingEventScope): boolean {
+  let event: { after?: unknown }
+  try { event = JSON.parse(data) } catch { return false }
+  const after = event?.after
+  if (!after || typeof after !== 'object') return false
+  const named = after as { computer_id?: unknown; request_id?: unknown; account_id?: unknown; account_ids?: unknown }
+  if (scope.computerId && named.computer_id === scope.computerId) return true
+  if (scope.requestId && named.request_id === scope.requestId) return true
+  if (typeof named.account_id === 'string' && scope.accountIds.includes(named.account_id)) return true
+  return Array.isArray(named.account_ids) && named.account_ids.some(id => typeof id === 'string' && scope.accountIds.includes(id))
+}
+
+interface PairingSource {
+  onerror: ((this: EventSource, ev: Event) => unknown) | null
+  addEventListener(type: string, listener: (event: MessageEvent) => void): void
+  close(): void
+}
+
+export const PAIRING_EVENT_COALESCE_MS = 250
+
+/**
+ * Follow the tenant event stream in live mode (?after=latest): the page never
+ * replays the log, only what happens while it is open. An event wakes the
+ * caller only when it names the pairing in scope, and a burst of them wakes it
+ * once. After a gap the stream cannot bridge (resumed: false past the first
+ * connection) the caller is woken once to read again. Returns the unsubscribe.
+ */
+export function subscribePairingEvents(
+  scope: () => PairingEventScope,
+  wake: () => void,
+  open: (url: string) => PairingSource | null = url => typeof EventSource === 'undefined' ? null : new EventSource(url),
+): () => void {
+  const stream = open('/api/events/stream?after=latest')
+  if (!stream) return () => {}
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let closed = false
+  let connected = false
+  const soon = () => {
+    if (closed || timer) return
+    timer = setTimeout(() => { timer = undefined; if (!closed) wake() }, PAIRING_EVENT_COALESCE_MS)
+  }
+  stream.addEventListener('stream.ready', event => {
+    let ready: { resumed?: unknown }
+    try { ready = JSON.parse(event.data) } catch { return }
+    // The first connection starts at the newest event, with nothing to bridge.
+    if (connected && ready.resumed !== true) soon()
+    connected = true
+  })
+  for (const name of PAIRING_LIVE_EVENTS) stream.addEventListener(name, event => { if (pairingEventMatches(event.data, scope())) soon() })
+  return () => {
+    closed = true
+    if (timer) clearTimeout(timer)
+    timer = undefined
+    stream.close()
+  }
 }
 
 export interface PairingProgress {
@@ -1141,11 +1207,18 @@ export function describeComputerStatus(view: Pick<PairingView, 'computer_state' 
   return { stateLabel, cleanupLabel, processLabel, claimsProcessStopped, detail, next }
 }
 
-/** Keep reading until the daemon is connected and verification is no longer moving, or the request is closed. */
+/**
+ * Keep reading until the daemon is connected and verification is no longer
+ * moving, or the request is closed. A failed setup, or a failed, cancelled,
+ * expired or ownership-lost verification, is final whatever the connectivity
+ * says: nothing more will change by waiting.
+ */
 export function pairingStillLive(view: PairingView): boolean {
   if (!view.computer_id) return false
   const phase = describeProgress(view).phase
   if (phase === 'denied' || phase === 'expired' || phase === 'revoked') return false
+  if (view.setup_state === 'setup_failed') return false
+  if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED as readonly string[]).includes(item.verification_state))) return false
   const connected = describeComputerStatus(view).stateLabel === 'Connected'
   const moving = view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state))
   return !(connected && !moving)

@@ -929,7 +929,7 @@ paths:
       security: []
       requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingReconcileRequest"}}}}
       responses:
-        '200': {"description": "Pairing result; see state and cleanup fields. A change of setup state or harness report appends agent_pairing.reported on /events/stream (computer_id and setup_state only). An unchanged heartbeat does not.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '200': {"description": "Pairing result; see state and cleanup fields. A change of setup state or harness report appends agent_pairing.reported (computer_id and setup_state only) to /events and /events/stream. Only the person who approved the pairing reads it; other people, agent keys and other tenants do not. An unchanged heartbeat appends nothing.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
         '400': {description: Invalid or mismatched request}
         '403': {description: Person permission and same-origin approval required}
         '404': {description: Request or proof not found}

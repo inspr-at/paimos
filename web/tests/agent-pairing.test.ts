@@ -8,7 +8,7 @@ import {
   agentRouteKind, canonicalUserCode, clearPairingClientState, denyPairing,
   describeComputerStatus, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, describeProgress, harnessRecovery, disconnectComputer, disconnectConfirm, disconnectEnrollment,
   formatVerification, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
-  pairingLiveCopy, pairingPermissions, pairingStillLive, planApproval, planLookup, planPoll,
+  pairingEventMatches, pairingEventScope, pairingLiveCopy, pairingPermissions, pairingStillLive, planApproval, planLookup, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
   peekPairingCode, presentPublicGuide, publicGuideSections, rememberPairingCode, takePairingCode,
   chooseInstallMethod, homebrewPendingNote, installMethods, readPairingInstallMethod, writePairingInstallMethod,
@@ -429,6 +429,38 @@ test('a daemon connect reads as Connected while verification is still running', 
   const waiting = view({ state: 'approved', computer_id: COMPUTER, computer_state: 'connected', setup_state: 'approved', connectivity: 'unknown' })
   assert.equal(pairingLiveCopy(waiting).title, 'Setting up')
   assert.equal(pairingStillLive(waiting), true)
+})
+
+test('a failed setup and a failed or cancelled verification stop the read whatever the connectivity says', () => {
+  const base = { state: 'redeemed', computer_id: COMPUTER, computer_state: 'connected', setup_state: 'connected' } as const
+  for (const connectivity of ['online', 'offline', 'unknown'] as const) {
+    assert.equal(pairingStillLive(view({ ...base, setup_state: 'setup_failed', setup_error: 'installation_failed', connectivity })), false, `setup_failed ${connectivity}`)
+    for (const verification_state of ['failed', 'cancelled', 'expired', 'ownership_lost']) {
+      const final = view({ ...base, connectivity, enrollments: [enrollment({ verification_state })] })
+      assert.equal(pairingStillLive(final), false, `${verification_state} ${connectivity}`)
+    }
+  }
+  // Still moving, or not yet reported: keep reading.
+  assert.equal(pairingStillLive(view({ ...base, connectivity: 'offline', enrollments: [enrollment({ verification_state: 'running' })] })), true)
+  assert.equal(pairingStillLive(view({ ...base, setup_state: 'provisioning', connectivity: 'unknown', enrollments: [enrollment({ verification_state: 'queued' })] })), true)
+  // One failed harness ends the read even while another still runs.
+  assert.equal(pairingStillLive(view({ ...base, connectivity: 'online', enrollments: [enrollment({ verification_state: 'failed' }), enrollment({ account_id: ACCOUNT_2, verification_state: 'running' })] })), false)
+})
+
+test('a stream event belongs to the page only when it names the followed pairing', () => {
+  const followed = view({ state: 'redeemed', computer_id: COMPUTER, enrollments: [enrollment()] })
+  const scope = pairingEventScope(followed)
+  const event = (after: unknown) => JSON.stringify({ id: 9, type: 'agent_pairing.reported', after })
+  assert.equal(pairingEventMatches(event({ computer_id: COMPUTER, setup_state: 'connected' }), scope), true)
+  assert.equal(pairingEventMatches(event({ request_id: REQUEST }), scope), true)
+  assert.equal(pairingEventMatches(event({ account_id: ACCOUNT }), scope), true)
+  assert.equal(pairingEventMatches(event({ account_ids: ['99999999-9999-4999-8999-999999999999', ACCOUNT] }), scope), true)
+  assert.equal(pairingEventMatches(event({ computer_id: '99999999-9999-4999-8999-999999999999' }), scope), false)
+  assert.equal(pairingEventMatches(event({ request_id: '99999999-9999-4999-8999-999999999999' }), scope), false)
+  assert.equal(pairingEventMatches(event({ account_id: ACCOUNT_2 }), scope), false)
+  assert.equal(pairingEventMatches(event(null), scope), false)
+  assert.equal(pairingEventMatches('not json', scope), false)
+  assert.equal(pairingEventMatches(event({ computer_id: COMPUTER }), pairingEventScope(null)), false)
 })
 
 test('a response secret is refused and computer lists stay on the person projection', async () => {
