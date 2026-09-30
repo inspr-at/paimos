@@ -138,15 +138,18 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   let glimpseLaidOut = false
   // The product never publishes simulation stop. A canvas-centre click therefore
   // races the layout, and it misses whenever the bubble is not the centre.
-  // Test builds expose data-settled once the engine has stopped and every node's
-  // projected box has held still for two frames. Each box sits inside the
-  // force-graph container, takes the click, and lets pointermove through so
-  // hover still reaches the canvas (AEON-447).
+  // Test builds publish read-only canvas positions and data-settled. Settled
+  // means the engine has stopped, the projection has matched for two frames,
+  // and the 2D hit bitmap has been flushed for that frame. A restart, including
+  // a drag, clears it. The markers take no clicks (AEON-447).
   const testNodes = import.meta.env.MODE === 'test' && !glimpse
   let layoutRunning = false
   let nodeLayer: HTMLDivElement | undefined
   const nodeTargets = new Map<string, HTMLSpanElement>()
   let settleSig = '', settleFrames = 0, settlePaintSig = ''
+  // The 2D picker reads a shadow canvas that is not in the document. Test builds
+  // keep its context so a settle can paint the current frame itself.
+  let shadowCtx: CanvasRenderingContext2D | undefined
   // Header contrast runs Vite with `--mode test` and releases a fixed orbit.
   // Production builds fold that branch away, so the window hook is not emitted.
   type GlimpseTestPin = { pending(): boolean; pinned(): boolean; afterData(): void; afterLayout(): void; dispose(): void }
@@ -402,68 +405,114 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     }
     return { x: screen.x, y: screen.y, radius }
   }
-  // The box has to match on two frames. A later camera move changes the
-  // signature and clears data-settled.
-  function publishTestNodes() {
-    if (!testNodes || disposed) return
-    if (!nodeLayer) {
-      nodeLayer = document.createElement('div')
-      nodeLayer.className = 'graph-node-targets'
-      nodeLayer.setAttribute('aria-hidden', 'true')
-      // Inside the container, pointermove still reaches the canvas hover listener.
-      // On the host itself the box would sit above that listener and swallow it.
-      const parent = host.querySelector('.force-graph-container') ?? host
-      nodeLayer.dataset.passthrough = parent === host ? 'true' : 'false'
-      nodeLayer.style.cssText = 'position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden'
-      parent.append(nodeLayer)
-    }
-    const seen = new Set<string>()
+  function ensureTestLayer() {
+    if (nodeLayer) return
+    nodeLayer = document.createElement('div')
+    nodeLayer.className = 'graph-node-targets'
+    nodeLayer.setAttribute('aria-hidden', 'true')
+    nodeLayer.style.cssText = 'position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden'
+    const parent = host.querySelector('.force-graph-container') ?? host
+    parent.append(nodeLayer)
+  }
+  // Rounded so sub-pixel camera noise does not look like motion. The click
+  // still uses the unrounded canvas pixel on the marker.
+  function projectNodes() {
+    const points = new Map<string, { x: number; y: number }>()
     const parts: string[] = []
     let placed = nodes.length > 0
     for (const n of nodes) {
-      seen.add(n.id)
       if (n.x === undefined || n.y === undefined) { placed = false; continue }
       const screen = screenBox(n)
       if (!screen) { placed = false; continue }
-      let el = nodeTargets.get(n.id)
+      points.set(n.id, { x: screen.x, y: screen.y })
+      parts.push(`${n.id}:${Math.round(screen.x)}:${Math.round(screen.y)}:${Math.round(screen.radius)}`)
+    }
+    return { placed, points, sig: parts.join('|') }
+  }
+  function writeTestMarkers(points: Map<string, { x: number; y: number }>) {
+    ensureTestLayer()
+    const seen = new Set(points.keys())
+    for (const [id, screen] of points) {
+      let el = nodeTargets.get(id)
       if (!el) {
-        const target = document.createElement('span')
-        target.dataset.nodeId = n.id
-        target.style.position = 'absolute'
-        target.style.display = 'block'
-        const passthrough = nodeLayer.dataset.passthrough === 'true'
-        target.style.pointerEvents = passthrough ? 'none' : 'auto'
-        if (!passthrough) {
-          // pointerdown stops the canvas click. pointermove is left alone for hover.
-          target.addEventListener('pointerdown', event => event.stopPropagation())
-          target.addEventListener('click', event => {
-            const node = nodes.find(item => item.id === target.dataset.nodeId)
-            if (!node) return
-            event.preventDefault()
-            event.stopPropagation()
-            options.select(node)
-          })
-        }
-        nodeLayer.append(target)
-        nodeTargets.set(n.id, target)
-        el = target
+        el = document.createElement('span')
+        el.dataset.nodeId = id
+        el.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;pointer-events:none'
+        nodeLayer?.append(el)
+        nodeTargets.set(id, el)
       }
-      const size = Math.max(2, screen.radius * 2)
-      el.style.width = `${size}px`
-      el.style.height = `${size}px`
-      el.style.transform = `translate(${screen.x - size / 2}px, ${screen.y - size / 2}px)`
-      parts.push(`${n.id}:${Math.round(screen.x)}:${Math.round(screen.y)}:${Math.round(size)}`)
+      el.dataset.nodeX = screen.x.toFixed(2)
+      el.dataset.nodeY = screen.y.toFixed(2)
     }
     for (const [id, el] of nodeTargets) if (!seen.has(id)) { el.remove(); nodeTargets.delete(id) }
-    const sig = parts.join('|')
-    const frozen = !layoutRunning && placed && parts.length === nodes.length && sig !== ''
-    if (frozen && sig === settleSig) settleFrames++
+  }
+  // force-graph paints the hit bitmap at most every 800ms, and a same-value
+  // flush is a no-op once that timer is running. Paint this frame's index
+  // colours straight into the shadow canvas. 3D picking reads the meshes.
+  function flushHitBitmap() {
+    if (!g2 || disposed) return !g2
+    if (!shadowCtx) return false
+    const px = window.devicePixelRatio || 1
+    const origin = g2.graph2ScreenCoords(0, 0)
+    const scale = g2.zoom() || 1
+    if (!Number.isFinite(origin.x) || !Number.isFinite(origin.y) || !Number.isFinite(scale) || scale <= 0) return false
+    shadowCtx.setTransform(px, 0, 0, px, 0, 0)
+    shadowCtx.clearRect(0, 0, g2.width(), g2.height())
+    // Same zoom the library stores on the shadow context: device pixels from graph space.
+    shadowCtx.setTransform(px * scale, 0, 0, px * scale, px * origin.x, px * origin.y)
+    shadowCtx.globalAlpha = 1
+    shadowCtx.globalCompositeOperation = 'source-over'
+    let painted = 0
+    for (const n of nodes) {
+      const color = (n as LayoutNode & { __indexColor?: string }).__indexColor
+      if (!color || n.x === undefined || n.y === undefined) continue
+      shadowCtx.beginPath()
+      shadowCtx.fillStyle = color
+      shadowCtx.arc(n.x, n.y, graphRadius(n), 0, Math.PI * 2)
+      shadowCtx.fill()
+      painted++
+    }
+    // Settled only when the centre pixel is that node's index colour. A flushed
+    // timer that painted an older camera still misses the click.
+    return painted === nodes.length && nodes.length > 0 && bitmapMatches()
+  }
+  function bitmapMatches() {
+    if (!g2 || !shadowCtx) return false
+    const px = window.devicePixelRatio || 1
+    for (const n of nodes) {
+      const color = (n as LayoutNode & { __indexColor?: string }).__indexColor
+      const screen = g2.graph2ScreenCoords(n.x ?? 0, n.y ?? 0)
+      if (!color || screen.x <= 0 || screen.y <= 0) return false
+      const value = Number.parseInt(color.slice(1), 16)
+      let pixel: Uint8ClampedArray
+      try { pixel = shadowCtx.getImageData(screen.x * px, screen.y * px, 1, 1).data }
+      catch { return false }
+      if (pixel[0] !== (value >> 16 & 255) || pixel[1] !== (value >> 8 & 255) || pixel[2] !== (value & 255) || pixel[3] !== 255) return false
+    }
+    return true
+  }
+  function publishTestNodes() {
+    if (!testNodes || disposed) return
+    const measured = projectNodes()
+    writeTestMarkers(measured.points)
+    const frozen = !layoutRunning && measured.placed && measured.points.size === nodes.length && measured.sig !== ''
+    if (frozen && measured.sig === settleSig) settleFrames++
     else settleFrames = 0
-    settleSig = sig
+    settleSig = measured.sig
     const stable = frozen && settleFrames >= 1
     if (!stable) { host.dataset.settled = 'false'; settlePaintSig = ''; return }
-    if (settlePaintSig === sig && host.dataset.settled === 'true') return
-    settlePaintSig = sig
+    if (settlePaintSig === measured.sig && host.dataset.settled === 'true') return
+    if (!flushHitBitmap() || layoutRunning || disposed) { host.dataset.settled = 'false'; settlePaintSig = ''; return }
+    const after = projectNodes()
+    writeTestMarkers(after.points)
+    if (!after.placed || after.sig !== measured.sig || after.points.size !== nodes.length) {
+      host.dataset.settled = 'false'
+      settlePaintSig = ''
+      settleFrames = 0
+      settleSig = after.sig
+      return
+    }
+    settlePaintSig = after.sig
     host.dataset.settled = 'true'
   }
   function unsettle() {
@@ -474,7 +523,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     settlePaintSig = ''
     host.dataset.settled = 'false'
   }
-  function interact() { cameraTaken = true; resumeAt = performance.now() + 5000; clearTimeout(settleTimer) }
+  function interact() { cameraTaken = true; resumeAt = performance.now() + 5000; clearTimeout(settleTimer); cancelAnimationFrame(fitFrame) }
   function motion(value: boolean) {
     // The pinned pose ignores later play, occlusion and visibility.
     if (import.meta.env.MODE === 'test' && glimpsePin?.pinned()) {
@@ -536,7 +585,16 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   if (!g3) {
     const { default: ForceGraph } = await import('force-graph')
     if (options.signal.aborted) return null
-    g2 = new ForceGraph<LayoutNode, LayoutEdge>(host)
+    const proto = HTMLCanvasElement.prototype
+    const originalGetContext = proto.getContext
+    const readContext = originalGetContext as (this: HTMLCanvasElement, type: string, options?: CanvasRenderingContext2DSettings) => RenderingContext | null
+    if (testNodes) proto.getContext = function (this: HTMLCanvasElement, type: string, options?: CanvasRenderingContext2DSettings) {
+      const ctx = readContext.call(this, type, options)
+      if (type === '2d' && options?.willReadFrequently === true && ctx instanceof CanvasRenderingContext2D) shadowCtx = ctx
+      return ctx
+    } as typeof proto.getContext
+    try { g2 = new ForceGraph<LayoutNode, LayoutEdge>(host) }
+    finally { if (testNodes) proto.getContext = originalGetContext }
     g2.backgroundColor(sceneColor()).nodeCanvasObject((n, ctx, scale) => draw2D(n, ctx, scale)).nodePointerAreaPaint(pointerArea).linkWidth(l => glimpse ? .5 : l.width ?? (touches(l) ? 1 : .6))
   }
   if (!glimpse) host.append(labelLayer)
@@ -545,16 +603,51 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     .linkColor(linkColor).linkVisibility(glimpseLinkVisible).linkDirectionalParticles(particles).linkDirectionalParticleWidth(1.4).linkDirectionalParticleSpeed(.002)
     .linkDirectionalArrowLength(l => !glimpse && l.directed ? 3 : 0).linkDirectionalArrowRelPos(1).linkCurvature(l => glimpse ? 0 : l.curvature ?? 0)
     .warmupTicks(90).cooldownTicks(paused ? 0 : 140).d3VelocityDecay(.38)
-    .onNodeClick((node, event) => {
-      if (glimpse || performance.now() - openedAt < 100) return
-      lastPick = { node, x: event.clientX, y: event.clientY, at: performance.now() }; options.select(node)
-    }).onNodeHover(node => { if (glimpse) return; pointerNode = node; options.hover(node) })
+    .onNodeClick((node, event) => { deliverPick(node, event.clientX, event.clientY) }).onNodeHover(node => { if (glimpse) return; pointerNode = node; options.hover(node) })
     .onBackgroundClick(() => { if (!glimpse && performance.now() - openedAt >= 100) options.clear() })
-    .onNodeDrag(() => { if (!glimpse) interact() }).onNodeDragEnd(() => { if (!glimpse) interact() })
+    .onNodeDrag(() => { if (!glimpse) { unsettle(); interact() } }).onNodeDragEnd(() => { if (!glimpse) { unsettle(); interact() } })
+    .onEngineTick(() => { if (testNodes && !layoutRunning) unsettle() })
     .onEngineStop(() => { layoutRunning = false; if (fitOnSettle && !cameraTaken && !emphasis.selected) fit(); fitOnSettle = false })
-  const pointerDown = () => { dragging = true; interact() }
+  let clickDelivered = false, sawDown = false, pressX = 0, pressY = 0
+  // One delivery for the library click and the test sample. force-graph drops
+  // the click when a move arrives while the button is down (AEON-447).
+  function deliverPick(node: LayoutNode, x: number, y: number) {
+    if (clickDelivered) return
+    clickDelivered = true
+    if (glimpse || performance.now() - openedAt < 100) return
+    lastPick = { node, x, y, at: performance.now() }; options.select(node)
+  }
+  function nodeAt(clientX: number, clientY: number) {
+    if (!shadowCtx || !g2) return null
+    const surface = host.querySelector('canvas')
+    if (!(surface instanceof HTMLCanvasElement)) return null
+    const rect = surface.getBoundingClientRect()
+    const x = clientX - rect.left, y = clientY - rect.top
+    if (x <= 0 || y <= 0) return null
+    const px = window.devicePixelRatio || 1
+    let pixel: Uint8ClampedArray
+    try { pixel = shadowCtx.getImageData(x * px, y * px, 1, 1).data } catch { return null }
+    return nodes.find(n => {
+      const color = (n as LayoutNode & { __indexColor?: string }).__indexColor
+      if (!color) return false
+      const value = Number.parseInt(color.slice(1), 16)
+      return pixel[0] === (value >> 16 & 255) && pixel[1] === (value >> 8 & 255) && pixel[2] === (value & 255)
+    }) ?? null
+  }
+  const pointerDown = (event: PointerEvent) => { clickDelivered = false; sawDown = true; pressX = event.clientX; pressY = event.clientY; dragging = true; interact() }
   const pointerMove = () => { if (dragging) interact() }
-  const pointerUp = () => { if (dragging) { dragging = false; interact() } }
+  const pointerUp = (event: PointerEvent) => {
+    const down = sawDown
+    sawDown = false
+    if (dragging) { dragging = false; interact() }
+    if (!testNodes || event.type !== 'pointerup' || event.button !== 0) return
+    const surface = host.querySelector('.force-graph-container')
+    if (!(event.target instanceof Node) || !surface?.contains(event.target)) return
+    if (down && Math.hypot(event.clientX - pressX, event.clientY - pressY) > 5) return
+    if (!flushHitBitmap()) return
+    const node = nodeAt(event.clientX, event.clientY)
+    if (node) deliverPick(node, event.clientX, event.clientY)
+  }
   if (!glimpse) {
     host.addEventListener('pointerdown', pointerDown, { passive: true }); host.addEventListener('wheel', interact, { passive: true })
     window.addEventListener('pointermove', pointerMove, { passive: true }); window.addEventListener('pointerup', pointerUp); window.addEventListener('pointercancel', pointerUp)
@@ -848,10 +941,10 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       if (disposed) return
       disposed = true
       if (import.meta.env.MODE === 'test') glimpsePin?.dispose()
-      cancelAnimationFrame(frame); cancelAnimationFrame(paintFrame); cancelAnimationFrame(fitFrame); clearTimeout(settleTimer); clearTimeout(pickTimer); nodeTargets.clear()
+      cancelAnimationFrame(frame); cancelAnimationFrame(paintFrame); cancelAnimationFrame(fitFrame); clearTimeout(settleTimer); clearTimeout(pickTimer); nodeTargets.clear(); nodeLayer?.remove()
       host.removeEventListener('dblclick', doubleClick); host.removeEventListener('pointerdown', pointerDown); host.removeEventListener('wheel', interact)
       window.removeEventListener('pointermove', pointerMove); window.removeEventListener('pointerup', pointerUp); window.removeEventListener('pointercancel', pointerUp)
-      graph.onNodeHover(() => {}).onNodeClick(() => {}).onBackgroundClick(() => {}).onNodeDrag(() => {}).onNodeDragEnd(() => {}).onEngineStop(() => {}).pauseAnimation()
+      graph.onNodeHover(() => {}).onNodeClick(() => {}).onBackgroundClick(() => {}).onNodeDrag(() => {}).onNodeDragEnd(() => {}).onEngineTick(() => {}).onEngineStop(() => {}).pauseAnimation()
       const renderer = g3?.renderer()
       const gl = renderer?.getContext()
       const canvas = renderer?.domElement ?? null

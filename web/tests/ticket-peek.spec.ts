@@ -40,13 +40,24 @@ async function clickShown(target: Locator) {
 }
 
 // data-ready means the renderer has started, not that the simulation has stopped.
-// The product has no settle signal. Test builds set data-settled when the engine
-// has stopped and the node's box has held still for two frames. Click that box.
-// The canvas centre is empty once more than one bubble is on screen (AEON-447).
+// Test builds set data-settled after the engine has stopped, the projection has
+// held for two frames, and the hit bitmap has been flushed. The marker only
+// reports canvas CSS pixels. The click lands on the canvas (AEON-447).
 async function clickGraphNode(canvas: Locator, id: string, timeout: number) {
   const node = canvas.locator(`[data-node-id="${id}"]`)
-  await expect.poll(async () => (await canvas.getAttribute('data-settled')) === 'true' && await node.count() === 1, { timeout }).toBe(true)
-  await node.click()
+  await expect.poll(async () => {
+    const x = Number(await node.getAttribute('data-node-x'))
+    const y = Number(await node.getAttribute('data-node-y'))
+    return (await canvas.getAttribute('data-settled')) === 'true' && await node.count() === 1 && Number.isFinite(x) && Number.isFinite(y)
+  }, { timeout }).toBe(true)
+  const x = Number(await node.getAttribute('data-node-x'))
+  const y = Number(await node.getAttribute('data-node-y'))
+  const surface = canvas.locator('canvas').first()
+  const box = await surface.boundingBox()
+  if (!box || !Number.isFinite(x) || !Number.isFinite(y) || (await canvas.getAttribute('data-settled')) !== 'true') throw new Error(`graph node ${id} has no canvas position`)
+  // One click. The hold finishes the move before the press, so a late move is
+  // not still in flight when the button comes up (AEON-447).
+  await canvas.page().mouse.click(box.x + x, box.y + y, { delay: 30 })
 }
 
 async function openAgents(page: Page) {
@@ -82,16 +93,11 @@ test('cmd-click on an agents ticket keeps the real link', async ({ page }) => {
   await openAgents(page)
   const chip = page.locator('.sessions').getByRole('link', { name: 'PHAROS-11' }).first()
   await expect(chip).toBeVisible()
-  // A busy renderer sometimes focuses the link and drops the new tab. One more
-  // modified click is the same gesture; it must not open the peek (AEON-447).
-  let tab: Page | undefined
-  for (let attempt = 0; attempt < 2 && !tab; attempt++) {
-    if (await peek(page).count()) await page.keyboard.press('Escape')
-    const pending = page.context().waitForEvent('page', { timeout: 8_000 }).catch(() => undefined)
-    await chip.click({ modifiers: ['ControlOrMeta'], force: true })
-    tab = await pending
-  }
-  if (!tab) throw new Error('modified click did not open the ticket link')
+  await expect(peek(page)).toHaveCount(0)
+  // One modified click. It opens the ticket in a new tab and leaves the peek closed (AEON-447).
+  const pending = page.context().waitForEvent('page', { timeout: 15_000 })
+  await chip.click({ modifiers: ['ControlOrMeta'], force: true })
+  const tab = await pending
   await tab.waitForURL('**/p/PHAROS/PHAROS-11')
   await tab.close()
   await expect(peek(page)).toHaveCount(0)
