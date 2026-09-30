@@ -261,6 +261,11 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "releases":
+		// Build history is readable by agents. Presentation writes remain person-only.
+		if read && (len(parts) == 1 || len(parts) == 2 && parts[1] != "") {
+			return "releases.read", true
+		}
 	case "rules":
 		// Dedicated rules routes are an explicit agent allowlist. Publishing and
 		// restoring remain person-only regardless of any key's supplied scopes.
