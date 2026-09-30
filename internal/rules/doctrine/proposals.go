@@ -20,6 +20,8 @@ import (
 
 // Proposal holds references and workflow evidence, never proposed prose.
 type Proposal struct {
+	Draft            bool      `json:"draft,omitempty"`
+	Automatic        bool      `json:"automatic,omitempty"`
 	ID               string    `json:"id"`
 	SourceID         string    `json:"source_id"`
 	Repository       string    `json:"repository"`
@@ -134,6 +136,9 @@ func (m *Module) proposalAccess(p tenant.Principal) error {
 	return nil
 }
 func (m *Module) listProposals(r *http.Request, actor tenant.Principal) (any, error) {
+	if actor.Kind != tenant.Person || actor.KeyCreatorID != "" {
+		return nil, authz.ErrForbidden
+	}
 	out := struct {
 		Proposals []Proposal `json:"proposals"`
 	}{Proposals: []Proposal{}}
@@ -171,10 +176,22 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
+	return m.proposeChange(r.Context(), actor, in)
+}
+
+// proposeChange is shared by the person workflow and the bounded system job.
+// Both traverse the identical edit, private guard, main and authority checks.
+func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, in ProposalInput) (any, error) {
+	if err := m.proposalAccess(actor); err != nil {
+		return nil, err
+	}
+	if in.automatic && !m.analysisAuthorized(parent, actor) {
+		return nil, authz.ErrForbidden
+	}
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), fetchTimeout)
+	ctx, cancel := context.WithTimeout(parent, fetchTimeout)
 	defer cancel()
 	var source Source
 	var files []File
@@ -219,6 +236,19 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 		return nil, err
 	}
 	if existing != nil && existing.PRNumber > 0 {
+		if in.automatic {
+			// A PR may have landed before its label response or authority was
+			// lost. Reapplying one label is idempotent and completes that retry.
+			g, err := m.appClient(ctx, actor.TenantID, existing.Repository)
+			if err != nil {
+				return nil, err
+			}
+			defer g.revoke()
+			g.beforeWrite = func(ctx context.Context) error { return m.reauthorize(ctx, actor, "rules.write") }
+			if err := g.labelOutcomeProposal(ctx, *existing); err != nil {
+				return nil, err
+			}
+		}
 		return *existing, nil
 	}
 	changed, err := editRule(source, files, in)
@@ -270,7 +300,26 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	}
 	// Reserve before the first GitHub mutation; same input recovers failures.
 	err = m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
-		result, err := tx.Exec(ctx, `INSERT INTO doctrine_proposals(tenant_id,id,source_id,repository,path,rule_key,input_digest,base_commit,proposed_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(tenant_id,id) DO NOTHING`, actor.TenantID, in.RequestID, in.SourceID, source.Repository, in.Path, in.RuleKey, inputDigest(in), main, actor.ID)
+		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, actor.TenantID); err != nil {
+			return err
+		}
+		var duplicate bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM doctrine_findings WHERE source_id=$1 AND path=$2 AND rule_key=$3 AND status IN ('pending','draft') AND id<>$4::uuid)`, in.SourceID, in.Path, in.RuleKey, in.RequestID).Scan(&duplicate); err != nil {
+			return err
+		}
+		if duplicate {
+			return fail(409, "rule_proposal_open", "An outcome proposal already reserves this rule.")
+		}
+		if in.automatic {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM doctrine_proposals WHERE source_id=$1 AND path=$2 AND rule_key=$3 AND id<>$4::uuid AND COALESCE(data->>'state','proposed') NOT IN ('closed','merged','released','pinned'))`, in.SourceID, in.Path, in.RuleKey, in.RequestID).Scan(&duplicate); err != nil {
+				return err
+			}
+			if duplicate {
+				return fail(409, "rule_proposal_open", "A proposal for this rule is already open.")
+			}
+		}
+		data, _ := json.Marshal(map[string]any{"automatic": in.automatic, "draft": in.automatic})
+		result, err := tx.Exec(ctx, `INSERT INTO doctrine_proposals(tenant_id,id,source_id,repository,path,rule_key,input_digest,base_commit,proposed_by,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(tenant_id,id) DO NOTHING`, actor.TenantID, in.RequestID, in.SourceID, source.Repository, in.Path, in.RuleKey, inputDigest(in), main, actor.ID, data)
 		if err != nil || result.RowsAffected() == 0 {
 			return err
 		}
@@ -325,6 +374,7 @@ func (m *Module) observe(ctx context.Context, g *GitHub, p *Proposal) error {
 		p.GateReason = "The PR head or target changed; inspect it in git."
 		return nil
 	}
+	p.Draft = pr.Draft
 	if pr.Merged {
 		if !shaPattern.MatchString(pr.MergeCommit) {
 			return gitFail("the merge commit is invalid")

@@ -57,6 +57,7 @@ var credentialLeaks = regexp.MustCompile(credentialPattern())
 var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type ProposalInput struct {
+	automatic bool   // internal job only; cannot be supplied by an HTTP caller
 	RequestID string `json:"request_id"`
 	SourceID  string `json:"source_id"`
 	Path      string `json:"path"`
@@ -85,6 +86,9 @@ func (in ProposalInput) validate() error {
 
 func inputDigest(in ProposalInput) string {
 	b, _ := json.Marshal(in)
+	if in.automatic {
+		b = append(b, []byte("\nAEON-378-draft")...)
+	}
 	s := sha256.Sum256(b)
 	return hex.EncodeToString(s[:])
 }

@@ -268,7 +268,7 @@ test('propose a rule, recover a refused public edit, and approve a checked PR', 
 })
 
 
-test('an agent can propose but never sees the human merge action', async ({ page }) => {
+test('an agent can propose but never sees the person-only proposal list', async ({ page }) => {
   await setup(page, { manage: false, layer: { sources: [READY], proposals_enabled: true } })
   await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: 'agent-test', name: 'Builder', kind: 'agent', roles: ['admin'] }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
   await page.route('**/api/rules/doctrine/proposals', route => route.fulfill({ json: { proposals: [{ id: 'proposal', repository: READY.repository, pr_number: 12, pr_url: 'https://github.com/inspr-at/inspr-modules/pull/12', head_sha: '2'.repeat(40), state: 'in_review', gate_ready: true, pinned_machines: 0 }] } }))
@@ -276,7 +276,8 @@ test('an agent can propose but never sees the human merge action', async ({ page
   const doctrine = section(page)
   await doctrine.getByRole('button', { name: /^AGENTS-KERNEL\.md/ }).click()
   await expect(doctrine.getByRole('button', { name: 'Propose change' }).first()).toBeVisible()
-  await expect(doctrine.getByText('In review', { exact: true })).toBeVisible()
+  await expect(doctrine.getByText('In review', { exact: true })).toHaveCount(0)
+  await expect(doctrine.getByLabel('Proposals', { exact: true })).toHaveCount(0)
   await expect(doctrine.getByRole('button', { name: 'Approve & merge' })).toHaveCount(0)
 })
 

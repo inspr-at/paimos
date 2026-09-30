@@ -251,7 +251,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		},
 	})
 	go doctrineMod.EnsurePrivateGuards(ctx)
-	api := &httpapi.Server{
+	go doctrineMod.RunOutcomeAnalysis(ctx)
+		api := &httpapi.Server{
 		Pool:  pool,
 		Brand: &productBrand,
 		Web:   webFS,

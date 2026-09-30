@@ -19,6 +19,7 @@ const PublicRoute = "public"
 var RoutePermissions = map[string]string{
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/reparent":              "harness.write",
 	"GET /api/rules/doctrine/proposals":                                                 "rules.read",
+	"GET /api/rules/doctrine/analysis":                                                  "rules.read",
 	"POST /api/rules/doctrine/proposals":                                                "rules.write",
 	"POST /api/rules/doctrine/proposals/{proposalId}/refresh":                           "rules.write",
 	"POST /api/rules/doctrine/proposals/{proposalId}/approve":                           "rules.publish",

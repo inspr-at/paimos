@@ -42,6 +42,7 @@ type Options struct {
 	App             AppConfig
 	GuardKey        []byte
 	BinaryAllowlist map[string]string
+	Analysis AnalysisPolicy
 }
 
 // Module serves the doctrine layer.
@@ -52,6 +53,7 @@ type Module struct {
 	app             AppConfig
 	guardMaster     []byte
 	binaryAllowlist map[string]string
+	analysis AnalysisPolicy
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -61,7 +63,7 @@ func New(pool *pgxpool.Pool, opts Options) *Module {
 	if len(opts.GuardKey) >= 32 {
 		key = append([]byte(nil), opts.GuardKey...)
 	}
-	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client, app: opts.App, guardMaster: key, binaryAllowlist: maps.Clone(opts.BinaryAllowlist)}
+	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client, app: opts.App, guardMaster: key, binaryAllowlist: maps.Clone(opts.BinaryAllowlist), analysis: opts.Analysis.defaults()}
 }
 
 func (m *Module) guardKey(tenantID string) []byte {
@@ -77,6 +79,7 @@ const fetchTimeout = 45 * time.Second
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/rules/doctrine", m.handle(m.layer))
 	mux.HandleFunc("GET /api/rules/doctrine/proposals", m.handle(m.listProposals))
+	mux.HandleFunc("GET /api/rules/doctrine/analysis", m.handle(m.listFindings))
 	mux.HandleFunc("POST /api/rules/doctrine/proposals", m.handle(m.propose))
 	mux.HandleFunc("POST /api/rules/doctrine/proposals/{proposalId}/refresh", m.handle(m.refreshProposal))
 	mux.HandleFunc("POST /api/rules/doctrine/proposals/{proposalId}/approve", m.handle(m.approveProposal))
@@ -226,6 +229,9 @@ func view(s Source, files []File) SourceView {
 // ---------- Handlers ----------
 
 func (m *Module) tx(ctx context.Context, p tenant.Principal, permission string, fn func(pgx.Tx) error) error {
+	if m.analysisAuthorized(ctx, p) && (permission == "rules.read" || permission == "rules.write") {
+		return db.InTenant(db.AllProjects(ctx, "doctrine outcome analysis"), m.pool, p.TenantID, fn)
+	}
 	if permission == "settings.manage" && p.Kind != tenant.Person {
 		return authz.ErrForbidden
 	}

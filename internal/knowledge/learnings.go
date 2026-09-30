@@ -523,6 +523,13 @@ func listLearnings(ctx context.Context, tx pgx.Tx, tenantID, projectID string) (
 	return page, nil
 }
 
+// AnalysisLearnings gives the system outcome job the same current inbox as the
+// person view, including edits, deletions, nominations and decisions. Callers
+// must establish tenant and project visibility in the supplied transaction.
+func AnalysisLearnings(ctx context.Context, tx pgx.Tx, tenantID, projectID string) (LearningPage, error) {
+	return listLearnings(ctx, tx, tenantID, projectID)
+}
+
 func decidedKeys(ctx context.Context, tx pgx.Tx, tenantID string) (map[string]bool, error) {
 	rows, err := tx.Query(ctx, `SELECT source_key FROM method_learning_decisions WHERE tenant_id=$1`, tenantID)
 	if err != nil {
