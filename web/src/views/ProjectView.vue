@@ -12,6 +12,7 @@ import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
 import { useDensity, useHeaderGraph } from '../lib/prefs'
 import { orderOf, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
+import { COST_COLUMNS } from '../lib/planning'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../lib/savedViews'
 import { usePreference } from '../lib/preferences'
 import { toast } from '../lib/toast'
@@ -87,7 +88,9 @@ const tablePrefs = computed<ListPrefs | null>(() => {
   return { ...(listPrefs.value ?? {}), order: [...PINNED, ...cols, ...rest], visible: cols }
 })
 const tableLayout = ref<{ visible: ColumnId[]; customised: boolean }>({ visible: [], customised: false })
-const toolbarColumns = computed(() => ({ order: orderOf(tablePrefs.value), visible: tableLayout.value.visible, customised: tableLayout.value.customised }))
+// ≈ Cost and Paid are offered only to people who may see usage (the server sends no cost otherwise).
+const usageVisible = computed(() => can('harness.read', projectId.value ?? undefined))
+const toolbarColumns = computed(() => ({ order: orderOf(tablePrefs.value).filter(id => usageVisible.value || !(COST_COLUMNS as ColumnId[]).includes(id)), visible: tableLayout.value.visible, customised: tableLayout.value.customised }))
 // In a saved view the columns belong to the view (they become part of the list's
 // state); on the plain list they are the person's own for this project.
 function saveColumns(order: ColumnId[], visible: ColumnId[]) {

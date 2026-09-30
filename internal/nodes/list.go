@@ -64,6 +64,9 @@ type listItem struct {
 	// permission-projected label. Key identifies that session for the client
 	// without carrying a session id the caller cannot already see.
 	LeadWorker *leadWorker `json:"lead_worker,omitempty"`
+	// Planning is the resolved model, tokens and (with harness.read) cost of a
+	// ticket, task or epic (AEON-329). Absent when there is nothing to show.
+	Planning *planningView `json:"planning,omitempty"`
 }
 
 // leadWorker is one bound live session, chosen by the server.
@@ -129,9 +132,10 @@ type listQuery struct {
 	DateTo    *time.Time `json:"date_to,omitempty"`
 	// seen and the lead thresholds are filled by listNodes. They are not
 	// request input and stay out of the cursor fingerprint (unexported).
-	seen       assigneeSeen
-	leadYellow int
-	leadRed    int
+	seen          assigneeSeen
+	leadYellow    int
+	leadRed       int
+	planningOrder json.RawMessage
 }
 type listCursor struct {
 	Hash string `json:"hash"`
@@ -145,7 +149,7 @@ type treeQuery struct {
 	Cursor   string
 }
 
-var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true}
+var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
 var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true}
 
 // dateFieldKeys maps date_field to the fields key of dates kept in node fields.
@@ -453,6 +457,14 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			}
 			q.leadYellow, q.leadRed = yellow, red
 		}
+		var planning map[string]*planningView
+		if sortsByPlanningValue(q) {
+			var err error
+			planning, err = loadPlanningOrder(ctx, tx, &q)
+			if err != nil {
+				return dbErr("planning sort", err)
+			}
+		}
 		sql, args := listSQL(q, anchor)
 		rows, err := tx.Query(ctx, sql, args...)
 		if err != nil {
@@ -538,6 +550,15 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			}
 			for i := range page.Items {
 				page.Items[i].Estimate = estimates[page.Items[i].ID]
+			}
+			if planning == nil {
+				planning, err = loadPlanning(ctx, tx, page.Items, q.seen)
+				if err != nil {
+					return dbErr("list planning", err)
+				}
+			}
+			for i := range page.Items {
+				page.Items[i].Planning = planning[page.Items[i].ID]
 			}
 			views, err := eta.Load(ctx, tx, ids)
 			if err != nil {
@@ -1048,6 +1069,13 @@ func listOrder(q listQuery) string {
 			parts = append(parts, "est.hours IS NULL ASC", "est.hours "+dir)
 		case "progress":
 			parts = append(parts, "eta.progress_pct IS NULL ASC", "eta.progress_pct "+dir)
+		case "model":
+			// The role's rung on the ladder, then the area; rows without a role last.
+			parts = append(parts, "route.rank IS NULL ASC", "route.rank "+dir, "route.area IS NULL ASC", "route.area "+dir)
+		case "tokens", "list_cost", "paid":
+			// The same numeric value as the cell: spent, else estimated.
+			value := map[string]string{"tokens": "plan.tokens", "list_cost": "plan.list_usd", "paid": "plan.paid_usd"}[key.Name]
+			parts = append(parts, value+" IS NULL ASC", value+" "+dir)
 		default:
 			parts = append(parts, "f."+key.Name+" "+dir)
 		}
@@ -1091,11 +1119,29 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {
 		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta(f.id) eta ON true`
 	}
-	estimateJoin := ""
+	estimateJoin, planningCTE, planningJoin := "", "", ""
+	if sortsBy(q, "model") {
+		planningJoin = ` LEFT JOIN LATERAL (
+            SELECT CASE rn.fields->>'route_role' WHEN 'scout' THEN 0 WHEN 'mechanical' THEN 1 WHEN 'build' THEN 2 WHEN 'build-hard' THEN 3 WHEN 'review-gate' THEN 4 END AS rank,
+                nullif(rn.fields->>'area','') AS area
+            FROM nodes rn WHERE rn.tenant_id=current_setting('aeon.tenant_id')::uuid AND rn.id=f.id
+        ) route ON true`
+	}
+	if sortsByPlanningValue(q) {
+		values := q.planningOrder
+		if len(values) == 0 {
+			values = json.RawMessage(`[]`)
+		}
+		args = append(args, string(values))
+		planningCTE = fmt.Sprintf(`, planning_values AS MATERIALIZED (
+            SELECT * FROM jsonb_to_recordset($%d::jsonb) AS v(id uuid, tokens bigint, list_usd numeric, paid_usd numeric)
+        )`, len(args))
+		planningJoin += ` LEFT JOIN planning_values plan ON plan.id=f.id`
+	}
 	if sortsBy(q, "estimate") {
 		estimateJoin = ` LEFT JOIN LATERAL (` + estimateSQL(`SELECT n.id,n.fields,f.kind_slug FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=f.id`) + `) est ON true`
 	}
-	sql := prefix + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + `),
+	sql := prefix + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
     selected AS (SELECT * FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
     -- Count visible children for the page once instead of rescanning nodes per row.
     child_counts AS MATERIALIZED (

@@ -17,6 +17,8 @@ import StatusIcon from './StatusIcon.vue'
 import TicketWorkers from './TicketWorkers.vue'
 import QuickCreateRow, { type QuickDraft } from './QuickCreateRow.vue'
 import EtaCell from './EtaCell.vue'
+import PlanningCell from './PlanningCell.vue'
+import { PLANNING_COLUMNS, planningPresent, type PlanningColumn } from '../../lib/planning'
 import { etaFromTicket, progressAccessibleName, progressReportedAt } from '../../lib/eta'
 
 const NO_WORKERS: LiveAgent[] = []
@@ -93,7 +95,8 @@ const emit = defineEmits<{
   release: [row: ListItem, anchor: HTMLElement]
 }>()
 
-const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated', progress: 'c-progress', eta: 'c-eta' }
+const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated', progress: 'c-progress', eta: 'c-eta', model: 'c-model', tokens: 'c-tokens', list_cost: 'c-list-cost', paid: 'c-paid' }
+const isPlanning = (id: ColumnId): id is PlanningColumn => (PLANNING_COLUMNS as ColumnId[]).includes(id)
 // Columns follow the table's own width (the docked panel narrows it; wide screens
 // add columns) and the person's saved choice. Decided here rather than in CSS so
 // every colspan matches the visible columns.
@@ -119,6 +122,7 @@ const present = computed(() => {
     tags: rows.some(row => tagList(row.fields).length > 0),
     progress: listed.some(row => progressOf(row) != null),
     eta: listed.some(row => { const eta = etaFromTicket(row.eta); return !!eta?.ready || !!eta?.live }),
+    ...planningPresent(rows),
   }
 })
 const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -738,6 +742,7 @@ defineExpose({
                 </div>
               </td>
               <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" /></div></td>
+              <td v-else-if="isPlanning(column.id)" :class="column.cls"><div class="cell"><PlanningCell :column="column.id" :row="entry.row" /></div></td>
             </template>
           </tr>
         </template>
@@ -814,7 +819,7 @@ thead th:hover .col-resize::after { opacity: 1; }
 .ticket-row td { height: var(--row-h); padding: 0 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .ticket-row td:first-child { padding-left: 18px; }
 .cell { display: flex; align-items: center; gap: 8px; min-width: 0; height: calc(var(--row-h) - 1px); line-height: 18px; white-space: nowrap; }
-.c-updated .cell, .c-created .cell, .c-estimate .cell, .c-progress .cell, .c-eta .cell { justify-content: flex-end; }
+.c-updated .cell, .c-created .cell, .c-estimate .cell, .c-progress .cell, .c-eta .cell, .c-tokens .cell, .c-list-cost .cell, .c-paid .cell { justify-content: flex-end; }
 @media (hover: hover) { .ticket-row:hover td { background: var(--row-hover); } }
 .ticket-row.cursor td, .ticket-row.open td { background: var(--row-selected); }
 /* The ticket shown in the panel also carries a hairline ring in the row's own shape (no edge accents, rule 11). */
@@ -930,8 +935,8 @@ td.c-title { position: relative; overflow: hidden; }
 .progress-read.stale .bar > i { opacity: .45; }
 /* The percent lives in Progress once that column is on; ETA keeps the time. */
 .table-card:has(col.c-progress) .c-eta :deep(.pct) { display: none; }
-th.c-progress, th.c-eta, td.c-progress, td.c-eta { padding-left: 8px; padding-right: 8px; }
-th.c-progress .th-sort, th.c-eta .th-sort { letter-spacing: .08em; }
+th.c-progress, th.c-eta, td.c-progress, td.c-eta, th.c-tokens, td.c-tokens, th.c-list-cost, td.c-list-cost, th.c-paid, td.c-paid { padding-left: 8px; padding-right: 8px; }
+th.c-progress .th-sort, th.c-eta .th-sort, th.c-tokens .th-sort, th.c-list-cost .th-sort, th.c-paid .th-sort { letter-spacing: .08em; }
 .epic-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-2); font-size: 12.5px; }
 .epic-name { overflow: hidden; text-overflow: ellipsis; }
 .cost-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-2); font-size: 12.5px; }
