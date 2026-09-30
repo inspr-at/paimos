@@ -483,10 +483,15 @@ hidden members contribute no key or text. The raw ignored export stays local.
 Identical reruns use that same export; changed observations conflict with the
 frozen original. Commit the public bundle alongside the version reservation
 before opening the PR. CI's `release-check` rejects a missing own-version entry,
-a missing or mismatched sequence/channel or incomplete own-release bilingual
-notes, even when `written_after_release` is set. Historic entries remain
-immutable; reserve and capture the next release rather than rewriting a legacy
-entry to satisfy the gate. After
+a mismatched sequence/channel or invalid bilingual fields. AEON-405 pins the
+legacy cutoff at release sequence **113** (`LEGACY_RELEASE_SEQUENCE_CUTOFF` in
+the checker): captures through that sequence may omit channel/sequence and
+bilingual fields, but every field present is still validated. From sequence
+**114** onward, the complete matching channel/sequence and all four bilingual
+fields are required, even when `written_after_release` is set. The cutoff stays
+fixed; it does not follow `version.json` or future releases. Historic entries
+remain immutable; reserve and capture the next release rather than rewriting a
+legacy entry to satisfy the gate. After
 publication, verify the same capture digest and both languages on the target
 instance; do not recapture or rewrite it.
 

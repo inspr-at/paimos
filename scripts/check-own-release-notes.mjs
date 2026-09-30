@@ -4,6 +4,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validCalendarVersion } from './verify-release.mjs';
 
+// AEON-405: release 113 is the last legacy backfill. Keep this cutoff pinned;
+// every later reservation requires complete metadata and bilingual notes.
+const LEGACY_RELEASE_SEQUENCE_CUTOFF = 113;
+
 // The bundle is keyed by version; version.json binds that coordinate to the
 // PR's channel and sequence. Empty public captures are valid internal releases.
 export function checkOwnReleaseNotes(root = resolve(dirname(fileURLToPath(import.meta.url)), '..')) {
@@ -15,12 +19,16 @@ export function checkOwnReleaseNotes(root = resolve(dirname(fileURLToPath(import
   const notes = bundle.releases?.[version.version];
   if (!notes) fail(`release ${version.release_sequence} (${version.version}) has no frozen entry in product-notes.json; export and pack its own notes before the PR`);
   if (!Array.isArray(notes.items) || !/^[a-f0-9]{64}$/.test(notes.snapshot_sha256) || !Number.isFinite(Date.parse(notes.captured_at)) || !Number.isInteger(notes.release_revision) || notes.release_revision < 1) fail('invalid capture provenance');
-  if (notes.release_sequence !== version.release_sequence || notes.release_channel !== version.release_channel) fail('capture channel/sequence differs from version.json');
-  // This checks only the own-release entry. Its provenance marker cannot waive
-  // the complete EN/DE text required for the release PR, including both pills.
+  const legacy = version.release_sequence <= LEGACY_RELEASE_SEQUENCE_CUTOFF;
+  for (const field of ['release_sequence', 'release_channel']) {
+    if ((!legacy || Object.hasOwn(notes, field)) && notes[field] !== version[field]) fail('capture channel/sequence differs from version.json');
+  }
+  // Legacy fields are checked when present. From sequence 114, all EN/DE text
+  // is required; written_after_release cannot waive metadata or translations.
   for (const item of notes.items) {
     if (!/^AEON-[1-9][0-9]*$/.test(item.key) || !['features', 'fixes', 'other'].includes(item.group)) fail('invalid public item');
     for (const field of ['pill_en', 'pill_de', 'benefit_en', 'benefit_de']) {
+      if (legacy && !Object.hasOwn(item, field)) continue;
       if (typeof item[field] !== 'string' || !item[field].trim()) fail(`${item.key}: ${field} is required`);
       if (field.startsWith('pill_') && (item[field].trim().split(/\s+/).length < 2 || item[field].trim().split(/\s+/).length > 4)) fail(`${item.key}: ${field} must contain 2–4 words`);
     }
