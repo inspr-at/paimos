@@ -91,11 +91,10 @@ async function removeAccount(row: AccountRow) {
   })
   if (!ok) return
   const rows = [...(card.value?.querySelectorAll<HTMLElement>('.acct-remove') ?? [])]
-  const index = rows.findIndex(el => el.dataset.account === row.id)
+  const index = rows.findIndex(el => el.closest<HTMLElement>('.acct')?.dataset.account === row.id)
   removing.value = row.id
   try {
     await agents.removeAccount(row)
-    void capacity.load()
     toast(`Removed ${row.name}. Its runs and history stay.`)
     // A disabled button takes no focus: settle busy before moving focus.
     removing.value = ''
@@ -188,7 +187,7 @@ async function useHours(row: AccountRow) {
   if (!mayManage.value || !hours || !row.schedule) return
   const next = clone(row.schedule)
   next.week = next.week.map(d => d.on ? { ...d, start: hours.start, end: hours.end } : d)
-  await run(async () => { await putSchedule({ scope: 'account', account_id: row.id, schedule: next }); await capacity.load() }, `Saved ${row.name}'s work hours.`)
+  await run(async () => { await putSchedule({ scope: 'account', account_id: row.id, schedule: next }); await agents.afterWrite() }, `Saved ${row.name}'s work hours.`)
 }
 async function saveKeep(draft: KeepDraft) {
   saving.value = true
@@ -429,7 +428,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
           <span class="resets" :data-tip="row.primary ? whenFull(row.primary.reading.resets_at) : undefined">{{ row.primary ? `resets ${when(row.primary.reading.resets_at, now)}` : '' }}</span>
           <span class="source" :title="row.sharedQuotaName ? undefined : sourceLine(row, now)">{{ row.sharedQuotaName ? '' : sourceLine(row, now) }}</span>
           <button
-            v-if="mayManage" type="button" class="icon-btn sm flat acct-remove" :data-account="row.id" :disabled="!!removing"
+            v-if="mayManage" type="button" class="icon-btn sm flat acct-remove" :disabled="!!removing"
             :aria-label="`Remove ${row.name}`" data-tip="Remove" @click="removeAccount(row)"
           ><AppIcon name="trash" :size="15" /></button>
           <CapacityLearning class="row-learning" :learning="row.learning" :host="row.host" :now="now" :may-manage="mayManage" :saving="busy" @hours="useHours(row)" @away="openEditor('keep', $event)" />

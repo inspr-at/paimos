@@ -34,6 +34,9 @@ export const useCapacity = defineStore('capacity', () => {
   async function load() {
     await Promise.all([capacityRead.refresh(), schedulesRead.refresh(), computersRead.refresh()])
   }
+  const invalidate = () => { capacityRead.invalidate(); schedulesRead.invalidate(); computersRead.invalidate() }
+  // Every write on /agents drops these reads too and reads them again (AEON-402).
+  agents.onWrite({ invalidate, refresh: load })
 
   const computerOf = computed(() => {
     const out = new Map<string, PairingView>()
@@ -111,7 +114,7 @@ export const useCapacity = defineStore('capacity', () => {
       if (confirmsSave(fresh, body)) return
       throw new Error('Not saved: the connection dropped before the server took it. Try again.')
     } finally {
-      await Promise.all([schedulesRead.refresh(), capacityRead.refresh()])
+      await agents.afterWrite()
     }
   }
   async function setPreset(days: 5 | 6 | 7) {
@@ -138,7 +141,7 @@ export const useCapacity = defineStore('capacity', () => {
       if (!value && carrier && !own) await write(null)
       else await write({ ...clone(shape), override: value, ...(value === 'hold' && until ? { override_until: until } : {}) })
     } finally {
-      await Promise.all([schedulesRead.refresh(), capacityRead.refresh()])
+      await agents.afterWrite()
     }
   }
   /**
@@ -164,7 +167,7 @@ export const useCapacity = defineStore('capacity', () => {
         await putSchedule({ scope: 'pool', pool: pool as Pool, schedule: next })
       }
     } finally {
-      await Promise.all([schedulesRead.refresh(), capacityRead.refresh()])
+      await agents.afterWrite()
     }
   }
   /** The plan card's answer: keep Auto, or turn the reserve off. */
@@ -178,6 +181,6 @@ export const useCapacity = defineStore('capacity', () => {
   return {
     state, loaded, stale, load, inputs, rows, byAccount, computers: computersRead.data, computersLoaded: computed(() => computersRead.status.value.updatedAt !== null), refreshCapacity: capacityRead.refresh, pools, ready, signins, schedule, timezone, saveSchedule, setPreset, setNights, setPoolOverride, gauge, setGauge,
     schedulesLoaded, away, reserveConfirmed, hasUserSchedule, poolReserves, saveKeep, confirmReserve, endAway,
-    invalidate: () => { capacityRead.invalidate(); schedulesRead.invalidate(); computersRead.invalidate() },
+    invalidate,
   }
 })

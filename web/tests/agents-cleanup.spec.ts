@@ -73,6 +73,8 @@ async function setup(page: Page, options: { folded?: boolean; manage?: boolean }
       posts.push({ path, method })
       const index = list.findIndex(c => c.computer_id === remove[1])
       const [gone] = list.splice(index, 1)
+      // The server archives its account bindings with it: they leave Accounts.
+      for (const e of gone.enrollments) { const at = data.accounts.findIndex(a => a.id === e.account_id); if (at !== -1) data.accounts.splice(at, 1) }
       return route.fulfill({ json: { ...gone, archived_at: new Date(NOW).toISOString() } })
     }
     return route.fallback()
@@ -83,7 +85,24 @@ async function setup(page: Page, options: { folded?: boolean; manage?: boolean }
     const account = path.split('/')[3]
     const index = data.accounts.findIndex(a => a.id === account)
     const [gone] = data.accounts.splice(index, 1)
+    // The server cancels the queued runs meant for it in the same transaction.
+    for (const run of data.runs) if (run.status === 'queued' && (run.account_id === account || (run as { requested_account_id?: string }).requested_account_id === account)) Object.assign(run, { status: 'cancelled' })
     return route.fulfill({ json: { ...gone, state: 'unavailable' } })
+  })
+  // A test may hold the next GET of these lists: it answers later with what the
+  // server had when it was asked, after a write has changed it.
+  const holdGets = new Set<string>()
+  const heldGets: (() => void)[] = []
+  const snapshot: Record<string, () => unknown> = {
+    '/api/runs': () => ({ items: data.runs, next_cursor: null }),
+    '/api/agent-accounts': () => data.accounts,
+    '/api/agent-accounts/capacity': () => capacity.handle('/api/agent-accounts/capacity', 'GET', null)?.json,
+  }
+  await page.route(url => url.pathname in snapshot, route => {
+    const url = new URL(route.request().url())
+    if (route.request().method() !== 'GET' || url.searchParams.has('agent') || !holdGets.delete(url.pathname)) return route.fallback()
+    const json = JSON.parse(JSON.stringify(snapshot[url.pathname]()))
+    heldGets.push(() => void route.fulfill({ json }))
   })
   await page.route('**/api/runs/*/cancel', route => {
     posts.push({ path: new URL(route.request().url()).pathname, method: route.request().method() })
@@ -96,7 +115,7 @@ async function setup(page: Page, options: { folded?: boolean; manage?: boolean }
     answer.workspace.permissions = [...answer.workspace.permissions, 'account.read', ...(options.manage === false ? [] : ['account.manage']), 'run.create', 'run.read', 'models.read', 'work_orders.read', 'work_orders.write']
     return route.fulfill({ json: answer })
   })
-  return { data, calls, posts, work, hold }
+  return { data, calls, posts, work, hold, list, holdGets, heldGets }
 }
 async function open(page: Page) {
   await page.goto('/agents')
@@ -166,6 +185,52 @@ test('a list read that started before Remove does not bring the computer back', 
   await page.waitForTimeout(300)
   await expect(region.locator('.revoked-list li')).toHaveCount(2)
   await expect(region.getByRole('button', { name: 'Refresh computers' })).toBeEnabled()
+})
+
+// The page's poll holds the shared list reads across a write; the fresh read after
+// the write must win and the old answers, released late, must change nothing.
+async function pollHeldAcross(page: Page, holdGets: Set<string>, heldGets: (() => void)[], paths: string[]) {
+  for (const path of paths) holdGets.add(path)
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
+  await expect.poll(() => heldGets.length).toBe(paths.length)
+}
+
+test('a runs read that started before account Remove does not bring its cancelled run back', async ({ page }) => {
+  const { holdGets, heldGets } = await setup(page)
+  await open(page)
+  const item = page.getByRole('region', { name: 'Runs awaiting a session' }).locator('li').filter({ hasText: 'Add an Oracle Cloud connector' })
+  await expect(item).toHaveCount(1)
+  await pollHeldAcross(page, holdGets, heldGets, ['/api/runs', '/api/agent-accounts', '/api/agent-accounts/capacity'])
+  const row = page.locator(`.acct[data-account="${ACCOUNTS.claude}"]`)
+  await row.getByRole('button', { name: /^Remove / }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove account' }).click()
+  await expect(row).toHaveCount(0)
+  // The fresh read after Remove shows the queued run cancelled.
+  await expect(item).toHaveCount(0)
+  for (const release of heldGets.splice(0)) release()
+  await page.waitForTimeout(300)
+  await expect(item).toHaveCount(0)
+  await expect(row).toHaveCount(0)
+})
+
+test('account and capacity reads that started before computer Remove do not bring its account back', async ({ page }) => {
+  const { list, holdGets, heldGets } = await setup(page)
+  // The first revoked mbp2607 still carries the Spare binding in this case.
+  list[1]!.enrollments[0]!.account_id = ACCOUNTS.spare
+  await open(page)
+  const row = page.locator(`.acct[data-account="${ACCOUNTS.spare}"]`)
+  await expect(row).toHaveCount(1)
+  const region = computersRegion(page)
+  await region.getByRole('button', { name: 'Revoked (3)' }).click()
+  await pollHeldAcross(page, holdGets, heldGets, ['/api/agent-accounts', '/api/agent-accounts/capacity'])
+  await region.getByRole('button', { name: 'Remove mbp2607' }).first().click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove', exact: true }).click()
+  await expect(region.locator('.revoked-list li')).toHaveCount(2)
+  await expect(row).toHaveCount(0)
+  for (const release of heldGets.splice(0)) release()
+  await page.waitForTimeout(300)
+  await expect(row).toHaveCount(0)
+  await expect(region.locator('.revoked-list li')).toHaveCount(2)
 })
 
 test('every account row has a person-only Remove that names what goes away', async ({ page }) => {

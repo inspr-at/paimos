@@ -53,6 +53,7 @@ async function move(run: AgentRun, body: { account_id?: string; group_id?: strin
   error.value = ''
   try {
     await setRunTarget(run.id, body)
+    void agents.afterWrite()
     await agents.refreshAgentRuns(run.agent_principal_id)
   } catch (e) { error.value = e instanceof Error ? e.message : 'The run could not be moved.' }
   finally { busy.value = '' }
@@ -60,7 +61,7 @@ async function move(run: AgentRun, body: { account_id?: string; group_id?: strin
 async function runNow(run: AgentRun) {
   if (busy.value) return
   busy.value = run.id; error.value = ''
-  try { agents.recordRun(await runNowOnce(run.id)) }
+  try { const started = await runNowOnce(run.id); void agents.afterWrite(() => agents.recordRun(started)) }
   catch (e) { error.value = e instanceof Error ? e.message : 'The run could not be updated.' }
   finally { busy.value = '' }
 }

@@ -101,7 +101,7 @@ export const useAgents = defineStore('agents', () => {
     for (const item of items) if (item.to && !names[item.recipient_principal_id]) { names[item.recipient_principal_id] = item.to; changed = true }
     if (changed) addresses.value = names
   }
-  // Bumped by every accepted run write; a per-agent read started before one is dropped.
+  // Bumped by every accepted write; a per-agent read started before one is dropped.
   let runWrites = 0
   function mergeRuns(list: AgentRun[]) {
     if (list.length) runs.value = { ...runs.value, ...Object.fromEntries(list.map(run => [run.id, run])) }
@@ -118,9 +118,11 @@ export const useAgents = defineStore('agents', () => {
   // The newest runs cover the rows' account, model and telemetry in one read.
   const refreshRuns = runsRead.refresh
   // Held action requests still waiting on a person, and message addresses for names.
+  let messagingTurn = 0
   async function refreshMessaging(force = false) {
     if (!force && Date.now() - messagingAt < 30_000) return
     messagingAt = Date.now()
+    const turn = ++messagingTurn
     const ids = sessionProjects()
     if (!ids.length) { pendingHeld.value = {}; if (messagingState.value === 'idle') messagingState.value = 'ready'; return }
     const held: Record<string, ProjectMessage[]> = {}
@@ -133,6 +135,7 @@ export const useAgents = defineStore('agents', () => {
         for (const target of targets) if (target.enabled && target.role !== 'simple_fallback') names[target.principal_id] = target.address
       } catch (e) { failure ??= e }
     })
+    if (turn !== messagingTurn) return
     if (failure && !Object.keys(held).length) { messagingState.value = availability(failure); return }
     messagingState.value = 'ready'
     pendingHeld.value = held
@@ -292,34 +295,63 @@ export const useAgents = defineStore('agents', () => {
     .slice().sort((a, b) => a.sent_event_id - b.sent_event_id)
   const addressOf = (principalId: string) => addresses.value[principalId] ?? ''
 
-  // An accepted removal wins over any list or ticket read already in flight.
+  // ---------- One rule for every write (AEON-402) ----------
+  // A write on /agents can change what any of its reads return: Remove account
+  // cancels runs, Remove computer takes account bindings along. So an accepted
+  // write drops every read already in flight, here and in the stores and lists
+  // that registered with onWrite, applies its own result, then reads each once more.
+  interface WriteReader { invalidate: () => void; refresh: () => Promise<unknown> }
+  const writeReaders = new Set<WriteReader>()
+  function onWrite(reader: WriteReader) {
+    writeReaders.add(reader)
+    return () => { writeReaders.delete(reader) }
+  }
+  function invalidatePolls() { sessionsRead.invalidate(); approvalsRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate() }
+  let rereadAfterWrite: Promise<void> | undefined
+  function afterWrite(apply?: () => void): Promise<void> {
+    invalidatePolls()
+    appliedSessionRead = ++sessionReadOrder
+    runWrites++
+    messagingTurn++
+    for (const reader of writeReaders) reader.invalidate()
+    apply?.()
+    // Writes in one burst (a bulk removal) share one re-read.
+    rereadAfterWrite ??= new Promise<void>(resolve => setTimeout(resolve)).then(async () => {
+      rereadAfterWrite = undefined
+      await Promise.allSettled([refreshSessions(), refreshApprovals(), refreshAccounts(), refreshModels(), refreshRuns(), refreshMessaging(true), ...[...writeReaders].map(reader => reader.refresh())])
+      now.value = Math.max(now.value, Date.now())
+    })
+    return rereadAfterWrite
+  }
+
   // Preserve summaries locally because the mutation response is a bare session.
   function recordRemoval(removed: HarnessSession) {
-    sessionsRead.invalidate()
-    appliedSessionRead = ++sessionReadOrder
-    const known = sessions.value.some(s => s.id === removed.id)
-    sessions.value = known ? sessions.value.map(s => s.id === removed.id ? { ...s, ...removed } : s) : [...sessions.value, removed]
-    historySessions.value = historySessions.value.map(s => s.id === removed.id ? { ...s, ...removed } : s)
+    void afterWrite(() => {
+      const known = sessions.value.some(s => s.id === removed.id)
+      sessions.value = known ? sessions.value.map(s => s.id === removed.id ? { ...s, ...removed } : s) : [...sessions.value, removed]
+      historySessions.value = historySessions.value.map(s => s.id === removed.id ? { ...s, ...removed } : s)
+    })
   }
 
   // ---------- Writes ----------
   async function decide(approval: Approval, decision: 'approved' | 'denied', reason: string) {
     const updated = await decideApproval(approval.id, decision, reason)
-    approvals.value = approvals.value.map(a => a.id === approval.id ? { ...a, ...updated, decision } : a)
+    void afterWrite(() => { approvals.value = approvals.value.map(a => a.id === approval.id ? { ...a, ...updated, decision } : a) })
   }
   async function revoke(approval: Approval) {
     await revokeApproval(approval.id)
+    void afterWrite()
   }
   // Resolving records a person's answer; the held message itself is never released.
   async function resolve(request: HeldRequest, decision: 'resolved' | 'dismissed', note: string) {
     await resolveMessage(request.projectId, request.id, decision, note)
-    pendingHeld.value = { ...pendingHeld.value, [request.projectId]: (pendingHeld.value[request.projectId] ?? []).filter(m => m.id !== request.id) }
+    void afterWrite(() => { pendingHeld.value = { ...pendingHeld.value, [request.projectId]: (pendingHeld.value[request.projectId] ?? []).filter(m => m.id !== request.id) } })
   }
   async function control(view: SessionView, kind: SessionControl['kind']) {
     const { session } = view
     // managed_control_v1 sessions refuse the legacy route; use the ownership-aware one.
     const issued = managedControlSession(session) ? await requestManagedControl(session, kind) : await requestControl(session.project_id, session.id, kind)
-    controls.value = { ...controls.value, [session.id]: issued }
+    void afterWrite(() => { controls.value = { ...controls.value, [session.id]: issued } })
     void follow(session, issued, view.name)
     return issued
   }
@@ -346,23 +378,18 @@ export const useAgents = defineStore('agents', () => {
     await sendMessage(session.project_id, { to, body, recipient_session_id: session.id, idempotency_key: crypto.randomUUID(), expects_reply: false, is_action_request: false, delivery_level: level, ...(replyTo ? { reply_to: replyTo } : {}) })
     await refreshThread(session.project_id, session.id)
   }
-  // An accepted write wins over any list read already in flight (AEON-402).
   async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
     const updated = await setAccountState(account.id, state)
-    accountsRead.invalidate()
-    accounts.value = accounts.value.map(a => a.id === account.id ? { ...a, ...updated } : a)
+    void afterWrite(() => { accounts.value = accounts.value.map(a => a.id === account.id ? { ...a, ...updated } : a) })
   }
   // Remove leaves the list at once; its runs and history stay on the server (AEON-402).
   async function removeAccount(account: Pick<AgentAccount, 'id'>) {
     await archiveAccount(account.id)
-    accountsRead.invalidate()
-    accounts.value = accounts.value.filter(a => a.id !== account.id)
+    void afterWrite(() => { accounts.value = accounts.value.filter(a => a.id !== account.id) })
   }
   async function cancelQueuedRun(run: Pick<AgentRun, 'id'>) {
     const cancelled = await cancelRun(run.id)
-    runsRead.invalidate()
-    runWrites++
-    mergeRuns([cancelled])
+    void afterWrite(() => mergeRuns([cancelled]))
   }
   function tick() { now.value = Math.max(now.value, Date.now()) }
   // Bumped by delivery events (AEON-280); an open chat re-reads its message status.
@@ -374,7 +401,7 @@ export const useAgents = defineStore('agents', () => {
     loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordRemoval, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshAccounts, refreshSessions, refreshThread, refreshAgentRuns, tick, deliveryPulse, deliveryChanged,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount, removeAccount, cancelQueuedRun,
-    invalidatePolls: () => { sessionsRead.invalidate(); approvalsRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate() },
+    invalidatePolls, afterWrite, onWrite,
     recordRun: (run: AgentRun) => mergeRuns([run]),
   }
 })

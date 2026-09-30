@@ -13,10 +13,12 @@ import { brand } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
 import { usePoller } from '../../lib/usePolledData'
+import { useAgents } from '../../stores/agents'
 import HarnessMark from './HarnessMark.vue'
 
 const props = defineProps<{ permissions: PairingPermissions; compactEmpty?: boolean; embedded?: boolean }>()
-const emit = defineEmits<{ removed: [computer: PairingView]; loaded: [computers: PairingView[]] }>()
+const emit = defineEmits<{ loaded: [computers: PairingView[]] }>()
+const agents = useAgents()
 
 const computers = ref<PairingView[]>([])
 const state = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -82,10 +84,11 @@ let loadTurn = 0
 watch(() => props.permissions.canListComputers, can => { if (can) void load(); else dropSignedInList() }, { immediate: true })
 const stopAccess = onAccessChange(change => { if (change === 'reset') dropSignedInList() })
 const poller = usePoller(() => load(), 20_000, { enabled: () => props.permissions.canListComputers })
+// Every write on /agents drops this list's read in flight and reads it again (AEON-402).
+const stopWrites = agents.onWrite({ invalidate: supersedeLoads, refresh: load })
 onMounted(() => poller.start())
-onBeforeUnmount(() => { stopAccess(); poller.stop() })
+onBeforeUnmount(() => { stopAccess(); stopWrites(); poller.stop() })
 
-// An accepted write wins over any list read already in flight (AEON-402).
 function supersedeLoads() {
   loadTurn += 1
   refreshing.value = false
@@ -190,8 +193,7 @@ async function commit(mode: DisconnectMode) {
       ? await disconnectEnrollment(fresh, request.accountId, mode, props.permissions)
       : await disconnectComputer(fresh, mode, props.permissions)
     if (started !== pairingReadGeneration()) return
-    supersedeLoads()
-    replace(next)
+    void agents.afterWrite(() => replace(next))
     closeDialog()
   } catch (error) {
     if (started !== pairingReadGeneration()) return
@@ -225,10 +227,9 @@ async function remove(computer: PairingView) {
   try {
     await removeComputer(computer, props.permissions)
     if (started !== pairingReadGeneration()) return
-    supersedeLoads()
-    computers.value = computers.value.filter(item => keyOf(item) !== key)
+    // Its account bindings leave Accounts and capacity too: the shared stores re-read.
+    void agents.afterWrite(() => { computers.value = computers.value.filter(item => keyOf(item) !== key) })
     toast(`Removed ${computer.computer_name}. Its history stays in the audit log.`)
-    emit('removed', computer)
     // A disabled button takes no focus: settle busy before moving focus.
     busy.value = ''
     await nextTick()

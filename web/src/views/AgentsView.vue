@@ -82,9 +82,7 @@ function toggleSetup() { layoutPref.save({ ...(layoutPref.value.value ?? {}), se
 const liveComputers = computed(() => capacity.computers.filter(c => c.computer_id && c.computer_state !== 'revoked').length)
 const setupLine = computed(() => setupSummary({ computers: liveComputers.value, ready: capacity.ready.live, total: capacity.ready.total }))
 const showSetup = computed(() => agents.loaded && layoutReady.value && (showCapacity.value || (pairingAccess.value.canListComputers && capacity.computers.length > 0)))
-// A removed computer takes its account bindings along: re-read both.
 const pageTitle = ref<HTMLElement>()
-function computerRemoved() { void agents.refreshAccounts(); void capacity.load() }
 const waiting = computed(() => agents.needsCount + capacity.signins.length)
 
 // ---------- Resources and people ----------
@@ -301,7 +299,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           </button>
           <div v-if="!folded" id="setup-body" class="setup-body">
             <CapacityCard v-if="showCapacity" />
-            <ConnectedComputers :permissions="pairingAccess" compact-empty embedded @removed="computerRemoved" />
+            <ConnectedComputers :permissions="pairingAccess" compact-empty embedded />
           </div>
         </div>
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
