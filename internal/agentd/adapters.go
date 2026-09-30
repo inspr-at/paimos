@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/piprobe"
+	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
@@ -194,6 +195,9 @@ func (p *codexProcess) Control(ctx context.Context, op, text string) error {
 	return ErrUnsupported
 }
 func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
+	if len(r.Rules) > rules.MaxBytes {
+		return nil, errors.New("Codex rules exceed the client byte limit")
+	}
 	if err := validExecutionMode(r.Run, a); err != nil {
 		return nil, err
 	}
@@ -254,11 +258,22 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		Effort string `json:"reasoningEffort"`
 	}
 	threadArgs := map[string]any{"cwd": r.Workspace, "approvalPolicy": "never", "model": r.Profile.Model}
+	config := map[string]any{}
+	if r.Rules != "" {
+		// This limits the repository AGENTS.md chain, not developer instructions.
+		// Preserve Codex's default allowance when the delivered rules are smaller.
+		// Only this fresh thread receives overrides; never edit persistent config.
+		config["project_doc_max_bytes"] = max(len(r.Rules), rules.CodexProjectDocMaxBytes)
+		config["developer_instructions"] = r.Rules
+	}
 	if r.Tools != nil {
-		threadArgs["config"] = map[string]any{"mcp_servers": map[string]any{"aeon": map[string]any{
+		config["mcp_servers"] = map[string]any{"aeon": map[string]any{
 			"url": r.Tools.URL, "http_headers": map[string]string{"Authorization": "Bearer " + r.Tools.Token}, "required": true,
-		}}}
+		}}
 		threadArgs["sandboxPolicy"] = map[string]any{"type": "workspaceWrite", "writableRoots": []string{r.Workspace}, "networkAccess": false}
+	}
+	if len(config) > 0 {
+		threadArgs["config"] = config
 	}
 	raw, err = p.request(op, "jsonrpc", "thread/start", threadArgs)
 	if err != nil || json.Unmarshal(raw, &thread) != nil || thread.Thread.ID == "" {

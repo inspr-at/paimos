@@ -472,30 +472,48 @@ role, named agent, task. The highest matching identity wins; identical-rank
 ambiguity fails closed. No natural-language conflict guesses are made. Expiry is
 checked on every request. The complete rendered body must fit the workspace
 budget (12,000 UTF-8 bytes by default); publication over that budget returns 422.
-Admins can set up to 64,000 bytes in the rules budget editor once all clients
-active in the tenant over the last seven days report support. Missing reports,
-reports under 12,000, stopped/archived older generations and an empty inventory
-retain the 12,000-byte ceiling. The editor lists up to 50 blocking hosts,
-harnesses and reported versions, and counts any further clients.
-CLI and agentd send optional `max_session_file_bytes` and `rules_client_version`
-on registration and every heartbeat. The number is that harness's default read
-limit: Codex stops at `project_doc_max_bytes` (32,768 bytes of combined
-`AGENTS.md`); the other harnesses report 64,000. Omission resets support to the
-legacy limit, so rolling a client back closes the gate. These are request-only fields;
-PHAROS/JANUS reporter response contracts and pins are unchanged.
+Admins can set 2,000–500,000 bytes in the rules budget editor, with optional
+layer caps from 500 bytes to the total. Older clients never block a save;
+out-of-range totals return the stable `400 invalid_budget` error. Lowering a
+budget below published rules still fails with 422. The editor estimates tokens
+at full budget (bytes ÷ 4), adds nonblocking guidance above 64 KB and 128 KB,
+and offers a collapsible English/German Tip for keeping the kernel small.
 
-Rules requests report `X-Aeon-Max-Session-File-Bytes` (2,000–64,000; omission
+CLI and agentd send optional `max_session_file_bytes` and `rules_client_version`
+on registration and every heartbeat. The transport ceiling is 512,000 bytes,
+separate from the 500,000-byte workspace budget. General Codex reports remain
+32,768 bytes, its default combined project-instruction limit; other harnesses
+report 512,000. Fresh Aeon app-server launches supplied with rules set
+`project_doc_max_bytes` to the greater of the delivered byte size and 32,768,
+preserving the default allowance for the repository's `AGENTS.md` chain.
+The delivered rules go separately into ephemeral developer instructions,
+without changing account config or repository files. Manually launched Codex
+sessions keep their honest default report. See the
+[official configuration reference](https://developers.openai.com/codex/config-reference/).
+Omission resets support to the legacy 12,000-byte limit after a downgrade.
+These are request-only fields; PHAROS/JANUS session responses stay unchanged.
+
+Rules requests report `X-Aeon-Max-Session-File-Bytes` (2,000–512,000; omission
 means 12,000). Managed delivery also respects its registered capability.
-When a valid publication is larger than that limit, delivery retains all locked
-rules, then adds whole rules in precedence/identity order as space allows, with
-an explicit compatibility note in the file. Legacy cuts also fit the old 512-KiB
-cache envelope, with 16 KiB reserved for its wrapper. The body digest, receipt
-and served manifest describe the actual cut. If locked rules plus the note cannot fit,
-delivery fails closed with an upgrade message; it never drops a locked rule.
-Upgraded CLI, managed delivery, Claude bridge and caches accept 64,000-byte
-files. The bounded cache envelope allows 32 MiB for repeated text, metadata and
-worst-case JSON escaping. Roll out the server before upgraded reporting clients;
-raise the workspace budget only after the editor's gate clears.
+Delivery fits within the lesser of the workspace budget and client limit,
+retaining all locked rules before adding whole normal rules in this fixed
+priority: company, project, person, agent role, named agent, task; identity
+ascending within each priority. A compatibility note names any cut. Legacy
+cuts also fit the old 512-KiB cache envelope, reserving 16 KiB for the wrapper.
+The body digest, receipt and served manifest describe the actual cut. If
+locked rules plus the note cannot fit, delivery fails closed with an upgrade
+message; it never drops a locked rule. Whole rules may leave unused bytes.
+The admin editor shows each recent client's delivery allowance
+`min(budget, reported limit)` and marks smaller allowances as truncated. The
+historical `blocking_clients` field now carries this inventory, grouped by
+host/harness/version/limit over seven days, bounded to 50 plus a remainder
+count, including stopped/archived generations. Readers without workspace
+`settings.manage` never receive tenant-wide host/version details. The product
+ceiling is always 500,000, including an empty inventory.
+Upgraded CLI, managed delivery, Claude bridge and caches accept 512,000-byte
+files. The cache envelope remains bounded at 32 MiB; publication store caps
+remain 2,000 rules and 2 MiB. Roll out migration 1042 and the server before
+upgraded reporting clients.
 An applicable published locked company floor is required.
 
 `paimos session start --rules-preview` is an opt-in JSON preview. Use `--project`

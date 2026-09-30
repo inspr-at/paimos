@@ -9,7 +9,8 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
 const [, , sdkPath, claudePath, workspace] = process.argv;
-const MAX_INPUT_FRAME_BYTES = 2 * 1024 * 1024;
+// Rules and prompts can expand sixfold when JSON-escaped by the Go sender.
+const MAX_INPUT_FRAME_BYTES = 8 * 1024 * 1024;
 const MAX_PROMPT_BYTES = 256 * 1024;
 const MAX_STEER_BYTES = 64 * 1024;
 const MAX_PENDING_STEERS = 256;
@@ -179,7 +180,7 @@ try {
   process.exit(1);
 }
 if ((start?.capabilities !== undefined && (!Array.isArray(start.capabilities) || start.capabilities.some(c => typeof c !== "string"))) ||
-    (start?.rules !== undefined && (typeof start.rules !== "string" || Buffer.byteLength(start.rules) > 64000)) ||
+    (start?.rules !== undefined && (typeof start.rules !== "string" || Buffer.byteLength(start.rules) > 512000)) ||
     (start?.max_turns !== undefined && (!Number.isSafeInteger(start.max_turns) || start.max_turns < 0)) ||
     (start?.max_tokens !== undefined && (!Number.isSafeInteger(start.max_tokens) || start.max_tokens < 0)) ||
     start?.op !== "start" || typeof start.prompt !== "string" || start.prompt.length === 0 ||
