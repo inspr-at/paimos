@@ -75,6 +75,54 @@ func TestIssueUpdateRefusesKindChange(t *testing.T) {
 	}
 }
 
+func TestIssueConvert(t *testing.T) {
+	isolate(t)
+	code, out, stderr := runCLI([]string{"aeon", "issue", "convert", "-h"}, "")
+	if code != 0 || !strings.Contains(out, "issue convert <ref> --to <epic|ticket|task>") || !strings.Contains(out, "epic, ticket, or task") {
+		t.Fatalf("help: exit %d stdout %q stderr %q", code, out, stderr)
+	}
+	code, _, stderr = runCLI([]string{"aeon", "issue", "convert", "AEON-1"}, "")
+	if code != 2 || !strings.Contains(stderr, "--to must be epic, ticket, or task") {
+		t.Fatalf("missing --to: exit %d stderr %q", code, stderr)
+	}
+
+	revision := time.Date(2026, 9, 29, 10, 0, 0, 123456000, time.UTC)
+	ticket := apiNode{ID: "11111111-1111-4111-8111-111111111111", Key: "AEON-1", KindID: "ticket-kind", Title: "Stay", UpdatedAt: revision, State: "open"}
+	var posted map[string]any
+	posts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
+			json.NewEncoder(w).Encode(kindPage{Items: []apiKind{
+				{ID: "ticket-kind", Slug: "ticket"},
+				{ID: "epic-kind", Slug: "epic"},
+			}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
+			json.NewEncoder(w).Encode(nodePage{Items: []apiNode{ticket}})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/nodes/"+ticket.ID+"/convert":
+			posts++
+			json.NewDecoder(r.Body).Decode(&posted)
+			ticket.KindID = "epic-kind"
+			json.NewEncoder(w).Encode(ticket)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.RequestURI())
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("AEON_URL", srv.URL)
+	t.Setenv("AEON_API_KEY", testKey)
+	args := []string{"aeon", "--config", filepath.Join(t.TempDir(), "missing")}
+	code, out, stderr = runCLI(append(args, "issue", "convert", "AEON-1", "--to", "ticket"), "")
+	if code != 0 || !strings.Contains(out, "kind is already ticket") || posts != 0 {
+		t.Fatalf("same kind: exit %d stdout %q stderr %q posts %d", code, out, stderr, posts)
+	}
+	code, out, stderr = runCLI(append(args, "issue", "convert", "AEON-1", "--to", "epic"), "")
+	if code != 0 || !strings.Contains(out, "✓ AEON-1: ticket → epic") || posts != 1 || posted["to_kind"] != "epic" {
+		t.Fatalf("convert: exit %d stdout %q stderr %q posts %d body %v", code, out, stderr, posts, posted)
+	}
+}
+
 func TestMCPIssueUpdateRefusesKind(t *testing.T) {
 	isolate(t)
 	srv := meServer(t, testKey)

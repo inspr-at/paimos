@@ -15,6 +15,7 @@ import AttachmentLightbox from './AttachmentLightbox.vue'
 import AttachmentStrip from './AttachmentStrip.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import ChildList from './ChildList.vue'
+import ConvertKindSheet from './ConvertKindSheet.vue'
 import CommentComposer from './CommentComposer.vue'
 import EpicPicker from './EpicPicker.vue'
 import InlineTitle from './InlineTitle.vue'
@@ -67,6 +68,12 @@ const ticket = useTicket(item, {
   onMoved: (moved, fromParent) => emit('moved', moved, fromParent),
 })
 const activity = useActivity(computed(() => props.item?.id ?? null))
+const convertOpen = ref(false)
+function finishConvert() {
+  convertOpen.value = false
+  if (props.item) toast(`${props.item.key} is now ${kindLabel(props.item.kind_slug).toLowerCase()}`)
+  activity.load()
+}
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
 const deletable = computed(() => props.canDelete && !ticket.readOnly.value && !ticket.gone.value)
 const movable = computed(() => props.canMove && !ticket.readOnly.value && !ticket.gone.value)
@@ -437,11 +444,12 @@ defineExpose({
       :can-start-agent="canStartAgent" :open-in-project="openInProject" :back-label="backLabel"
       @copy-key="copy(item?.key ?? ticketKey, item?.key ?? ticketKey)" @copy-link="copy(link(), 'link')" @prev="emit('prev')" @next="emit('next')"
       @expand="emit('expand')" @collapse="emit('collapse')" @new-tab="emit('newTab')" @close="emit('close')" @open-in-project="emit('openInProject')"
-      @move="anchor => openMenu('epic', anchor)" @delete="remove" @back="steps => emit('trailBack', steps)"
+      @move="anchor => openMenu('epic', anchor)" @delete="remove" @convert="convertOpen = true" @back="steps => emit('trailBack', steps)"
       @edit="startEdit()" @save="saveEdit" @cancel="cancelEdit"
       @start-agent="item && startDialog?.open(item)"
     />
     <StartAgentDialog ref="startDialog" />
+    <ConvertKindSheet v-if="convertOpen && item" :item="item" :children="ticket.children.value" :children-loading="ticket.childrenLoading.value" :convert="ticket.convert" @close="convertOpen = false" @converted="finishConvert" />
 
     <div ref="scroller" class="ws-scroll">
       <div v-if="ticket.gone.value" class="ws-state" role="alert">

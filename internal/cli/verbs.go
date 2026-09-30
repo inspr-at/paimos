@@ -25,6 +25,7 @@ func (rt *runtime) cmdIssue() *Command {
 			rt.cmdIssueGet(),
 			rt.cmdIssueCreate(),
 			rt.cmdIssueUpdate(),
+			rt.cmdIssueConvert(),
 			rt.cmdIssueEstimate(),
 			rt.cmdIssueComment(),
 			rt.cmdIssueMove(),
@@ -263,6 +264,29 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 				AC: acText, Notes: notesText, CloseNote: closeText, AddTag: addTag, RemoveTag: removeTag,
 				RouteRole: role, Area: area,
 			})
+		},
+	}
+}
+
+func (rt *runtime) cmdIssueConvert() *Command {
+	var to string
+	return &Command{
+		Name:    "convert",
+		Short:   "Convert an issue to another kind",
+		Use:     "issue convert <ref> --to <epic|ticket|task>",
+		minArgs: 1,
+		maxArgs: 1,
+		addFlags: func(fs *flagSet) {
+			fs.string(&to, "to", 0, "epic, ticket, or task")
+		},
+		run: func(args []string) error {
+			if _, err := normalizeIssueRef(args[0]); err != nil {
+				return err
+			}
+			if !issueKinds[strings.TrimSpace(to)] {
+				return usagef("--to must be epic, ticket, or task")
+			}
+			return rt.convertIssue(args[0], strings.TrimSpace(to))
 		},
 	}
 }

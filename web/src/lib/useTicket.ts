@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ref, watch, type Ref } from 'vue'
-import { APIError, createNode, createRelation, deleteNode, deleteRelation, getKinds, getNode, getRelations, listNodes, lookupNodes, moveNode, updateNode, type Kind, type ListItem, type ListParent, type NodePatch, type Relation, type WorkNode } from './api'
+import { APIError, convertNode, createNode, createRelation, deleteNode, deleteRelation, getKinds, getNode, getRelations, listNodes, lookupNodes, moveNode, updateNode, type Kind, type ListItem, type ListParent, type NodePatch, type Relation, type WorkNode } from './api'
 import { linkBody, linkedSentence, relationLabel, unlinkedSentence, type RelationChoice } from './relations'
 import { benefitGateError } from './doneGate'
 import { toast } from './toast'
@@ -305,5 +305,19 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     return { done, total: scope.length, percent: scope.length ? Math.round((done / scope.length) * 100) : 0 }
   }
 
-  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, setEstimate, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink }
+  async function convert(toKind: string) {
+    const target = item.value
+    if (!target) throw new Error('nothing is open')
+    const node = await convertNode(target.id, toKind, { ifUnmodifiedSince: target.updated_at })
+    const kind = (await kinds()).find(entry => entry.slug === toKind)
+    if (kind) {
+      target.kind_id = node.kind_id || kind.id
+      target.kind_slug = kind.slug
+      target.kind_label = kind.label
+    }
+    merge(target, node)
+    await loadChildren()
+  }
+
+  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, setEstimate, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink, convert }
 }

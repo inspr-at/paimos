@@ -331,6 +331,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/portal/wishes/{wishId}/reject":                                                   "settings.manage",
 	"POST /api/nodes/{nodeId}/attachments":                                                      "attachments.write",
 	"POST /api/nodes/{nodeId}/comments":                                                         "comments.write",
+	"POST /api/nodes/{nodeId}/convert":                                                          "nodes.write",
 	"POST /api/nodes/{nodeId}/move":                                                             "nodes.move",
 	"POST /api/nodes/{nodeId}/project-move":                                                     "nodes.move",
 	"POST /api/project-groups":                                                                  "project_groups.write",

@@ -2330,6 +2330,41 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/convert:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    post:
+      operationId: convertNodeKind
+      description: |
+        Change an issue between epic, ticket and task in one transaction.
+        Person callers only; agent keys are refused even with nodes.write.
+        The key, history, relations, comments and attachments stay.
+        Fields the new kind's schema does not declare stay on the node and in the event.
+        One node.kind_changed event records from, to and by.
+        Naming the current kind returns the node and writes nothing.
+      parameters:
+        - name: If-Unmodified-Since
+          in: header
+          description: Exact RFC3339 timestamp from Node.updated_at, including fractional seconds. A mismatch returns 412 without changing the node or appending an event.
+          schema: {type: string}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ConvertNode'}
+      responses:
+        '200': {$ref: '#/components/responses/Node'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409':
+          description: |
+            kind_change_not_allowed when the pair is not an issue-kind conversion.
+            kind_conversion_blocked when the parent, existing children, or schema fields do not allow it. children and fields list the offenders. The node is unchanged.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NodeError'}
+        '412': {$ref: '#/components/responses/Error'}
   /nodes/{nodeId}/move:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     post:
@@ -10448,7 +10483,21 @@ components:
           type: string
         code:
           type: string
-          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch names a different kind or type. Omitted for other errors.
+          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch or convert names a different kind that this route will not apply. kind_conversion_blocked when convert is refused because of the parent, children, or fields. Omitted for other errors.
+        children:
+          type: array
+          description: Direct children that cannot stay under the target kind. Present for kind_conversion_blocked.
+          items:
+            type: object
+            required: [id, key, kind]
+            properties:
+              id: {type: string, format: uuid}
+              key: {type: string}
+              kind: {type: string}
+        fields:
+          type: array
+          description: Schema fields that are missing or invalid for the target kind. Extra fields the schema does not declare are kept and are not listed.
+          items: {type: string}
     Principal:
       type: object
       required: [id, tenant_id, kind, name, roles]
@@ -10922,7 +10971,7 @@ components:
             type: object
             required: [field, from, to]
             properties:
-              field: {type: string, description: "tags is the native label list, names in stored order joined by a comma and a space.", enum: [status, priority, assignee, title, parent, tags]}
+              field: {type: string, description: "tags is the native label list, names in stored order joined by a comma and a space. kind is the issue type slug after a conversion.", enum: [status, priority, assignee, title, parent, tags, kind]}
               from: {type: [string, 'null']}
               to: {type: [string, 'null']}
     Attachment:
@@ -11095,6 +11144,12 @@ components:
         name: {type: string, minLength: 1}
         color: {type: string, enum: [gray, slate, blue, indigo, purple, pink, red, orange, yellow, green, teal, cyan]}
         description: {type: string}
+    ConvertNode:
+      type: object
+      additionalProperties: false
+      required: [to_kind]
+      properties:
+        to_kind: {type: string, description: "Target kind slug. Issue kinds are epic, ticket and task."}
     MoveNode:
       type: object
       required: [parent_id]

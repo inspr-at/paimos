@@ -554,6 +554,36 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 	return nil
 }
 
+func (rt *runtime) convertIssue(ref, to string) error {
+	if strings.HasPrefix(strings.TrimSpace(ref), "id:") {
+		return usagef("id:<n> is a classic numeric id; pass the issue key")
+	}
+	n, err := rt.nodeByKey(ref)
+	if err != nil {
+		return err
+	}
+	kinds, err := rt.loadKinds()
+	if err != nil {
+		return err
+	}
+	current := kinds.slug(n.KindID)
+	if !issueKinds[current] {
+		return rt.fail(fmt.Errorf("issue %q not found", ref), "")
+	}
+	if current == to {
+		fmt.Fprintf(rt.stdout, "kind is already %s\n", current)
+		return nil
+	}
+	if err := rt.do(http.MethodPost, "/api/nodes/"+url.PathEscape(n.ID)+"/convert", map[string]string{"to_kind": to}, &n); err != nil {
+		return err
+	}
+	if rt.jsonOut {
+		return rt.printJSON(rt.viewIssue(n, kinds))
+	}
+	fmt.Fprintf(rt.stdout, "✓ %s: %s → %s\n", n.Key, current, to)
+	return nil
+}
+
 func (rt *runtime) commentIssue(ref, body string) error {
 	if strings.HasPrefix(strings.TrimSpace(ref), "id:") {
 		return usagef("id:<n> is a classic numeric id; pass the issue key")
