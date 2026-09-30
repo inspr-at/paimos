@@ -67,7 +67,16 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/agent-accounts/{accountId}/windows/{windowId}", m.removeWindow)
 	mux.HandleFunc("POST /api/agent-accounts/{accountId}/windows/{windowId}/repeat", m.repeatWindow)
 	mux.HandleFunc("PUT /api/agent-accounts/{accountId}/limit", m.putLimit)
-	mux.HandleFunc("DELETE /api/agent-accounts/{accountId}/limit", m.deleteLimit)
+	// A literal /limit here crosses groups/{id} at groups/limit, which Go's
+	// ServeMux rejects. Keep the public URLs; the group route is more specific
+	// than this fallback, whose only supported account resource is limit.
+	mux.HandleFunc("DELETE /api/agent-accounts/{accountId}/{resource}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("resource") != "limit" {
+			http.NotFound(w, r)
+			return
+		}
+		m.deleteLimit(w, r)
+	})
 	mux.HandleFunc("PATCH /api/agent-accounts/{accountId}", m.patch)
 	mux.HandleFunc("POST /api/agent-accounts/{accountId}/probe", m.probe)
 }
