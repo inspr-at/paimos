@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { pct, poolSentence } from '../../lib/capacity'
+import { pct, poolSentence, sourceLine, consumptionLine } from '../../lib/capacity'
 import { bandReadings, bandRows, plural, type BandRow } from '../../lib/usageWork'
 import { useAgents } from '../../stores/agents'
 import { useCapacity } from '../../stores/capacity'
@@ -64,11 +64,12 @@ function resetTip(row: BandRow) {
           <span class="pool-name">{{ row.pool.name }}</span>
           <span v-if="planText(row)" class="plan-name" :title="planText(row)">{{ planText(row) }}</span>
         </div>
-        <CapacityGauge class="bar" :gauge="row.gauge" :left="row.left ?? 0" :value="row.left ?? 0" :label="gaugeLabel(row)" :ahead="!!row.today?.ahead" />
+        <CapacityGauge v-if="row.gauge || !row.pool.rows.some(r => r.learning)" class="bar" :gauge="row.gauge" :left="row.left ?? 0" :value="row.left ?? 0" :label="gaugeLabel(row)" :ahead="!!row.today?.ahead" :estimated="row.pool.rows.some(r => r.primary?.reading.source === 'estimate')" />
         <span class="left num"><template v-if="row.left !== null"><b>{{ pct(row.left) }}</b> left</template></span>
         <span class="reset num" :data-tip="resetTip(row)">
           <template v-if="row.reset">resets <b>{{ row.reset.label }}</b><span v-if="row.reset.window" class="win"> · {{ row.reset.window }}</span></template>
         </span>
+        <p v-if="row.pool.rows.some(r => r.primary?.reading.source === 'estimate' || !r.primary && r.learning)" class="estimate-source">{{ row.pool.rows.filter(r => r.primary?.reading.source === 'estimate' || !r.primary && r.learning).map(r => r.primary ? sourceLine(r, now) : `${consumptionLine(r.learning!)} · ${sourceLine(r, now)}`).join('; ') }}</p>
         <p class="sentence" :class="{ ahead: poolSentence(row.pool, now).ahead }"><span v-if="bandReadings(row)" class="partial">{{ sentenceCase(bandReadings(row)) }}. </span><PlanSentence :sentence="poolSentence(row.pool, now)" /></p>
       </li>
     </ul>
@@ -102,6 +103,7 @@ function resetTip(row: BandRow) {
 .reset b { color: var(--ink); font-weight: 600; }
 .win { color: var(--ink-3); }
 .num { font-variant-numeric: tabular-nums; }
+.estimate-source { grid-column: 2 / -1; margin: 0; font-size: 12px; color: var(--ink-3); }
 .sentence { grid-area: sentence; margin: 2px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.5; text-wrap: pretty; }
 .sentence :deep(b) { color: var(--ink); font-weight: 600; }
 .sentence :deep(.n) { color: var(--teal-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -121,6 +123,7 @@ function resetTip(row: BandRow) {
     grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name left" "bar bar" "reset reset" "sentence sentence";
     gap: 6px 12px; padding: 12px 14px;
   }
+  .estimate-source { grid-column: 1 / -1; }
   .reset { justify-self: start; font-size: 12.5px; color: var(--ink-3); }
   .band-foot { padding: 10px 14px 12px; gap: 6px 14px; }
 }

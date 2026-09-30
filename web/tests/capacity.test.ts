@@ -5,7 +5,7 @@ import { APIError, RequestFailure, StaleRequestError } from '../src/lib/api.ts'
 import {
   accountPlan, confirmsSave, uncertainFailure, accountState, buildPools, buildRows, clampRate, dayProfile, daysLabel, defaultSchedule, fullPaceHours, gauge, gaugeModeFor,
   nightLabel, pickWindows, plainText, poolSentence, presetWeek, rateAt, sameShape, scheduleProblem, setGlobalMode, sourceLine, todayCell,
-  toggleAccountMode, when, reserveLabel, reserveLevel, withReserve, workStart, zonedInstant, activeOverride, stripOverride,
+  estimateLabel, consumptionLine, usingNow, toggleAccountMode, when, reserveLabel, reserveLevel, withReserve, workStart, zonedInstant, activeOverride, stripOverride,
   type AccountCapacity, type AccountInput, type CapacitySchedule, type CapacityWindow,
 } from '../src/lib/capacity.ts'
 
@@ -330,4 +330,20 @@ test('server-ineligible accounts stay out of the actionable plan', () => {
   assert.match(sentence, /of Spare/)
   assert.doesNotMatch(sentence, /then .*Main|20% of Main|can run in parallel/)
   assert.match(sentence, /Main: Waiting for the vendor/)
+})
+
+
+test('learned capacity stays honest about uncertainty and blind consumption', () => {
+  const reading = win({ used: 50, budget: 12, reset: '2026-10-04T09:00:00Z', source: 'estimate' }).reading
+  assert.equal(estimateLabel({ ...reading, plus_minus: 20, evidence: { kind: 'limit_hits', samples: 2 } }), 'Estimated · ±20% · 2 limit hits')
+  assert.equal(estimateLabel({ ...reading, plus_minus: 2, evidence: { kind: 'runs', samples: 12 } }), 'Estimated · 12 runs')
+  const learning = { windows: [], tokens: 24000, cost_micros: 0, runs: 3, limit_hits: 0, presence_until: new Date(now + 60000).toISOString() }
+  const c = { ...cap('a', []), learning }
+  const [row] = buildRows([acct('a', 'Blind', 'grok')], [c])
+  assert.equal(row.primary, null)
+  assert.equal(sourceLine(row, now), 'No limit seen yet')
+  assert.deepEqual(todayCell(row, null), { kind: 'quiet', text: '3 runs · 24k tokens' })
+  assert.equal(consumptionLine({ ...learning, cost_micros: 1500000 }), '3 runs · $1.50')
+  assert.equal(usingNow(row, now), true)
+  assert.equal(usingNow(row, now + 60000), false)
 })

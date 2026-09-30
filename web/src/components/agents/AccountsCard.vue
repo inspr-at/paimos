@@ -6,6 +6,8 @@ import { can } from '../../lib/authz'
 import { accountName, accountPlan, allowanceWindowLabel } from '../../lib/accountCascade'
 import { PACE_LABEL, UNIT_LABEL, bindingWindow, duration, harnessLabel } from '../../lib/agentState'
 import type { Availability } from '../../stores/agents'
+import { useCapacity } from '../../stores/capacity'
+import CapacityLearning from './CapacityLearning.vue'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import AllowanceWindowForm from './AllowanceWindowForm.vue'
@@ -18,6 +20,8 @@ import { ABSENT_ALLOWANCE, allowanceFailure, beginSave, findSavedAllowance, hold
 const props = defineProps<{ accounts: AgentAccount[]; state: Availability; now: number; admin: boolean; set: (account: AgentAccount, state: AgentAccount['state']) => Promise<void> }>()
 const emit = defineEmits<{ 'allowance-created': [] }>()
 const session = useSession()
+const capacity = useCapacity()
+const learned = (id: string) => capacity.rows.find(r => r.id === id)
 const mayManage = computed(() => session.identity?.principal.kind === 'person' && can('account.manage'))
 const busy = ref('')
 const error = ref('')
@@ -174,6 +178,7 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
           </p>
         </template>
         <p v-else class="facts muted">No active allowance window</p>
+        <CapacityLearning :learning="learned(account.id)?.learning" :host="account.host_label" :now="now" />
         <ClaudeStatuslineToggle v-if="mayManage && account.harness === 'claude' && account.statusline_opt_in" :account="account" @changed="emit('allowance-created')" />
         <AllowanceWindowForm
           v-if="mayManage && editingId === account.id"

@@ -4,6 +4,7 @@ import { onMounted } from 'vue'
 import { accountName } from '../../lib/accountCascade'
 import { approveAccountCapacity, type AgentAccount } from '../../lib/agents'
 import { confirmAction } from '../../lib/confirm'
+import { useCapacity } from '../../stores/capacity'
 import { useAgents } from '../../stores/agents'
 import AccountsCard from '../agents/AccountsCard.vue'
 import SettingsCard from './SettingsCard.vue'
@@ -12,7 +13,8 @@ import SettingsCard from './SettingsCard.vue'
 // Pausing an account and limits set by hand live here; sign-ins happen on the
 // computer itself, and credentials never reach Aeon.
 const agents = useAgents()
-onMounted(() => { void agents.refreshAccounts() })
+const capacity = useCapacity()
+onMounted(() => { void agents.refreshAccounts(); void capacity.load() })
 async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
   if (state === 'draining') {
     const ok = await confirmAction({ title: `Drain ${accountName(account)}?`, body: 'Running work finishes; no new runs start on this account until you resume it.', confirmLabel: 'Drain account' })

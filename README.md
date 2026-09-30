@@ -53,9 +53,23 @@ paimos mcp
 `aeon capacity next codex` shows the server's next eligible account and parallel
 capacity; `--json` returns the ordered advice. It never reserves quota. The
 Accounts plan uses that same order: soonest weekly/monthly reset, then larger
-available cap, then account ID. Short windows still constrain every admission.
+available cap, then account ID. Recent own use moves an account behind other
+eligible accounts, without changing its budget. Short windows still constrain
+every admission.
 Workspace readers can request advice across their accounts; paired agents and
 keys with only `account.probe` see only accounts registered by that agent.
+
+Capacity learning uses tenant-local readings and usage only (AEON-388,
+migration 1020). Three matching run samples enable a decaying p75 hold; five
+observed work days enable an Auto reserve normalized to the window's usable
+work hours. Managed overlap is excluded from own-use learning. Blind accounts
+show consumption until a vendor stop and a known or observed cycle support an
+estimate. Estimates carry uncertainty and evidence, never replace a fresh
+measurement, and never lift a vendor denial. Aging readings include observed
+burn; off-day pacing uses learned throughput to spend what would otherwise
+expire. The Accounts disclosure shows evidence and hours/Away/sleep suggestions;
+only an explicit save changes a schedule. Learning state is bounded and
+contains no local paths or credentials.
 
 `aeon capacity next codex --env` prints a shell-quoted config-home export only
 when the selected account belongs to the authenticated local agentd. Use
