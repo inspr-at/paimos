@@ -436,7 +436,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .cap-title { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
 .cap-title h2 { font-size: 19px; }
 .cap-meta { color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.settings { display: flex; align-items: center; gap: 22px; min-width: 0; max-width: 100%; }
+.settings { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; min-width: 0; max-width: 100%; }
 .setting { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 13px; font-weight: 550; white-space: nowrap; }
 .setting .lbl { margin-right: 2px; }
 .setting.nights .lbl { cursor: pointer; }
@@ -567,7 +567,8 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .acct { grid-template-columns: minmax(0, 150px) minmax(120px, 1fr) 68px minmax(0, 110px) 150px; }
   .source { display: none; }
 }
-@container cap (max-width: 640px) {
+@container cap (max-width: 1000px) {
+  .settings .divider { display: none; }
   .settings { flex-wrap: wrap; row-gap: 6px; }
   .setting { min-width: 0; max-width: 100%; }
 }

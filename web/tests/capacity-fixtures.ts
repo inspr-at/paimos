@@ -178,7 +178,7 @@ export function capacityWorld(options: CapacityOptions = {}) {
     return {
       account_id: a.id, ongoing_use_approved: true, schedule: s,
       ...(rule ? { limit: { ...rule, period_end: periodEnd(rule.period) } } : {}),
-      ...(a.harness === 'pi' ? { spend_month_usd: '12.40', cost_limit_supported: true } : {}),
+      ...(a.harness === 'pi' && options.apiKey ? { spend_month_usd: '12.40', cost_limit_supported: true } : {}),
       ...(a.failure ? { probe_failure: a.failure } : {}),
       ...(resets.length ? { limiting_reset: new Date(Math.min(...resets)).toISOString() } : {}),
       windows: a.windows.map(w => ({

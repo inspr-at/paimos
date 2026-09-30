@@ -93,7 +93,7 @@ func TestPercentLimitSurvivesVendorResetAndRefresh(t *testing.T) {
 }
 
 func TestLimitConcurrentReservationsAndClaim(t *testing.T) {
-	for _, unit := range []string{"requests", "tokens", "cost_micros"} {
+	for _, unit := range []string{"percent", "runs", "requests", "tokens", "cost_micros"} {
 		t.Run(unit, func(t *testing.T) {
 			f := limitWorld(t, "limit-concurrent-"+unit, 3)
 			now := time.Now().UTC().Add(-time.Second)
@@ -222,4 +222,38 @@ func TestRepeatPreservesOriginalAndExistingCaps(t *testing.T) {
 	if n := scalar(t, f.admin, `SELECT count(*) FROM account_allowance_windows WHERE id=$1 AND removed_at IS NULL`, other.ID); n != 1 {
 		t.Fatal("rejected repeat changed the window")
 	}
+}
+
+func TestLearnedLimitEstimateAndOutstandingUsage(t *testing.T) {
+	f := limitWorld(t, "limit-learned", 3)
+	old := seedPricedRun(t, f, 100)
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE run_telemetry SET turn_count_delta=5 WHERE run_id=$1`, old)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Add(-time.Second)
+	f.report(t, 10, now, now.Add(48*time.Hour))
+	path := "/api/agent-accounts/" + f.account.ID + "/limit"
+	callStatus(t, accountsMod(), &f.admin, "", "PUT", path, `{"amount":9,"unit":"requests","period":"day"}`, 200, nil)
+	run, _ := f.route(t, 200) // Caller asks for one, history reserves five.
+	f.route(t, 409)
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='running',started_at=clock_timestamp()-interval '1 minute' WHERE id=$1`, run); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,turn_count_delta) VALUES($1,$2,1,'usage',2)`, f.admin.TenantID, run)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := f.capacity(t); c.Limit.Used != 5 {
+		t.Fatalf("recorded 2 plus remaining 3 should be 5: %+v", c.Limit)
+	}
+	f.route(t, 409) // A claimed run keeps the rest of its estimate.
+	callStatus(t, accountsMod(), &f.admin, "", "PUT", path, `{"amount":10,"unit":"requests","period":"day"}`, 200, nil)
+	f.route(t, 200)
 }

@@ -25,5 +25,5 @@ export function mockEffectivePermissions(role: MockRole, projectId?: string) {
   const permissions = [...source]
   const ref = { id: `role-${role}`, key: role, name: role[0].toUpperCase() + role.slice(1) }
   // Copies: a test that adds a permission must not grant it to later tests in the worker.
-  return { workspace: { role: ref, permissions: [...permissions] }, project: projectId ? { id: projectId, role: null, permissions: [...permissions] } : null }
+  return { workspace: { role: ref, permissions }, project: projectId ? { id: projectId, role: null, permissions } : null }
 }

@@ -166,6 +166,7 @@ func TestPacingAtNightAndDay(t *testing.T) {
 			for _, override := range []string{"", "sprint", "hold"} {
 				t.Run("override="+override, func(t *testing.T) {
 					s := DefaultSchedule()
+					s.Reserve = ReserveOff // Isolate the work-hours band.
 					s.Override = override
 					p, err := Plan(in, s)
 					if err != nil {

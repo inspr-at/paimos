@@ -319,6 +319,8 @@ func TestCapacityPacingAtNightAndDay(t *testing.T) {
 						readAt := now.Add(-time.Minute)
 						windows := []Window{{AccountID: account.ID, StartsAt: now.Add(-4 * time.Hour), EndsAt: now.Add(time.Hour), Unit: "percent", Allowance: 100, Used: 20, PaceModel: "unrestricted", capacityReadAt: &readAt, capacityAllowed: true, capacityKind: "5h"}}
 						schedule := capacity.DefaultSchedule()
+						// This fixture isolates the work-hours band from Keep for you.
+						schedule.Reserve = capacity.ReserveOff
 						schedule.Override = override
 						err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 							return applyCapacityPacing(t.Context(), tx, account, windows, now, schedule)
