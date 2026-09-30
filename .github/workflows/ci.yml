@@ -169,7 +169,7 @@ jobs:
         run: |
           node --test scripts/check-own-release-notes.test.mjs
           node scripts/check-own-release-notes.mjs
-      - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs
+      - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs scripts/release-timing.test.mjs
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"

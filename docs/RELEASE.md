@@ -391,6 +391,19 @@ The attestation action uses the existing `packages`, `attestations` and OIDC wri
 
 Baseline evidence: [release run 36647379702](https://github.com/inspr-at/paimos/actions/runs/36647379702), obtained with `gh run view --json jobs,createdAt,updatedAt`, took **641 s (10:41)** from run creation to pushed digest. The release job began after **237 s**; Linux/CLI builds took **99 s**, artifact download **1 s**, history **32 s**, image smoke (including its original build) **119 s**, and build/push **122 s**. Removing the signing dependency and client build/download time gives a conservative structural estimate of **304 s (5:04)** before the new attestation/verification overhead, with cache gains unmeasured. The ≤6 min target and successful test-image verification remain pending a hosted run; do not report this estimate as measured acceptance.
 
+### Release timing (AEON-416)
+
+`node scripts/release-timing.mjs` prints a compact table and JSON for four intervals: gate-ok → live, cut → live, PR → merge, and rollback. It reads GitHub through `gh pr`/`gh run` list and view and `gh api --method GET` only, plus optional rollout JSON (`--rollout`, one file or a directory of `aeon.rollout.v1` objects). `--since` keeps releases whose start is at or after that timestamp. `--release` matches the label (`12d`), version, sequence, or `stable110`. `--json` prints JSON only. `--fixture` replays a recorded bundle and does not call `gh`.
+
+```sh
+node scripts/release-timing.mjs --fixture scripts/testdata/release-timing/section1.json
+node scripts/release-timing.mjs --since 2026-09-29T17:00:00Z --release 12d
+```
+
+Cut and live for the §1 baseline come from rollout `cut_at` / `live_at` (the release progress logs). Wall minutes are the truncated UTC-minute span, which is how that section counts 128, 38, 84 and 58. PR → merge, the digest step, PR CI and the pin PR come from GitHub. Gate-ok → live stays empty for those releases: there is no `gate/cross-family` status, and the historical verdicts are untimed ticket comments, so the published 3-5 h median is not recomputed. Rollback stays empty too: none of those releases rolled back. The published ≈15 min is an estimate of a rollback pin PR. Measured forward pin PRs merged in about 11 min, and the 12d Pharos check is 9 min 19 s. The plan's 9.4 min is the progress-log span of that same check.
+
+Quote the JSON as release evidence. This repository has no `RUNBOOK.md`; the process runbook is the PPM entry `runbook/flywheel`, which is not edited here.
+
 ### Publish after live verification (AEON-356)
 
 Run this explicit step from the release coordinator's checked-out release commit, only after recording the successful live verification against the image digest in the draft notes. Confirm the tag, draft state and complete nine-asset set (eight binaries plus `SHA256SUMS`); do not publish a draft from a failed or partial tag workflow.
