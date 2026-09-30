@@ -794,8 +794,14 @@ func within(root, path string) bool {
 	return err == nil && (rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 func repositoryPath(path string) bool {
+	return repositoryPathWithLstat(path, os.Lstat)
+}
+
+// Private state rejects every repository ancestor, including package-manager
+// prefixes. The Homebrew exception belongs only to executable/dependency pins.
+func repositoryPathWithLstat(path string, lstat func(string) (os.FileInfo, error)) bool {
 	for p := path; p != "/" && p != "."; p = filepath.Dir(p) {
-		if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
+		if _, err := lstat(filepath.Join(p, ".git")); err == nil {
 			return true
 		}
 	}

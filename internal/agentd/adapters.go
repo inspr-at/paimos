@@ -230,13 +230,13 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	raw, err := p.request(op, "jsonrpc", "account/read", map[string]any{"refreshToken": false})
 	var account struct {
 		Account *struct {
-			ID    string  `json:"id"`
-			Type  string  `json:"type"`
-			Email *string `json:"email"`
+			ID    string `json:"id"`
+			Type  string `json:"type"`
+			Email string `json:"email"`
 		} `json:"account"`
 	}
-	if err != nil || json.Unmarshal(raw, &account) != nil || account.Account == nil || account.Account.Type != "chatgpt" || account.Account.Email == nil ||
-		!strings.EqualFold(strings.TrimSpace(*account.Account.Email), expectedEmail) {
+	if err != nil || json.Unmarshal(raw, &account) != nil || account.Account == nil || account.Account.Type != "chatgpt" ||
+		!agentsetup.CodexAccountMatches(expectedEmail, account.Account.Email) {
 		return fail(errors.New("Codex account identity mismatch"))
 	}
 	if account.Account.ID != "" {
