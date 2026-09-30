@@ -95,6 +95,33 @@ const showDetail = ref(window.matchMedia('(max-width: 760px)').matches && !!prop
 const help = ref(false)
 const evidence = ref(false)
 const missing = ref('')
+// Keys stay inert until the open-time refetch has chosen a row. The dialog is
+// focused while that request is in flight, and a key then would hit an empty
+// list or a history that is about to be replaced.
+const keysReady = ref(false)
+// The latest version this sheet has asked the address to show and not yet seen
+// come back. The navigation waits on the session, so the address lands after
+// the cursor has moved — often into Compare, which never writes the address.
+// Only that echo is ignored. A newer request replaces it. A navigation that
+// settles on a failure, or any other address, drops it: Back, Forward and an
+// in-app link then select that release, and Compare closes.
+let pendingEcho = ''
+function targetVersion(target: string | null) {
+  return target && target !== 'all' && target !== 'current' ? target.replace(/^v/, '') : ''
+}
+function publishSelection(version: string) {
+  // A request that already matches the address will not change it, so it is not
+  // an echo — and it supersedes one that was still in flight.
+  pendingEcho = version === targetVersion(props.target) ? '' : version
+  emit('select', version)
+}
+// The address did not adopt this version: the replace was cancelled, duplicated
+// or rejected. A later visit to it is someone opening that release.
+function navigationSettled(version: string | undefined, failure: unknown) {
+  if (!failure || !version || version !== pendingEcho) return
+  pendingEcho = ''
+}
+defineExpose({ navigationSettled })
 const phoneQuery = window.matchMedia('(max-width: 760px)')
 const phone = ref(phoneQuery.matches)
 const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
@@ -157,14 +184,23 @@ function initialSelection() {
   cursor.value = currentKnown.value ? current.value : releases.value[0]?.version ?? null
 }
 watch(() => props.target, target => {
-  if (target === 'current') { initialSelection(); return }
-  const wanted = target && target !== 'all' ? target.replace(/^v/, '') : ''
-  if (wanted && wanted !== cursor.value && byVersion.value.has(wanted)) { mode.value = 'browse'; cursor.value = wanted }
+  // `current` is the footer before the running version is known. It resolves
+  // to that release when the history arrives; it is not a version to echo.
+  if (target === 'current') { pendingEcho = ''; initialSelection(); return }
+  const wanted = targetVersion(target)
+  const echo = !!wanted && wanted === pendingEcho
+  // Any other address ends the echo, including one this build cannot show.
+  if (!echo) pendingEcho = ''
+  if (!wanted || !byVersion.value.has(wanted)) return
+  if (echo) { pendingEcho = ''; return }
+  if (wanted === cursor.value) return
+  mode.value = 'browse'
+  cursor.value = wanted
 })
 watch(history, () => { if (props.target === 'current') initialSelection() })
 watch(cursor, async (value, old) => {
   if (!value) return
-  if (mode.value === 'browse') emit('select', value)
+  if (mode.value === 'browse') publishSelection(value)
   await nextTick()
   document.getElementById(optionId(value))?.scrollIntoView({ block: 'nearest' })
   if (detailPane.value && old) detailPane.value.scrollTop = 0
@@ -205,7 +241,7 @@ function startCompare() {
 function exitCompare() {
   mode.value = 'browse'
   compareFrom.value = null
-  if (cursor.value) emit('select', cursor.value)
+  if (cursor.value) publishSelection(cursor.value)
   listbox.value?.focus({ preventScroll: true })
 }
 function swap() { if (compareTo.value && compareFrom.value) { const a = compareFrom.value; compareFrom.value = compareTo.value; cursor.value = a } }
@@ -277,6 +313,7 @@ function keydown(event: KeyboardEvent) {
     else emit('close')
     return
   }
+  if (!keysReady.value) return
   if (typing(event.target) || event.metaKey || event.ctrlKey || event.altKey) return
   if (inPeek(event.target)) { peekKeys(event); return }
   if (event.target instanceof Element && event.target.closest('.switches') && ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
@@ -307,13 +344,15 @@ onMounted(async () => {
   clock = setInterval(() => { now.value = Date.now() }, 30_000)
   dialog.value?.showModal()
   dialog.value?.focus()
-  if (store.history) { initialSelection(); await nextTick(); listbox.value?.focus({ preventScroll: true }) }
   // Always refetch: the server may run a newer build than when the page loaded.
+  // Keys wait until that history is the one on screen, so a press during the
+  // refetch cannot move a row the replacement then drops.
   await store.load(true)
   await store.markSeen()
   initialSelection()
+  keysReady.value = true
   await nextTick()
-  if (document.activeElement === dialog.value) listbox.value?.focus({ preventScroll: true })
+  if (document.activeElement === dialog.value || !dialog.value?.contains(document.activeElement)) listbox.value?.focus({ preventScroll: true })
 })
 onBeforeUnmount(() => {
   phoneQuery.removeEventListener('change', onPhone)
