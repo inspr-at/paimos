@@ -83,4 +83,8 @@ test('deactivating an agent says how many keys go with it', () => {
   assert.match(agentDeactivatePoints(1)[0]!, /Its active key is revoked now/)
   assert.match(agentDeactivatePoints(3)[0]!, /Its 3 active keys are revoked now/)
   assert.ok(agentDeactivatePoints(2).some(line => /revoked keys stay revoked/.test(line)))
+  // A retired computer takes no key: its confirmation points to pairing afresh, never to a new key.
+  const computer = agentDeactivatePoints(0, true).join(' ')
+  assert.match(computer, /connect it afresh by pairing it/)
+  assert.doesNotMatch(computer, /new one|new key/)
 })

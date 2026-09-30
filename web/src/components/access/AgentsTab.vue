@@ -131,7 +131,7 @@ async function focusSurvivor(index: number) {
   target?.focus()
 }
 async function deactivate(agent: Agent) {
-  const ok = await confirmAction({ title: `Deactivate ${agent.name}?`, points: agentDeactivatePoints(agent.key_count), confirmLabel: agent.key_count ? 'Revoke keys and deactivate' : 'Deactivate', danger: true })
+  const ok = await confirmAction({ title: `Deactivate ${agent.name}?`, points: agentDeactivatePoints(agent.key_count, !!agent.paired_computer), confirmLabel: agent.key_count ? 'Revoke keys and deactivate' : 'Deactivate', danger: true })
   if (!ok) return
   const index = working.value.findIndex(a => a.principal_id === agent.principal_id)
   try {

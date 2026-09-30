@@ -30,12 +30,15 @@ export interface AgentPreview { allowed: boolean; reason?: AgentPreviewReason; c
 // paired_computer marks any computer's identity, retired ones too: it never takes a key, a computer
 // is connected by pairing it afresh.
 export interface Agent { description?: string; project_roles?: ProjectRole[]; principal_id: string; name: string; has_avatar: boolean; workspace_role: RoleRef | null; key_count: number; last_seen_at: string | null; service: boolean; status?: Status; connected_computer?: boolean; paired_computer?: boolean; preview?: AgentPreview }
-// What deactivating an agent does: the keys go with it, the history stays.
-export function agentDeactivatePoints(keys: number): string[] {
+// What deactivating an agent does: the keys go with it, the history stays. A computer's identity takes
+// no key, so reactivating it is followed by pairing the computer afresh.
+export function agentDeactivatePoints(keys: number, pairedComputer = false): string[] {
   return [
     keys ? (keys === 1 ? 'Its active key is revoked now; anything using it is refused.' : `Its ${keys} active keys are revoked now; anything using them is refused.`) : 'It has no active key to revoke.',
     'Its role, project access and history stay.',
-    'You can reactivate it later; revoked keys stay revoked, so it needs a new one.',
+    pairedComputer
+      ? 'You can reactivate it later; a computer takes no key, so you connect it afresh by pairing it.'
+      : 'You can reactivate it later; revoked keys stay revoked, so it needs a new one.',
   ]
 }
 export const CONNECTED_COMPUTER_REASON = 'A connected computer. Disconnect it on the Agents page first.'

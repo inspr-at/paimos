@@ -2,28 +2,30 @@
 
 package authz
 
-import "strings"
+// personAgentRoles are the legacy role tags a person-created agent or paired
+// computer identity may carry. Every path a person can reach (Access → Agents
+// creation, computer pairing, first key redemption) writes an empty role list;
+// only Aeon's own services (system, importer, operator, embedding, the quote
+// and portal services, whatever comes next) write a tag. So the set is empty and
+// the classification is default-deny: a tag nobody listed here marks a service.
+var personAgentRoles = map[string]bool{}
 
-// serviceRoles are the legacy role tags that mark an agent principal as an
-// internal service identity (system, importer, operator, embedding and the
-// public-facing quote and portal services). Such identities belong to Aeon, not
-// to a person's Access list: the directory flags them and the lifecycle refuses
-// to deactivate them.
-var serviceRoles = []string{"system", "importer", "operator", "embedding", "quote_public_service", "quote_confirmation_service", "portal_public_service"}
-
-// IsServiceIdentity reports whether an agent with these legacy roles is an
-// internal service identity. The quote_ prefix stays reserved for future quote
-// services.
-func IsServiceIdentity(roles []string) bool {
+// IsPersonAgent reports whether an agent with these legacy roles is positively
+// classified as a person-created agent or computer identity.
+func IsPersonAgent(roles []string) bool {
 	for _, v := range roles {
-		if strings.HasPrefix(v, "quote_") {
-			return true
-		}
-		for _, s := range serviceRoles {
-			if v == s {
-				return true
-			}
+		if !personAgentRoles[v] {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+// IsServiceIdentity reports whether an agent with these legacy roles is an
+// internal service identity. Such identities belong to Aeon, not to a person's
+// Access list: the directory flags them and the lifecycle refuses to deactivate
+// them. It fails closed: every agent that is not a person agent is a service,
+// including a role tag added in the future.
+func IsServiceIdentity(roles []string) bool {
+	return !IsPersonAgent(roles)
 }

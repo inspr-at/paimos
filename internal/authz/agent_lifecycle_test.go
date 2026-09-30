@@ -163,7 +163,9 @@ func TestAgentIdentityDeactivateAndReactivate(t *testing.T) {
 	}
 	// Every reserved service identity is classified once: the directory flags it
 	// and the lifecycle refuses it, including the portal's public service.
-	for _, role := range []string{"system", "importer", "operator", "embedding", "quote_public_service", "quote_confirmation_service", "portal_public_service"} {
+	// The classification fails closed: a role tag nobody listed (a future service,
+	// a typo, a tag outside the quote_ family) is a service identity too.
+	for _, role := range []string{"system", "importer", "operator", "embedding", "quote_public_service", "quote_confirmation_service", "portal_public_service", "portal_future_service", "worker"} {
 		id := agent("svc "+role, role)
 		if !agents()[id].Service {
 			t.Fatalf("%s is not flagged as a service identity in the directory", role)

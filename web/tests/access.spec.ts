@@ -454,6 +454,17 @@ test('agents: reactivating a retired computer points to pairing afresh; no key i
   await expect(old.getByRole('button', { name: /Create first key|New key/ })).toHaveCount(0)
   await expect(old).toContainText('No key: a computer connects by pairing.')
   await expect(old.getByRole('link', { name: 'Connect a computer' })).toHaveAttribute('href', '/agents/register-agent')
+  // Deactivating it again promises pairing afresh in the confirmation too, never a new key.
+  const trigger = old.getByRole('button', { name: 'Actions for mbp2607 old' })
+  await trigger.click()
+  await page.getByRole('menuitem', { name: 'Deactivate…' }).click()
+  const confirm = page.getByRole('dialog', { name: 'Deactivate mbp2607 old?' })
+  await expect(confirm).toContainText('It has no active key to revoke.')
+  await expect(confirm).toContainText('a computer takes no key, so you connect it afresh by pairing it')
+  await expect(confirm).not.toContainText(/needs a new one|revoked keys stay revoked/)
+  await confirm.getByRole('button', { name: 'Cancel' }).click()
+  await expect(trigger).toBeFocused()
+  expect(calls(world, 'POST', new RegExp(`/members/${LAPTOP_OLD}/deactivate$`))).toHaveLength(0)
   // A connected computer never offers a key either, and nothing was issued.
   const laptop = agents.getByRole('listitem').filter({ has: page.getByRole('button', { name: 'Actions for mbp2607', exact: true }) })
   await laptop.getByRole('button', { name: '1 active key' }).click()
