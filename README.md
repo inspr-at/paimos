@@ -689,18 +689,7 @@ sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 
 Licence: AGPL-3.0-only.
 
-### Paired daemon socket paths
-
-Paired mode uses `<setup-root>/daemon/agentd.sock`. If that exceeds the
-platform's socket path budget (100 bytes on macOS, 104 on Linux, allowing for
-`sun_path` overhead), it uses `~/.aeon/run/<state-hash>.sock`, with 16 hex
-characters identifying the daemon state directory. Both fallback directories
-are owned by the user and mode 0700; symlinks and unsafe existing directories
-are rejected. The selected socket is recorded privately in `daemon/control.json`.
-Attach, setup/status and capacity clients read that reference; local control
-can do the same with `control --setup-root PATH` (exclusive with `--socket`).
-Existing generation-specific socket references remain readable while their
-listener exists. No pairing data migration is required.
+### Pairing readiness and diagnostics
 
 `aeon-agentd status` reads the last atomic setup snapshot and live daemon status
 without taking `setup.lock`, reconciling enrollment, or performing cleanup.
@@ -718,6 +707,18 @@ Existing receipt-bound service definitions remain owned and unchanged; logging
 is added when a new service is installed. Managed Nix/Home Manager services
 retain their configuration ownership.
 
+### Paired daemon socket paths
+
+Paired mode uses `<setup-root>/daemon/agentd.sock`. If that exceeds the
+platform's socket path budget (100 bytes on macOS, 104 on Linux, allowing for
+`sun_path` overhead), it uses `~/.aeon/run/<state-hash>.sock`, with 16 hex
+characters identifying the daemon state directory. Both fallback directories
+are owned by the user and mode 0700; symlinks and unsafe existing directories
+are rejected. The selected socket is recorded privately in `daemon/control.json`.
+Attach, setup/status and capacity clients read that reference; local control
+can do the same with `control --setup-root PATH` (exclusive with `--socket`).
+Existing generation-specific socket references remain readable while their
+listener exists. No pairing data migration is required.
 
 `HOME` is needed only for the fallback, so short and existing legacy socket
 paths still resolve when it is unset. If the service and shell resolve different
