@@ -54,9 +54,6 @@ let timer: ReturnType<typeof setTimeout> | undefined
 let controller: AbortController | null = null
 let searched = ''
 let searchGen = 0
-let arming = false
-let armFrame = 0
-let escapeArmed = false
 
 const routeProject = computed(() => typeof route.params.projectKey === 'string' ? projects.byRouteKey(route.params.projectKey) : undefined)
 const scopeProject = computed(() => scope.value ? projects.byRouteKey(scope.value) : undefined)
@@ -182,24 +179,12 @@ function open() {
   term.value = ''; listed.value = []; hits.value = []; knowledgeHits.value = []; failed.value = ''; loading.value = false; active.value = 0; searched = ''
   void projects.load()
   if (routeProject.value) void loadViews(routeProject.value.id)
-  // Arm before showModal: a cancel fired while the dialog opens must not close it.
-  // Two frames later, Escape still closes. Focus now, so the following keys hit the input.
-  arming = true
+  // Focus before returning. The shortcut handler does not await open(), and the
+  // keys that follow have to land in this input.
   dialog.value?.showModal()
   input.value?.focus()
-  cancelAnimationFrame(armFrame)
-  armFrame = requestAnimationFrame(() => { armFrame = requestAnimationFrame(() => { arming = false }) })
 }
 function close() { controller?.abort(); dialog.value?.close(); opener?.focus({ preventScroll: true }) }
-function noteEscape(event: KeyboardEvent) { if (event.key === 'Escape') escapeArmed = true }
-function onCancel(event: Event) {
-  event.preventDefault()
-  const viaEscape = escapeArmed
-  escapeArmed = false
-  // Opening the dialog can fire cancel from the same key. Escape still closes.
-  if (arming && !viaEscape) return
-  close()
-}
 function hrefOf(result: Result): string | null {
   if (result.type === 'project') return `/p/${encodeURIComponent(result.key)}`
   if (result.type === 'ticket' && result.projectKey) return `/p/${encodeURIComponent(result.projectKey)}/${encodeURIComponent(result.key)}`
@@ -263,7 +248,7 @@ function move(step: number) {
 function jumpGroup(step: number) {
   const starts: number[] = []
   let index = 0
-  for (const group of groups.value) { starts.push(index); index += group.items.length }
+  for (const group of shownGroups.value) { starts.push(index); index += group.items.length }
   if (starts.length < 2) return
   const current = starts.reduce((found, start, i) => active.value >= start ? i : found, 0)
   active.value = starts[(current + step + starts.length) % starts.length]
@@ -279,9 +264,9 @@ function keydown(event: KeyboardEvent) {
   else if (event.key === 'Enter') { event.preventDefault(); void choose(flat.value[active.value], event.metaKey || event.ctrlKey) }
   else if (event.key === 'Backspace' && !term.value && scope.value) { event.preventDefault(); scope.value = null }
 }
-function backdrop(event: MouseEvent) { if (arming) return; if (event.target === dialog.value) close() }
+function backdrop(event: MouseEvent) { if (event.target === dialog.value) close() }
 function indexOf(result: Result) { return flat.value.indexOf(result) }
-onBeforeUnmount(() => { clearTimeout(timer); cancelAnimationFrame(armFrame); controller?.abort(); narrowQuery.removeEventListener('change', onNarrow) })
+onBeforeUnmount(() => { clearTimeout(timer); controller?.abort(); narrowQuery.removeEventListener('change', onNarrow) })
 defineExpose({ open })
 // A body match explains itself with the excerpt; a title match needs nothing more.
 const titleMatches = (title: string) => query.value.toLowerCase().split(/\s+/).some(word => word.length > 1 && title.toLowerCase().includes(word))
@@ -289,7 +274,7 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
 </script>
 
 <template>
-  <dialog ref="dialog" class="palette" aria-label="Search and commands" @keydown="noteEscape" @cancel="onCancel" @click="backdrop">
+  <dialog ref="dialog" class="palette" aria-label="Search and commands" @cancel.prevent="close" @click="backdrop">
     <div class="sheet">
       <label class="input-row">
         <AppIcon name="search" :size="18" class="lead" />

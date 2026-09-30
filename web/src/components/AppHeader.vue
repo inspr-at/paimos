@@ -82,10 +82,10 @@ function shortcut(event: KeyboardEvent) {
   if (!globalSearch.value) return
   const isK = event.key.toLowerCase() === 'k' || event.code === 'KeyK'
   if ((event.metaKey || event.ctrlKey) && !event.altKey && isK) {
-    // Capture runs before the focused control. While the palette input already
-    // has the key, leave it so Ctrl+K moves the selection instead of reopening.
+    // Capture runs before the focused control. Ctrl+K in the open palette moves
+    // the highlight; Cmd+K still selects the query.
     const paletteInput = document.querySelector('dialog.palette[open] input')
-    if (paletteInput && event.target === paletteInput) return
+    if (event.ctrlKey && !event.metaKey && paletteInput && event.target === paletteInput) return
     event.preventDefault()
     event.stopPropagation()
     palette.value?.open()
