@@ -767,7 +767,9 @@ export function planPoll(input: {
   retryAfterSeconds?: number | null
   state?: string | null
   rateLimited?: boolean
-}): { action: 'wait' | 'stop'; delayMs: number; reason: 'interval' | 'retry_after' | 'lifetime' | 'terminal' } {
+  /** Transient read failures since the last success. The wait doubles, and stays capped. */
+  failures?: number
+}): { action: 'wait' | 'stop'; delayMs: number; reason: 'interval' | 'backoff' | 'retry_after' | 'lifetime' | 'terminal' } {
   if (input.state === 'denied' || input.state === 'expired' || input.state === 'revoked') {
     return { action: 'stop', delayMs: 0, reason: 'terminal' }
   }
@@ -777,7 +779,95 @@ export function planPoll(input: {
     return { action: 'wait', delayMs: Math.max(MIN_POLL_INTERVAL_MS, seconds * 1000), reason: 'retry_after' }
   }
   const seconds = input.intervalSeconds ?? MIN_POLL_INTERVAL_MS / 1000
-  return { action: 'wait', delayMs: Math.max(MIN_POLL_INTERVAL_MS, seconds * 1000), reason: 'interval' }
+  const base = Math.max(MIN_POLL_INTERVAL_MS, seconds * 1000)
+  const steps = Math.min(Math.max(0, input.failures ?? 0), 3)
+  return { action: 'wait', delayMs: Math.min(base * 2 ** steps, 30_000), reason: steps > 0 ? 'backoff' : 'interval' }
+}
+
+// Wake hints on the existing tenant event stream. The page refetches the
+// computer; the payload is not a substitute for that read.
+export const PAIRING_LIVE_EVENTS = [
+  'agent_pairing.approved',
+  'agent_pairing.denied',
+  'agent_pairing.reported',
+  'agent_pairing.disconnected',
+  'agent_pairing.removed',
+  'agent_pairing.cleanup_acknowledged',
+  'agent_pairing.verification_created',
+  'agent_pairing.verification_withdrawn',
+] as const
+
+/** What the page follows: the events that name one of these belong to this pairing. */
+export interface PairingEventScope {
+  requestId: string | null
+  computerId: string | null
+  accountIds: readonly string[]
+}
+
+export function pairingEventScope(view: PairingView | null): PairingEventScope {
+  return {
+    requestId: view?.request_id || null,
+    computerId: view?.computer_id ?? null,
+    accountIds: view?.enrollments.map(item => item.account_id) ?? [],
+  }
+}
+
+/** Does this stream event name the pairing in scope? Events of other pairings, and anything unreadable, do not. */
+export function pairingEventMatches(data: string, scope: PairingEventScope): boolean {
+  let event: { after?: unknown }
+  try { event = JSON.parse(data) } catch { return false }
+  const after = event?.after
+  if (!after || typeof after !== 'object') return false
+  const named = after as { computer_id?: unknown; request_id?: unknown; account_id?: unknown; account_ids?: unknown }
+  if (scope.computerId && named.computer_id === scope.computerId) return true
+  if (scope.requestId && named.request_id === scope.requestId) return true
+  if (typeof named.account_id === 'string' && scope.accountIds.includes(named.account_id)) return true
+  return Array.isArray(named.account_ids) && named.account_ids.some(id => typeof id === 'string' && scope.accountIds.includes(id))
+}
+
+interface PairingSource {
+  onerror: ((this: EventSource, ev: Event) => unknown) | null
+  addEventListener(type: string, listener: (event: MessageEvent) => void): void
+  close(): void
+}
+
+export const PAIRING_EVENT_COALESCE_MS = 250
+
+/**
+ * Follow the tenant event stream in live mode (?after=latest): the page never
+ * replays the log, only what happens while it is open. An event wakes the
+ * caller only when it names the pairing in scope, and a burst of them wakes it
+ * once. After a gap the stream cannot bridge (resumed: false past the first
+ * connection) the caller is woken once to read again. Returns the unsubscribe.
+ */
+export function subscribePairingEvents(
+  scope: () => PairingEventScope,
+  wake: () => void,
+  open: (url: string) => PairingSource | null = url => typeof EventSource === 'undefined' ? null : new EventSource(url),
+): () => void {
+  const stream = open('/api/events/stream?after=latest')
+  if (!stream) return () => {}
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let closed = false
+  let connected = false
+  const soon = () => {
+    if (closed || timer) return
+    timer = setTimeout(() => { timer = undefined; if (!closed) wake() }, PAIRING_EVENT_COALESCE_MS)
+  }
+  stream.addEventListener('stream.ready', event => {
+    let ready: { resumed?: unknown }
+    try { ready = JSON.parse(event.data) } catch { return }
+    // The first connection starts at the newest event, with nothing to bridge.
+    if (connected && ready.resumed !== true) soon()
+    connected = true
+  })
+  for (const name of PAIRING_LIVE_EVENTS) stream.addEventListener(name, event => { if (pairingEventMatches(event.data, scope())) soon() })
+  return () => {
+    closed = true
+    if (timer) clearTimeout(timer)
+    timer = undefined
+    stream.close()
+  }
 }
 
 export interface PairingProgress {
@@ -1115,6 +1205,39 @@ export function describeComputerStatus(view: Pick<PairingView, 'computer_state' 
     next = 'Cleanup and revocation do not settle run accounting. Local processes stay unconfirmed until the computer says otherwise.'
   }
   return { stateLabel, cleanupLabel, processLabel, claimsProcessStopped, detail, next }
+}
+
+/**
+ * Keep reading until the daemon is connected and verification is no longer
+ * moving, or the request is closed. A failed setup, or a failed, cancelled,
+ * expired or ownership-lost verification, is final whatever the connectivity
+ * says: nothing more will change by waiting.
+ */
+export function pairingStillLive(view: PairingView): boolean {
+  if (!view.computer_id) return false
+  const phase = describeProgress(view).phase
+  if (phase === 'denied' || phase === 'expired' || phase === 'revoked') return false
+  if (view.setup_state === 'setup_failed') return false
+  if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED as readonly string[]).includes(item.verification_state))) return false
+  const connected = describeComputerStatus(view).stateLabel === 'Connected'
+  const moving = view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state))
+  return !(connected && !moving)
+}
+
+/**
+ * What the register page shows after approval. A daemon that has finished
+ * setup and answered a recent probe is Connected, including while a
+ * verification run is still in progress. describeProgress keeps verification
+ * as its own phase; this copy is the page title.
+ */
+export function pairingLiveCopy(view: PairingView): { title: string; detail: string; next: string } {
+  const progress = describeProgress(view)
+  if (describeComputerStatus(view).stateLabel !== 'Connected') return { title: progress.title, detail: progress.detail, next: progress.next }
+  return {
+    title: 'Connected',
+    detail: progress.phase === 'verify' ? progress.detail : 'The computer reported that setup finished, and a recent probe succeeded.',
+    next: progress.next,
+  }
 }
 
 function accountingUnconfirmed(view: Pick<PairingView, 'accounting_state' | 'enrollments'>): boolean {

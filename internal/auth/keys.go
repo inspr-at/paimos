@@ -185,6 +185,10 @@ func (m *Module) writeCreatedAgentKey(w http.ResponseWriter, rec keyRecord, err 
 			writeBadRequest(w, "principal_id must be an agent")
 			return
 		}
+		if errors.Is(err, errAgentDeactivated) {
+			writeJSON(w, http.StatusConflict, errorJSON{Error: "agent is deactivated; reactivate it first"})
+			return
+		}
 		if errors.Is(err, errServicePrincipal) || errors.Is(err, authz.ErrForbidden) {
 			writeForbidden(w)
 			return
