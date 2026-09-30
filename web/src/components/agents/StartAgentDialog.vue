@@ -188,7 +188,7 @@ async function submit(runNow = false) {
     else if (remembered.value && !remember.value) await deletePin(ticket.value.id, choice.value.harness)
     const result = await startAgent({ ticket: ticket.value, agentId: view.value.agentId, profileId: view.value.profileId, accountId: choice.value.accountId, runNow })
     run.value = result.run; reused.value = result.reused; requested.value = pinned
-    agents.recordRun(result.run)
+    void agents.afterWrite(() => agents.recordRun(result.run))
     await refresh()
     await nextTick(); dialog.value?.querySelector<HTMLElement>('[data-result]')?.focus()
   } catch (e) {
@@ -206,7 +206,7 @@ async function submit(runNow = false) {
 async function overrideQueued() {
   if (!run.value || busy.value) return
   busy.value = true; checkError.value = ''
-  try { run.value = await runNowOnce(run.value.id); agents.recordRun(run.value) }
+  try { const started = await runNowOnce(run.value.id); run.value = started; void agents.afterWrite(() => agents.recordRun(started)) }
   catch (e) { checkError.value = message(e) }
   finally { busy.value = false }
 }

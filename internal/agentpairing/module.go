@@ -70,6 +70,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agent-pairing/computers/{computerId}", m.person("account.read", m.get))
 	mux.HandleFunc("POST /api/agent-pairing/computers/{computerId}/disconnect", m.person("account.manage", m.disconnect))
 	mux.HandleFunc("POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/disconnect", m.person("account.manage", m.disconnect))
+	mux.HandleFunc("POST /api/agent-pairing/computers/{computerId}/remove", m.person("account.manage", m.remove))
 	mux.HandleFunc("GET /api/agent-pairing/self", m.self)
 	mux.HandleFunc("POST /api/agent-pairing/self/disconnect", m.self)
 }

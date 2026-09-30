@@ -90,6 +90,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 		{"GET /api/runs/queued", "run.read", true, 200, m.queued},
 		{"GET /api/runs/{runId}", "run.read", false, 200, m.get},
 		{"POST /api/runs/{runId}/capacity-override", "run.create", false, 200, m.runNow},
+		{"POST /api/runs/{runId}/cancel", "run.create", false, 200, m.cancel},
 		{"POST /api/runs/{runId}/claim", "run.claim", true, 200, m.claim},
 		{"POST /api/runs/{runId}/telemetry", "run.telemetry", true, 200, m.telemetry},
 	} {

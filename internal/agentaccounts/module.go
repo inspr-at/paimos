@@ -78,6 +78,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		m.deleteLimit(w, r)
 	})
 	mux.HandleFunc("PATCH /api/agent-accounts/{accountId}", m.patch)
+	mux.HandleFunc("POST /api/agent-accounts/{accountId}/archive", m.archive)
 	mux.HandleFunc("POST /api/agent-accounts/{accountId}/probe", m.probe)
 }
 
@@ -102,7 +103,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	var items []Account
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var err error
-		items, err = listAccounts(r.Context(), tx)
+		items, err = queryAccounts(r.Context(), tx, p.Kind == tenant.Agent)
 		if err == nil && p.Kind == tenant.Person {
 			err = annotateStatuslineOptIn(r.Context(), tx, p, items)
 		}
@@ -199,6 +200,29 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		out, err = updateState(r.Context(), tx, p, r.PathValue("accountId"), in.State)
+		return err
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, out)
+}
+
+// archive is Remove on an account row in /agents: person-only.
+func (m *Module) archive(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if err := m.requirePermission(r, p, "account.manage"); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var out Account
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = archiveAccount(r.Context(), tx, p, r.PathValue("accountId"))
 		return err
 	})
 	if err != nil {

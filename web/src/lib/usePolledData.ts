@@ -21,13 +21,17 @@ export function usePolledData<T>(read: () => Promise<T>, initial: T, onSuccess?:
   const status = shallowRef(initialRefreshStatus())
   const stale = computed(() => status.value.failures > 0 && status.value.updatedAt !== null)
   let flight: Promise<void> | undefined
+  let flightTurn = -1
   let generation = 0
   function invalidate() { generation++ }
+  // Refreshes join the read in flight only while it is current: after an
+  // invalidation the next refresh reads again instead of waiting on a dropped one.
   function refresh(): Promise<void> {
-    if (flight) return flight
+    if (flight && flightTurn === generation) return flight
     const turn = generation
     const started = Date.now()
-    flight = (async () => {
+    flightTurn = turn
+    const current: Promise<void> = (async () => {
       try {
         const value = await read()
         if (turn !== generation || Date.now() - started > 30_000 || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return
@@ -41,8 +45,9 @@ export function usePolledData<T>(read: () => Promise<T>, initial: T, onSuccess?:
           forbidden: error instanceof APIError && error.status === 403,
         })
       }
-    })().finally(() => { flight = undefined })
-    return flight
+    })().finally(() => { if (flight === current) flight = undefined })
+    flight = current
+    return current
   }
   return { data, status, stale, refresh, invalidate }
 }
