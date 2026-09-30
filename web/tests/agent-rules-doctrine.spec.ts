@@ -49,7 +49,7 @@ const PRIVATE_FAILED = {
 
 interface DoctrineMock { calls: { method: string; path: string; body?: unknown }[] }
 
-async function setup(page: Page, options: { manage: boolean; layer: { sources: unknown[]; proposals_enabled?: boolean }; after?: { sources: unknown[] } }): Promise<DoctrineMock> {
+async function setup(page: Page, options: { manage: boolean; layer: { sources: unknown[]; proposals_enabled?: boolean; proposals_disabled_reason?: string }; after?: { sources: unknown[] } }): Promise<DoctrineMock> {
   await mockWork(page, fixtures())
   await mockSettings(page, settingsData())
   await mockRules(page)
@@ -295,4 +295,16 @@ test('external merges show repository release guidance and contextual controls',
   expect(await controls.count()).toBeGreaterThan(1)
   const names = await controls.evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))
   expect(new Set(names).size).toBe(names.length)
+})
+
+
+test('missing proposal guard gives administrators a reason while doctrine remains readable', async ({ page }) => {
+  const reason = 'Propose PR is disabled: the server quotation guard key is not provisioned. Ask the server administrator to provision AEON_DOCTRINE_GUARD_KEY_FILE.'
+  await setup(page, { manage: true, layer: { sources: [READY], proposals_enabled: false, proposals_disabled_reason: reason } })
+  await page.goto('/settings/agent-rules')
+  const doctrine = section(page)
+  await expect(doctrine.getByRole('status').filter({ hasText: reason })).toBeVisible()
+  await doctrine.getByRole('button', { name: /^AGENTS-KERNEL\.md/ }).click()
+  await expect(doctrine.getByText('Never print the environment.')).toBeVisible()
+  await expect(doctrine.getByRole('button', { name: /Propose/ })).toHaveCount(0)
 })

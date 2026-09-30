@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -96,7 +97,7 @@ func FromEnv() (Config, error) {
 	}
 	if f := os.Getenv("AEON_DOCTRINE_GUARD_KEY_FILE"); f != "" {
 		key, err := doctrineGuardKey(f)
-		if err != nil && !os.IsNotExist(err) {
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return Config{}, err
 		}
 		// A not-yet-provisioned guard disables proposals, not server startup.

@@ -114,7 +114,7 @@ func findingClass(s string) string {
 		{"scope", []string{"scope", "ownership", "unrelated", "contract", "contracts"}},
 	} {
 		for _, word := range c.words {
-			if strings.Contains(words, " "+word+" ") {
+			if strings.Contains(words, " "+strings.Join(proposalWords(word), " ")+" ") {
 				return c.name
 			}
 		}

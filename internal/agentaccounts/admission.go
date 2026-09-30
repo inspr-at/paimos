@@ -411,19 +411,29 @@ func readingDenials(ctx context.Context, tx pgx.Tx, accountID string) ([]denial,
 }
 
 func blindDenials(ctx context.Context, tx pgx.Tx, accountID string) ([]denial, error) {
-	var at *time.Time
-	err := tx.QueryRow(ctx, `SELECT max(t.at) FROM run_telemetry t
- JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
+	var at time.Time
+	var reset *time.Time
+	// Only a reading tied to the stopped run can identify its reset. A prior
+	// run's named denial must not shorten a newer unnamed stop's backoff.
+	err := tx.QueryRow(ctx, `SELECT t.at,
+ (SELECT max(r.resets_at) FROM account_capacity_readings r
+  WHERE r.account_id=$1 AND r.run_id=t.run_id AND r.source<>'estimate'
+  AND (r.ordinary_usage_allowed=false OR r.used_percent>=100) AND r.resets_at>t.at)
+ FROM run_telemetry t JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
  WHERE ar.account_id=$1 AND t.error_code='vendor_limit' AND NOT EXISTS(
   SELECT 1 FROM account_capacity_readings r WHERE r.account_id=$1 AND r.source<>'estimate'
-  AND r.ordinary_usage_allowed=true AND r.read_at>t.at)`, accountID).Scan(&at)
-	if err != nil || at == nil {
+  AND r.ordinary_usage_allowed=true AND r.read_at>t.at)
+ ORDER BY t.at DESC LIMIT 1`, accountID).Scan(&at, &reset)
+	if isNoRows(err) {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, err
 	}
 	stop := at.UTC()
-	until, _, err := VendorRetryAt(ctx, tx, accountID, stop)
-	if err != nil {
-		return nil, err
+	until := stop.Add(vendorStopBackoff)
+	if reset != nil {
+		until = reset.UTC()
 	}
 	return []denial{{until: until, at: stop}}, nil
 }

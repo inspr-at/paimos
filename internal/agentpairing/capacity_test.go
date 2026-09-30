@@ -61,7 +61,6 @@ func TestObservedCapacityPreservesSeparatePairingApproval(t *testing.T) {
 	f.probe(v, e, key, 200)
 	// This test isolates approval; routing must not depend on local test time.
 	schedule := capacity.DefaultSchedule()
-	schedule.Override = "sprint"
 	schedule.Reserve = capacity.ReserveOff
 	for i := range schedule.Week {
 		schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}

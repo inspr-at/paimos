@@ -31,7 +31,7 @@ func armVendorRetry(ctx context.Context, tx pgx.Tx, v Run) error {
 	if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
 		return err
 	}
-	at, known, err := agentaccounts.VendorRetryAt(ctx, tx, *v.AccountID, now)
+	at, known, err := agentaccounts.VendorRetryAt(ctx, tx, *v.AccountID, v.ID, now)
 	if err != nil {
 		return err
 	}

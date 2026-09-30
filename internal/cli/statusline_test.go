@@ -44,6 +44,9 @@ func TestStatuslineOnlyRelaysNormalizedQuota(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(filepath.Join(root, name), 0600); err != nil {
+		t.Fatal(err)
+	}
 	requests := make(chan agentd.StatuslineRequest, 1)
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/statusline" || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("t", 32) {
