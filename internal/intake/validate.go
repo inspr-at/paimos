@@ -119,6 +119,9 @@ func validateDraft(in *draftWrite) error {
 			return err
 		}
 	}
+	if err := validateExtensions(in); err != nil {
+		return err
+	}
 	return cleanKey(&in.IdempotencyKey)
 }
 

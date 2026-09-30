@@ -19,6 +19,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/version"
 )
@@ -145,7 +146,7 @@ func (r *Remote) Identity(ctx context.Context) (string, string, error) {
 
 func (r *Remote) Queued(ctx context.Context) ([]Run, error) {
 	var runs []Run
-	err := r.Client.Do(ctx, "GET", "/api/runs/queued?limit=100", nil, &runs)
+	err := r.Client.DoWithHeaders(ctx, "GET", "/api/runs/queued?limit=100", nil, &runs, map[string]string{reviewgate.PolicyHeader: reviewgate.Policy})
 	return runs, err
 }
 
@@ -333,9 +334,9 @@ func (r *Remote) Claim(ctx context.Context, runID, daemonID, generation string, 
 	r.mu.Lock()
 	r.daemonID, r.generation = daemonID, generation
 	r.mu.Unlock()
-	err := r.Client.Do(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", map[string]any{
+	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", map[string]any{
 		"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations,
-	}, nil)
+	}, nil, map[string]string{reviewgate.PolicyHeader: reviewgate.Policy})
 	return err
 }
 
@@ -391,8 +392,12 @@ func (r *Remote) AddEvidence(ctx context.Context, workOrderID, runID, answer str
 	if answer == "" || len(answer) > 64<<10 {
 		return errors.New("run evidence is empty or exceeds bound")
 	}
-	return r.Client.Do(ctx, "POST", "/api/work-orders/"+url.PathEscape(workOrderID)+"/evidence",
-		map[string]any{"kind": "text", "reference": answer, "run_id": runID}, nil)
+	r.mu.RLock()
+	daemon, generation := r.daemonID, r.generation
+	r.mu.RUnlock()
+	return r.Client.DoWithHeaders(ctx, "POST", "/api/work-orders/"+url.PathEscape(workOrderID)+"/evidence",
+		map[string]any{"kind": "text", "reference": answer, "run_id": runID}, nil,
+		map[string]string{"X-Aeon-Daemon-ID": daemon, "X-Aeon-Daemon-Generation": generation})
 }
 
 func (r *Remote) Probe(ctx context.Context, accountID, daemonID, generation string, available bool) error {

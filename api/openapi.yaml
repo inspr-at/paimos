@@ -321,7 +321,7 @@ paths:
   /rules/merged:
     get:
       operationId: "mergeAgentRules"
-      description: "rules.read in exact project; tenant from authentication; person must be caller or agent key creator; named agent must be caller or owner controlled; role/harness are exact requested selectors, not permission grants; fails closed on ambiguous identities; no HTTP cache. The rendered file stays within the workspace budget (GET /rules/budget; default 12000, maximum 64000 UTF-8 bytes) and its per-layer caps. Explanations (tldr) and details are never included. Git-backed doctrine rules are omitted from that file; when a doctrine release is pinned, body names the release and does not repeat its text. The budget counts this session file only, separate from the harness doctrine. Loading the snapshots for that one file stops at the same store caps as publication: 2,000 rules or 2 MiB of rule text (422 budget_check_too_large). The 1,000 session-file cap remains on batch publication."
+      description: "rules.read in exact project; tenant from authentication; person must be caller or agent key creator; named agent must be caller or owner controlled; role/harness are exact requested selectors, not permission grants; fails closed on ambiguous identities; no HTTP cache. The rendered file stays within the workspace budget (GET /rules/budget; default 12000, maximum 500000 UTF-8 bytes) and its per-layer caps. Explanations (tldr) and details are never included. Git-backed doctrine rules are omitted from that file; when a doctrine release is pinned, body names the release and does not repeat its text. The budget counts this session file only, separate from the harness doctrine. Loading the snapshots for that one file stops at the same store caps as publication: 2,000 rules or 2 MiB of rule text (422 budget_check_too_large). The 1,000 session-file cap remains on batch publication."
       responses:
         "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
@@ -337,7 +337,7 @@ paths:
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap, or the snapshots for this session exceed 2,000 rules or 2 MiB of rule text","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
-        - {name: X-Aeon-Max-Session-File-Bytes, in: header, required: false, schema: {type: integer, minimum: 2000, maximum: 64000}, description: "Requesting client limit; omission means 12000. Larger files get a deterministic whole-rule compatibility cut and upgrade note (also bounded for the legacy 512-KiB cache); locked rules are never omitted (422 if they cannot fit)."}
+        - {name: X-Aeon-Max-Session-File-Bytes, in: header, required: false, schema: {type: integer, minimum: 2000, maximum: 512000}, description: "Requesting client limit; omission means 12000. Larger files get a deterministic whole-rule compatibility cut: locked rules first, then company, project, person, agent role, named agent, task; identity ascending within each priority. Includes an upgrade note (also bounded for the legacy 512-KiB cache); locked rules are never omitted (422 if they cannot fit)."}
         -
           name: "project_id"
           in: "query"
@@ -516,7 +516,7 @@ paths:
   /rules/budget:
     get:
       operationId: "getRuleBudget"
-      description: "AEON-314. rules.read. The workspace's always-on budget for one merged session file (default 12,000 bytes; 2,000 to 64,000 subject to the seven-day client capability gate) and optional per-layer caps, plus the bounds."
+      description: "AEON-432. rules.read. The workspace's always-on budget for one merged session file (default 12,000 bytes; 2,000 to 500,000) and optional per-layer caps. Recent client capabilities describe delivery; they never block saving a budget."
       responses:
         "200":
           description: "The workspace budget"
@@ -531,7 +531,7 @@ paths:
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
     put:
       operationId: "setRuleBudget"
-      description: "AEON-314. settings.manage in the workspace; people only. Sets the total budget (2,000 to 64,000 bytes; values above 12,000 require every client active in the tenant in the last seven days to report support) and optional per-layer caps (500 bytes to the total; omit or 0 for none). Refused with 422 when a session file served now would no longer fit. Publication, the merged file and its explanation use these values. The store caps (2,000 rules, 2 MiB) are separate and unchanged."
+      description: "AEON-432. settings.manage in the workspace; people only. Sets the total budget (2,000 to 500,000 bytes; older clients never block saving) and optional per-layer caps (500 bytes to the total; omit or 0 for none). Outside the product bounds returns 400 invalid_budget, including 500,001. Refused with 422 when a session file served now would no longer fit. Each client receives whole rules within min(budget, its reported limit), retaining all locked rules or failing closed. Publication and explanation use the workspace budget. The store caps (2,000 rules, 2 MiB) are separate and unchanged."
       responses:
         "200":
           description: "The saved budget"
@@ -542,7 +542,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"rules_clients_incompatible: at least one recently active client cannot support this budget, or no client has reported support","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Ambiguous same-rank rule identity in the published session context","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"A session file served now would exceed the new budget","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       requestBody:
@@ -3477,6 +3477,30 @@ paths:
         '204': {description: Target disabled}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/reviews:
+    get:
+      operationId: listTicketReviews
+      summary: Cross-family review results for this ticket
+      description: Newest first, bounded to 50 reviews. A gate opens only for a completed, vendor-reported, other-family review of the exact commit range. No merge is performed.
+      security: *auth
+      parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Reviews, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TicketReview'}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: requestTicketReview
+      summary: Queue an independent managed review of a commit range
+      description: Requires work_orders.write and run.create on the ticket. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection.
+      security: *auth
+      parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TicketReviewCreate'}}}}
+      responses:
+        '201': {description: Review (queued or blocked), content: {application/json: {schema: {$ref: '#/components/schemas/TicketReview'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /work-orders:
     get:
       operationId: listWorkOrders
@@ -3777,7 +3801,7 @@ paths:
       - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
     post:
       parameters:
-        - {name: X-Aeon-Max-Session-File-Bytes, in: header, schema: {type: integer, minimum: 2000, maximum: 64000}, description: "Omission means 12000. Delivery also respects the registered maximum; whole-rule compatibility cut with note, never dropping locked rules."}
+        - {name: X-Aeon-Max-Session-File-Bytes, in: header, schema: {type: integer, minimum: 2000, maximum: 512000}, description: "Omission means 12000. Delivery also respects the registered maximum; whole-rule compatibility cut with note, never dropping locked rules."}
       operationId: managedHarnessContext
       description: Bound managed worker only. ADR-004 rules merge for this exact tenant/project/key creator/agent/task; delivered in ephemeral context. No repository writes. A receipt proves received bytes, not model obedience. No caller-selectable context or broader rules access.
       requestBody:
@@ -4488,7 +4512,9 @@ paths:
       operationId: listQueuedRuns
       description: Agent daemon sees queued runs for its principal only. Polling is a fallback when webhook wakes are missed. The daemon poll omits per-run wait; people read it on the run.
       security: [{agentKey: []}]
-      parameters: [{$ref: '#/components/parameters/Limit'}]
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {name: X-Aeon-Review-Policy, in: header, schema: {type: string, enum: [no_tools_v1]}, description: Advertise no_tools_v1 to receive review runs. Legacy daemons receive ordinary runs only.}
       responses:
         '200': {description: Queued runs, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}}}}
         '403': {$ref: '#/components/responses/Error'}
@@ -4505,7 +4531,9 @@ paths:
       operationId: claimAgentRun
       description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts.
       security: [{agentKey: []}]
-      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-Aeon-Review-Policy, in: header, schema: {type: string, enum: [no_tools_v1]}, description: Required for review claims. Ordinary run claims are unchanged.}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunClaim'}}}}
       responses:
         '200': {description: Claimed run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
@@ -5200,7 +5228,9 @@ paths:
       summary: Read intake history
       description: Aithema's current source, transcript and draft history; accepted and superseded proposals remain visible with citations.
       security: *auth
-      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: node_id, in: query, schema: {type: string, format: uuid}, description: Return accepted drafts for this node or the requirement that generated this ticket; sources and turns are empty. Requires the same intake.read permission.}
       responses:
         '200': {description: Intake snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSnapshot'}}}}
         '404': {$ref: '#/components/responses/Error'}
@@ -6923,23 +6953,23 @@ components:
       type: "object"
       additionalProperties: false
       properties:
-        company: {type: integer, minimum: 0, maximum: 64000}
-        project: {type: integer, minimum: 0, maximum: 64000}
-        person: {type: integer, minimum: 0, maximum: 64000}
-        agent: {type: integer, minimum: 0, maximum: 64000}
+        company: {type: integer, minimum: 0, maximum: 500000}
+        project: {type: integer, minimum: 0, maximum: 500000}
+        person: {type: integer, minimum: 0, maximum: 500000}
+        agent: {type: integer, minimum: 0, maximum: 500000}
     RuleBudget:
       type: "object"
       additionalProperties: false
       properties:
-        max_bytes: {type: integer, minimum: 2000, maximum: 64000}
+        max_bytes: {type: integer, minimum: 2000, maximum: 500000}
         layer_max_bytes:
           "$ref": "#/components/schemas/RuleLayerBytes"
       required: ["max_bytes"]
     RulesClientMaximum:
       type: [integer, 'null']
       minimum: 2000
-      maximum: 64000
-      description: "Optional report on every registration and heartbeat. Omitted/null means legacy 12000 (including after downgrade); never a permission grant. Reports affect only the budget gate and managed delivery, not session response fields."
+      maximum: 512000
+      description: "Optional report on every registration and heartbeat. Omitted/null means legacy 12000 (including after downgrade); never a permission grant. Reports affect per-client delivery and the admin inventory, never budget admission or session response fields."
     RuleBudgetBlocker:
       type: object
       required: [host, harness, max_session_file_bytes]
@@ -6948,6 +6978,8 @@ components:
         harness: {type: string}
         version: {type: string}
         max_session_file_bytes: {type: integer}
+        delivered_max_bytes: {type: integer, description: "Delivery allowance: min(workspace budget, reported client limit). Whole-rule delivery may use fewer bytes; locked rules are never omitted."}
+        truncated: {type: boolean, description: "The client's allowance is below the workspace budget."}
     RuleBudgetView:
       type: "object"
       additionalProperties: false
@@ -6957,13 +6989,13 @@ components:
           "$ref": "#/components/schemas/RuleLayerBytes"
         default_bytes: {type: integer}
         min_bytes: {type: integer}
-        ceiling_bytes: {type: integer, description: "Minimum reported maximum across all sessions active in the tenant within seven days, including stopped/archived sessions, and never below 12000. Missing reports, reports under 12000, and an empty inventory keep 12000."}
+        ceiling_bytes: {type: integer, description: "Product budget ceiling: 500000, independent of recent client reports."}
         blocking_clients:
           type: array
-          description: "Clients below 64000, grouped by host/harness/version/limit, at most 50. Only people with workspace settings.manage receive these tenant-wide details."
+          description: "Recent client delivery inventory (historical field name retained), grouped by host/harness/version/limit, at most 50, including stopped/archived sessions active within seven days. Only people with workspace settings.manage receive these tenant-wide details. Clients never block budget changes."
           maxItems: 50
           items: {$ref: '#/components/schemas/RuleBudgetBlocker'}
-        blocking_clients_more: {type: integer, minimum: 0, description: "Additional blocking clients omitted after the first 50. Present only together with blocking_clients, and only for settings.manage."}
+        blocking_clients_more: {type: integer, minimum: 0, description: "Additional recent clients omitted after the first 50. Present only together with blocking_clients, and only for settings.manage."}
         min_layer_bytes: {type: integer}
       required: ["max_bytes", "layer_max_bytes", "default_bytes", "min_bytes", "ceiling_bytes", "min_layer_bytes"]
     ExplainedRules:
@@ -7327,10 +7359,10 @@ components:
           type: "string"
         body:
           type: "string"
-          description: "Exact always-on rendered bytes; within the workspace budget (default 12000, never above 64000 UTF-8 bytes); details and explanations excluded"
+          description: "Exact always-on rendered bytes; within the workspace budget (default 12000, never above 500000 UTF-8 bytes); details and explanations excluded"
         byte_size:
           type: "integer"
-          maximum: 64000
+          maximum: 512000
         rules:
           type: "array"
           maxItems: 10000
@@ -8716,10 +8748,27 @@ components:
         target_node_id: {type: string, format: uuid}
         title: {type: string, minLength: 1}
         body: {type: string}
+        extensions: {$ref: '#/components/schemas/IntakeExtensions'}
+        document_bytes:
+          type: string
+          description: Original Aithema review snapshot JSON, preserved as text. Extensions are extracted from its single confirmed, unbound item; an explicit extensions map must match those exact bytes. This native draft envelope retains its required projection fields. The complete request is limited to 1 MiB, allowing a 64 KiB canonical extension map plus JSON escaping and projection overhead.
         base_event_id: {type: integer, minimum: 0, description: Last target-node event observed by Aithema; zero for a new target}
         citations: {type: array, minItems: 1, items: {$ref: '#/components/schemas/IntakeCitation'}}
         ticket_suggestions: {type: array, items: {$ref: '#/components/schemas/IntakeTicketSuggestion'}}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
+    IntakeExtensions:
+      type: object
+      maxProperties: 8
+      description: Aithema item.extensions, preserved without reshaping. Registry and canonical 16 KiB instance / 64 KiB map validation belong to Aithema; Aeon checks the envelope and retains unknown namespaces. Evidence strings are not trimmed or normalized. Changing the raw map or document on an idempotent retry returns 409.
+      additionalProperties: false
+      patternProperties:
+        '^x-[a-z0-9]+(\.[a-z0-9-]+)+@(0|[1-9][0-9]*)$':
+          type: object
+          additionalProperties: false
+          required: [version, data]
+          properties:
+            version: {type: string, maxLength: 33, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', description: Major must match the map key}
+            data: {}
     IntakeTicketSuggestion:
       type: object
       additionalProperties: false
@@ -10154,6 +10203,8 @@ components:
       required: [node_id, status, revision, criteria, created_at, updated_at]
       properties:
         node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [build, review]}
+        review: {$ref: '#/components/schemas/ReviewBinding'}
         status: {type: string, enum: [draft, ready, running, blocked, done, cancelled]}
         revision: {type: integer, format: int64}
         requested_by_principal_id: {type: string, format: uuid}
@@ -10163,6 +10214,69 @@ components:
         criteria: {type: array, items: {$ref: '#/components/schemas/WorkCriterion'}}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    TicketReviewCreate:
+      type: object
+      additionalProperties: false
+      required: [request_id, repository, base_sha, head_sha]
+      properties:
+        request_id: {type: string, format: uuid}
+        repository: {type: string, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$', maxLength: 200}
+        base_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
+        head_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
+        author_run_id: {type: string, format: uuid}
+        author_family: {type: string, enum: [openai, anthropic, xai, cursor], description: Person-only declaration for a change outside managed runs.}
+        pull_request: {type: integer, minimum: 1}
+    ReviewBinding:
+      type: object
+      required: [ticket_node_id, repository, base_sha, head_sha, author_family]
+      properties:
+        ticket_node_id: {type: string, format: uuid}
+        repository: {type: string}
+        base_sha: {type: string}
+        head_sha: {type: string}
+        author_family: {type: string}
+        ticket_snapshot: {type: string, description: Immutable ticket and acceptance-criteria snapshot supplied on the managed work order.}
+        author_run_id: {type: [string, 'null'], format: uuid}
+        reviewer_profile_id: {type: [string, 'null'], format: uuid}
+        reviewer_family: {type: [string, 'null']}
+        pull_request: {type: [integer, 'null']}
+    ReviewFinding:
+      type: object
+      required: [severity, file, line, message]
+      properties:
+        severity: {type: string, enum: [critical, high, medium, low]}
+        file: {type: string}
+        line: {type: integer, minimum: 1}
+        message: {type: string}
+    ReviewResult:
+      type: object
+      required: [verdict, findings, reason]
+      properties:
+        verdict: {type: string, enum: ['', ok, changes]}
+        findings: {type: array, items: {$ref: '#/components/schemas/ReviewFinding'}}
+        reason: {type: string, description: A missing or malformed final verdict keeps the gate closed.}
+    TicketReview:
+      allOf:
+        - {$ref: '#/components/schemas/ReviewBinding'}
+        - type: object
+          required: [work_order_id, request_id, status, gate_open, gate_reason, ladder, result, created_at, github_status]
+          properties:
+            work_order_id: {type: string, format: uuid}
+            request_id: {type: string, format: uuid}
+            run_id: {type: [string, 'null'], format: uuid}
+            status: {type: string, enum: [blocked, queued, starting, running, waiting, completed, failed, cancelled, ownership_lost]}
+            reviewer_model: {type: [string, 'null']}
+            reviewer_effort: {type: [string, 'null']}
+            reviewer_profile_version: {type: [string, 'null']}
+            effective_model: {type: [string, 'null']}
+            gate_open: {type: boolean}
+            gate_reason: {type: string}
+            result: {$ref: '#/components/schemas/ReviewResult'}
+            ladder: {type: array, items: {type: object, required: [profile_id, selected, skip_reasons], properties: {profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
+            cost_micros: {type: [integer, 'null'], format: int64, description: Reported USD cost; null when cost was not measured.}
+            duration_seconds: {type: [integer, 'null'], format: int64}
+            created_at: {type: string, format: date-time}
+            github_status: {type: string, enum: [unconfigured, pending, success, failure, error, stale]}
     WorkEvidenceWrite:
       type: object
       required: [kind, reference]
@@ -10723,7 +10837,7 @@ components:
         context: {$ref: '#/components/schemas/HarnessRulesReceiptContext'}
         body_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Worker-reported SHA256 of exact merged bytes, never a hash of a version label'}
         version: {type: string, maxLength: 16, pattern: '^(floor-only|[0-9]{12}\.0\.0)$', description: Worker-reported calendar version or floor-only; no assertion of publication}
-        byte_size: {type: integer, minimum: 1, maximum: 64000}
+        byte_size: {type: integer, minimum: 1, maximum: 512000}
         source: {type: string, enum: [online, cache, floor-only], description: Worker-reported source; cache/floor-only are stale fallback evidence and never fresh authority}
     HarnessRulesReceipt:
       type: object
@@ -10914,6 +11028,7 @@ components:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
+        read_only_review: {type: boolean, description: A pinned review run using a qualified no-tools adapter; repository_mutation_allowed is false.}
         verification_error: {type: string, enum: [verification_unavailable], description: Present only for a verification refused before launch.}
         verification_reason: {type: string, enum: [adapter_unsupported, binding_incomplete, local_binding_missing], description: Bounded cause for verification_unavailable; never vendor diagnostics.}
         capacity_override: {type: string, enum: ['', now]}
@@ -10966,6 +11081,14 @@ components:
         error_code: {type: string, enum: [event_stream_bound, app_server_protocol, child_exit_failed, turn_failed, child_stop_failed, ownership_lost, reporter_unavailable, workspace_conflict, decision_refused, vendor_limit]}
         limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Present only when reported by the vendor.}
         limit_resets_at: {type: string, format: date-time, description: Present only when reported by the vendor.}
+        review_range:
+          type: object
+          description: Optional exact range produced by a completed builder run. Automatically requests an independent review of that run's parent ticket, subject to the caller's existing work_orders.write and run.create permissions. Reviewer runs cannot request recursive reviews.
+          required: [repository, base_sha, head_sha]
+          properties:
+            repository: {type: string, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'}
+            base_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
+            head_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
         git_commits:
           type: array
           maxItems: 20
