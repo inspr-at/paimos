@@ -49,7 +49,7 @@ const SPECS: Spec[] = [
 
 // The server names each release from its sequence (AEON-430); these are the
 // frozen names of sequences 1-6 (internal/releasehistory/codename/testdata/golden.txt).
-export const CODENAMES = ['Aqua Arc', 'Blue Bot', 'Cyan Cell', 'Dual Dawn', 'Even Era', 'Full Fuel']
+export const CODENAMES = ['Avid Axle', 'Blue Bot', 'Cyan Cell', 'Dual Dawn', 'Even Era', 'Full Fin']
 
 export function releaseHistory(now = Date.now(), repository = 'inspr-at/aeon') {
   let sequence = SPECS.filter(s => !s.reserved).length

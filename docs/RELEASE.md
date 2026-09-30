@@ -137,7 +137,7 @@ conflicts. Restore the file before re-reserving; do not export the preview again
 Conflicting entries fail instead of rewriting a reserved version.
 
 Every release also has a codename (AEON-430): an alliterative science-fiction
-name such as "Calm Coil" or "Solar Star", a pure function of
+name such as "Cool Chip" or "Solar Star", a pure function of
 `release_sequence` from the frozen, append-only lists in
 `internal/releasehistory/codename/words.txt`. The letter steps through a
 fixed cycle of the 15 letters rich enough for thousands of good names

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package codename names releases (AEON-430). Every release sequence gets an
-// alliterative science-fiction codename such as "Calm Cosmos", "Brisk Beacon"
+// alliterative science-fiction codename such as "Cyan Comet", "Brisk Beacon"
 // or "Galactic Gyroscope", from the frozen, append-only lists in words.txt.
 //
 // # The letter
@@ -18,7 +18,7 @@
 // letter has not used yet and that is allowed at that round's sequence. The
 // order puts short names first: step by step it takes the cheapest name left,
 // where a name costs its letters plus 2 for every earlier use of each of its
-// words, so the early rounds ("Calm Coil", "Solar Star") are short and still
+// words, so the early rounds ("Cool Chip", "Solar Star") are short and still
 // vary their words, and long names ("Intuitive Interface") come years later.
 // Ties go by the FNV-1a hash of the name, then alphabetically. Nothing repeats
 // until the letter's capacity (adjectives × nouns, less the denied

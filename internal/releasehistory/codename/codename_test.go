@@ -91,7 +91,7 @@ func TestVersionBlocksAreAppendOnly(t *testing.T) {
 }
 
 // version1SHA256 freezes the "version 1 from 1" block of words.txt.
-const version1SHA256 = "eb3875e7b34e962b1a696fedcd5a05cee5a78c25519aa44089a2650f8b055253"
+const version1SHA256 = "6f8bb0b02f4e949f9c23082bc3e00a08e4bdd9dd4ed0d143eb8c9d0d77314f00"
 
 func TestLetterCycling(t *testing.T) {
 	cycle := defaultLists.cycle
@@ -268,10 +268,42 @@ var (
 	}
 )
 
+// brands reads brands.txt: the one-word names and the
+// two-word names, lower case.
+func brands(t *testing.T) (words map[string]bool, pairs []string) {
+	t.Helper()
+	raw, err := os.ReadFile("brands.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	words = map[string]bool{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		name := strings.ToLower(strings.TrimSpace(line))
+		switch {
+		case name == "" || strings.HasPrefix(name, "#"):
+		case strings.Contains(name, " "):
+			pairs = append(pairs, name)
+		default:
+			words[name] = true
+		}
+	}
+	if len(words)+len(pairs) < 300 {
+		t.Fatalf("brands.txt holds only %d names", len(words)+len(pairs))
+	}
+	return words, pairs
+}
+
 func TestWordQuality(t *testing.T) {
+	brandWords, brandPairs := brands(t)
+	checked, hits := 0, 0
 	for li, ll := range defaultLists.letters {
 		for _, w := range append(append([]word{}, ll.adj...), ll.noun...) {
+			checked++
 			lower := strings.ToLower(w.text)
+			if brandWords[lower] {
+				hits++
+				t.Errorf("letter %c: %q is a brand or product name (brands.txt)", 'A'+li, w.text)
+			}
 			for _, bad := range rudeFragments {
 				if strings.Contains(lower, bad) {
 					t.Errorf("letter %c: %q contains %q", 'A'+li, w.text, bad)
@@ -287,11 +319,44 @@ func TestWordQuality(t *testing.T) {
 					t.Errorf("letter %c: %q is a proper noun", 'A'+li, w.text)
 				}
 			}
-			if slices.Contains(offTheme, w.text) {
+			if slices.ContainsFunc(offTheme, func(o string) bool { return strings.EqualFold(o, w.text) }) {
+				hits++
 				t.Errorf("letter %c: %q is off theme (a brand, fantasy or pastoral)", 'A'+li, w.text)
 			}
 		}
 	}
+	// A two-word brand the lists can form must be denied.
+	for _, pair := range brandPairs {
+		words := strings.Fields(pair)
+		if len(words) != 2 || words[0][0] != words[1][0] {
+			continue
+		}
+		li := int(strings.ToUpper(words[0])[0] - 'A')
+		if li < 0 || li >= 26 {
+			continue
+		}
+		adj, noun := findFold(li, words[0], true), findFold(li, words[1], false)
+		if adj != "" && noun != "" && !denied(li, adj, noun) {
+			hits++
+			t.Errorf("%s %s is a brand (brands.txt); add \"deny %s %s\"", adj, noun, adj, noun)
+		}
+	}
+	t.Logf("brand screen: %d words checked against %d names and %d two-word names, %d hits", checked, len(brandWords), len(brandPairs), hits)
+}
+
+// findFold is the listed spelling of an adjective or noun of letter li that
+// equals w ignoring case, or "".
+func findFold(li int, w string, adj bool) string {
+	list := defaultLists.letters[li].noun
+	if adj {
+		list = defaultLists.letters[li].adj
+	}
+	for _, x := range list {
+		if strings.EqualFold(x.text, w) {
+			return x.text
+		}
+	}
+	return ""
 }
 
 // Every combination is scanned: a strong rude fragment where the words run
@@ -484,7 +549,7 @@ func TestStampVersionFile(t *testing.T) {
 		t.Fatal("a file without release_sequence must be refused")
 	}
 	last, _, err := StampVersionFile([]byte(`{"version": "x", "release_sequence": 1}`))
-	if err != nil || string(last) != "{\n  \"version\": \"x\",\n  \"release_sequence\": 1,\n  \"codename\": \"Aqua Arc\"\n}\n" {
+	if err != nil || string(last) != "{\n  \"version\": \"x\",\n  \"release_sequence\": 1,\n  \"codename\": \"Avid Axle\"\n}\n" {
 		t.Fatalf("stamp after the last member: %q, %v", last, err)
 	}
 }

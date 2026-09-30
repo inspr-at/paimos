@@ -157,7 +157,7 @@ func TestBuildFromGit(t *testing.T) {
 	for _, r := range h.Releases {
 		names = append(names, r.Codename)
 	}
-	if strings.Join(names, "|") != "Blue Bot||Aqua Arc|" {
+	if strings.Join(names, "|") != "Blue Bot||Avid Axle|" {
 		t.Fatalf("codenames %q", names)
 	}
 }
@@ -353,7 +353,7 @@ func TestWithCodenames(t *testing.T) {
 		names = append(names, r.Codename)
 	}
 	// The function wins over any stored name; a reservation keeps its own slot.
-	if strings.Join(names, "|") != "First Force|Ideal Iris|Aqua Arc||" {
+	if strings.Join(names, "|") != "Fresh Flyby|Inner Iota|Avid Axle||" {
 		t.Fatalf("codenames %q", names)
 	}
 	if h.Releases[0].Codename != "Stale Name" || h.Releases[2].Codename != "" {

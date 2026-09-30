@@ -696,7 +696,7 @@ const shots: Shot[] = [
     await mockWork(page, fixtures())
     const history = presentedHistory(PRESENTED_NOW)
     history.releases[0].codename = 'Trailblazing Thermosphere'
-    Object.assign(history.releases.find(r => r.state === 'reserved')!, { release_sequence: 54, codename: 'Ideal Iris' })
+    Object.assign(history.releases.find(r => r.state === 'reserved')!, { release_sequence: 54, codename: 'Inner Iota' })
     await mockReleases(page, history)
   }, act: async page => {
     await page.goto('/releases/all')
