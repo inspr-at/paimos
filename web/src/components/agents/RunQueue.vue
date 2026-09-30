@@ -66,7 +66,10 @@ async function runNow(run: AgentRun) {
 }
 // A queued run that never started can be cancelled; its holds go back (AEON-402).
 const list = ref<HTMLElement>()
+const heading = ref<HTMLElement>()
 const cancelling = ref('')
+// Cancelling the last row closes this section; the page then takes focus.
+const emit = defineEmits<{ emptied: [] }>()
 async function cancel(run: AgentRun) {
   if (busy.value) return
   const title = titles.value[run.work_order_id] || 'this run'
@@ -77,10 +80,16 @@ async function cancel(run: AgentRun) {
   try {
     await agents.cancelQueuedRun(run)
     toast(`Cancelled: ${titles.value[run.work_order_id] || 'the run'}.`)
+    // A disabled button takes no focus: settle busy before moving focus.
+    busy.value = ''; cancelling.value = ''
     await nextTick()
-    // Focus stays in the list: the next run's first action, or the one before.
-    const rows = list.value?.querySelectorAll<HTMLElement>('li') ?? []
-    rows[Math.min(index, rows.length - 1)]?.querySelector<HTMLElement>('button')?.focus()
+    // Focus stays in the list: the next run's first action, else the one before,
+    // else the section heading; the page takes it when the section closes.
+    const rows = [...(list.value?.querySelectorAll<HTMLElement>('li') ?? [])]
+    const order = [...rows.slice(index), ...rows.slice(0, index).reverse()]
+    const next = order.map(row => row.querySelector<HTMLElement>('button:not(:disabled)')).find(Boolean) ?? heading.value
+    if (next) next.focus()
+    else emit('emptied')
   } catch (e) { error.value = e instanceof Error ? e.message : 'The run could not be cancelled.' }
   finally { busy.value = ''; cancelling.value = '' }
 }
@@ -97,7 +106,7 @@ watch(() => pending.value.map(r => r.work_order_id), async ids => {
 <template>
   <section v-if="pending.length" class="run-queue glass-card" aria-label="Runs awaiting a session">
     <header>
-      <h2>Queued</h2><span class="count mono">{{ pending.length }}</span>
+      <h2 ref="heading" tabindex="-1">Queued</h2><span class="count mono">{{ pending.length }}</span>
     </header>
     <ul ref="list">
       <li v-for="run in pending" :key="run.id">

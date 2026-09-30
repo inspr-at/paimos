@@ -58,9 +58,16 @@ async function setup(page: Page, options: { folded?: boolean; manage?: boolean }
   const calls = await mockAgents(page, data, { capacity })
   const list = computers()
   const posts: { path: string; method: string }[] = []
+  // A test may hold the next list read to answer it later with what it saw then.
+  const hold: { next?: (answer: () => void) => void } = {}
   await page.route('**/api/agent-pairing/computers**', route => {
     const path = new URL(route.request().url()).pathname, method = route.request().method()
-    if (method === 'GET' && path === '/api/agent-pairing/computers') return route.fulfill({ json: { computers: list } })
+    if (method === 'GET' && path === '/api/agent-pairing/computers') {
+      const json = { computers: [...list] }
+      const held = hold.next
+      if (held) { hold.next = undefined; held(() => void route.fulfill({ json })); return }
+      return route.fulfill({ json })
+    }
     const remove = /^\/api\/agent-pairing\/computers\/([^/]+)\/remove$/.exec(path)
     if (remove && method === 'POST') {
       posts.push({ path, method })
@@ -89,7 +96,7 @@ async function setup(page: Page, options: { folded?: boolean; manage?: boolean }
     answer.workspace.permissions = [...answer.workspace.permissions, 'account.read', ...(options.manage === false ? [] : ['account.manage']), 'run.create', 'run.read', 'models.read', 'work_orders.read', 'work_orders.write']
     return route.fulfill({ json: answer })
   })
-  return { data, calls, posts, work }
+  return { data, calls, posts, work, hold }
 }
 async function open(page: Page) {
   await page.goto('/agents')
@@ -143,6 +150,24 @@ test('revoked computers fold into one disclosure and a person removes them', asy
   expect(errors).toEqual([])
 })
 
+test('a list read that started before Remove does not bring the computer back', async ({ page }) => {
+  const { hold } = await setup(page)
+  await open(page)
+  const region = computersRegion(page)
+  await region.getByRole('button', { name: 'Revoked (3)' }).click()
+  let answer: (() => void) | undefined
+  hold.next = release => { answer = release }
+  await region.getByRole('button', { name: 'Refresh computers' }).click()
+  await expect.poll(() => answer !== undefined).toBe(true)
+  await region.getByRole('button', { name: 'Remove mbp2607' }).first().click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove', exact: true }).click()
+  await expect(region.locator('.revoked-list li')).toHaveCount(2)
+  answer!()
+  await page.waitForTimeout(300)
+  await expect(region.locator('.revoked-list li')).toHaveCount(2)
+  await expect(region.getByRole('button', { name: 'Refresh computers' })).toBeEnabled()
+})
+
 test('every account row has a person-only Remove that names what goes away', async ({ page }) => {
   const { posts } = await setup(page)
   await open(page)
@@ -154,6 +179,9 @@ test('every account row has a person-only Remove that names what goes away', asy
   await shots(page, 'account-remove-confirm')
   await dialog.getByRole('button', { name: 'Remove account' }).click()
   await expect(row).toHaveCount(0)
+  // Focus moves to the next Remove, which is enabled again.
+  await expect(page.locator('.acct-remove:focus')).toHaveCount(1)
+  await expect(page.locator('.acct-remove:focus')).toBeEnabled()
   await shots(page, 'account-removed')
   expect(posts.map(p => p.path)).toEqual([`/api/agent-accounts/${ACCOUNTS.claude}/archive`])
   await expect(page.locator('.acct-remove').first()).toBeVisible()
@@ -177,6 +205,11 @@ test('a queued run can be cancelled from /agents', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Cancel run' }).click()
   await expect(item).toHaveCount(0)
   expect(posts.map(p => p.path)).toEqual([`/api/runs/${QUEUED}/cancel`])
+  // Focus stays in the queue, or goes to the page title once the queue closes; never lost.
+  await expect.poll(() => page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null
+    return !!el && el !== document.body && !(el as HTMLButtonElement).disabled && (!!el.closest('.run-queue') || el.id === 'agents-title')
+  })).toBe(true)
 })
 
 test('accounts and computers fold into one calm line, remembered per person', async ({ page }) => {

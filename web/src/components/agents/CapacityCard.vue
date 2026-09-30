@@ -97,6 +97,8 @@ async function removeAccount(row: AccountRow) {
     await agents.removeAccount(row)
     void capacity.load()
     toast(`Removed ${row.name}. Its runs and history stay.`)
+    // A disabled button takes no focus: settle busy before moving focus.
+    removing.value = ''
     await nextTick()
     const left = [...(card.value?.querySelectorAll<HTMLElement>('.acct-remove') ?? [])]
     ;(left[Math.min(index, left.length - 1)] ?? card.value?.querySelector<HTMLElement>('#cap-title'))?.focus()

@@ -83,6 +83,7 @@ const liveComputers = computed(() => capacity.computers.filter(c => c.computer_i
 const setupLine = computed(() => setupSummary({ computers: liveComputers.value, ready: capacity.ready.live, total: capacity.ready.total }))
 const showSetup = computed(() => agents.loaded && layoutReady.value && (showCapacity.value || (pairingAccess.value.canListComputers && capacity.computers.length > 0)))
 // A removed computer takes its account bindings along: re-read both.
+const pageTitle = ref<HTMLElement>()
 function computerRemoved() { void agents.refreshAccounts(); void capacity.load() }
 const waiting = computed(() => agents.needsCount + capacity.signins.length)
 
@@ -259,7 +260,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
     <header class="page-head">
       <div class="head-main">
         <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
-        <h1 id="agents-title">Agents</h1>
+        <h1 id="agents-title" ref="pageTitle" tabindex="-1">Agents</h1>
         <LiveLine :views="agents.views" :now="agents.now" :loaded="agents.loaded" @open="openSession" @jump="jump" />
       </div>
       <div class="head-side">
@@ -316,7 +317,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           :pending="[]" :held="[]" :history="history" :now="agents.now" :loaded="agents.loaded" cursor="" :can-decide="false" :can-decide-approval="() => false" :can-resolve="false"
           :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
         />
-        <RunQueue v-if="agents.loaded" />
+        <RunQueue v-if="agents.loaded" @emptied="pageTitle?.focus()" />
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
           <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
