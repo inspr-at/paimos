@@ -25,6 +25,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', manage = tru
   })
   await page.goto('/settings/accounts')
   const row = page.locator('.account').filter({ hasText: 'OpenRouter on this Mac' })
+  await row.getByRole('button', { name: 'Details for OpenRouter on this Mac' }).click()
   await expect(row.getByLabel('Model OpenRouter')).toBeVisible()
   return { row, writes }
 }

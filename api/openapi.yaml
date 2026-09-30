@@ -7261,7 +7261,8 @@ components:
       required: [sources]
       properties:
         sources: {type: array, maxItems: 8, items: {"$ref": "#/components/schemas/DoctrineSource"}}
-        proposals_enabled: {type: boolean, description: Whether this workspace has a server-provisioned proposal App}
+        proposals_enabled: {type: boolean, description: Whether this workspace has a server-provisioned proposal App and quotation guard key}
+        proposals_disabled_reason: {type: string, description: Admin-visible reason proposal creation is disabled; contains no key material or host path}
     RuleChannels:
       type: object
       additionalProperties: false

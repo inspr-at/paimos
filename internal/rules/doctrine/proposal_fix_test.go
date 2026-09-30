@@ -866,3 +866,35 @@ func TestGuardSlotWaitsForCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMissingGuardDisablesOnlyProposalCreation(t *testing.T) {
+	f, forge, m, owner, in := publicProposalFixture(t)
+	m.guardMaster = nil
+	// Public reads and private indexing remain usable without provisioning a guard.
+	private := seedPrivateGuard(t, f, m, owner)
+	if private.State != "ready" || len(private.Files) == 0 {
+		t.Fatal("private index needs no proposal key")
+	}
+	layer := f.layer(owner, "GET", "/api/rules/doctrine", nil)
+	if layer.ProposalsEnabled || layer.ProposalsDisabledReason != missingGuardReason || len(layer.Sources) != 2 {
+		t.Fatal("admin must see why proposals are disabled while retaining sources")
+	}
+	member := f.principal(owner.TenantID, "person", "member", "member", nil, "")
+	if f.layer(member, "GET", "/api/rules/doctrine", nil).ProposalsDisabledReason != "" {
+		t.Fatal("admin detail exposed to member")
+	}
+	before := forge.calls
+	body := f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 503)
+	if !strings.Contains(string(body), "guard_unavailable") || forge.calls != before {
+		t.Fatal("missing guard must refuse before forge access")
+	}
+	// Existing history remains readable, and the scheduled path uses the same fence.
+	f.call(owner, "GET", "/api/rules/doctrine/proposals", nil, 200)
+	if _, err := m.proposeChange(t.Context(), owner, in); err == nil || forge.calls != before {
+		t.Fatal("background proposal bypassed missing guard")
+	}
+	m.guardMaster = testGuardMaster()
+	if !f.layer(owner, "GET", "/api/rules/doctrine", nil).ProposalsEnabled {
+		t.Fatal("provisioning guard did not restore capability")
+	}
+}

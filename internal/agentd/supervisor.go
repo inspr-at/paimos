@@ -199,9 +199,9 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 			return nil, errors.New("duplicate or invalid adapter")
 		}
 		if claude, ok := a.(*ClaudeAdapter); ok {
-			bound := *claude
+			bound := claude.clone()
 			bound.Workspace = c.Workspace
-			a = &bound
+			a = bound
 		}
 		adapters[a.Name()] = a
 	}

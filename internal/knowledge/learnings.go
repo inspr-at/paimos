@@ -21,6 +21,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -526,8 +527,13 @@ func listLearnings(ctx context.Context, tx pgx.Tx, tenantID, projectID string) (
 // AnalysisLearnings gives the system outcome job the same current inbox as the
 // person view, including edits, deletions, nominations and decisions. Callers
 // must establish tenant and project visibility in the supplied transaction.
-func AnalysisLearnings(ctx context.Context, tx pgx.Tx, tenantID, projectID string) (LearningPage, error) {
-	return listLearnings(ctx, tx, tenantID, projectID)
+func AnalysisLearnings(ctx context.Context, tx pgx.Tx, tenantID, projectID string) (doctrine.AnalysisLearningPage, error) {
+	page, err := listLearnings(ctx, tx, tenantID, projectID)
+	out := doctrine.AnalysisLearningPage{Truncated: page.Truncated}
+	for _, item := range page.Items {
+		out.Items = append(out.Items, doctrine.AnalysisLearning{ID: item.ID, NodeID: item.NodeID, Key: item.Key, Href: item.Href, Text: item.Text, At: item.At})
+	}
+	return out, err
 }
 
 func decidedKeys(ctx context.Context, tx pgx.Tx, tenantID string) (map[string]bool, error) {

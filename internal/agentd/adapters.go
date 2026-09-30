@@ -671,6 +671,7 @@ var claudeAssets embed.FS
 
 type ClaudeAdapter struct {
 	quotaIDs                      sync.Map
+	quotaCache                    *sync.Map
 	usage                         *claudeUsageCapability
 	NodePath, SDKPath, ClaudePath string
 	Workspace                     string
@@ -684,10 +685,25 @@ func NewClaudeAdapter(nodePath, sdkPath, claudePath string, homes map[string]str
 func (*ClaudeAdapter) Name() string                                 { return Claude }
 func (a *ClaudeAdapter) SetExpectedEmails(emails map[string]string) { a.Emails = emails }
 
+// clone shares verified quota identities without copying sync.Map's locks.
+// Runtime paths are local to each launch; configuration is immutable once bound.
+func (a *ClaudeAdapter) clone() *ClaudeAdapter {
+	return &ClaudeAdapter{quotaCache: a.quotaIdentities(), usage: a.usage,
+		NodePath: a.NodePath, SDKPath: a.SDKPath, ClaudePath: a.ClaudePath,
+		Workspace: a.Workspace, Homes: a.Homes, Emails: a.Emails}
+}
+
+func (a *ClaudeAdapter) quotaIdentities() *sync.Map {
+	if a.quotaCache != nil {
+		return a.quotaCache
+	}
+	return &a.quotaIDs
+}
+
 func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
 	var configured *ClaudeAdapter
 	if a.Workspace != "" && workspace != a.Workspace {
-		bound := *a
+		bound := a.clone()
 		bound.Workspace = ""
 		var err error
 		configured, err = bound.resolved(a.Workspace)
@@ -709,9 +725,9 @@ func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
 	if configured != nil && (configured.NodePath != deps.NodePath || configured.SDKPath != deps.SDKPath || configured.ClaudePath != cli) {
 		return nil, errors.New("Claude dependency links changed during launch validation")
 	}
-	resolved := *a
+	resolved := a.clone()
 	resolved.NodePath, resolved.SDKPath, resolved.ClaudePath = deps.NodePath, deps.SDKPath, cli
-	return &resolved, nil
+	return resolved, nil
 }
 
 type claudeProcess struct {

@@ -122,6 +122,9 @@ const analysisFixtureRules = "# Dev\n\n## Validation\n<!-- aeon-rule: validation
 func setupAnalysis(t *testing.T) (doctrineFixture, *proposalForge, *Module, tenant.Principal) {
 	t.Helper()
 	f, forge, m := newProposalFixture(t)
+	m.analysisLearnings = func(context.Context, pgx.Tx, string, string) (AnalysisLearningPage, error) {
+		return AnalysisLearningPage{}, nil
+	}
 	tid := f.tenant("analysis")
 	m.app.TenantID = tid
 	allowCredential(t, m.credentials.Dir, "app-key", tid, publicRepository)

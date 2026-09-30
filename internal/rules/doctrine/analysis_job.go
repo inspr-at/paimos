@@ -83,7 +83,7 @@ func (m *Module) analyzeOnce(parent context.Context, now time.Time) error {
 	var existing []findingData
 	err = m.tx(ctx, actor, "rules.read", func(tx pgx.Tx) error {
 		var err error
-		samples, err = loadAnalysisSamples(ctx, tx, tid, from, now)
+		samples, err = m.loadAnalysisSamples(ctx, tx, tid, from, now)
 		if err != nil {
 			return err
 		}

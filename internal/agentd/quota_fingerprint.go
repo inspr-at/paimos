@@ -50,7 +50,7 @@ func (a *CodexAdapter) quotaIdentity(key string) string {
 	return id
 }
 func (a *ClaudeAdapter) quotaIdentity(key string) string {
-	v, _ := a.quotaIDs.Load(key)
+	v, _ := a.quotaIdentities().Load(key)
 	id, _ := v.(string)
 	return id
 }

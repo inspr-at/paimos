@@ -61,6 +61,8 @@ func TestObservedCapacityPreservesSeparatePairingApproval(t *testing.T) {
 	f.probe(v, e, key, 200)
 	// This test isolates approval; routing must not depend on local test time.
 	schedule := capacity.DefaultSchedule()
+	schedule.Override = "sprint"
+	schedule.Reserve = capacity.ReserveOff
 	for i := range schedule.Week {
 		schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 	}
@@ -68,11 +70,6 @@ func TestObservedCapacityPreservesSeparatePairingApproval(t *testing.T) {
 	now := time.Now().UTC().Add(-time.Second)
 	reading := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 20, ReadAt: now, ResetsAt: now.Add(time.Hour), Source: "harness"}
 	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/readings", map[string]any{"readings": []capacity.Reading{reading}}, false, key, 204)
-	// Approval, rather than the wall clock's work-hours band, must decide
-	// whether this account can route an ordinary run.
-	schedule := capacity.DefaultSchedule()
-	schedule.Override = "sprint"
-	f.call("PUT", "/api/agent-accounts/capacity/schedule", map[string]any{"scope": "user", "schedule": schedule}, true, "", 204)
 	var approved bool
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT ongoing_approved_at IS NOT NULL FROM agent_pairing_enrollments WHERE account_id=$1`, e.AccountID).Scan(&approved); err != nil {
 		t.Fatal(err)
@@ -93,13 +90,6 @@ func TestObservedCapacityPreservesSeparatePairingApproval(t *testing.T) {
 	f.claim(v, e, key, reservationIDs(check), 200)
 	f.telemetry(v, e, key, 200)
 	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/capacity/approve", nil, true, "", 204)
-	// Round the clock: the managed route must not depend on the hour the test runs.
-	always := capacity.DefaultSchedule("UTC")
-	for i := range always.Week {
-		always.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
-	}
-	always.Reserve = capacity.ReserveOff
-	f.call("PUT", "/api/agent-accounts/capacity/schedule", map[string]any{"scope": "user", "schedule": always}, true, "", 204)
 	route := routeWithUnits(t, f, v, e, key, managed.ID, map[string]int{"requests": 1}, 200)
 	if len(route.Reservations) != 1 || route.Reservations[0].Unit != "percent" {
 		t.Fatal(route)

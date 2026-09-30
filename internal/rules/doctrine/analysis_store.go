@@ -13,10 +13,21 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
-	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// AnalysisLearning is the current knowledge-inbox projection supplied by the
+// composition root. This avoids a doctrine -> knowledge -> rules -> doctrine cycle.
+type AnalysisLearning struct {
+	ID, NodeID, Key, Href, Text string
+	At                          time.Time
+}
+type AnalysisLearningPage struct {
+	Items     []AnalysisLearning
+	Truncated bool
+}
+type AnalysisLearnings func(context.Context, pgx.Tx, string, string) (AnalysisLearningPage, error)
 
 const analysisSampleLimit = 5000
 
@@ -35,7 +46,7 @@ const analysisProvenance = `
   FROM harness_instruction_provenance_items WHERE provenance_id=revision.id
  ) provenance ON true`
 
-func loadAnalysisSamples(ctx context.Context, tx pgx.Tx, tid string, from, until time.Time) ([]analysisSample, error) {
+func (m *Module) loadAnalysisSamples(ctx context.Context, tx pgx.Tx, tid string, from, until time.Time) ([]analysisSample, error) {
 	rows, err := tx.Query(ctx, `
  WITH x AS (
   SELECT 'o:'||o.id::text AS id,o.ticket_node_id,o.session_id,o.rules_version,o.kind,o.payload,o.recorded_at AS at FROM outcome_events o
@@ -115,7 +126,10 @@ func loadAnalysisSamples(ctx context.Context, tx pgx.Tx, tid string, from, until
 		return nil, fail(503, "analysis_budget", "Project scan budget reached.")
 	}
 	for _, id := range ids {
-		page, err := knowledge.AnalysisLearnings(ctx, tx, tid, id)
+		if m.analysisLearnings == nil {
+			return nil, fail(503, "analysis_unavailable", "The knowledge inbox reader is unavailable; no partial analysis was proposed.")
+		}
+		page, err := m.analysisLearnings(ctx, tx, tid, id)
 		if err != nil {
 			return nil, err
 		}

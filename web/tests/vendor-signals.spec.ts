@@ -41,6 +41,7 @@ test('a computer approver loses the statusline toggle when account.manage is rev
   const grants = { manage: true }
   const { changes, account } = await setup(page, 'light', grants)
   await page.goto('/settings/accounts')
+  await page.locator(`[data-account="${account.id}"]`).getByRole('button', { name: /^Details for/ }).click()
   const toggle = page.getByRole('switch', { name: /Show .* in your Claude status line/ })
   await expect(toggle).toBeVisible()
   expect(account.statusline_opt_in).toBe('own')
@@ -56,7 +57,7 @@ test('a computer approver loses the statusline toggle when account.manage is rev
 for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) {
   test(`vendor throttling and explicit statusline consent ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 960 })
-    const { first, changes } = await setup(page, theme)
+    const { first, changes, account } = await setup(page, theme)
     await page.goto('/agents')
     const row = page.locator(`[data-row="s:${first.id}"]`)
     await expect(row).toBeVisible()
@@ -71,6 +72,7 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
     const dir = process.env.AEON354_SHOTS
     if (dir) { mkdirSync(dir, { recursive: true }); await page.screenshot({ path: join(dir, `throttled-${width}-${theme}.png`), fullPage: true }) }
     await page.goto('/settings/accounts')
+  await page.locator(`[data-account="${account.id}"]`).getByRole('button', { name: /^Details for/ }).click()
     const toggle = page.getByRole('switch', { name: /Show .* in your Claude status line/ })
     await expect(toggle).toBeVisible()
     await expect(toggle).toHaveAttribute('aria-checked', 'false')

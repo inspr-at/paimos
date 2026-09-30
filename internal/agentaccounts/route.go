@@ -328,11 +328,11 @@ func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemon
 
 type ranked struct {
 	limitEstimates map[string]int64
-	account Account
-	windows []Window
-	cap     float64
-	reset   *time.Time
-	slots   int
+	account        Account
+	windows        []Window
+	cap            float64
+	reset          *time.Time
+	slots          int
 }
 
 func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harness, profileID, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, map[string]int64, error) {

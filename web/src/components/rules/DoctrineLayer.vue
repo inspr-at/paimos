@@ -109,6 +109,7 @@ onMounted(load)
       </div>
     </div>
 
+    <p v-if="canManage && layer?.proposals_disabled_reason" class="quiet" role="status">{{ layer.proposals_disabled_reason }}</p>
     <DoctrineProposals v-if="layer?.proposals_enabled" :latest="latestProposal" />
     <DoctrineProposalDialog v-if="proposing" v-bind="proposing" @close="proposing = undefined" @saved="proposed" />
     <DoctrineSourceDialog v-if="editing" :source="editing.source" @close="editing = null" @saved="saved" />

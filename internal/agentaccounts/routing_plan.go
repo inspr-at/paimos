@@ -264,11 +264,12 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 // bounded backoff. This value is frozen on the stopped run, so polling cannot
 // slide a long-reset handoff into the short-wait branch.
 func VendorRetryAt(ctx context.Context, tx pgx.Tx, accountID string, now time.Time) (time.Time, bool, error) {
-	block, err := readingDenial(ctx, tx, accountID)
+	denials, err := readingDenials(ctx, tx, accountID)
 	if err != nil {
 		return time.Time{}, false, err
 	}
-	if block.active && block.until != nil && block.until.After(now) {
+	block := effectiveDenial(now, denials, nil)
+	if block.waiting(now) {
 		return *block.until, true, nil
 	}
 	// Some adapters report 100% without an authority bit.

@@ -303,7 +303,11 @@ credential grant. The quotation guard is an HMAC keyed by
 `AEON_DOCTRINE_GUARD_KEY_FILE` (at least 32 characters; dev without the file uses
 an ephemeral key). Its saved metadata binds the normalization code/table and
 binary policy versions. Startup rebuilds missing, old or rotated guards;
-public proposals fail closed until a compatible guard exists.
+public proposals fail closed until a compatible guard exists. An unset production
+key or a configured file that does not exist disables PR proposal creation without
+blocking startup or doctrine reads/indexing. Workspace administrators see the
+reason in the Doctrine panel; malformed or unreadable keys remain configuration
+errors. No key or host path is returned in that reason.
 
 Every private-tree file must be UTF-8 text, without control codes other than
 tab, LF and CR. No binary extension, signature or readable-text heuristic skips

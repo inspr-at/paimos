@@ -168,6 +168,9 @@ func (m *Module) listProposals(r *http.Request, actor tenant.Principal) (any, er
 	})
 	return out, err
 }
+
+const missingGuardReason = "Propose PR is disabled: the server quotation guard key is not provisioned. Ask the server administrator to provision AEON_DOCTRINE_GUARD_KEY_FILE."
+
 func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	if err := m.proposalAccess(actor); err != nil {
 		return nil, err
@@ -184,6 +187,9 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, in ProposalInput) (any, error) {
 	if err := m.proposalAccess(actor); err != nil {
 		return nil, err
+	}
+	if len(m.guardMaster) < 32 {
+		return nil, fail(503, "guard_unavailable", missingGuardReason)
 	}
 	if in.automatic && !m.analysisAuthorized(parent, actor) {
 		return nil, authz.ErrForbidden

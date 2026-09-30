@@ -501,7 +501,7 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 		return probeUnavailable
 	}
 	if status.AccountID != "" {
-		a.quotaIDs.Store(key, status.AccountID)
+		a.quotaIdentities().Store(key, status.AccountID)
 	}
 	return probeOK
 }

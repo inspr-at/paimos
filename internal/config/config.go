@@ -96,9 +96,10 @@ func FromEnv() (Config, error) {
 	}
 	if f := os.Getenv("AEON_DOCTRINE_GUARD_KEY_FILE"); f != "" {
 		key, err := doctrineGuardKey(f)
-		if err != nil {
+		if err != nil && !os.IsNotExist(err) {
 			return Config{}, err
 		}
+		// A not-yet-provisioned guard disables proposals, not server startup.
 		cfg.DoctrineGuardKey = key
 	} else if cfg.Env == "dev" {
 		cfg.DoctrineGuardKey = make([]byte, 32)

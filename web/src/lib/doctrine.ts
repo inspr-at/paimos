@@ -59,7 +59,7 @@ export interface DoctrineSource {
   files: DoctrineFile[]
   skipped: DoctrineSkip[]
 }
-export interface DoctrineLayer { sources: DoctrineSource[]; proposals_enabled?: boolean }
+export interface DoctrineLayer { sources: DoctrineSource[]; proposals_enabled?: boolean; proposals_disabled_reason?: string }
 export interface DoctrineSourceInput {
   repository?: string
   visibility: 'public' | 'private'

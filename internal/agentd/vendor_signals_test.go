@@ -527,3 +527,17 @@ func TestCodexVendorLimitWaitsForTurnAcknowledgement(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeRuntimeCloneSharesQuotaIdentity(t *testing.T) {
+	original := &ClaudeAdapter{Workspace: "configured"}
+	bound := original.clone()
+	resolved := bound.clone()
+	resolved.Workspace = "launch"
+	resolved.quotaIdentities().Store("fixture", "verified-account")
+	if original.quotaIdentity("fixture") != "verified-account" || bound.quotaIdentity("fixture") != "verified-account" {
+		t.Fatal("launch probe lost the identity used by account signals")
+	}
+	if original.Workspace != "configured" {
+		t.Fatal("launch mutated configured workspace")
+	}
+}

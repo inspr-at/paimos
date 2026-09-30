@@ -242,9 +242,10 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	pairingMod.SetHomebrewFormula(homebrewFormula)
 	go homebrewFormula.Watch(ctx)
 	doctrineMod := doctrine.New(pool, doctrine.Options{
-		CredentialsDir:  cfg.DoctrineCredentialsDir,
-		GuardKey:        cfg.DoctrineGuardKey,
-		BinaryAllowlist: cfg.DoctrineBinaryAllowlist,
+		CredentialsDir:    cfg.DoctrineCredentialsDir,
+		GuardKey:          cfg.DoctrineGuardKey,
+		BinaryAllowlist:   cfg.DoctrineBinaryAllowlist,
+		AnalysisLearnings: knowledge.AnalysisLearnings,
 		App: doctrine.AppConfig{
 			ID: cfg.DoctrineAppID, InstallationID: cfg.DoctrineInstallationID, KeyRef: cfg.DoctrineAppKeyRef,
 			TenantID: cfg.DoctrineAppTenantID, GateLogin: cfg.DoctrineGateLogin, DCOAcknowledged: cfg.DoctrineDCOAcknowledged,

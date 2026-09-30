@@ -215,3 +215,22 @@ func TestLinkKeyRequiresPersistentFile(t *testing.T) {
 		t.Fatalf("messaging file fallback must be domain-separated: %v", err)
 	}
 }
+
+func TestMissingDoctrineGuardFileDoesNotPreventStartup(t *testing.T) {
+	t.Setenv("AEON_DATABASE_URL", "postgres://example")
+	t.Setenv("AEON_MESSAGING_KEY_FILE", "")
+	t.Setenv("AEON_LINK_KEY_FILE", "")
+	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", filepath.Join(t.TempDir(), "not-provisioned"))
+	for _, mode := range []string{"prod", "dev"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("AEON_ENV", mode)
+			cfg, err := FromEnv()
+			if err != nil || cfg.DoctrineGuardKey != nil {
+				t.Fatal("missing guard must allow startup without inventing a key")
+			}
+			if cfg.DatabaseURL != "postgres://example" {
+				t.Fatal("unrelated configuration changed")
+			}
+		})
+	}
+}

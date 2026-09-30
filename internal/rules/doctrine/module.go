@@ -37,23 +37,25 @@ import (
 // GuardKey is the server secret for per-tenant HMAC of the private quotation
 // guard. It is copied, never logged, and never written to the database.
 type Options struct {
-	CredentialsDir  string
-	Client          *http.Client
-	App             AppConfig
-	GuardKey        []byte
-	BinaryAllowlist map[string]string
-	Analysis        AnalysisPolicy
+	CredentialsDir    string
+	Client            *http.Client
+	App               AppConfig
+	GuardKey          []byte
+	BinaryAllowlist   map[string]string
+	Analysis          AnalysisPolicy
+	AnalysisLearnings AnalysisLearnings
 }
 
 // Module serves the doctrine layer.
 type Module struct {
-	pool            *pgxpool.Pool
-	credentials     Credentials
-	client          *http.Client
-	app             AppConfig
-	guardMaster     []byte
-	binaryAllowlist map[string]string
-	analysis        AnalysisPolicy
+	pool              *pgxpool.Pool
+	credentials       Credentials
+	client            *http.Client
+	app               AppConfig
+	guardMaster       []byte
+	binaryAllowlist   map[string]string
+	analysis          AnalysisPolicy
+	analysisLearnings AnalysisLearnings
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -63,7 +65,7 @@ func New(pool *pgxpool.Pool, opts Options) *Module {
 	if len(opts.GuardKey) >= 32 {
 		key = append([]byte(nil), opts.GuardKey...)
 	}
-	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client, app: opts.App, guardMaster: key, binaryAllowlist: maps.Clone(opts.BinaryAllowlist), analysis: opts.Analysis.defaults()}
+	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client, app: opts.App, guardMaster: key, binaryAllowlist: maps.Clone(opts.BinaryAllowlist), analysis: opts.Analysis.defaults(), analysisLearnings: opts.AnalysisLearnings}
 }
 
 func (m *Module) guardKey(tenantID string) []byte {
@@ -177,8 +179,9 @@ func writeFailure(w http.ResponseWriter, err error) {
 // Layer is the git-backed doctrine layer: every configured repository at its
 // pinned commit.
 type Layer struct {
-	Sources          []SourceView `json:"sources"`
-	ProposalsEnabled bool         `json:"proposals_enabled,omitempty"`
+	Sources                 []SourceView `json:"sources"`
+	ProposalsEnabled        bool         `json:"proposals_enabled,omitempty"`
+	ProposalsDisabledReason string       `json:"proposals_disabled_reason,omitempty"`
 }
 
 // SourceView is one repository at its pin. State is ready (indexed at the
@@ -290,7 +293,12 @@ func (m *Module) load(ctx context.Context, p tenant.Principal, permission string
 	if err != nil {
 		return Layer{}, err
 	}
-	out := Layer{Sources: []SourceView{}, ProposalsEnabled: m.app.configured() && p.TenantID == m.app.TenantID}
+	out := Layer{Sources: []SourceView{}, ProposalsEnabled: m.app.configured() && p.TenantID == m.app.TenantID && len(m.guardMaster) >= 32}
+	if len(m.guardMaster) < 32 && p.Kind == tenant.Person {
+		if err := m.tx(ctx, p, "settings.manage", func(pgx.Tx) error { return nil }); err == nil {
+			out.ProposalsDisabledReason = missingGuardReason
+		}
+	}
 	for _, item := range all {
 		out.Sources = append(out.Sources, view(item.source, item.files))
 	}
@@ -590,7 +598,7 @@ func (m *Module) fetch(ctx context.Context, tenantID string, s Source) ([]File, 
 	}
 	// The visible index follows the configured paths. The quotation guard does
 	// not: a public proposal is checked against every file at the pin.
-	if s.Repository != privateRepository || s.Visibility != "private" {
+	if s.Repository != privateRepository || s.Visibility != "private" || len(m.guardMaster) < 32 {
 		return files, skipped, nil, nil
 	}
 	corpus, err := readPrivateCorpus(ctx, reader, s.Repository, s.Commit, m.guardKey(tenantID), m.binaryAllowlist)
