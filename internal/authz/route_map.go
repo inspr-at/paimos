@@ -221,6 +221,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/public/portal/{tenantSlug}/catalog.json":                                "public",
 	"GET /api/public/portal/{tenantSlug}/llms.txt":                                    "public",
 	"GET /api/public/portal/{tenantSlug}/releases":                                    "public",
+	"GET /api/public/portal/{tenantSlug}/roadmap":                                     "public",
+	"GET /api/public/portal/{tenantSlug}/roadmap.json":                                "public",
 	"GET /api/public/quotes/{publicTenant}/{token}":                                   "public",
 	"GET /api/public/quotes/{publicTenant}/{token}/pdf":                               "public",
 	"GET /api/quote-profiles":                                                         "quotes.read",

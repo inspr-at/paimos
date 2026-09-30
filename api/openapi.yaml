@@ -6133,6 +6133,28 @@ paths:
         '200': {description: Published release notes, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicReleases'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/roadmap:
+    get:
+      operationId: readPublicPortalRoadmap
+      summary: Read the public roadmap for the portal product
+      description: Anonymous and cacheable. A ticket appears only when it is tagged roadmap, not hidden, has a public target (roadmap-rN, roadmap-later, a release assignment, or a release label that is rN or later) and a person has set roadmap_public. Agents cannot publish. The document carries pill and benefit in English and German, the target, and status planned, in progress, or shipped. Ticket keys, node ids, titles, assignees and internal notes are omitted. A shipped ticket already visible on the public release history is omitted. Release history being off keeps that shipped item here. Ordered by target, then priority. A disabled portal and an unknown tenant both answer 404. An open portal with no published product returns product null and an empty items list. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved. Success responses are public, max-age 60. Errors stay uncached. The public page is /portal/{tenantSlug}/roadmap.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Public roadmap, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicRoadmap'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/roadmap.json:
+    get:
+      operationId: readPublicPortalRoadmapFile
+      summary: Read the public roadmap as a file
+      description: Anonymous. The body is the same document as readPublicPortalRoadmap. The site also serves this file at /portal/{tenantSlug}/roadmap.json, outside this API. A disabled portal and an unknown tenant both answer 404 with the same JSON error. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved. Success responses are public, max-age 60. Errors stay uncached.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Public roadmap, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicRoadmap'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /portal/market:
     get:
       operationId: readPortalMarket
@@ -9310,6 +9332,7 @@ components:
           items: {$ref: '#/components/schemas/PortalPublicComparison'}
         pace: {$ref: '#/components/schemas/PortalPublicPace'}
         release_history: {type: boolean, description: True only when the linked project publishes release notes. Omitted otherwise. Notes themselves stay on the releases document.}
+        roadmap: {type: boolean, description: True only when at least one public roadmap item exists. Omitted otherwise. Items stay on the roadmap document.}
     PortalPublicRelease:
       type: object
       additionalProperties: false
@@ -9335,6 +9358,25 @@ components:
       properties:
         product: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/PortalProduct'}]}
         releases: {type: array, items: {$ref: '#/components/schemas/PortalPublicRelease'}}
+    PortalPublicRoadmapItem:
+      type: object
+      additionalProperties: false
+      required: [pill_en, pill_de, benefit_en, benefit_de, target, status]
+      properties:
+        pill_en: {type: string}
+        pill_de: {type: string}
+        benefit_en: {type: string}
+        benefit_de: {type: string}
+        target: {type: string, description: 'rN for a numbered release, or later'}
+        status: {type: string, enum: [planned, in_progress, shipped]}
+    PortalPublicRoadmap:
+      type: object
+      additionalProperties: false
+      required: [schema, product, items]
+      properties:
+        schema: {type: string, enum: [inspr.release-roadmap.v1]}
+        product: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/PortalProduct'}]}
+        items: {type: array, items: {$ref: '#/components/schemas/PortalPublicRoadmapItem'}}
     PortalVote:
       type: object
       additionalProperties: false
@@ -11919,13 +11961,17 @@ components:
     TicketBenefitFields:
       type: object
       additionalProperties: true
-      description: Tenant-default ticket fields. Drafts may be incomplete; entering a built-in completed state (done, accepted, delivered) from outside that set validates pills (2–4 whitespace-separated words) and nonblank benefits. One or two plain-language sentences and translation quality are editorial requirements, not inferred by software.
+      description: Tenant-default ticket fields. Drafts may be incomplete; entering a built-in completed state (done, accepted, delivered) from outside that set validates pills (2–4 whitespace-separated words) and nonblank benefits. One or two plain-language sentences and translation quality are editorial requirements, not inferred by software. roadmap_public publishes the ticket on the public roadmap. Only a person can turn that on or clear it. The server writes source, by and at. Agents cannot publish.
       properties:
         pill_en: {type: string, description: "English pill, 2–4 words"}
         pill_de: {type: string, description: "German pill, 2–4 words"}
         benefit_en: {type: string, description: "English benefit, one or two plain-language sentences"}
         benefit_de: {type: string, description: "German benefit, one or two plain-language sentences, neutral without direct address"}
         hide_from_release_notes: {type: boolean, default: false, description: Omit from public notes; does not waive completion requirements}
+        roadmap_public: {type: boolean, description: Person approval for the public roadmap. False and omitted are unpublished. Only a person can change that.}
+        roadmap_public_source: {type: [string, 'null'], enum: [person, null], description: Acting principal kind. Must be person when supplied while publishing.}
+        roadmap_public_by: {type: [string, 'null'], format: uuid, readOnly: true, description: Person principal id. The server overwrites this.}
+        roadmap_public_at: {type: [string, 'null'], format: date-time, readOnly: true, description: 'When a person published the ticket, UTC. The server overwrites this.'}
     TicketRouteFields:
       type: object
       additionalProperties: true

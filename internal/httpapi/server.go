@@ -120,6 +120,7 @@ func (s *Server) build() {
 	if publicMounted {
 		root.Handle("GET /portal/{tenantSlug}/llms.txt", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/catalog.json", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/roadmap.json", commonMiddleware(publicMux))
 	}
 	root.Handle("/", commonMiddleware(spaHandler(s.Web, s.brand())))
 	s.handler = root

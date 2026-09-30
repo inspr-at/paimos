@@ -84,6 +84,10 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 		{http.MethodHead, "/api/public/portal/harbour"},
 		{http.MethodGet, "/api/public/portal/harbour/releases"},
 		{http.MethodHead, "/api/public/portal/harbour/releases"},
+		{http.MethodGet, "/api/public/portal/harbour/roadmap"},
+		{http.MethodHead, "/api/public/portal/harbour/roadmap"},
+		{http.MethodGet, "/api/public/portal/harbour/roadmap.json"},
+		{http.MethodHead, "/api/public/portal/harbour/roadmap.json"},
 		{http.MethodGet, "/api/public/portal/harbour/llms.txt"},
 		{http.MethodHead, "/api/public/portal/harbour/llms.txt"},
 		{http.MethodGet, "/api/public/portal/harbour/catalog.json"},
@@ -97,6 +101,10 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 		switch {
 		case (route.method == http.MethodGet || route.method == http.MethodHead) && strings.HasSuffix(route.path, "/releases"):
 			req.Pattern = portalReleasesPattern
+		case (route.method == http.MethodGet || route.method == http.MethodHead) && strings.HasSuffix(route.path, "/roadmap.json"):
+			req.Pattern = portalRoadmapFilePattern
+		case (route.method == http.MethodGet || route.method == http.MethodHead) && strings.HasSuffix(route.path, "/roadmap"):
+			req.Pattern = portalRoadmapPattern
 		case (route.method == http.MethodGet || route.method == http.MethodHead) && strings.HasSuffix(route.path, "/llms.txt"):
 			req.Pattern = portalLlmsPattern
 		case (route.method == http.MethodGet || route.method == http.MethodHead) && strings.HasSuffix(route.path, "/catalog.json"):
@@ -171,6 +179,15 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 		{http.MethodPut, "/api/public/portal/harbour/releases"},
 		{http.MethodGet, "/api/public/portal/harbour/releases/extra"},
 		{http.MethodGet, "/api/public/portal/harbour/releases/"},
+		{http.MethodPost, "/api/public/portal/harbour/roadmap"},
+		{http.MethodPut, "/api/public/portal/harbour/roadmap"},
+		{http.MethodGet, "/api/public/portal/harbour/roadmap/extra"},
+		{http.MethodGet, "/api/public/portal/harbour/roadmap/"},
+		{http.MethodGet, "/api/public/portal/harbour/Roadmap"},
+		{http.MethodPost, "/api/public/portal/harbour/roadmap.json"},
+		{http.MethodGet, "/api/public/portal/harbour/roadmap.json.bak"},
+		{http.MethodGet, "/api/public/portal/harbour/roadmap.json/"},
+		{http.MethodGet, "/api/public/portal/harbour/Roadmap.json"},
 		{http.MethodPost, "/api/public/portal/harbour/llms.txt"},
 		{http.MethodGet, "/api/public/portal/harbour/LLMS.TXT"},
 		{http.MethodGet, "/api/public/portal/harbour/llms.txt/"},
@@ -207,6 +224,20 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 	handler.ServeHTTP(rec, releases)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("releases path with the catalog pattern: %d", rec.Code)
+	}
+	roadmap := httptest.NewRequest(http.MethodGet, "/api/public/portal/harbour/roadmap", nil)
+	roadmap.Pattern = portalCatalogPattern
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, roadmap)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("roadmap path with the catalog pattern: %d", rec.Code)
+	}
+	roadmapFile := httptest.NewRequest(http.MethodGet, "/api/public/portal/harbour/roadmap.json", nil)
+	roadmapFile.Pattern = portalRoadmapPattern
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, roadmapFile)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("roadmap file with the page pattern: %d", rec.Code)
 	}
 }
 
