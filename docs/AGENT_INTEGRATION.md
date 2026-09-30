@@ -277,76 +277,86 @@ stored server-side in `person_watch_security`, scoped to that person and tenant.
 writes require the instance’s origin. The server, never a device request, selects
 one of two modes at approval:
 
-- **Also confirm on the Mac** (`local_auth`): after browser approval the daemon
-  must also complete LocalAuthentication in its own process. No helper, CLI
-  flag, local socket field or environment value can assert this result. Until
-  confirmation succeeds there is no session, lease or shared text. Cancel,
-  timeout, unavailable authentication, loss of the peer, or revocation fails
-  closed. Linux and older daemons cannot approve this mode.
-- **Approve in Aeon** (`aeon`): same-origin, digest-bound person approval is the
-  consent gate. The terminal WATCH prompt is a best-effort extra factor; a
-  same-user process can emulate its PTY. The approval warns who requested it
+- **Approve in Aeon** (`aeon`): same-origin, digest-bound person approval
+  is the consent gate. The terminal WATCH prompt is a best-effort extra factor;
+  a same-user process can emulate its PTY. The approval warns who requested it
   and shows process, cwd and transcript before the Allow action. Saving this
-  mode is the opt-out from Mac confirmation. A program running as that user can
-  open another terminal and request the review.
+  mode opts out of Mac confirmation. A program running as that user can open
+  another terminal and request the review.
+- **Also confirm on the Mac** (`local_auth`): on an upgraded pairing, browser
+  approval issues a random, one-use `local_auth_nonce`. The daemon signs
+  `SHA-256("aeon.attach.local-consent.v1\0" + consent_digest + "\0" + nonce)`
+  with the pairing's P-256 Secure Enclave key. The wire signature is base64
+  ASN.1 DER ECDSA. The server verifies it against the immutable public key pinned
+  by browser-approved pairing, then consumes the nonce in the session/lease
+  transaction. A bare `local_confirmed: true`, wrong key, nonce, stale digest,
+  expired approval or replay is refused. No text is accepted before activation.
+  Changing biometric enrollment invalidates the key; re-pair to restore Touch ID.
 
-Until the person saves a choice, a pending attach on a Mac whose connected
-daemon reports `available` uses `local_auth`. Linux, SSH to a machine without a
-graphical login, an empty or legacy platform, and a Mac that reports `no_gui`,
+Until the person saves a choice, a pending attach on an upgraded Mac whose
+connected daemon reports `available` uses `local_auth`. Linux, older pairings,
+SSH to a machine without a graphical login, an empty or legacy platform,
+and a Mac that reports `no_gui`,
 `unsigned`, `policy`, `unsupported` or `unreported` stay on Aeon approval so
 those attaches keep working. SSH to a Mac that reports `available` shows the
 Touch ID prompt on that Mac's screen, not in the SSH terminal. Settings shows
 `local_auth` with `consent_saved: false` when any connected computer reports
-`available`, including when another computer would still approve in Aeon.
-Saving `local_auth` applies it to every computer and fails closed where
-confirmation cannot run. Saving `aeon` keeps Aeon approval everywhere. The
+`available` and has a browser-pinned key, including when another computer would
+still approve in Aeon. Saving `local_auth` applies it to every upgraded computer
+and fails closed where confirmation cannot run; pairings without a key retain
+Aeon approval until re-paired. Saving `aeon` keeps Aeon approval everywhere. The
 daemon's platform and capability report are advisory: a hostile daemon can
-claim another platform or `no_gui` to skip the unsaved default. An impersonator
-holding the pairing state can report `available` and assert confirmation. A
-saved `local_auth` fails closed only for a genuine daemon that cannot run it.
-Touch ID needs a person at the Mac and stops code that can only drive
-terminals or the browser. It is still defence in depth, because a program
-running as you that reads the daemon's pairing state can impersonate the
-daemon and report confirmation. Signing that confirmation with a Secure
-Enclave key is AEON-460. Ancestry and session checks are defence in depth,
-not a guarantee that same-user code cannot request its own attach.
+claim another platform or `no_gui` to skip the unsaved default. A saved
+`local_auth` on an upgraded pairing requires the pinned key's signature;
+capability reports cannot substitute for that proof. Touch ID needs a person
+at the Mac. Ancestry and session checks are defence in depth, not a guarantee
+that same-user code cannot request its own attach.
 
-The separate `consent_digest` binds the request ID, snapshot digest and mode,
-using the `aeon.attach.consent.v1` domain. The browser echoes it on approval;
-a stale review is rejected after a setting change. The daemon validates it,
-then echoes it with its authenticated confirmation for strict activation.
-Only the memory-key-authenticated exchange can carry that assertion; it is a
-trusted-daemon assertion, not remote OS attestation. A replacement daemon that
-registers using stolen pairing credentials still needs fresh browser approval,
-but the server cannot verify its executable or LocalAuthentication result.
-Preventing that same-user replacement requires the separately tracked protected
-device identity/installer boundary; this mode does not claim that protection.
-Pending requests read the current setting; approved and active requests retain the
-pinned mode. Changing settings neither upgrades nor downgrades existing watches.
-Mode A retains the original snapshot digest and accepts legacy A approvals.
+The `consent_digest` binds request ID, snapshot digest and mode with the
+`aeon.attach.consent.v1` domain. Settings changes affect pending requests;
+approved and active watches retain their pin. Existing pairings without a key
+use Aeon approval until re-paired, even if they report Touch ID availability.
+Settings says “upgrade this computer’s pairing to enable Touch ID”. Migration
+1047 ends in-flight watches approved under the old boolean protocol, requiring
+fresh consent. Daemon registration cannot install or replace a public key, and
+Add harness preserves both the public key and the original local key identity.
 
-Native Mac confirmation needs `CGO_ENABLED=1`, Apple's Foundation,
-LocalAuthentication and Security frameworks, and an installed executable named
-`paimos-agentd` (the pairing installer) or `aeon-agentd` (the Nix package) with
-a valid Developer ID signature by the team the build expects, hardened runtime and no
-get-task-allow, library-validation or DYLD-environment exceptions. It validates
-the running process through `SecCodeCopySelf`/`SecCodeCheckValidity`, checks for
-a graphical login, and evaluates a fresh `LAContext` with
-[`deviceOwnerAuthentication`](https://developer.apple.com/documentation/localauthentication/lapolicy/deviceownerauthentication).
-The OS supplies Touch ID/device-password authentication (and other OS-supported
-owner factors); the reason names the harness session PID and host. Contexts
-are never reused. The prompt is asynchronous, remains revocable during polling,
-and times out after 90 seconds. These checks do not replace installer provenance
-or same-user OS isolation. Release darwin `paimos-agentd` is built with
-`CGO_ENABLED=1` and links LocalAuthentication. Linux `paimos-agentd`, `aeon-cli`,
-and the server image stay `CGO_ENABLED=0`. The Nix `aeon-agentd` package uses
-the same split. At watch registration the daemon reports a non-interactive
-capability: `available`, `unsupported`, `unsigned`, `no_gui`, or `policy`.
-An omitted report is stored as `unreported`. Settings lists that report for
-the signed-in person's connected computers and does not offer Mac confirmation
-unless one reports `available`. Unsigned, ad-hoc, and headless builds still
-fail closed. A signed interactive Touch ID acceptance check remains release
-qualification.
+Release Darwin builds enable `-tags aeon_enclave` with `CGO_ENABLED=1` and link
+Apple's Security, Foundation and LocalAuthentication frameworks. The native
+boundary validates the running hardened Developer ID daemon, team `P66J39QV6V`,
+identifier `paimos-agentd`, and refuses debugging, DYLD environment or disabled
+library validation. At pairing it creates a non-exportable P-256 key using
+`kSecAttrTokenIDSecureEnclave`, `biometryCurrentSet` and `privateKeyUsage`.
+Every signature uses a fresh cancellable `LAContext`, without authentication
+reuse or a password fallback. Cancellation, expiry, revocation and changed
+process identity fail closed. Unsigned/Nix development builds do not enable
+this path. Linux remains CGO-free and uses Aeon approval.
+
+In the same release build, private pairing state (including device, runtime and
+lifecycle capabilities) and the runtime bearer live in Keychain generic-password
+items. Their ACL trusts the validated daemon's designated requirement, with
+root as ACL owner rather than the user's UID. Existing items must have the same
+code signing requirement and restrictive ACL; permissive pre-created items are
+refused. Requirement introspection is weak-linked and fails closed if macOS
+cannot provide it. Reads suppress authorization prompts and an ACL denial never
+falls back to disk. First access imports existing
+`pairing.json` and `runtime.key`, verifies the persisted item, overwrites the
+exact private source inode, and unlinks it. Interrupted cleanup resumes safely;
+symlinks, hardlinks and conflicting state are refused. Overwriting does not
+promise physical erasure of APFS snapshots or backups. Public `runtime.json`
+remains on disk; it contains no bearer or private key. Its server address,
+computer/tenant/principal identities, approved folder and local key identity
+must match the protected pairing before cold-start lifecycle or bearer requests;
+changing that disk file cannot redirect credentials.
+
+The server verifies possession of the browser-pinned key; this is not remote
+hardware attestation. A new pairing still needs the person to trust the installed
+daemon and review the requested computer. Automated tests use an injectable
+signer and cover server proof verification, migration and unsigned native denial.
+A signed interactive Mac qualification must additionally prove actual enclave
+creation, Touch ID success/cancel, changed-biometry invalidation and Keychain ACL
+refusal to a separate unsigned process before release. Local unsigned checks do
+not supply that hardware or ACL qualification.
 
 ### Signed release daemon (AEON-285)
 
@@ -361,10 +371,11 @@ see them. Signing happens before `SHA256SUMS` is computed.
 
 `scripts/build-release-binaries.sh` embeds the expected team through
 `-X github.com/inspr-at/paimos/internal/agentd.expectedTeamID=P66J39QV6V`
-(`AEON_DEVELOPER_ID_TEAM` overrides it). The daemon compares the team of its own
-valid signature with that value. An empty value (development and Nix builds),
-an ad-hoc signature or another team reports `unsigned` and refuses Mac
-confirmation with an explicit message.
+for the existing signing diagnostics (`AEON_DEVELOPER_ID_TEAM` overrides that
+value). The enclave and Keychain boundary additionally requires the fixed team
+`P66J39QV6V`, identifier `paimos-agentd` and hardened runtime; changing a build
+variable cannot relax it. Development/Nix builds without `aeon_enclave`, ad-hoc
+signatures and other teams report `unsigned` and refuse Mac confirmation.
 
 Bare binaries cannot be stapled, so Gatekeeper looks the notarization ticket up
 online on first run. To verify a downloaded daemon:
@@ -418,8 +429,9 @@ same-user code can still open an independent terminal and request the review.
 Ancestors are identified from kernel metadata only. On Linux that is
 `/proc/<pid>/stat` plus the directory uid, so a root-owned sshd, su or sudo
 ancestor stays acceptable; the target still needs its executable and cwd. On a
-Mac whose daemon reports that Touch ID can run, the unsaved default also
-requires LocalAuthentication before a session exists. Type `WATCH`, then open the paired
+Mac with an upgraded pairing whose daemon reports that Touch ID can run, the
+unsaved default also requires an enclave-signed confirmation before a session
+exists. Type `WATCH`, then open the paired
 instance's Agents page and choose
 **Attach session**. Review the code and snapshot, then approve. Keep the terminal
 open; Ctrl-C detaches without signalling the harness. Missing helper polls,

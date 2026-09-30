@@ -22,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 )
@@ -49,6 +50,7 @@ type Choice struct {
 	Provider   string `json:"provider,omitempty"`
 }
 type Details struct {
+	LocalAuthPublicKey string   `json:"local_auth_public_key,omitempty"`
 	ComputerName       string   `json:"computer_name"`
 	Platform           string   `json:"platform"`
 	Arch               string   `json:"arch"`
@@ -199,6 +201,9 @@ func safeText(s string, max int) bool {
 	return len(s) > 0 && len(s) <= max && strings.TrimSpace(s) == s && utf8.ValidString(s) && !strings.ContainsFunc(s, unicode.IsControl)
 }
 func validateDevice(in deviceRequest) error {
+	if in.LocalAuthPublicKey != "" && (in.Platform != "darwin" || attachwatch.LocalAuthPublicKey(in.LocalAuthPublicKey) == nil) {
+		return fail(400, "invalid_request", "valid Mac P-256 public key required")
+	}
 	if !uuidRE.MatchString(in.RequestID) || (in.TenantID == "") == (in.TenantSlug == "") || in.TenantID != "" && !uuidRE.MatchString(in.TenantID) || !hashRE.MatchString(in.DeviceHash) || !hashRE.MatchString(in.RuntimeHash) || !hashRE.MatchString(in.LifecycleHash) || in.DeviceHash == in.RuntimeHash || in.DeviceHash == in.LifecycleHash || in.RuntimeHash == in.LifecycleHash {
 		return fail(400, "invalid_request", "distinct commitments, request UUID and exactly one tenant selector required")
 	}

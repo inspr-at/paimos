@@ -19,8 +19,12 @@ import (
 
 func watchFixture(t *testing.T) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
+	return watchFixtureWithKey(t, "")
+}
+func watchFixtureWithKey(t *testing.T, publicKey string) (*fixture, string, attachwatch.DeviceRequest) {
+	t.Helper()
 	f := newFixture(t)
-	p := f.propose("codex")
+	p := f.proposePlatformKey("darwin", "arm64", publicKey, "codex")
 	f.approve(p, "connect_only")
 	v := f.redeem(p)
 	project, ticket := uuid(t, f.db), uuid(t, f.db)

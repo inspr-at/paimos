@@ -16,9 +16,10 @@ type watchSecurityWrite struct {
 }
 
 type localAuthComputer struct {
-	ComputerID string `json:"computer_id"`
-	Name       string `json:"name"`
-	Capability string `json:"capability"`
+	PairingUpgraded bool   `json:"pairing_upgraded"`
+	ComputerID      string `json:"computer_id"`
+	Name            string `json:"name"`
+	Capability      string `json:"capability"`
 }
 
 type watchSecurityView struct {
@@ -36,7 +37,7 @@ func watchConsentPreference(ctx context.Context, tx pgx.Tx, owner string) (mode 
 	return mode, true, err
 }
 
-// Touch ID is the default only for a Mac whose daemon reports it can run.
+// Touch ID is the default only for an upgraded Mac whose daemon reports it can run.
 // Linux, SSH without a graphical login, and a Mac that cannot confirm stay on
 // Aeon approval so those attaches keep working. The report never satisfies
 // confirmation; saving local_auth still fails closed where it cannot run.
@@ -63,8 +64,23 @@ func effectiveWatchConsent(ctx context.Context, tx pgx.Tx, owner, platform, comp
 	return defaultWatchConsent(ctx, tx, platform, computer)
 }
 
+// Old pairings cannot prove local confirmation. Their effective policy is Aeon
+// approval until a fresh, browser-reviewed pairing pins the public key.
+func computerWatchConsentMode(ctx context.Context, tx pgx.Tx, owner, platform, computer string) (string, error) {
+	mode, err := effectiveWatchConsent(ctx, tx, owner, platform, computer)
+	if err != nil || mode != attachwatch.ConsentLocalAuth {
+		return mode, err
+	}
+	var upgraded bool
+	err = tx.QueryRow(ctx, `SELECT local_auth_public_key<>'' FROM agent_pairing_computers WHERE id=$1`, computer).Scan(&upgraded)
+	if !upgraded {
+		mode = attachwatch.ConsentAeon
+	}
+	return mode, err
+}
+
 func localAuthComputers(ctx context.Context, tx pgx.Tx, person string) ([]localAuthComputer, error) {
-	rows, err := tx.Query(ctx, `SELECT c.id::text, coalesce(q.details->>'computer_name', ''), c.local_auth_capability
+	rows, err := tx.Query(ctx, `SELECT c.id::text, coalesce(q.details->>'computer_name', ''), c.local_auth_capability, c.local_auth_public_key<>''
  FROM agent_pairing_computers c
  JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
  WHERE c.state='connected' AND q.approved_by=$1
@@ -76,7 +92,7 @@ func localAuthComputers(ctx context.Context, tx pgx.Tx, person string) ([]localA
 	out := []localAuthComputer{}
 	for rows.Next() {
 		var item localAuthComputer
-		if err = rows.Scan(&item.ComputerID, &item.Name, &item.Capability); err != nil {
+		if err = rows.Scan(&item.ComputerID, &item.Name, &item.Capability, &item.PairingUpgraded); err != nil {
 			return nil, err
 		}
 		if item.Name == "" {
@@ -112,7 +128,7 @@ func (m *Module) watchSecurity(w http.ResponseWriter, r *http.Request, p tenant.
 			return err
 		}
 		for _, computer := range out.LocalAuthComputers {
-			if computer.Capability == attachwatch.LocalAuthAvailable {
+			if computer.Capability == attachwatch.LocalAuthAvailable && computer.PairingUpgraded {
 				out.ConsentMode = attachwatch.ConsentLocalAuth
 				break
 			}

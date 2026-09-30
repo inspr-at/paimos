@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsecurity"
+	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/grokprobe"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/piprobe"
@@ -69,6 +71,7 @@ type RuntimeAccount struct {
 	Node      harnesslaunch.Node `json:"node,omitempty"`
 }
 type RuntimeConfig struct {
+	LocalAuthKeyID   string                    `json:"local_auth_key_id,omitempty"`
 	AttachIdentities map[string]AttachIdentity `json:"attach_identities,omitempty"`
 	Schema           string                    `json:"schema"`
 	Origin           string                    `json:"origin"`
@@ -84,6 +87,7 @@ type RuntimeConfig struct {
 }
 
 type snapshot struct {
+	LocalAuthKeyID     string                `json:"local_auth_key_id,omitempty"`
 	BoundComputer      string                `json:"bound_computer_id,omitempty"`
 	BoundDaemon        string                `json:"bound_daemon_id,omitempty"`
 	BoundPrincipal     string                `json:"bound_principal_id,omitempty"`
@@ -173,6 +177,7 @@ type LocalDaemon interface {
 	Status(context.Context, string) (LocalStatus, error)
 }
 type Engine struct {
+	Enclave            agentsecurity.Signer
 	Store              *Store
 	API                PairingAPI
 	Services           *ServiceManager
@@ -336,7 +341,7 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		return Progress{}, ErrUnsafePath
 	}
 	for _, entry := range entries {
-		if entry.Name() != "setup.lock" {
+		if entry.Name() != "setup.lock" && !(e.Store.vault != nil && entry.Name() == "keychain-migration.lock") {
 			return Progress{}, ErrCollision
 		}
 	}
@@ -401,7 +406,21 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		return Progress{}, err
 	}
 	s := &snapshot{Schema: "aeon.agent-setup.private.v1", Origin: strings.TrimRight(o.Origin, "/"), Device: device, Runtime: runtimeSecret, Lifecycle: life, LifecycleRequestID: id, StartService: o.StartService, NodePath: o.NodePath, ClaudeSDKPath: o.ClaudeSDKPath, Phase: "requesting", Removed: map[string]bool{}}
-	s.Request = DeviceRequest{RequestID: id, TenantID: o.TenantID, TenantSlug: o.TenantSlug, DeviceHash: Hash([]byte(device)), RuntimeHash: Hash([]byte(runtimeSecret)), LifecycleHash: Hash([]byte(life)), Details: Details{ComputerName: o.ComputerName, Platform: o.Platform.OS, Arch: o.Platform.Arch, Workspace: o.Workspace, Capabilities: []string{"managed_runs"}}}
+	signer := e.Enclave
+	if signer == nil {
+		signer = agentsecurity.DefaultSigner()
+	}
+	publicKey, keyErr := signer.Create(ctx, Hash([]byte(e.Store.Path()))+"/"+id)
+	if keyErr != nil && !errors.Is(keyErr, agentsecurity.ErrUnavailable) {
+		return Progress{}, keyErr
+	}
+	if publicKey != "" && (o.Platform.OS != "darwin" || attachwatch.LocalAuthPublicKey(publicKey) == nil) {
+		return Progress{}, errors.New("invalid enclave public key")
+	}
+	if publicKey != "" {
+		s.LocalAuthKeyID = Hash([]byte(e.Store.Path())) + "/" + id
+	}
+	s.Request = DeviceRequest{RequestID: id, TenantID: o.TenantID, TenantSlug: o.TenantSlug, DeviceHash: Hash([]byte(device)), RuntimeHash: Hash([]byte(runtimeSecret)), LifecycleHash: Hash([]byte(life)), Details: Details{LocalAuthPublicKey: publicKey, ComputerName: o.ComputerName, Platform: o.Platform.OS, Arch: o.Platform.Arch, Workspace: o.Workspace, Capabilities: []string{"managed_runs"}}}
 	for _, c := range o.Candidates {
 		key, err := uuid()
 		if err != nil {
@@ -621,7 +640,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 	if err := e.save(s, false); err != nil {
 		return e.progress(s), err
 	}
-	config := RuntimeConfig{Schema: "aeon.agent-runtime.v1", Origin: s.Origin, TenantID: s.View.TenantID, PrincipalID: s.View.PrincipalID, DaemonID: s.View.DaemonID, ComputerID: s.View.ComputerID, Workspace: s.Request.Workspace, NodePath: s.NodePath, ClaudeSDKPath: s.ClaudeSDKPath, ClaudeRepinID: s.ClaudeRepinID, Accounts: []RuntimeAccount{}}
+	config := RuntimeConfig{LocalAuthKeyID: s.LocalAuthKeyID, Schema: "aeon.agent-runtime.v1", Origin: s.Origin, TenantID: s.View.TenantID, PrincipalID: s.View.PrincipalID, DaemonID: s.View.DaemonID, ComputerID: s.View.ComputerID, Workspace: s.Request.Workspace, NodePath: s.NodePath, ClaudeSDKPath: s.ClaudeSDKPath, ClaudeRepinID: s.ClaudeRepinID, Accounts: []RuntimeAccount{}}
 	seen := map[string]bool{}
 	for _, a := range s.View.Enrollments {
 		if a.State != "connected" || s.Removed[a.AccountID] {
@@ -707,6 +726,10 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 		return RuntimeConfig{}, err
 	}
 	defer s.Close()
+	return readRuntimeConfig(s)
+}
+
+func readRuntimeConfig(s *Store) (RuntimeConfig, error) {
 	raw, err := s.Read(RuntimeName, 128<<10)
 	if err != nil {
 		return RuntimeConfig{}, err
@@ -714,6 +737,19 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 	var c RuntimeConfig
 	if json.Unmarshal(raw, &c) != nil || c.Schema != "aeon.agent-runtime.v1" || ValidateOrigin(c.Origin) != nil || !uuidPattern.MatchString(c.TenantID) || !uuidPattern.MatchString(c.PrincipalID) || !uuidPattern.MatchString(c.ComputerID) || c.DaemonID == "" || len(c.DaemonID) > 128 || strings.ContainsAny(c.DaemonID, "/\\\x00\r\n") {
 		return RuntimeConfig{}, errors.New("private runtime configuration invalid")
+	}
+	if s.vault != nil {
+		// Public disk state cannot redirect the signed daemon into disclosing a
+		// protected lifecycle proof or bearer. This runs before cold-start
+		// preflight, and migrates the pairing snapshot on first daemon start.
+		engine := Engine{Store: s}
+		paired, err := engine.load()
+		if err != nil {
+			return RuntimeConfig{}, err
+		}
+		if paired.ComputerCleaned || c.Origin != paired.Origin || c.TenantID != paired.View.TenantID || c.ComputerID != paired.View.ComputerID || c.PrincipalID != paired.View.PrincipalID || c.DaemonID != paired.View.DaemonID || c.Workspace != paired.Request.Workspace || c.LocalAuthKeyID != paired.LocalAuthKeyID {
+			return RuntimeConfig{}, errors.New("runtime configuration differs from protected pairing")
+		}
 	}
 	return c, nil
 }

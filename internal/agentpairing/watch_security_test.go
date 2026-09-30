@@ -16,9 +16,10 @@ type watchSetting struct {
 	ConsentMode  string `json:"consent_mode"`
 	ConsentSaved bool   `json:"consent_saved"`
 	Computers    []struct {
-		ComputerID string `json:"computer_id"`
-		Name       string `json:"name"`
-		Capability string `json:"capability"`
+		ComputerID      string `json:"computer_id"`
+		Name            string `json:"name"`
+		Capability      string `json:"capability"`
+		PairingUpgraded bool   `json:"pairing_upgraded"`
 	} `json:"local_auth_computers"`
 }
 
@@ -94,7 +95,7 @@ func TestWatchSecurityIsPersonOnlySameOriginAndTenantScoped(t *testing.T) {
 	}
 }
 func TestStrictWatchRequiresBoundDaemonConfirmation(t *testing.T) {
-	f, key, in := watchFixture(t)
+	f, key, in, signer := upgradedWatchFixture(t)
 	setWatchMode(f, attachwatch.ConsentLocalAuth)
 	in.Snapshot.Platform = "darwin"
 	in.Digest = in.Snapshot.Digest()
@@ -116,6 +117,10 @@ func TestStrictWatchRequiresBoundDaemonConfirmation(t *testing.T) {
 	}
 	in.LocalConfirmed = true
 	in.ConsentDigest = v.ConsentDigest
+	f.call("POST", "/api/agent-pairing/attach", in, false, key, 403)
+	in.LocalConfirmed = false
+	in.LocalAuthNonce = waiting.LocalAuthNonce
+	in.LocalAuthSignature = signWatchConsent(t, signer, v.ConsentDigest, waiting.LocalAuthNonce)
 	stolen := in
 	stolen.PollKey = ""
 	f.call("POST", "/api/agent-pairing/attach", stolen, false, key, 403)
@@ -131,7 +136,7 @@ func TestStrictWatchRequiresBoundDaemonConfirmation(t *testing.T) {
 	}
 }
 func TestWatchSecurityCannotBeDowngradedByRequestOrStaleReview(t *testing.T) {
-	f, key, in := watchFixture(t)
+	f, key, in, _ := upgradedWatchFixture(t)
 	in.Snapshot.Platform = "darwin"
 	in.Digest = in.Snapshot.Digest()
 	in.ConsentDigest = attachwatch.ConsentDigest(in.RequestID, in.Digest, attachwatch.ConsentAeon)
@@ -152,7 +157,7 @@ func TestWatchSecurityCannotBeDowngradedByRequestOrStaleReview(t *testing.T) {
 func TestStrictWatchUnavailableOnLinuxAndLegacyDaemon(t *testing.T) {
 	for _, platform := range []string{"linux", ""} {
 		t.Run(platform, func(t *testing.T) {
-			f, key, in := watchFixture(t)
+			f, key, in, _ := upgradedWatchFixture(t)
 			setWatchMode(f, attachwatch.ConsentLocalAuth)
 			in.Snapshot.Platform = platform
 			in.Digest = in.Snapshot.Digest()
@@ -269,14 +274,14 @@ func finishAeonWatch(t *testing.T, f *fixture, key string, in *attachwatch.Devic
 
 func TestTouchIDDefaultIsMacOnlyUntilSaved(t *testing.T) {
 	t.Run("darwin available", func(t *testing.T) {
-		f, key, in := watchFixture(t)
+		f, key, in, signer := upgradedWatchFixture(t)
 		registerCapability(t, f, key, &in, attachwatch.LocalAuthAvailable)
 		in.Snapshot.Platform = "darwin"
 		v := requestWatch(t, f, key, in)
 		if v.ConsentMode != attachwatch.ConsentLocalAuth {
 			t.Fatalf("unsaved mac default %s", v.ConsentMode)
 		}
-		if got := readWatchSetting(t, f); got.ConsentMode != attachwatch.ConsentLocalAuth || got.ConsentSaved {
+		if got := readWatchSetting(t, f); got.ConsentMode != attachwatch.ConsentLocalAuth || got.ConsentSaved || !got.Computers[0].PairingUpgraded {
 			t.Fatalf("settings %+v", got)
 		}
 		f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200)
@@ -289,6 +294,10 @@ func TestTouchIDDefaultIsMacOnlyUntilSaved(t *testing.T) {
 		}
 		in.LocalConfirmed = true
 		in.ConsentDigest = v.ConsentDigest
+		f.call("POST", "/api/agent-pairing/attach", in, false, key, 403)
+		in.LocalConfirmed = false
+		in.LocalAuthNonce = waiting.LocalAuthNonce
+		in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce)
 		decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &waiting)
 		if waiting.State != "active" || waiting.SessionID == nil {
 			t.Fatal("confirmed watch did not activate")
@@ -296,7 +305,7 @@ func TestTouchIDDefaultIsMacOnlyUntilSaved(t *testing.T) {
 	})
 	for _, capability := range []string{attachwatch.LocalAuthNoGUI, attachwatch.LocalAuthPolicy, attachwatch.LocalAuthUnsigned} {
 		t.Run(capability, func(t *testing.T) {
-			f, key, in := watchFixture(t)
+			f, key, in, _ := upgradedWatchFixture(t)
 			registerCapability(t, f, key, &in, capability)
 			in.Snapshot.Platform = "darwin"
 			v := requestWatch(t, f, key, in)
@@ -310,7 +319,7 @@ func TestTouchIDDefaultIsMacOnlyUntilSaved(t *testing.T) {
 		})
 	}
 	t.Run("linux available", func(t *testing.T) {
-		f, key, in := watchFixture(t)
+		f, key, in, _ := upgradedWatchFixture(t)
 		registerCapability(t, f, key, &in, attachwatch.LocalAuthAvailable)
 		in.Snapshot.Platform = "linux"
 		v := requestWatch(t, f, key, in)
@@ -323,7 +332,7 @@ func TestTouchIDDefaultIsMacOnlyUntilSaved(t *testing.T) {
 		finishAeonWatch(t, f, key, &in, v)
 	})
 	t.Run("saved aeon opt-out", func(t *testing.T) {
-		f, key, in := watchFixture(t)
+		f, key, in, _ := upgradedWatchFixture(t)
 		registerCapability(t, f, key, &in, attachwatch.LocalAuthAvailable)
 		setWatchMode(f, attachwatch.ConsentAeon)
 		in.Snapshot.Platform = "darwin"
