@@ -62,8 +62,10 @@ type Proposal struct {
 	DismissedBy    string `json:"dismissed_by,omitempty"`
 	DismissReason  string `json:"dismiss_reason,omitempty"`
 	PromotedCommit string `json:"promoted_commit,omitempty"`
-	RuleSet        string `json:"rule_set,omitempty"`
-	RuleIndex      int    `json:"rule_index,omitempty"`
+	// The rule file a person approved: as sent to git, then as promoted.
+	ApprovedFileSHA string `json:"approved_file_sha256,omitempty"`
+	RuleSet         string `json:"rule_set,omitempty"`
+	RuleIndex       int    `json:"rule_index,omitempty"`
 }
 
 type proposalData struct {

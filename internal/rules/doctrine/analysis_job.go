@@ -414,9 +414,13 @@ func (m *Module) observeFinding(ctx context.Context, actor tenant.Principal, f *
 			return err
 		}
 	}
-	if proposal.PRURL != f.PRURL {
-		// A person sent the proposal to git.
+	if proposal.PRURL != f.PRURL || proposal.ApprovedFileSHA != "" && proposal.ApprovedFileSHA != f.AfterFileSHA {
+		// A person sent the proposal to git, perhaps edited, or a pin promoted
+		// it: the after measurement follows the file they approved.
 		f.PRURL = proposal.PRURL
+		if proposal.ApprovedFileSHA != "" {
+			f.AfterFileSHA = proposal.ApprovedFileSHA
+		}
 		if err := m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error { return saveFinding(ctx, tx, actor, *f, "doctrine.finding_proposed") }); err != nil {
 			return err
 		}

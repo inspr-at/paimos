@@ -7,7 +7,8 @@
 // person and proposal, in any tab or device, with or without storage. A
 // person's action and a session change invalidate summary reads still in
 // flight, so a late answer never restores a dot, claims a toast or brings back
-// the previous principal.
+// the previous principal. A proposal a person settled here never toasts, even
+// when its claim was granted before the dismissal and answered after it.
 import { reactive } from 'vue'
 import { claimDoctrineInboxNotice, getDoctrineInboxSummary, inboxLabel, type DoctrineInboxHeadline } from './doctrine.ts'
 
@@ -17,6 +18,8 @@ export const doctrineInbox = reactive({ pending: 0, principal: '' })
 let generation = 0
 // Bumped by a session change only.
 let session = 0
+// Proposals a person sent, edited or dismissed here in this session.
+const settled = new Set<string>()
 
 /** The headlines this person was not notified of yet, oldest first. */
 export function unclaimed(items: DoctrineInboxHeadline[]): DoctrineInboxHeadline[] {
@@ -52,15 +55,21 @@ export async function pollDoctrineInbox(principal: string, read = getDoctrineInb
       break // the next poll claims the rest
     }
   }
-  // A granted claim is this person's only toast for it; only a session
-  // change drops it.
-  return since === session ? toastText(fresh) : null
+  // A granted claim is this person's only toast for it; a session change
+  // drops it, and so does settling the proposal while the claim was answered.
+  if (since !== session) return null
+  const waiting = turn === generation ? fresh : fresh.filter(item => !settled.has(item.id) && doctrineInbox.pending > 0)
+  return toastText(waiting)
 }
 
 /** Drops every summary read still in flight. */
 export function invalidateDoctrineInbox() { generation++ }
 
 /** A person acted on a proposal here: the count follows at once. */
-export function inboxChanged(pending: number) { invalidateDoctrineInbox(); doctrineInbox.pending = Math.max(0, pending) }
+export function inboxChanged(pending: number, ...acted: string[]) {
+  invalidateDoctrineInbox()
+  for (const id of acted) settled.add(id)
+  doctrineInbox.pending = Math.max(0, pending)
+}
 
-export function resetDoctrineInbox() { session++; invalidateDoctrineInbox(); doctrineInbox.pending = 0; doctrineInbox.principal = '' }
+export function resetDoctrineInbox() { session++; invalidateDoctrineInbox(); settled.clear(); doctrineInbox.pending = 0; doctrineInbox.principal = '' }

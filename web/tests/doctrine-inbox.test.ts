@@ -146,3 +146,30 @@ test('a failed claim leaves the rest for the next poll', async () => {
   fail = false
   assert.equal(await pollDoctrineInbox('flaky', read, flaky), 'Doctrine change proposed: second')
 })
+
+test('a claim answered after a dismissal never toasts the dismissed proposal', async () => {
+  resetDoctrineInbox()
+  const api = server()
+  let answer!: () => void
+  const delayed = async (id: string) => {
+    const granted = await api.claim(id) // the server grants the claim …
+    await new Promise<void>(resolve => { answer = resolve }) // … but its answer arrives late
+    return granted
+  }
+  const read = async () => ({ pending: 2, items: [headline('late', 'Dismissed meanwhile', '2026-09-30T10:00:00Z')] })
+  const poll = pollDoctrineInbox('late', read, delayed)
+  while (!api.claimed.includes('late')) await new Promise(resolve => setTimeout(resolve, 1))
+  await new Promise(resolve => setTimeout(resolve, 1))
+  inboxChanged(1, 'late') // the person dismissed it before the answer came
+  answer()
+  assert.equal(await poll, null)
+  assert.deepEqual(api.claimed, ['late'])
+  // A proposal still waiting keeps its toast when another one was settled meanwhile.
+  const both = async () => ({ pending: 2, items: [headline('kept', 'Still waits', '2026-09-30T10:01:00Z')] })
+  const next = pollDoctrineInbox('late', both, delayed)
+  while (!api.claimed.includes('kept')) await new Promise(resolve => setTimeout(resolve, 1))
+  await new Promise(resolve => setTimeout(resolve, 1))
+  inboxChanged(1, 'other')
+  answer()
+  assert.equal(await next, 'Doctrine change proposed: Still waits')
+})

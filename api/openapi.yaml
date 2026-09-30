@@ -7441,6 +7441,7 @@ components:
         dismissed_by: {type: string, format: uuid}
         dismiss_reason: {type: string, maxLength: 500}
         promoted_commit: {type: string, description: The pinned commit that contains the change}
+        approved_file_sha256: {type: string, description: "SHA-256 of the rule file as a person sent it to git, then as the promoting pin holds it; outcome measurement follows these bytes"}
     DoctrineInboxInput:
       type: object
       additionalProperties: false

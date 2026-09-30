@@ -182,6 +182,16 @@ func readAnalysis(t *testing.T, f doctrineFixture, p tenant.Principal) []finding
 	return out.Findings
 }
 
+// afterFileSHA is the stored file hash a finding's after measurement needs.
+func afterFileSHA(t *testing.T, f doctrineFixture, id string) string {
+	t.Helper()
+	var sha string
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT COALESCE(data->>'after_file_sha','') FROM doctrine_findings WHERE id=$1`, id).Scan(&sha); err != nil {
+		t.Fatal(err)
+	}
+	return sha
+}
+
 // inboxProposals counts the doctrine inbox proposals of a workspace.
 func inboxProposals(t *testing.T, f doctrineFixture, tid string) int {
 	t.Helper()
@@ -306,6 +316,62 @@ func TestAnalysisDraftJobAndBeforeAfter(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A person who edits the job's proposal before sending it approves other
+// bytes than the job drafted: the after measurement follows the file they
+// sent, not the file the job computed.
+func TestAnalysisEditedProposalMeasuresTheApprovedFile(t *testing.T) {
+	f, forge, m, owner := setupAnalysis(t)
+	now := time.Now().UTC().Add(time.Minute)
+	seedAnalysisOutcomes(t, f, owner, "BEFORE", "v1", "Missing regression test", "changes", strings.Repeat("c", 64), now.Add(-time.Hour))
+	if err := m.analyzeOnce(t.Context(), now); err != nil {
+		t.Fatal(err)
+	}
+	got := readAnalysis(t, f, owner)
+	if len(got) != 1 || got[0].Status != "draft" || afterFileSHA(t, f, got[0].ID) == "" {
+		t.Fatalf("finding = %+v", got)
+	}
+	drafted := afterFileSHA(t, f, got[0].ID)
+	const path = "/api/rules/doctrine/inbox"
+	var inbox inboxList
+	_ = json.Unmarshal(f.call(owner, "GET", path, nil, 200), &inbox)
+	if len(inbox.Items) != 1 || inbox.Items[0].Proposed == "" {
+		t.Fatalf("inbox = %+v", inbox)
+	}
+	item := inbox.Items[0]
+	edit := map[string]any{"source": strings.TrimRight(item.Proposed, "\n") + " Name the command you ran.", "rule_sha256": item.BaseSHA}
+	var sent Proposal
+	_ = json.Unmarshal(f.call(owner, "POST", path+"/"+item.ID+"/pull-request", edit, 200), &sent)
+	approved := hashText(forge.treeFiles[analysisFixturePath])
+	if sent.PRNumber == 0 || sent.EditedBy != owner.ID || !strings.Contains(forge.treeFiles[analysisFixturePath], "Name the command you ran.") {
+		t.Fatalf("edited send: %+v", sent)
+	}
+	if sent.ApprovedFileSHA != approved || approved == drafted {
+		t.Fatalf("approved file %q, sent %q, drafted %q", approved, sent.ApprovedFileSHA, drafted)
+	}
+	for key, p := range forge.pulls {
+		p.Merged, p.State, p.Draft, p.MergeCommit = true, "closed", false, privateSHA
+		forge.pulls[key] = p
+	}
+	next := now.Add(24 * time.Hour)
+	if err := m.analyzeOnce(t.Context(), next); err != nil {
+		t.Fatal(err)
+	}
+	got = readAnalysis(t, f, owner)
+	if got[0].Status != "awaiting_use" || afterFileSHA(t, f, got[0].ID) != approved || got[0].PRURL != sent.PRURL {
+		t.Fatalf("the measurement kept the drafted bytes: %+v", got[0])
+	}
+	// Agents now report the approved file; the comparison completes.
+	next = next.Add(24 * time.Hour)
+	seedAnalysisOutcomes(t, f, owner, "AFTER", "v2", "Checks passed", "ok", approved, next.Add(-time.Hour))
+	if err := m.analyzeOnce(t.Context(), next); err != nil {
+		t.Fatal(err)
+	}
+	got = readAnalysis(t, f, owner)
+	if len(got) != 1 || got[0].Status != "observed" || got[0].After == nil || got[0].Delta == nil || *got[0].Delta != -1 {
+		t.Fatalf("measurement = %+v", got)
 	}
 }
 

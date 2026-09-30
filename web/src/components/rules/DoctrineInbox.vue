@@ -39,8 +39,8 @@ async function load() {
     publish()
   } catch (cause) { if (turn === generation) error.value = doctrineMessage(cause) }
 }
-function publish() { emit('count', items.value.length); inboxChanged(items.value.length) }
-function drop(id: string) { items.value = items.value.filter(item => item.id !== id); publish() }
+function publish(...acted: string[]) { emit('count', items.value.length); inboxChanged(items.value.length, ...acted) }
+function drop(id: string) { items.value = items.value.filter(item => item.id !== id); publish(id) }
 
 // The pinned rule the proposal is diffed against, for Edit.
 function pinned(item: DoctrineInboxItem) {

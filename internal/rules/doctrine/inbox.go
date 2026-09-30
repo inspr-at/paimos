@@ -811,6 +811,7 @@ func (m *Module) submitInbox(r *http.Request, actor tenant.Principal) (any, erro
 		}
 		current.SubmittedBy, current.BaseRuleSHA, current.ProposedSHA = actor.ID, old.SHA256, next.SHA256
 		current.ProposedTLDR = tldrDigest(in.TLDR.EN, in.TLDR.DE)
+		current.ApprovedFileSHA = hashText(changed[in.Path])
 		return saveProposal(ctx, tx, actor, &current, "doctrine.inbox_submitted")
 	})
 	if err != nil {
@@ -953,6 +954,12 @@ func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Sou
 			continue
 		}
 		p.State, p.PromotedCommit = "promoted", s.Commit
+		// Agents report the file the pin holds, with any other change in it.
+		for _, f := range files {
+			if f.Path == p.Path {
+				p.ApprovedFileSHA = hashText(string(f.Content))
+			}
+		}
 		if err := saveProposal(ctx, tx, actor, &p, "doctrine.inbox_promoted"); err != nil {
 			var f *failure
 			if errors.As(err, &f) && f.Code == "proposal_changed" {

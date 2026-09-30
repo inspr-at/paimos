@@ -358,7 +358,7 @@ func TestDoctrineInboxOutdatedAndLandedElsewhere(t *testing.T) {
 	var mine inboxList
 	_ = json.Unmarshal(f.call(agent, "GET", path, nil, 200), &mine)
 	for _, it := range mine.Items {
-		if it.ID == b.ID && (it.State != "promoted" || it.PromotedCommit != promotedCommit) {
+		if it.ID == b.ID && (it.State != "promoted" || it.PromotedCommit != promotedCommit || it.ApprovedFileSHA != hashText(next["docs/AGENTS-DOMAIN-DEV.md"])) {
 			t.Fatalf("a change that landed elsewhere closes as promoted: %+v", it)
 		}
 	}
