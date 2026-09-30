@@ -28,6 +28,7 @@ import { quickRemoval, sessionMenu, type SessionMenu } from './sessionActions'
 import { controlPermitted, type ControlGrant } from '../../lib/managedControl'
 import { can } from '../../lib/authz'
 import { useSession } from '../../stores/session'
+import { DEFAULT_SORT, nextSort, orderForest, readSort, writeSort, type SessionSort, type SortKey } from './sessionOrder'
 
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
@@ -51,16 +52,17 @@ const stale = computed(() => current.value.map(v => v.session).filter(s => isSta
 const lineageName = (id: string) => [...current.value, ...(props.history ?? [])].find(v => v.session.id === id)?.name || 'lead session'
 const total = computed(() => GROUPS.reduce((sum, g) => sum + props.groups[g.id].length, 0))
 type Branch = SessionBranch<SessionView>
-const forest = computed(() => sessionForest(showRemoved.value ? props.history ?? [] : current.value, props.now))
+// Families in the viewer's order (AEON-468): state, then start time, unless they chose a column.
+const sort = ref<SessionSort | null>(null)
+const forest = computed(() => orderForest(sessionForest(showRemoved.value ? props.history ?? [] : current.value, props.now), sort.value, props.now, showRemoved.value))
 // Three calm buckets in urgency order: what needs a look, what runs, what ended.
 // Each row still names its exact state; a family sits with its most urgent member.
 type Bucket = 'attention' | 'live' | 'stopped'
 const BUCKETS: { id: Bucket; label: string }[] = [{ id: 'attention', label: 'Needs attention' }, { id: 'live', label: 'Live' }, { id: 'stopped', label: 'Stopped' }]
 const bucketOf = (group: SessionGroup): Bucket => group === 'stopped' ? 'stopped' : group === 'working' || group === 'idle' ? 'live' : 'attention'
-const rank = (group: SessionGroup) => GROUPS.findIndex(g => g.id === group)
 const roots = (bucket: Bucket) => showRemoved.value
   ? (bucket === 'stopped' ? forest.value : [])
-  : forest.value.filter(branch => bucketOf(branch.group) === bucket).sort((a, b) => rank(a.group) - rank(b.group))
+  : forest.value.filter(branch => bucketOf(branch.group) === bucket)
 const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
 const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)
@@ -125,6 +127,32 @@ watch(selectedPath, path => {
 // Control rights are per session: harness.control in that session's project.
 const identity = useSession()
 const grant = computed<ControlGrant>(() => ({ person: identity.identity?.principal.kind === 'person', can }))
+// The chosen order is remembered per viewer in this browser; the page works without storage.
+const viewer = computed(() => identity.identity ? `${identity.identity.tenant.id}.${identity.identity.principal.id}` : '')
+watch(viewer, id => { sort.value = readSort(id) }, { immediate: true })
+const COLUMNS: { key: SortKey; label: string; cls?: string }[] = [
+  { key: 'state', label: 'State' }, { key: 'result', label: 'Intended result' }, { key: 'ticket', label: 'Ticket' },
+  { key: 'execution', label: 'Execution', cls: 'c-exec' }, { key: 'heartbeat', label: 'Heartbeat', cls: 'right c-beat' }, { key: 'running', label: 'Running', cls: 'right c-elapsed' },
+]
+const effectiveSort = computed(() => sort.value ?? DEFAULT_SORT)
+const ariaSort = (key: SortKey) => effectiveSort.value.key === key ? (effectiveSort.value.dir === 'asc' ? 'ascending' : 'descending') : undefined
+const HEARTBEAT_HELP = 'Beats under 3 minutes old count as equal; start time and id then decide their order.'
+const sortTip = (column: { key: SortKey; label: string }) => column.key === 'heartbeat' ? `Sort by heartbeat. ${HEARTBEAT_HELP}` : !sort.value && column.key === 'state' ? 'Default order: state, then start time' : `Sort by ${column.label.toLowerCase()}`
+// Headers are hidden on narrow lists, so a compact control carries the same keys and direction.
+const sortable = computed(() => props.loaded && props.state === 'ready' && (showRemoved.value ? removedCount.value > 0 : total.value > 0))
+const dirWord = computed(() => effectiveSort.value.dir === 'asc' ? 'ascending' : 'descending')
+function pickSort(event: Event) {
+  const key = (event.target as HTMLSelectElement).value as SortKey
+  if (key !== effectiveSort.value.key) sortBy(key)
+}
+function sortBy(key: SortKey) {
+  sort.value = nextSort(sort.value, key)
+  writeSort(viewer.value, sort.value)
+}
+function resetSort() {
+  sort.value = null
+  writeSort(viewer.value, null)
+}
 const controlBlock = (view: SessionView, kind: SessionControl['kind']) => controlBlocked(view.session, kind, view.name, controlPermitted(view.session, grant.value), props.controls[view.session.id])
 // A direct link to a session that already left the list shows it in History.
 // Removing the selected session here never flips the list.
@@ -249,6 +277,7 @@ function rowClick(event: MouseEvent, id: string) {
     <header class="card-head">
       <h2 id="sessions-title">{{ showRemoved ? 'History' : 'Sessions' }}</h2>
       <span v-if="loaded && state === 'ready'" class="head-tools">
+        <button v-if="sort" type="button" class="btn sm ghost quiet-btn" data-tip="Order by state, then start time" @click="resetSort">Default order</button>
         <button
           v-if="!showRemoved && stale.length" type="button" class="btn sm ghost quiet-btn" :disabled="removal.busy.value"
           :data-tip="`${stale.length} without a heartbeat for 15 minutes`" @click="removal.clearStale(stale)"
@@ -259,6 +288,21 @@ function rowClick(event: MouseEvent, id: string) {
         ><template v-if="showRemoved"><AppIcon name="arrow-left" :size="13" />Sessions</template><template v-else><AppIcon name="clock" :size="13" />History</template></button>
       </span>
     </header>
+
+    <div v-if="sortable" class="sort-bar" role="group" aria-label="Sort sessions">
+      <label class="sort-pick">
+        <span class="sort-label">Sort</span>
+        <select class="sort-select" :value="effectiveSort.key" aria-describedby="sort-beat-help" @change="pickSort">
+          <option v-for="column in COLUMNS" :key="column.key" :value="column.key">{{ column.label }}</option>
+        </select>
+      </label>
+      <button
+        type="button" class="icon-btn sort-dir" :aria-label="`Order ${dirWord}; switch to ${effectiveSort.dir === 'asc' ? 'descending' : 'ascending'}`"
+        :data-tip="`Order ${dirWord}`" @click="sortBy(effectiveSort.key)"
+      ><AppIcon :name="effectiveSort.dir === 'asc' ? 'arrow-up' : 'arrow-down'" :size="14" /></button>
+      <p v-if="effectiveSort.key === 'heartbeat'" class="sort-note">{{ HEARTBEAT_HELP }}</p>
+    </div>
+    <span v-if="sortable" id="sort-beat-help" class="sr-only">{{ HEARTBEAT_HELP }}</span>
 
     <div v-if="state === 'forbidden'" class="state">
       <AppIcon name="agent" :size="20" />
@@ -279,9 +323,13 @@ function rowClick(event: MouseEvent, id: string) {
 
     <div v-else class="table" :class="{ 'has-eta': hasEta }" role="table" aria-label="Agent sessions">
       <div class="thead" role="row">
-        <span role="columnheader">State</span><span role="columnheader">Intended result</span><span role="columnheader">Ticket</span>
-        <span role="columnheader" class="c-exec">Execution</span>
-        <span role="columnheader" class="right c-beat">Heartbeat</span><span role="columnheader" class="right c-elapsed">Running</span><span role="columnheader"><span class="sr-only">Actions</span></span>
+        <span v-for="column in COLUMNS" :key="column.key" role="columnheader" :class="column.cls" :aria-sort="ariaSort(column.key)">
+          <button type="button" class="th-sort" :class="{ on: sort?.key === column.key }" :data-tip="sortTip(column)" :aria-describedby="column.key === 'heartbeat' ? 'sort-beat-help' : undefined" @click="sortBy(column.key)">
+            <span>{{ column.label }}</span>
+            <span v-if="ariaSort(column.key)" class="sort-mark" aria-hidden="true"><AppIcon :name="effectiveSort.dir === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" :class="{ 'default-sort': !sort }" /></span>
+          </button>
+        </span>
+        <span role="columnheader"><span class="sr-only">Actions</span></span>
       </div>
       <template v-for="group in BUCKETS" :key="group.id">
         <div v-if="roots(group.id).length" class="group-row" :class="group.id" role="row">
@@ -437,11 +485,30 @@ function rowClick(event: MouseEvent, id: string) {
 .quiet-btn[aria-pressed="true"] { background: transparent; box-shadow: none; color: var(--ink-2); }
 .quiet-btn[aria-pressed="true"]:hover { background: var(--row-selected); color: var(--ink); }
 .quiet-btn .count { margin-left: 2px; font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 68px 76px; padding: 0 0 8px; }
+.table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 80px 76px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span { padding: 0 8px; min-width: 0; }
 .right { text-align: right; justify-content: flex-end; }
+/* Each header orders the families by its column; the mark shows key and direction.
+   Labels never clip: right-aligned headers grow leftwards into the free end of the
+   column beside them. :where keeps the container queries able to hide the cell. */
+.th-sort { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 26px; margin: 0 -6px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; white-space: nowrap; }
+:where(.thead > .right) { display: flex; }
+.thead > .right .th-sort { flex-direction: row-reverse; }
+.th-sort:hover { color: var(--ink); background: var(--row-hover); }
+.th-sort.on { color: var(--teal-ink); }
+.th-sort:focus-visible { box-shadow: var(--focus-ring); }
+.sort-mark { display: inline-grid; place-items: center; flex: none; width: 11px; height: 11px; }
+.default-sort { opacity: .55; }
+/* Where headers (or their Running and Heartbeat columns) are hidden, this bar carries the same keys and direction. */
+.sort-bar { display: none; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 18px 10px; border-top: 1px solid var(--line); }
+.sort-pick { display: inline-flex; align-items: center; gap: 8px; }
+.sort-label { font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+.sort-select { height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--field-bg); font: inherit; font-size: 13px; color: var(--ink); }
+.sort-select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.sort-dir { width: 34px; height: 34px; }
+.sort-note { flex-basis: 100%; font-size: 12px; color: var(--ink-3); }
 .group-row { margin: 10px 6px 2px; padding: 0 12px; }
 .group-label { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 8px; height: 26px; font: 500 10.5px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .group-row.attention .group-label { color: var(--gold-ink); }
@@ -557,8 +624,9 @@ function rowClick(event: MouseEvent, id: string) {
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
 /* Estimates need a ticket track wide enough for "overdue 5 min". */
-.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(112px, .48fr) minmax(128px, .82fr) 80px 68px 76px; }
+.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(112px, .48fr) minmax(128px, .82fr) 80px 80px 76px; }
 @container sessions (max-width: 980px) {
+  .sort-bar { display: flex; }
   .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 72px 76px; }
   .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(104px, .42fr) minmax(116px, .75fr) 72px 76px; }
   .c-elapsed { display: none; }
@@ -625,7 +693,12 @@ function rowClick(event: MouseEvent, id: string) {
 /* AEON-304: the overflow sits top-right, its icon centred on the title's first line. */
 @container sessions (max-width: 560px) {
   .row > .c-actions { align-self: start; margin-top: calc(var(--title-line) / 2 - 22px); }
-  .card-head { align-items: center; padding: 6px 10px 2px 18px; }
+  /* With Default order showing, the tools take their own line rather than clip. */
+  .card-head { flex-wrap: wrap; align-items: center; padding: 6px 10px 2px 18px; }
+  .head-tools { flex-wrap: wrap; justify-content: flex-end; }
   .head-tools .btn { min-height: 44px; }
+  .sort-bar { padding: 8px 18px; }
+  .sort-select { height: 44px; font-size: 16px; }
+  .sort-dir { width: 44px; height: 44px; }
 }
 </style>
