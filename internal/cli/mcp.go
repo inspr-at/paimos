@@ -5,6 +5,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -35,7 +36,10 @@ func (rt *runtime) mcpServer() *mcp.Server {
 	addR1Tool(s, "issue_list", "List issues.", issueListArgs{})
 	addR1Tool(s, "issue_get", "Fetch one issue by key.", issueRefArgs{})
 	addR1Tool(s, "issue_create", "Create an issue.", issueCreateArgs{})
-	addR1Tool(s, "issue_update", "Update an issue.", issueUpdateArgs{})
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "issue_update",
+		Description: "Update an issue. A type or kind is refused with kind_change_not_allowed; other updates arrive in R1.",
+	}, rt.toolIssueUpdate)
 	addR1Tool(s, "issue_comment", "Comment on an issue.", issueCommentArgs{})
 	addR1Tool(s, "knowledge_list", "List knowledge entries.", knowledgeListArgs{})
 	addR1Tool(s, "knowledge_get", "Fetch one knowledge entry.", knowledgeGetArgs{})
@@ -73,6 +77,15 @@ type issueUpdateArgs struct {
 	Title       string `json:"title,omitempty" jsonschema:"new title"`
 	Status      string `json:"status,omitempty" jsonschema:"new status"`
 	Description string `json:"description,omitempty" jsonschema:"new description markdown"`
+	Type        string `json:"type,omitempty" jsonschema:"issue kind slug; a change is refused"`
+	Kind        string `json:"kind,omitempty" jsonschema:"issue kind slug; a change is refused"`
+}
+
+func (rt *runtime) toolIssueUpdate(_ context.Context, _ *mcp.CallToolRequest, in issueUpdateArgs) (*mcp.CallToolResult, any, error) {
+	if strings.TrimSpace(in.Type) != "" || strings.TrimSpace(in.Kind) != "" {
+		return nil, nil, errors.New("kind_change_not_allowed")
+	}
+	return nil, nil, errors.New("issue_update arrives in R1")
 }
 
 type issueCommentArgs struct {

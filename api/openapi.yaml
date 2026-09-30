@@ -2139,7 +2139,9 @@ paths:
     patch:
       operationId: updateNode
       description: |
-        Key, kind, and parent are immutable here; use move for parent.
+        Key and parent are immutable here; use move for parent.
+        Naming the node's current kind, type, or kind_id changes nothing.
+        A different kind or type returns 409 with code kind_change_not_allowed and changes nothing else in that call.
         Tag renames use PATCH /tags/{tagId} so assignments change atomically.
         Optional optimistic concurrency compares If-Unmodified-Since to the exact
         updated_at value while holding the node row lock in the write transaction.
@@ -2163,6 +2165,12 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+        '409':
+          description: A different kind, type, or kind_id was named. The node is unchanged. code is kind_change_not_allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeError'
         '412':
           $ref: '#/components/responses/Error'
         '422':
@@ -10440,7 +10448,7 @@ components:
           type: string
         code:
           type: string
-          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. Omitted for other errors.
+          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch names a different kind or type. Omitted for other errors.
     Principal:
       type: object
       required: [id, tenant_id, kind, name, roles]
@@ -11069,6 +11077,16 @@ components:
           description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields is the route_role and area classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
         state:
           type: string
+        kind_id:
+          type: string
+          format: uuid
+          description: The current kind is a no-op and is not written. A different kind returns 409 kind_change_not_allowed and changes nothing else.
+        type:
+          type: string
+          description: Kind slug. The current slug is a no-op. A different slug returns 409 kind_change_not_allowed and changes nothing else.
+        kind:
+          type: string
+          description: Kind slug. Same rules as type.
     TagPatch:
       type: object
       minProperties: 1

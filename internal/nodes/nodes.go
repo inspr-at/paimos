@@ -327,11 +327,9 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 	}
 	for key := range raw {
 		switch key {
-		case "title", "body", "fields", "state":
+		case "title", "body", "fields", "state", "kind_id", "type", "kind":
 		case "key":
 			return nodeJSON{}, badRequest("key is immutable")
-		case "kind_id":
-			return nodeJSON{}, badRequest("kind is immutable")
 		case "parent_id":
 			return nodeJSON{}, badRequest("parent is immutable; use move")
 		default:
@@ -360,6 +358,19 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		// consume the same timestamp. Advance even on equal clock readings.
 		if expected != nil && !current.UpdatedAt.Equal(*expected) {
 			return &httpError{status: http.StatusPreconditionFailed, msg: "node has changed"}
+		}
+		kindOnly, err := refuseKindChange(ctx, tx, current, raw)
+		if err != nil {
+			return err
+		}
+		if kindOnly {
+			node = current
+			views, err := loadEstimates(ctx, tx, []string{id})
+			if err != nil {
+				return err
+			}
+			node.Estimate = views[id]
+			return nil
 		}
 		nextState, nextFields := current.State, current.Fields
 		sets := []string{"updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')"}

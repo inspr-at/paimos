@@ -36,6 +36,10 @@ func unprocessableCoded(msg, code string) *httpError {
 	return &httpError{status: http.StatusUnprocessableEntity, msg: msg, code: code}
 }
 
+func conflictCoded(msg, code string) *httpError {
+	return &httpError{status: http.StatusConflict, msg: msg, code: code}
+}
+
 // errorBody adds an optional code without changing errors that only have a sentence.
 // A set node and an empty code stay {"error","node"}, as before.
 type errorBody struct {

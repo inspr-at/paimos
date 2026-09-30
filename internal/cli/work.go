@@ -372,12 +372,41 @@ type issuePatch struct {
 	Area           string
 }
 
+// noteKindUpdate refuses a different kind before any write. The same kind is a
+// no-op and is reported; the caller must not send the kind to the API.
+func (rt *runtime) noteKindUpdate(ref, requested string) error {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return nil
+	}
+	if !issueKinds[requested] {
+		return usagef("unknown issue type %q (kind is immutable; create a node of that kind)", requested)
+	}
+	n, err := rt.nodeByKey(ref)
+	if err != nil {
+		return err
+	}
+	kinds, err := rt.loadKinds()
+	if err != nil {
+		return err
+	}
+	current := kinds.slug(n.KindID)
+	if !issueKinds[current] {
+		return rt.fail(fmt.Errorf("issue %q not found", ref), "")
+	}
+	if current == requested {
+		fmt.Fprintf(rt.stdout, "kind is already %s\n", current)
+		return nil
+	}
+	return rt.fail(fmt.Errorf("kind is immutable here: %s → %s; use \"aeon issue convert %s --to %s\"", current, requested, n.Key, requested), "")
+}
+
 func (rt *runtime) updateIssue(in issuePatch) error {
 	if strings.HasPrefix(strings.TrimSpace(in.Ref), "id:") {
 		return usagef("id:<n> is a classic numeric id; pass the issue key")
 	}
-	if strings.TrimSpace(in.Type) != "" && !issueKinds[in.Type] {
-		return usagef("unknown issue type %q (kind is immutable; create a node of that kind)", in.Type)
+	if err := rt.noteKindUpdate(in.Ref, in.Type); err != nil {
+		return err
 	}
 	n, err := rt.nodeByKey(in.Ref)
 	if err != nil {
